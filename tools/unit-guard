@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""Protect unit Intent/Acceptance/blast-radius/verifier fields after dispatch.
+
+Usage:
+  tools/unit-guard OLD NEW [--non-unit-changes]
+  tools/unit-guard --git-range BASE [REF]
+
+With no args inside git, scans staged unit changes against HEAD.
+Set UNIT_GUARD_OVERRIDE=1 to warn instead of fail.
+"""
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+from typing import Dict, Iterable, List
+
+PROTECTED_HEADINGS = {"intent", "acceptance"}
+PROTECTED_FIELDS = {"blast radius", "verifier class"}
+OVERRIDE = os.environ.get("UNIT_GUARD_OVERRIDE") == "1"
+
+
+def run(cmd: List[str]) -> str:
+    return subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
+
+
+def status(text: str) -> str:
+    patterns = [
+        r"(?im)^\s*-\s*\*\*Status:\*\*\s*([^\n]+)",
+        r"(?im)^\s*Status:\s*([^\n]+)",
+    ]
+    for pat in patterns:
+        m = re.search(pat, text)
+        if m:
+            return m.group(1).strip().lower()
+    return "queued"
+
+
+def field_values(text: str) -> Dict[str, str]:
+    vals: Dict[str, str] = {}
+    for name in PROTECTED_FIELDS:
+        pat = rf"(?im)^\s*-?\s*\*\*{re.escape(name)}:\*\*\s*([^\n]+)|^\s*{re.escape(name)}:\s*([^\n]+)"
+        m = re.search(pat, text)
+        vals[name] = ((m.group(1) or m.group(2)).strip() if m else "")
+    return vals
+
+
+def sections(text: str) -> Dict[str, str]:
+    result: Dict[str, List[str]] = {}
+    current = None
+    in_fence = False
+    for line in text.splitlines():
+        fence = re.match(r"^\s*(```|~~~)", line)
+        if not in_fence:
+            m = re.match(r"^(#{1,6})\s+(.+?)\s*$", line)
+            if m:
+                key = m.group(2).strip().lower()
+                current = key if key in PROTECTED_HEADINGS else None
+                if current is not None:
+                    result.setdefault(current, [])
+                continue
+        if current is not None:
+            result[current].append(line.rstrip())
+        if fence:
+            in_fence = not in_fence
+    return {k: "\n".join(v).strip() for k, v in result.items()}
+
+
+def protected_changed(old: str, new: str) -> List[str]:
+    changed: List[str] = []
+    old_sections, new_sections = sections(old), sections(new)
+    for name in sorted(PROTECTED_HEADINGS):
+        if old_sections.get(name, "") != new_sections.get(name, ""):
+            changed.append(name.title())
+    old_fields, new_fields = field_values(old), field_values(new)
+    for name in sorted(PROTECTED_FIELDS):
+        if old_fields.get(name, "") != new_fields.get(name, ""):
+            changed.append(name)
+    return changed
+
+
+def check_pair(label: str, old: str, new: str, non_unit_changes: bool) -> List[str]:
+    changed = protected_changed(old, new)
+    if not changed:
+        return []
+    dispatched = status(old) != "queued" or status(new) != "queued"
+    implementing = non_unit_changes
+    if dispatched or implementing:
+        why = "unit is not queued" if dispatched else "changed with implementation files"
+        return [f"{label}: protected unit fields changed after dispatch ({why}): {', '.join(changed)}"]
+    return []
+
+
+def changed_unit_scan(names: List[str], old_ref: str, new_ref: str, staged: bool = False) -> int:
+    unit_names = [n for n in names if n.startswith("units/") and n.endswith(".md")]
+    non_unit_changes = any(not (n.startswith("units/") and n.endswith(".md")) for n in names)
+    violations: List[str] = []
+    for path in unit_names:
+        try:
+            old = run(["git", "show", f"{old_ref}:{path}"])
+        except subprocess.CalledProcessError:
+            old = ""
+        try:
+            new = run(["git", "show", f":{path}" if staged else f"{new_ref}:{path}"])
+        except subprocess.CalledProcessError:
+            new = Path(path).read_text() if Path(path).exists() else ""
+        violations.extend(check_pair(path, old, new, non_unit_changes))
+    return report(violations)
+
+
+def git_staged_scan() -> int:
+    names = run(["git", "diff", "--cached", "--name-only"]).splitlines()
+    return changed_unit_scan(names, "HEAD", ":", staged=True)
+
+
+def git_range_scan(base: str, ref: str) -> int:
+    names = run(["git", "diff", "--name-only", f"{base}...{ref}"]).splitlines()
+    return changed_unit_scan(names, base, ref)
+
+
+def report(violations: Iterable[str]) -> int:
+    violations = list(violations)
+    if not violations:
+        return 0
+    for v in violations:
+        print(v, file=sys.stderr)
+    if OVERRIDE:
+        print("UNIT_GUARD_OVERRIDE=1 set; warnings only", file=sys.stderr)
+        return 0
+    return 1
+
+
+def main(argv: List[str]) -> int:
+    if len(argv) == 1:
+        return git_staged_scan()
+    if argv[1] == "--git-range" and len(argv) in {3, 4}:
+        return git_range_scan(argv[2], argv[3] if len(argv) == 4 else "HEAD")
+    if len(argv) not in {3, 4}:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    old_path, new_path = argv[1], argv[2]
+    non_unit_changes = "--non-unit-changes" in argv[3:]
+    old = Path(old_path).read_text() if old_path != "-" else sys.stdin.read()
+    new = Path(new_path).read_text()
+    return report(check_pair(new_path, old, new, non_unit_changes))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

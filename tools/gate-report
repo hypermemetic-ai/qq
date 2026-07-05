@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+since=${1:-"3 months ago"}
+
+echo "Gate-related commits since: $since"
+echo
+
+git log --since="$since" --pretty=format:'%h %ad %s' --date=short -- \
+  policy.md README.md quarterly-checklist.md units project-template tools hooks record/adoption.md \
+  | awk '
+      /LL-[0-9]+/ { print "OK   " $0; next }
+      { print "MISS " $0 }
+    '

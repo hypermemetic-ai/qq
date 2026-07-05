@@ -1,0 +1,36 @@
+name: unit-acceptance
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  unit-acceptance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Guard locked unit fields
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -n "$BASE_SHA" ] && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            tools/unit-guard --git-range "$BASE_SHA" HEAD
+          else
+            echo "no comparable base; skipping unit guard"
+          fi
+      - name: Run changed unit acceptance
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -n "$BASE_SHA" ] && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            units=$(git diff --name-only "$BASE_SHA"...HEAD -- 'units/*.md')
+          else
+            units=$(find units -name '*.md' -type f | sort)
+          fi
+          [ -n "$units" ] || exit 0
+          for unit in $units; do
+            tools/run-acceptance "$unit"
+          done

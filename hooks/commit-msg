@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+msg_file=${1:?commit message file required}
+msg=$(cat "$msg_file")
+
+if printf '%s\n' "$msg" | grep -Eq 'LL-[0-9]+'; then
+  exit 0
+fi
+
+# Let ordinary project commits proceed when no system files are staged.
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  exit 0
+fi
+
+changed=$(git diff --cached --name-only || true)
+if printf '%s\n' "$changed" | grep -Eq '^(policy\.md|README\.md|quarterly-checklist\.md|units/|project-template/|tools/|hooks/|record/adoption\.md)$|^(policy\.md|README\.md|quarterly-checklist\.md|units/|project-template/|tools/|hooks/|record/adoption\.md)/'; then
+  echo "system change requires a loss-ledger citation like LL-1 in the commit message" >&2
+  exit 1
+fi
+
+exit 0
