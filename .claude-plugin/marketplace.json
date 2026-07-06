@@ -1,0 +1,13 @@
+{
+  "name": "hypercore",
+  "owner": { "name": "surlej" },
+  "description": "surlej's personal hypercore plugin.",
+  "plugins": [
+    {
+      "name": "hypercore",
+      "source": "./",
+      "description": "Curated skills + operating rules, with knowledge and session layers.",
+      "version": "0.1.0"
+    }
+  ]
+}

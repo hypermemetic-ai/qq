@@ -1,0 +1,8 @@
+{
+  "name": "hypercore",
+  "description": "A lean engineering system: curated skills, a knowledge layer, and parallel-session orchestration for Claude Code.",
+  "version": "0.1.0",
+  "author": { "name": "surlej" },
+  "license": "MIT",
+  "keywords": ["hypercore", "skills", "workflow", "engineering"]
+}
