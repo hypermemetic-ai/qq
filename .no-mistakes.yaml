@@ -8,7 +8,7 @@
 # Ref: https://kunchenguid.github.io/no-mistakes/reference/repo-config/
 agent: claude
 commands:
-  lint: "shellcheck bin/hc-wip bin/hc-wip-snapshot.sh bin/hypercore-activate.sh bin/install.sh"
+  lint: "shellcheck bin/qq-wip bin/qq-wip-snapshot.sh bin/hypercore-activate.sh bin/install.sh"
   format: ""            # no formatter wired (shfmt optional, not required)
   test: ""              # no formal suite; the gate's agent validates behavior against --intent
 intent:

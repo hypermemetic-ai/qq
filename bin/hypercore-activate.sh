@@ -45,9 +45,9 @@ mkdir -p "$HOME/.claude/hooks"
 cp "$HC/skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh" "$HOME/.claude/hooks/block-dangerous-git.sh"
 chmod +x "$HOME/.claude/hooks/block-dangerous-git.sh"
 echo "     installed ~/.claude/hooks/block-dangerous-git.sh"
-ln -sfn "$HC/bin/hc-wip-snapshot.sh" "$HOME/.claude/hooks/hc-wip-snapshot.sh"
-mkdir -p "$HOME/.local/bin"; ln -sfn "$HC/bin/hc-wip" "$HOME/.local/bin/hc-wip"
-echo "     linked wip savepoint + hc-wip (recover: hc-wip list|diff|branch <name>)"
+ln -sfn "$HC/bin/qq-wip-snapshot.sh" "$HOME/.claude/hooks/qq-wip-snapshot.sh"
+mkdir -p "$HOME/.local/bin"; ln -sfn "$HC/bin/qq-wip" "$HOME/.local/bin/qq-wip"
+echo "     linked wip savepoint + qq-wip (recover: qq-wip list|diff|branch <name>)"
 
 say "3/5  Claude Code yolo + wire the rail into ~/.claude/settings.json"
 bak "$HOME/.claude/settings.json"
@@ -64,9 +64,9 @@ arr = d.setdefault("hooks", {}).setdefault("PreToolUse", [])
 present = any(e.get("matcher") == "Bash" and any(x.get("command", "").endswith("block-dangerous-git.sh") for x in e.get("hooks", [])) for e in arr)
 if not present:
     arr.append({"matcher": "Bash", "hooks": [{"type": "command", "command": hook}]})
-wip = os.path.expanduser("~/.claude/hooks/hc-wip-snapshot.sh")
+wip = os.path.expanduser("~/.claude/hooks/qq-wip-snapshot.sh")
 stop = d.setdefault("hooks", {}).setdefault("Stop", [])
-if not any(any("hc-wip-snapshot" in x.get("command", "") for x in e.get("hooks", [])) for e in stop):
+if not any(any("qq-wip-snapshot" in x.get("command", "") for x in e.get("hooks", [])) for e in stop):
     stop.append({"hooks": [{"type": "command", "command": wip}]})
 json.dump(d, open(p, "w"), indent=2)
 print("     bypassPermissions + PreToolUse rail + Stop wip savepoint wired")

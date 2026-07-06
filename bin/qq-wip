@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# hc-wip — inspect / recover the working-tree savepoints taken by hc-wip-snapshot.sh.
+# qq-wip — inspect / recover the working-tree savepoints taken by qq-wip-snapshot.sh.
 #
-#   hc-wip list            snapshots for the current branch, newest first
-#   hc-wip diff            what the latest snapshot holds over HEAD
-#   hc-wip branch <name>   materialize the latest snapshot as a real branch to inspect
+#   qq-wip list            snapshots for the current branch, newest first
+#   qq-wip diff            what the latest snapshot holds over HEAD
+#   qq-wip branch <name>   materialize the latest snapshot as a real branch to inspect
 #
 # Recovery is always non-destructive: `branch` gives you the lost work on a fresh
 # branch to cherry-pick or copy from — it never overwrites your working tree.
@@ -18,8 +18,8 @@ git rev-parse --quiet --verify "$ref" >/dev/null 2>&1 \
 case "${1:-list}" in
   list)   git log --format='%h  %cd  %s' --date=iso "$ref" | head -50 ;;
   diff)   git --no-pager diff HEAD "$ref" ;;
-  branch) [ -n "${2:-}" ] || { echo "usage: hc-wip branch <name>"; exit 1; }
+  branch) [ -n "${2:-}" ] || { echo "usage: qq-wip branch <name>"; exit 1; }
           git branch "$2" "$ref" \
             && echo "snapshot → branch '${2}'. Inspect it, take what you need, then delete." ;;
-  *)      echo "usage: hc-wip {list|diff|branch <name>}"; exit 1 ;;
+  *)      echo "usage: qq-wip {list|diff|branch <name>}"; exit 1 ;;
 esac

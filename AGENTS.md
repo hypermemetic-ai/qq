@@ -78,7 +78,7 @@ Support, any time: `research` (delegated, cited investigation → `research/`);
 - **In-flight work is never lost.** A `Stop` hook snapshots the working tree to
   `refs/wip/<branch>` every idle — the un-green counterpart to commit-on-green,
   and non-destructive (never touches HEAD, the index, or `main`). Recover with
-  `hc-wip list | diff | branch <name>`.
+  `qq-wip list | diff | branch <name>`.
 - **Isolation on demand** — serial work runs in the main tree on a branch; fan out
   parallel agents and each gets its own worktree: `herdr worktree create --branch
   <name>`, then `herdr agent start <name> --cwd <worktree> -- claude`. Isolation *is*
