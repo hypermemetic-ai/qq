@@ -1,9 +1,9 @@
 # Skills — attribution
 
 hypercore's skill set is curated from four excellent MIT-licensed collections, plus
-three skills authored for hypercore by synthesizing the best ideas across them.
-All upstream sources are MIT; their copyright notices are retained inside each
-vendored skill directory.
+four skills authored for hypercore — three synthesizing the best ideas across them,
+and `orchestrate`, original to hypercore. All upstream sources are MIT; their
+copyright notices are retained inside each vendored skill directory.
 
 ## Vendored (unmodified except where noted)
 
@@ -37,3 +37,4 @@ history rewrites.
 | `research` | mattpocock `research` (shape) + Every researcher agents (source-craft) + [open-gsd/gsd-core](https://github.com/open-gsd/gsd-core) research guardrails | MIT |
 | `uat-signoff` | the human-UAT pattern of gsd `gsd-verify-work` ([open-gsd/gsd-core](https://github.com/open-gsd/gsd-core)), distilled runtime-free | MIT |
 | `writing-skills` | Anthropic skill-authoring best-practices + mattpocock `writing-great-skills` + superpowers `writing-skills` (eval-first) | MIT |
+| `orchestrate` | original to hypercore — conducts the `AGENTS.md` loop as a Claude-conducts / Codex-implements split | MIT |

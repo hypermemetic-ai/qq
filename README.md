@@ -20,13 +20,14 @@ Operating rules live in [`AGENTS.md`](./AGENTS.md) (loaded every session;
 ## The loop
 **Align → Plan → Build → Verify (autonomous) → Sign-off (human, gated) → Review →
 Compound.** Trivial work takes the escape hatch — do it directly — but *never*
-skips verification. Full detail in `AGENTS.md`.
+skips verification. Full detail in `AGENTS.md`. Invoke `orchestrate` to run the
+whole loop end-to-end as one command — Claude conducts, Codex implements.
 
 ## Skills
-14 skills, curated from four MIT collections (mattpocock, superpowers,
-compound-engineering, gsd-core) plus three authored for hypercore — `research`,
-`uat-signoff`, and `writing-skills`. The index is in `AGENTS.md`; full provenance
-in [`SKILLS-ATTRIBUTION.md`](./SKILLS-ATTRIBUTION.md).
+15 skills, curated from four MIT collections (mattpocock, superpowers,
+compound-engineering, gsd-core) plus four authored for hypercore — `research`,
+`uat-signoff`, `writing-skills`, and `orchestrate`. The index is in `AGENTS.md`;
+full provenance in [`SKILLS-ATTRIBUTION.md`](./SKILLS-ATTRIBUTION.md).
 
 ## Setup
 1. **Preflight** — `bash bin/install.sh` checks `gh`/`fd`/`eza`/`tmux`/`ntm` and

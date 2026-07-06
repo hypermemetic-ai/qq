@@ -32,7 +32,8 @@ Triage every task by size and reversibility first.
 - **Trivial + local + reversible** (typo, rename, one-liner): just do it — then
   still run `verification-before-completion`.
 - **Everything else** (multi-file, ambiguous, irreversible): run the loop below,
-  starting at Align.
+  starting at Align — or hand the whole task to `orchestrate`, which conducts the
+  loop end-to-end (Claude aligns / plans / verifies / reviews; Codex implements).
 
 The one invariant: **`verification-before-completion` is never skipped.**
 
@@ -57,9 +58,34 @@ Support, any time: `research` (delegated, cited investigation → `research/`);
 `handoff` (compact state for a fresh agent when context runs low); `writing-skills`
 (author or edit a skill, eval-first).
 
+## Git — how work lands
+- **Commit on green.** A commit is a claim: commit only what
+  `verification-before-completion` just proved — one commit per verified task or
+  batch. History stays bisectable, and the post-commit knowledge-graph hook keeps
+  the map fresh (commits are its heartbeat). Un-green WIP never reaches a shared branch.
+- **Push the branch after each green commit** — always fast-forward-safe; durability
+  plus live visibility for your partner.
+- **Undo is `git revert`** to the last green commit — forward and clean, never
+  `reset --hard` (the rail blocks it). Commit-on-green is what makes revert cheap.
+- **Isolation on demand** — serial work runs in the main tree on a branch; fan out
+  parallel agents and each gets its own `ntm worktree` (stronger than file locks for
+  independent tasks; keep `ntm lock` for the shared-file case).
+
+**Merge gate is a per-project setting** — how green work reaches `main`:
+- `trunk` — commit on green straight to `main` and push; review is in-process
+  (`code-review`) plus async audit. Fastest; fits a solo repo.
+- `blast-radius` — low-risk green work auto-merges; user-facing / irreversible /
+  ambiguous → a `gh` PR a human merges. The git gate mirrors the Sign-off routing.
+- `human` — every task lands via a human-approved PR; agents never touch `main`.
+
+**This project: `trunk`** (solo). Autocommit-on-green is agent-driven —
+`orchestrate` and the escape hatch commit the moment verification passes, because
+"green" is a fact the agent knows, not a timer a hook can trip.
+
 ## Skill index
 | skill | reach for it when |
 |---|---|
+| `orchestrate` | running a non-trivial task through the whole loop end-to-end — Claude conducts, Codex implements |
 | `grilling` / `grill-me` | starting non-trivial work — pin down intent first |
 | `writing-plans` | turning agreed intent into an executable plan |
 | `executing-plans` | working a plan task-by-task (stops on blockers; won't touch main without consent) |
