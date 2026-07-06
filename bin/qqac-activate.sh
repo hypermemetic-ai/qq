@@ -20,7 +20,7 @@ set -euo pipefail
 QQAC=/home/qqp/projects/qq-ac
 MR=/home/qqp/projects/meeting-reviewer
 say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
-bak() { [ -f "$1" ] && cp -n "$1" "$1.qqac.bak" 2>/dev/null || true; }
+bak() { if [ -f "$1" ]; then cp -n "$1" "$1.qqac.bak" 2>/dev/null || true; fi; }
 
 # set a top-level TOML key: replace in place if present, else prepend above any [section]
 set_toml_top() {
