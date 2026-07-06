@@ -1,0 +1,88 @@
+{
+  "document": {
+    "block_prefix": "\n",
+    "block_suffix": "\n",
+    "color": "252",
+    "margin": 3
+  },
+  "block_quote": {
+    "color": "245",
+    "italic": true,
+    "indent": 1,
+    "indent_token": "│ "
+  },
+  "paragraph": {
+    "block_suffix": "\n"
+  },
+  "list": {
+    "block_suffix": "\n",
+    "level_indent": 2
+  },
+  "heading": {
+    "block_suffix": "\n",
+    "color": "180",
+    "bold": true
+  },
+  "h1": {
+    "block_suffix": "\n",
+    "color": "223",
+    "bold": true,
+    "underline": true
+  },
+  "h2": {
+    "prefix": "▎ ",
+    "color": "180",
+    "bold": true
+  },
+  "h3": {
+    "prefix": "▎ ",
+    "color": "108",
+    "bold": true
+  },
+  "h4": {
+    "color": "109",
+    "bold": true
+  },
+  "text": {},
+  "strong": {
+    "color": "223",
+    "bold": true
+  },
+  "emph": {
+    "italic": true
+  },
+  "hr": {
+    "color": "240",
+    "format": "\n──────────────────────────────\n"
+  },
+  "item": {
+    "block_prefix": "• "
+  },
+  "enumeration": {
+    "block_prefix": ". "
+  },
+  "code": {
+    "color": "210",
+    "background_color": "236",
+    "prefix": " ",
+    "suffix": " "
+  },
+  "code_block": {
+    "color": "250",
+    "margin": 3,
+    "theme": "nord"
+  },
+  "table": {
+    "center_separator": "┼",
+    "column_separator": "│",
+    "row_separator": "─"
+  },
+  "link": {
+    "color": "75",
+    "underline": true
+  },
+  "link_text": {
+    "color": "111",
+    "bold": true
+  }
+}

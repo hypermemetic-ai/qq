@@ -1,0 +1,20 @@
+[theme]
+name = "tokyo-night"
+auto_switch = false
+
+[keys]
+switch_workspace = "prefix+1..9"
+focus_agent = "prefix+alt+1..9"
+
+[[keys.command]]
+key = "prefix+f"
+type = "pane"
+command = "bash -ic 'qqy; exec bash -i'"
+
+[[keys.command]]
+key = "prefix+shift+f"
+type = "pane"
+command = "bash -ic 'qqbr; exec bash -i'"
+
+[ui]
+agent_panel_sort = "spaces"

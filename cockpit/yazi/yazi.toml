@@ -1,0 +1,25 @@
+# Layout: drop the preview pane (3rd ratio = 0) and give its width to the file
+# list. Reading happens on open (see the openers below), not in a cramped side
+# panel. Restore the preview with ratio = [1, 4, 3].
+[mgr]
+ratio = [1, 4, 0]
+
+# Markdown reader. Enter uses the first entry = mdcat: clean paragraph reflow,
+# single-blank block spacing, clickable OSC-8 links + inline images (both
+# supported by ghostty), and its own pager (-p). Second entry = glow with the
+# tuned theme (~/.config/glow/tuned.json) as an alternate. Both size to the pane
+# so nothing re-wraps behind the pager — glow needs -3 for its document margin,
+# mdcat -4 for its 2-col left margin (else prose wraps a word past the edge).
+[opener]
+md = [
+	{ run = 'c=$(tput cols 2>/dev/null||echo 80); mdcat -p --columns "$((c-4))" %s', block = true, desc = "Render (mdcat)", for = "unix" },
+	{ run = 'c=$(tput cols 2>/dev/null||echo 80); glow -s "$HOME/.config/glow/tuned.json" -p -w "$((c-3))" %s', block = true, desc = "Render (glow, tuned)", for = "unix" },
+]
+
+# prepend (not `rules`) so these win over the default `text/*` rule without
+# discarding the built-in rules. `edit`/`reveal` stay as fallbacks.
+[open]
+prepend_rules = [
+	{ url = "*.md",       use = [ "md", "edit", "reveal" ] },
+	{ url = "*.markdown", use = [ "md", "edit", "reveal" ] },
+]

@@ -1,0 +1,11 @@
+[[mgr.prepend_keymap]]
+on = "!"
+for = "unix"
+run = 'shell "$SHELL" --block'
+desc = "Open shell here"
+
+[[mgr.prepend_keymap]]
+on = [ "g", "H" ]
+for = "unix"
+run = "cd ~/projects/qq-ac"
+desc = "Go to qq-ac"
