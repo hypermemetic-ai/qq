@@ -1,2 +1,5 @@
 # no-mistakes gate — ignore local scratch/evidence; keep .no-mistakes.yaml tracked
 .no-mistakes/
+
+# herdr session scratch (logs / pids) — local runtime state, never tracked
+.ntm/
