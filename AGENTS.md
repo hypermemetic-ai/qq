@@ -10,7 +10,10 @@ Every part earns its place by being *invoked*, not by being *reported to*.
 - **Actions** — `skills/`: atomic capabilities, invoked by name (indexed below).
 - **Knowledge** — `.understand-anything/knowledge-graph.json`: the map of what the
   code *is*. Consult it for architecture / dependency / "where is X" questions;
-  build or refresh it with `/understand`.
+  build it with `/understand` — **always pass `--auto-update`** (the standing
+  default for every project) so the plugin's post-commit and session-start hooks
+  keep the graph current with no manual refresh. The graph dir is committed to
+  the repo (only `intermediate/`, `tmp/`, and `.trash-*/` scratch are gitignored).
 - **Sessions** — NTM (`ntm`): many named agents in parallel, coordinated by file
   locks so they don't clobber each other.
 - **Externals** — Context7 (live, version-correct library docs), `gh` (GitHub),

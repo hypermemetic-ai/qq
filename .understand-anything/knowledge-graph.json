@@ -1,0 +1,840 @@
+{
+  "version": "1.0.0",
+  "project": {
+    "name": "hypercore",
+    "languages": [
+      "markdown",
+      "shell",
+      "json"
+    ],
+    "frameworks": [],
+    "description": "A lean engineering system for Claude Code: sharp skills invoked on demand, a knowledge layer that maps the code, a session layer for parallel agents, and a thin external surface. Capability you reach for, not process you maintain.",
+    "analyzedAt": "2026-07-06T17:59:43Z",
+    "gitCommitHash": "4abad771802593b51a3bb51ca95b55c7ad6f0c53"
+  },
+  "nodes": [
+    {
+      "id": "config:.mcp.json",
+      "type": "config",
+      "name": ".mcp.json",
+      "filePath": ".mcp.json",
+      "summary": "MCP server configuration registering the Context7 server (launched via npx @upstash/context7-mcp) to provide agents with live, version-correct library documentation.",
+      "tags": [
+        "configuration",
+        "mcp",
+        "external-tools",
+        "context7"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:AGENTS.md",
+      "type": "document",
+      "name": "AGENTS.md",
+      "filePath": "AGENTS.md",
+      "summary": "Core agent operating rules for hypercore: defines the five layers, the always-on behavioral floor, task routing, the Align to Compound loop, and the full skill index. Loaded every session as the behavioral floor.",
+      "tags": [
+        "documentation",
+        "operating-rules",
+        "entry-point",
+        "workflow"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:CLAUDE.md",
+      "type": "document",
+      "name": "CLAUDE.md",
+      "filePath": "CLAUDE.md",
+      "summary": "Claude Code project rules entry point; mirrors AGENTS.md (symlinked) so the same hypercore operating rules — five layers, behavioral floor, routing, loop, and skill index — load automatically every session.",
+      "tags": [
+        "documentation",
+        "operating-rules",
+        "entry-point",
+        "configuration"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:CONCEPTS.md",
+      "type": "document",
+      "name": "CONCEPTS.md",
+      "filePath": "CONCEPTS.md",
+      "summary": "Durable domain vocabulary registry: a glossary of project-specific terms appended by the ce-compound skill as concepts stabilize, so agents speak the same language across sessions.",
+      "tags": [
+        "documentation",
+        "glossary",
+        "vocabulary",
+        "compounding"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:README.md",
+      "type": "document",
+      "name": "README.md",
+      "filePath": "README.md",
+      "summary": "Project overview and setup guide for hypercore: maps the five layers, summarizes the engineering loop, and walks through plugin install, Context7, the knowledge layer, and NTM parallel-session setup.",
+      "tags": [
+        "documentation",
+        "entry-point",
+        "overview",
+        "setup"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:SKILLS-ATTRIBUTION.md",
+      "type": "document",
+      "name": "SKILLS-ATTRIBUTION.md",
+      "filePath": "SKILLS-ATTRIBUTION.md",
+      "summary": "Provenance and licensing record for hypercore's skill set: tables of vendored MIT skills with sources and authors plus the three in-house authored skills, documenting per-skill modifications.",
+      "tags": [
+        "documentation",
+        "attribution",
+        "licensing",
+        "provenance"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:.claude-plugin/marketplace.json",
+      "type": "config",
+      "name": "marketplace.json",
+      "filePath": ".claude-plugin/marketplace.json",
+      "summary": "Claude Code plugin marketplace manifest declaring the hypercore plugin, its local source (./), owner, and version for distribution.",
+      "tags": [
+        "configuration",
+        "plugin",
+        "distribution",
+        "claude-code"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:.claude-plugin/plugin.json",
+      "type": "config",
+      "name": "plugin.json",
+      "filePath": ".claude-plugin/plugin.json",
+      "summary": "Plugin manifest for hypercore describing its name, description, version, author, license, and keywords for the Claude Code plugin system.",
+      "tags": [
+        "configuration",
+        "plugin",
+        "manifest",
+        "metadata"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:.understand-anything/.understandignore",
+      "type": "file",
+      "name": ".understandignore",
+      "filePath": ".understand-anything/.understandignore",
+      "summary": "Ignore-pattern file (gitignore syntax) controlling which files and directories the Understand-Anything analysis excludes; ships with commented suggestions to uncomment.",
+      "tags": [
+        "configuration",
+        "ignore-file",
+        "knowledge-graph",
+        "tooling"
+      ],
+      "complexity": "simple",
+      "languageNotes": "Uses .gitignore glob syntax with # comments and ! negation; all patterns are commented out by default."
+    },
+    {
+      "id": "file:bin/hypercore-activate.sh",
+      "type": "file",
+      "name": "hypercore-activate.sh",
+      "filePath": "bin/hypercore-activate.sh",
+      "summary": "One-shot idempotent activation script that wires the NTM project base, installs the destructive-git block hook, enables yolo permissions for Claude Code and Codex, and commits/pushes the hypercore layer of both repos.",
+      "tags": [
+        "script",
+        "setup",
+        "activation",
+        "automation",
+        "shell"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "Backs up every edited config to *.hypercore.bak and installs the safety rail before enabling yolo so agents never get prompt-free git destruction."
+    },
+    {
+      "id": "file:bin/install.sh",
+      "type": "file",
+      "name": "install.sh",
+      "filePath": "bin/install.sh",
+      "summary": "Preflight checker that inspects the external tool surface (rg, fd, eza, gh, tmux, ntm, Context7, skills) and prints exact, non-destructive setup instructions for anything missing.",
+      "tags": [
+        "script",
+        "preflight",
+        "setup",
+        "environment-check",
+        "shell"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:docs/solutions/README.md",
+      "type": "document",
+      "name": "README.md",
+      "filePath": "docs/solutions/README.md",
+      "summary": "Explains the docs/solutions corpus — one Markdown file per solved problem written by ce-compound — and its role as the payload a later research or planning pass reads back in.",
+      "tags": [
+        "documentation",
+        "solutions",
+        "knowledge-capture",
+        "overview"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:skills/ce-compound/SKILL.md",
+      "type": "document",
+      "name": "ce-compound/SKILL.md",
+      "filePath": "skills/ce-compound/SKILL.md",
+      "summary": "Skill that captures a just-solved problem as a durable solution doc under docs/solutions/ and records project-specific domain vocabulary in CONCEPTS.md so knowledge compounds instead of being relearned.",
+      "tags": [
+        "skill",
+        "knowledge-capture",
+        "documentation",
+        "compound"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:skills/code-review/SKILL.md",
+      "type": "document",
+      "name": "code-review/SKILL.md",
+      "filePath": "skills/code-review/SKILL.md",
+      "summary": "Two-axis code review skill that diffs HEAD against a fixed point and runs parallel sub-agents for Standards (repo coding conventions) and Spec (originating issue/PRD) review, reporting the results side by side.",
+      "tags": [
+        "skill",
+        "code-review",
+        "quality",
+        "parallel-agents"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:skills/diagnosing-bugs/scripts/hitl-loop.template.sh",
+      "type": "file",
+      "name": "hitl-loop.template.sh",
+      "filePath": "skills/diagnosing-bugs/scripts/hitl-loop.template.sh",
+      "summary": "Copy-and-edit shell template for a human-in-the-loop reproduction loop; provides step and capture helpers so the agent runs the script while the user follows terminal prompts, emitting KEY=VALUE results for the agent to parse.",
+      "tags": [
+        "script",
+        "template",
+        "debugging",
+        "human-in-the-loop",
+        "shell"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:skills/diagnosing-bugs/SKILL.md",
+      "type": "document",
+      "name": "diagnosing-bugs/SKILL.md",
+      "filePath": "skills/diagnosing-bugs/SKILL.md",
+      "summary": "Six-phase diagnosis loop for hard bugs and performance regressions — build a feedback loop, reproduce and minimise, hypothesise, instrument, fix with a regression test, then clean up and post-mortem.",
+      "tags": [
+        "skill",
+        "debugging",
+        "diagnosis",
+        "workflow"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:skills/executing-plans/SKILL.md",
+      "type": "document",
+      "name": "executing-plans/SKILL.md",
+      "filePath": "skills/executing-plans/SKILL.md",
+      "summary": "Skill for executing a written implementation plan task-by-task with review checkpoints, stopping to ask for help on blockers and never touching the main branch without consent.",
+      "tags": [
+        "skill",
+        "planning",
+        "execution",
+        "workflow"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:skills/finishing-a-development-branch/SKILL.md",
+      "type": "document",
+      "name": "finishing-a-development-branch/SKILL.md",
+      "filePath": "skills/finishing-a-development-branch/SKILL.md",
+      "summary": "Skill guiding branch completion after tests pass — verify tests, detect environment, determine base branch, then present structured options to merge locally, push and open a PR, keep as-is, or discard, and finally clean up the workspace.",
+      "tags": [
+        "skill",
+        "git",
+        "workflow",
+        "branch-management"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh",
+      "type": "file",
+      "name": "block-dangerous-git.sh",
+      "filePath": "skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh",
+      "summary": "Claude Code PreToolUse(Bash) hook that reads the proposed command and blocks destructive git operations — force-push, reset --hard, clean -f, branch -D, checkout/restore ., and history rewrites — while allowing normal git push.",
+      "tags": [
+        "script",
+        "git",
+        "safety-hook",
+        "security",
+        "shell"
+      ],
+      "complexity": "simple",
+      "languageNotes": "Reads tool input JSON via jq and exit-2 blocks on any DANGEROUS_PATTERNS regex match; adapted from mattpocock/skills (MIT), narrowed to force-pushes only."
+    },
+    {
+      "id": "document:skills/git-guardrails-claude-code/SKILL.md",
+      "type": "document",
+      "name": "git-guardrails-claude-code/SKILL.md",
+      "filePath": "skills/git-guardrails-claude-code/SKILL.md",
+      "summary": "Skill that installs the Claude Code hook blocking dangerous git commands before execution — walking through scope, copying the hook script, wiring it into settings, offering customization, and verifying.",
+      "tags": [
+        "skill",
+        "git",
+        "safety",
+        "setup",
+        "security"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:skills/grill-me/SKILL.md",
+      "type": "document",
+      "name": "grill-me/SKILL.md",
+      "filePath": "skills/grill-me/SKILL.md",
+      "summary": "Thin user-invocable entry point (disable-model-invocation) that triggers a grilling session to relentlessly stress-test a plan or design.",
+      "tags": [
+        "skill",
+        "alignment",
+        "entry-point",
+        "planning"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:skills/grilling/SKILL.md",
+      "type": "document",
+      "name": "grilling/SKILL.md",
+      "filePath": "skills/grilling/SKILL.md",
+      "summary": "Skill that interviews the user one question at a time to stress-test a plan, walking the design tree and resolving decisions before any building begins.",
+      "tags": [
+        "skill",
+        "alignment",
+        "planning",
+        "interview"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:skills/handoff/SKILL.md",
+      "type": "document",
+      "name": "handoff/SKILL.md",
+      "filePath": "skills/handoff/SKILL.md",
+      "summary": "Skill that compacts the current conversation into a redacted handoff document (with a suggested-skills section) saved to the OS temp directory so a fresh agent can continue the work.",
+      "tags": [
+        "skill",
+        "handoff",
+        "context-management",
+        "documentation"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:skills/receiving-code-review/SKILL.md",
+      "type": "document",
+      "name": "receiving-code-review/SKILL.md",
+      "filePath": "skills/receiving-code-review/SKILL.md",
+      "summary": "Skill for weighing code-review feedback with technical rigor rather than performative agreement — verify before implementing, push back when warranted, and acknowledge correct feedback.",
+      "tags": [
+        "skill",
+        "code-review",
+        "quality",
+        "workflow"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "document:skills/research/SKILL.md",
+      "type": "document",
+      "name": "research/SKILL.md",
+      "filePath": "skills/research/SKILL.md",
+      "summary": "Skill that delegates reading legwork to a background agent, verifies each claim adversarially against primary sources and Context7, and returns one cited, confidence-tagged Markdown file under research/.",
+      "tags": [
+        "skill",
+        "research",
+        "investigation",
+        "citations"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:skills/uat-signoff/SKILL.md",
+      "type": "document",
+      "name": "uat-signoff/SKILL.md",
+      "filePath": "skills/uat-signoff/SKILL.md",
+      "summary": "Human acceptance sign-off skill that walks the owner through one observable test at a time to confirm a user-facing or high-risk change is what they wanted, inferring severity for any gaps from their own words.",
+      "tags": [
+        "skill",
+        "uat",
+        "acceptance",
+        "verification"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:skills/verification-before-completion/SKILL.md",
+      "type": "document",
+      "name": "verification-before-completion/SKILL.md",
+      "filePath": "skills/verification-before-completion/SKILL.md",
+      "summary": "Non-skippable gate skill requiring that any done/fixed/passing claim be backed by running the real verification command and reading its full output — evidence before assertions, always.",
+      "tags": [
+        "skill",
+        "verification",
+        "quality",
+        "gate"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:skills/writing-plans/plan-document-reviewer-prompt.md",
+      "type": "document",
+      "name": "writing-plans/plan-document-reviewer-prompt.md",
+      "filePath": "skills/writing-plans/plan-document-reviewer-prompt.md",
+      "summary": "Prompt template for dispatching a subagent that reviews a written plan for completeness, spec alignment, task decomposition, and buildability before implementation begins.",
+      "tags": [
+        "documentation",
+        "template",
+        "planning",
+        "review"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:skills/writing-plans/SKILL.md",
+      "type": "document",
+      "name": "writing-plans/SKILL.md",
+      "filePath": "skills/writing-plans/SKILL.md",
+      "summary": "Skill for turning a spec into an executable, right-sized, bite-sized task plan — with a proper document header, no placeholders, and a self-review pass before handing off to execution.",
+      "tags": [
+        "skill",
+        "planning",
+        "workflow",
+        "task-decomposition"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:skills/writing-skills/SKILL.md",
+      "type": "document",
+      "name": "writing-skills/SKILL.md",
+      "filePath": "skills/writing-skills/SKILL.md",
+      "summary": "Authoring discipline for hypercore's own skills — fuses structural best-practices (progressive disclosure, matched degrees of freedom, positive prompting) with a RED/GREEN/REFACTOR eval discipline that proves each skill against a baseline before it ships.",
+      "tags": [
+        "skill",
+        "meta",
+        "authoring",
+        "eval-driven"
+      ],
+      "complexity": "complex"
+    }
+  ],
+  "edges": [
+    {
+      "source": "document:CLAUDE.md",
+      "target": "document:AGENTS.md",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "document:AGENTS.md",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "document:SKILLS-ATTRIBUTION.md",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "document:CONCEPTS.md",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "config:.mcp.json",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:AGENTS.md",
+      "target": "document:SKILLS-ATTRIBUTION.md",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:AGENTS.md",
+      "target": "document:CONCEPTS.md",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:skills/git-guardrails-claude-code/SKILL.md",
+      "target": "file:skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:skills/diagnosing-bugs/SKILL.md",
+      "target": "file:skills/diagnosing-bugs/scripts/hitl-loop.template.sh",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:skills/writing-plans/SKILL.md",
+      "target": "document:skills/writing-plans/plan-document-reviewer-prompt.md",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:bin/hypercore-activate.sh",
+      "target": "file:skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "document:docs/solutions/README.md",
+      "target": "document:skills/ce-compound/SKILL.md",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:skills/grill-me/SKILL.md",
+      "target": "document:skills/grilling/SKILL.md",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "config:.claude-plugin/marketplace.json",
+      "target": "config:.claude-plugin/plugin.json",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:AGENTS.md",
+      "target": "document:skills/grilling/SKILL.md",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:AGENTS.md",
+      "target": "document:skills/grill-me/SKILL.md",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:AGENTS.md",
+      "target": "document:skills/writing-plans/SKILL.md",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:AGENTS.md",
+      "target": "document:skills/executing-plans/SKILL.md",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:AGENTS.md",
+      "target": "document:skills/finishing-a-development-branch/SKILL.md",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:AGENTS.md",
+      "target": "document:skills/verification-before-completion/SKILL.md",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:AGENTS.md",
+      "target": "document:skills/uat-signoff/SKILL.md",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:AGENTS.md",
+      "target": "document:skills/diagnosing-bugs/SKILL.md",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:AGENTS.md",
+      "target": "document:skills/code-review/SKILL.md",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:AGENTS.md",
+      "target": "document:skills/receiving-code-review/SKILL.md",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:AGENTS.md",
+      "target": "document:skills/ce-compound/SKILL.md",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:AGENTS.md",
+      "target": "document:skills/research/SKILL.md",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:AGENTS.md",
+      "target": "document:skills/handoff/SKILL.md",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:AGENTS.md",
+      "target": "document:skills/writing-skills/SKILL.md",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:AGENTS.md",
+      "target": "document:skills/git-guardrails-claude-code/SKILL.md",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "file:bin/install.sh",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:README.md",
+      "target": "config:.claude-plugin/marketplace.json",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    }
+  ],
+  "layers": [
+    {
+      "id": "layer:rules",
+      "name": "Operating Rules",
+      "description": "The behavioral floor, task-routing loop, and durable vocabulary that every hypercore session loads: AGENTS.md, its CLAUDE.md symlink mirror, and the CONCEPTS glossary.",
+      "nodeIds": [
+        "document:AGENTS.md",
+        "document:CLAUDE.md",
+        "document:CONCEPTS.md"
+      ]
+    },
+    {
+      "id": "layer:actions",
+      "name": "Skill Catalog (Actions)",
+      "description": "The invocable skill catalog: fifteen SKILL.md capabilities (grilling, writing-plans, executing-plans, code-review, verification, handoff, research, and more) that agents reach for by name.",
+      "nodeIds": [
+        "document:skills/ce-compound/SKILL.md",
+        "document:skills/code-review/SKILL.md",
+        "document:skills/diagnosing-bugs/SKILL.md",
+        "document:skills/executing-plans/SKILL.md",
+        "document:skills/finishing-a-development-branch/SKILL.md",
+        "document:skills/git-guardrails-claude-code/SKILL.md",
+        "document:skills/grill-me/SKILL.md",
+        "document:skills/grilling/SKILL.md",
+        "document:skills/handoff/SKILL.md",
+        "document:skills/receiving-code-review/SKILL.md",
+        "document:skills/research/SKILL.md",
+        "document:skills/uat-signoff/SKILL.md",
+        "document:skills/verification-before-completion/SKILL.md",
+        "document:skills/writing-plans/SKILL.md",
+        "document:skills/writing-skills/SKILL.md"
+      ]
+    },
+    {
+      "id": "layer:skill-helpers",
+      "name": "Skill Helper Scripts & Templates",
+      "description": "Executable helpers and prompt/loop templates bundled inside individual skills: the git-guardrails PreToolUse hook, the HITL bug-reproduction template, and the plan-document reviewer prompt.",
+      "nodeIds": [
+        "file:skills/diagnosing-bugs/scripts/hitl-loop.template.sh",
+        "file:skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh",
+        "document:skills/writing-plans/plan-document-reviewer-prompt.md"
+      ]
+    },
+    {
+      "id": "layer:tooling",
+      "name": "Setup & Activation Scripts",
+      "description": "Shell scripts that bootstrap and activate the system: install.sh preflight external-tool checks and hypercore-activate.sh (NTM base, git-hook wiring, permissions, commit/push).",
+      "nodeIds": [
+        "file:bin/hypercore-activate.sh",
+        "file:bin/install.sh"
+      ]
+    },
+    {
+      "id": "layer:config",
+      "name": "Distribution & External-Tool Config",
+      "description": "Distribution and tool-wiring config: the Claude plugin and marketplace manifests, the Context7 MCP server registration, and the understand-anything ignore-pattern file.",
+      "nodeIds": [
+        "config:.claude-plugin/marketplace.json",
+        "config:.claude-plugin/plugin.json",
+        "config:.mcp.json",
+        "file:.understand-anything/.understandignore"
+      ]
+    },
+    {
+      "id": "layer:documentation",
+      "name": "Knowledge & Documentation",
+      "description": "The project narrative and compounding knowledge surface: the README overview/setup guide, the skill provenance/licensing attribution, and the docs/solutions corpus README.",
+      "nodeIds": [
+        "document:README.md",
+        "document:SKILLS-ATTRIBUTION.md",
+        "document:docs/solutions/README.md"
+      ]
+    }
+  ],
+  "tour": [
+    {
+      "order": 1,
+      "title": "Start Here — The Map",
+      "description": "hypercore isn't an application; it's an operating system for an AI engineer. The README is the map: it names the five layers (Rules, Actions, Knowledge, Sessions, Externals) and the setup path. Read it first to get the shape of the whole system before diving into any one part.",
+      "nodeIds": [
+        "document:README.md"
+      ]
+    },
+    {
+      "order": 2,
+      "title": "The Operating Rules & the Five Layers",
+      "description": "AGENTS.md is the behavioral floor loaded every session (CLAUDE.md is a symlink mirror so Claude Code picks it up automatically). It defines the five layers, the always-on rules, task routing (the 'trivial vs. everything else' escape hatch), and the full skill index. This is the constitution the whole system runs under.",
+      "nodeIds": [
+        "document:AGENTS.md",
+        "document:CLAUDE.md"
+      ]
+    },
+    {
+      "order": 3,
+      "title": "Align — Pin Down Intent Before Building",
+      "description": "The loop opens with alignment. `grilling` interviews you one question at a time to stress-test a plan and resolve open decisions; `grill-me` is the thin user-invocable trigger for that session. Nothing gets built until intent is sharp.",
+      "nodeIds": [
+        "document:skills/grilling/SKILL.md",
+        "document:skills/grill-me/SKILL.md"
+      ]
+    },
+    {
+      "order": 4,
+      "title": "Plan — Turn Intent into an Executable Plan",
+      "description": "`writing-plans` converts agreed intent into a right-sized, bite-sized task plan with a proper header and a self-review pass. Its companion prompt template dispatches a reviewer sub-agent to check the plan for completeness and buildability before any code is written.",
+      "nodeIds": [
+        "document:skills/writing-plans/SKILL.md",
+        "document:skills/writing-plans/plan-document-reviewer-prompt.md"
+      ]
+    },
+    {
+      "order": 5,
+      "title": "Build — Execute the Plan, Diagnose When Stuck",
+      "description": "`executing-plans` works the plan task-by-task with review checkpoints, stopping on blockers and never touching main without consent. When a bug bites, `diagnosing-bugs` runs a six-phase loop; its HITL shell template lets the agent drive a reproduction while you follow terminal prompts.",
+      "nodeIds": [
+        "document:skills/executing-plans/SKILL.md",
+        "document:skills/diagnosing-bugs/SKILL.md",
+        "file:skills/diagnosing-bugs/scripts/hitl-loop.template.sh"
+      ]
+    },
+    {
+      "order": 6,
+      "title": "Verify & Sign-off — The One Invariant",
+      "description": "`verification-before-completion` is the gate that is never skipped: no 'done/fixed/passing' claim without running the real command and reading its full output. For user-facing, irreversible, or ambiguous changes, `uat-signoff` then walks the human owner through observable tests one at a time.",
+      "nodeIds": [
+        "document:skills/verification-before-completion/SKILL.md",
+        "document:skills/uat-signoff/SKILL.md"
+      ]
+    },
+    {
+      "order": 7,
+      "title": "Review — Produce It, Then Weigh It",
+      "description": "`code-review` runs the diff across two axes — Standards (repo conventions) and Intent (the originating spec) — via parallel sub-agents. `receiving-code-review` is the counterweight: verify feedback with technical rigor and push back when warranted instead of rubber-stamping it.",
+      "nodeIds": [
+        "document:skills/code-review/SKILL.md",
+        "document:skills/receiving-code-review/SKILL.md"
+      ]
+    },
+    {
+      "order": 8,
+      "title": "Land & Compound — Don't Relearn What You Solved",
+      "description": "`finishing-a-development-branch` lands finished work (verify → merge/PR/cleanup). Then `ce-compound` closes the loop by capturing the solved problem into docs/solutions/ and durable vocabulary into CONCEPTS.md, so the next session starts ahead instead of from scratch.",
+      "nodeIds": [
+        "document:skills/finishing-a-development-branch/SKILL.md",
+        "document:skills/ce-compound/SKILL.md",
+        "document:CONCEPTS.md",
+        "document:docs/solutions/README.md"
+      ]
+    },
+    {
+      "order": 9,
+      "title": "The Always-On Safety Rail & Support Skills",
+      "description": "Not everything is an invoked step. `git-guardrails-claude-code` installs a PreToolUse hook (block-dangerous-git.sh) that blocks force-push, reset --hard, clean -fd, and history rewrites before they run. Alongside the loop sit support skills reachable any time: `research` (delegated cited investigation), `handoff` (compact state for a fresh agent), and `writing-skills` (author/edit skills, eval-first).",
+      "nodeIds": [
+        "document:skills/git-guardrails-claude-code/SKILL.md",
+        "file:skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh",
+        "document:skills/research/SKILL.md",
+        "document:skills/handoff/SKILL.md",
+        "document:skills/writing-skills/SKILL.md"
+      ]
+    },
+    {
+      "order": 10,
+      "title": "Setup, Distribution & External Surface",
+      "description": "Finally, how hypercore installs and reaches the outside world. `bin/install.sh` preflights the external tool surface; `bin/hypercore-activate.sh` wires the git hook, permissions, and NTM base. The plugin manifests distribute it as a Claude Code plugin, `.mcp.json` registers Context7 for live library docs, `.understandignore` scopes this knowledge graph, and SKILLS-ATTRIBUTION.md records the MIT provenance of every skill.",
+      "nodeIds": [
+        "file:bin/install.sh",
+        "file:bin/hypercore-activate.sh",
+        "config:.claude-plugin/plugin.json",
+        "config:.claude-plugin/marketplace.json",
+        "config:.mcp.json",
+        "file:.understand-anything/.understandignore",
+        "document:SKILLS-ATTRIBUTION.md"
+      ]
+    }
+  ]
+}

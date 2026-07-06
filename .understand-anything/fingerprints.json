@@ -1,0 +1,370 @@
+{
+  "version": "1.0.0",
+  "gitCommitHash": "4abad771802593b51a3bb51ca95b55c7ad6f0c53",
+  "generatedAt": "2026-07-06T17:59:44.081Z",
+  "files": {
+    ".claude-plugin/marketplace.json": {
+      "filePath": ".claude-plugin/marketplace.json",
+      "contentHash": "b51e369b981890ce325907222bc2f4fa0051eecdea9528db2355c02e814e99c5",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 14,
+      "hasStructuralAnalysis": true
+    },
+    ".claude-plugin/plugin.json": {
+      "filePath": ".claude-plugin/plugin.json",
+      "contentHash": "013c085b2bdafaa629030cc0378d4a13fb5c3c21858cada14d32ad0cfc2a749d",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 9,
+      "hasStructuralAnalysis": true
+    },
+    ".mcp.json": {
+      "filePath": ".mcp.json",
+      "contentHash": "5b78e56c2a3f76948d9c4a151930b87a16e47504d5a20f2164e884f1e4cfe042",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 9,
+      "hasStructuralAnalysis": true
+    },
+    ".understand-anything/.understandignore": {
+      "filePath": ".understand-anything/.understandignore",
+      "contentHash": "023617ac91b06660660717f5d43180ebee082a0dd5d07ae4f62bb1d9dd747ac7",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 43,
+      "hasStructuralAnalysis": false
+    },
+    "AGENTS.md": {
+      "filePath": "AGENTS.md",
+      "contentHash": "0e34601f1d82c6696543da5c965696211c792253f3f16b59b61f581660ed8475",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 79,
+      "hasStructuralAnalysis": true
+    },
+    "bin/hypercore-activate.sh": {
+      "filePath": "bin/hypercore-activate.sh",
+      "contentHash": "414e5de106aa48f77c6107eff6f99e2ae018045ef33619d087708bf6120559a7",
+      "functions": [
+        {
+          "name": "say",
+          "params": [],
+          "exported": false,
+          "lineCount": 1
+        },
+        {
+          "name": "bak",
+          "params": [],
+          "exported": false,
+          "lineCount": 1
+        },
+        {
+          "name": "set_toml_top",
+          "params": [],
+          "exported": false,
+          "lineCount": 9
+        }
+      ],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 91,
+      "hasStructuralAnalysis": true
+    },
+    "bin/install.sh": {
+      "filePath": "bin/install.sh",
+      "contentHash": "7abb8b8fdb3314128c4631c318a33e25165a2f8420fcfda07dff9a1b919aab3e",
+      "functions": [
+        {
+          "name": "bold",
+          "params": [],
+          "exported": false,
+          "lineCount": 1
+        },
+        {
+          "name": "ok",
+          "params": [],
+          "exported": false,
+          "lineCount": 1
+        },
+        {
+          "name": "miss",
+          "params": [],
+          "exported": false,
+          "lineCount": 1
+        },
+        {
+          "name": "have",
+          "params": [],
+          "exported": false,
+          "lineCount": 1
+        },
+        {
+          "name": "pkg_hint",
+          "params": [],
+          "exported": false,
+          "lineCount": 6
+        }
+      ],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 71,
+      "hasStructuralAnalysis": true
+    },
+    "CLAUDE.md": {
+      "filePath": "CLAUDE.md",
+      "contentHash": "0e34601f1d82c6696543da5c965696211c792253f3f16b59b61f581660ed8475",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 79,
+      "hasStructuralAnalysis": true
+    },
+    "CONCEPTS.md": {
+      "filePath": "CONCEPTS.md",
+      "contentHash": "97e5ec1468fb109ec6e7518b44b9c5a64383bb4ffaf6a63c00175164d2677ed3",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 8,
+      "hasStructuralAnalysis": true
+    },
+    "docs/solutions/README.md": {
+      "filePath": "docs/solutions/README.md",
+      "contentHash": "ed3800dabbe57cbf8a8452dfb206ab3a8169e1b2895ae555ad19f39d41afe863",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 10,
+      "hasStructuralAnalysis": true
+    },
+    "README.md": {
+      "filePath": "README.md",
+      "contentHash": "1f0db1583ce4dd08b7b65033f53f1a8f5150ace55a64ca35f41255ac2b756503",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 59,
+      "hasStructuralAnalysis": true
+    },
+    "SKILLS-ATTRIBUTION.md": {
+      "filePath": "SKILLS-ATTRIBUTION.md",
+      "contentHash": "3adbd4eb8b75c489c0ba77d1103111a004ae7a224362e8e85ad47c3894ce57e9",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 40,
+      "hasStructuralAnalysis": true
+    },
+    "skills/ce-compound/SKILL.md": {
+      "filePath": "skills/ce-compound/SKILL.md",
+      "contentHash": "060504ffa604fb3c89221e3cc2a15fae7c74ed44023acce867fa6d20a92695e9",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 95,
+      "hasStructuralAnalysis": true
+    },
+    "skills/code-review/SKILL.md": {
+      "filePath": "skills/code-review/SKILL.md",
+      "contentHash": "6a65cc61114f96db07ec41e3920e67c9c5bf70dd6e0901eb9460ebcb2bdc209f",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 90,
+      "hasStructuralAnalysis": true
+    },
+    "skills/diagnosing-bugs/scripts/hitl-loop.template.sh": {
+      "filePath": "skills/diagnosing-bugs/scripts/hitl-loop.template.sh",
+      "contentHash": "b2932630950e5210075bcd6f850e5accf30c101c5367b29eac3a29b4dd8084c8",
+      "functions": [
+        {
+          "name": "step",
+          "params": [],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "capture",
+          "params": [],
+          "exported": false,
+          "lineCount": 6
+        }
+      ],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 42,
+      "hasStructuralAnalysis": true
+    },
+    "skills/diagnosing-bugs/SKILL.md": {
+      "filePath": "skills/diagnosing-bugs/SKILL.md",
+      "contentHash": "c2a243305861913cfbf57ed1c1a53e5f73f44308e23ecee07da4ae9407c0ffdc",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 139,
+      "hasStructuralAnalysis": true
+    },
+    "skills/executing-plans/SKILL.md": {
+      "filePath": "skills/executing-plans/SKILL.md",
+      "contentHash": "bbd8d28bb655a52817cc129ce49f9e46fa7c6303f72ed5de95bfe914ef8e0ce8",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 71,
+      "hasStructuralAnalysis": true
+    },
+    "skills/finishing-a-development-branch/SKILL.md": {
+      "filePath": "skills/finishing-a-development-branch/SKILL.md",
+      "contentHash": "e6d4a812de900d33c6eacfb40747f99427f25c304a7b7099120f9373b115a47f",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 242,
+      "hasStructuralAnalysis": true
+    },
+    "skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh": {
+      "filePath": "skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh",
+      "contentHash": "0f87092323f74b535e1db9e0fb17e7922d25df7a424558a094932262ffd654ba",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 38,
+      "hasStructuralAnalysis": true
+    },
+    "skills/git-guardrails-claude-code/SKILL.md": {
+      "filePath": "skills/git-guardrails-claude-code/SKILL.md",
+      "contentHash": "03c4de7613c712aea336d64c467ea3ed14be2cbd52345925fe949c75c01c29f7",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 96,
+      "hasStructuralAnalysis": true
+    },
+    "skills/grill-me/SKILL.md": {
+      "filePath": "skills/grill-me/SKILL.md",
+      "contentHash": "6189dfceb7304a6e5558f75d87e68fa3bc7fcf7ba120e44f21f8a61fe01eba54",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 8,
+      "hasStructuralAnalysis": true
+    },
+    "skills/grilling/SKILL.md": {
+      "filePath": "skills/grilling/SKILL.md",
+      "contentHash": "5a35925d03a391bcfa46940868b649b72dba89ec9c19525e785bbb6bd3a7f478",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 13,
+      "hasStructuralAnalysis": true
+    },
+    "skills/handoff/SKILL.md": {
+      "filePath": "skills/handoff/SKILL.md",
+      "contentHash": "94bee8c16cbfcf9f1e15187f7e5d0d5a93c4adb7c512feceecaab80c8ff7c059",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 17,
+      "hasStructuralAnalysis": true
+    },
+    "skills/receiving-code-review/SKILL.md": {
+      "filePath": "skills/receiving-code-review/SKILL.md",
+      "contentHash": "647036bbdab7bf2317e14e079595e984c9030f64295e2b4c0fb57dbeb48f25dd",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 214,
+      "hasStructuralAnalysis": true
+    },
+    "skills/research/SKILL.md": {
+      "filePath": "skills/research/SKILL.md",
+      "contentHash": "d1a7a6b00aa91bca5da01449b6665aabbfcd6edbf840c06bc8265619dd4c58e8",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 42,
+      "hasStructuralAnalysis": true
+    },
+    "skills/uat-signoff/SKILL.md": {
+      "filePath": "skills/uat-signoff/SKILL.md",
+      "contentHash": "ebdcc9001860f5e71741eadaabc687baf4095084109399d5e2d3bbe75f2b7bb1",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 112,
+      "hasStructuralAnalysis": true
+    },
+    "skills/verification-before-completion/SKILL.md": {
+      "filePath": "skills/verification-before-completion/SKILL.md",
+      "contentHash": "ea52d15aabaf72bc6b558efe2c126f161b53961090ddcd712000273bfe8c7b6c",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 140,
+      "hasStructuralAnalysis": true
+    },
+    "skills/writing-plans/plan-document-reviewer-prompt.md": {
+      "filePath": "skills/writing-plans/plan-document-reviewer-prompt.md",
+      "contentHash": "aa728b96aad603c8be28875a4305637f6c984aa81ffcadcb13e743202fa2a0c7",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 50,
+      "hasStructuralAnalysis": true
+    },
+    "skills/writing-plans/SKILL.md": {
+      "filePath": "skills/writing-plans/SKILL.md",
+      "contentHash": "272e1af349f5062c28dc282b3e21b220d58d683a7314a10c455b7432ec91d845",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 175,
+      "hasStructuralAnalysis": true
+    },
+    "skills/writing-skills/SKILL.md": {
+      "filePath": "skills/writing-skills/SKILL.md",
+      "contentHash": "85b53e6f09f247e39958b9e3b1b6cc612228a3a5c63d969b8c0188663c55a63a",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 190,
+      "hasStructuralAnalysis": true
+    }
+  }
+}
