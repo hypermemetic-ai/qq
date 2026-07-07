@@ -10,9 +10,10 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
 
 ## Backlog
 
-> **Session 2026-07-07 worked this folder; statuses below are current. Next session
-> picks up the build in this order: #5 (status substrate) → #2 (`compound`) → #1
-> (`/idea`). Design is locked — no more design questions, just build.**
+> **Session 2026-07-07 worked this folder; statuses below are current. #5 is now
+> built (writer + status-line reader) and landing via the gate — remaining build
+> order: #2 (`compound`) → #1 (`/idea`). Design is locked — no more design
+> questions, just build.**
 
 - **#1 · The `/idea` capture skill** → [`01-btw-ideas-skill.md`](01-btw-ideas-skill.md).
   _Design locked (07-07)._ Renamed off `/btw` — that's a **built-in Claude Code command**
@@ -25,11 +26,13 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   `~/.claude/skills` link). And stop asking: it **auto-fires when appropriate**, with the
   appropriateness judgment living *inside* the skill, not a yes/no prompt. _(2026-07-06 → 07)_
 - **#5 · Background-status substrate** → [`02-orchestrate-phase-state.md`](02-orchestrate-phase-state.md).
-  _Approved to resurrect (07-07), scope widened._ `qq-phase` → `.orchestrate/state.json` +
-  widget; re-appliable patch beside the note. No longer orchestrate-only — it's the shared
-  **"background-work status" surface** #1 publishes to (`capturing → researching → done`).
-  Build first. Patch predates the `qq-ac→qq` rename + codex-gate change → expect small
-  conflicts. _(2026-07-06 → 07)_
+  ✅ **Built + verified (07-07), landing via the gate** (branch `feat/status-substrate`).
+  Resurrected the salvaged patch and widened it per the note: single writer **`bin/qq-phase`**
+  stamps the current phase to **`.qq/state.json`** (neutral home, not `.orchestrate/`), and the
+  reader is folded into the same script as **`qq-phase render`** — wired into the **Claude Code
+  status line** via `qq-activate.sh`, merging the live gate step from `no-mistakes axi status`.
+  Any producer can stamp a free-form phase (`capturing → researching → done`), so **#1 rides it
+  for free**. Salvaged patch + note (`02-*.md/.patch`) safe to retire once merged. _(2026-07-06 → 07)_
 - **#3 · `codex exec` stdin-hang** → [`03-codex-exec-stdin-hang.md`](03-codex-exec-stdin-hang.md).
   ✅ **Done (07-07).** Wired `< /dev/null` + a rule bullet into
   `skills/orchestrate/SKILL.md`'s Build handoffs. Note kept for rationale; safe to delete. _(2026-07-06 → 07)_
