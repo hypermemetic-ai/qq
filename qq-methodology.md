@@ -16,7 +16,7 @@ repo via a symlinked `@`-import — do not edit a copy; edit it in qq.
   its own git worktree; herdr's sidebar shows which agent is blocked / working /
   done / idle, so you see at a glance which one needs you.
 - **Cockpit** — the operator's tuned terminal surface, linked from the qq repo:
-  herdr, yazi, broot, glow, mdcat, and shell navigation.
+  herdr, yazi, broot, glow, mdcat, shell navigation, and the `qq-phase` status line.
 - **Externals** — Context7 (live, version-correct library docs), `gh` (GitHub),
   `fd` / `eza` / `rg` (fast filesystem), and **the gate** (`no-mistakes`, an
   external MIT tool): real work is *pushed to it* — an independent pipeline

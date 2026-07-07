@@ -10,7 +10,8 @@ qq is the source of truth for the methodology. The shared core is
 `qq-methodology.md` (imported below), and every linked repo symlinks and
 `@`-imports it. Skills live in `skills/` and are linked into
 `~/.claude/skills` by `bin/qq-link.sh`; cockpit configs in `cockpit/` symlink
-into `~/.config` via `bin/qq-activate.sh`.
+into `~/.config` via `bin/qq-activate.sh`, which also wires the `qq-phase` status
+line.
 
 **Merge gate: `blast-radius`.** Trivial + local + reversible work still commits
 on green straight to `main` (the escape hatch — `orchestrate` and trivial fixes

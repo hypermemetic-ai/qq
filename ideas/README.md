@@ -32,8 +32,8 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   reader is folded into the same script as **`qq-phase render`** — wired into the **Claude Code
   status line** via `qq-activate.sh`, merging the live gate step from `no-mistakes axi status`.
   Any producer can stamp free-form phases (`capturing`, `researching`) and finish with `qq-phase
-  done`, so **#1 rides it for free**. Salvaged patch + note (`02-*.md/.patch`) safe to retire once
-  merged. _(2026-07-06 → 07)_
+  done`, so **#1 rides it for free**. The `02-*.md` note now records the built shape; the archived
+  patch is safe to retire once merged. _(2026-07-06 → 07)_
 - **#3 · `codex exec` stdin-hang** → [`03-codex-exec-stdin-hang.md`](03-codex-exec-stdin-hang.md).
   ✅ **Done (07-07).** Wired `< /dev/null` + a rule bullet into
   `skills/orchestrate/SKILL.md`'s Build handoffs. Note kept for rationale; safe to delete. _(2026-07-06 → 07)_

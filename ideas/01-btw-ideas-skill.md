@@ -1,7 +1,8 @@
-# The `/btw` ideas skill
+# The `/idea` capture skill
 
-_Banked 2026-07-06. Status: aligned on design; harness-extensibility question
-researched (2026-07-07, section below); three decisions open, not yet built._
+_Banked 2026-07-06. Status: design locked as `/idea`; harness-extensibility
+question researched (2026-07-07, section below); not yet built. It rides the
+background-status substrate built by #5._
 
 ## Original (verbatim — surlej)
 
@@ -37,7 +38,7 @@ Two native primitives together already cover most of what this note set out to b
 
 **Consequences:**
 1. **Don't build a `/btw` skill** — the name is a built-in and the behavior overlaps.
-   Give the durable-capture skill a distinct name: `/idea`, `/park`, or `/bank`.
+   The durable-capture skill is `/idea`.
 2. **Completion is *visibility*, not a *reply* (operator, 2026-07-07).** The done-signal
    must NOT re-enter the conversation — same contract as the orchestrate progress tracker:
    ambient status you glance at, zero conversation pollution. That rules out surfacing via
@@ -45,16 +46,15 @@ Two native primitives together already cover most of what this note set out to b
    finishes." Instead: **capture in-turn** (that turn has full context → write a scoped
    brief, per the mini-handoff slot), **spawn a detached researcher**
    (`setsid … codex exec / claude -p … < /dev/null &`) that writes `ideas/NN-slug.md`, and
-   **report status to the shared background-status surface** — the same `qq-phase`/
-   state.json widget + herdr sidebar as idea #5 — flipping
+   **report status to the shared background-status surface** — `qq-phase` writing
+   `.qq/state.json`, read by `qq-phase render` in the Claude Code status line — flipping
    `capturing → researching → done: ideas/NN-slug.md`. The skill returns nothing into the
    transcript.
 3. **The genuinely additive part is small but real:** durable persistence + the
    grooming convention (`ideas/` + README backlog). Everything else is now native.
 4. **#1 and #5 converge.** The completion-visibility surface *is* the progress tracker's
-   surface. Resurrecting #5 (`qq-phase` → `.orchestrate/state.json` + widget) as a general
-   "background-work status" substrate gives `/idea` its done-signal for free — so build #5
-   first, then #1 piggybacks. This also lifts #5 from an orchestrate-only nicety into
+   surface. With #5 built as `qq-phase` → `.qq/state.json` + `qq-phase render`, `/idea`
+   gets its done-signal for free. This also lifts #5 from an orchestrate-only nicety into
    shared cockpit infrastructure.
 
 **Codex mapping (for when it's the primary cockpit):** Codex has `/side` (ephemeral
@@ -72,11 +72,10 @@ developers.openai.com/codex/cli/slash-commands · github.com/openai/codex/issues
 
 ## Sharpened design
 
-A `writing-skills` eval-first skill named `ideas`, with a `btw` alias like
-`grill-me`→`grilling` (`disable-model-invocation: true` on the alias). Also
-honors natural phrases: "btw…", "capture this", "note for later", "idea:".
+A `writing-skills` eval-first skill named `idea`. It also honors natural phrases:
+"capture this", "note for later", and "idea:".
 
-**Contract: `/btw` never blocks the running session.** Operator-side ceremony
+**Contract: `/idea` never blocks the running session.** Operator-side ceremony
 stays at zero; the agent does the fleshing.
 
 1. **Capture first, verbatim, instantly** — raw input is written to the idea
@@ -89,9 +88,9 @@ stays at zero; the agent does the fleshing.
    artifacts by path/URL instead of duplicating them, and redact secrets.
 3. **Research in the background** — reuse the `research` skill (cited,
    confidence-tagged), running async so the operator stays in-session.
-4. **One confirmation line, then out of the way** — e.g.
-   `💡 ideas/03-retry-backoff.md — researching whether the gate can key on X`.
-   The file enriches itself when research lands.
+4. **Ambient status, then out of the way** — e.g. the status line shows
+   `researching · ideas/03-retry-backoff.md`. The transcript stays clean, and the
+   file enriches itself when research lands.
 5. **File shape, ready to take on cold:** `Original` (verbatim, sacred) ·
    `Sharpened` + what we were doing when it came up · `Findings` (cited
    research) · `Ready-to-take-on` (what acting on it involves, optional
@@ -103,14 +102,14 @@ Backlog bullet in `README.md`; anything with supporting data → its own
 
 ## Relationship to `handoff`
 
-`/btw` and `handoff` are two consumers of the **same underlying capability** —
+`/idea` and `handoff` are two consumers of the **same underlying capability** —
 "compact live session state so a *cold reader* can resume without re-deriving
-it" — pointed at different targets. The `ideas` skill should *reuse* handoff's
+it" — pointed at different targets. The `idea` skill should *reuse* handoff's
 compaction discipline for its session-context work, not reinvent it.
 
 Where they diverge (keep the two skills distinct):
 
-| | `handoff` | `/btw` (ideas) |
+| | `handoff` | `/idea` |
 |---|---|---|
 | **Fires when** | context is low; you must pass the baton | a tangential thought occurs; you want to keep going |
 | **Relation to current task** | *end/transfer* this work | *park a different* work, stay on this one |
@@ -120,7 +119,7 @@ Where they diverge (keep the two skills distinct):
 
 Where they connect (borrow, don't duplicate):
 
-- **Bare `/btw` = a scoped handoff.** Decision #2's recommended "snapshot the
+- **Bare `/idea` = a scoped handoff.** Decision #2's recommended "snapshot the
   session as the seed" is literally handoff-style conversation compaction,
   redirected from the temp dir to `ideas/` and reframed as "a thread to pick up
   later" rather than "continue this exact work." Implement it by reusing
@@ -131,31 +130,25 @@ Where they connect (borrow, don't duplicate):
   it explicitly: every idea names the next skill to reach for (`writing-plans`,
   `orchestrate`, …) so future-you starts warm.
 
-Net: in the "Support, any time" trio, `ideas` *uses* `research` (to flesh out)
+Net: in the "Support, any time" trio, `idea` *uses* `research` (to flesh out)
 and *borrows from* `handoff` (to capture context) — it sits between them.
 
-## Three decisions open (with recommendations)
+## Locked decisions
 
-1. **Research trigger** — **Rec: judge per idea** (spin up an agent only when
-   there's something researchable; a bare todo just gets a bullet). Alternatives:
-   always research; only on explicit `--deep` flag.
-2. **Bare `/btw` (no text)** — **Rec: snapshot the current session as the seed**
-   (infer the concern from what we're wrestling with) — implemented by reusing
-   `handoff`'s compaction, redirected to `ideas/`. Alternatives: prompt for a
-   thought; disallow.
-3. **Sharpening depth** — **Rec: silent distill, capture-first, at most one
-   clarifying question and only if the idea can't be researched without it.**
-   Alternatives: always ask one question; store verbatim only.
+1. **Research trigger** — judge per idea: spin up an agent only when there's
+   something researchable; a bare todo just gets a bullet.
+2. **Bare `/idea` (no text)** — snapshot the current session as the seed by
+   reusing `handoff`'s compaction, redirected to `ideas/`.
+3. **Sharpening depth** — silent distill, capture-first, with at most one
+   clarifying question and only if the idea can't be researched without it.
 
 ## Ready to take on
 
-Confirm the three decisions (default = all three recommendations), then author
-via `writing-skills` (eval-first): the `ideas` skill + `btw` alias, and
-formalize this `ideas/` folder as its output surface. Index row goes under
+Build via `writing-skills` (eval-first): the `idea` skill, and formalize this
+`ideas/` folder as its output surface. Index row goes under
 "Support, any time" in `CLAUDE.md`, alongside `research` / `handoff`.
 
-One build decision surfaced by the handoff analysis: whether `ideas` simply
-*invokes* `handoff` for its session-snapshot / context-slot work, or whether the
-shared "compact live session for a cold reader" method gets factored out so both
-skills point at it. Lean toward the lighter option first (invoke/reference
-`handoff`); factor only if the duplication actually bites.
+Implementation note from the handoff analysis: start by having `idea`
+invoke/reference `handoff` for its session-snapshot / context-slot work. Factor a
+shared "compact live session for a cold reader" method only if the duplication
+actually bites.

@@ -16,7 +16,7 @@ Operating rules live in [`AGENTS.md`](./AGENTS.md) (loaded every session;
 | **Actions** | curated, invocable skills linked live | `skills/` → `~/.claude/skills/` |
 | **Knowledge** | auto-generated map of the code | `.understand-anything/knowledge-graph.json` |
 | **Sessions** | many named parallel agents, each in its own worktree, state-aware | herdr (`herdr`) |
-| **Cockpit** | human-driven terminal tools + tuned configs | `cockpit/` |
+| **Cockpit** | human-driven terminal tools + status line + tuned configs | `cockpit/`, `bin/qq-phase` |
 | **Externals** | live docs · GitHub · fast filesystem · gate | Context7 · `gh` · `fd`/`eza`/`rg` · `no-mistakes` |
 
 ## The loop
@@ -24,6 +24,8 @@ Operating rules live in [`AGENTS.md`](./AGENTS.md) (loaded every session;
 Compound.** Trivial work takes the escape hatch — do it directly — but *never*
 skips verification. Full detail in `AGENTS.md`. Invoke `orchestrate` to run the
 whole loop end-to-end as one command — Claude conducts, Codex implements.
+Long-running work stamps `.qq/state.json` with `qq-phase`, and `qq-phase render`
+feeds the Claude Code status line with the current phase plus any live gate step.
 
 ## Skills
 16 skills, curated from four MIT collections (mattpocock, superpowers,
@@ -36,8 +38,9 @@ provenance is in [`SKILLS-ATTRIBUTION.md`](./SKILLS-ATTRIBUTION.md).
 1. **Preflight** — `bash bin/install.sh` checks the external surface and cockpit
    tools, then prints exact install hints for anything missing.
 2. **One-shot activation** — `bash bin/qq-activate.sh` installs the guardrail
-   hook, wires the WIP savepoint, symlinks cockpit configs from this repo into
-   `~/.config`, and links skills into `~/.claude/skills`.
+   hook, wires the WIP savepoint and `qq-phase` status line, symlinks cockpit
+   configs from this repo into `~/.config`, and links skills into
+   `~/.claude/skills`.
 3. **Skills** — link them live:
    ```
    bash bin/qq-link.sh skills
@@ -48,7 +51,8 @@ provenance is in [`SKILLS-ATTRIBUTION.md`](./SKILLS-ATTRIBUTION.md).
    bash bin/qq-link.sh repo <path>
    ```
    This adds the live methodology symlink, ensures the repo imports it, merges
-   Context7 into `.mcp.json`, and seeds `CONCEPTS.md` only when missing.
+   Context7 into `.mcp.json`, seeds `CONCEPTS.md` only when missing, and ignores
+   the transient `.qq/` status directory.
 5. **Cockpit** — `cockpit/` is the source of truth for yazi, glow, herdr, and
    shell navigation. `herdr prefix+f` opens `qqy`; yazi starts at the repo root;
    pressing Enter on `.md` renders in-pane via mdcat or the tuned Glow theme.
