@@ -1,6 +1,7 @@
 # The `/btw` ideas skill
 
-_Banked 2026-07-06. Status: aligned on design, three decisions open, not yet built._
+_Banked 2026-07-06. Status: aligned on design; harness-extensibility question
+researched (2026-07-07, section below); three decisions open, not yet built._
 
 ## Original (verbatim — surlej)
 
@@ -15,6 +16,59 @@ _Banked 2026-07-06. Status: aligned on design, three decisions open, not yet bui
 No such skill exists in `skills/` (checked all 16). Closest prior art is the
 `research` skill (which this reuses) and this `ideas/` folder's own convention
 (README backlog + `NN-slug.md`). So: build it, on top of this scaffold.
+
+## Native `/btw` already exists — reframe the idea around it (researched 2026-07-07)
+
+**`/btw` is a *built-in Claude Code command*** (shipped 2.1.72, ~Mar 2026) — not
+something to author. Official docs: `/btw <question>` = "Ask a quick side question
+without adding to the conversation." It forks the session context, answers in an
+overlay, keeps the Q&A out of the main history (context/token savings), and works
+mid-task. It is **read-only** — no tools, no file writes — so it can *ask* about the
+session but cannot *persist* anything.
+
+Two native primitives together already cover most of what this note set out to build:
+- **`/btw`** — the ephemeral aside-without-derailing ergonomics.
+- **`/fork <directive>`** (Claude Code ≥ 2.1.161) — "spawn a background subagent that
+  inherits the full conversation and works on the directive while you keep going; its
+  result returns to your conversation when it finishes." This *is* the
+  "sharpen-using-the-running-session's-context + research-in-the-background,
+  non-blocking" engine the design spec'd from scratch — and unlike `/btw` it's a full
+  subagent (can research, write files).
+
+**Consequences:**
+1. **Don't build a `/btw` skill** — the name is a built-in and the behavior overlaps.
+   Give the durable-capture skill a distinct name: `/idea`, `/park`, or `/bank`.
+2. **Completion is *visibility*, not a *reply* (operator, 2026-07-07).** The done-signal
+   must NOT re-enter the conversation — same contract as the orchestrate progress tracker:
+   ambient status you glance at, zero conversation pollution. That rules out surfacing via
+   `/fork`, whose defining behavior is "result returns to your conversation when it
+   finishes." Instead: **capture in-turn** (that turn has full context → write a scoped
+   brief, per the mini-handoff slot), **spawn a detached researcher**
+   (`setsid … codex exec / claude -p … < /dev/null &`) that writes `ideas/NN-slug.md`, and
+   **report status to the shared background-status surface** — the same `qq-phase`/
+   state.json widget + herdr sidebar as idea #5 — flipping
+   `capturing → researching → done: ideas/NN-slug.md`. The skill returns nothing into the
+   transcript.
+3. **The genuinely additive part is small but real:** durable persistence + the
+   grooming convention (`ideas/` + README backlog). Everything else is now native.
+4. **#1 and #5 converge.** The completion-visibility surface *is* the progress tracker's
+   surface. Resurrecting #5 (`qq-phase` → `.orchestrate/state.json` + widget) as a general
+   "background-work status" substrate gives `/idea` its done-signal for free — so build #5
+   first, then #1 piggybacks. This also lifts #5 from an orchestrate-only nicety into
+   shared cockpit infrastructure.
+
+**Codex mapping (for when it's the primary cockpit):** Codex has `/side` (ephemeral
+detour, parent status visible, can't nest) ≈ `/btw`, and `/fork` (a *durable* parallel
+thread switched to via `/agent` — not a returns-when-done background subagent). A native
+`/btw` alias for `/side` is only a **request** (openai/codex#18884). Codex has no
+returns-when-done background-subagent-from-a-command, so the Codex build uses a
+**detached agent subprocess** —
+`setsid codex exec "$(cat brief)" < /dev/null >research.log 2>&1 &` (note `< /dev/null`,
+per idea #3) — that self-files to `ideas/`. Both harnesses share the `SKILL.md` model,
+so author once and link into both `~/.claude/skills` and `~/.codex/skills`.
+
+Sources: code.claude.com/docs/en/commands (`/btw`, `/fork`, `/branch`) ·
+developers.openai.com/codex/cli/slash-commands · github.com/openai/codex/issues/18884
 
 ## Sharpened design
 

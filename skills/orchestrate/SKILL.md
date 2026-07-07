@@ -57,12 +57,17 @@ Hand work to Codex **adaptively**: batch independent, low-risk tasks into one
 handoff; isolate risky or coupled ones. Handoffs are sequential — Codex holds the
 working tree, you wait, then verify; don't edit the tree while Codex has it.
 
-- First handoff: `codex exec "<plan task(s) + the acceptance check>"` from the repo
-  root. Codex edits the working tree in place (this repo is trusted + full-access)
-  and inherits `AGENTS.md` as its own instructions, so the behavioral floor already
-  binds it — point it at the plan task, don't re-explain the standards.
-- Later handoffs: `codex exec resume --last "<next task(s)>"` so its context stays
-  warm across the plan.
+- First handoff: `codex exec "<plan task(s) + the acceptance check>" < /dev/null` from
+  the repo root. Codex edits the working tree in place (this repo is trusted +
+  full-access) and inherits `AGENTS.md` as its own instructions, so the behavioral
+  floor already binds it — point it at the plan task, don't re-explain the standards.
+- Later handoffs: `codex exec resume --last "<next task(s)>" < /dev/null` so its
+  context stays warm across the plan.
+- **Always close stdin (`< /dev/null`) on every `codex exec` handoff.** Run
+  non-interactively, `codex exec` blocks forever on `Reading additional input from
+  stdin...` unless stdin is closed — it reads as "Codex is stuck" but it's hung before
+  the first token. The redirect makes it hit EOF and start immediately. For long
+  briefs, prefer a prompt file: `codex exec "$(cat brief.prompt)" < /dev/null`.
 
 ### 4 — Verify (sub-agent)
 After each handoff, dispatch a Claude sub-agent to run `verification-before-completion`

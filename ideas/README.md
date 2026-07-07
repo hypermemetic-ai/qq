@@ -9,23 +9,37 @@ Quick thoughts go as bullets under **Backlog**. When an idea outgrows a line, gi
 it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
 
 ## Backlog
-- **The `/btw` ideas skill** → [`01-btw-ideas-skill.md`](01-btw-ideas-skill.md).
-  Mid-session capture: type a thought, agent sharpens + researches in the
-  background, files it ready to take on. Design aligned, three decisions open,
-  not yet built. _(2026-07-06)_
-- **Auto-compound, don't ask.** The agent shouldn't ask whether to compound or
-  not — `ce-compound` (loop step 7) should just run when work lands green,
-  capturing the solved problem and durable vocabulary without a yes/no prompt.
-  The question itself is friction on something that should be automatic. _(2026-07-06)_
-- **Orchestrate progress state** → [`02-orchestrate-phase-state.md`](02-orchestrate-phase-state.md).
-  `qq-phase` stamps the loop's current phase to `.orchestrate/state.json` for a
-  status widget. Built but unmerged — salvaged (with a re-appliable patch) from
-  the pruned `qq-ac/orchestrate-progress` branch; promote or drop. _(2026-07-06)_
-- **`codex exec` stdin-hang** → [`03-codex-exec-stdin-hang.md`](03-codex-exec-stdin-hang.md).
-  `codex exec` blocks forever on `Reading additional input from stdin...` unless you
-  close stdin — pass `< /dev/null`. One-line fix; wire it into `orchestrate`'s Build
-  handoff so it never recurs. _(2026-07-06)_
-- **Gate stuck after a rename** → [`04-gate-stale-path-after-rename.md`](04-gate-stale-path-after-rename.md).
-  `git push no-mistakes` "succeeds" but no PR opens — the gate's stored repo path is
-  the pre-rename `/home/qqp/projects/hypercore`; `no-mistakes init` repairs it. Add
-  gate-refresh to the rename checklist. _(2026-07-06)_
+
+> **Session 2026-07-07 worked this folder; statuses below are current. Next session
+> picks up the build in this order: #5 (status substrate) → #2 (`compound`) → #1
+> (`/idea`). Design is locked — no more design questions, just build.**
+
+- **#1 · The `/idea` capture skill** → [`01-btw-ideas-skill.md`](01-btw-ideas-skill.md).
+  _Design locked (07-07)._ Renamed off `/btw` — that's a **built-in Claude Code command**
+  (ephemeral, read-only side-question) — to **`/idea`**. A thin durable-capture skill:
+  capture verbatim in-turn → detached researcher writes `ideas/NN-slug.md` → completion
+  shows as **ambient status on #5's surface, never a reply in the transcript**. Rides #5;
+  build last. _(2026-07-06 → 07)_
+- **#2 · Auto-compound + rename to `compound`** _(decided 07-07)._ Drop the `ce` prefix —
+  we own it, call it **`compound`** (rename `skills/ce-compound/` + all refs + the
+  `~/.claude/skills` link). And stop asking: it **auto-fires when appropriate**, with the
+  appropriateness judgment living *inside* the skill, not a yes/no prompt. _(2026-07-06 → 07)_
+- **#5 · Background-status substrate** → [`02-orchestrate-phase-state.md`](02-orchestrate-phase-state.md).
+  _Approved to resurrect (07-07), scope widened._ `qq-phase` → `.orchestrate/state.json` +
+  widget; re-appliable patch beside the note. No longer orchestrate-only — it's the shared
+  **"background-work status" surface** #1 publishes to (`capturing → researching → done`).
+  Build first. Patch predates the `qq-ac→qq` rename + codex-gate change → expect small
+  conflicts. _(2026-07-06 → 07)_
+- **#3 · `codex exec` stdin-hang** → [`03-codex-exec-stdin-hang.md`](03-codex-exec-stdin-hang.md).
+  ✅ **Done (07-07).** Wired `< /dev/null` + a rule bullet into
+  `skills/orchestrate/SKILL.md`'s Build handoffs. Note kept for rationale; safe to delete. _(2026-07-06 → 07)_
+- **#4 · Gate "stall" after a rename** → [`04-gate-stale-path-after-rename.md`](04-gate-stale-path-after-rename.md).
+  ✅ **Root-caused (07-07).** (1) stale-path → `no-mistakes init` repairs it. (2) the
+  "post-review freeze" was **not** a deadlock — the run parked in `awaiting_approval`
+  (review had auto-fix findings, `auto_fix.review:0`); `no-mistakes attach` to approve. A
+  14h-orphaned run still sits parked (its work is already on main — safe to dismiss). _(2026-07-06 → 07)_
+- **Agents should self-wrap-up on context pressure** _(new, 07-07)._ Make agents
+  context-aware: as they approach ~200–250k tokens they should proactively start wrapping
+  up / handing off on their own, rather than *beginning* fresh work deep in a window ("you
+  shouldn't start here"). Relates to `handoff` (the transfer) and the Stop-hook WIP snapshot
+  — this is the *trigger* that should fire the wrap-up. Could grow its own `NN-slug.md`. _(2026-07-07)_

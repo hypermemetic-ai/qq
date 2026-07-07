@@ -1,6 +1,8 @@
 # Gate silently stuck after a repo rename — `no-mistakes init` repairs it
 
-**Status:** _stale-path root cause found + one-command repair; a second post-review stall (below) is still open._
+**Status:** _both failure modes root-caused. (1) stale-path → one-command repair (below).
+(2) the "post-review stall" is not a stall at all — the run parked in `awaiting_approval`
+waiting for a human to approve review findings; see below (root-caused 2026-07-07)._
 
 ## Symptom
 `git push no-mistakes <branch>` **succeeds** (`* [new branch] …`) but no pipeline
@@ -39,32 +41,45 @@ After init, `status` shows the correct `repo /home/qqp/projects/qq` +
 `remote …/qq.git`, and the already-pushed branch reruns. One `init` fixes every
 branch on that gate (it unblocked the parallel session too).
 
-## Second failure mode (open): run stalls right after review
-`init` + `rerun` cleared the notify-push death — runs then **started** and moved
-through `rebase → intent → review` cleanly. But both concurrent runs (the
-methodology branch and `herdr-pull-agent`) then **froze immediately after the
-review step** and never reached `document / lint / push / pr`. The whole gate went
-silent: no new step logs, and `state.sqlite-wal` — the daemon's write heartbeat —
-stopped at 21:19 and still hadn't moved 16 min later, with the daemon process
-alive and `status` still reporting the run "running." No PR ever opened.
+## Second failure mode: NOT a wedge — the run parked in `awaiting_approval` (root-caused 2026-07-07)
+The note above guessed a "shared-daemon fault / two-concurrent-run deadlock." Wrong.
+The frozen run's own recorded state (`~/.no-mistakes/state.sqlite`, table
+`step_results`) shows the `review` step ended with **`status = awaiting_approval`**,
+the next step (`test`) still `pending`, and the run row carries
+`awaiting_agent_since = 1783390760` (2026-07-06 21:19:20). The run isn't wedged — it's
+**waiting for a human to approve the review findings**, and the approval prompt was
+never surfaced into the operator's flow.
 
-So the path repair is necessary but here was **not sufficient**: something wedges
-after review, and it hit both runs at once — pointing at a shared-daemon fault (the
-auto-fix/apply step, or a two-concurrent-run deadlock), not the branch content.
-`herdr-pull-agent` was unblocked in the moment by **bypassing the gate** —
-cherry-picking its two commits onto the (since-advanced) `origin/main` and pushing
-straight to main. The post-review stall itself is **unresolved**; repro next with
-one run in isolation vs. two concurrent to isolate a possible concurrency lock.
+Why it parked: review returned two `action:auto-fix` findings at `risk_level: medium`
+(the `jq`-guard + reject-`0` issues on `bin/qq-herdr-pull`), and the gate config sets
+`auto_fix.review: 0` → review findings are **not** auto-applied; the run parks and
+asks. Nobody attached, so it sat forever. Both concurrent runs "froze together" for
+the mundane reason that **both had review findings** — not a race. The silent
+`state.sqlite-wal` and "no new step logs" are exactly what a *parked* run looks like
+(no CPU, no writes); `no-mistakes status` reporting the run as plain "running" is the
+real trap — `awaiting_approval` is a distinct state hidden behind that label. (The
+findings were ultimately applied by hand on `main` as commit `c64a1fd`; the run was
+abandoned in `awaiting_approval`, where it still sits as of 2026-07-07.)
+
+**The correct move when a run "stalls after review":** `no-mistakes attach` — it shows
+the pending findings; approve (gate applies the fix and continues) or dismiss (gate
+continues without). To skip the prompt entirely for review, set `auto_fix.review` > 0
+so review findings auto-apply like the other steps.
 
 ## Prevention
 - **Add "refresh the gate" to the repo rename/move checklist:** any no-mistakes repo
   that is renamed or moved needs `no-mistakes init` at the new path. The `qq-ac`
   reframe re-registered the Claude Code plugin but missed the gate — same class of
   miss.
-- **Make the trap loud (upstream ask):** a notify-push that fails should not leave
-  `git push` looking successful. A `no-mistakes doctor` check that flags a
-  registered repo path which no longer exists would have caught this instantly.
-- **Until the post-review stall is understood, don't run two gate runs at once** on
-  the same daemon — both froze together on 2026-07-06 right after review.
+- **"Stalled after review" = check for `awaiting_approval` first.** Run
+  `no-mistakes attach` (or read `step_results.status` in `state.sqlite`) before
+  assuming a crash. The earlier "don't run two gate runs at once" advice was based on
+  the misdiagnosis and is dropped — concurrent runs are fine; both just needed approval.
+- **Make hidden states loud (upstream asks):** (1) a failed notify-push should not
+  leave `git push` looking successful — a `no-mistakes doctor` check flagging a
+  registered repo path that no longer exists would have caught failure-mode #1
+  instantly. (2) `no-mistakes status` should surface `awaiting_approval` distinctly
+  (and ideally notify) instead of reporting a run that needs you as plain "running" —
+  that hidden state is what made #2 read as a 14-hour freeze.
 
 _(2026-07-06)_
