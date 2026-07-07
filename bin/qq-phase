@@ -47,7 +47,7 @@ if st.get("detail"):
 gid = st.get("gate_run_id")
 if gid:
     lines = os.environ.get("GATE_OUT", "").splitlines()
-    run_id = run_status = step = gstatus = None
+    run_id = run_status = run_outcome = step = gstatus = None
     seen_block = False  # after steps[/gate:, a `status:` is no longer the run's own
     for i, l in enumerate(lines):
         s = l.strip()
@@ -57,6 +57,8 @@ if gid:
             run_id = s.split(":", 1)[1].strip().strip('"')
         elif run_status is None and not seen_block and s.startswith("status:"):
             run_status = s.split(":", 1)[1].strip().strip('"')
+        if run_outcome is None and s.startswith("outcome:"):   # a finished run reports `outcome:`
+            run_outcome = s.split(":", 1)[1].strip().strip('"')
         if s == "gate:":                              # nested: `gate:` then `  step: X`
             for j in range(i + 1, min(i + 8, len(lines))):
                 t = lines[j].strip()
@@ -69,10 +71,13 @@ if gid:
                 if t.startswith("status:"):
                     gstatus = t.split(":", 1)[1].strip().strip('"'); break
     terminal = {"passed", "completed", "succeeded", "failed", "blocked",
-                "cancelled", "canceled", "error", "aborted"}
+                "cancelled", "canceled", "error", "aborted",
+                "checks-passed", "checks-failed"}
     # only advertise a gate step while the run is genuinely OUR run and still live;
-    # a finished/other/unknown run never leaves a stale pending marker behind
-    if run_id == gid and run_status not in terminal:
+    # a finished run (terminal status OR any `outcome:` reported) or another/unknown
+    # run never leaves a stale pending marker behind
+    finished = run_outcome is not None or run_status in terminal
+    if run_id == gid and not finished:
         if step:
             line += f" · gate:{step}" + (" ⏳" if gstatus and "await" in gstatus else "")
         else:
