@@ -1,11 +1,11 @@
 {
   "version": "1.0.0",
-  "gitCommitHash": "4abad771802593b51a3bb51ca95b55c7ad6f0c53",
-  "generatedAt": "2026-07-06T17:59:44.081Z",
+  "gitCommitHash": "6ba188726b457f674cf342b78e56298f1537cc77",
+  "generatedAt": "2026-07-07T01:22:26.511Z",
   "files": {
     ".claude-plugin/marketplace.json": {
       "filePath": ".claude-plugin/marketplace.json",
-      "contentHash": "b51e369b981890ce325907222bc2f4fa0051eecdea9528db2355c02e814e99c5",
+      "contentHash": "cc47fcd539cffc61e86fb247d758dbbd7f162045bb06520aad4f070c8a41201c",
       "functions": [],
       "classes": [],
       "imports": [],
@@ -15,7 +15,7 @@
     },
     ".claude-plugin/plugin.json": {
       "filePath": ".claude-plugin/plugin.json",
-      "contentHash": "013c085b2bdafaa629030cc0378d4a13fb5c3c21858cada14d32ad0cfc2a749d",
+      "contentHash": "2b390ac65a8553dea5ad8036c20b1528e1672e49382fb952a4b8f799d79e59bf",
       "functions": [],
       "classes": [],
       "imports": [],
@@ -33,58 +33,29 @@
       "totalLines": 9,
       "hasStructuralAnalysis": true
     },
-    ".understand-anything/.understandignore": {
-      "filePath": ".understand-anything/.understandignore",
-      "contentHash": "023617ac91b06660660717f5d43180ebee082a0dd5d07ae4f62bb1d9dd747ac7",
+    ".no-mistakes.yaml": {
+      "filePath": ".no-mistakes.yaml",
+      "contentHash": "61cfa313097b01584a8e3093f93671bfb01e9e908179e2f6acded61d9999ada1",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 43,
-      "hasStructuralAnalysis": false
+      "totalLines": 19,
+      "hasStructuralAnalysis": true
     },
     "AGENTS.md": {
       "filePath": "AGENTS.md",
-      "contentHash": "0e34601f1d82c6696543da5c965696211c792253f3f16b59b61f581660ed8475",
+      "contentHash": "764b2b1afd3e0765bdcf472b439c341166d3826a0ebaefca90d373e63bdb9971",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 79,
-      "hasStructuralAnalysis": true
-    },
-    "bin/hypercore-activate.sh": {
-      "filePath": "bin/hypercore-activate.sh",
-      "contentHash": "414e5de106aa48f77c6107eff6f99e2ae018045ef33619d087708bf6120559a7",
-      "functions": [
-        {
-          "name": "say",
-          "params": [],
-          "exported": false,
-          "lineCount": 1
-        },
-        {
-          "name": "bak",
-          "params": [],
-          "exported": false,
-          "lineCount": 1
-        },
-        {
-          "name": "set_toml_top",
-          "params": [],
-          "exported": false,
-          "lineCount": 9
-        }
-      ],
-      "classes": [],
-      "imports": [],
-      "exports": [],
-      "totalLines": 91,
+      "totalLines": 138,
       "hasStructuralAnalysis": true
     },
     "bin/install.sh": {
       "filePath": "bin/install.sh",
-      "contentHash": "7abb8b8fdb3314128c4631c318a33e25165a2f8420fcfda07dff9a1b919aab3e",
+      "contentHash": "8548f0ca894189e569d4edfa3ba9bd8aa1c122649811f0b993723cb12dab5412",
       "functions": [
         {
           "name": "bold",
@@ -120,17 +91,173 @@
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 71,
+      "totalLines": 83,
       "hasStructuralAnalysis": true
     },
-    "CLAUDE.md": {
-      "filePath": "CLAUDE.md",
-      "contentHash": "0e34601f1d82c6696543da5c965696211c792253f3f16b59b61f581660ed8475",
+    "bin/qq-activate.sh": {
+      "filePath": "bin/qq-activate.sh",
+      "contentHash": "b8cc2ab8c82ba33aa11dd997d44e515ebcbb9d9685c7c5311ca33dbe49c04ec7",
+      "functions": [
+        {
+          "name": "say",
+          "params": [],
+          "exported": false,
+          "lineCount": 1
+        },
+        {
+          "name": "bak",
+          "params": [],
+          "exported": false,
+          "lineCount": 1
+        },
+        {
+          "name": "set_toml_top",
+          "params": [],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "link_cfg",
+          "params": [],
+          "exported": false,
+          "lineCount": 9
+        }
+      ],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 120,
+      "hasStructuralAnalysis": true
+    },
+    "bin/qq-wip": {
+      "filePath": "bin/qq-wip",
+      "contentHash": "2916a8cf56c31d52a82362a477181f8b2f3e2b3d5934382cc712553535cda7eb",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 79,
+      "totalLines": 26,
+      "hasStructuralAnalysis": false
+    },
+    "bin/qq-wip-snapshot.sh": {
+      "filePath": "bin/qq-wip-snapshot.sh",
+      "contentHash": "c447b97f8ffc8a2aaed25d2228a2c762fd0395a986ec752ddf01bfd245f0ef35",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 52,
+      "hasStructuralAnalysis": true
+    },
+    "CLAUDE.md": {
+      "filePath": "CLAUDE.md",
+      "contentHash": "764b2b1afd3e0765bdcf472b439c341166d3826a0ebaefca90d373e63bdb9971",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 138,
+      "hasStructuralAnalysis": true
+    },
+    "cockpit/glow/glow.yml": {
+      "filePath": "cockpit/glow/glow.yml",
+      "contentHash": "796f8b21d9bb28d6f7fc8d07832164ac39e2cad7e028b4a41f95cb3a141796c1",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 11,
+      "hasStructuralAnalysis": true
+    },
+    "cockpit/glow/tuned.json": {
+      "filePath": "cockpit/glow/tuned.json",
+      "contentHash": "f1738503c2341d72fb4537e584c9aa7af3ddd07c114b636e6e04f91cca259952",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 89,
+      "hasStructuralAnalysis": true
+    },
+    "cockpit/herdr/config.toml": {
+      "filePath": "cockpit/herdr/config.toml",
+      "contentHash": "64b797074ee9131c1fc06124f638aaa18ce76409a7336e51fe7e83cbc4d5e880",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 21,
+      "hasStructuralAnalysis": true
+    },
+    "cockpit/README.md": {
+      "filePath": "cockpit/README.md",
+      "contentHash": "4258599af236ec7ee34b94e9fc7e706abbd2434f188280385c0eb21f75663105",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 22,
+      "hasStructuralAnalysis": true
+    },
+    "cockpit/shell/file-navigation.bash": {
+      "filePath": "cockpit/shell/file-navigation.bash",
+      "contentHash": "e0d4957d11b0703f8298cafd1a748dc3f268cf95e290fc5e013c680e54768462",
+      "functions": [
+        {
+          "name": "y",
+          "params": [],
+          "exported": false,
+          "lineCount": 12
+        },
+        {
+          "name": "br",
+          "params": [],
+          "exported": false,
+          "lineCount": 14
+        },
+        {
+          "name": "qqroot",
+          "params": [],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "qqy",
+          "params": [],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "qqbr",
+          "params": [],
+          "exported": false,
+          "lineCount": 7
+        }
+      ],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 60,
+      "hasStructuralAnalysis": true
+    },
+    "cockpit/yazi/keymap.toml": {
+      "filePath": "cockpit/yazi/keymap.toml",
+      "contentHash": "cf67c1397ae31a0649829bf9519da1d714dee5e04641e532c6253115a7af966d",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 12,
+      "hasStructuralAnalysis": true
+    },
+    "cockpit/yazi/yazi.toml": {
+      "filePath": "cockpit/yazi/yazi.toml",
+      "contentHash": "2a8659c54aefb88cc7c546bcbc0295e261134fc99e2b7b2599964d3f5f90f5de",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 26,
       "hasStructuralAnalysis": true
     },
     "CONCEPTS.md": {
@@ -143,6 +270,36 @@
       "totalLines": 8,
       "hasStructuralAnalysis": true
     },
+    "docs/plans/2026-07-06-no-mistakes-gate-integration.md": {
+      "filePath": "docs/plans/2026-07-06-no-mistakes-gate-integration.md",
+      "contentHash": "c317b9b3d341f794e5c7a5453b53c0424b85882488f3809539b533c0c3e9c52c",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 421,
+      "hasStructuralAnalysis": true
+    },
+    "docs/plans/2026-07-06-no-mistakes-trial-report.md": {
+      "filePath": "docs/plans/2026-07-06-no-mistakes-trial-report.md",
+      "contentHash": "d882329411410a1969496fde49dc2ca3efa80d969d5563cc2a55354bc7fc189f",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 71,
+      "hasStructuralAnalysis": true
+    },
+    "docs/plans/2026-07-06-qq-ac-reframe.md": {
+      "filePath": "docs/plans/2026-07-06-qq-ac-reframe.md",
+      "contentHash": "abc22b02d6fbd5d0f78b4f2532d2171d449862e17bcbe91db61a436713356d2d",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 283,
+      "hasStructuralAnalysis": true
+    },
     "docs/solutions/README.md": {
       "filePath": "docs/solutions/README.md",
       "contentHash": "ed3800dabbe57cbf8a8452dfb206ab3a8169e1b2895ae555ad19f39d41afe863",
@@ -153,24 +310,64 @@
       "totalLines": 10,
       "hasStructuralAnalysis": true
     },
-    "README.md": {
-      "filePath": "README.md",
-      "contentHash": "1f0db1583ce4dd08b7b65033f53f1a8f5150ace55a64ca35f41255ac2b756503",
+    "ideas/01-btw-ideas-skill.md": {
+      "filePath": "ideas/01-btw-ideas-skill.md",
+      "contentHash": "17c3a7717c246a905c1293c27e9f9f5c0de32d9e149033f7572adca83c3a309f",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 59,
+      "totalLines": 108,
+      "hasStructuralAnalysis": true
+    },
+    "ideas/02-orchestrate-phase-state.md": {
+      "filePath": "ideas/02-orchestrate-phase-state.md",
+      "contentHash": "fcd00d11d168c111e371978cae686f06e88a6467bf412469f1758fafef7a1867",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 52,
+      "hasStructuralAnalysis": true
+    },
+    "ideas/02-orchestrate-phase-state.patch": {
+      "filePath": "ideas/02-orchestrate-phase-state.patch",
+      "contentHash": "8c10464653dc9cbc383f89994c4d21eac1a73d92c6fa3aa747362280f516a09b",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 196,
+      "hasStructuralAnalysis": false
+    },
+    "ideas/README.md": {
+      "filePath": "ideas/README.md",
+      "contentHash": "4e655cef39e2f770690a25b5418ad1e8fc6b9f0132139c8d83dc6958c0f5abab",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 24,
+      "hasStructuralAnalysis": true
+    },
+    "README.md": {
+      "filePath": "README.md",
+      "contentHash": "030d64fa35d0c62a5f6321fbc049c5e297f0c281e40b5ec06d43cfc0c831215e",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 61,
       "hasStructuralAnalysis": true
     },
     "SKILLS-ATTRIBUTION.md": {
       "filePath": "SKILLS-ATTRIBUTION.md",
-      "contentHash": "3adbd4eb8b75c489c0ba77d1103111a004ae7a224362e8e85ad47c3894ce57e9",
+      "contentHash": "a243231658615755d2652442e9680a65d1ded4bad0001b95ae72eb765043c37c",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 40,
+      "totalLines": 41,
       "hasStructuralAnalysis": true
     },
     "skills/ce-compound/SKILL.md": {
@@ -218,7 +415,7 @@
     },
     "skills/diagnosing-bugs/SKILL.md": {
       "filePath": "skills/diagnosing-bugs/SKILL.md",
-      "contentHash": "c2a243305861913cfbf57ed1c1a53e5f73f44308e23ecee07da4ae9407c0ffdc",
+      "contentHash": "9d0200353e76e24f4f042b5dffcd980d53ad860aaeef42b434e26a3616a6e0e1",
       "functions": [],
       "classes": [],
       "imports": [],
@@ -248,7 +445,7 @@
     },
     "skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh": {
       "filePath": "skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh",
-      "contentHash": "0f87092323f74b535e1db9e0fb17e7922d25df7a424558a094932262ffd654ba",
+      "contentHash": "0a21ddb495e7626fcb33eaee078cc123c45b4d5167fc8a19f8e18ffa657cf85a",
       "functions": [],
       "classes": [],
       "imports": [],
@@ -294,6 +491,16 @@
       "imports": [],
       "exports": [],
       "totalLines": 17,
+      "hasStructuralAnalysis": true
+    },
+    "skills/orchestrate/SKILL.md": {
+      "filePath": "skills/orchestrate/SKILL.md",
+      "contentHash": "763b93e417c4769ba1745537f5d05f316c685415dad9ebc180bfd117e3cdc9e7",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 111,
       "hasStructuralAnalysis": true
     },
     "skills/receiving-code-review/SKILL.md": {
@@ -358,7 +565,7 @@
     },
     "skills/writing-skills/SKILL.md": {
       "filePath": "skills/writing-skills/SKILL.md",
-      "contentHash": "85b53e6f09f247e39958b9e3b1b6cc612228a3a5c63d969b8c0188663c55a63a",
+      "contentHash": "bce86ad6c2c373c7af4036814a2a5cf39ce410da6c80251925c0dda8b425ee1f",
       "functions": [],
       "classes": [],
       "imports": [],

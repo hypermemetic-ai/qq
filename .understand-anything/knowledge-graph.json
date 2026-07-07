@@ -1,16 +1,19 @@
 {
   "version": "1.0.0",
   "project": {
-    "name": "hypercore",
+    "name": "qq",
     "languages": [
+      "json",
       "markdown",
+      "patch",
       "shell",
-      "json"
+      "toml",
+      "yaml"
     ],
     "frameworks": [],
-    "description": "A lean engineering system for Claude Code: sharp skills invoked on demand, a knowledge layer that maps the code, a session layer for parallel agents, and a thin external surface. Capability you reach for, not process you maintain.",
-    "analyzedAt": "2026-07-06T17:59:43Z",
-    "gitCommitHash": "4abad771802593b51a3bb51ca95b55c7ad6f0c53"
+    "description": "surlej's bespoke agentic-dev command center — sharp skills, operating rules, a code-knowledge layer, parallel named agent sessions, and a tuned terminal cockpit, with only the external tools that earn their keep.",
+    "analyzedAt": "2026-07-07T01:14:13Z",
+    "gitCommitHash": "6ba188726b457f674cf342b78e56298f1537cc77"
   },
   "nodes": [
     {
@@ -18,26 +21,41 @@
       "type": "config",
       "name": ".mcp.json",
       "filePath": ".mcp.json",
-      "summary": "MCP server configuration registering the Context7 server (launched via npx @upstash/context7-mcp) to provide agents with live, version-correct library documentation.",
+      "summary": "Model Context Protocol configuration that registers the Context7 MCP server (launched via npx) to give agents live, version-correct library documentation.",
       "tags": [
         "configuration",
         "mcp",
-        "external-tools",
-        "context7"
+        "context7",
+        "external-tools"
       ],
       "complexity": "simple"
+    },
+    {
+      "id": "config:.no-mistakes.yaml",
+      "type": "config",
+      "name": ".no-mistakes.yaml",
+      "filePath": ".no-mistakes.yaml",
+      "summary": "Repository configuration for qq's blast-radius merge gate (the external MIT no-mistakes pipeline): selects the codex agent, wires shellcheck linting of the bin/ scripts, and enables intent validation with the evidence trail kept out of the working tree.",
+      "tags": [
+        "configuration",
+        "ci-cd",
+        "security",
+        "gate"
+      ],
+      "complexity": "simple",
+      "languageNotes": "agent and commands are read from the default branch by a no-mistakes security rule, so the file only takes effect once committed to main."
     },
     {
       "id": "document:AGENTS.md",
       "type": "document",
       "name": "AGENTS.md",
       "filePath": "AGENTS.md",
-      "summary": "Core agent operating rules for hypercore: defines the five layers, the always-on behavioral floor, task routing, the Align to Compound loop, and the full skill index. Loaded every session as the behavioral floor.",
+      "summary": "Authoritative operating rules for the qq agent command center, loaded every session — defines the six layers, the behavioral floor, task routing, the Align-to-Compound loop, git landing rules, and the skill index.",
       "tags": [
         "documentation",
         "operating-rules",
-        "entry-point",
-        "workflow"
+        "agent-workflow",
+        "entry-point"
       ],
       "complexity": "moderate"
     },
@@ -46,26 +64,27 @@
       "type": "document",
       "name": "CLAUDE.md",
       "filePath": "CLAUDE.md",
-      "summary": "Claude Code project rules entry point; mirrors AGENTS.md (symlinked) so the same hypercore operating rules — five layers, behavioral floor, routing, loop, and skill index — load automatically every session.",
+      "summary": "Symlink to AGENTS.md so Claude Code loads the same operating rules; identical content covering qq's six layers, behavioral floor, task routing, the loop, git rules, and the skill index.",
       "tags": [
         "documentation",
         "operating-rules",
-        "entry-point",
-        "configuration"
+        "symlink",
+        "entry-point"
       ],
-      "complexity": "moderate"
+      "complexity": "moderate",
+      "languageNotes": "This file is a symbolic link to AGENTS.md, not a separate copy — edits to either are the same bytes."
     },
     {
       "id": "document:CONCEPTS.md",
       "type": "document",
       "name": "CONCEPTS.md",
       "filePath": "CONCEPTS.md",
-      "summary": "Durable domain vocabulary registry: a glossary of project-specific terms appended by the ce-compound skill as concepts stabilize, so agents speak the same language across sessions.",
+      "summary": "Durable project glossary of qq-specific domain vocabulary, appended by the ce-compound skill as concepts stabilize so agents share consistent language across sessions.",
       "tags": [
         "documentation",
         "glossary",
-        "vocabulary",
-        "compounding"
+        "domain-vocabulary",
+        "reference"
       ],
       "complexity": "simple"
     },
@@ -74,7 +93,7 @@
       "type": "document",
       "name": "README.md",
       "filePath": "README.md",
-      "summary": "Project overview and setup guide for hypercore: maps the five layers, summarizes the engineering loop, and walks through plugin install, Context7, the knowledge layer, and NTM parallel-session setup.",
+      "summary": "Project overview and setup guide for qq — surlej's bespoke agentic-dev command center — mapping the six layers and the loop and walking through preflight, activation, plugin install, cockpit, Context7, the knowledge layer, and session setup.",
       "tags": [
         "documentation",
         "entry-point",
@@ -88,7 +107,7 @@
       "type": "document",
       "name": "SKILLS-ATTRIBUTION.md",
       "filePath": "SKILLS-ATTRIBUTION.md",
-      "summary": "Provenance and licensing record for hypercore's skill set: tables of vendored MIT skills with sources and authors plus the three in-house authored skills, documenting per-skill modifications.",
+      "summary": "Attribution and licensing record for qq's skill set, listing each vendored MIT skill with its upstream source and author, plus the four skills authored for qq and what each synthesizes.",
       "tags": [
         "documentation",
         "attribution",
@@ -98,15 +117,155 @@
       "complexity": "simple"
     },
     {
+      "id": "file:bin/install.sh",
+      "type": "file",
+      "name": "install.sh",
+      "filePath": "bin/install.sh",
+      "summary": "Preflight checker for qq's external surface — verifies the fast-filesystem tools (ripgrep/fd/eza/gh), herdr, the cockpit tools (yazi/broot/glow/mdcat), the knowledge graph, the Context7 MCP config, and vendored skills are present, printing exact per-platform install hints. Inspects and instructs only; it never installs packages or uses sudo.",
+      "tags": [
+        "preflight",
+        "installation",
+        "tooling",
+        "cli",
+        "environment-setup"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "Idempotent bash that probes availability with `command -v` and emits brew/apt install hints via a small pkg_hint helper; strictly read-only against the system."
+    },
+    {
+      "id": "file:bin/qq-activate.sh",
+      "type": "file",
+      "name": "qq-activate.sh",
+      "filePath": "bin/qq-activate.sh",
+      "summary": "One-shot, idempotent activation of the qq setup: installs herdr agent-state integrations, symlinks the tuned cockpit configs into ~/.config, installs the git-guardrail + WIP-savepoint hooks, enables Claude Code and Codex yolo modes, and commits/pushes the qq layer to both the qq repo and a sibling meeting-reviewer repo. Backs up every file it edits to *.qq.bak.",
+      "tags": [
+        "activation",
+        "bootstrap",
+        "environment-setup",
+        "hooks",
+        "symlinks"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "Embeds a python3 heredoc to idempotently merge JSON into ~/.claude/settings.json (wiring the PreToolUse rail and Stop savepoint), and uses grep/sed to upsert top-level TOML keys in ~/.codex/config.toml; installs the rail before enabling yolo."
+    },
+    {
+      "id": "file:bin/qq-wip-snapshot.sh",
+      "type": "file",
+      "name": "qq-wip-snapshot.sh",
+      "filePath": "bin/qq-wip-snapshot.sh",
+      "summary": "Claude Code Stop-hook that non-destructively snapshots the working tree to refs/wip/<branch>, capturing in-flight work between green commits without touching HEAD, the index, or any working file. No-ops when outside a repo, when the tree is clean, or when nothing changed since the last snapshot.",
+      "tags": [
+        "git",
+        "hook",
+        "savepoint",
+        "backup",
+        "snapshot"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "Builds the snapshot out-of-band via a temporary GIT_INDEX_FILE with git read-tree/add/write-tree/commit-tree, then moves refs/wip/<branch> with update-ref — writing only new objects and refs so normal git operations are unaffected."
+    },
+    {
+      "id": "document:docs/plans/2026-07-06-no-mistakes-gate-integration.md",
+      "type": "document",
+      "name": "2026-07-06-no-mistakes-gate-integration.md",
+      "filePath": "docs/plans/2026-07-06-no-mistakes-gate-integration.md",
+      "summary": "Five-task implementation plan for integrating the external no-mistakes gate into the repo: a GO/NO-GO trial in a scratch clone, installing and configuring the gate on the real repo, rewriting AGENTS.md around the merge gate, dogfooding one real change to a PR, and compounding the decision.",
+      "tags": [
+        "documentation",
+        "plan",
+        "history",
+        "ci-cd",
+        "development"
+      ],
+      "complexity": "complex",
+      "languageNotes": "Structured implementation plan with per-task acceptance gates; references the repo's earlier hypercore identity prior to the qq rename."
+    },
+    {
+      "id": "document:docs/plans/2026-07-06-no-mistakes-trial-report.md",
+      "type": "document",
+      "name": "2026-07-06-no-mistakes-trial-report.md",
+      "filePath": "docs/plans/2026-07-06-no-mistakes-trial-report.md",
+      "summary": "GO/NO-GO trial report for the no-mistakes gate, recording a GO verdict with evidence from a harmless trial change run end-to-end through the pipeline, including init-manifest contents, lint auto-fix proof, cost/latency figures, and safety confirmations.",
+      "tags": [
+        "documentation",
+        "history",
+        "report",
+        "ci-cd",
+        "verification"
+      ],
+      "complexity": "simple",
+      "languageNotes": "Evidence-first trial report supporting the gate-integration plan's Task 1 decision gate."
+    },
+    {
+      "id": "document:docs/plans/2026-07-06-qq-ac-reframe.md",
+      "type": "document",
+      "name": "2026-07-06-qq-ac-reframe.md",
+      "filePath": "docs/plans/2026-07-06-qq-ac-reframe.md",
+      "summary": "Four-phase implementation plan that reframes the project (rename hypercore to qq-ac): vendoring cockpit configs, renaming wip bin scripts, rewriting the activation script to symlink the cockpit, renaming the plugin identity, reframing the narrative docs, then verifying, landing through the gate, and flipping GitHub plus the on-disk directory.",
+      "tags": [
+        "documentation",
+        "plan",
+        "history",
+        "refactor",
+        "migration"
+      ],
+      "complexity": "complex",
+      "languageNotes": "Historical rename record; the qq-ac/hypercore names in the body are intentional, documenting the very rename this plan enacts."
+    },
+    {
+      "id": "document:ideas/README.md",
+      "type": "document",
+      "name": "README.md",
+      "filePath": "ideas/README.md",
+      "summary": "Explains the purpose of the ideas/ backlog folder — an informal, no-ceremony holding pen for not-yet-built proposals — and indexes current backlog entries with one-line pointers to their detailed write-ups.",
+      "tags": [
+        "documentation",
+        "backlog",
+        "ideas",
+        "entry-point"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:ideas/01-btw-ideas-skill.md",
+      "type": "document",
+      "name": "01-btw-ideas-skill.md",
+      "filePath": "ideas/01-btw-ideas-skill.md",
+      "summary": "Design write-up for a proposed /btw ideas-capture skill that instantly banks a mid-session thought, sharpens it against session context, and researches it in the background; records the sharpened design, its relationship to the handoff skill, and three open decisions with recommendations.",
+      "tags": [
+        "documentation",
+        "proposal",
+        "ideas",
+        "skill-design",
+        "backlog"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:ideas/02-orchestrate-phase-state.md",
+      "type": "document",
+      "name": "02-orchestrate-phase-state.md",
+      "filePath": "ideas/02-orchestrate-phase-state.md",
+      "summary": "Notes on a built-but-unmerged orchestrate progress-state feature (qq-phase stamping loop phase to .orchestrate/state.json), salvaged as a re-appliable patch from a pruned branch, with instructions to resurrect it and caveats about expected conflicts.",
+      "tags": [
+        "documentation",
+        "proposal",
+        "ideas",
+        "backlog",
+        "tooling"
+      ],
+      "complexity": "simple"
+    },
+    {
       "id": "config:.claude-plugin/marketplace.json",
       "type": "config",
       "name": "marketplace.json",
       "filePath": ".claude-plugin/marketplace.json",
-      "summary": "Claude Code plugin marketplace manifest declaring the hypercore plugin, its local source (./), owner, and version for distribution.",
+      "summary": "Claude Code marketplace manifest that publishes qq as a single-plugin marketplace owned by surlej, pointing the qq plugin at the repo root.",
       "tags": [
         "configuration",
-        "plugin",
-        "distribution",
+        "plugin-manifest",
+        "marketplace",
         "claude-code"
       ],
       "complexity": "simple"
@@ -116,100 +275,182 @@
       "type": "config",
       "name": "plugin.json",
       "filePath": ".claude-plugin/plugin.json",
-      "summary": "Plugin manifest for hypercore describing its name, description, version, author, license, and keywords for the Claude Code plugin system.",
+      "summary": "Claude Code plugin manifest declaring the qq plugin (name, version 0.1.0, MIT license) that bundles qq's curated skills, rules, knowledge, session, and cockpit layers.",
       "tags": [
         "configuration",
-        "plugin",
-        "manifest",
-        "metadata"
+        "plugin-manifest",
+        "metadata",
+        "claude-code"
       ],
       "complexity": "simple"
     },
     {
-      "id": "file:.understand-anything/.understandignore",
+      "id": "file:bin/qq-wip",
       "type": "file",
-      "name": ".understandignore",
-      "filePath": ".understand-anything/.understandignore",
-      "summary": "Ignore-pattern file (gitignore syntax) controlling which files and directories the Understand-Anything analysis excludes; ships with commented suggestions to uncomment.",
+      "name": "qq-wip",
+      "filePath": "bin/qq-wip",
+      "summary": "WIP-recovery CLI that lists, diffs, and materializes the non-destructive working-tree savepoints qq snapshots to refs/wip/<branch>, so lost in-flight work can be recovered onto a fresh branch.",
       "tags": [
-        "configuration",
-        "ignore-file",
-        "knowledge-graph",
-        "tooling"
+        "cli",
+        "git",
+        "recovery",
+        "tooling",
+        "entry-point"
       ],
       "complexity": "simple",
-      "languageNotes": "Uses .gitignore glob syntax with # comments and ! negation; all patterns are commented out by default."
+      "languageNotes": "POSIX bash with set -euo pipefail and a case dispatch over the list/diff/branch subcommands."
     },
     {
-      "id": "file:bin/hypercore-activate.sh",
-      "type": "file",
-      "name": "hypercore-activate.sh",
-      "filePath": "bin/hypercore-activate.sh",
-      "summary": "One-shot idempotent activation script that wires the NTM project base, installs the destructive-git block hook, enables yolo permissions for Claude Code and Codex, and commits/pushes the hypercore layer of both repos.",
+      "id": "config:cockpit/glow/glow.yml",
+      "type": "config",
+      "name": "glow.yml",
+      "filePath": "cockpit/glow/glow.yml",
+      "summary": "Glow defaults for in-pane markdown rendering — fixed 80-column width, no pager, no mouse — used when files open inside cockpit terminal panes.",
       "tags": [
-        "script",
-        "setup",
-        "activation",
-        "automation",
-        "shell"
+        "configuration",
+        "cockpit",
+        "markdown",
+        "rendering"
       ],
-      "complexity": "moderate",
-      "languageNotes": "Backs up every edited config to *.hypercore.bak and installs the safety rail before enabling yolo so agents never get prompt-free git destruction."
+      "complexity": "simple"
     },
     {
-      "id": "file:bin/install.sh",
-      "type": "file",
-      "name": "install.sh",
-      "filePath": "bin/install.sh",
-      "summary": "Preflight checker that inspects the external tool surface (rg, fd, eza, gh, tmux, ntm, Context7, skills) and prints exact, non-destructive setup instructions for anything missing.",
+      "id": "config:cockpit/glow/tuned.json",
+      "type": "config",
+      "name": "tuned.json",
+      "filePath": "cockpit/glow/tuned.json",
+      "summary": "Hand-tuned Glow markdown theme defining colors and styling for every element (headings, code, tables, links) rendered in cockpit panes.",
       "tags": [
-        "script",
-        "preflight",
-        "setup",
-        "environment-check",
-        "shell"
+        "configuration",
+        "cockpit",
+        "theme",
+        "markdown"
       ],
       "complexity": "moderate"
+    },
+    {
+      "id": "config:cockpit/herdr/config.toml",
+      "type": "config",
+      "name": "config.toml",
+      "filePath": "cockpit/herdr/config.toml",
+      "summary": "Herdr multiplexer config: tokyo-night theme, agent sorting, and cockpit pane bindings (prefix+f runs qqy, prefix+shift+f runs qqbr).",
+      "tags": [
+        "configuration",
+        "cockpit",
+        "herdr",
+        "keybindings"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:cockpit/README.md",
+      "type": "document",
+      "name": "README.md",
+      "filePath": "cockpit/README.md",
+      "summary": "Documents the cockpit terminal surface — the yazi/glow/herdr configs and shell navigation helpers symlinked into ~/.config — and the pane-navigation flow between them.",
+      "tags": [
+        "documentation",
+        "cockpit",
+        "overview"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:cockpit/shell/file-navigation.bash",
+      "type": "file",
+      "name": "file-navigation.bash",
+      "filePath": "cockpit/shell/file-navigation.bash",
+      "summary": "Terminal navigation helpers for herdr panes and shells: generic yazi/broot wrappers (y, br) that cd to the chosen directory, plus repo-focused qqroot/qqy/qqbr and qfiles/qtree aliases.",
+      "tags": [
+        "shell",
+        "cockpit",
+        "navigation",
+        "utility"
+      ],
+      "complexity": "simple",
+      "languageNotes": "Uses cwd-file / --outcmd handoff so yazi and broot can change the parent shell's directory."
+    },
+    {
+      "id": "config:cockpit/yazi/keymap.toml",
+      "type": "config",
+      "name": "keymap.toml",
+      "filePath": "cockpit/yazi/keymap.toml",
+      "summary": "Yazi keymap overrides: `!` opens a shell in the current directory and `g H` jumps to the qq project root.",
+      "tags": [
+        "configuration",
+        "cockpit",
+        "yazi",
+        "keybindings"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:cockpit/yazi/yazi.toml",
+      "type": "config",
+      "name": "yazi.toml",
+      "filePath": "cockpit/yazi/yazi.toml",
+      "summary": "Yazi file-manager config for pane-first navigation, opening markdown in-pane via mdcat with tuned Glow as the alternate opener.",
+      "tags": [
+        "configuration",
+        "cockpit",
+        "yazi",
+        "file-manager"
+      ],
+      "complexity": "simple"
     },
     {
       "id": "document:docs/solutions/README.md",
       "type": "document",
       "name": "README.md",
       "filePath": "docs/solutions/README.md",
-      "summary": "Explains the docs/solutions corpus — one Markdown file per solved problem written by ce-compound — and its role as the payload a later research or planning pass reads back in.",
+      "summary": "README for the docs/solutions/ directory where the ce-compound skill records durable solution write-ups for solved problems.",
       "tags": [
         "documentation",
         "solutions",
-        "knowledge-capture",
-        "overview"
+        "knowledge"
       ],
       "complexity": "simple"
     },
     {
+      "id": "file:ideas/02-orchestrate-phase-state.patch",
+      "type": "file",
+      "name": "02-orchestrate-phase-state.patch",
+      "filePath": "ideas/02-orchestrate-phase-state.patch",
+      "summary": "Proposed git patch adding bin/qq-phase as the single writer of loop-phase state to .orchestrate/state.json and wiring the orchestrate skill to stamp each phase boundary for a token-free progress widget.",
+      "tags": [
+        "patch",
+        "proposal",
+        "orchestrate",
+        "tooling"
+      ],
+      "complexity": "moderate",
+      "languageNotes": "Unified git-format-patch diff touching .gitignore, .no-mistakes.yaml, AGENTS.md, bin/qq-phase, and skills/orchestrate/SKILL.md."
+    },
+    {
       "id": "document:skills/ce-compound/SKILL.md",
       "type": "document",
-      "name": "ce-compound/SKILL.md",
+      "name": "SKILL.md",
       "filePath": "skills/ce-compound/SKILL.md",
-      "summary": "Skill that captures a just-solved problem as a durable solution doc under docs/solutions/ and records project-specific domain vocabulary in CONCEPTS.md so knowledge compounds instead of being relearned.",
+      "summary": "Defines the ce-compound skill: after a verified fix, capture a solution doc under docs/solutions/ and record durable vocabulary in CONCEPTS.md so the next session doesn't relearn it.",
       "tags": [
         "skill",
+        "action",
         "knowledge-capture",
-        "documentation",
-        "compound"
+        "documentation"
       ],
       "complexity": "moderate"
     },
     {
       "id": "document:skills/code-review/SKILL.md",
       "type": "document",
-      "name": "code-review/SKILL.md",
+      "name": "SKILL.md",
       "filePath": "skills/code-review/SKILL.md",
-      "summary": "Two-axis code review skill that diffs HEAD against a fixed point and runs parallel sub-agents for Standards (repo coding conventions) and Spec (originating issue/PRD) review, reporting the results side by side.",
+      "summary": "Defines the code-review skill: review changes since a fixed point along two axes — Standards and Spec — via parallel sub-agents, reporting findings side by side.",
       "tags": [
         "skill",
+        "action",
         "code-review",
-        "quality",
-        "parallel-agents"
+        "quality"
       ],
       "complexity": "moderate"
     },
@@ -218,40 +459,39 @@
       "type": "file",
       "name": "hitl-loop.template.sh",
       "filePath": "skills/diagnosing-bugs/scripts/hitl-loop.template.sh",
-      "summary": "Copy-and-edit shell template for a human-in-the-loop reproduction loop; provides step and capture helpers so the agent runs the script while the user follows terminal prompts, emitting KEY=VALUE results for the agent to parse.",
+      "summary": "Copyable human-in-the-loop template: step() prompts the user through reproduction actions and capture() reads their answers into variables printed as KEY=VALUE for the agent to parse.",
       "tags": [
+        "shell",
         "script",
         "template",
-        "debugging",
-        "human-in-the-loop",
-        "shell"
+        "diagnosis"
       ],
       "complexity": "simple"
     },
     {
       "id": "document:skills/diagnosing-bugs/SKILL.md",
       "type": "document",
-      "name": "diagnosing-bugs/SKILL.md",
+      "name": "SKILL.md",
       "filePath": "skills/diagnosing-bugs/SKILL.md",
-      "summary": "Six-phase diagnosis loop for hard bugs and performance regressions — build a feedback loop, reproduce and minimise, hypothesise, instrument, fix with a regression test, then clean up and post-mortem.",
+      "summary": "Defines the diagnosing-bugs skill: a six-phase loop (feedback loop, reproduce/minimise, hypothesise, instrument, fix + regression test, cleanup) for hard bugs and performance regressions.",
       "tags": [
         "skill",
+        "action",
         "debugging",
-        "diagnosis",
-        "workflow"
+        "diagnosis"
       ],
       "complexity": "moderate"
     },
     {
       "id": "document:skills/executing-plans/SKILL.md",
       "type": "document",
-      "name": "executing-plans/SKILL.md",
+      "name": "SKILL.md",
       "filePath": "skills/executing-plans/SKILL.md",
-      "summary": "Skill for executing a written implementation plan task-by-task with review checkpoints, stopping to ask for help on blockers and never touching the main branch without consent.",
+      "summary": "Defines the executing-plans skill: work a written implementation plan task-by-task with review checkpoints, stopping on blockers and never touching main without consent.",
       "tags": [
         "skill",
+        "action",
         "planning",
-        "execution",
         "workflow"
       ],
       "complexity": "moderate"
@@ -259,14 +499,14 @@
     {
       "id": "document:skills/finishing-a-development-branch/SKILL.md",
       "type": "document",
-      "name": "finishing-a-development-branch/SKILL.md",
+      "name": "SKILL.md",
       "filePath": "skills/finishing-a-development-branch/SKILL.md",
-      "summary": "Skill guiding branch completion after tests pass — verify tests, detect environment, determine base branch, then present structured options to merge locally, push and open a PR, keep as-is, or discard, and finally clean up the workspace.",
+      "summary": "Defines the finishing-a-development-branch skill: verify tests, detect environment and base branch, then present structured merge / PR / keep / discard options and clean up the workspace.",
       "tags": [
         "skill",
+        "action",
         "git",
-        "workflow",
-        "branch-management"
+        "workflow"
       ],
       "complexity": "complex"
     },
@@ -275,28 +515,27 @@
       "type": "file",
       "name": "block-dangerous-git.sh",
       "filePath": "skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh",
-      "summary": "Claude Code PreToolUse(Bash) hook that reads the proposed command and blocks destructive git operations — force-push, reset --hard, clean -f, branch -D, checkout/restore ., and history rewrites — while allowing normal git push.",
+      "summary": "Claude Code PreToolUse(Bash) hook that allows normal git push but blocks destructive operations — force-push, reset --hard, clean -f, branch -D, checkout/restore ., and history rewrites — by pattern-matching the command.",
       "tags": [
+        "shell",
         "script",
         "git",
-        "safety-hook",
         "security",
-        "shell"
+        "hook"
       ],
       "complexity": "simple",
-      "languageNotes": "Reads tool input JSON via jq and exit-2 blocks on any DANGEROUS_PATTERNS regex match; adapted from mattpocock/skills (MIT), narrowed to force-pushes only."
+      "languageNotes": "Reads tool_input.command via jq and greps it against a DANGEROUS_PATTERNS array, exiting 2 to block."
     },
     {
       "id": "document:skills/git-guardrails-claude-code/SKILL.md",
       "type": "document",
-      "name": "git-guardrails-claude-code/SKILL.md",
+      "name": "SKILL.md",
       "filePath": "skills/git-guardrails-claude-code/SKILL.md",
-      "summary": "Skill that installs the Claude Code hook blocking dangerous git commands before execution — walking through scope, copying the hook script, wiring it into settings, offering customization, and verifying.",
+      "summary": "Defines the git-guardrails skill: install a Claude Code hook that blocks dangerous git commands before they execute, covering setup scope, hook wiring, and verification.",
       "tags": [
         "skill",
+        "action",
         "git",
-        "safety",
-        "setup",
         "security"
       ],
       "complexity": "moderate"
@@ -304,13 +543,13 @@
     {
       "id": "document:skills/grill-me/SKILL.md",
       "type": "document",
-      "name": "grill-me/SKILL.md",
+      "name": "SKILL.md",
       "filePath": "skills/grill-me/SKILL.md",
-      "summary": "Thin user-invocable entry point (disable-model-invocation) that triggers a grilling session to relentlessly stress-test a plan or design.",
+      "summary": "Thin alias skill that simply runs a /grilling session; a user-invocable entry point (disable-model-invocation) for the grilling interview.",
       "tags": [
         "skill",
-        "alignment",
-        "entry-point",
+        "action",
+        "alias",
         "planning"
       ],
       "complexity": "simple"
@@ -318,28 +557,127 @@
     {
       "id": "document:skills/grilling/SKILL.md",
       "type": "document",
-      "name": "grilling/SKILL.md",
+      "name": "SKILL.md",
       "filePath": "skills/grilling/SKILL.md",
-      "summary": "Skill that interviews the user one question at a time to stress-test a plan, walking the design tree and resolving decisions before any building begins.",
+      "summary": "Defines the grilling skill: a relentless one-question-at-a-time interview that walks the design tree and resolves decisions before any building begins.",
       "tags": [
         "skill",
-        "alignment",
+        "action",
         "planning",
-        "interview"
+        "alignment"
       ],
       "complexity": "simple"
     },
     {
       "id": "document:skills/handoff/SKILL.md",
       "type": "document",
-      "name": "handoff/SKILL.md",
+      "name": "SKILL.md",
       "filePath": "skills/handoff/SKILL.md",
-      "summary": "Skill that compacts the current conversation into a redacted handoff document (with a suggested-skills section) saved to the OS temp directory so a fresh agent can continue the work.",
+      "summary": "Defines the handoff skill: compact the current session state into a briefing so a fresh agent can resume work when the context window fills.",
       "tags": [
         "skill",
-        "handoff",
-        "context-management",
-        "documentation"
+        "action",
+        "context",
+        "workflow"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:skills/orchestrate/SKILL.md",
+      "type": "document",
+      "name": "SKILL.md",
+      "filePath": "skills/orchestrate/SKILL.md",
+      "summary": "Defines the orchestrate skill: conduct a non-trivial task through qq's full loop as a two-model split — Claude conducts and judges, Codex implements — from align through verify, review, and compound.",
+      "tags": [
+        "skill",
+        "action",
+        "orchestration",
+        "workflow"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "function:cockpit/shell/file-navigation.bash:y",
+      "type": "function",
+      "name": "y",
+      "filePath": "cockpit/shell/file-navigation.bash",
+      "lineRange": [
+        5,
+        16
+      ],
+      "summary": "Runs yazi with a temporary cwd-file, then cds the parent shell to the directory the user selected on exit.",
+      "tags": [
+        "shell",
+        "navigation",
+        "utility"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:cockpit/shell/file-navigation.bash:br",
+      "type": "function",
+      "name": "br",
+      "filePath": "cockpit/shell/file-navigation.bash",
+      "lineRange": [
+        18,
+        31
+      ],
+      "summary": "Runs broot with --outcmd and evals the emitted command so broot can change the parent shell's directory.",
+      "tags": [
+        "shell",
+        "navigation",
+        "utility"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:cockpit/shell/file-navigation.bash:qqroot",
+      "type": "function",
+      "name": "qqroot",
+      "filePath": "cockpit/shell/file-navigation.bash",
+      "lineRange": [
+        33,
+        40
+      ],
+      "summary": "Cds to the qq project root ($QQ_HOME), printing an error and returning non-zero if it does not exist.",
+      "tags": [
+        "shell",
+        "navigation",
+        "cockpit"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:cockpit/shell/file-navigation.bash:qqy",
+      "type": "function",
+      "name": "qqy",
+      "filePath": "cockpit/shell/file-navigation.bash",
+      "lineRange": [
+        42,
+        48
+      ],
+      "summary": "Opens yazi (via y) rooted at the qq project when $QQ_HOME exists, otherwise at the current directory.",
+      "tags": [
+        "shell",
+        "navigation",
+        "cockpit"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "function:cockpit/shell/file-navigation.bash:qqbr",
+      "type": "function",
+      "name": "qqbr",
+      "filePath": "cockpit/shell/file-navigation.bash",
+      "lineRange": [
+        50,
+        56
+      ],
+      "summary": "Opens broot (via br) rooted at the qq project when $QQ_HOME exists, otherwise at the current directory.",
+      "tags": [
+        "shell",
+        "navigation",
+        "cockpit"
       ],
       "complexity": "simple"
     },
@@ -348,40 +686,44 @@
       "type": "document",
       "name": "receiving-code-review/SKILL.md",
       "filePath": "skills/receiving-code-review/SKILL.md",
-      "summary": "Skill for weighing code-review feedback with technical rigor rather than performative agreement — verify before implementing, push back when warranted, and acknowledge correct feedback.",
+      "summary": "Defines the qq 'receiving-code-review' skill: a response protocol for weighing code-review feedback with technical rigor and verification rather than performative agreement or blind implementation. Covers forbidden responses, when to push back, and how to handle unclear or external-reviewer feedback.",
       "tags": [
+        "documentation",
         "skill",
+        "action",
         "code-review",
-        "quality",
         "workflow"
       ],
-      "complexity": "complex"
+      "complexity": "moderate",
+      "languageNotes": "Skill markdown with 17 sections; frontmatter description drives Claude Code's skill dispatcher."
     },
     {
       "id": "document:skills/research/SKILL.md",
       "type": "document",
       "name": "research/SKILL.md",
       "filePath": "skills/research/SKILL.md",
-      "summary": "Skill that delegates reading legwork to a background agent, verifies each claim adversarially against primary sources and Context7, and returns one cited, confidence-tagged Markdown file under research/.",
+      "summary": "Defines the qq 'research' skill: investigates a question against primary sources and Context7, adversarially verifies each claim, and leaves one cited, confidence-tagged Markdown file in research/. A compact skill covering method, output format, and when not to use it.",
       "tags": [
+        "documentation",
         "skill",
+        "action",
         "research",
-        "investigation",
-        "citations"
+        "investigation"
       ],
-      "complexity": "moderate"
+      "complexity": "simple"
     },
     {
       "id": "document:skills/uat-signoff/SKILL.md",
       "type": "document",
       "name": "uat-signoff/SKILL.md",
       "filePath": "skills/uat-signoff/SKILL.md",
-      "summary": "Human acceptance sign-off skill that walks the owner through one observable test at a time to confirm a user-facing or high-risk change is what they wanted, inferring severity for any gaps from their own words.",
+      "summary": "Defines the qq 'uat-signoff' skill: a human acceptance sign-off that walks the owner through one observable test at a time to confirm a change is what they actually wanted, inferring severity for any gaps. Documents when it fires, its precondition on verification evidence, and how to run the checkpoint.",
       "tags": [
+        "documentation",
         "skill",
-        "uat",
-        "acceptance",
-        "verification"
+        "action",
+        "acceptance-testing",
+        "workflow"
       ],
       "complexity": "moderate"
     },
@@ -390,24 +732,27 @@
       "type": "document",
       "name": "verification-before-completion/SKILL.md",
       "filePath": "skills/verification-before-completion/SKILL.md",
-      "summary": "Non-skippable gate skill requiring that any done/fixed/passing claim be backed by running the real verification command and reading its full output — evidence before assertions, always.",
+      "summary": "Defines the qq 'verification-before-completion' skill: the never-skipped gate requiring real verification commands and confirmed output before any 'done/fixed/passing' claim. States the Iron Law, a gate function, common failures, and rationalization-prevention guidance.",
       "tags": [
+        "documentation",
         "skill",
+        "action",
         "verification",
-        "quality",
-        "gate"
+        "workflow"
       ],
-      "complexity": "moderate"
+      "complexity": "moderate",
+      "languageNotes": "Central invariant skill referenced across the qq loop; enforces evidence-before-assertion."
     },
     {
       "id": "document:skills/writing-plans/plan-document-reviewer-prompt.md",
       "type": "document",
       "name": "writing-plans/plan-document-reviewer-prompt.md",
       "filePath": "skills/writing-plans/plan-document-reviewer-prompt.md",
-      "summary": "Prompt template for dispatching a subagent that reviews a written plan for completeness, spec alignment, task decomposition, and buildability before implementation begins.",
+      "summary": "Prompt template used by the 'writing-plans' skill to review a drafted plan document before execution. A single-section helper asset rather than a standalone skill definition.",
       "tags": [
         "documentation",
-        "template",
+        "prompt-template",
+        "skill-asset",
         "planning",
         "review"
       ],
@@ -418,12 +763,13 @@
       "type": "document",
       "name": "writing-plans/SKILL.md",
       "filePath": "skills/writing-plans/SKILL.md",
-      "summary": "Skill for turning a spec into an executable, right-sized, bite-sized task plan — with a proper document header, no placeholders, and a self-review pass before handing off to execution.",
+      "summary": "Defines the qq 'writing-plans' skill: turns a spec or requirements for a multi-step task into an executable, bite-sized plan document before touching code. Covers scope check, file structure, task right-sizing, plan headers, self-review, and execution handoff.",
       "tags": [
+        "documentation",
         "skill",
+        "action",
         "planning",
-        "workflow",
-        "task-decomposition"
+        "workflow"
       ],
       "complexity": "moderate"
     },
@@ -432,14 +778,15 @@
       "type": "document",
       "name": "writing-skills/SKILL.md",
       "filePath": "skills/writing-skills/SKILL.md",
-      "summary": "Authoring discipline for hypercore's own skills — fuses structural best-practices (progressive disclosure, matched degrees of freedom, positive prompting) with a RED/GREEN/REFACTOR eval discipline that proves each skill against a baseline before it ships.",
+      "summary": "Defines the qq 'writing-skills' meta-skill: an eval-first, RED/GREEN/REFACTOR process for authoring or editing qq skills, including matching degrees of freedom to the task, countering rationalizations, structural passes, and an optional judge layer.",
       "tags": [
+        "documentation",
         "skill",
+        "action",
         "meta",
-        "authoring",
-        "eval-driven"
+        "authoring"
       ],
-      "complexity": "complex"
+      "complexity": "moderate"
     }
   ],
   "edges": [
@@ -453,20 +800,13 @@
     {
       "source": "document:README.md",
       "target": "document:AGENTS.md",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
-      "source": "document:README.md",
-      "target": "document:SKILLS-ATTRIBUTION.md",
       "type": "related",
       "direction": "forward",
       "weight": 0.5
     },
     {
       "source": "document:README.md",
-      "target": "document:CONCEPTS.md",
+      "target": "document:SKILLS-ATTRIBUTION.md",
       "type": "related",
       "direction": "forward",
       "weight": 0.5
@@ -480,49 +820,224 @@
     },
     {
       "source": "document:AGENTS.md",
-      "target": "document:SKILLS-ATTRIBUTION.md",
-      "type": "related",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
-      "source": "document:AGENTS.md",
       "target": "document:CONCEPTS.md",
       "type": "related",
       "direction": "forward",
       "weight": 0.5
     },
     {
-      "source": "document:skills/git-guardrails-claude-code/SKILL.md",
-      "target": "file:skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh",
-      "type": "documents",
+      "source": "config:.no-mistakes.yaml",
+      "target": "file:bin/qq-wip",
+      "type": "configures",
       "direction": "forward",
-      "weight": 0.5
+      "weight": 0.6
     },
     {
-      "source": "document:skills/diagnosing-bugs/SKILL.md",
-      "target": "file:skills/diagnosing-bugs/scripts/hitl-loop.template.sh",
-      "type": "documents",
+      "source": "config:.no-mistakes.yaml",
+      "target": "file:bin/qq-wip-snapshot.sh",
+      "type": "configures",
       "direction": "forward",
-      "weight": 0.5
+      "weight": 0.6
     },
     {
-      "source": "document:skills/writing-plans/SKILL.md",
-      "target": "document:skills/writing-plans/plan-document-reviewer-prompt.md",
-      "type": "related",
+      "source": "config:.no-mistakes.yaml",
+      "target": "file:bin/qq-activate.sh",
+      "type": "configures",
       "direction": "forward",
-      "weight": 0.5
+      "weight": 0.6
     },
     {
-      "source": "file:bin/hypercore-activate.sh",
-      "target": "file:skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh",
+      "source": "config:.no-mistakes.yaml",
+      "target": "file:bin/install.sh",
+      "type": "configures",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:bin/qq-activate.sh",
+      "target": "file:bin/qq-wip-snapshot.sh",
       "type": "depends_on",
       "direction": "forward",
       "weight": 0.6
     },
     {
-      "source": "document:docs/solutions/README.md",
-      "target": "document:skills/ce-compound/SKILL.md",
+      "source": "file:bin/install.sh",
+      "target": "file:bin/qq-activate.sh",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:docs/plans/2026-07-06-no-mistakes-trial-report.md",
+      "target": "document:docs/plans/2026-07-06-no-mistakes-gate-integration.md",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:docs/plans/2026-07-06-qq-ac-reframe.md",
+      "target": "document:docs/plans/2026-07-06-no-mistakes-gate-integration.md",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:ideas/README.md",
+      "target": "document:ideas/01-btw-ideas-skill.md",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:ideas/README.md",
+      "target": "document:ideas/02-orchestrate-phase-state.md",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:ideas/02-orchestrate-phase-state.md",
+      "target": "file:ideas/02-orchestrate-phase-state.patch",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:cockpit/shell/file-navigation.bash",
+      "target": "function:cockpit/shell/file-navigation.bash:y",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:cockpit/shell/file-navigation.bash",
+      "target": "function:cockpit/shell/file-navigation.bash:br",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:cockpit/shell/file-navigation.bash",
+      "target": "function:cockpit/shell/file-navigation.bash:qqroot",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:cockpit/shell/file-navigation.bash",
+      "target": "function:cockpit/shell/file-navigation.bash:qqy",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:cockpit/shell/file-navigation.bash",
+      "target": "function:cockpit/shell/file-navigation.bash:qqbr",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "file:cockpit/shell/file-navigation.bash",
+      "target": "function:cockpit/shell/file-navigation.bash:y",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:cockpit/shell/file-navigation.bash",
+      "target": "function:cockpit/shell/file-navigation.bash:br",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:cockpit/shell/file-navigation.bash",
+      "target": "function:cockpit/shell/file-navigation.bash:qqroot",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:cockpit/shell/file-navigation.bash",
+      "target": "function:cockpit/shell/file-navigation.bash:qqy",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "file:cockpit/shell/file-navigation.bash",
+      "target": "function:cockpit/shell/file-navigation.bash:qqbr",
+      "type": "exports",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "config:.claude-plugin/marketplace.json",
+      "target": "config:.claude-plugin/plugin.json",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "config:cockpit/herdr/config.toml",
+      "target": "file:cockpit/shell/file-navigation.bash",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "document:cockpit/README.md",
+      "target": "config:cockpit/yazi/yazi.toml",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:cockpit/README.md",
+      "target": "config:cockpit/yazi/keymap.toml",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:cockpit/README.md",
+      "target": "config:cockpit/glow/glow.yml",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:cockpit/README.md",
+      "target": "config:cockpit/glow/tuned.json",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:cockpit/README.md",
+      "target": "config:cockpit/herdr/config.toml",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:cockpit/README.md",
+      "target": "file:cockpit/shell/file-navigation.bash",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "config:cockpit/glow/glow.yml",
+      "target": "config:cockpit/glow/tuned.json",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "config:cockpit/yazi/yazi.toml",
+      "target": "config:cockpit/glow/glow.yml",
       "type": "related",
       "direction": "forward",
       "weight": 0.5
@@ -535,29 +1050,99 @@
       "weight": 0.5
     },
     {
-      "source": "config:.claude-plugin/marketplace.json",
-      "target": "config:.claude-plugin/plugin.json",
+      "source": "document:skills/orchestrate/SKILL.md",
+      "target": "document:skills/grilling/SKILL.md",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:skills/orchestrate/SKILL.md",
+      "target": "document:skills/code-review/SKILL.md",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:skills/orchestrate/SKILL.md",
+      "target": "document:skills/ce-compound/SKILL.md",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:skills/orchestrate/SKILL.md",
+      "target": "document:skills/executing-plans/SKILL.md",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:skills/orchestrate/SKILL.md",
+      "target": "document:skills/finishing-a-development-branch/SKILL.md",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:skills/diagnosing-bugs/SKILL.md",
+      "target": "file:skills/diagnosing-bugs/scripts/hitl-loop.template.sh",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:skills/git-guardrails-claude-code/SKILL.md",
+      "target": "file:skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:ideas/02-orchestrate-phase-state.patch",
+      "target": "document:skills/orchestrate/SKILL.md",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:skills/ce-compound/SKILL.md",
+      "target": "document:docs/solutions/README.md",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:skills/executing-plans/SKILL.md",
+      "target": "document:skills/finishing-a-development-branch/SKILL.md",
+      "type": "related",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:skills/writing-plans/SKILL.md",
+      "target": "document:skills/writing-plans/plan-document-reviewer-prompt.md",
       "type": "related",
       "direction": "forward",
       "weight": 0.5
     },
     {
       "source": "document:AGENTS.md",
-      "target": "document:skills/grilling/SKILL.md",
+      "target": "document:skills/ce-compound/SKILL.md",
       "type": "documents",
       "direction": "forward",
       "weight": 0.5
     },
     {
       "source": "document:AGENTS.md",
-      "target": "document:skills/grill-me/SKILL.md",
+      "target": "document:skills/code-review/SKILL.md",
       "type": "documents",
       "direction": "forward",
       "weight": 0.5
     },
     {
       "source": "document:AGENTS.md",
-      "target": "document:skills/writing-plans/SKILL.md",
+      "target": "document:skills/diagnosing-bugs/SKILL.md",
       "type": "documents",
       "direction": "forward",
       "weight": 0.5
@@ -578,49 +1163,21 @@
     },
     {
       "source": "document:AGENTS.md",
-      "target": "document:skills/verification-before-completion/SKILL.md",
+      "target": "document:skills/git-guardrails-claude-code/SKILL.md",
       "type": "documents",
       "direction": "forward",
       "weight": 0.5
     },
     {
       "source": "document:AGENTS.md",
-      "target": "document:skills/uat-signoff/SKILL.md",
+      "target": "document:skills/grill-me/SKILL.md",
       "type": "documents",
       "direction": "forward",
       "weight": 0.5
     },
     {
       "source": "document:AGENTS.md",
-      "target": "document:skills/diagnosing-bugs/SKILL.md",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
-      "source": "document:AGENTS.md",
-      "target": "document:skills/code-review/SKILL.md",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
-      "source": "document:AGENTS.md",
-      "target": "document:skills/receiving-code-review/SKILL.md",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
-      "source": "document:AGENTS.md",
-      "target": "document:skills/ce-compound/SKILL.md",
-      "type": "documents",
-      "direction": "forward",
-      "weight": 0.5
-    },
-    {
-      "source": "document:AGENTS.md",
-      "target": "document:skills/research/SKILL.md",
+      "target": "document:skills/grilling/SKILL.md",
       "type": "documents",
       "direction": "forward",
       "weight": 0.5
@@ -634,206 +1191,309 @@
     },
     {
       "source": "document:AGENTS.md",
-      "target": "document:skills/writing-skills/SKILL.md",
+      "target": "document:skills/orchestrate/SKILL.md",
       "type": "documents",
       "direction": "forward",
       "weight": 0.5
     },
     {
       "source": "document:AGENTS.md",
-      "target": "document:skills/git-guardrails-claude-code/SKILL.md",
+      "target": "document:skills/receiving-code-review/SKILL.md",
       "type": "documents",
       "direction": "forward",
       "weight": 0.5
     },
     {
-      "source": "document:README.md",
-      "target": "file:bin/install.sh",
+      "source": "document:AGENTS.md",
+      "target": "document:skills/research/SKILL.md",
       "type": "documents",
       "direction": "forward",
       "weight": 0.5
     },
     {
-      "source": "document:README.md",
-      "target": "config:.claude-plugin/marketplace.json",
+      "source": "document:AGENTS.md",
+      "target": "document:skills/uat-signoff/SKILL.md",
       "type": "documents",
       "direction": "forward",
       "weight": 0.5
+    },
+    {
+      "source": "document:AGENTS.md",
+      "target": "document:skills/verification-before-completion/SKILL.md",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:AGENTS.md",
+      "target": "document:skills/writing-plans/SKILL.md",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "document:AGENTS.md",
+      "target": "document:skills/writing-skills/SKILL.md",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "file:bin/qq-activate.sh",
+      "target": "config:cockpit/yazi/yazi.toml",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:bin/qq-activate.sh",
+      "target": "config:cockpit/yazi/keymap.toml",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:bin/qq-activate.sh",
+      "target": "config:cockpit/glow/glow.yml",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:bin/qq-activate.sh",
+      "target": "config:cockpit/glow/tuned.json",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:bin/qq-activate.sh",
+      "target": "config:cockpit/herdr/config.toml",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "file:bin/qq-activate.sh",
+      "target": "file:cockpit/shell/file-navigation.bash",
+      "type": "depends_on",
+      "direction": "forward",
+      "weight": 0.6
     }
   ],
   "layers": [
     {
       "id": "layer:rules",
-      "name": "Operating Rules",
-      "description": "The behavioral floor, task-routing loop, and durable vocabulary that every hypercore session loads: AGENTS.md, its CLAUDE.md symlink mirror, and the CONCEPTS glossary.",
+      "name": "Rules",
+      "description": "The behavioral floor and navigation backbone loaded every session — the operating rules (AGENTS.md and its CLAUDE.md symlink), project overview (README.md), the durable glossary (CONCEPTS.md), and the skill-provenance record (SKILLS-ATTRIBUTION.md).",
       "nodeIds": [
         "document:AGENTS.md",
         "document:CLAUDE.md",
-        "document:CONCEPTS.md"
+        "document:README.md",
+        "document:CONCEPTS.md",
+        "document:SKILLS-ATTRIBUTION.md"
       ]
     },
     {
-      "id": "layer:actions",
-      "name": "Skill Catalog (Actions)",
-      "description": "The invocable skill catalog: fifteen SKILL.md capabilities (grilling, writing-plans, executing-plans, code-review, verification, handoff, research, and more) that agents reach for by name.",
+      "id": "layer:skills",
+      "name": "Actions (Skills)",
+      "description": "qq's atomic capabilities under skills/ — one SKILL.md per skill (grilling, orchestrate, code-review, verification, git-guardrails, and the rest) plus their bundled helper prompts and shell scripts, invoked by name from the loop.",
       "nodeIds": [
         "document:skills/ce-compound/SKILL.md",
         "document:skills/code-review/SKILL.md",
         "document:skills/diagnosing-bugs/SKILL.md",
+        "file:skills/diagnosing-bugs/scripts/hitl-loop.template.sh",
         "document:skills/executing-plans/SKILL.md",
         "document:skills/finishing-a-development-branch/SKILL.md",
         "document:skills/git-guardrails-claude-code/SKILL.md",
+        "file:skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh",
         "document:skills/grill-me/SKILL.md",
         "document:skills/grilling/SKILL.md",
         "document:skills/handoff/SKILL.md",
+        "document:skills/orchestrate/SKILL.md",
         "document:skills/receiving-code-review/SKILL.md",
         "document:skills/research/SKILL.md",
         "document:skills/uat-signoff/SKILL.md",
         "document:skills/verification-before-completion/SKILL.md",
         "document:skills/writing-plans/SKILL.md",
+        "document:skills/writing-plans/plan-document-reviewer-prompt.md",
         "document:skills/writing-skills/SKILL.md"
       ]
     },
     {
-      "id": "layer:skill-helpers",
-      "name": "Skill Helper Scripts & Templates",
-      "description": "Executable helpers and prompt/loop templates bundled inside individual skills: the git-guardrails PreToolUse hook, the HITL bug-reproduction template, and the plan-document reviewer prompt.",
+      "id": "layer:cockpit",
+      "name": "Cockpit",
+      "description": "The tuned terminal surface under cockpit/ — herdr/yazi/glow configs, the shell navigation helpers symlinked into ~/.config, and the README documenting the pane-navigation flow between them.",
       "nodeIds": [
-        "file:skills/diagnosing-bugs/scripts/hitl-loop.template.sh",
-        "file:skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh",
-        "document:skills/writing-plans/plan-document-reviewer-prompt.md"
+        "config:cockpit/herdr/config.toml",
+        "config:cockpit/yazi/yazi.toml",
+        "config:cockpit/yazi/keymap.toml",
+        "config:cockpit/glow/glow.yml",
+        "config:cockpit/glow/tuned.json",
+        "file:cockpit/shell/file-navigation.bash",
+        "document:cockpit/README.md"
       ]
     },
     {
-      "id": "layer:tooling",
-      "name": "Setup & Activation Scripts",
-      "description": "Shell scripts that bootstrap and activate the system: install.sh preflight external-tool checks and hypercore-activate.sh (NTM base, git-hook wiring, permissions, commit/push).",
+      "id": "layer:externals",
+      "name": "Externals & Plugin Surface",
+      "description": "The thin outward-facing surface — the Context7 MCP registration (.mcp.json), the no-mistakes merge-gate config (.no-mistakes.yaml), and the Claude Code plugin/marketplace manifests that publish qq as a plugin.",
       "nodeIds": [
-        "file:bin/hypercore-activate.sh",
-        "file:bin/install.sh"
-      ]
-    },
-    {
-      "id": "layer:config",
-      "name": "Distribution & External-Tool Config",
-      "description": "Distribution and tool-wiring config: the Claude plugin and marketplace manifests, the Context7 MCP server registration, and the understand-anything ignore-pattern file.",
-      "nodeIds": [
-        "config:.claude-plugin/marketplace.json",
-        "config:.claude-plugin/plugin.json",
         "config:.mcp.json",
-        "file:.understand-anything/.understandignore"
+        "config:.no-mistakes.yaml",
+        "config:.claude-plugin/plugin.json",
+        "config:.claude-plugin/marketplace.json"
       ]
     },
     {
-      "id": "layer:documentation",
-      "name": "Knowledge & Documentation",
-      "description": "The project narrative and compounding knowledge surface: the README overview/setup guide, the skill provenance/licensing attribution, and the docs/solutions corpus README.",
+      "id": "layer:setup",
+      "name": "Setup & Bootstrap",
+      "description": "The bin/ scripts that stand qq up and keep it safe — the preflight checker, the idempotent activation script that symlinks the cockpit and installs hooks, and the WIP savepoint snapshot hook plus its recovery CLI.",
       "nodeIds": [
-        "document:README.md",
-        "document:SKILLS-ATTRIBUTION.md",
-        "document:docs/solutions/README.md"
+        "file:bin/install.sh",
+        "file:bin/qq-activate.sh",
+        "file:bin/qq-wip-snapshot.sh",
+        "file:bin/qq-wip"
+      ]
+    },
+    {
+      "id": "layer:planning",
+      "name": "Planning & History",
+      "description": "The narrative record of decisions and pending work — the docs/ implementation plans and solution history plus the ideas/ backlog of not-yet-built proposals and its salvaged patch.",
+      "nodeIds": [
+        "document:docs/plans/2026-07-06-no-mistakes-gate-integration.md",
+        "document:docs/plans/2026-07-06-no-mistakes-trial-report.md",
+        "document:docs/plans/2026-07-06-qq-ac-reframe.md",
+        "document:docs/solutions/README.md",
+        "document:ideas/README.md",
+        "document:ideas/01-btw-ideas-skill.md",
+        "document:ideas/02-orchestrate-phase-state.md",
+        "file:ideas/02-orchestrate-phase-state.patch"
       ]
     }
   ],
   "tour": [
     {
       "order": 1,
-      "title": "Start Here — The Map",
-      "description": "hypercore isn't an application; it's an operating system for an AI engineer. The README is the map: it names the five layers (Rules, Actions, Knowledge, Sessions, Externals) and the setup path. Read it first to get the shape of the whole system before diving into any one part.",
+      "title": "What is qq?",
+      "description": "Start here. README.md is the map and the setup guide for qq — surlej's bespoke agentic-dev command center, packaged as a Claude Code plugin. Its guiding line is \"capability I reach for, not process I maintain\": qq is a curated set of skills, rules, a knowledge layer, parallel sessions, and a tuned terminal cockpit that earn their place by being invoked, not reported to. The README lays out the six-layer model and the core build loop that the rest of this tour walks through in order.",
       "nodeIds": [
         "document:README.md"
       ]
     },
     {
       "order": 2,
-      "title": "The Operating Rules & the Five Layers",
-      "description": "AGENTS.md is the behavioral floor loaded every session (CLAUDE.md is a symlink mirror so Claude Code picks it up automatically). It defines the five layers, the always-on rules, task routing (the 'trivial vs. everything else' escape hatch), and the full skill index. This is the constitution the whole system runs under.",
+      "title": "The Operating Rules",
+      "description": "AGENTS.md is the behavioral floor loaded into every session — the single highest-connected file in the repo. It defines the six layers, the routing rules that triage each task by size and reversibility, the Align-to-Compound loop, how git work lands, and the skill index that names every capability. CLAUDE.md is a symlink to the same bytes so Claude Code and any AGENTS-aware tool read identical rules, and CONCEPTS.md is the durable glossary that keeps vocabulary consistent across sessions.",
       "nodeIds": [
         "document:AGENTS.md",
-        "document:CLAUDE.md"
-      ]
+        "document:CLAUDE.md",
+        "document:CONCEPTS.md"
+      ],
+      "languageLesson": "A symlink (CLAUDE.md → AGENTS.md) is one file under two names — editing either changes the same bytes on disk. qq uses it so two different tool conventions (Claude Code expects CLAUDE.md, the wider ecosystem expects AGENTS.md) share one source of truth instead of drifting apart."
     },
     {
       "order": 3,
-      "title": "Align — Pin Down Intent Before Building",
-      "description": "The loop opens with alignment. `grilling` interviews you one question at a time to stress-test a plan and resolve open decisions; `grill-me` is the thin user-invocable trigger for that session. Nothing gets built until intent is sharp.",
+      "title": "Aligning Before Building",
+      "description": "Now we enter the Actions layer under skills/ — atomic capabilities the rules invoke by name. The loop opens with alignment: grilling runs a relentless one-question-at-a-time interview that walks the design tree and settles decisions before any code is written, and grill-me is the thin user-invocable alias that fires it. Once intent is pinned, writing-plans turns it into a bite-sized, executable plan document — the artifact the next steps consume.",
       "nodeIds": [
         "document:skills/grilling/SKILL.md",
-        "document:skills/grill-me/SKILL.md"
-      ]
+        "document:skills/grill-me/SKILL.md",
+        "document:skills/writing-plans/SKILL.md"
+      ],
+      "languageLesson": "Each skill is a SKILL.md whose YAML frontmatter description drives Claude Code's skill dispatcher — that sentence is what decides whether the model reaches for the skill, so it is written as a precise trigger, not a summary."
     },
     {
       "order": 4,
-      "title": "Plan — Turn Intent into an Executable Plan",
-      "description": "`writing-plans` converts agreed intent into a right-sized, bite-sized task plan with a proper header and a self-review pass. Its companion prompt template dispatches a reviewer sub-agent to check the plan for completeness and buildability before any code is written.",
+      "title": "Orchestrate: Running the Whole Loop",
+      "description": "orchestrate is the marquee skill — it conducts a non-trivial task through qq's entire loop as a two-model split: Claude aligns, plans, verifies, and judges while Codex does the implementation, so the conductor's context stays clean and the reviewer is never the author. It leans on executing-plans to work a plan task-by-task with review checkpoints (never touching main without consent), and on finishing-a-development-branch to land the result via merge, PR, or the gate. Together these three are the spine of how real work moves from intent to a landed change.",
       "nodeIds": [
-        "document:skills/writing-plans/SKILL.md",
-        "document:skills/writing-plans/plan-document-reviewer-prompt.md"
+        "document:skills/orchestrate/SKILL.md",
+        "document:skills/executing-plans/SKILL.md",
+        "document:skills/finishing-a-development-branch/SKILL.md"
       ]
     },
     {
       "order": 5,
-      "title": "Build — Execute the Plan, Diagnose When Stuck",
-      "description": "`executing-plans` works the plan task-by-task with review checkpoints, stopping on blockers and never touching main without consent. When a bug bites, `diagnosing-bugs` runs a six-phase loop; its HITL shell template lets the agent drive a reproduction while you follow terminal prompts.",
-      "nodeIds": [
-        "document:skills/executing-plans/SKILL.md",
-        "document:skills/diagnosing-bugs/SKILL.md",
-        "file:skills/diagnosing-bugs/scripts/hitl-loop.template.sh"
-      ]
-    },
-    {
-      "order": 6,
-      "title": "Verify & Sign-off — The One Invariant",
-      "description": "`verification-before-completion` is the gate that is never skipped: no 'done/fixed/passing' claim without running the real command and reading its full output. For user-facing, irreversible, or ambiguous changes, `uat-signoff` then walks the human owner through observable tests one at a time.",
+      "title": "Verify, Review, Sign Off",
+      "description": "These skills are the quality gates the loop refuses to skip. verification-before-completion is the never-skipped invariant: no \"done/fixed/passing\" claim without running the real command and reading its output — evidence before assertions. code-review audits a diff along Standards and Spec axes via parallel sub-agents, receiving-code-review governs how feedback is weighed with rigor rather than rubber-stamped, and uat-signoff walks the human owner through one observable test at a time for user-facing or irreversible changes.",
       "nodeIds": [
         "document:skills/verification-before-completion/SKILL.md",
+        "document:skills/code-review/SKILL.md",
+        "document:skills/receiving-code-review/SKILL.md",
         "document:skills/uat-signoff/SKILL.md"
       ]
     },
     {
-      "order": 7,
-      "title": "Review — Produce It, Then Weigh It",
-      "description": "`code-review` runs the diff across two axes — Standards (repo conventions) and Intent (the originating spec) — via parallel sub-agents. `receiving-code-review` is the counterweight: verify feedback with technical rigor and push back when warranted instead of rubber-stamping it.",
+      "order": 6,
+      "title": "Diagnose, Compound, and Support",
+      "description": "The remaining skills support the loop from the edges. diagnosing-bugs is a six-phase loop for hard bugs and performance regressions; ce-compound captures a just-solved problem so the next session doesn't relearn it (it is what appends to CONCEPTS.md from Step 2); handoff compacts session state when the context window fills; research investigates a question against cited primary sources; and writing-skills is the eval-first meta-skill for authoring new skills. This closes the Actions layer — the full vocabulary of what qq can do.",
       "nodeIds": [
-        "document:skills/code-review/SKILL.md",
-        "document:skills/receiving-code-review/SKILL.md"
-      ]
-    },
-    {
-      "order": 8,
-      "title": "Land & Compound — Don't Relearn What You Solved",
-      "description": "`finishing-a-development-branch` lands finished work (verify → merge/PR/cleanup). Then `ce-compound` closes the loop by capturing the solved problem into docs/solutions/ and durable vocabulary into CONCEPTS.md, so the next session starts ahead instead of from scratch.",
-      "nodeIds": [
-        "document:skills/finishing-a-development-branch/SKILL.md",
+        "document:skills/diagnosing-bugs/SKILL.md",
         "document:skills/ce-compound/SKILL.md",
-        "document:CONCEPTS.md",
-        "document:docs/solutions/README.md"
-      ]
-    },
-    {
-      "order": 9,
-      "title": "The Always-On Safety Rail & Support Skills",
-      "description": "Not everything is an invoked step. `git-guardrails-claude-code` installs a PreToolUse hook (block-dangerous-git.sh) that blocks force-push, reset --hard, clean -fd, and history rewrites before they run. Alongside the loop sit support skills reachable any time: `research` (delegated cited investigation), `handoff` (compact state for a fresh agent), and `writing-skills` (author/edit skills, eval-first).",
-      "nodeIds": [
-        "document:skills/git-guardrails-claude-code/SKILL.md",
-        "file:skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh",
-        "document:skills/research/SKILL.md",
         "document:skills/handoff/SKILL.md",
+        "document:skills/research/SKILL.md",
         "document:skills/writing-skills/SKILL.md"
       ]
     },
     {
-      "order": 10,
-      "title": "Setup, Distribution & External Surface",
-      "description": "Finally, how hypercore installs and reaches the outside world. `bin/install.sh` preflights the external tool surface; `bin/hypercore-activate.sh` wires the git hook, permissions, and NTM base. The plugin manifests distribute it as a Claude Code plugin, `.mcp.json` registers Context7 for live library docs, `.understandignore` scopes this knowledge graph, and SKILLS-ATTRIBUTION.md records the MIT provenance of every skill.",
+      "order": 7,
+      "title": "The Cockpit",
+      "description": "The cockpit/ directory is the human-driven terminal surface, symlinked into ~/.config so the repo stays the live source of truth. Its README documents the pane-navigation flow between the tools: file-navigation.bash is the hub of shell helpers (y/br wrappers plus repo-focused qqroot/qqy/qqbr), herdr/config.toml sets the tokyo-night multiplexer theme and binds prefix+f to those helpers, yazi.toml drives pane-first file browsing that opens markdown in place, and glow/tuned.json is the hand-tuned markdown theme those panes render with.",
       "nodeIds": [
-        "file:bin/install.sh",
-        "file:bin/hypercore-activate.sh",
+        "document:cockpit/README.md",
+        "file:cockpit/shell/file-navigation.bash",
+        "config:cockpit/herdr/config.toml",
+        "config:cockpit/yazi/yazi.toml",
+        "config:cockpit/glow/tuned.json"
+      ],
+      "languageLesson": "The shell wrappers use a cwd-file / --outcmd handoff: a child tool (yazi, broot) writes the directory the user picked to a temp file, and the parent shell reads it back to cd there — a subprocess normally can't change its parent's working directory, so this indirection is the workaround."
+    },
+    {
+      "order": 8,
+      "title": "Externals & Plugin Surface",
+      "description": "This is qq's thin outward-facing surface — how it reaches external tools and how it publishes itself. .mcp.json registers the Context7 MCP server that gives agents live, version-correct library docs; .no-mistakes.yaml configures the external blast-radius merge gate (selecting Codex, wiring shellcheck on bin/, enabling intent validation). plugin.json and marketplace.json declare qq as an installable Claude Code plugin bundling all six layers, and SKILLS-ATTRIBUTION.md records the MIT provenance of every vendored skill plus the four authored for qq.",
+      "nodeIds": [
+        "config:.mcp.json",
+        "config:.no-mistakes.yaml",
         "config:.claude-plugin/plugin.json",
         "config:.claude-plugin/marketplace.json",
-        "config:.mcp.json",
-        "file:.understand-anything/.understandignore",
         "document:SKILLS-ATTRIBUTION.md"
+      ],
+      "languageLesson": "The .no-mistakes.yaml agent and commands are read from the default branch by a security rule, so the config only takes effect once committed to main — a deliberate safeguard so a feature branch can't reconfigure the gate that reviews it."
+    },
+    {
+      "order": 9,
+      "title": "Bootstrap: Preflight & Activation",
+      "description": "The bin/ scripts stand qq up on a new machine. install.sh is a read-only preflight checker: it probes for the fast-filesystem tools, herdr, and the cockpit binaries and prints exact per-platform install hints, but never installs anything or uses sudo. qq-activate.sh is the idempotent one-shot that actually wires things up — symlinking the cockpit configs from Step 8 into ~/.config, installing the safety hooks from the next step, enabling yolo modes, and backing up every file it edits to *.qq.bak.",
+      "nodeIds": [
+        "file:bin/install.sh",
+        "file:bin/qq-activate.sh"
+      ],
+      "languageLesson": "Both scripts are idempotent bash — running them twice is safe and produces the same result. Activation embeds a python3 heredoc to merge JSON into ~/.claude/settings.json rather than overwrite it, so it can wire in hooks without clobbering the operator's existing settings."
+    },
+    {
+      "order": 10,
+      "title": "Safety Net: The Git Rail & WIP Savepoints",
+      "description": "Activation installs two always-on protections. The git-guardrails skill and its block-dangerous-git.sh hook run as a Claude Code PreToolUse gate that allows normal git push but blocks force-push, reset --hard, clean -f, branch -D, and history rewrites before they execute. qq-wip-snapshot.sh is the complementary Stop-hook that non-destructively snapshots the working tree to refs/wip/<branch> on every idle, and qq-wip is the recovery CLI that lists, diffs, and materializes those savepoints onto a fresh branch — so in-flight work between green commits is never lost.",
+      "nodeIds": [
+        "document:skills/git-guardrails-claude-code/SKILL.md",
+        "file:skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh",
+        "file:bin/qq-wip-snapshot.sh",
+        "file:bin/qq-wip"
+      ],
+      "languageLesson": "The savepoint hook builds its snapshot out-of-band via a temporary GIT_INDEX_FILE with read-tree/write-tree/commit-tree, writing only new git objects and a wip ref — it never touches HEAD, the index, or any working file, so normal git operations are completely unaffected."
+    },
+    {
+      "order": 11,
+      "title": "Planning & History",
+      "description": "The last layer is qq's narrative memory — the record of how it got here and what's next. The qq-ac-reframe plan documents the full hypercore → qq-ac → qq rebuild that produced the current identity, while the no-mistakes gate-integration plan and its GO/NO-GO trial report capture how the merge gate was trialed and adopted with evidence. docs/solutions/README.md is where ce-compound (Step 6) files durable solution write-ups, and ideas/README.md indexes the informal backlog of not-yet-built proposals. Reading these closes the loop: qq compounds its own decisions so the next session starts ahead.",
+      "nodeIds": [
+        "document:docs/plans/2026-07-06-qq-ac-reframe.md",
+        "document:docs/plans/2026-07-06-no-mistakes-gate-integration.md",
+        "document:docs/plans/2026-07-06-no-mistakes-trial-report.md",
+        "document:docs/solutions/README.md",
+        "document:ideas/README.md"
       ]
     }
   ]
