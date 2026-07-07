@@ -8,7 +8,7 @@
 # Ref: https://kunchenguid.github.io/no-mistakes/reference/repo-config/
 agent: codex          # gate's pipeline stages run on gpt-5.5 (via ~/.codex/config.toml), not Opus
 commands:
-  lint: "shellcheck bin/qq-wip bin/qq-wip-snapshot.sh bin/qq-activate.sh bin/install.sh"
+  lint: "shellcheck bin/qq-wip bin/qq-wip-snapshot.sh bin/qq-activate.sh bin/install.sh bin/qq-phase"
   format: ""            # no formatter wired (shfmt optional, not required)
   test: ""              # no formal suite; the gate's agent validates behavior against --intent
 intent:

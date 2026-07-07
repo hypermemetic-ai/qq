@@ -3,3 +3,6 @@
 
 # herdr session scratch (logs / pids) — local runtime state, never tracked
 .ntm/
+
+# background-work progress — transient per-repo state a status widget reads
+.qq/

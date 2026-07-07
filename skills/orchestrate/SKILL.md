@@ -37,6 +37,16 @@ Two rules make the separation real:
 
 ## The run
 
+**Stamp progress at every phase boundary.** As you enter each numbered phase
+below, run `qq-phase <PhaseName>` (`Align`→`Plan`→`Build`→`Verify`→`Sign-off`→
+`Review`→`Compound`). This writes `.qq/state.json` — the cheap, token-free source
+of truth a status widget reads (merged with the gate's own `no-mistakes axi
+status` steps). It is the loop's only self-report; without it the widget shows
+`idle`. Refinements: on a Build hand-off add `--detail "handoff k/n"`; on Verify
+set `--status green` or `--status red`; when you push to the gate add `--gate`
+(attaches the run id). Run `qq-phase done` after Compound, or whenever you stop
+conducting. The escape hatch (step 0) does not stamp — it never enters the loop.
+
 ### 0 — Triage first
 Trivial + local + reversible (typo, rename, one-liner)? Do it here, run
 `verification-before-completion`, commit on green (land per the project's Git mode —

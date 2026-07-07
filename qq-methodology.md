@@ -66,6 +66,13 @@ Support, any time: `research` (delegated, cited investigation → `research/`);
 `handoff` (compact state for a fresh agent when context runs low); `writing-skills`
 (author or edit a skill, eval-first).
 
+**Progress is stamped.** Long-running work records its current phase to
+`.qq/state.json` via `qq-phase <Phase>` at each boundary — cheap, token-free,
+per-repo, never an LLM call. A status widget reads it (merging the gate's own
+`no-mistakes axi status` steps), so loop position and pipeline position show as
+one. Orchestrate's loop is the first producer; any background skill can stamp the
+same surface with a free-form phase (`capturing → researching → done`).
+
 ## Git — how work lands
 - **Commit on green.** A commit is a claim: commit only what
   `verification-before-completion` just proved — one commit per verified task or

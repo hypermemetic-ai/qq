@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# qq-phase — stamp the current background-work phase to .qq/state.json, a cheap,
+# token-free source of truth a status widget reads. One writer; a long-running
+# skill (orchestrate's loop, /idea's researcher, …) calls it at each boundary.
+# Never makes an LLM call — pure local file + a fast local-daemon read for the
+# gate run id.
+#
+#   qq-phase <Phase> [--detail T] [--task T] [--status S] [--gate]  advance to a phase
+#   qq-phase gate                    attach the active gate run id (no phase change)
+#   qq-phase status                  print the current state JSON (widget read API)
+#   qq-phase done                    mark the work complete (status=done)
+#   qq-phase clear                   remove state (idle)
+#
+# Loop phases: Align(1) Plan(2) Build(3) Verify(4) Sign-off(5) Review(6) Compound(7);
+# Triage(0) is pre-loop. Any other name (e.g. capturing/researching) stamps verbatim
+# with a null index — so non-loop producers share the same surface.
+set -euo pipefail
+
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "not a git repo"; exit 1; }
+root=$(git rev-parse --show-toplevel)
+dir="$root/.qq"
+file="$dir/state.json"
+branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || echo detached)
+
+cmd="${1:-status}"; shift || true
+
+case "$cmd" in
+  status) [ -f "$file" ] && cat "$file" || echo '{"phase":"idle"}'; exit 0 ;;
+  clear)  rm -f "$file"; echo "cleared $file"; exit 0 ;;
+esac
+
+detail=""; task=""; status=""; gate=0; phase=""
+if   [ "$cmd" = "gate" ]; then gate=1; phase="__keep__"
+elif [ "$cmd" = "done" ]; then phase="__keep__"; status="done"
+else phase="$cmd"; fi
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --detail) detail="${2:-}"; shift 2 ;;
+    --task)   task="${2:-}";   shift 2 ;;
+    --status) status="${2:-}"; shift 2 ;;
+    --gate)   gate=1; shift ;;
+    *) echo "unknown arg: $1"; exit 1 ;;
+  esac
+done
+
+gate_id=""
+if [ "$gate" = "1" ]; then
+  gate_id=$( { no-mistakes axi status 2>/dev/null || true; } | grep -oE '[0-9A-Z]{26}' | head -1 || true)
+fi
+
+mkdir -p "$dir"
+now=$(date +%s)
+
+PHASE="$phase" DETAIL="$detail" TASK="$task" STATUS="$status" GATE_ID="$gate_id" \
+BRANCH="$branch" NOW="$now" FILE="$file" python3 - <<'PY'
+import json, os, tempfile
+
+file = os.environ["FILE"]
+try:
+    with open(file) as f: st = json.load(f)
+except Exception:
+    st = {}
+
+names = ["Triage", "Align", "Plan", "Build", "Verify", "Sign-off", "Review", "Compound"]
+idx = {n.lower(): i for i, n in enumerate(names)}
+idx.update({"signoff": 5, "sign off": 5})
+canon = {n.lower(): n for n in names}
+
+phase = os.environ["PHASE"]
+if phase == "__keep__":
+    phase = st.get("phase", "idle")
+else:
+    phase = canon.get(phase.lower(), phase)
+
+# a fresh run (no prior state, or the last one finished) starts clean
+if not st.get("started_at") or st.get("status") == "done":
+    st = {"started_at": int(os.environ["NOW"])}
+
+# detail is phase-scoped: a phase change drops it unless this call re-supplies one
+prev_phase = st.get("phase")
+if phase != prev_phase and not os.environ.get("DETAIL"):
+    st.pop("detail", None)
+
+st["phase"] = phase
+st["index"] = idx.get(phase.lower())
+st["total"] = 7
+st["branch"] = os.environ["BRANCH"]
+st["updated_at"] = int(os.environ["NOW"])
+
+for key, env in (("detail", "DETAIL"), ("task", "TASK"),
+                 ("status", "STATUS"), ("gate_run_id", "GATE_ID")):
+    v = os.environ.get(env, "")
+    if v:
+        st[key] = v
+
+st.setdefault("status", "working")
+
+tmp = tempfile.NamedTemporaryFile("w", dir=os.path.dirname(file), delete=False)
+json.dump(st, tmp, indent=2)
+tmp.write("\n")
+tmp.close()
+os.replace(tmp.name, file)
+print(json.dumps(st))
+PY
