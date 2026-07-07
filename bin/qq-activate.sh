@@ -95,7 +95,10 @@ wip = os.path.expanduser("~/.claude/hooks/qq-wip-snapshot.sh")
 stop = d.setdefault("hooks", {}).setdefault("Stop", [])
 if not any(any("qq-wip-snapshot" in x.get("command", "") for x in e.get("hooks", [])) for e in stop):
     stop.append({"hooks": [{"type": "command", "command": wip}]})
-d["statusLine"] = {"type": "command", "command": os.environ["QQ_STATUSLINE"], "padding": 0}
+# refreshInterval (seconds) re-runs render on a timer, not just on UI events — so
+# background qq-phase transitions stay visible while the coordinator sits idle
+# waiting on a subagent / the gate (the exact case the CC statusline docs call out)
+d["statusLine"] = {"type": "command", "command": os.environ["QQ_STATUSLINE"], "padding": 0, "refreshInterval": 3}
 json.dump(d, open(p, "w"), indent=2)
 print("     bypassPermissions + PreToolUse rail + Stop wip savepoint + status line wired")
 PY
