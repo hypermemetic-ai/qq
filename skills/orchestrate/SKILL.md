@@ -22,8 +22,8 @@ the verdict is worth something.
   Each returns only its artifact; the reads that produced it stay out of this context.
 - **Codex** (`codex exec`) — implementation and its own repair. Nothing else. Model,
   reasoning effort, sandbox, and approvals come from `~/.codex/config.toml`
-  (`gpt-5.5` / `xhigh` / full-access / no-prompt here); pass `-c` overrides only if
-  you must.
+  (`gpt-5.5` / `xhigh` / `priority` tier / full-access / no-prompt here); pass `-c`
+  overrides only if you must.
 
 Two rules make the separation real:
 

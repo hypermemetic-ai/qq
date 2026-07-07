@@ -6,7 +6,7 @@
 # NOTE: `agent` + `commands` are read from the DEFAULT BRANCH (a no-mistakes security
 # rule) — this file only takes effect once committed to main.
 # Ref: https://kunchenguid.github.io/no-mistakes/reference/repo-config/
-agent: claude
+agent: codex          # gate's pipeline stages run on gpt-5.5 (via ~/.codex/config.toml), not Opus
 commands:
   lint: "shellcheck bin/qq-wip bin/qq-wip-snapshot.sh bin/qqac-activate.sh bin/install.sh"
   format: ""            # no formatter wired (shfmt optional, not required)
