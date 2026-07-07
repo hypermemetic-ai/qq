@@ -1,6 +1,6 @@
 # Gate silently stuck after a repo rename — `no-mistakes init` repairs it
 
-**Status:** _root cause found + one-command repair; wire rename → gate-refresh._
+**Status:** _stale-path root cause found + one-command repair; a second post-review stall (below) is still open._
 
 ## Symptom
 `git push no-mistakes <branch>` **succeeds** (`* [new branch] …`) but no pipeline
@@ -39,6 +39,23 @@ After init, `status` shows the correct `repo /home/qqp/projects/qq` +
 `remote …/qq.git`, and the already-pushed branch reruns. One `init` fixes every
 branch on that gate (it unblocked the parallel session too).
 
+## Second failure mode (open): run stalls right after review
+`init` + `rerun` cleared the notify-push death — runs then **started** and moved
+through `rebase → intent → review` cleanly. But both concurrent runs (the
+methodology branch and `herdr-pull-agent`) then **froze immediately after the
+review step** and never reached `document / lint / push / pr`. The whole gate went
+silent: no new step logs, and `state.sqlite-wal` — the daemon's write heartbeat —
+stopped at 21:19 and still hadn't moved 16 min later, with the daemon process
+alive and `status` still reporting the run "running." No PR ever opened.
+
+So the path repair is necessary but here was **not sufficient**: something wedges
+after review, and it hit both runs at once — pointing at a shared-daemon fault (the
+auto-fix/apply step, or a two-concurrent-run deadlock), not the branch content.
+`herdr-pull-agent` was unblocked in the moment by **bypassing the gate** —
+cherry-picking its two commits onto the (since-advanced) `origin/main` and pushing
+straight to main. The post-review stall itself is **unresolved**; repro next with
+one run in isolation vs. two concurrent to isolate a possible concurrency lock.
+
 ## Prevention
 - **Add "refresh the gate" to the repo rename/move checklist:** any no-mistakes repo
   that is renamed or moved needs `no-mistakes init` at the new path. The `qq-ac`
@@ -47,5 +64,7 @@ branch on that gate (it unblocked the parallel session too).
 - **Make the trap loud (upstream ask):** a notify-push that fails should not leave
   `git push` looking successful. A `no-mistakes doctor` check that flags a
   registered repo path which no longer exists would have caught this instantly.
+- **Until the post-review stall is understood, don't run two gate runs at once** on
+  the same daemon — both froze together on 2026-07-06 right after review.
 
 _(2026-07-06)_
