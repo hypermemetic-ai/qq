@@ -1,8 +1,8 @@
 # Skills — attribution
 
-qq-ac's skill set is curated from four excellent MIT-licensed collections, plus
-four skills authored for qq-ac — three synthesizing the best ideas across them,
-and `orchestrate`, original to qq-ac. All upstream sources are MIT; their
+qq's skill set is curated from four excellent MIT-licensed collections, plus
+four skills authored for qq — three synthesizing the best ideas across them,
+and `orchestrate`, original to qq. All upstream sources are MIT; their
 copyright notices are retained inside each vendored skill directory.
 
 ## Vendored (unmodified except where noted)
@@ -22,7 +22,7 @@ copyright notices are retained inside each vendored skill directory.
 | `ce-compound` | [EveryInc/compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin) | Kieran Klaassen & Trevin Chow (Every) | MIT |
 | `git-guardrails-claude-code` | [mattpocock/skills](https://github.com/mattpocock/skills) | Matt Pocock | MIT |
 
-`diagnosing-bugs` carries a small qq-ac addendum (a fix-attempt circuit-breaker
+`diagnosing-bugs` carries a small qq addendum (a fix-attempt circuit-breaker
 from superpowers `systematic-debugging`, and an optional scratchpad idea distilled
 from gsd `gsd-debug`). `ce-compound` has been slimmed from its upstream 727-line
 form to a lean, self-contained ~94-line capture skill. `git-guardrails-claude-code`'s
@@ -30,11 +30,11 @@ hook is modified from upstream to allow normal `git push` while still blocking
 force-push, `reset --hard`, `clean -f`, `branch -D`, `checkout/restore .`, and
 history rewrites.
 
-## Authored for qq-ac (syntheses)
+## Authored for qq (syntheses)
 
 | skill | synthesized from | license |
 |---|---|---|
 | `research` | mattpocock `research` (shape) + Every researcher agents (source-craft) + [open-gsd/gsd-core](https://github.com/open-gsd/gsd-core) research guardrails | MIT |
 | `uat-signoff` | the human-UAT pattern of gsd `gsd-verify-work` ([open-gsd/gsd-core](https://github.com/open-gsd/gsd-core)), distilled runtime-free | MIT |
 | `writing-skills` | Anthropic skill-authoring best-practices + mattpocock `writing-great-skills` + superpowers `writing-skills` (eval-first) | MIT |
-| `orchestrate` | original to qq-ac — conducts the `AGENTS.md` loop as a Claude-conducts / Codex-implements split | MIT |
+| `orchestrate` | original to qq — conducts the `AGENTS.md` loop as a Claude-conducts / Codex-implements split | MIT |

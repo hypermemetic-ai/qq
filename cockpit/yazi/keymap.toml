@@ -7,5 +7,5 @@ desc = "Open shell here"
 [[mgr.prepend_keymap]]
 on = [ "g", "H" ]
 for = "unix"
-run = "cd ~/projects/qq-ac"
-desc = "Go to qq-ac"
+run = "cd ~/projects/qq"
+desc = "Go to qq"

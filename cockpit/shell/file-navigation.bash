@@ -1,6 +1,6 @@
 # Terminal file navigation helpers for Herdr panes and ordinary shells.
 
-: "${QQAC_HOME:=$HOME/projects/qq-ac}"
+: "${QQ_HOME:=$HOME/projects/qq}"
 
 function y() {
     local tmp cwd
@@ -31,25 +31,25 @@ function br() {
 }
 
 function qqroot() {
-    if [ -d "$QQAC_HOME" ]; then
-        builtin cd -- "$QQAC_HOME"
+    if [ -d "$QQ_HOME" ]; then
+        builtin cd -- "$QQ_HOME"
     else
-        printf 'QQAC_HOME does not exist: %s\n' "$QQAC_HOME" >&2
+        printf 'QQ_HOME does not exist: %s\n' "$QQ_HOME" >&2
         return 1
     fi
 }
 
 function qqy() {
-    if [ -d "$QQAC_HOME" ]; then
-        y "$QQAC_HOME" "$@"
+    if [ -d "$QQ_HOME" ]; then
+        y "$QQ_HOME" "$@"
     else
         y "$@"
     fi
 }
 
 function qqbr() {
-    if [ -d "$QQAC_HOME" ]; then
-        br "$QQAC_HOME" "$@"
+    if [ -d "$QQ_HOME" ]; then
+        br "$QQ_HOME" "$@"
     else
         br "$@"
     fi

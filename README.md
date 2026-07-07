@@ -1,6 +1,6 @@
-# qq-ac
+# qq
 
-My own agent core; bespoke because it only serves me. qq-ac is the command center
+My own agent core; bespoke because it only serves me. qq is the command center
 I use to run agentic development: sharp skills, operating rules, code knowledge,
 parallel sessions, a tuned terminal cockpit, and only the external tools that earn
 their keep. **Capability I reach for — not process I maintain.**
@@ -26,22 +26,22 @@ whole loop end-to-end as one command — Claude conducts, Codex implements.
 
 ## Skills
 15 skills, curated from four MIT collections (mattpocock, superpowers,
-compound-engineering, gsd-core) plus four authored for qq-ac — `research`,
+compound-engineering, gsd-core) plus four authored for qq — `research`,
 `uat-signoff`, `writing-skills`, and `orchestrate`. The index is in `AGENTS.md`;
 full provenance in [`SKILLS-ATTRIBUTION.md`](./SKILLS-ATTRIBUTION.md).
 
 ## Setup
 1. **Preflight** — `bash bin/install.sh` checks the external surface and cockpit
    tools, then prints exact install hints for anything missing.
-2. **One-shot activation** — `bash bin/qqac-activate.sh` installs the guardrail
+2. **One-shot activation** — `bash bin/qq-activate.sh` installs the guardrail
    hook, wires the WIP savepoint, and symlinks cockpit configs from this repo into
    `~/.config`.
 3. **Skills** — activate as a plugin:
    ```
-   /plugin marketplace add /home/qqp/projects/qq-ac
-   /plugin install qq-ac@qq-ac
+   /plugin marketplace add /home/qqp/projects/qq
+   /plugin install qq@qq
    ```
-   Skills become `/qq-ac:grilling`, etc.
+   Skills become `/qq:grilling`, etc.
 4. **Cockpit** — `cockpit/` is the source of truth for yazi, glow, herdr, and
    shell navigation. `herdr prefix+f` opens `qqy`; yazi starts at the repo root;
    pressing Enter on `.md` renders in-pane via mdcat or the tuned Glow theme.

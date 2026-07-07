@@ -1,10 +1,10 @@
 {
-  "name": "qq-ac",
+  "name": "qq",
   "owner": { "name": "surlej" },
-  "description": "surlej's personal qq-ac plugin.",
+  "description": "surlej's personal qq plugin.",
   "plugins": [
     {
-      "name": "qq-ac",
+      "name": "qq",
       "source": "./",
       "description": "Curated skills + operating rules, plus knowledge, session, and cockpit layers.",
       "version": "0.1.0"

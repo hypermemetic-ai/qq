@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qq-ac preflight — checks the external surface and prints exact setup steps.
+# qq preflight — checks the external surface and prints exact setup steps.
 # Safe by design: it inspects and instructs; it does not install system packages
 # or use sudo on your behalf. Re-run any time; it is idempotent.
 set -euo pipefail
@@ -17,7 +17,7 @@ pkg_hint() {
   else echo "see $1 install docs"; fi
 }
 
-bold "qq-ac preflight"
+bold "qq preflight"
 echo
 
 bold "Externals (fast filesystem + GitHub)"
@@ -73,10 +73,10 @@ bold "Skills"
 if [ -d skills ]; then
   n=$(find skills -maxdepth 2 -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')
   ok "$n skills in ./skills/"
-  miss "activate in a project: /plugin marketplace add \"$(pwd)\"  then  /plugin install qq-ac@qq-ac"
+  miss "activate in a project: /plugin marketplace add \"$(pwd)\"  then  /plugin install qq@qq"
   miss "or vendor into a project: cp -R skills/* <project>/.claude/skills/"
 else
-  miss "skills/ not found — run from the qq-ac repo root"
+  miss "skills/ not found — run from the qq repo root"
 fi
 echo
 bold "Done. Address any '•' items above."

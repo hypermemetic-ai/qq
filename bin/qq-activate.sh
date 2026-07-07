@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# qqac-activate — one-shot activation of the qq-ac setup.
+# qq-activate — one-shot activation of the qq setup.
 #
-#   Run ONCE:  bash /home/qqp/projects/qq-ac/bin/qqac-activate.sh
+#   Run ONCE:  bash /home/qqp/projects/qq/bin/qq-activate.sh
 #
-# What it does (idempotent; backs up every file it edits to *.qqac.bak):
+# What it does (idempotent; backs up every file it edits to *.qq.bak):
 #   1. herdr : install claude + codex integrations so herdr tracks agent state
 #   2. Cockpit: symlink tuned terminal configs into ~/.config
 #   3. Hooks : git rail (block destructive git) + wip savepoint (Stop) (~/.claude/hooks + settings.json)
 #   4. Claude: yolo — permissions.defaultMode="bypassPermissions"  (~/.claude/settings.json)
 #   5. Codex : yolo — approval_policy="never", sandbox_mode="danger-full-access" (~/.codex/config.toml)
-#   6. Commit + push both repos (meeting-reviewer: qq-ac-layer files ONLY; your src/tests stay uncommitted)
+#   6. Commit + push both repos (meeting-reviewer: qq-layer files ONLY; your src/tests stay uncommitted)
 #
 # Safety: the rail is installed BEFORE yolo, so future Claude Code agents never get
 # prompt-free git destruction — force-push / reset --hard / clean -fd / history
@@ -17,10 +17,10 @@
 # run by YOU in a plain shell, is not intercepted by that hook, so its own push works.
 set -euo pipefail
 
-QQAC=/home/qqp/projects/qq-ac
+QQ=/home/qqp/projects/qq
 MR=/home/qqp/projects/meeting-reviewer
 say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
-bak() { if [ -f "$1" ]; then cp -n "$1" "$1.qqac.bak" 2>/dev/null || true; fi; }
+bak() { if [ -f "$1" ]; then cp -n "$1" "$1.qq.bak" 2>/dev/null || true; fi; }
 
 # set a top-level TOML key: replace in place if present, else prepend above any [section]
 set_toml_top() {
@@ -41,14 +41,14 @@ else
   echo "     herdr not installed — run: brew install herdr"
 fi
 
-say "2/6  cockpit — symlink tuned configs (~/.config → $QQAC/cockpit)"
+say "2/6  cockpit — symlink tuned configs (~/.config → $QQ/cockpit)"
 link_cfg() {  # $1 = repo-relative source, $2 = ~/.config dest
-  local src="$QQAC/$1" dst="$HOME/.config/$2"
+  local src="$QQ/$1" dst="$HOME/.config/$2"
   mkdir -p "$(dirname "$dst")"
   if [ -L "$dst" ] && [ "$(readlink -f "$dst")" = "$(readlink -f "$src")" ]; then
     echo "     ok (already linked): $2"; return
   fi
-  [ -e "$dst" ] && ! [ -L "$dst" ] && cp -a "$dst" "$dst.qqac.bak" && echo "     backed up $2 → $2.qqac.bak"
+  [ -e "$dst" ] && ! [ -L "$dst" ] && cp -a "$dst" "$dst.qq.bak" && echo "     backed up $2 → $2.qq.bak"
   ln -sfn "$src" "$dst" && echo "     linked $2 → $1"
 }
 link_cfg cockpit/yazi/yazi.toml            yazi/yazi.toml
@@ -60,11 +60,11 @@ link_cfg cockpit/shell/file-navigation.bash shell/file-navigation.bash
 
 say "3/6  global hooks (git rail + wip savepoint)"
 mkdir -p "$HOME/.claude/hooks"
-cp "$QQAC/skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh" "$HOME/.claude/hooks/block-dangerous-git.sh"
+cp "$QQ/skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh" "$HOME/.claude/hooks/block-dangerous-git.sh"
 chmod +x "$HOME/.claude/hooks/block-dangerous-git.sh"
 echo "     installed ~/.claude/hooks/block-dangerous-git.sh"
-ln -sfn "$QQAC/bin/qq-wip-snapshot.sh" "$HOME/.claude/hooks/qq-wip-snapshot.sh"
-mkdir -p "$HOME/.local/bin"; ln -sfn "$QQAC/bin/qq-wip" "$HOME/.local/bin/qq-wip"
+ln -sfn "$QQ/bin/qq-wip-snapshot.sh" "$HOME/.claude/hooks/qq-wip-snapshot.sh"
+mkdir -p "$HOME/.local/bin"; ln -sfn "$QQ/bin/qq-wip" "$HOME/.local/bin/qq-wip"
 echo "     linked wip savepoint + qq-wip (recover: qq-wip list|diff|branch <name>)"
 
 say "4/6  Claude Code yolo + wire the rail into ~/.claude/settings.json"
@@ -96,24 +96,24 @@ set_toml_top sandbox_mode '"danger-full-access"' "$HOME/.codex/config.toml"
 echo "     approval_policy=never, sandbox_mode=danger-full-access"
 
 say "6/6  commit + push both repos"
-git -C "$QQAC" add -A
-git -C "$QQAC" commit -q -m "qq-ac: curated 15-skill system, rules, knowledge + session layers
+git -C "$QQ" add -A
+git -C "$QQ" commit -q -m "qq: curated 15-skill system, rules, knowledge + session layers
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" && echo "     qq-ac committed" || echo "     qq-ac: nothing to commit"
-git -C "$QQAC" push origin main && echo "     qq-ac pushed" || echo "     qq-ac push FAILED — pull/rebase then retry"
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" && echo "     qq committed" || echo "     qq: nothing to commit"
+git -C "$QQ" push origin main && echo "     qq pushed" || echo "     qq push FAILED — pull/rebase then retry"
 
-# meeting-reviewer: stage ONLY the qq-ac layer; your src/tests WIP is left untouched
+# meeting-reviewer: stage ONLY the qq layer; your src/tests WIP is left untouched
 git -C "$MR" add AGENTS.md CLAUDE.md .mcp.json CONCEPTS.md SKILLS-ATTRIBUTION.md docs/solutions .claude/skills
-git -C "$MR" commit -q -m "adopt qq-ac: rules + 15 skills + Context7
+git -C "$MR" commit -q -m "adopt qq: rules + 15 skills + Context7
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" && echo "     meeting-reviewer committed (qq-ac layer only)" || echo "     meeting-reviewer: nothing to commit"
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" && echo "     meeting-reviewer committed (qq layer only)" || echo "     meeting-reviewer: nothing to commit"
 git -C "$MR" push origin main && echo "     meeting-reviewer pushed" || echo "     meeting-reviewer push FAILED — pull/rebase then retry"
 
 say "done"
 cat <<'EOF'
-  qq-ac is active. Notes:
+  qq is active. Notes:
    - Restart Claude Code (or open a new session) so yolo + the rail load.
    - The rail blocks destructive git only (force-push, reset --hard, clean -f, history rewrites); normal `git push` is allowed, so agents push for you.
-   - Backups of every edited config sit beside them as *.qqac.bak.
+   - Backups of every edited config sit beside them as *.qq.bak.
    - Codex now defaults to yolo; just run `codex`.
 EOF

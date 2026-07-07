@@ -1,6 +1,6 @@
 ---
 name: writing-skills
-description: Authoring discipline for qq-ac's own skills — fuses structural best-practices (progressive disclosure, matched degrees of freedom, the no-op test, positive prompting) with an eval discipline that proves each skill against a baseline before it ships. Use when writing a new skill in this repo, revising or reviewing an existing one, or when a skill misfires and its wording needs a principled rewrite.
+description: Authoring discipline for qq's own skills — fuses structural best-practices (progressive disclosure, matched degrees of freedom, the no-op test, positive prompting) with an eval discipline that proves each skill against a baseline before it ships. Use when writing a new skill in this repo, revising or reviewing an existing one, or when a skill misfires and its wording needs a principled rewrite.
 disable-model-invocation: true
 ---
 

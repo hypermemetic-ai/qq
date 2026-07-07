@@ -133,6 +133,6 @@ Required before declaring done:
 
 **Then ask: what would have prevented this bug?** If the answer involves architectural change (no good test seam, tangled callers, hidden coupling) hand off to the `/improve-codebase-architecture` skill with the specifics. Make the recommendation **after** the fix is in, not before — you have more information now than when you started.
 
-## qq-ac addendum
+## qq addendum
 - **Fix-attempt circuit-breaker:** if 3+ fixes have failed, STOP. The problem is likely the architecture or your mental model, not the current hypothesis — step back and question the design instead of attempting fix #4. (from superpowers `systematic-debugging`)
 - **Marathon bugs (optional):** if a bug outlives one context window, keep a bare `.debug/<slug>.md` scratchpad with three sections — `Current focus`, `Eliminated (append-only)`, `Evidence (append-only)`. A fresh context reads it to avoid re-treading dead ends. (idea distilled from gsd `gsd-debug`, without its runtime.)

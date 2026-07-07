@@ -1,6 +1,6 @@
 ---
 name: orchestrate
-description: Conducts a non-trivial engineering task through qq-ac's full loop as a two-model split — Claude conducts and judges in the main session while Codex does the implementation — so interactive work and noisy reads never pollute the conductor's context and the reviewer is never the author. Use to take a real build task from intent to a landed, verified change end-to-end; not for questions, lookups, or trivial one-liners, which take the escape hatch.
+description: Conducts a non-trivial engineering task through qq's full loop as a two-model split — Claude conducts and judges in the main session while Codex does the implementation — so interactive work and noisy reads never pollute the conductor's context and the reviewer is never the author. Use to take a real build task from intent to a landed, verified change end-to-end; not for questions, lookups, or trivial one-liners, which take the escape hatch.
 ---
 
 # Orchestrate
@@ -22,8 +22,8 @@ the verdict is worth something.
   Each returns only its artifact; the reads that produced it stay out of this context.
 - **Codex** (`codex exec`) — implementation and its own repair. Nothing else. Model,
   reasoning effort, sandbox, and approvals come from `~/.codex/config.toml`
-  (`gpt-5.5` / `xhigh` / full-access / no-prompt here); pass `-c` overrides only if
-  you must.
+  (`gpt-5.5` / `xhigh` / `priority` tier / full-access / no-prompt here); pass `-c`
+  overrides only if you must.
 
 Two rules make the separation real:
 

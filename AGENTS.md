@@ -1,6 +1,6 @@
-# qq-ac — agent operating rules
+# qq — agent operating rules
 
-qq-ac is surlej's bespoke agentic-dev command center — capability I reach for,
+qq is surlej's bespoke agentic-dev command center — capability I reach for,
 tuned to one operator: me. Sharp skills, a knowledge layer, named agent sessions,
 a tuned terminal cockpit, and a thin external surface all earn their place by
 being *invoked*, not by being *reported to*.
@@ -23,7 +23,7 @@ being *invoked*, not by being *reported to*.
   mdcat/glow, preview pane dropped), **broot** (tree nav via `qqbr`),
   **glow**/**mdcat** (pane-width markdown rendering; `glow/tuned.json` theme).
   Symlinked from `~/.config` so the repo is the live source of truth. Installed
-  by `bin/qqac-activate.sh`.
+  by `bin/qq-activate.sh`.
 - **Externals** — Context7 (live, version-correct library docs), `gh` (GitHub),
   `fd` / `eza` / `rg` (fast filesystem), and **the gate** (`no-mistakes`, an
   external MIT tool): real work is *pushed to it* — an independent pipeline
@@ -128,10 +128,10 @@ with a committed evidence trail. (`/no-mistakes` drives the same gate headlessly
 | `ce-compound` | you just solved something worth not relearning |
 | `research` | a task turns into reading legwork |
 | `handoff` | the context window is filling — hand off to a fresh agent |
-| `writing-skills` | authoring or editing a qq-ac skill (eval-first) |
+| `writing-skills` | authoring or editing a qq skill (eval-first) |
 | `git-guardrails-claude-code` | (safety rail) blocks destructive git — installed as always-on hooks |
 
-Skills are vendored from MIT sources or authored for qq-ac; see
+Skills are vendored from MIT sources or authored for qq; see
 `SKILLS-ATTRIBUTION.md`. The git rail is not invoked during work — it runs as a
 Claude Code hook that blocks force-push, `reset --hard`, `clean -fd`, and history
 rewrites before they execute.
