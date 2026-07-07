@@ -74,9 +74,9 @@ ln -sfn "$QQ/bin/qq-herdr-pull" "$HOME/.local/bin/qq-herdr-pull"
 echo "     linked wip savepoint + qq-wip (recover: qq-wip list|diff|branch <name>)"
 echo "     linked qq-herdr-pull (prefix+F<N> pulls agent N into the focused pane)"
 
-say "5/7  Claude Code yolo + wire the rail into ~/.claude/settings.json"
+say "5/7  Claude Code yolo + wire the rail + status line into ~/.claude/settings.json"
 bak "$HOME/.claude/settings.json"
-python3 - <<'PY'
+QQ_STATUSLINE="$QQ/bin/qq-phase render" python3 - <<'PY'
 import json, os
 p = os.path.expanduser("~/.claude/settings.json")
 d = {}
@@ -93,8 +93,9 @@ wip = os.path.expanduser("~/.claude/hooks/qq-wip-snapshot.sh")
 stop = d.setdefault("hooks", {}).setdefault("Stop", [])
 if not any(any("qq-wip-snapshot" in x.get("command", "") for x in e.get("hooks", [])) for e in stop):
     stop.append({"hooks": [{"type": "command", "command": wip}]})
+d["statusLine"] = {"type": "command", "command": os.environ["QQ_STATUSLINE"], "padding": 0}
 json.dump(d, open(p, "w"), indent=2)
-print("     bypassPermissions + PreToolUse rail + Stop wip savepoint wired")
+print("     bypassPermissions + PreToolUse rail + Stop wip savepoint + status line wired")
 PY
 
 say "6/7  Codex yolo -> ~/.codex/config.toml"

@@ -7,7 +7,8 @@
 #
 #   qq-phase <Phase> [--detail T] [--task T] [--status S] [--gate]  advance to a phase
 #   qq-phase gate                    attach the active gate run id (no phase change)
-#   qq-phase status                  print the current state JSON (widget read API)
+#   qq-phase status                  print the current state JSON (raw read API)
+#   qq-phase render                  one-line status for the widget/statusline (silent when idle)
 #   qq-phase done                    mark the work complete (status=done)
 #   qq-phase clear                   remove state (idle)
 #
@@ -16,13 +17,57 @@
 # with a null index — so non-loop producers share the same surface.
 set -euo pipefail
 
+cmd="${1:-status}"; shift || true
+
+# render — the reader half: a tolerant one-liner for the Claude Code statusline.
+# NEVER errors and prints nothing when there's no active work / not a repo, so a
+# blank cockpit stays blank. Touches the gate daemon only when a run is attached.
+if [ "$cmd" = "render" ]; then
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+  file="$root/.qq/state.json"
+  [ -f "$file" ] || exit 0
+  branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || echo detached)
+  gate_out=""
+  if grep -q '"gate_run_id"' "$file" 2>/dev/null; then
+    gate_out=$( { timeout 2 no-mistakes axi status 2>/dev/null || true; } )
+  fi
+  BRANCH="$branch" FILE="$file" GATE_OUT="$gate_out" python3 - <<'PY'
+import json, os
+st = json.load(open(os.environ["FILE"]))
+branch = os.environ.get("BRANCH") or st.get("branch") or ""
+phase  = st.get("phase", "idle")
+status = st.get("status", "working")
+index  = st.get("index")
+total  = st.get("total", 7)
+icon = {"working": "◐", "green": "●", "red": "✗", "done": "✓"}.get(status, "◐")
+core = f"{icon} {phase} {index}/{total}" if index is not None else f"{icon} {phase}"
+line = f"{branch}  {core}" if branch else core
+if st.get("detail"):
+    line += f" · {st['detail']}"
+if st.get("gate_run_id"):
+    step = gstatus = None
+    lines = os.environ.get("GATE_OUT", "").splitlines()
+    for i, l in enumerate(lines):
+        if l.rstrip() == "gate:":
+            for j in range(i + 1, min(i + 6, len(lines))):
+                s = lines[j].strip()
+                if s.startswith("step:"):   step   = s.split(":", 1)[1].strip().strip('"')
+                elif s.startswith("status:"): gstatus = s.split(":", 1)[1].strip().strip('"')
+            break
+    if step:
+        line += f" · gate:{step}" + (" ⏳" if gstatus and "await" in gstatus else "")
+    else:
+        line += " · gate ⏳"
+print(line)
+PY
+  exit 0
+fi
+
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "not a git repo"; exit 1; }
 root=$(git rev-parse --show-toplevel)
 dir="$root/.qq"
 file="$dir/state.json"
 branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || echo detached)
-
-cmd="${1:-status}"; shift || true
 
 case "$cmd" in
   status) [ -f "$file" ] && cat "$file" || echo '{"phase":"idle"}'; exit 0 ;;
