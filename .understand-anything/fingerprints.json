@@ -1,28 +1,8 @@
 {
   "version": "1.0.0",
-  "gitCommitHash": "6ba188726b457f674cf342b78e56298f1537cc77",
-  "generatedAt": "2026-07-07T01:22:26.511Z",
+  "gitCommitHash": "2f04f6497ed6c0b3dcc4fa154010487303fd9a35",
+  "generatedAt": "2026-07-07T03:19:00.800Z",
   "files": {
-    ".claude-plugin/marketplace.json": {
-      "filePath": ".claude-plugin/marketplace.json",
-      "contentHash": "cc47fcd539cffc61e86fb247d758dbbd7f162045bb06520aad4f070c8a41201c",
-      "functions": [],
-      "classes": [],
-      "imports": [],
-      "exports": [],
-      "totalLines": 14,
-      "hasStructuralAnalysis": true
-    },
-    ".claude-plugin/plugin.json": {
-      "filePath": ".claude-plugin/plugin.json",
-      "contentHash": "2b390ac65a8553dea5ad8036c20b1528e1672e49382fb952a4b8f799d79e59bf",
-      "functions": [],
-      "classes": [],
-      "imports": [],
-      "exports": [],
-      "totalLines": 9,
-      "hasStructuralAnalysis": true
-    },
     ".mcp.json": {
       "filePath": ".mcp.json",
       "contentHash": "5b78e56c2a3f76948d9c4a151930b87a16e47504d5a20f2164e884f1e4cfe042",
@@ -45,17 +25,17 @@
     },
     "AGENTS.md": {
       "filePath": "AGENTS.md",
-      "contentHash": "764b2b1afd3e0765bdcf472b439c341166d3826a0ebaefca90d373e63bdb9971",
+      "contentHash": "a83acce408b40b8d54c5257a0f577a02358853a33fb0f0b06b0831f4effe221c",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 138,
+      "totalLines": 27,
       "hasStructuralAnalysis": true
     },
     "bin/install.sh": {
       "filePath": "bin/install.sh",
-      "contentHash": "8548f0ca894189e569d4edfa3ba9bd8aa1c122649811f0b993723cb12dab5412",
+      "contentHash": "6304ab04fa719136a5b617e6e949d800dc916327926b36ba142310b60089ee8b",
       "functions": [
         {
           "name": "bold",
@@ -96,7 +76,7 @@
     },
     "bin/qq-activate.sh": {
       "filePath": "bin/qq-activate.sh",
-      "contentHash": "b8cc2ab8c82ba33aa11dd997d44e515ebcbb9d9685c7c5311ca33dbe49c04ec7",
+      "contentHash": "50d7032cf23ca1ed78cccc830a0f8d9beb7becc9712fd326e8f0830090467b70",
       "functions": [
         {
           "name": "say",
@@ -126,7 +106,94 @@
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 120,
+      "totalLines": 128,
+      "hasStructuralAnalysis": true
+    },
+    "bin/qq-herdr-pull": {
+      "filePath": "bin/qq-herdr-pull",
+      "contentHash": "9d69a6d1d32fe791b5c969a1f8d5f926076f8a6fbd64bd51ce14055f54887147",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 111,
+      "hasStructuralAnalysis": false
+    },
+    "bin/qq-link.sh": {
+      "filePath": "bin/qq-link.sh",
+      "contentHash": "975a1f90b29a702d60a441cf648f1ea2ae795d79addda35d13d6c2fa8b85ad4a",
+      "functions": [
+        {
+          "name": "usage",
+          "params": [],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "die",
+          "params": [],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "backup_path",
+          "params": [],
+          "exported": false,
+          "lineCount": 13
+        },
+        {
+          "name": "resolved_path",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "link_one",
+          "params": [],
+          "exported": false,
+          "lineCount": 24
+        },
+        {
+          "name": "link_skills",
+          "params": [],
+          "exported": false,
+          "lineCount": 14
+        },
+        {
+          "name": "ensure_agents_import",
+          "params": [],
+          "exported": false,
+          "lineCount": 21
+        },
+        {
+          "name": "merge_context7",
+          "params": [],
+          "exported": false,
+          "lineCount": 37
+        },
+        {
+          "name": "seed_concepts",
+          "params": [],
+          "exported": false,
+          "lineCount": 19
+        },
+        {
+          "name": "link_repo",
+          "params": [],
+          "exported": false,
+          "lineCount": 38
+        },
+        {
+          "name": "main",
+          "params": [],
+          "exported": false,
+          "lineCount": 22
+        }
+      ],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 221,
       "hasStructuralAnalysis": true
     },
     "bin/qq-wip": {
@@ -151,12 +218,12 @@
     },
     "CLAUDE.md": {
       "filePath": "CLAUDE.md",
-      "contentHash": "764b2b1afd3e0765bdcf472b439c341166d3826a0ebaefca90d373e63bdb9971",
+      "contentHash": "a83acce408b40b8d54c5257a0f577a02358853a33fb0f0b06b0831f4effe221c",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 138,
+      "totalLines": 27,
       "hasStructuralAnalysis": true
     },
     "cockpit/glow/glow.yml": {
@@ -181,12 +248,12 @@
     },
     "cockpit/herdr/config.toml": {
       "filePath": "cockpit/herdr/config.toml",
-      "contentHash": "64b797074ee9131c1fc06124f638aaa18ce76409a7336e51fe7e83cbc4d5e880",
+      "contentHash": "5d5f08b78d828354e17a17a052eab191b9b42d8a674d91f14fbf9fdf336b0734",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 21,
+      "totalLines": 77,
       "hasStructuralAnalysis": true
     },
     "cockpit/README.md": {
@@ -270,6 +337,16 @@
       "totalLines": 8,
       "hasStructuralAnalysis": true
     },
+    "docs/plans/2026-07-06-link-not-copy-methodology.md": {
+      "filePath": "docs/plans/2026-07-06-link-not-copy-methodology.md",
+      "contentHash": "57ec392131feff7e3bf885104118580f8354f3782cba262081844c0b443414f6",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 172,
+      "hasStructuralAnalysis": true
+    },
     "docs/plans/2026-07-06-no-mistakes-gate-integration.md": {
       "filePath": "docs/plans/2026-07-06-no-mistakes-gate-integration.md",
       "contentHash": "c317b9b3d341f794e5c7a5453b53c0424b85882488f3809539b533c0c3e9c52c",
@@ -340,24 +417,54 @@
       "totalLines": 196,
       "hasStructuralAnalysis": false
     },
-    "ideas/README.md": {
-      "filePath": "ideas/README.md",
-      "contentHash": "4e655cef39e2f770690a25b5418ad1e8fc6b9f0132139c8d83dc6958c0f5abab",
+    "ideas/03-codex-exec-stdin-hang.md": {
+      "filePath": "ideas/03-codex-exec-stdin-hang.md",
+      "contentHash": "39b27bfe655800345fbfe551783c4c3c838c8ad5a93cd2790dd217f6a305c2fb",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 24,
+      "totalLines": 38,
+      "hasStructuralAnalysis": true
+    },
+    "ideas/04-gate-stale-path-after-rename.md": {
+      "filePath": "ideas/04-gate-stale-path-after-rename.md",
+      "contentHash": "6c093fca6c4be3395a22f1c429ba46463baf10d39108d3a4dd399b12df3d1509",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 71,
+      "hasStructuralAnalysis": true
+    },
+    "ideas/README.md": {
+      "filePath": "ideas/README.md",
+      "contentHash": "2361aea088a7f0c65de43fb7af92133bbf84750ce942b116f81cf1e40008a5b2",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 32,
+      "hasStructuralAnalysis": true
+    },
+    "qq-methodology.md": {
+      "filePath": "qq-methodology.md",
+      "contentHash": "dfb136cef4e1be541ad80edddfd2f36ed8cf40cd0eec60d4519ee315ac20e101",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 121,
       "hasStructuralAnalysis": true
     },
     "README.md": {
       "filePath": "README.md",
-      "contentHash": "030d64fa35d0c62a5f6321fbc049c5e297f0c281e40b5ec06d43cfc0c831215e",
+      "contentHash": "98ff74d8ff2dc097026d050568ae4ec09e1db19c12e552f7943b44edfd97ff22",
       "functions": [],
       "classes": [],
       "imports": [],
       "exports": [],
-      "totalLines": 61,
+      "totalLines": 68,
       "hasStructuralAnalysis": true
     },
     "SKILLS-ATTRIBUTION.md": {
