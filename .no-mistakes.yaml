@@ -11,7 +11,7 @@ agent: codex          # gate's pipeline stages run on gpt-5.5 (via ~/.codex/conf
 commands:
   lint: "shellcheck bin/qq-wip bin/qq-wip-snapshot.sh bin/qq-activate.sh bin/install.sh bin/qq-phase bin/qq-registry-check.sh bin/qq-openwiki-refresh"
   format: "bin/qq-openwiki-refresh"   # refresh openwiki/ inside the landing transaction (guarded no-op until adopted+keyed)
-  test: "bin/qq-registry-check.sh"    # refuse a landing that doesn't reconcile the intent registry (backlog/)
+  test: "bash -c 'set -euo pipefail; git show refs/remotes/origin/main:bin/qq-registry-check.sh | bash'"    # refuse a landing that doesn't reconcile the intent registry (backlog/)
 intent:
   enabled: true
 test:
