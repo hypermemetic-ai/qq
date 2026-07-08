@@ -55,6 +55,21 @@ check block "xargs sh -c 'git update-ref -d refs/wip/main'"
 check block 'git -C /some/repo reset --hard'
 check block 'GIT_DIR=/x/.git git reset --hard'
 check block 'echo $(git reset --hard)'
+check block 'echo "$(git reset --hard)"'
+check block 'git commit -m "$(git clean -fd)"'
+check block 'echo "`git reset --hard`"'
+check block "bash -o pipefail -c 'git reset --hard'"
+check block "bash -O extglob -c 'git reset --hard'"
+check block "git submodule foreach 'git reset --hard'"
+check block "git submodule foreach --recursive 'git clean -fd'"
+check block "git submodule foreach git reset --hard"
+check block 'cat <<EOF
+$(git reset --hard)
+EOF'
+check block 'cat <<EOF
+git status
+EOF
+git reset --hard'
 
 # --- benign: must allow (incl. observed false positives) ---------------------
 check allow 'git push'
@@ -81,9 +96,22 @@ check allow 'sudo echo "git reset --hard"'
 check allow "xargs echo git reset --hard"
 check allow 'command -v git reset --hard'
 check allow "printf 'git reset --hard\\n' > notes.md"
+check allow "rg '\$(git reset --hard)' docs/"
+check allow "rg '\`git reset --hard\`' docs/"
 check allow "git log --grep 'filter-branch'"
 check allow 'git push origin HEAD:refs/heads/feature'
 check allow "bash -c 'git commit -m \"mentions reset --hard\"'"
+check allow "bash script.sh -c 'git reset --hard'"
+check allow "bash -c -e 'git reset --hard'"
+check allow "cat <<'EOF'
+git reset --hard
+EOF"
+check allow 'cat <<EOF
+git reset --hard
+EOF'
+check allow "cat <<'EOF'
+\$(git reset --hard)
+EOF"
 # unparseable line, no dangerous substring → fallback allows
 check allow 'echo "unclosed quote'
 # unparseable line WITH dangerous substring → fallback blocks (fails safe)

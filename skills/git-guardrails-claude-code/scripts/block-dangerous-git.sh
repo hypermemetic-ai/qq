@@ -57,6 +57,171 @@ def simple_commands(tokens):
     if seg:
         yield seg
 
+def read_word(text, i):
+    buf, quoted = [], False
+    while i < len(text):
+        c = text[i]
+        if c in " \t\r\n;|&<>":
+            break
+        if c == "'":
+            quoted = True
+            i += 1
+            while i < len(text) and text[i] != "'":
+                buf.append(text[i])
+                i += 1
+            if i < len(text):
+                i += 1
+        elif c == '"':
+            quoted = True
+            i += 1
+            while i < len(text) and text[i] != '"':
+                if text[i] == "\\" and i + 1 < len(text):
+                    i += 1
+                buf.append(text[i])
+                i += 1
+            if i < len(text):
+                i += 1
+        elif c == "\\":
+            quoted = True
+            i += 1
+            if i < len(text):
+                buf.append(text[i])
+                i += 1
+        else:
+            buf.append(c)
+            i += 1
+    return "".join(buf), quoted, i
+
+def heredocs_in_line(line):
+    docs = []
+    i, in_single, in_double = 0, False, False
+    while i < len(line):
+        c = line[i]
+        if c == "\\" and not in_single:
+            i += 2
+            continue
+        if c == "'" and not in_double:
+            in_single = not in_single
+            i += 1
+            continue
+        if c == '"' and not in_single:
+            in_double = not in_double
+            i += 1
+            continue
+        if not in_single and not in_double and line.startswith("<<<", i):
+            i += 3
+            continue
+        if not in_single and not in_double and line.startswith("<<", i):
+            j = i + 2
+            strip_tabs = False
+            if j < len(line) and line[j] == "-":
+                strip_tabs = True
+                j += 1
+            while j < len(line) and line[j] in " \t":
+                j += 1
+            delim, quoted, j = read_word(line, j)
+            if delim:
+                docs.append((delim, not quoted, strip_tabs))
+            i = j
+            continue
+        i += 1
+    return docs
+
+def without_heredoc_bodies(text):
+    kept, expandable, pending = [], [], []
+    for line in text.splitlines(True):
+        if pending:
+            delim, expands, strip_tabs = pending[0]
+            body = line[:-1] if line.endswith("\n") else line
+            marker = body.lstrip("\t") if strip_tabs else body
+            if marker == delim:
+                pending.pop(0)
+            elif expands:
+                expandable.append(line)
+            continue
+        kept.append(line)
+        pending.extend(heredocs_in_line(line))
+    return "".join(kept), "".join(expandable)
+
+def extract_dollar_paren(text, start):
+    i, level = start + 2, 1
+    in_single, in_double = False, False
+    while i < len(text):
+        c = text[i]
+        if c == "\\" and not in_single:
+            i += 2
+            continue
+        if c == "'" and not in_double:
+            in_single = not in_single
+            i += 1
+            continue
+        if c == '"' and not in_single:
+            in_double = not in_double
+            i += 1
+            continue
+        if not in_single and text.startswith("$(", i):
+            level += 1
+            i += 2
+            continue
+        if not in_single and c == "(":
+            level += 1
+            i += 1
+            continue
+        if not in_single and c == ")":
+            level -= 1
+            if level == 0:
+                return text[start + 2:i], i + 1
+        i += 1
+    return None, len(text)
+
+def extract_backticks(text, start):
+    i, buf = start + 1, []
+    while i < len(text):
+        c = text[i]
+        if c == "\\" and i + 1 < len(text):
+            buf.append(text[i + 1])
+            i += 2
+            continue
+        if c == "`":
+            return "".join(buf), i + 1
+        buf.append(c)
+        i += 1
+    return None, len(text)
+
+def scan_command_substitutions(text, depth, single_quotes_protect=True):
+    if depth > 8:
+        return
+    i, in_single, in_double = 0, False, False
+    while i < len(text):
+        c = text[i]
+        if c == "\\" and not in_single:
+            i += 2
+            continue
+        if single_quotes_protect and c == "'" and not in_double:
+            in_single = not in_single
+            i += 1
+            continue
+        if c == '"' and not in_single:
+            in_double = not in_double
+            i += 1
+            continue
+        if not in_single and text.startswith("$((", i):
+            i += 3
+            continue
+        if not in_single and text.startswith("$(", i):
+            inner, end = extract_dollar_paren(text, i)
+            if inner is not None:
+                analyze_string(inner, depth + 1)
+            i = end
+            continue
+        if not in_single and c == "`":
+            inner, end = extract_backticks(text, i)
+            if inner is not None:
+                analyze_string(inner, depth + 1)
+            i = end
+            continue
+        i += 1
+
 # ------------------------------------------------------------------ analysis
 WRAPPERS = {"sudo", "doas", "env", "command", "nohup", "nice", "time",
             "timeout", "stdbuf", "xargs"}
@@ -76,6 +241,7 @@ XARGS_VALUE_OPTS = {"-a", "--arg-file", "-d", "--delimiter", "-E", "--eof",
                     "-P", "--max-procs", "-s", "--max-chars"}
 STDBUF_VALUE_OPTS = {"-i", "--input", "-o", "--output", "-e", "--error"}
 TIME_VALUE_OPTS = {"-f", "--format", "-o", "--output"}
+SHELL_VALUE_OPTS = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
 
 def base(tok):
     return tok.rsplit("/", 1)[-1]
@@ -154,7 +320,47 @@ def short_flag(args, ch):
             return True
     return False
 
-def analyze_git(args):
+def shell_c_string(seg, j):
+    while j < len(seg):
+        t = seg[j]
+        if t == "--":
+            return None
+        if t == "-c" or re.match(r"^-[A-Za-z]*c[A-Za-z]*$", t):
+            return seg[j + 1] if j + 1 < len(seg) else None
+        if option_matches(t, SHELL_VALUE_OPTS):
+            j += 1 if "=" in t else 2
+            continue
+        if t.startswith("-") and t != "-":
+            j += 1
+            continue
+        return None
+    return None
+
+def analyze_submodule(args, depth):
+    i = 0
+    while i < len(args):
+        if args[i] == "--":
+            i += 1
+            break
+        if args[i].startswith("-") and args[i] != "-":
+            i += 1
+            continue
+        break
+    if i >= len(args) or args[i] != "foreach":
+        return
+    i += 1
+    while i < len(args):
+        if args[i] == "--":
+            i += 1
+            break
+        if args[i].startswith("-") and args[i] != "-":
+            i += 1
+            continue
+        break
+    if i < len(args):
+        analyze_string(" ".join(args[i:]), depth + 1)
+
+def analyze_git(args, depth):
     i, sub = 0, None
     while i < len(args):                 # skip git global options
         t = args[i]
@@ -197,6 +403,8 @@ def analyze_git(args):
         block("'git reflog expire' (destroys recovery state)")
     elif sub == "update-ref" and (short_flag(rest, "d") or long_flag(rest, "--delete")):
         block("'git update-ref -d' (ref deletion)")
+    elif sub == "submodule":
+        analyze_submodule(rest, depth)
 
 def analyze(seg, depth):
     if depth > 8 or not seg:
@@ -208,25 +416,23 @@ def analyze(seg, depth):
         return
     cmd = base(seg[i])
     if cmd == "git":
-        analyze_git(seg[i + 1:])
+        analyze_git(seg[i + 1:], depth)
     elif cmd in ("git-filter-branch", "git-filter-repo"):
         block("'%s' (history rewrite)" % cmd)
     elif cmd in SHELLS:
-        # follow `sh -c '<string>'` (also clustered forms like -lc)
-        has_c = False
-        for t in seg[i + 1:]:
-            if re.match(r"^-[A-Za-z]*c[A-Za-z]*$", t):
-                has_c = True
-            elif not t.startswith("-") and has_c:
-                analyze_string(t, depth + 1)
-                return
+        command_string = shell_c_string(seg, i + 1)
+        if command_string is not None:
+            analyze_string(command_string, depth + 1)
     elif cmd in WRAPPERS:
         j = wrapped_command_start(cmd, seg, i + 1)
         if j is not None and j < len(seg):
             analyze(seg[j:], depth + 1)
 
 def analyze_string(text, depth=0):
-    for seg in simple_commands(tokenize(text)):
+    bodyless, expandable_heredocs = without_heredoc_bodies(text)
+    scan_command_substitutions(bodyless, depth)
+    scan_command_substitutions(expandable_heredocs, depth, single_quotes_protect=False)
+    for seg in simple_commands(tokenize(bodyless)):
         analyze(seg, depth)
 
 # ------------------------------------------------- conservative fallback
