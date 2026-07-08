@@ -1,5 +1,10 @@
 # Plan — methodology by link, not copy (drop the plugin)
 
+> **Superseded gate examples (2026-07-08):** This dated plan's merge-gate
+> examples predate qq's all-gated, landing-agent-owned policy. Current landings
+> use `no-mistakes axi run --intent "<task + AC>"` (or the equivalent
+> `git push no-mistakes` trigger); see `AGENTS.md` and `qq-methodology.md`.
+
 **Intent (approved by owner).** qq is the source of truth for the agent
 methodology. Today linked repos hold *hand-copied* adaptations of qq's `AGENTS.md`,
 and skills come from a versioned *plugin copy*. Both are snapshots, so they drift —

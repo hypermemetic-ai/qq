@@ -1,5 +1,11 @@
 # qq-ac Reframe Implementation Plan
 
+> **Superseded gate examples (2026-07-08):** This dated plan's Phase 3 fallback
+> and git-push-first examples predate qq's all-gated, landing-agent-owned policy.
+> Current landings use `no-mistakes axi run --intent "<task + AC>"` (or the
+> equivalent `git push no-mistakes` trigger); see `AGENTS.md` and
+> `qq-methodology.md`.
+
 > **For the implementer (Codex):** This repo's `AGENTS.md` binds you as the behavioral floor. Implement Phase 1 task-by-task on a branch; do **not** touch the on-disk directory name, the git remote, or GitHub — those are Phase 4, run by the conductor (Claude) after landing. Steps use checkbox (`- [ ]`) syntax.
 
 **Goal:** Turn this repo from "hypercore — a distributable engineering methodology" into **qq-ac — surlej's bespoke agentic-dev command center**: rename every identifier, add a **Cockpit** layer as the sixth layer, vendor the cockpit's tuned configs (yazi · broot · glow · mdcat · herdr + shell glue) into the repo as the *live source of truth* via symlinks, and drop all "distribution for others" framing.

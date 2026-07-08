@@ -28,7 +28,15 @@ from gsd `gsd-debug`). `ce-compound` has been slimmed from its upstream 727-line
 form to a lean, self-contained ~94-line capture skill. `git-guardrails-claude-code`'s
 hook is modified from upstream to allow normal `git push` while still blocking
 force-push, `reset --hard`, `clean -f`, `branch -D`, `checkout/restore .`, and
-history rewrites.
+history rewrites. `code-review` keeps qq's **Intent** axis (backlog-first intent
+sources) where upstream renamed it **Spec** and wired it to their
+issue-tracker pointer — a deliberate fork, re-assert on every sync.
+
+**Sync pin:** the mattpocock/skills set was last diffed against upstream
+[v1.1.0](https://github.com/mattpocock/skills/releases/tag/v1.1.0) (2026-07-08);
+all vendored copies match HEAD at that tag except the deliberate divergences
+noted above. To re-check after an upstream release: fetch each skill's
+`SKILL.md` and diff against `skills/<name>/`.
 
 ## Authored for qq (syntheses)
 

@@ -2,7 +2,11 @@
 
 **Status:** _both failure modes root-caused. (1) stale-path → one-command repair (below).
 (2) the "post-review stall" is not a stall at all — the run parked in `awaiting_approval`
-waiting for a human to approve review findings; see below (root-caused 2026-07-07)._
+waiting for a human to approve review findings; see below (root-caused 2026-07-07).
+2026-07-08 update: qq now drives landings with `no-mistakes axi run --intent`,
+sets `auto_fix.review: 3`, and handles parked questions through
+`no-mistakes axi respond`; the `attach` advice below is incident history, not
+current procedure._
 
 ## Symptom
 `git push no-mistakes <branch>` **succeeds** (`* [new branch] …`) but no pipeline
@@ -61,18 +65,19 @@ real trap — `awaiting_approval` is a distinct state hidden behind that label. 
 findings were ultimately applied by hand on `main` as commit `c64a1fd`; the run was
 abandoned in `awaiting_approval`, where it still sits as of 2026-07-07.)
 
-**The correct move when a run "stalls after review":** `no-mistakes attach` — it shows
-the pending findings; approve (gate applies the fix and continues) or dismiss (gate
-continues without). To skip the prompt entirely for review, set `auto_fix.review` > 0
-so review findings auto-apply like the other steps.
+**The correct move when a run "stalls after review":** current qq procedure is
+`no-mistakes axi status`, then `no-mistakes axi respond --action approve|skip|fix`
+for the parked gate. At the time of the incident this was handled with
+`no-mistakes attach`; the same lesson holds, but objective review findings now
+auto-fix via `auto_fix.review: 3` and only judgment-bearing questions should park.
 
 ## Prevention
 - **Add "refresh the gate" to the repo rename/move checklist:** any no-mistakes repo
   that is renamed or moved needs `no-mistakes init` at the new path. The `qq-ac`
   reframe re-registered the Claude Code plugin but missed the gate — same class of
   miss.
-- **"Stalled after review" = check for `awaiting_approval` first.** Run
-  `no-mistakes attach` (or read `step_results.status` in `state.sqlite`) before
+- **"Stalled after review" = check for a parked gate first.** Run
+  `no-mistakes axi status`, then answer with `no-mistakes axi respond` before
   assuming a crash. The earlier "don't run two gate runs at once" advice was based on
   the misdiagnosis and is dropped — concurrent runs are fine; both just needed approval.
 - **Make hidden states loud (upstream asks):** (1) a failed notify-push should not
