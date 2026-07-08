@@ -12,8 +12,8 @@ both writes and renders `.qq/state.json`.
 - `yazi/keymap.toml` — `!` opens a shell here; `g H` jumps to `~/projects/qq`.
 - `glow/glow.yml` — fixed-width, no-pager Glow defaults for pane rendering.
 - `glow/tuned.json` — the hand-tuned Markdown theme used by Glow.
-- `herdr/config.toml` — tokyo-night, agent sorting, and cockpit pane bindings:
-  `prefix+f` runs `qqy`, `prefix+shift+f` runs `qqbr`.
+- `herdr/config.toml` — tokyo-night, onboarding suppressed, agent sorting, and
+  cockpit pane bindings: `prefix+f` runs `qqy`, `prefix+shift+f` runs `qqbr`.
 - `shell/file-navigation.bash` — `QQ_HOME`, generic `y()`/`br()` wrappers,
   repo-focused `qqroot`/`qqy`/`qqbr`, and `qfiles`/`qtree` aliases.
 

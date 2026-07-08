@@ -2,8 +2,10 @@
 
 > **Superseded gate examples (2026-07-08):** This dated plan's merge-gate
 > examples predate qq's all-gated, landing-agent-owned policy. Current landings
-> use `no-mistakes axi run --intent "<task + AC>"` (or the equivalent
-> `git push no-mistakes` trigger); see `AGENTS.md` and `qq-methodology.md`.
+> use `no-mistakes axi run --intent "<task + AC>"`, adding `--skip ci` only
+> after confirming no CI exists. `git push no-mistakes` is only the fallback
+> when no skip flags are needed and no explicit intent is available; see
+> `AGENTS.md` and `qq-methodology.md`.
 
 **Intent (approved by owner).** qq is the source of truth for the agent
 methodology. Today linked repos hold *hand-copied* adaptations of qq's `AGENTS.md`,

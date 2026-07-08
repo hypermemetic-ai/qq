@@ -2,9 +2,10 @@
 
 > **Superseded gate examples (2026-07-08):** This dated plan's Phase 3 fallback
 > and git-push-first examples predate qq's all-gated, landing-agent-owned policy.
-> Current landings use `no-mistakes axi run --intent "<task + AC>"` (or the
-> equivalent `git push no-mistakes` trigger); see `AGENTS.md` and
-> `qq-methodology.md`.
+> Current landings use `no-mistakes axi run --intent "<task + AC>"`, adding
+> `--skip ci` only after confirming no CI exists. `git push no-mistakes` is only
+> the fallback when no skip flags are needed and no explicit intent is available;
+> see `AGENTS.md` and `qq-methodology.md`.
 
 > **For the implementer (Codex):** This repo's `AGENTS.md` binds you as the behavioral floor. Implement Phase 1 task-by-task on a branch; do **not** touch the on-disk directory name, the git remote, or GitHub — those are Phase 4, run by the conductor (Claude) after landing. Steps use checkbox (`- [ ]`) syntax.
 

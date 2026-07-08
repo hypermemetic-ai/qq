@@ -14,11 +14,11 @@ ordinal: 2000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Re-homed writing-plans / executing-plans / finishing-a-development-branch to qq's gate model: no Superpowers refs, no docs/superpowers path, and no landing flows that bypass `git push no-mistakes <branch>`. Finishing now narrows to the all-gated land/keep/discard decision. Audit: ideas/05 Part 1 HIGH + Part 3.
+Re-homed writing-plans / executing-plans / finishing-a-development-branch to qq's gate model: no Superpowers refs, no docs/superpowers path, and no landing flows that bypass the gate. Current landing syntax is `no-mistakes axi run --intent "<task + AC>"` (add `--skip ci` only when no CI exists); `git push no-mistakes <branch>` is fallback only when no skip flags are needed. Finishing now narrows to the all-gated land/keep/discard decision. Audit: ideas/05 Part 1 HIGH + Part 3.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 No superpowers:* or dead-path references remain in the three skills
-- [x] #2 No skill instructs a landing that bypasses git push no-mistakes
+- [x] #2 No skill instructs a landing that bypasses the gate
 <!-- AC:END -->
