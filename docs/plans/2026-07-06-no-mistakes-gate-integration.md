@@ -1,5 +1,11 @@
 # no-mistakes Gate Integration Implementation Plan
 
+> **Superseded gate policy (2026-07-08):** This dated plan preserves the initial
+> blast-radius/straight-to-main design. Current qq policy is all-gated and
+> landing-agent-owned: use `no-mistakes axi run --intent "<task + AC>"` (or the
+> equivalent `git push no-mistakes` trigger), with `ask-user` findings relayed by
+> the landing agent. See `AGENTS.md` and `qq-methodology.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or hypercore:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Adopt `kunchenguid/no-mistakes` as hypercore's externally-owned **blast-radius** merge gate — real work is pushed through an independent validation pipeline that opens a PR, while trivial work still commits straight to `main` — and re-slot the affected hypercore skills into a *layered* division of labor (author-side vs verifier-side).

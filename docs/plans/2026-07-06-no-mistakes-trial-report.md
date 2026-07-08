@@ -1,5 +1,11 @@
 # no-mistakes Gate — Trial Report & GO/NO-GO Verdict
 
+> **Superseded gate policy (2026-07-08):** This report captures the July 6 trial
+> conditions (`v1.31.2` and the then-current blast-radius policy). Current qq
+> landings are all-gated and driven by the landing agent with
+> `no-mistakes axi run --intent "<task + AC>"`; see `AGENTS.md` and
+> `qq-methodology.md`.
+
 **Date:** 2026-07-06
 **Binary:** `no-mistakes v1.31.2` (installer pinned; latest release is v1.33.0 — recent enough, all features present)
 **Environment:** isolated scratch clone at `…/scratchpad/nm-trial/repo` with a **local bare upstream** (no GitHub host ⇒ `pr`/`ci` auto-skip). The real remote `git@github.com:hypermemetic-ai/hypercore.git` was never touched.

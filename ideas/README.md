@@ -40,8 +40,10 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
 - **#4 · Gate "stall" after a rename** → [`04-gate-stale-path-after-rename.md`](04-gate-stale-path-after-rename.md).
   ✅ **Root-caused (07-07).** (1) stale-path → `no-mistakes init` repairs it. (2) the
   "post-review freeze" was **not** a deadlock — the run parked in `awaiting_approval`
-  (review had auto-fix findings, `auto_fix.review:0`); `no-mistakes attach` to approve. A
-  14h-orphaned run still sits parked (its work is already on main — safe to dismiss). _(2026-07-06 → 07)_
+  (review had auto-fix findings, `auto_fix.review:0`). Current policy (07-08):
+  `auto_fix.review:3`, drive with `no-mistakes axi run --intent`, and resolve parked
+  questions through `no-mistakes axi respond`. A 14h-orphaned run still sits parked
+  (its work is already on main — safe to dismiss). _(2026-07-06 → 08)_
 - **Agents should self-wrap-up on context pressure** _(new, 07-07)._ Make agents
   context-aware: as they approach ~200–250k tokens they should proactively start wrapping
   up / handing off on their own, rather than *beginning* fresh work deep in a window ("you

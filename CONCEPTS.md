@@ -24,6 +24,12 @@ work stands, one markdown file per task. Trustworthy only because it is total �
 the gate refuses any landing that doesn't touch it once adopted
 (`bin/qq-registry-check.sh`); PR review checks whether that touch is truthful.
 
-**one landing path** — The all-gated merge rule: every change reaches `main` via
-`git push no-mistakes <branch>` → validated PR. Triage scales ceremony, never the
-landing path; trivial fixes batch on a branch.
+**one landing path** — The all-gated merge rule: every change reaches `main`
+through the gate (`no-mistakes axi run --intent`, or the equivalent
+`git push no-mistakes` trigger) → validated PR. Triage scales ceremony, never
+the landing path; trivial fixes batch on a branch.
+
+**landing agent owns the run** — The fire-and-forget gate consent model: the
+agent starts `no-mistakes axi run --intent "<task + AC>"`, lets objective review
+findings auto-fix, relays any `ask-user` findings for operator judgment, and
+answers the gate with `no-mistakes axi respond`.

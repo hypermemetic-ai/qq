@@ -1,8 +1,9 @@
 # qq's merge gate — externally owned (MIT: kunchenguid/no-mistakes).
-# One landing path: everything is pushed through the gate (`git push no-mistakes
-# <branch>`), validated by an independent pipeline (review/test/lint/docs), and
-# lands as a PR a human merges. Trivial fixes batch on a branch; nothing commits
-# straight to main.
+# One landing path: the landing agent drives the gate (`no-mistakes axi run
+# --intent "<task + AC>"`, or the equivalent `git push no-mistakes <branch>`
+# trigger), the independent pipeline validates review/test/lint/docs, and the
+# work lands as a PR a human merges. Trivial fixes batch on a branch; nothing
+# commits straight to main.
 #
 # NOTE: `agent` + `commands` are read from the DEFAULT BRANCH (a no-mistakes security
 # rule), so changes to those executable keys only take effect once committed to

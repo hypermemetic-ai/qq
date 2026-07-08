@@ -40,10 +40,10 @@ repo via a symlinked `@`-import — do not edit a copy; edit it in qq.
   herdr, yazi, broot, glow, mdcat, shell navigation, and the `qq-phase` status line.
 - **Externals** — Context7 (live, version-correct library docs), `gh` (GitHub),
   `fd` / `eza` / `rg` (fast filesystem), and **the gate** (`no-mistakes`, an
-  external MIT tool): every landing is *pushed to it* — an independent pipeline
-  reviews the diff, runs the checks, requires a registry touch once `backlog/` is
-  adopted, refreshes adopted descriptive docs, and opens a PR. It is capability
-  you push to, not process you maintain.
+  external MIT tool): every landing is *driven through it* — an independent
+  pipeline reviews the diff, runs the checks, requires a registry touch once
+  `backlog/` is adopted, refreshes adopted descriptive docs, and opens a PR. It
+  is capability you invoke, not process you maintain.
 
 ## Behavioral floor (always)
 1. **Think before coding** — surface assumptions, offer interpretations, ask

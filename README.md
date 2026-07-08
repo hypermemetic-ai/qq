@@ -23,8 +23,9 @@ Operating rules live in [`AGENTS.md`](./AGENTS.md) (loaded every session;
 **Align → Plan → Build → Verify (autonomous) → Sign-off (human, gated) → Review →
 Compound.** Ceremony scales with the task — trivial work skips Align/Plan and is
 just done — but *nothing* skips verification, and everything lands through the
-gate. Full detail in `AGENTS.md`. Invoke `orchestrate` to run the
-whole loop end-to-end as one command — Claude conducts, Codex implements.
+gate; the landing agent drives `no-mistakes axi run --intent "<task + AC>"` and
+relays only judgment calls. Full detail in `AGENTS.md`. Invoke `orchestrate` to
+run the whole loop end-to-end as one command — Claude conducts, Codex implements.
 Long-running work stamps `.qq/state.json` with `qq-phase`, and `qq-phase render`
 feeds the Claude Code status line with the current phase plus any live gate step.
 
