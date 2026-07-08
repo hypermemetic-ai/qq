@@ -80,8 +80,10 @@ intent is available; the gate then infers intent from transcripts.)
 **You own this run — the operator never babysits it.** Objective review
 findings auto-fix (`auto_fix.review`). If the run parks with `ask-user`
 findings, relay each finding's ID, file, and full description to the owner,
-then answer with `no-mistakes axi respond`. Report the PR or gate status when
-the run completes.
+then answer with `no-mistakes axi respond --action approve`,
+`no-mistakes axi respond --action skip`, or
+`no-mistakes axi respond --action fix --findings <ids> --instructions "<owner guidance>"`.
+Report the PR or gate status when the run completes.
 
 #### Option 2: Keep As-Is
 

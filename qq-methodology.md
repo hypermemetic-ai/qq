@@ -136,9 +136,10 @@ no-mistakes <branch>` remains the equivalent trigger). The pipeline is
 fire-and-forget for the operator: objective review findings auto-fix
 (`auto_fix.review: 3` in `.no-mistakes.yaml`); `ask-user` findings park the run
 and the landing agent — never the operator — relays the question, then answers
-with `no-mistakes axi respond`. The operator's only touchpoints are a relayed
-judgment call and the PR merge click. A parked landing agent shows as blocked
-in herdr; the `qq-phase` status line shows the gate step.
+with `no-mistakes axi respond --action approve|skip|fix`, using `--findings`
+and `--instructions` when the answer asks the gate to fix. The operator's only
+touchpoints are a relayed judgment call and the PR merge click. A parked landing
+agent shows as blocked in herdr; the `qq-phase` status line shows the gate step.
 
 ## Skill index
 | skill | reach for it when |
