@@ -278,6 +278,27 @@ def mask_heredoc_ignored_contexts(line):
             erase(start, end + 2)
             i = end + 2
             continue
+        if line.startswith("$[", i):
+            start = i
+            j, depth = i + 2, 1
+            while j < len(chars):
+                if chars[j] == "\\":
+                    j += 2
+                    continue
+                if chars[j] == "[":
+                    depth += 1
+                    j += 1
+                    continue
+                if chars[j] == "]":
+                    depth -= 1
+                    j += 1
+                    if depth == 0:
+                        break
+                    continue
+                j += 1
+            erase(start, j if depth == 0 else len(chars))
+            i = j
+            continue
         i += 1
     return "".join(chars)
 

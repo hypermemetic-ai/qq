@@ -51,6 +51,8 @@ check block 'git status
 git reset --hard'
 check block 'echo $((1 << 2))
 git reset --hard'
+check block 'echo $[1 << 2]
+git reset --hard'
 check block 'true # <<EOF
 git reset --hard'
 check block '>/tmp/log git reset --hard'
@@ -160,6 +162,7 @@ check allow 'git restore --staged .'
 check allow 'git reflog'
 check allow 'git update-ref refs/wip/b abc123 def456'
 check allow 'echo $((1 << 2))'
+check allow 'echo $[1 << 2]'
 check allow 'echo "git push --force"'
 check allow 'echo "<(git reset --hard)"'
 check allow "cat <<< 'git reset --hard'"
