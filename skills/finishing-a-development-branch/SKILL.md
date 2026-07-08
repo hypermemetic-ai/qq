@@ -68,7 +68,8 @@ Do not offer a local merge or direct `origin` push.
 
 #### Option 1: Land Through The Gate
 
-Run, with the intent taken from the Backlog.md task this landing closes:
+Run, with the intent taken from the backlog task and acceptance criteria this
+landing advances or closes:
 
 ```bash
 no-mistakes axi run --intent "<task title + acceptance criteria>"

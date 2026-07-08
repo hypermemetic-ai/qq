@@ -5,7 +5,8 @@
 # straight to main.
 #
 # NOTE: `agent` + `commands` are read from the DEFAULT BRANCH (a no-mistakes security
-# rule) — this file only takes effect once committed to main.
+# rule), so changes to those executable keys only take effect once committed to
+# main. Branch-effective fields below are read from the pushed branch.
 # Ref: https://kunchenguid.github.io/no-mistakes/reference/repo-config/
 agent: codex          # gate's pipeline stages run on gpt-5.5 (via ~/.codex/config.toml), not Opus
 commands:
