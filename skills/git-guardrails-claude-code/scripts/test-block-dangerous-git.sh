@@ -70,6 +70,7 @@ check block "timeout 5 bash -c 'git push --delete origin feature-x'"
 check block 'sudo git clean -fd'
 check block 'xargs git branch -D < branches.txt'
 check block "xargs sh -c 'git update-ref -d refs/wip/main'"
+check block 'find . -exec git reset --hard \;'
 check block 'git -C /some/repo reset --hard'
 check block "git -c alias.nuke='!git reset --hard' nuke"
 check block "git -c alias.nuke='reset --hard' nuke"
@@ -91,11 +92,15 @@ check block '{ git clean -fd; }'
 check block '! git reset --hard'
 check block 'exec git reset --hard'
 check block "eval 'git reset --hard'"
+check block "builtin eval 'git reset --hard'"
+check block "trap 'git clean -fd' EXIT"
 check block "sh -c 'function f { git reset --hard; }; f'"
 check block "sh -c 'f() { git clean -fd; }; f'"
 check block "bash <<'EOF'
 git reset --hard
 EOF"
+check block "bash <<'EOF'
+git reset --hard"
 check block 'sh -s <<EOF
 git clean -fd
 EOF'
@@ -142,6 +147,7 @@ check allow 'git update-ref refs/wip/b abc123 def456'
 check allow 'echo "git push --force"'
 check allow 'echo "<(git reset --hard)"'
 check allow "cat <<< 'git reset --hard'"
+check allow "bash 3<<< 'git reset --hard'"
 check allow 'sudo echo "git reset --hard"'
 check allow "env -S 'echo git reset --hard'"
 check allow "xargs echo git reset --hard"
@@ -149,6 +155,7 @@ check allow 'command -v git reset --hard'
 check allow "git -c alias.note='!echo git reset --hard' note"
 check allow "printf 'git reset --hard\\n' > notes.md"
 check allow 'diff <(git show main:f) <(git show dev:f)'
+check allow "find . -name '*.md' -exec grep -l 'reset --hard' {} \;"
 check allow "rg '\$(git reset --hard)' docs/"
 check allow "rg '\`git reset --hard\`' docs/"
 check allow "git log --grep 'filter-branch'"

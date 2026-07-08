@@ -15,6 +15,13 @@
 # cannot be tokenized falls back to conservative whole-line matching:
 # false positives possible there, false negatives not.
 #
+# Threat model: this is an accident rail for well-intentioned agents, not a
+# security boundary against adversarial evasion. Arbitrary string-execution
+# vectors such as source/., mapfile+eval, function definitions, encoded or
+# interpolated payloads, and interpreter one-liners like python -c are out of
+# scope by design; unparseable input still falls back to conservative whole-line
+# matching.
+#
 # Modified from mattpocock/skills `git-guardrails-claude-code` (MIT): the
 # upstream version blocked ALL pushes and pattern-matched the whole line;
 # qq narrows that to force-pushes and matches the actual git argv.
@@ -100,7 +107,7 @@ def simple_commands(tokens):
             if i + 2 < len(tokens) and is_process_substitution_start(tokens[i + 2]):
                 i = skip_process_substitution(tokens, i + 2)
                 continue
-            if op == "<<<" and i + 2 < len(tokens):
+            if op == "<<<" and t == "0" and i + 2 < len(tokens):
                 here_strings.append(tokens[i + 2])
             i += 3 if i + 2 < len(tokens) else 2
             continue
@@ -249,9 +256,9 @@ def shell_heredoc_indexes(line):
             i += 1
             continue
         if t == "<<":
-            if words and words[-1].isdigit():
-                words.pop()
-            docs.append(doc_i)
+            fd = words.pop() if words and words[-1].isdigit() else None
+            if fd is None or fd == "0":
+                docs.append(doc_i)
             doc_i += 1
             i += 2 if t == "<<" else 1
             continue
@@ -287,6 +294,9 @@ def without_heredoc_bodies(text):
         shell_docs = shell_heredoc_indexes(line)
         for i, (delim, expands, strip_tabs) in enumerate(heredocs_in_line(line)):
             pending.append([delim, expands, strip_tabs, i in shell_docs, []])
+    for _, _, _, shell_input, body_lines in pending:
+        if shell_input:
+            shell_inputs.append("".join(body_lines))
     return "".join(kept), "".join(expandable), "".join(shell_inputs)
 
 def extract_dollar_paren(text, start):
@@ -449,6 +459,7 @@ STDBUF_VALUE_OPTS = {"-i", "--input", "-o", "--output", "-e", "--error"}
 TIME_VALUE_OPTS = {"-f", "--format", "-o", "--output"}
 SHELL_VALUE_OPTS = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
 EXEC_VALUE_OPTS = {"-a"}
+FIND_EXEC_PREDICATES = {"-exec", "-execdir"}
 
 def base(tok):
     return tok.rsplit("/", 1)[-1]
@@ -672,6 +683,46 @@ def analyze_submodule(args, depth):
     if i < len(args):
         analyze_string(" ".join(args[i:]), depth + 1)
 
+def analyze_find(args, depth):
+    i = 0
+    while i < len(args):
+        if args[i] not in FIND_EXEC_PREDICATES:
+            i += 1
+            continue
+        i += 1
+        cmd, terminated = [], False
+        while i < len(args):
+            if args[i] in {";", "+"}:
+                terminated = True
+                break
+            cmd.append(args[i])
+            i += 1
+        if cmd:
+            analyze(cmd, depth + 1)
+        if terminated:
+            i += 1
+
+def builtin_command_start(seg, j):
+    if j < len(seg) and seg[j] == "--":
+        return j + 1
+    return j
+
+def trap_command_string(seg, j):
+    while j < len(seg):
+        t = seg[j]
+        if t == "--":
+            j += 1
+            break
+        if re.match(r"^-[lp]+$", t):
+            return None
+        if t.startswith("-") and t != "-":
+            j += 1
+            continue
+        break
+    if j < len(seg) and seg[j] not in ("", "-"):
+        return seg[j]
+    return None
+
 def analyze_git(args, depth):
     i, sub, aliases = 0, None, {}
     while i < len(args):                 # skip git global options
@@ -783,6 +834,18 @@ def analyze(seg, depth):
     elif cmd == "eval":
         if i + 1 < len(seg):
             analyze_string(" ".join(seg[i + 1:]), depth + 1)
+    elif cmd == "builtin":
+        j = builtin_command_start(seg, i + 1)
+        if j is not None and j < len(seg):
+            analyze(seg[j:], depth + 1)
+    elif cmd == "trap":
+        command_string = trap_command_string(seg, i + 1)
+        if command_string is not None:
+            analyze_string(command_string, depth + 1)
+    elif cmd == "find":
+        analyze_find(seg[i + 1:], depth)
+    elif cmd in FIND_EXEC_PREDICATES:
+        analyze_find(seg[i:], depth)
     elif cmd in WRAPPERS:
         if cmd == "env":
             expanded = env_command_segment(seg, i + 1)
