@@ -5,9 +5,10 @@ about to become the main driver, so Codex workers stop being second-class —
 they get their own herdr pane, like Claude workers, so there is **one worker
 model**. Mechanics smoke-tested 07-08 (scratch workspace): `herdr agent start …
 -- codex` is auto-detected as agent `codex` with live idle/working state;
-`send` + `pane send-keys Enter` delivers prompts; `wait --status idle` blocks
-until the turn ends; herdr captures the codex session id. This plan lands as
-its own gated branch **after** `feat/document-stack` merges._
+`herdr agent send cx-<branch>` + `herdr pane send-keys <pane> Enter` delivers
+prompts; `herdr agent wait cx-<branch> --status idle` blocks until the turn
+ends; herdr captures the codex session id. This plan lands as its own gated
+branch **after** `feat/document-stack` merges._
 
 ## Goal
 
@@ -21,26 +22,29 @@ sidebar, addressable via send/read/wait, isolated per worktree.
 1. Start: `herdr agent start cx-<branch> --cwd <tree> --no-focus -- codex`
    (same workspace as the run's tree; `herdr worktree create` first when
    fanning out). One worker per working tree, honoring tree ownership.
-2. Trust prompt: after start, `agent read --source visible`; if the directory
-   trust prompt is showing, `pane send-keys <pane> Enter` (option 1 is
-   preselected). Long-term: pre-trust project roots in `~/.codex/config.toml`.
+2. Trust prompt: after start, `herdr agent read cx-<branch> --source visible`;
+   if the directory trust prompt is showing, `herdr pane send-keys <pane> Enter`
+   (option 1 is preselected). Long-term: pre-trust project roots in
+   `~/.codex/config.toml`.
 3. Handoff: write the brief to `.qq/handoffs/<n>-brief.md` (multi-line text
-   must not ride `agent send` — a newline submits early). Then
-   `agent send cx-<branch> "Execute .qq/handoffs/<n>-brief.md; when done write
-   .qq/handoffs/<n>-report.md (what changed, files touched, how to verify)."`
-   followed by `pane send-keys <pane> Enter`.
+   must not ride `herdr agent send` — a newline submits early). Then
+   `herdr agent send cx-<branch> "Execute .qq/handoffs/<n>-brief.md; when done
+   write .qq/handoffs/<n>-report.md (what changed, files touched, how to
+   verify)."` followed by `herdr pane send-keys <pane> Enter`.
 4. Wait: `herdr agent wait cx-<branch> --status idle --timeout <generous>`;
-   on timeout, `agent read` for signs of life before declaring it stuck. A
-   worker parked on an approval prompt surfaces as blocked → read the pane,
-   answer or escalate to the owner.
+   on timeout, `herdr agent read cx-<branch>` for signs of life before declaring
+   it stuck. A worker parked on an approval prompt surfaces as blocked → read
+   the pane, answer or escalate to the owner.
 5. Report-back is **file-based**: the conductor reads
-   `.qq/handoffs/<n>-report.md`. Scrollback (`agent read`) is debug/fallback
-   only — never parse it as the result of record.
+   `.qq/handoffs/<n>-report.md`. Scrollback
+   (`herdr agent read cx-<branch>`) is debug/fallback only — never parse it as
+   the result of record.
 6. Repair loop: the pane session is alive — send the failing evidence as a
    follow-up message in the same pane. `codex exec resume --last` semantics
    (and its cross-worktree bleed hazard, audit Part 2.3) are deleted, not
    scoped. If a pane dies, herdr holds the codex session id
-   (`agent get` → `agent_session.value`) for an explicit resume.
+   (`herdr agent get cx-<branch>` → `agent_session.value`) for an explicit
+   resume.
 7. Teardown: on run completion the worker pane stays for the operator to
    inspect; `qq-phase done` marks the run. Closing panes is the operator's
    call (or `herdr pane close` when the workspace was created by the run).
@@ -74,9 +78,10 @@ uses them unmodified; still no protocol beyond the handoff-file convention.
 
 ## Risks / open
 
-- `agent send` newline handling: long briefs must go via file (designed in).
+- `herdr agent send` newline handling: long briefs must go via file (designed in).
 - Non-focused pane rendering: worked in the smoke test; re-verify under a
   real multi-hour build.
-- `wait --status idle` fidelity during codex sub-shell activity: if idle
-  flickers mid-turn, add a settle re-check (wait idle twice, N s apart).
+- `herdr agent wait cx-<branch> --status idle` fidelity during codex sub-shell
+  activity: if idle flickers mid-turn, add a settle re-check (wait idle twice,
+  N s apart).
 - Codex resume-by-id flag name for dead panes: confirm during build.

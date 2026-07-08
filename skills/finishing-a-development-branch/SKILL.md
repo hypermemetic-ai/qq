@@ -8,9 +8,9 @@ description: Use when implementation is complete, verification is green, and you
 ## Overview
 
 Complete development work without inventing a second landing path. qq is
-all-gated: finished work lands through the gate — `no-mistakes axi run --intent
-"<backlog task + acceptance criteria>"`, or the equivalent `git push
-no-mistakes <branch>` — and the gate opens the PR.
+all-gated: finished work lands through the gate — `no-mistakes axi run --skip ci
+--intent "<backlog task + acceptance criteria>"` while this repo has no CI — and
+the gate opens the PR.
 
 **Core principle:** Verify evidence → confirm branch state → present the finish
 decision → push to the gate or preserve the work.
@@ -55,7 +55,7 @@ Present exactly these options:
 ```text
 Implementation is verified on branch <branch>. What would you like to do?
 
-1. Land through the gate (`no-mistakes axi run --intent "…"`)
+1. Land through the gate (`no-mistakes axi run --skip ci --intent "…"`)
 2. Keep the branch as-is
 3. Discard this work
 
@@ -72,16 +72,18 @@ Run, with the intent taken from the backlog task and acceptance criteria this
 landing advances or closes:
 
 ```bash
-no-mistakes axi run --intent "<task title + acceptance criteria>"
+no-mistakes axi run --skip ci --intent "<task title + acceptance criteria>"
 ```
 
-(`git push no-mistakes <branch>` is the equivalent trigger when no explicit
-intent is available; the gate then infers intent from transcripts.)
-
-While this repo has no CI configured, add `--skip ci` — the ci step otherwise
+While this repo has no CI configured, keep `--skip ci` — the ci step otherwise
 burns 13–22 minutes polling a checkless PR (`gh pr checks` exit-status-1 loop,
 measured on v1.31 and v1.34; task-13 AC#3). Remove the flag once real CI
 exists.
+
+Do not use `git push no-mistakes <branch>` for qq until real CI exists: the push
+trigger cannot pass `--skip ci`. It is only the fallback when no skip flags are
+needed and no explicit intent is available; the gate then infers intent from
+transcripts.
 
 **You own this run — the operator never babysits it.** Objective review
 findings auto-fix (`auto_fix.review`). If the run parks with `ask-user`
@@ -124,4 +126,4 @@ explicitly asked for that exact cleanup and the workspace is known to be yours.
 - Verify before finishing
 - Work from a feature branch
 - Preserve unrelated changes
-- Land through the gate (`no-mistakes axi run --intent`, or `git push no-mistakes <branch>`)
+- Land through the gate with `no-mistakes axi run --skip ci --intent` until real CI exists
