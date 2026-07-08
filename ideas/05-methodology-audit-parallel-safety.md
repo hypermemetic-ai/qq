@@ -235,10 +235,15 @@ escape hatch bypassing registry enforcement for ungated commits.
   (MrLesk/Backlog.md, MIT, ~6k★: per-task markdown files in an in-repo
   `backlog/` dir, CLI + terminal/web kanban, agent-oriented). Intent + work
   status in one plain-markdown surface; the gate stays the enforcer with the
-  same wiring idea. Open before wiring: Backlog.md has had none of beads'
-  verification — tasks live *in the branch dimension* (the thing beads' Dolt
-  store avoided), so cross-worktree visibility/merge behavior needs its own
-  smoke test. See Addendum 2 in the research file above.
+  same wiring idea. ✅ **Smoke-tested + adopted same day** (see Addendum 2 in
+  the research file above for the full result): committed-state ID minting is
+  worktree-safe; the *uncommitted* window can mint duplicate IDs that Backlog
+  then mishandles silently — closed by an operating rule (create tasks in the
+  main-tree session, commit immediately; workers only edit claimed tasks).
+  Wired in `feat/document-stack`: `backlog/` seeded with the live queue,
+  `bin/qq-registry-check.sh` as the gate's `commands.test` (a landing that
+  doesn't touch `backlog/` is refused), `bin/qq-openwiki-refresh` as
+  `commands.format` (guarded no-op until openwiki is generated + keyed).
 
 - **Layer 3 scope widened: OpenWiki takes *all* descriptive docs**, not just
   business logic — anything that documents what the system *is* consolidates

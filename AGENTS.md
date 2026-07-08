@@ -13,15 +13,13 @@ qq is the source of truth for the methodology. The shared core is
 into `~/.config` via `bin/qq-activate.sh`, which also wires the `qq-phase` status
 line.
 
-**Merge gate: `blast-radius`.** Trivial + local + reversible work still commits
-on green straight to `main` (the escape hatch — `orchestrate` and trivial fixes
-commit the moment the pre-push smoke test passes). **Real work** (multi-file /
-user-facing / irreversible) is pushed through the gate:
-`git push no-mistakes <branch>` → the pipeline reviews correctness, runs the
-checks, and opens a PR you merge with one click. For gated work, "green" is no
-longer a fact the agent *asserts* — it is a fact the gate *proves*,
-independently, with a committed evidence trail. (`/no-mistakes` drives the same
-gate headlessly.)
+**Merge gate: all-gated — one landing path.** Everything lands through the
+gate: `git push no-mistakes <branch>` → the pipeline reviews correctness, runs
+the checks (including the `backlog/` registry check), and opens a PR you merge
+with one click. Trivial fixes skip the ceremony, never the path — they batch on
+a branch and land as one gated push. "Green" is no longer a fact the agent
+*asserts* — it is a fact the gate *proves*, independently, with a committed
+evidence trail. (`/no-mistakes` drives the same gate headlessly.)
 
 ## Methodology
 @qq-methodology.md

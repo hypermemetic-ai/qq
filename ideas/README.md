@@ -84,21 +84,28 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   different way for agents to look at the codebase) · intent + work status =
   Backlog.md · durable descriptive docs = OpenWiki · opportunistic/episodic
   docs = compound · enforcement = the gate at landing.
-  **Remaining (gated branch):** author the thin
-  `code-graph` routing skill via `writing-skills`; retire the
-  Understand-Anything plugin, its hooks, and `.understand-anything/` tracking;
-  rewrite the Routing/merge-gate methodology sections (escape-hatch removal);
-  Backlog.md adoption (cross-worktree smoke test first, then `backlog init` +
-  gate task-check wiring); OpenWiki adoption + gate-triggered
-  refresh. _(2026-07-07 → 08)_
+  ✅ **Built (07-08, branch `feat/document-stack`):** Understand-Anything
+  untracked + de-referenced (plugin disable is user-side); methodology
+  rewritten to the four-document stack and the single all-gated landing path
+  (escape hatch removed from Routing/merge-gate/AGENTS.md); Backlog.md
+  smoke-tested (see #6 file Part 4) and adopted — `backlog/` seeded with the
+  live queue, `bin/qq-registry-check.sh` wired as the gate's test command,
+  `bin/qq-openwiki-refresh` as its format command (guarded no-op until the
+  wiki exists). **Still open:** initial `openwiki --init` generation (blocked
+  on an API key in `~/.openwiki/.env`, pre-staged); linked-repo rollout
+  (backlog task-9); the `code-graph` routing skill is **deferred by eval** —
+  the RED baseline (07-08) showed an unguided agent answers qq-scale
+  relational queries correctly with `rg` alone, so per `writing-skills` no
+  skill ships without an observed failure (backlog draft-1). The queue now
+  lives in `backlog/`, not here. _(2026-07-07 → 08)_
 - **#8 · Agent-to-agent comms = plain herdr** _(decided 07-08)._ When agents need
   to talk to each other, they use herdr's own primitives — `herdr agent list` /
   `send <target> <text>` / `read <target>` / `wait <target> --status …` (verified
   present in the installed CLI) — no new infrastructure; much simpler than an MCP
   agent-mail server. Deliberately unformalized: *teach* the agents the primitives
-  and watch what they do with them before designing any protocol. Next step: a
-  short "talking to other agents" note in the methodology / worker prompts.
-  _(2026-07-08)_
+  and watch what they do with them before designing any protocol. ✅ The teaching
+  note landed in the methodology's Sessions layer (branch `feat/document-stack`,
+  07-08); now we watch. _(2026-07-08)_
 - **#9 · Codex workers get their own herdr pane** _(decided 07-08)._ Codex is
   about to become the main driver, so its workers stop being second-class
   (today: headless `codex exec` inside the conductor's session while Claude
@@ -107,4 +114,8 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   visibility, reachable via #8's send/read/wait. Touches `orchestrate`'s Build
   handoff (the `codex exec` + `< /dev/null` model, and the `resume --last`
   cross-worktree hazard in #6 Part 2.3) — a gated branch of its own.
-  _(2026-07-08)_
+  ✅ **Mechanics smoke-tested (07-08):** `herdr agent start … -- codex` is
+  auto-detected as agent `codex` with live idle/working state; `send` + `pane
+  send-keys Enter` delivers prompts; `wait --status idle` blocks correctly; and
+  herdr captures the codex **session id**, which dissolves the `resume --last`
+  hazard. Tracked as backlog task-8; design doc next. _(2026-07-08)_

@@ -8,21 +8,42 @@ repo via a symlinked `@`-import — do not edit a copy; edit it in qq.
   behavioral floor and how work is routed.
 - **Actions** — curated skills, invoked as `/<name>`, linked live from qq's
   `skills/` into `~/.claude/skills/`.
-- **Knowledge** — `.understand-anything/knowledge-graph.json`: the map of what the
-  code *is*. Consult it for architecture / dependency / "where is X" questions;
-  build it with `/understand --auto-update` so the graph stays current with no
-  manual refresh.
+- **Knowledge** — the document stack, four documents with one maintainer each:
+  - *Code graph* — **codebase-memory** MCP tools (`search_graph`, `trace_path`,
+    `get_architecture`, …): a deterministic structural map, fully derived,
+    out-of-repo (`~/.cache`), auto-refreshed. Reach for it when a relational
+    question (impact, dependencies, architecture) gets expensive by grep;
+    plain file reading is still the default.
+  - *Intent + work status* — `backlog/` (Backlog.md): the registry of what the
+    operator wants and where work stands, one markdown file per task
+    (`backlog task create/edit/list`, `backlog board`). Create tasks in the
+    session that owns the main tree and **commit the new task file immediately**
+    — IDs are minted from committed branch state, so uncommitted tasks in
+    parallel worktrees can mint duplicates. Workers only edit tasks they claim.
+    The gate enforces the mechanical trust prerequisite: a landing that doesn't
+    touch the registry is refused; semantic correctness is still reviewed in
+    the PR (see Git below).
+  - *Durable descriptive docs* — `openwiki/` (OpenWiki): agent-written docs of
+    what the system *is*, refreshed inside the gate transaction at landing —
+    never pointed at the registry (it would rewrite "want" into "is").
+  - *Episodic docs* — `docs/solutions/` + `CONCEPTS.md` via `compound`:
+    solved problems and stabilized vocabulary, captured opportunistically.
 - **Sessions** — herdr (`herdr`): many named agents in parallel, each isolated in
   its own git worktree; herdr's sidebar shows which agent is blocked / working /
-  done / idle, so you see at a glance which one needs you.
+  done / idle, so you see at a glance which one needs you. Agents can also talk
+  to each other directly through herdr — `herdr agent list`, `send <target>
+  <text>` (follow with `herdr pane send-keys <pane> Enter` to submit), `read
+  <target>`, `wait <target> --status idle|working|blocked` — use it when
+  coordination helps; there is deliberately no protocol beyond these primitives
+  yet.
 - **Cockpit** — the operator's tuned terminal surface, linked from the qq repo:
   herdr, yazi, broot, glow, mdcat, shell navigation, and the `qq-phase` status line.
 - **Externals** — Context7 (live, version-correct library docs), `gh` (GitHub),
   `fd` / `eza` / `rg` (fast filesystem), and **the gate** (`no-mistakes`, an
-  external MIT tool): real work is *pushed to it* — an independent pipeline
-  reviews the code, runs the checks, and opens a PR. It implements the
-  `blast-radius` / `human` merge gates below — capability you push to, not
-  process you maintain.
+  external MIT tool): every landing is *pushed to it* — an independent pipeline
+  reviews the diff, runs the checks, requires a registry touch once `backlog/` is
+  adopted, refreshes adopted descriptive docs, and opens a PR. It is capability
+  you push to, not process you maintain.
 
 ## Behavioral floor (always)
 1. **Think before coding** — surface assumptions, offer interpretations, ask
@@ -32,23 +53,30 @@ repo via a symlinked `@`-import — do not edit a copy; edit it in qq.
    style; clean up only your own mess.
 4. **Goal-driven** — define verifiable success criteria, then loop until verified.
 
-## Routing (the escape hatch)
-Triage every task by size and reversibility first.
-- **Trivial + local + reversible** (typo, rename, one-liner): just do it — then
-  still run `verification-before-completion`.
+## Routing
+Triage every task by size and reversibility first. **Triage scales ceremony,
+never the landing path** — there is one workflow, and everything lands through
+the gate.
+- **Trivial + local + reversible** (typo, rename, one-liner): skip Align/Plan —
+  just do it, run `verification-before-completion`, commit on green to the
+  current working branch. Small changes batch on a branch and land as one
+  gated push; they do not commit straight to `main`.
 - **Everything else** (multi-file, ambiguous, irreversible): run the loop below,
   starting at Align — or hand the whole task to `orchestrate`, which conducts the
   loop end-to-end (Claude aligns / plans / verifies / reviews; Codex implements).
 
-The one invariant: **`verification-before-completion` is never skipped.**
+Two invariants: **`verification-before-completion` is never skipped**, and
+**no change reaches `main` except through the gate** — the second is what makes
+the intent registry (`backlog/`) trustworthy: one landing path means one
+enforcement point.
 
 ## The loop
 1. **Align** — `grilling` / `grill-me`: resolve intent and open decision branches
    before building.
 2. **Plan** — `writing-plans`: turn the agreed intent into an executable,
    step-by-step plan. Work it with `executing-plans`; land it with
-   `finishing-a-development-branch` — real work through the gate (`git push
-   no-mistakes`), trivial work straight to `main`.
+   `finishing-a-development-branch` — through the gate (`git push
+   no-mistakes <branch>`), like everything else.
 3. **Build** — implement per the plan, honoring the floor. Stuck on a bug? →
    `diagnosing-bugs`.
 4. **Verify (autonomous)** — `verification-before-completion`: run the real
@@ -77,8 +105,7 @@ background skill can stamp the same surface with free-form phases (e.g.
 ## Git — how work lands
 - **Commit on green.** A commit is a claim: commit only what
   `verification-before-completion` just proved — one commit per verified task or
-  batch. History stays bisectable, and the post-commit knowledge-graph hook keeps
-  the map fresh (commits are its heartbeat). Un-green WIP never reaches a shared branch.
+  batch. History stays bisectable. Un-green WIP never reaches a shared branch.
 - **Push the branch after each green commit** — always fast-forward-safe; durability
   plus live visibility for your partner.
 - **Undo is `git revert`** to the last green commit — forward and clean, never
@@ -93,15 +120,15 @@ background skill can stamp the same surface with free-form phases (e.g.
   the coordination model — no file locks. True shared-file work stays serial in the
   main tree, one agent at a time.
 
-**Merge gate is a per-project setting** — how green work reaches `main`:
-- `trunk` — commit on green straight to `main` and push; review is in-process
-  (`code-review`) plus async audit. Fastest; fits a solo repo.
-- `blast-radius` — low-risk green work commits straight to `main`; real work
-  (user-facing / irreversible / ambiguous) is pushed through **the gate**
-  (`git push no-mistakes <branch>`) — an independent pipeline validates it and
-  opens a PR a human merges. The git gate mirrors the Sign-off routing.
-- `human` — every task lands via a human-approved PR (the same gate, every task
-  routed to a PR); agents never touch `main`.
+**Merge gate: all-gated — one landing path.** Green work accumulates on its
+branch; landing is always `git push no-mistakes <branch>` — the independent
+pipeline reviews the diff, runs the checks (including the registry check: a
+diff that doesn't touch `backlog/` is refused once the registry exists),
+refreshes `openwiki/` inside the same transaction once configured, and opens a
+PR a human merges with one click. The former `trunk` / `blast-radius` modes are
+retired (operator decision, 2026-07-07): a second landing path would be a second —
+unenforced — registry producer, and partial coverage cannot serve as truth.
+Agents never touch `main`.
 
 ## Skill index
 | skill | reach for it when |
@@ -110,8 +137,8 @@ background skill can stamp the same surface with free-form phases (e.g.
 | `grilling` / `grill-me` | starting non-trivial work — pin down intent first |
 | `writing-plans` | turning agreed intent into an executable plan |
 | `executing-plans` | working a plan task-by-task (stops on blockers; won't touch main without consent) |
-| `finishing-a-development-branch` | landing finished work — for gated work the gate does rebase / push / PR, so this narrows to the merge decision |
-| `git push no-mistakes` (the gate) | landing *real* work — an external pipeline validates the diff and opens a PR; see "Git — how work lands" |
+| `finishing-a-development-branch` | landing finished work — the gate does rebase / push / PR, so this narrows to the merge decision |
+| `git push no-mistakes` (the gate) | landing work, always — the external pipeline validates the diff and opens a PR; see "Git — how work lands" |
 | `verification-before-completion` | before ANY "done / passing / fixed" claim (never skipped) — and the pre-push smoke test before handing a branch to the gate |
 | `uat-signoff` | a user-facing / irreversible / ambiguous change needs human acceptance |
 | `diagnosing-bugs` | a bug, failing test, or unexpected behavior |

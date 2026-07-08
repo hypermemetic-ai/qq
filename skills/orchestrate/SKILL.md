@@ -1,6 +1,6 @@
 ---
 name: orchestrate
-description: Conducts a non-trivial engineering task through qq's full loop as a two-model split — Claude conducts and judges in the main session while Codex does the implementation — so interactive work and noisy reads never pollute the conductor's context and the reviewer is never the author. Use to take a real build task from intent to a landed, verified change end-to-end; not for questions, lookups, or trivial one-liners, which take the escape hatch.
+description: Conducts a non-trivial engineering task through qq's full loop as a two-model split — Claude conducts and judges in the main session while Codex does the implementation — so interactive work and noisy reads never pollute the conductor's context and the reviewer is never the author. Use to take a real build task from intent to a landed, verified change end-to-end; not for questions, lookups, or trivial one-liners, which use the small-change shortcut.
 ---
 
 # Orchestrate
@@ -30,10 +30,10 @@ Two rules make the separation real:
 - **Once a task enters the loop, you never implement — Codex does.** Not "to save a
   round-trip," not "it's a one-liner inside a bigger task." The moment Claude writes
   shipped code, the later review and verification are grading their own author. The
-  only code you write yourself is triage's escape hatch (step 0), which never enters
-  the loop.
+  only code you write yourself is triage's small-change shortcut (step 0), which
+  never enters the loop.
 - **`verification-before-completion` is never skipped** — on the conducted path or
-  the escape hatch. This is the AGENTS.md invariant; it holds here too.
+  the small-change shortcut. This is the AGENTS.md invariant; it holds here too.
 
 ## The run
 
@@ -45,13 +45,14 @@ status` steps). It is the loop's only self-report; without it the widget shows
 `idle`. Refinements: on a Build hand-off add `--detail "handoff k/n"`; on Verify
 set `--status green` or `--status red`; when you push to the gate add `--gate`
 (attaches the run id). Run `qq-phase done` after Compound, or whenever you stop
-conducting. The escape hatch (step 0) does not stamp — it never enters the loop.
+conducting. The small-change shortcut (step 0) does not stamp — it never enters
+the loop.
 
 ### 0 — Triage first
 Trivial + local + reversible (typo, rename, one-liner)? Do it here, run
-`verification-before-completion`, commit on green (land per the project's Git mode —
-AGENTS.md § Git), stop. No Codex, no phases — the command must not turn a rename into
-a ceremony. Everything else conducts the loop below.
+`verification-before-completion`, commit on green, then land through the gate per
+AGENTS.md § Git. No Codex, no phases — the command must not turn a rename into a
+ceremony. Everything else conducts the loop below.
 
 ### 1 — Align (main)
 `grilling` / `grill-me` with the owner: pin intent and resolve the open decision
@@ -84,8 +85,9 @@ After each handoff, dispatch a Claude sub-agent to run `verification-before-comp
 against the real commands; it returns the evidence bundle (command + full output),
 not the churn.
 
-- **Green** → commit the verified work and land it per the project's Git mode
-  (AGENTS.md § Git); then the next handoff, or step 5 once the plan is done.
+- **Green** → commit the verified work and push the branch for durability; then the
+  next handoff, or step 5 once the plan is done. The completed branch lands through
+  the gate per AGENTS.md § Git.
 - **Red** → hand the failing evidence back to Codex (`codex exec resume --last`) to
   fix, then re-verify. After **2** failed Codex rounds on the same failure, stop and
   bring it to the owner in the main session — don't grind.
@@ -95,7 +97,7 @@ User-facing, irreversible, or ambiguous change? → `uat-signoff` with the owner
 seeded by step 4's evidence. Otherwise skip.
 
 ### 6 — Review (sub-agents)
-Dispatch `code-review` (Standards + Spec) as sub-agents; they return the two reports.
+Dispatch `code-review` (Standards + Intent) as sub-agents; they return the two reports.
 Codex wrote the code and Claude reviews it, so this is a genuine second pair of eyes.
 Weigh the feedback with `receiving-code-review` — don't rubber-stamp it.
 
@@ -106,13 +108,13 @@ Solved something worth not relearning? → dispatch `ce-compound` to capture it 
 ## Done means
 Report to the owner only when the plan's tasks are implemented by Codex,
 verification is green with evidence, any required sign-off is granted, review is
-in hand, and the work is landed per the project's Git mode. Name what Codex built,
+in hand, and the branch has been pushed through the gate. Name what Codex built,
 paste the verifying evidence, link the review. A
 "done" without the green evidence bundle is not done.
 
 ## When NOT to use
-- A trivial, local, reversible change — that's the escape hatch in step 0, not a
-  reason to spin up the loop.
+- A trivial, local, reversible change — that's the small-change shortcut in step 0,
+  not a reason to spin up the loop.
 - A question, a lookup, a read — answer it; orchestration is for landing a change.
 - A pure investigation with no build — use `research`.
 - Work already mid-loop — resume the phase you're in; don't restart the conductor.

@@ -1,6 +1,0 @@
-# understand-anything scratch — regenerated on every run, not durable.
-# Commit the graph itself (knowledge-graph.json, meta.json, fingerprints.json,
-# config.json, .understandignore); ignore the working artifacts below.
-intermediate/
-.trash-*/
-tmp/

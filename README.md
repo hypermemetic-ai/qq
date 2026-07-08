@@ -14,15 +14,16 @@ Operating rules live in [`AGENTS.md`](./AGENTS.md) (loaded every session;
 |---|---|---|
 | **Rules** | repo header + linked methodology | `AGENTS.md`, `qq-methodology.md` |
 | **Actions** | curated, invocable skills linked live | `skills/` → `~/.claude/skills/` |
-| **Knowledge** | auto-generated map of the code | `.understand-anything/knowledge-graph.json` |
+| **Knowledge** | the document stack: code graph · intent + work status · durable docs · episodic docs | codebase-memory MCP (out-of-repo) · `backlog/` · `openwiki/` · `docs/solutions/` + `CONCEPTS.md` |
 | **Sessions** | many named parallel agents, each in its own worktree, state-aware | herdr (`herdr`) |
 | **Cockpit** | human-driven terminal tools + status line + tuned configs | `cockpit/`, `bin/qq-phase` |
 | **Externals** | live docs · GitHub · fast filesystem · gate | Context7 · `gh` · `fd`/`eza`/`rg` · `no-mistakes` |
 
 ## The loop
 **Align → Plan → Build → Verify (autonomous) → Sign-off (human, gated) → Review →
-Compound.** Trivial work takes the escape hatch — do it directly — but *never*
-skips verification. Full detail in `AGENTS.md`. Invoke `orchestrate` to run the
+Compound.** Ceremony scales with the task — trivial work skips Align/Plan and is
+just done — but *nothing* skips verification, and everything lands through the
+gate. Full detail in `AGENTS.md`. Invoke `orchestrate` to run the
 whole loop end-to-end as one command — Claude conducts, Codex implements.
 Long-running work stamps `.qq/state.json` with `qq-phase`, and `qq-phase render`
 feeds the Claude Code status line with the current phase plus any live gate step.
@@ -35,8 +36,9 @@ as `/grilling`, `/executing-plans`, and so on. The index is in `AGENTS.md`; full
 provenance is in [`SKILLS-ATTRIBUTION.md`](./SKILLS-ATTRIBUTION.md).
 
 ## Setup
-1. **Preflight** — `bash bin/install.sh` checks the external surface and cockpit
-   tools, then prints exact install hints for anything missing.
+1. **Preflight** — `bash bin/install.sh` checks the external surface, document
+   stack, and cockpit tools, then prints exact install hints for anything
+   missing.
 2. **One-shot activation** — `bash bin/qq-activate.sh` installs the guardrail
    hook, wires the WIP savepoint and `qq-phase` status line, symlinks cockpit
    configs from this repo into `~/.config`, and links skills into
@@ -50,16 +52,26 @@ provenance is in [`SKILLS-ATTRIBUTION.md`](./SKILLS-ATTRIBUTION.md).
    ```
    bash bin/qq-link.sh repo <path>
    ```
-   This adds the live methodology symlink, ensures the repo imports it, merges
+   This adds the live methodology symlink, ensures the repo imports it, records
+   the all-gated landing path in newly scaffolded `AGENTS.md` files, merges
    Context7 into `.mcp.json`, seeds `CONCEPTS.md` only when missing, and ignores
-   the transient `.qq/` status directory.
+   the transient `.qq/` status directory. Retired gate values
+   (`trunk` / `blast-radius` / `human`) are rejected.
 5. **Cockpit** — `cockpit/` is the source of truth for yazi, glow, herdr, and
    shell navigation. `herdr prefix+f` opens `qqy`; yazi starts at the repo root;
    pressing Enter on `.md` renders in-pane via mdcat or the tuned Glow theme.
 6. **Context7** (live library docs) — `.mcp.json` is set; approve the `context7`
    server on next session start.
-7. **Knowledge layer** — `/plugin marketplace add Egonex-AI/Understand-Anything`
-   → `/plugin install understand-anything` → `/understand`.
+7. **Knowledge layer** — install
+   [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)
+   (`install.sh --skip-config`, then `claude mcp add --scope user codebase-memory`
+   + the `[mcp_servers.codebase-memory]` block in `~/.codex/config.toml`); the
+   index is fully derived, lives in `~/.cache`, and auto-refreshes
+   (`auto_index`/`auto_watch`); agents reach it as on-demand MCP tools. The intent
+   registry is `backlog/` ([Backlog.md](https://github.com/MrLesk/Backlog.md),
+   `npm i -g backlog.md`); durable docs are `openwiki/`
+   ([OpenWiki](https://github.com/langchain-ai/openwiki), `npm i -g openwiki`,
+   key in `~/.openwiki/.env`).
 8. **Sessions** — install herdr (`brew install herdr`), then
    `herdr integration install claude codex` so it tracks agent state. Fan out with
    `herdr worktree create --branch <name>` + `herdr agent start <name> --cwd <worktree> -- claude`.

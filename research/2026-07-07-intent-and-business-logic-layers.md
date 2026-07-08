@@ -260,9 +260,22 @@ Trade against beads, stated honestly: Backlog.md's tasks are plain tracked
 markdown — human-legible, diffable, exit-friendly, no binary Dolt store, no
 schema migrations. But they live **in the branch dimension** (beads' one
 verified superpower was living outside it), so cross-worktree task visibility
-and merge behavior need the same smoke test beads got **before** the gate
-check is wired. No smoke test has been run yet; details above are
-repo-README-grade, not exercised.
+and merge behavior needed the same smoke test beads got.
+
+**✅ Smoke test executed (07-08, v1.47.1, scratch repo, two worktrees):**
+- **ID minting is cross-branch aware for *committed* state** — with
+  `check_active_branches: true`, worktree B minted task-3 after seeing
+  worktree A's committed task-2 on a sibling branch. ✅
+- **Uncommitted window mints duplicates** — a task created-but-uncommitted in
+  one worktree is invisible to the other; both minted task-3. After merging,
+  git is clean (different filenames) but Backlog mishandles the duplicate
+  *silently*: `task list` shows one task-3, `backlog task 3` opens the other. ❌
+- **Same-task edits on two branches** → an ordinary, *visible* git conflict in
+  the task file (status line) — predictable, resolvable, not silent. ✅
+- **Operating rule adopted** (now in the methodology): create tasks in the
+  session that owns the main tree and commit the new task file immediately;
+  workers only edit tasks they claim. That closes the duplicate window;
+  everything else merges like normal markdown.
 
 The full settled document stack as of 07-08 (operator): structure =
 codebase-memory-mcp (an efficient, different way for agents to look at the

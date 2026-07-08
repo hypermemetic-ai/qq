@@ -53,12 +53,23 @@ for t in yazi broot glow mdcat; do
 done
 echo
 
-bold "Knowledge — Understand-Anything (documentation layer)"
-if [ -f .understand-anything/knowledge-graph.json ]; then ok "knowledge graph present"; else
-  miss "not built yet. In a Claude Code session:"
-  miss "  /plugin marketplace add Egonex-AI/Understand-Anything"
-  miss "  /plugin install understand-anything"
-  miss "  /understand           # builds .understand-anything/knowledge-graph.json"
+bold "Knowledge — the document stack"
+if have codebase-memory-mcp; then ok "codebase-memory-mcp (code graph, out-of-repo index)"; else
+  miss "codebase-memory-mcp  →  see github.com/DeusData/codebase-memory-mcp"
+  miss "  install.sh --skip-config, then wire MCP for Claude Code + Codex manually"
+fi
+if have backlog; then ok "backlog (intent + work status registry)"; else
+  miss "backlog  →  npm i -g backlog.md"
+fi
+if have openwiki; then
+  openwiki_env="$HOME/.openwiki/.env"
+  if [ ! -f "$openwiki_env" ]; then
+    miss "openwiki installed but ~/.openwiki/.env is missing"
+  elif grep -qs "PASTE_KEY_HERE" "$openwiki_env"; then
+    miss "openwiki installed but ~/.openwiki/.env still needs a real API key"
+  else ok "openwiki (durable descriptive docs)"; fi
+else
+  miss "openwiki  →  npm i -g openwiki  (then set provider/key in ~/.openwiki/.env)"
 fi
 echo
 

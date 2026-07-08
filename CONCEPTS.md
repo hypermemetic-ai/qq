@@ -13,3 +13,17 @@ and gate progress without transcript chatter.
 **qq-phase** — The `bin/qq-phase` command that writes background-work phase state,
 renders the one-line status widget, and optionally attaches the active
 `no-mistakes` gate run.
+
+**document stack** — The four-document knowledge layer, one maintainer each:
+code graph (codebase-memory MCP, derived + out-of-repo) · intent registry
+(`backlog/`, gate-enforced) · durable descriptive docs (`openwiki/`,
+gate-refreshed) · episodic docs (`docs/solutions/` + `CONCEPTS.md`, compound).
+
+**intent registry** — `backlog/` (Backlog.md): what the operator wants and where
+work stands, one markdown file per task. Trustworthy only because it is total —
+the gate refuses any landing that doesn't touch it once adopted
+(`bin/qq-registry-check.sh`); PR review checks whether that touch is truthful.
+
+**one landing path** — The all-gated merge rule: every change reaches `main` via
+`git push no-mistakes <branch>` → validated PR. Triage scales ceremony, never the
+landing path; trivial fixes batch on a branch.

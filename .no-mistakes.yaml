@@ -1,16 +1,17 @@
-# qq's blast-radius merge gate — externally owned (MIT: kunchenguid/no-mistakes).
-# Real work is pushed through the gate (`git push no-mistakes <branch>`), validated by an
-# independent pipeline (review/test/lint/docs), and lands as a PR; trivial work still
-# commits straight to main.
+# qq's merge gate — externally owned (MIT: kunchenguid/no-mistakes).
+# One landing path: everything is pushed through the gate (`git push no-mistakes
+# <branch>`), validated by an independent pipeline (review/test/lint/docs), and
+# lands as a PR a human merges. Trivial fixes batch on a branch; nothing commits
+# straight to main.
 #
 # NOTE: `agent` + `commands` are read from the DEFAULT BRANCH (a no-mistakes security
 # rule) — this file only takes effect once committed to main.
 # Ref: https://kunchenguid.github.io/no-mistakes/reference/repo-config/
 agent: codex          # gate's pipeline stages run on gpt-5.5 (via ~/.codex/config.toml), not Opus
 commands:
-  lint: "shellcheck bin/qq-wip bin/qq-wip-snapshot.sh bin/qq-activate.sh bin/install.sh bin/qq-phase"
-  format: ""            # no formatter wired (shfmt optional, not required)
-  test: ""              # no formal suite; the gate's agent validates behavior against --intent
+  lint: "shellcheck bin/qq-wip bin/qq-wip-snapshot.sh bin/qq-activate.sh bin/install.sh bin/qq-phase bin/qq-registry-check.sh bin/qq-openwiki-refresh"
+  format: "bin/qq-openwiki-refresh"   # refresh openwiki/ inside the landing transaction (guarded no-op until adopted+keyed)
+  test: "bash -c 'set -euo pipefail; git show refs/remotes/origin/main:bin/qq-registry-check.sh | bash'"    # refuse a landing that doesn't touch the intent registry (backlog/)
 intent:
   enabled: true
 test:

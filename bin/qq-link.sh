@@ -8,7 +8,7 @@ usage() {
   cat <<EOF
 usage:
   bash bin/qq-link.sh skills
-  bash bin/qq-link.sh repo <path> [--gate <trunk|blast-radius|human>]
+  bash bin/qq-link.sh repo <path> [--gate all-gated]
 EOF
 }
 
@@ -83,7 +83,7 @@ ensure_agents_import() {
 
   base="$(basename "$repo")"
   if [ ! -e "$agents" ]; then
-    printf "# %s — agent operating rules\n\nThis project runs on qq. Merge gate: \`%s\`.\n\n## Methodology\n@.claude/qq-methodology.md\n" "$base" "$gate" > "$agents"
+    printf "# %s — agent operating rules\n\nThis project runs on qq. Merge gate: %s — one landing path.\n\n## Methodology\n@.claude/qq-methodology.md\n" "$base" "$gate" > "$agents"
     printf 'scaffolded: %s\n' "$agents"
     return
   fi
@@ -173,7 +173,7 @@ ensure_gitignore() {
 
 link_repo() {
   local repo
-  local gate="blast-radius"
+  local gate="all-gated"
 
   if [ "$#" -lt 1 ]; then
     usage >&2
@@ -197,7 +197,8 @@ link_repo() {
   done
 
   case "$gate" in
-    trunk|blast-radius|human) ;;
+    all-gated) ;;
+    trunk|blast-radius|human) die "retired gate: $gate (use all-gated)" ;;
     *) die "unknown gate: $gate" ;;
   esac
 

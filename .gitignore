@@ -6,3 +6,7 @@
 
 # background-work progress — transient per-repo state a status widget reads
 .qq/
+
+# retired knowledge-layer plugin residue — the code graph now lives out-of-repo
+# (codebase-memory-mcp, ~/.cache); nothing under here is ever tracked again
+.understand-anything/
