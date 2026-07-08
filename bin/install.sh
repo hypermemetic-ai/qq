@@ -62,7 +62,10 @@ if have backlog; then ok "backlog (intent + work status registry)"; else
   miss "backlog  →  npm i -g backlog.md"
 fi
 if have openwiki; then
-  if grep -qs "PASTE_KEY_HERE" "$HOME/.openwiki/.env" 2>/dev/null; then
+  openwiki_env="$HOME/.openwiki/.env"
+  if [ ! -f "$openwiki_env" ]; then
+    miss "openwiki installed but ~/.openwiki/.env is missing"
+  elif grep -qs "PASTE_KEY_HERE" "$openwiki_env"; then
     miss "openwiki installed but ~/.openwiki/.env still needs a real API key"
   else ok "openwiki (durable descriptive docs)"; fi
 else

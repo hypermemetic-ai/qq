@@ -27,9 +27,9 @@ if [ ! -f "$env_file" ] || grep -qs "PASTE_KEY_HERE" "$env_file"; then
 fi
 
 say "refreshing openwiki/ against this diff (timeout 10m)..."
-if timeout 600 openwiki --update </dev/null; then
+if timeout 600 openwiki --update --print </dev/null; then
   say "refresh complete."
 else
-  say "WARNING: openwiki --update failed or timed out; landing proceeds with stale descriptive docs."
+  say "WARNING: openwiki --update --print failed or timed out; landing proceeds with stale descriptive docs."
 fi
 exit 0
