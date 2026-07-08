@@ -75,8 +75,7 @@ enforcement point.
    before building.
 2. **Plan** — `writing-plans`: turn the agreed intent into an executable,
    step-by-step plan. Work it with `executing-plans`; land it with
-   `finishing-a-development-branch` — through the gate (`git push
-   no-mistakes <branch>`), like everything else.
+   `finishing-a-development-branch` — through the gate, like everything else.
 3. **Build** — implement per the plan, honoring the floor. Stuck on a bug? →
    `diagnosing-bugs`.
 4. **Verify (autonomous)** — `verification-before-completion`: run the real
@@ -121,14 +120,25 @@ background skill can stamp the same surface with free-form phases (e.g.
   main tree, one agent at a time.
 
 **Merge gate: all-gated — one landing path.** Green work accumulates on its
-branch; landing is always `git push no-mistakes <branch>` — the independent
-pipeline reviews the diff, runs the checks (including the registry check: a
-diff that doesn't touch `backlog/` is refused once the registry exists),
-refreshes `openwiki/` inside the same transaction once configured, and opens a
-PR a human merges with one click. The former `trunk` / `blast-radius` modes are
-retired (operator decision, 2026-07-07): a second landing path would be a second —
-unenforced — registry producer, and partial coverage cannot serve as truth.
-Agents never touch `main`.
+branch; landing is always through the gate — the independent pipeline reviews
+the diff, runs the checks (including the registry check: a diff that doesn't
+touch `backlog/` is refused once the registry exists), refreshes `openwiki/`
+inside the same transaction once configured, and opens a PR a human merges with
+one click. The former `trunk` / `blast-radius` modes are retired (operator
+decision, 2026-07-07): a second landing path would be a second — unenforced —
+registry producer, and partial coverage cannot serve as truth. Agents never
+touch `main`.
+
+**The landing agent owns the run (operator decision, 2026-07-08).** Drive the
+gate with `no-mistakes axi run --intent "<backlog task + acceptance criteria>"`
+— exact intent in, transcript inference demoted to fallback (`git push
+no-mistakes <branch>` remains the equivalent trigger). The pipeline is
+fire-and-forget for the operator: objective review findings auto-fix
+(`auto_fix.review: 3` in `.no-mistakes.yaml`); `ask-user` findings park the run
+and the landing agent — never the operator — relays the question, then answers
+with `no-mistakes axi respond`. The operator's only touchpoints are a relayed
+judgment call and the PR merge click. A parked landing agent shows as blocked
+in herdr; the `qq-phase` status line shows the gate step.
 
 ## Skill index
 | skill | reach for it when |
@@ -138,7 +148,7 @@ Agents never touch `main`.
 | `writing-plans` | turning agreed intent into an executable plan |
 | `executing-plans` | working a plan task-by-task (stops on blockers; won't touch main without consent) |
 | `finishing-a-development-branch` | landing finished work — the gate does rebase / push / PR, so this narrows to the merge decision |
-| `git push no-mistakes` (the gate) | landing work, always — the external pipeline validates the diff and opens a PR; see "Git — how work lands" |
+| the gate (`no-mistakes axi run --intent`, or `git push no-mistakes`) | landing work, always — the external pipeline validates the diff and opens a PR; see "Git — how work lands" |
 | `verification-before-completion` | before ANY "done / passing / fixed" claim (never skipped) — and the pre-push smoke test before handing a branch to the gate |
 | `uat-signoff` | a user-facing / irreversible / ambiguous change needs human acceptance |
 | `diagnosing-bugs` | a bug, failing test, or unexpected behavior |

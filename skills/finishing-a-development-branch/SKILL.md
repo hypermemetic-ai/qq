@@ -8,8 +8,9 @@ description: Use when implementation is complete, verification is green, and you
 ## Overview
 
 Complete development work without inventing a second landing path. qq is
-all-gated: finished work lands through `git push no-mistakes <branch>` and the
-gate opens the PR.
+all-gated: finished work lands through the gate — `no-mistakes axi run --intent
+"<backlog task + acceptance criteria>"`, or the equivalent `git push
+no-mistakes <branch>` — and the gate opens the PR.
 
 **Core principle:** Verify evidence → confirm branch state → present the finish
 decision → push to the gate or preserve the work.
@@ -54,7 +55,7 @@ Present exactly these options:
 ```text
 Implementation is verified on branch <branch>. What would you like to do?
 
-1. Land through the gate (`git push no-mistakes <branch>`)
+1. Land through the gate (`no-mistakes axi run --intent "…"`)
 2. Keep the branch as-is
 3. Discard this work
 
@@ -67,14 +68,20 @@ Do not offer a local merge or direct `origin` push.
 
 #### Option 1: Land Through The Gate
 
-Run:
+Run, with the intent taken from the Backlog.md task this landing closes:
 
 ```bash
-git push no-mistakes <branch>
+no-mistakes axi run --intent "<task title + acceptance criteria>"
 ```
 
-Read the gate output and report the PR or gate status. If the gate parks at a
-decision point, handle it through the gate's documented response flow.
+(`git push no-mistakes <branch>` is the equivalent trigger when no explicit
+intent is available; the gate then infers intent from transcripts.)
+
+**You own this run — the operator never babysits it.** Objective review
+findings auto-fix (`auto_fix.review`). If the run parks with `ask-user`
+findings, relay each finding's ID, file, and full description to the owner,
+then answer with `no-mistakes axi respond`. Report the PR or gate status when
+the run completes.
 
 #### Option 2: Keep As-Is
 
@@ -109,4 +116,4 @@ explicitly asked for that exact cleanup and the workspace is known to be yours.
 - Verify before finishing
 - Work from a feature branch
 - Preserve unrelated changes
-- Land through `git push no-mistakes <branch>`
+- Land through the gate (`no-mistakes axi run --intent`, or `git push no-mistakes <branch>`)

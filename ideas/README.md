@@ -119,3 +119,10 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   send-keys Enter` delivers prompts; `wait --status idle` blocks correctly; and
   herdr captures the codex **session id**, which dissolves the `resume --last`
   hazard. Tracked as backlog task-8; design doc next. _(2026-07-08)_
+- **#10 · Expand–contract for wide refactors** _(captured 07-08)._ mattpocock
+  v1.1's `to-tickets` slices a wide refactor (one mechanical change,
+  whole-codebase blast radius, no green vertical slice possible) by
+  expand–contract: expand the new form beside the old, migrate call sites in
+  batches, contract the old form away. Deliberately not folded into
+  `writing-plans` yet — nothing speculative; reach for it when a real wide
+  refactor shows up. _(2026-07-08)_
