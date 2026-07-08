@@ -63,9 +63,80 @@ WRAPPERS = {"sudo", "doas", "env", "command", "nohup", "nice", "time",
 SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 GIT_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace",
                   "--exec-path", "--super-prefix"}
+ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+SUDO_VALUE_OPTS = {"-u", "--user", "-g", "--group", "-h", "--host", "-p",
+                   "--prompt", "-C", "--close-from", "-T", "--command-timeout",
+                   "--chdir", "--role", "--type", "--login-class"}
+ENV_VALUE_OPTS = {"-u", "--unset", "-C", "--chdir", "-S", "--split-string",
+                  "--argv0"}
+TIMEOUT_VALUE_OPTS = {"-s", "--signal", "-k", "--kill-after"}
+XARGS_VALUE_OPTS = {"-a", "--arg-file", "-d", "--delimiter", "-E", "--eof",
+                    "-I", "--replace", "-L", "--max-lines", "-n", "--max-args",
+                    "-P", "--max-procs", "-s", "--max-chars"}
+STDBUF_VALUE_OPTS = {"-i", "--input", "-o", "--output", "-e", "--error"}
+TIME_VALUE_OPTS = {"-f", "--format", "-o", "--output"}
 
 def base(tok):
     return tok.rsplit("/", 1)[-1]
+
+def is_assignment(tok):
+    return ASSIGNMENT_RE.match(tok) is not None
+
+def option_matches(tok, names):
+    return any(tok == name or tok.startswith(name + "=") for name in names)
+
+def skip_options(seg, j, value_opts, allow_assignments=False):
+    while j < len(seg):
+        t = seg[j]
+        if t == "--":
+            return j + 1
+        if allow_assignments and is_assignment(t):
+            j += 1
+            continue
+        if option_matches(t, value_opts):
+            j += 1 if "=" in t else 2
+            continue
+        if t.startswith("-") and t != "-":
+            j += 1
+            continue
+        break
+    return j
+
+def wrapped_command_start(cmd, seg, j):
+    if cmd in ("sudo", "doas"):
+        return skip_options(seg, j, SUDO_VALUE_OPTS)
+    if cmd == "env":
+        return skip_options(seg, j, ENV_VALUE_OPTS, allow_assignments=True)
+    if cmd == "timeout":
+        j = skip_options(seg, j, TIMEOUT_VALUE_OPTS)
+        return j + 1 if j < len(seg) else j
+    if cmd == "xargs":
+        return skip_options(seg, j, XARGS_VALUE_OPTS)
+    if cmd == "stdbuf":
+        return skip_options(seg, j, STDBUF_VALUE_OPTS)
+    if cmd == "nice":
+        if j < len(seg) and seg[j] == "-n":
+            j += 2
+        elif j < len(seg) and re.match(r"^-\d+$", seg[j]):
+            j += 1
+        return j
+    if cmd == "time":
+        return skip_options(seg, j, TIME_VALUE_OPTS)
+    if cmd == "command":
+        lookup_only = False
+        while j < len(seg):
+            t = seg[j]
+            if t == "--":
+                j += 1
+                break
+            if not t.startswith("-") or t == "-":
+                break
+            if re.match(r"^-[A-Za-z]+$", t) and ("v" in t[1:] or "V" in t[1:]):
+                lookup_only = True
+            j += 1
+        return None if lookup_only else j
+    return j
 
 def long_flag(args, name):
     for t in args:
@@ -128,10 +199,10 @@ def analyze_git(args):
         block("'git update-ref -d' (ref deletion)")
 
 def analyze(seg, depth):
-    if depth > 4 or not seg:
+    if depth > 8 or not seg:
         return
     i = 0
-    while i < len(seg) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", seg[i]):
+    while i < len(seg) and is_assignment(seg[i]):
         i += 1                           # skip VAR=val prefixes
     if i >= len(seg):
         return
@@ -150,11 +221,9 @@ def analyze(seg, depth):
                 analyze_string(t, depth + 1)
                 return
     elif cmd in WRAPPERS:
-        # re-anchor at the first bare git token, robust across wrapper flags
-        for j in range(i + 1, len(seg)):
-            if base(seg[j]) == "git":
-                analyze_git(seg[j + 1:])
-                return
+        j = wrapped_command_start(cmd, seg, i + 1)
+        if j is not None and j < len(seg):
+            analyze(seg[j:], depth + 1)
 
 def analyze_string(text, depth=0):
     for seg in simple_commands(tokenize(text)):

@@ -45,9 +45,13 @@ check block 'git status
 git reset --hard'
 check block 'bash -c "git push --force"'
 check block "sh -lc 'git reset --hard'"
+check block "sudo sh -c 'git reset --hard'"
+check block "env bash -c 'git push --force'"
 check block 'timeout 5 git reset --hard'
+check block "timeout 5 bash -c 'git push --delete origin feature-x'"
 check block 'sudo git clean -fd'
 check block 'xargs git branch -D < branches.txt'
+check block "xargs sh -c 'git update-ref -d refs/wip/main'"
 check block 'git -C /some/repo reset --hard'
 check block 'GIT_DIR=/x/.git git reset --hard'
 check block 'echo $(git reset --hard)'
@@ -73,6 +77,9 @@ check allow 'git restore --staged file.txt'
 check allow 'git reflog'
 check allow 'git update-ref refs/wip/b abc123 def456'
 check allow 'echo "git push --force"'
+check allow 'sudo echo "git reset --hard"'
+check allow "xargs echo git reset --hard"
+check allow 'command -v git reset --hard'
 check allow "printf 'git reset --hard\\n' > notes.md"
 check allow "git log --grep 'filter-branch'"
 check allow 'git push origin HEAD:refs/heads/feature'
