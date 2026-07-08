@@ -37,7 +37,7 @@ if [ "$base" = "$(git rev-parse HEAD)" ]; then
   exit 0
 fi
 
-changed=$(git diff --name-only "$base"...HEAD)
+changed=$(git -c core.quotePath=false diff --name-only "$base"...HEAD)
 if [ -z "$changed" ]; then
   say "empty diff — nothing to check."
   exit 0
