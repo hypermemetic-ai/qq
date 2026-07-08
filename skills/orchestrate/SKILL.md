@@ -42,8 +42,10 @@ below, run `qq-phase <PhaseName>` (`Align`→`Plan`→`Build`→`Verify`→`Sign
 `Review`→`Compound`). This writes `.qq/state.json` — the cheap, token-free source
 of truth a status widget reads (merged with the gate's own `no-mistakes axi
 status` steps). It is the loop's only self-report; without it the widget shows
-`idle`. Refinements: on a Build hand-off add `--detail "handoff k/n"`; on Verify
-set `--status green` or `--status red`; when you push to the gate add `--gate`
+`idle`. Orchestrate uses the default `main` producer slot; background skills that
+share the surface must pass `--producer <id>` on every stamp and on `done`/`clear`.
+Refinements: on a Build hand-off add `--detail "handoff k/n"`; on Verify set
+`--status green` or `--status red`; when you push to the gate add `--gate`
 (attaches the run id). Run `qq-phase done` after Compound, or whenever you stop
 conducting. The small-change shortcut (step 0) does not stamp — it never enters
 the loop.

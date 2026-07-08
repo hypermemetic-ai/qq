@@ -27,13 +27,14 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   appropriateness judgment living *inside* the skill, not a yes/no prompt. _(2026-07-06 → 07)_
 - **#5 · Background-status substrate** → [`02-orchestrate-phase-state.md`](02-orchestrate-phase-state.md).
   ✅ **Built + verified (07-07), landing via the gate** (branch `feat/status-substrate`).
-  Resurrected the salvaged patch and widened it per the note: single writer **`bin/qq-phase`**
-  stamps the current phase to **`.qq/state.json`** (neutral home, not `.orchestrate/`), and the
+  Resurrected the salvaged patch and widened it per the note: **`bin/qq-phase`**
+  stamps producer slots to **`.qq/state.json`** (neutral home, not `.orchestrate/`), and the
   reader is folded into the same script as **`qq-phase render`** — wired into the **Claude Code
-  status line** via `qq-activate.sh`, merging the live gate step from `no-mistakes axi status`.
-  Any producer can stamp free-form phases (`capturing`, `researching`) and finish with `qq-phase
-  done`, so **#1 rides it for free**. The `02-*.md` note now records the built shape; the archived
-  patch is safe to retire once merged. _(2026-07-06 → 07)_
+  status line** via `qq-activate.sh`, joining active slots and merging the live gate step from
+  `no-mistakes axi status`. Any producer can stamp free-form phases (`capturing`, `researching`)
+  with `--producer <id>` and finish with `qq-phase done --producer <id>`, so **#1 rides it for
+  free**. The `02-*.md` note now records the built shape; the archived patch is safe to retire
+  once merged. _(2026-07-06 → 08)_
 - **#3 · `codex exec` stdin-hang** → [`03-codex-exec-stdin-hang.md`](03-codex-exec-stdin-hang.md).
   ✅ **Done (07-07).** Wired `< /dev/null` + a rule bullet into
   `skills/orchestrate/SKILL.md`'s Build handoffs. Note kept for rationale; safe to delete. _(2026-07-06 → 07)_
@@ -55,9 +56,10 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   [`05-methodology-audit-parallel-safety.md`](05-methodology-audit-parallel-safety.md).
   Full audit (07-07): the vendored loop skills contradict the gate model (finishing
   merges around the gate; `superpowers:*` refs baked into every generated plan), three
-  mechanical concurrency hazards (single-slot `.qq/state.json`, `codex resume --last`
-  cross-worktree bleed, WIP-ref race), and a proposed 5-step sequencing. **#1 (`/idea`)
-  now depends on its step-3 multi-producer fix.** _(2026-07-07)_
+  mechanical concurrency hazards (then-single-slot `.qq/state.json`, `codex resume --last`
+  cross-worktree bleed, WIP-ref race), and a proposed 5-step sequencing. **TASK-3 has now
+  landed the multi-producer phase slots, WIP-ref CAS, and argv-aware rail hardening; the Codex
+  resume hazard moved to task-8.** _(2026-07-07 → 08)_
 - **#7 · Drop Understand-Anything for an agent-maintained map** → Part 4 of
   [`05-methodology-audit-parallel-safety.md`](05-methodology-audit-parallel-safety.md).
   Operator's call, independently corroborated: the knowledge layer produced both HIGH

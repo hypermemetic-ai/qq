@@ -10,9 +10,9 @@ agents to speak the same language across sessions.
 Claude Code status-line reader that lets long-running qq work show ambient phase
 and gate progress without transcript chatter.
 
-**qq-phase** — The `bin/qq-phase` command that writes background-work phase state,
-renders the one-line status widget, and optionally attaches the active
-`no-mistakes` gate run.
+**qq-phase** — The `bin/qq-phase` command that writes producer-scoped
+background-work phase state, renders the one-line status widget, and optionally
+attaches the active `no-mistakes` gate run.
 
 **document stack** — The four-document knowledge layer, one maintainer each:
 code graph (codebase-memory MCP, derived + out-of-repo) · intent registry

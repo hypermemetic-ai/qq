@@ -5,9 +5,11 @@
 # (verified work is committed; in-flight work between green points is not).
 #
 # Non-destructive by construction: it builds the snapshot in a temporary index and
-# only ever writes new git objects + moves refs/wip/<branch>. It is invisible to
-# normal git operations. No-op when the tree is clean, outside a repo, or when
-# nothing changed since the last snapshot.
+# only ever writes new git objects + moves refs/wip/<branch>. The ref update is
+# compare-and-swap so same-tree Stop hooks do not clobber each other, and hook
+# races never fail the caller. It is invisible to normal git operations. No-op
+# when the tree is clean, outside a repo, or when nothing changed since the last
+# snapshot.
 #
 # Recover with:  qq-wip list | diff | branch <name>
 set -euo pipefail

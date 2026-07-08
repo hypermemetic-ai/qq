@@ -342,7 +342,9 @@ git push origin main
 
 - [ ] **Step 1: Confirm the guardrails don't block a plain gate push**
 
-The git-guardrails hook blocks `push --force` / `-f`, `reset --hard`, `clean -fd`, history rewrites — not a plain push. Verify the matcher:
+The git-guardrails hook blocks destructive git (`push --force` / `-f`, remote
+branch deletion, `reset --hard`, `clean -fd`, `reflog expire`, `update-ref -d`,
+history rewrites) — not a plain push. Verify the matcher:
 
 ```bash
 grep -rn -iE "force|no-mistakes|push" ~/.config/hypercore 2>/dev/null | grep -i guardrail || true

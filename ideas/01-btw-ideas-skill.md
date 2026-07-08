@@ -47,15 +47,16 @@ Two native primitives together already cover most of what this note set out to b
    brief, per the mini-handoff slot), **spawn a detached researcher**
    (`setsid … codex exec / claude -p … < /dev/null &`) that writes `ideas/NN-slug.md`, and
    **report status to the shared background-status surface** — `qq-phase` writing
-   `.qq/state.json`, read by `qq-phase render` in the Claude Code status line — flipping
-   `capturing → researching → done: ideas/NN-slug.md`. The skill returns nothing into the
-   transcript.
+   its own producer slot in `.qq/state.json`, read by `qq-phase render` in the Claude Code
+   status line — flipping `capturing → researching → done: ideas/NN-slug.md` via
+   `qq-phase ... --producer idea`. The skill returns nothing into the transcript.
 3. **The genuinely additive part is small but real:** durable persistence + the
    grooming convention (`ideas/` + README backlog). Everything else is now native.
 4. **#1 and #5 converge.** The completion-visibility surface *is* the progress tracker's
-   surface. With #5 built as `qq-phase` → `.qq/state.json` + `qq-phase render`, `/idea`
-   gets its done-signal for free. This also lifts #5 from an orchestrate-only nicety into
-   shared cockpit infrastructure.
+   surface. With #5 built as producer-scoped `qq-phase` slots in `.qq/state.json` +
+   `qq-phase render`, `/idea` gets its done-signal for free without clobbering
+   orchestrate. This also lifts #5 from an orchestrate-only nicety into shared
+   cockpit infrastructure.
 
 **Codex mapping (for when it's the primary cockpit):** Codex has `/side` (ephemeral
 detour, parent status visible, can't nest) ≈ `/btw`, and `/fork` (a *durable* parallel
@@ -89,8 +90,8 @@ stays at zero; the agent does the fleshing.
 3. **Research in the background** — reuse the `research` skill (cited,
    confidence-tagged), running async so the operator stays in-session.
 4. **Ambient status, then out of the way** — e.g. the status line shows
-   `researching · ideas/03-retry-backoff.md`. The transcript stays clean, and the
-   file enriches itself when research lands.
+   `idea:◐ researching · ideas/03-retry-backoff.md`. The transcript stays clean,
+   and the file enriches itself when research lands.
 5. **File shape, ready to take on cold:** `Original` (verbatim, sacred) ·
    `Sharpened` + what we were doing when it came up · `Findings` (cited
    research) · `Ready-to-take-on` (what acting on it involves, optional

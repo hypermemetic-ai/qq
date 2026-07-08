@@ -27,10 +27,12 @@ from superpowers `systematic-debugging`, and an optional scratchpad idea distill
 from gsd `gsd-debug`). `ce-compound` has been slimmed from its upstream 727-line
 form to a lean, self-contained ~94-line capture skill. `git-guardrails-claude-code`'s
 hook is modified from upstream to allow normal `git push` while still blocking
-force-push, `reset --hard`, `clean -f`, `branch -D`, `checkout/restore .`, and
-history rewrites. `code-review` keeps qq's **Intent** axis (backlog-first intent
-sources) where upstream renamed it **Spec** and wired it to their
-issue-tracker pointer — a deliberate fork, re-assert on every sync.
+force-push, remote branch deletion, `reset --hard`, `clean -f`, `branch -D`,
+`checkout/restore .`, `reflog expire`, `update-ref -d`, and history rewrites;
+its matcher is argv-aware so quoted prose is allowed. `code-review` keeps qq's
+**Intent** axis (backlog-first intent sources) where upstream renamed it
+**Spec** and wired it to their issue-tracker pointer — a deliberate fork,
+re-assert on every sync.
 
 **Sync pin:** the mattpocock/skills set was last diffed against upstream
 [v1.1.0](https://github.com/mattpocock/skills/releases/tag/v1.1.0) (2026-07-08);

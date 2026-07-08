@@ -1,7 +1,9 @@
 # Methodology audit → parallel-safety plan
 
 _Banked 2026-07-07. Status: audit complete (three parallel readers + main-session
-verification of every load-bearing claim); sequencing proposed, nothing applied.
+verification of every load-bearing claim); sequencing proposed. Update 2026-07-08:
+TASK-3 landed the qq-phase, WIP-ref, and rail hardening from Part 2; Codex resume
+scoping moved to TASK-8.
 Trigger: operator asked "make the whole workflow parallel safe" + "audit the whole
 methodology for coherence, soundness, simplification — then see where concurrency
 fits in."_
@@ -59,12 +61,11 @@ that instructions alone can't fix.
   aborts all of activation if that repo moves; the git rail is **copied** into
   `~/.claude/hooks/` (`:68`) while everything else is symlinked — a drift-by-design
   exception to the repo's own link-not-copy plan.
-- Rail matching (`~/.claude/hooks/block-dangerous-git.sh:30-34`): patterns are
-  `grep -qE` over the whole command string, so a benign command that *mentions*
-  a phrase gets blocked — e.g. `git commit -m "block reset --hard"`. Fails safe,
-  but this repo's docs literally contain those strings. Also missing: remote
-  branch deletion (`push --delete` / `push :branch`), `reflog expire`,
-  `update-ref -d`.
+- Rail matching (`~/.claude/hooks/block-dangerous-git.sh:30-34`) was resolved by
+  TASK-3: the rail is now argv-aware, allows benign quoted prose such as
+  `git commit -m "block reset --hard"`, and additionally blocks remote branch
+  deletion (`push --delete` / `push :branch`), `reflog expire`, `update-ref -d`,
+  and force-push `+refspec`s.
 
 ### LOW
 - Provenance leaked into skill bodies (`diagnosing-bugs:137-138`,
@@ -90,24 +91,22 @@ fine (root-caused in idea #4). The rail allows `git push no-mistakes`.
    branch's HEAD, so every other worktree's SessionStart sees "stale" and pushes
    a rebuild — N worktrees, N redundant rebuilds. → superseded by idea #7 (drop
    the plugin; see below).
-2. **`.qq/state.json` is single-slot with invited multi-producers (MED).**
-   `bin/qq-phase` is one phase/status/started_at record per tree; the methodology
-   says "any background skill can stamp the same surface" — so orchestrate's loop
-   and (planned) `/idea`'s researcher clobber each other, and one producer's
-   `done` triggers the fresh-run reset (`bin/qq-phase:154`) wiping the other's
-   state. Must be fixed **before** idea #1 builds, since `/idea` rides this.
-   Fix shape: a `--producer <id>` slot keyed under `producers{}` in the JSON;
-   `render` shows the active one(s). Read-modify-write stays unlocked (os.replace
-   is atomic; last-writer-wins per slot is then acceptable).
+2. **`.qq/state.json` single-slot with invited multi-producers (MED) — resolved
+   by TASK-3.** `bin/qq-phase` now stores slots under `producers{}` keyed by
+   `--producer <id>` (default `main`), serializes read-modify-write with `flock`,
+   keeps fresh-run reset/detail/status/gate state per slot, migrates legacy
+   single-slot files on first stamp, and renders every active slot. `qq-phase
+   clear` wipes all state; `qq-phase clear --producer <id>` removes one slot.
 3. **`codex exec resume --last` is not worktree-scoped (MED).** Two orchestrate
    runs in two worktrees can cross-resume each other's Codex session — silently
    corrupting "the reviewer is never the author". Fix: capture the session id at
    first handoff and `codex exec resume <id>`; `--last` is banned in parallel
    operation. (Also `orchestrate/SKILL.md:89` shows the repair handoff without
    `< /dev/null` — the one handoff missing the idea-#3 redirect.)
-4. **Same-tree Stop-hook race (LOW).** Two sessions in one tree race
-   `git update-ref refs/wip/<branch>`; loser's snapshot orphans and the hook
-   returns non-zero. Fix: CAS form (`update-ref <ref> <new> <old>`) + `|| true`.
+4. **Same-tree Stop-hook race (LOW) — resolved by TASK-3.** Two sessions in one
+   tree no longer clobber `refs/wip/<branch>`: `qq-wip-snapshot.sh` updates the
+   ref with compare-and-swap against the previously read value, retries against
+   the current value when the tree changed, and never fails the Stop hook.
 5. **Gate-daemon polling (LOW-MED).** With a `gate_run_id` attached, every
    session's statusline polls `no-mistakes axi status` every 3s — N sessions,
    N pollers against one daemon. Fine at N=2; worth a cache file at N=6.
@@ -292,9 +291,9 @@ questions in the research file.
    writing parallel-safety instructions — no point hardening text that's about
    to be rewritten, and the worst instruction-level hazards (local merge to
    main, `worktree prune`) live inside it.
-3. **Mechanical hardening** (Part 2, items 2-4): `qq-phase` producer slots,
-   worktree-scoped Codex resume + the missing `< /dev/null`, WIP-ref CAS, rail
-   regex tightening.
+3. **Mechanical hardening** (Part 2, items 2-4): completed for `qq-phase`
+   producer slots, WIP-ref CAS, and argv-aware rail hardening in TASK-3. Codex
+   resume scoping and the orchestrate handoff model moved to TASK-8.
 4. **The instruction layer**: add §Parallel operation to `qq-methodology.md`
    (tree ownership, shared-surface conventions, global-config rule) and thread
    the one-line rules into the affected skills.

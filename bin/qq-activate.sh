@@ -14,9 +14,10 @@
 #   7. Commit + push both repos (meeting-reviewer: qq link artifacts ONLY; your src/tests stay uncommitted)
 #
 # Safety: the rail is installed BEFORE yolo, so future Claude Code agents never get
-# prompt-free git destruction — force-push / reset --hard / clean -fd / history
-# rewrites are blocked at the hook layer even with permissions off. This script,
-# run by YOU in a plain shell, is not intercepted by that hook, so its own push works.
+# prompt-free git destruction — force-push, branch deletion, reset --hard,
+# clean -fd, checkout/restore ., reflog expiry, ref deletion, and history rewrites
+# are blocked at the hook layer even with permissions off. This script, run by YOU
+# in a plain shell, is not intercepted by that hook, so its own push works.
 set -euo pipefail
 
 QQ=/home/qqp/projects/qq
@@ -134,7 +135,7 @@ say "done"
 cat <<'EOF'
   qq is active. Notes:
    - Restart Claude Code (or open a new session) so yolo + the rail load.
-   - The rail blocks destructive git only (force-push, reset --hard, clean -f, history rewrites); normal `git push` is allowed, so agents push for you.
+   - The rail blocks destructive git only (force-push, branch deletion, reset --hard, clean -f, checkout/restore ., reflog expiry, ref deletion, history rewrites); normal `git push` is allowed, so agents push for you.
    - Backups of every edited config sit beside them as *.qq.bak.
    - Codex now defaults to yolo; just run `codex`.
 EOF

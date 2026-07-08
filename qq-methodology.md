@@ -99,10 +99,11 @@ per-repo, never an LLM call. The Claude Code status line reads it (`qq-phase
 render`, merging the gate's own `no-mistakes axi status` steps), so loop position
 and pipeline position show as one. Orchestrate's loop is the first producer; any
 background skill can stamp the same surface with free-form phases (e.g.
-`capturing`, `researching`) and mark completion with `qq-phase done`. Producers
-stamp concurrently without clobbering: each writes its own slot (`--producer
-<id>`, default `main`) and `render` shows every active slot — one producer
-finishing never resets another's state.
+`capturing`, `researching`) and mark completion with `qq-phase done --producer
+<id>`. Producers stamp concurrently without clobbering: each writes its own slot
+(`--producer <id>`, default `main`) and `render` shows every active slot — one
+producer finishing never resets another's state. Bare `qq-phase clear` wipes all
+state; `qq-phase clear --producer <id>` removes one slot.
 
 ## Git — how work lands
 - **Commit on green.** A commit is a claim: commit only what

@@ -12,15 +12,16 @@ through `qq-phase render`, so the loop phase and the gate's pipeline position sh
 as one ambient readout.
 
 - **`bin/qq-phase`** — the writer and reader in one script. It stamps the current
-  background-work phase to `.qq/state.json` via an atomic temp-file replace,
-  renders a one-line widget, and never makes an LLM call. It reads the local gate
-  daemon only on short timeout when a run id is attached.
-  - `qq-phase <Phase> [--detail T] [--task T] [--status S] [--gate]` — advance
-  - `qq-phase gate` — attach the active gate run id (no phase change)
+  background-work phase to a producer slot in `.qq/state.json`, serializes
+  read-modify-write with a lock, writes via an atomic temp-file replace, renders
+  a one-line widget, and never makes an LLM call. It reads the local gate daemon
+  only on short timeout when a run id is attached.
+  - `qq-phase <Phase> [--producer P] [--detail T] [--task T] [--status S] [--gate]` — advance
+  - `qq-phase gate [--producer P]` — attach the active gate run id (no phase change)
   - `qq-phase status` — print current state JSON (raw read API)
   - `qq-phase render` — print the status-line text, silently when idle
-  - `qq-phase done` — mark the work complete
-  - `qq-phase clear` — remove state (idle)
+  - `qq-phase done [--producer P]` — mark the producer's work complete
+  - `qq-phase clear [--producer P]` — remove one producer slot, or all state when bare
   - Phases: Align(1) Plan(2) Build(3) Verify(4) Sign-off(5) Review(6) Compound(7);
     Triage(0) is pre-loop. Unknown names stamp verbatim with a null index.
 - **`skills/orchestrate/SKILL.md`** — a "stamp progress at every phase boundary"
@@ -38,14 +39,16 @@ as one ambient readout.
 ## Final shape
 The resurrected feature was widened from an orchestrate-only tracker into a shared
 background-work surface. Orchestrate is the first producer, but `/idea` and any
-future background skill can stamp free-form phases such as `capturing` or
-`researching`, then finish with `qq-phase done`.
+future background skill can stamp its own `--producer <id>` slot with free-form
+phases such as `capturing` or `researching`, then finish with
+`qq-phase done --producer <id>`.
 
 The state home changed from the parked patch's `.orchestrate/state.json` to the
 neutral `.qq/state.json`, and the reader moved into the same script as
-`qq-phase render`. The renderer also merges the active `no-mistakes axi status`
-gate step only while the attached run is still live, so stale gate markers fall
-away.
+`qq-phase render`. The renderer joins every active producer slot, keeps `main`
+unprefixed for back-compat, and merges the active `no-mistakes axi status` gate
+step only while that slot's attached run is still live, so stale gate markers
+fall away.
 
 ## Archived patch
 Do not re-apply `02-orchestrate-phase-state.patch` to current `main`; it predates

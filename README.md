@@ -27,8 +27,9 @@ gate; the landing agent drives `no-mistakes axi run --intent "<task + AC>"`
 with `--skip ci` only after confirming no CI exists, and relays only judgment
 calls. Full detail in `AGENTS.md`. Invoke `orchestrate` to
 run the whole loop end-to-end as one command — Claude conducts, Codex implements.
-Long-running work stamps `.qq/state.json` with `qq-phase`, and `qq-phase render`
-feeds the Claude Code status line with the current phase plus any live gate step.
+Long-running work stamps producer slots in `.qq/state.json` with `qq-phase`, and
+`qq-phase render` feeds the Claude Code status line with every active phase plus
+any live gate step.
 
 ## Skills
 16 skills, curated from four MIT collections (mattpocock, superpowers,
