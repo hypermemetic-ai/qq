@@ -78,6 +78,11 @@ no-mistakes axi run --intent "<task title + acceptance criteria>"
 (`git push no-mistakes <branch>` is the equivalent trigger when no explicit
 intent is available; the gate then infers intent from transcripts.)
 
+While this repo has no CI configured, add `--skip ci` — the ci step otherwise
+burns 13–22 minutes polling a checkless PR (`gh pr checks` exit-status-1 loop,
+measured on v1.31 and v1.34; task-13 AC#3). Remove the flag once real CI
+exists.
+
 **You own this run — the operator never babysits it.** Objective review
 findings auto-fix (`auto_fix.review`). If the run parks with `ask-user`
 findings, relay each finding's ID, file, and full description to the owner,
