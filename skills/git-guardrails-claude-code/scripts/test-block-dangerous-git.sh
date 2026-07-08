@@ -45,14 +45,26 @@ check block 'git status
 git reset --hard'
 check block 'bash -c "git push --force"'
 check block "sh -lc 'git reset --hard'"
+check block "sh -c'git reset --hard'"
+check block "bash -lc'git push --delete origin x'"
 check block "sudo sh -c 'git reset --hard'"
 check block "env bash -c 'git push --force'"
+check block "env -S 'git reset --hard'"
+check block "env --split-string='git reset --hard'"
+check block "env -iS 'git reset --hard'"
+check block 'env -uSOME git reset --hard'
+check block "env -S 'FOO=bar git reset' --hard"
 check block 'timeout 5 git reset --hard'
 check block "timeout 5 bash -c 'git push --delete origin feature-x'"
 check block 'sudo git clean -fd'
 check block 'xargs git branch -D < branches.txt'
 check block "xargs sh -c 'git update-ref -d refs/wip/main'"
 check block 'git -C /some/repo reset --hard'
+check block "git -c alias.nuke='!git reset --hard' nuke"
+check block "git -c alias.nuke='reset --hard' nuke"
+check block "git -c alias.wipe=reset wipe --hard"
+check block "git -c alias.wipe='!git reset' wipe --hard"
+check block "git -c alias.a=b -c alias.b='reset --hard' a"
 check block 'GIT_DIR=/x/.git git reset --hard'
 check block "echo \$(git reset --hard)"
 check block "echo \"\$(git reset --hard)\""
@@ -79,6 +91,9 @@ EOF'
 check block 'cat <<EOF | bash
 git reset --hard
 EOF'
+check block "env -S 'bash' <<'EOF'
+git reset --hard
+EOF"
 check block 'echo "<<EOF"; bash <<EOF
 git reset --hard
 EOF'
@@ -95,6 +110,8 @@ check allow 'git push'
 check allow 'git push origin main'
 check allow 'git push no-mistakes feature'
 check allow 'git push -u origin my-branch'
+check allow 'git -c user.name=x commit --allow-empty -m ok'
+check allow 'git -c core.editor=vim commit'
 check allow 'git commit -m "rail: block reset --hard and branch -D"'
 check allow "rg 'reset --hard' docs/"
 check allow 'rg -l "block-dangerous-git|reset --hard" skills/ bin/'
@@ -112,8 +129,10 @@ check allow 'git reflog'
 check allow 'git update-ref refs/wip/b abc123 def456'
 check allow 'echo "git push --force"'
 check allow 'sudo echo "git reset --hard"'
+check allow "env -S 'echo git reset --hard'"
 check allow "xargs echo git reset --hard"
 check allow 'command -v git reset --hard'
+check allow "git -c alias.note='!echo git reset --hard' note"
 check allow "printf 'git reset --hard\\n' > notes.md"
 check allow "rg '\$(git reset --hard)' docs/"
 check allow "rg '\`git reset --hard\`' docs/"

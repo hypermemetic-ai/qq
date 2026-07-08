@@ -135,6 +135,9 @@ def segment_stdin_shell(seg):
         return False
     cmd = base(seg[i])
     if cmd in STDIN_PRESERVING_WRAPPERS:
+        if cmd == "env":
+            expanded = env_command_segment(seg, i + 1)
+            return bool(expanded) and segment_stdin_shell(expanded)
         j = wrapped_command_start(cmd, seg, i + 1)
         return j is not None and segment_stdin_shell(seg[j:])
     if cmd == "exec":
@@ -311,8 +314,8 @@ ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 SUDO_VALUE_OPTS = {"-u", "--user", "-g", "--group", "-h", "--host", "-p",
                    "--prompt", "-C", "--close-from", "-T", "--command-timeout",
                    "--chdir", "--role", "--type", "--login-class"}
-ENV_VALUE_OPTS = {"-u", "--unset", "-C", "--chdir", "-S", "--split-string",
-                  "--argv0"}
+ENV_VALUE_OPTS = {"-u", "--unset", "-C", "--chdir", "--argv0"}
+ENV_SHORT_NO_VALUE_OPTS = set("i0v")
 TIMEOUT_VALUE_OPTS = {"-s", "--signal", "-k", "--kill-after"}
 XARGS_VALUE_OPTS = {"-a", "--arg-file", "-d", "--delimiter", "-E", "--eof",
                     "-I", "--replace", "-L", "--max-lines", "-n", "--max-args",
@@ -347,6 +350,47 @@ def skip_options(seg, j, value_opts, allow_assignments=False):
             continue
         break
     return j
+
+def split_env_string(text):
+    return shlex.split(text, posix=True)
+
+def env_split_string_at(seg, j):
+    t = seg[j]
+    if t in ("-S", "--split-string"):
+        return (seg[j + 1] if j + 1 < len(seg) else None), min(j + 2, len(seg))
+    if t.startswith("--split-string="):
+        return t.split("=", 1)[1], j + 1
+    if t.startswith("-") and not t.startswith("--"):
+        body = t[1:]
+        pos = body.find("S")
+        if pos != -1 and all(ch in ENV_SHORT_NO_VALUE_OPTS for ch in body[:pos]):
+            tail = body[pos + 1:]
+            if tail:
+                return tail, j + 1
+            return (seg[j + 1] if j + 1 < len(seg) else None), min(j + 2, len(seg))
+    return None, None
+
+def env_command_segment(seg, j):
+    while j < len(seg):
+        t = seg[j]
+        if t == "--":
+            return seg[j + 1:]
+        split_text, next_j = env_split_string_at(seg, j)
+        if next_j is not None:
+            if split_text is None:
+                return []
+            return ["env"] + split_env_string(split_text) + seg[next_j:]
+        if is_assignment(t):
+            j += 1
+            continue
+        if option_matches(t, ENV_VALUE_OPTS):
+            j += 1 if "=" in t else 2
+            continue
+        if t.startswith("-") and t != "-":
+            j += 1
+            continue
+        break
+    return seg[j:]
 
 def wrapped_command_start(cmd, seg, j):
     if cmd in ("sudo", "doas"):
@@ -402,6 +446,45 @@ def short_flag(args, ch):
             return True
     return False
 
+def git_config_at(args, i):
+    t = args[i]
+    if t == "-c":
+        return (args[i + 1] if i + 1 < len(args) else None), min(i + 2, len(args))
+    if t.startswith("-c") and t != "-c":
+        return t[2:], i + 1
+    return None, None
+
+def git_value_option(t):
+    return t in GIT_VALUE_OPTS or any(t.startswith(opt + "=") for opt in GIT_VALUE_OPTS)
+
+def collect_git_alias(config_value, aliases):
+    if not config_value or "=" not in config_value:
+        return
+    name, value = config_value.split("=", 1)
+    name = name.lower()
+    if name.startswith("alias.") and len(name) > len("alias."):
+        aliases[name[len("alias."):]] = value
+
+def analyze_git_alias(value, rest, aliases, depth):
+    if depth > 8:
+        return
+    stripped = value.lstrip()
+    if stripped.startswith("!"):
+        command = stripped[1:].lstrip()
+        if rest:
+            command = (command + " " + shlex.join(rest)).strip()
+        if command:
+            analyze_string(command, depth + 1)
+        return
+    expanded = shlex.split(value, posix=True) + rest
+    if not expanded:
+        return
+    alias_name = expanded[0].lower()
+    if alias_name in aliases:
+        analyze_git_alias(aliases[alias_name], expanded[1:], aliases, depth + 1)
+    else:
+        analyze_git(expanded, depth + 1)
+
 def shell_command(seg, j):
     reads_stdin = False
     while j < len(seg):
@@ -411,6 +494,10 @@ def shell_command(seg, j):
             break
         if t == "-c" or re.match(r"^-[A-Za-z]*c[A-Za-z]*$", t):
             return (seg[j + 1] if j + 1 < len(seg) else None), False
+        if t.startswith("-") and not t.startswith("--") and "c" in t[1:]:
+            command_string = t[t.index("c") + 1:]
+            if command_string:
+                return command_string, False
         if t == "-s" or re.match(r"^-[A-Za-z]*s[A-Za-z]*$", t):
             reads_stdin = True
             j += 1
@@ -453,11 +540,16 @@ def analyze_submodule(args, depth):
         analyze_string(" ".join(args[i:]), depth + 1)
 
 def analyze_git(args, depth):
-    i, sub = 0, None
+    i, sub, aliases = 0, None, {}
     while i < len(args):                 # skip git global options
         t = args[i]
-        if t in GIT_VALUE_OPTS:
-            i += 2
+        config_value, next_i = git_config_at(args, i)
+        if next_i is not None:
+            collect_git_alias(config_value, aliases)
+            i = next_i
+            continue
+        if git_value_option(t):
+            i += 1 if "=" in t else 2
             continue
         if t.startswith("-"):
             i += 1
@@ -497,6 +589,8 @@ def analyze_git(args, depth):
         block("'git update-ref -d' (ref deletion)")
     elif sub == "submodule":
         analyze_submodule(rest, depth)
+    elif sub.lower() in aliases:
+        analyze_git_alias(aliases[sub.lower()], rest, aliases, depth + 1)
 
 def command_index(seg):
     i = 0
@@ -554,9 +648,14 @@ def analyze(seg, depth):
         if i + 1 < len(seg):
             analyze_string(" ".join(seg[i + 1:]), depth + 1)
     elif cmd in WRAPPERS:
-        j = wrapped_command_start(cmd, seg, i + 1)
-        if j is not None and j < len(seg):
-            analyze(seg[j:], depth + 1)
+        if cmd == "env":
+            expanded = env_command_segment(seg, i + 1)
+            if expanded:
+                analyze(expanded, depth + 1)
+        else:
+            j = wrapped_command_start(cmd, seg, i + 1)
+            if j is not None and j < len(seg):
+                analyze(seg[j:], depth + 1)
 
 def analyze_string(text, depth=0):
     bodyless, expandable_heredocs, shell_heredocs = without_heredoc_bodies(text)
