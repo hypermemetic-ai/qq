@@ -23,8 +23,9 @@ Operating rules live in [`AGENTS.md`](./AGENTS.md) (loaded every session;
 **Align → Plan → Build → Verify (autonomous) → Sign-off (human, gated) → Review →
 Compound.** Ceremony scales with the task — trivial work skips Align/Plan and is
 just done — but *nothing* skips verification, and everything lands through the
-gate; the landing agent drives `no-mistakes axi run --intent "<task + AC>"` and
-relays only judgment calls. Full detail in `AGENTS.md`. Invoke `orchestrate` to
+gate; the landing agent drives `no-mistakes axi run --intent "<task + AC>"`
+with `--skip ci` only after confirming no CI exists, and relays only judgment
+calls. Full detail in `AGENTS.md`. Invoke `orchestrate` to
 run the whole loop end-to-end as one command — Claude conducts, Codex implements.
 Long-running work stamps `.qq/state.json` with `qq-phase`, and `qq-phase render`
 feeds the Claude Code status line with the current phase plus any live gate step.
@@ -70,9 +71,10 @@ provenance is in [`SKILLS-ATTRIBUTION.md`](./SKILLS-ATTRIBUTION.md).
    index is fully derived, lives in `~/.cache`, and auto-refreshes
    (`auto_index`/`auto_watch`); agents reach it as on-demand MCP tools. The intent
    registry is `backlog/` ([Backlog.md](https://github.com/MrLesk/Backlog.md),
-   `npm i -g backlog.md`); durable docs are `openwiki/`
-   ([OpenWiki](https://github.com/langchain-ai/openwiki), `npm i -g openwiki`,
-   key in `~/.openwiki/.env`).
+   `npm i -g backlog.md`); durable docs target `openwiki/`-style in-repo
+   markdown. Today `bin/qq-openwiki-refresh` only runs when `openwiki/`, the
+   OpenWiki CLI, and a provider key exist; task-7 is researching the sub-only /
+   no-key engine path before initial generation.
 8. **Sessions** — install herdr (`brew install herdr`), then
    `herdr integration install claude codex` so it tracks agent state. Fan out with
    `herdr worktree create --branch <name>` + `herdr agent start <name> --cwd <worktree> -- claude`.

@@ -131,15 +131,18 @@ touch `main`.
 
 **The landing agent owns the run (operator decision, 2026-07-08).** Drive the
 gate with `no-mistakes axi run --intent "<backlog task + acceptance criteria>"`
-— exact intent in, transcript inference demoted to fallback (`git push
-no-mistakes <branch>` remains the equivalent trigger). The pipeline is
-fire-and-forget for the operator: objective review findings auto-fix
-(`auto_fix.review: 3` in `.no-mistakes.yaml`); `ask-user` findings park the run
-and the landing agent — never the operator — relays the question, then answers
-with `no-mistakes axi respond --action approve|skip|fix`, using `--findings`
-and `--instructions` when the answer asks the gate to fix. The operator's only
-touchpoints are a relayed judgment call and the PR merge click. A parked landing
-agent shows as blocked in herdr; the `qq-phase` status line shows the gate step.
+— exact intent in, transcript inference demoted to fallback. For qq itself,
+while it has no configured CI, use `no-mistakes axi run --skip ci --intent
+"<backlog task + acceptance criteria>"`; remove the skip flag once real CI
+exists. `git push no-mistakes <branch>` is only the fallback when no skip flags
+are needed and no explicit intent is available. The pipeline is fire-and-forget
+for the operator: objective review findings auto-fix (`auto_fix.review: 3` in
+`.no-mistakes.yaml`); `ask-user` findings park the run and the landing agent —
+never the operator — relays the question, then answers with `no-mistakes axi
+respond --action approve|skip|fix`, using `--findings` and `--instructions`
+when the answer asks the gate to fix. The operator's only touchpoints are a
+relayed judgment call and the PR merge click. A parked landing agent shows as
+blocked in herdr; the `qq-phase` status line shows the gate step.
 
 ## Skill index
 | skill | reach for it when |
@@ -149,7 +152,7 @@ agent shows as blocked in herdr; the `qq-phase` status line shows the gate step.
 | `writing-plans` | turning agreed intent into an executable plan |
 | `executing-plans` | working a plan task-by-task (stops on blockers; won't touch main without consent) |
 | `finishing-a-development-branch` | landing finished work — the gate does rebase / push / PR, so this narrows to the merge decision |
-| the gate (`no-mistakes axi run --intent`, or `git push no-mistakes`) | landing work, always — the external pipeline validates the diff and opens a PR; see "Git — how work lands" |
+| the gate (`no-mistakes axi run --intent`; `git push no-mistakes` only when no skip flags are needed) | landing work, always — the external pipeline validates the diff and opens a PR; add `--skip ci` only after confirming no CI exists; see "Git — how work lands" |
 | `verification-before-completion` | before ANY "done / passing / fixed" claim (never skipped) — and the pre-push smoke test before handing a branch to the gate |
 | `uat-signoff` | a user-facing / irreversible / ambiguous change needs human acceptance |
 | `diagnosing-bugs` | a bug, failing test, or unexpected behavior |

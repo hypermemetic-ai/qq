@@ -1,9 +1,10 @@
 # qq's merge gate — externally owned (MIT: kunchenguid/no-mistakes).
 # One landing path: the landing agent drives the gate (`no-mistakes axi run
-# --intent "<task + AC>"`, or the equivalent `git push no-mistakes <branch>`
-# trigger), the independent pipeline validates review/test/lint/docs, and the
-# work lands as a PR a human merges. Trivial fixes batch on a branch; nothing
-# commits straight to main.
+# --intent "<task + AC>"`, adding `--skip ci` only after confirming no CI);
+# `git push no-mistakes <branch>` is a fallback only when no skip flags are
+# needed. The independent pipeline validates review/test/lint/docs, and the work
+# lands as a PR a human merges. Trivial fixes batch on a branch; nothing commits
+# straight to main.
 #
 # NOTE: `agent` + `commands` are read from the DEFAULT BRANCH (a no-mistakes security
 # rule), so changes to those executable keys only take effect once committed to
@@ -19,7 +20,7 @@ ignore_patterns:
 auto_fix:
   review: 3         # fire-and-forget: objective review findings fix themselves; `ask-user` findings still park for the landing agent to relay (operator decision, 2026-07-08)
 intent:
-  enabled: true     # fallback only — landings pass explicit intent via `no-mistakes axi run --intent`
+  enabled: true     # fallback only — landings pass explicit intent via `no-mistakes axi run --intent`, plus `--skip ci` only when no CI exists
 test:
   evidence:
     store_in_repo: false  # keep the evidence trail out of the working tree

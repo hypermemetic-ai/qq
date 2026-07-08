@@ -41,9 +41,11 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   ✅ **Root-caused (07-07).** (1) stale-path → `no-mistakes init` repairs it. (2) the
   "post-review freeze" was **not** a deadlock — the run parked in `awaiting_approval`
   (review had auto-fix findings, `auto_fix.review:0`). Current policy (07-08):
-  `auto_fix.review:3`, drive with `no-mistakes axi run --intent`, and resolve parked
-  questions through `no-mistakes axi respond`. A 14h-orphaned run still sits parked
-  (its work is already on main — safe to dismiss). _(2026-07-06 → 08)_
+  `auto_fix.review:3`, drive with `no-mistakes axi run --intent` (add
+  `--skip ci` only when the repo has no CI; `git push no-mistakes` is fallback
+  only), and resolve parked questions through `no-mistakes axi respond`. A
+  14h-orphaned run still sits parked (its work is already on main — safe to
+  dismiss). _(2026-07-06 → 08)_
 - **Agents should self-wrap-up on context pressure** _(new, 07-07)._ Make agents
   context-aware: as they approach ~200–250k tokens they should proactively start wrapping
   up / handing off on their own, rather than *beginning* fresh work deep in a window ("you
@@ -93,8 +95,8 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   smoke-tested (see #6 file Part 4) and adopted — `backlog/` seeded with the
   live queue, `bin/qq-registry-check.sh` wired as the gate's test command,
   `bin/qq-openwiki-refresh` as its format command (guarded no-op until the
-  wiki exists). **Still open:** initial `openwiki --init` generation (blocked
-  on an API key in `~/.openwiki/.env`, pre-staged); linked-repo rollout
+  wiki exists). **Still open:** initial wiki generation is reframed as research
+  under the operator's sub-only / no-API-key constraint (backlog task-7); linked-repo rollout
   (backlog task-9); the `code-graph` routing skill is **deferred by eval** —
   the RED baseline (07-08) showed an unguided agent answers qq-scale
   relational queries correctly with `rg` alone, so per `writing-skills` no
@@ -120,7 +122,9 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   auto-detected as agent `codex` with live idle/working state; `send` + `pane
   send-keys Enter` delivers prompts; `wait --status idle` blocks correctly; and
   herdr captures the codex **session id**, which dissolves the `resume --last`
-  hazard. Tracked as backlog task-8; design doc next. _(2026-07-08)_
+  hazard. Tracked as backlog task-8; design doc:
+  [`docs/plans/2026-07-08-orchestrate-codex-panes.md`](../docs/plans/2026-07-08-orchestrate-codex-panes.md).
+  _(2026-07-08)_
 - **#10 · Expand–contract for wide refactors** _(captured 07-08)._ mattpocock
   v1.1's `to-tickets` slices a wide refactor (one mechanical change,
   whole-codebase blast radius, no green vertical slice possible) by

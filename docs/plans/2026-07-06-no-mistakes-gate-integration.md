@@ -2,9 +2,11 @@
 
 > **Superseded gate policy (2026-07-08):** This dated plan preserves the initial
 > blast-radius/straight-to-main design. Current qq policy is all-gated and
-> landing-agent-owned: use `no-mistakes axi run --intent "<task + AC>"` (or the
-> equivalent `git push no-mistakes` trigger), with `ask-user` findings relayed by
-> the landing agent. See `AGENTS.md` and `qq-methodology.md`.
+> landing-agent-owned: use `no-mistakes axi run --intent "<task + AC>"`, adding
+> `--skip ci` only after confirming no CI exists. `git push no-mistakes` is only
+> the fallback when no skip flags are needed and no explicit intent is available;
+> `ask-user` findings are relayed by the landing agent. See `AGENTS.md` and
+> `qq-methodology.md`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or hypercore:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

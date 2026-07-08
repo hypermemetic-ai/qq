@@ -24,3 +24,9 @@ Idea #9, decided 07-08: replace headless codex exec with herdr agent start <name
 - [ ] #3 codex exec resume --last no longer appears anywhere in orchestrate
 - [ ] #4 Planned as parent + dependency-linked slices; each slice lands as its own gated run
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Design doc: docs/plans/2026-07-08-orchestrate-codex-panes.md (written 07-08, rides the rework branch). Lifecycle: agent start cx-<branch> per tree; brief/report via .qq/handoffs/<n>-{brief,report}.md; wait --status idle; repair in-pane (resume --last deleted).
+<!-- SECTION:PLAN:END -->

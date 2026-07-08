@@ -3,8 +3,9 @@
 **Status:** _both failure modes root-caused. (1) stale-path → one-command repair (below).
 (2) the "post-review stall" is not a stall at all — the run parked in `awaiting_approval`
 waiting for a human to approve review findings; see below (root-caused 2026-07-07).
-2026-07-08 update: qq now drives landings with `no-mistakes axi run --intent`,
-sets `auto_fix.review: 3`, and handles parked questions through
+2026-07-08 update: qq now drives landings with `no-mistakes axi run --intent`
+(adding `--skip ci` only when the repo has no CI; `git push no-mistakes` is
+fallback only), sets `auto_fix.review: 3`, and handles parked questions through
 `no-mistakes axi respond`; the `attach` advice below is incident history, not
 current procedure._
 

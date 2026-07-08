@@ -3,7 +3,9 @@
 > **Superseded gate policy (2026-07-08):** This report captures the July 6 trial
 > conditions (`v1.31.2` and the then-current blast-radius policy). Current qq
 > landings are all-gated and driven by the landing agent with
-> `no-mistakes axi run --intent "<task + AC>"`; see `AGENTS.md` and
+> `no-mistakes axi run --intent "<task + AC>"`, adding `--skip ci` only after
+> confirming no CI exists. `git push no-mistakes` is only the fallback when no
+> skip flags are needed and no explicit intent is available; see `AGENTS.md` and
 > `qq-methodology.md`.
 
 **Date:** 2026-07-06
@@ -61,7 +63,7 @@ The gate ran `shellcheck` (our configured `commands.lint`), found violations in 
 
 ## Cost & latency (know before gating)
 
-One gated push = **~5.5 min wall-clock** across **4 agent-backed stages** (review, test, document, lint) each spending `claude` tokens. Proportionate for real work; heavy for a one-line change. **Reinforces the blast-radius rule: gate real work only; trivial work stays straight-to-main.**
+One gated push = **~5.5 min wall-clock** across **4 agent-backed stages** (review, test, document, lint) each spending `claude` tokens. Proportionate for real work; heavy for a one-line change. The historical conclusion was blast-radius gating only for real work; current qq policy keeps the single gate path and reduces waste with landing-agent ownership plus `--skip ci` on no-CI repos.
 
 ## Safety confirmations
 

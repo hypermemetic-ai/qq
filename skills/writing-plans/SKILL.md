@@ -167,7 +167,7 @@ After saving the plan, offer execution choice:
 
 **If Conducted chosen:**
 - Use `orchestrate`
-- Codex implements; Claude verifies/reviews; finish through the gate with `no-mistakes axi run --intent "<task + AC>"`
+- Codex implements; Claude verifies/reviews; finish through the gate with `no-mistakes axi run --intent "<task + AC>"`, adding `--skip ci` only after confirming no CI exists
 
 **If Inline Execution chosen:**
 - Use `executing-plans`
