@@ -43,8 +43,9 @@ if [ -z "$changed" ]; then
   exit 0
 fi
 
-if printf '%s\n' "$changed" | grep -q '^backlog/'; then
-  say "OK: landing touches the registry ($(printf '%s\n' "$changed" | grep -c '^backlog/') backlog file(s) in diff)."
+backlog_count=$(grep -c '^backlog/' <<<"$changed" || true)
+if [ "$backlog_count" -gt 0 ]; then
+  say "OK: landing touches the registry ($backlog_count backlog file(s) in diff)."
   exit 0
 fi
 

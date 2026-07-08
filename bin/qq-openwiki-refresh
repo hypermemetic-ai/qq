@@ -26,10 +26,23 @@ if [ ! -f "$env_file" ] || grep -qs "PASTE_KEY_HERE" "$env_file"; then
   exit 0
 fi
 
+backup_dir=$(mktemp -d)
+trap 'rm -rf "$backup_dir"' EXIT
+if ! cp -a openwiki "$backup_dir/openwiki"; then
+  say "WARNING: could not snapshot openwiki/ before refresh; skipping refresh."
+  exit 0
+fi
+
 say "refreshing openwiki/ against this diff (timeout 10m)..."
 if timeout 600 openwiki --update --print </dev/null; then
   say "refresh complete."
 else
-  say "WARNING: openwiki --update --print failed or timed out; landing proceeds with stale descriptive docs."
+  rm -rf openwiki
+  if cp -a "$backup_dir/openwiki" openwiki; then
+    say "WARNING: openwiki --update --print failed or timed out; restored stale descriptive docs."
+  else
+    say "ERROR: openwiki --update --print failed and openwiki/ could not be restored."
+    exit 1
+  fi
 fi
 exit 0

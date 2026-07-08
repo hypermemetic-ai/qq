@@ -39,9 +39,9 @@ repo via a symlinked `@`-import — do not edit a copy; edit it in qq.
   herdr, yazi, broot, glow, mdcat, shell navigation, and the `qq-phase` status line.
 - **Externals** — Context7 (live, version-correct library docs), `gh` (GitHub),
   `fd` / `eza` / `rg` (fast filesystem), and **the gate** (`no-mistakes`, an
-  external MIT tool): real work is *pushed to it* — an independent pipeline
-  reviews the code, runs the checks, and opens a PR. It implements the
-  `blast-radius` / `human` merge gates below — capability you push to, not
+  external MIT tool): every landing is *pushed to it* — an independent pipeline
+  reviews the diff, runs the checks, reconciles the registry contract, refreshes
+  adopted descriptive docs, and opens a PR. It is capability you push to, not
   process you maintain.
 
 ## Behavioral floor (always)
