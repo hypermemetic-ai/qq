@@ -47,3 +47,41 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   up / handing off on their own, rather than *beginning* fresh work deep in a window ("you
   shouldn't start here"). Relates to `handoff` (the transfer) and the Stop-hook WIP snapshot
   — this is the *trigger* that should fire the wrap-up. Could grow its own `NN-slug.md`. _(2026-07-07)_
+- **#6 · Methodology audit → parallel-safety plan** →
+  [`05-methodology-audit-parallel-safety.md`](05-methodology-audit-parallel-safety.md).
+  Full audit (07-07): the vendored loop skills contradict the gate model (finishing
+  merges around the gate; `superpowers:*` refs baked into every generated plan), three
+  mechanical concurrency hazards (single-slot `.qq/state.json`, `codex resume --last`
+  cross-worktree bleed, WIP-ref race), and a proposed 5-step sequencing. **#1 (`/idea`)
+  now depends on its step-3 multi-producer fix.** _(2026-07-07)_
+- **#7 · Drop Understand-Anything for an agent-maintained map** → Part 4 of
+  [`05-methodology-audit-parallel-safety.md`](05-methodology-audit-parallel-safety.md).
+  Operator's call, independently corroborated: the knowledge layer produced both HIGH
+  infra findings (git-tracked auto-rewritten JSON, rewritten per commit in every
+  session). ✅ **Researched + adopted (07-07)** →
+  [`research/2026-07-07-understand-anything-replacement.md`](../research/2026-07-07-understand-anything-replacement.md):
+  **`codebase-memory-mcp`** (MIT) chosen and installed — worktree smoke test
+  passed, wired as **on-demand MCP tools only** (no search-intercepting hooks;
+  Claude Code user scope + Codex config), `auto_index`/`auto_watch` on.
+  **OKF: format direction adopted, dependency deferred** (pre-ecosystem; keep
+  compound's outputs OKF-compatible markdown, plug in a conformant toolchain when
+  one exists). **Round 2 (07-07): layers 2+3 researched** →
+  [`research/2026-07-07-intent-and-business-logic-layers.md`](../research/2026-07-07-intent-and-business-logic-layers.md):
+  intent-vs-reality = **spec registry substrate + the gate as enforcer** (nothing
+  shipping enforces "EVERYTHING at landing"; OpenSpec fails on unforced
+  delta→registry consolidation); business logic = **OpenWiki** (langchain-ai,
+  MIT), cron refresh swapped for gate-triggered `--update`.
+  **Post-round-2 decisions (07-07):** OpenWiki takes **all descriptive docs**
+  (layer 2 stays separate — intent isn't derivable from code, and OpenWiki's
+  code-is-truth refresh would rewrite "want" into "is"); **escape hatch
+  dropped** — everything lands through the gate, single workflow, single
+  registry-enforcement point; **layer 2 = `beads`** (MIT, agent-native nestable
+  issue graph, Dolt-backed — issues live outside the branch dimension, so
+  worktrees share one workspace; ✅ smoke-tested) with the gate enforcing
+  "landing maps to claimed/closed issues" — OpenSpec drops out.
+  **Remaining (gated branch):** author the thin
+  `code-graph` routing skill via `writing-skills`; retire the
+  Understand-Anything plugin, its hooks, and `.understand-anything/` tracking;
+  rewrite the Routing/merge-gate methodology sections (escape-hatch removal);
+  `bd init` + gate issue-check wiring; OpenWiki adoption + gate-triggered
+  refresh. _(2026-07-07)_
