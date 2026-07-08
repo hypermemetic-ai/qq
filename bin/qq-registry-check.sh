@@ -8,11 +8,9 @@ set -euo pipefail
 
 say() { printf '[qq-registry-check] %s\n' "$1"; }
 
-# Repo hasn't adopted the registry — nothing to enforce.
-if [ ! -d backlog ]; then
-  say "no backlog/ directory — registry not adopted here; skipping."
-  exit 0
-fi
+backlog_tree_exists() {
+  [ "$(git cat-file -t "$1:backlog" 2>/dev/null || true)" = "tree" ]
+}
 
 # Find the base to diff against: the push target's main line.
 base=""
@@ -35,6 +33,26 @@ fi
 if [ "$base" = "$(git rev-parse HEAD)" ]; then
   say "no commits beyond base — nothing to check."
   exit 0
+fi
+
+base_has_backlog=0
+head_has_backlog=0
+if backlog_tree_exists "$base"; then
+  base_has_backlog=1
+fi
+if backlog_tree_exists HEAD; then
+  head_has_backlog=1
+fi
+
+if [ "$head_has_backlog" -eq 0 ]; then
+  if [ "$base_has_backlog" -eq 0 ]; then
+    say "no backlog/ directory — registry not adopted here; skipping."
+    exit 0
+  fi
+
+  say "REFUSED: backlog/ existed on the base branch but is missing from HEAD."
+  say "Restore the registry or update this check deliberately before landing its removal."
+  exit 1
 fi
 
 changed=$(git -c core.quotePath=false diff --name-only "$base"...HEAD)
