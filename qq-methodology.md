@@ -118,6 +118,11 @@ background skill can stamp the same surface with free-form phases (e.g.
   <name>`, then `herdr agent start <name> --cwd <worktree> -- claude`. Isolation *is*
   the coordination model — no file locks. True shared-file work stays serial in the
   main tree, one agent at a time.
+- **Branches die at merge.** Every GitHub repo sets delete-branch-on-merge
+  (`gh repo edit --delete-branch-on-merge`) — set it when a repo is created or
+  linked (operator decision, 2026-07-08). Merged and superseded branches are
+  pruned; unlanded work is never deleted in cleanup — it lands through the gate
+  or stays.
 
 **Merge gate: all-gated — one landing path.** Green work accumulates on its
 branch; landing is always through the gate — the independent pipeline reviews
