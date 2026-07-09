@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - task-8-orchestrate-panes
 created_date: '2026-07-08 14:41'
-updated_date: '2026-07-09 00:02'
+updated_date: '2026-07-09 00:08'
 labels:
   - parallel-ok
 dependencies: []
@@ -30,7 +30,7 @@ Idea #9, decided 07-08: replace headless codex exec with herdr agent start <name
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Design doc: docs/plans/2026-07-08-orchestrate-codex-panes.md (written 07-08, rides the rework branch). Lifecycle: agent start cx-<branch> per tree; brief/report via .qq/handoffs/<n>-{brief,report}.md; wait --status idle; repair in-pane (resume --last deleted).
+Design doc: docs/plans/2026-07-08-orchestrate-codex-panes.md (updated 07-08 with approved substrate: tab-per-task pane topology, herdr 0.7.3 observe primitives, resume-by-id). SLICING PILOT: parent + dependency-linked slices, each its own gated run on a stacked branch — slice 0 = plan (this landing), task-8.1 = skill rewrite, task-8.2 = records retirement run as live e2e through the new Build path (dep 8.1), task-8.3 = lessons + close-out (dep 8.1, 8.2). Lifecycle: agent start cx-<branch> --cwd <tree> --tab <conductor-tab> --split; brief/report via .qq/handoffs/<n>-{brief,report}.md; wait --status idle; repair in-pane; dead pane -> codex resume <session-id> (--last banned).
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
