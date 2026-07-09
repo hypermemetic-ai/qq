@@ -17,7 +17,7 @@ Operating rules live in [`AGENTS.md`](./AGENTS.md) (loaded every session;
 | **Knowledge** | the document stack: code graph · intent + work status · durable docs · episodic docs | codebase-memory MCP (out-of-repo) · `backlog/` · `openwiki/` · `docs/solutions/` + `CONCEPTS.md` |
 | **Sessions** | many named parallel agents, each in its own worktree, state-aware | herdr (`herdr`) |
 | **Cockpit** | human-driven terminal tools + status line + tuned configs | `cockpit/`, `bin/qq-phase` |
-| **Externals** | live docs · GitHub · fast filesystem · gate | Context7 · `gh` · `fd`/`eza`/`rg` · `no-mistakes` |
+| **Externals** | live docs · GitHub · fast filesystem/JSON · gate | Context7 · `gh` · `fd`/`eza`/`rg`/`jq` · `no-mistakes` |
 
 ## The loop
 **Align → Plan → Build → Verify (autonomous) → Sign-off (human, gated) → Review →
@@ -34,7 +34,12 @@ status line with every active phase plus any live gate step.
 When the backlog is deep, pick from the claimable frontier instead of the raw
 To Do column: `bin/qq-frontier` lists unassigned ready tasks with no local or
 remote `task-<id>` branch claim; `--afk` narrows to unattended-safe work and
-`--json` is for tooling.
+`--json` is for tooling. Dispatchers pass `--ref <rev>` so the frontier is read
+from the same commit the workers will check out. `bin/qq-wave` consumes that
+frontier from `origin/main`, refuses non-frontier tasks, creates one
+worktree/tab/worker per task, and spawns `qq-gate-view` as a right split beside
+each worker. A conductor pane that sits on `main` can run `qq-gate-view --repo`
+to follow the repo's active run.
 
 ## Skills
 16 skills, curated from four MIT collections (mattpocock, superpowers,
@@ -48,9 +53,9 @@ provenance is in [`SKILLS-ATTRIBUTION.md`](./SKILLS-ATTRIBUTION.md).
    stack, and cockpit tools, then prints exact install hints for anything
    missing.
 2. **One-shot activation** — `bash bin/qq-activate.sh` installs the guardrail
-   hook, wires the WIP savepoint and `qq-phase` status line, symlinks cockpit
-   configs from this repo into `~/.config`, and links skills into
-   `~/.claude/skills`.
+   hook, wires the WIP savepoint and `qq-phase` status line, links
+   `qq-frontier`/`qq-gate-view` onto `PATH`, symlinks cockpit configs from this
+   repo into `~/.config`, and links skills into `~/.claude/skills`.
 3. **Skills** — link them live:
    ```
    bash bin/qq-link.sh skills
@@ -87,11 +92,12 @@ provenance is in [`SKILLS-ATTRIBUTION.md`](./SKILLS-ATTRIBUTION.md).
    OpenWiki CLI, and a provider key exist; task-7 is researching the sub-only /
    no-key engine path before initial generation.
 8. **Sessions** — install herdr (`brew install herdr`), then
-   `herdr integration install claude codex` so it tracks agent state. Fan out with
-   task branches (`task-<id>-<slug>`, or `task-<id>.<n>-<slug>` for slices):
-   `herdr worktree create --branch task-<id>-<slug>` +
-   `herdr agent start <name> --cwd <worktree> -- claude`; `orchestrate` uses
-   the same surface for Codex workers (`cx-<branch> -- codex`).
+   `herdr integration install claude codex` so it tracks agent state. Fan out
+   frontier tasks with `bin/qq-wave --frontier [--afk]` or explicit task ids;
+   it creates task branches (`task-<id>-<slug>`, or `task-<id>.<n>-<slug>` for
+   slices), herdr worktrees/tabs, Claude workers, and branch-scoped gate viewer
+   right splits. `orchestrate` uses the same herdr pane surface for Codex
+   workers (`cx-<branch> -- codex`).
 
 ## Provenance
 Curated from MIT sources, kept only where they serve my workflow: superpowers

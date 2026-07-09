@@ -44,13 +44,14 @@ repo via a symlinked `@`-import — do not edit a copy; edit it in qq.
   coordination helps; there is deliberately no protocol beyond these primitives
   yet.
 - **Cockpit** — the operator's tuned terminal surface, linked from the qq repo:
-  herdr, yazi, broot, glow, mdcat, shell navigation, and the `qq-phase` status line.
+  herdr, yazi, broot, glow, mdcat, shell navigation, the `qq-phase` status line,
+  and pane helpers such as `qq-frontier` / `qq-gate-view`.
 - **Externals** — Context7 (live, version-correct library docs), `gh` (GitHub),
-  `fd` / `eza` / `rg` (fast filesystem), and **the gate** (`no-mistakes`, an
-  external MIT tool): every landing is *driven through it* — an independent
-  pipeline reviews the diff, runs the checks, requires a registry touch once
-  `backlog/` is adopted, refreshes adopted descriptive docs, and opens a PR. It
-  is capability you invoke, not process you maintain.
+  `fd` / `eza` / `rg` (fast filesystem), `jq` (JSON glue), and **the gate**
+  (`no-mistakes`, an external MIT tool): every landing is *driven through it* —
+  an independent pipeline reviews the diff, runs the checks, requires a
+  registry touch once `backlog/` is adopted, refreshes adopted descriptive docs,
+  and opens a PR. It is capability you invoke, not process you maintain.
 
 ## Behavioral floor (always)
 1. **Think before coding** — surface assumptions, offer interpretations, ask
@@ -77,9 +78,9 @@ Triage also flags parallelism — without being asked: every **unclaimed To Do**
 task gets its `parallel-ok` label (or explicit dependencies) and its
 `hitl`/`afk` attendance label at creation or first triage (claimed tasks are
 exempt — see §Parallel operation). When the operator asks for the next task and
-the queue is deep, don't default to serial: run `bin/qq-frontier` and propose a
-wave of independent frontier tasks fanned out via herdr worktrees (see
-§Parallel operation).
+the queue is deep, don't default to serial: run `bin/qq-frontier`, then propose
+or launch a `bin/qq-wave` of independent frontier tasks fanned out via herdr
+worktrees (see §Parallel operation).
 
 Two invariants: **`verification-before-completion` is never skipped**, and
 **no change reaches `main` except through the gate** — the second is what makes
@@ -186,9 +187,13 @@ These are the rules that make that safe.
 - **The frontier** — the set of claimable tasks: status `To Do`, every
   dependency `Done`, unassigned, **and no `task-<id>` branch anywhere** (local
   or remote). `bin/qq-frontier` computes it mechanically (`--afk` filters to
-  unattended-safe work, `--json` for tooling). Background agents and wave
-  dispatchers pick only from the frontier — never from the raw To Do column,
-  which under-reports claims (see below) and over-reports readiness.
+  unattended-safe work, `--json` for tooling, `--ref <rev>` reads the registry
+  from a specific commit). Background agents and wave dispatchers pick only
+  from the frontier — never from the raw To Do column, which under-reports
+  claims (see below) and over-reports readiness. A dispatcher must read the
+  frontier from the same commit its workers are created from; `bin/qq-wave`
+  refreshes `origin/main`, creates workers from that commit, and calls
+  `qq-frontier --ref <origin-main-sha>`.
 - **Claim-by-assignment** — claiming a task is three moves, atomically on your
   own branch: create `task-<id>-<slug>`, set the task's assignee to that branch
   name, commit the claim immediately. Because claims land on `main` only at
@@ -217,6 +222,11 @@ These are the rules that make that safe.
   conductor (the operator's main session) for grilling first. A worker that
   finds real ambiguity anyway stops and asks; grinding ahead is the failure
   mode, not the protocol.
+- **Wave dispatch** — `bin/qq-wave` is the in-repo fan-out call site: pass
+  explicit task ids or `--frontier [--afk]`, and it refuses anything outside the
+  frontier. Each task gets a branch/worktree, a tab in the qq workspace, one
+  Claude worker, and a non-agent `qq-gate-view` right split beside that worker.
+  Titles and branch slugs come from the same frontier JSON used for dispatch.
 - **Worker composition** — a worker starts as one Claude session in its
   worktree. For conducted work, `orchestrate` turns that session into a task
   tab: the Claude conductor pane stays first, and Codex implementer panes spawn
@@ -237,8 +247,10 @@ These are the rules that make that safe.
   via the gate; never live-edit the linked copies from a worker.
 - **Conductor duties** — dispatching a wave doesn't end the dispatcher's job:
   watch the herdr sidebar, nudge workers that end a turn on an announcement
-  instead of an action, relay `ask-user` gate findings to the operator, queue
-  dependent tasks behind their blockers, and clean up merged worktrees.
+  instead of an action, keep a repo-scoped gate viewer available with
+  `qq-gate-view --repo` when the conductor pane drives or supervises runs, relay
+  `ask-user` gate findings to the operator, queue dependent tasks behind their
+  blockers, and clean up merged worktrees.
 
 ## Skill index
 | skill | reach for it when |

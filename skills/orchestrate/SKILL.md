@@ -152,8 +152,9 @@ a glance; if not, it exits quietly.
 ## Done means
 Report to the owner only when the plan's tasks are implemented by Codex,
 verification is green with evidence, any required sign-off is granted, review is
-in hand, and the branch has been pushed through the gate. Name what Codex built,
-paste the verifying evidence, link the review. A
+in hand, and the branch has been pushed through the gate. Keep a `qq-gate-view`
+split beside whichever pane drives that gate run (`--repo` when the conductor is
+on `main`). Name what Codex built, paste the verifying evidence, link the review. A
 "done" without the green evidence bundle is not done.
 
 ## When NOT to use

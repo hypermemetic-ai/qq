@@ -8,7 +8,7 @@
 #   1. herdr : install claude + codex integrations so herdr tracks agent state
 #   2. Cockpit: symlink tuned terminal configs into ~/.config
 #   3. Skills : symlink qq skills into ~/.claude/skills
-#   4. Hooks : git rail + WIP savepoint + qq-phase on PATH (~/.claude/hooks + ~/.local/bin)
+#   4. Hooks : git rail + WIP savepoint + qq helpers on PATH (~/.claude/hooks + ~/.local/bin)
 #   5. Claude: yolo + qq-phase status line (`qq-phase render`) (~/.claude/settings.json)
 #   6. Codex : yolo — approval_policy="never", sandbox_mode="danger-full-access" (~/.codex/config.toml)
 #   7. Commit + push both repos (meeting-reviewer: qq link artifacts ONLY; your src/tests stay uncommitted)

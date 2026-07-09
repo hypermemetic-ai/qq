@@ -40,6 +40,15 @@ only after confirming no CI, lets objective review findings auto-fix, relays any
 dependencies are Done, whose assignee is empty, and whose task id has no local
 or remote task branch claim.
 
+**wave dispatch** — `bin/qq-wave` fan-out from the frontier: workers are created
+from `origin/main`, frontier state is read from that same commit, and each task
+gets its own worktree, herdr tab, worker pane, and gate-viewer split.
+
+**gate viewer** — `bin/qq-gate-view`, a pane-local wrapper around the
+`no-mistakes` TUI that follows the current branch's run by default, follows the
+repo's active run with `--repo`, waits before a run exists, survives successive
+runs, and respects detach.
+
 **task branch claim** — The cross-worktree claim signal for task work: a
 `task-<id>-<slug>` or `task-<id>.<n>-<slug>` branch, paired with the task's
 assignee field on the worker's own branch.
