@@ -230,6 +230,7 @@ Use the same `$root` resolved above for every path in this section.
    scratch_parent="${XDG_CACHE_HOME:-$HOME/.cache}/qq"
    mkdir -p "$scratch_parent" || { printf 'failed to create scratch parent: %s\n' "$scratch_parent" > "$log"; timeout 5 qq-phase researching --producer "$producer" --status red --detail "failed -- see $log_rel" >/dev/null 2>&1 || true; exit 1; }
    scratch=$(mktemp -d "$scratch_parent/idea-$NN-XXXXXX") || { printf 'failed to create scratch directory under: %s\n' "$scratch_parent" > "$log"; timeout 5 qq-phase researching --producer "$producer" --status red --detail "failed -- see $log_rel" >/dev/null 2>&1 || true; exit 1; }
+   sha256sum "$target" > "$scratch/target.sha256" || { printf 'failed to hash target: %s\n' "$target_rel" > "$log"; timeout 5 qq-phase researching --producer "$producer" --status red --detail "failed -- see $log_rel" >/dev/null 2>&1 || true; rm -rf "$scratch"; exit 1; }
    setsid bash -c '
      root="$1"; brief="$2"; producer="$3"; log_rel="$4"; scratch="$5"; target="$6"; target_rel="$7"
      cd "$root" || exit 1
@@ -247,18 +248,25 @@ Use the same `$root` resolved above for every path in this section.
        rc=$?
      fi
      if [ "$rc" -eq 0 ] && [ -s "$scratch/enriched.md" ]; then
-       original_tmp=$(mktemp "$scratch/original.XXXXXX") &&
-         enriched_original_tmp=$(mktemp "$scratch/enriched-original.XXXXXX") &&
-         sed -n "/^## Original/,/^## Sharpened/{/^## Sharpened/!p;}" "$target" > "$original_tmp" &&
-         sed -n "/^## Original/,/^## Sharpened/{/^## Sharpened/!p;}" "$scratch/enriched.md" > "$enriched_original_tmp" &&
-         [ -s "$original_tmp" ] &&
-         cmp -s "$original_tmp" "$enriched_original_tmp" &&
-         install_tmp=$(mktemp "$target.tmp.XXXXXX") &&
-         cp "$scratch/enriched.md" "$install_tmp" &&
-         mv "$install_tmp" "$target"
-       rc=$?
-       rm -f "${original_tmp:-}" "${enriched_original_tmp:-}"
-       [ "$rc" -eq 0 ] || rm -f "${install_tmp:-}"
+       if ! sha256sum -c "$scratch/target.sha256" >/dev/null 2>&1; then
+         printf 'target changed during research; preserved %s\n' "$scratch/enriched.md"
+         red_detail="target changed -- preserved $scratch/enriched.md"
+         preserve_scratch=1
+         rc=1
+       else
+         original_tmp=$(mktemp "$scratch/original.XXXXXX") &&
+           enriched_original_tmp=$(mktemp "$scratch/enriched-original.XXXXXX") &&
+           sed -n "/^## Original/,/^## Sharpened/{/^## Sharpened/!p;}" "$target" > "$original_tmp" &&
+           sed -n "/^## Original/,/^## Sharpened/{/^## Sharpened/!p;}" "$scratch/enriched.md" > "$enriched_original_tmp" &&
+           [ -s "$original_tmp" ] &&
+           cmp -s "$original_tmp" "$enriched_original_tmp" &&
+           install_tmp=$(mktemp "$target.tmp.XXXXXX") &&
+           cp "$scratch/enriched.md" "$install_tmp" &&
+           mv "$install_tmp" "$target"
+         rc=$?
+         rm -f "${original_tmp:-}" "${enriched_original_tmp:-}"
+         [ "$rc" -eq 0 ] || rm -f "${install_tmp:-}"
+       fi
      elif [ "$rc" -eq 0 ]; then
        rc=1
      fi
@@ -266,9 +274,11 @@ Use the same `$root` resolved above for every path in this section.
        timeout 5 qq-phase done --producer "$producer" --detail "$target_rel" >/dev/null 2>&1 || true
      fi
      if [ "$rc" -ne 0 ]; then
-       timeout 5 qq-phase researching --producer "$producer" --status red --detail "failed -- see $log_rel" >/dev/null 2>&1 || true
+       timeout 5 qq-phase researching --producer "$producer" --status red --detail "${red_detail:-failed -- see $log_rel}" >/dev/null 2>&1 || true
      fi
-     rm -rf "$scratch"
+     if [ "$rc" -eq 0 ] || [ -z "${preserve_scratch:-}" ]; then
+       rm -rf "$scratch"
+     fi
      exit "$rc"
    ' bash "$root" "$brief" "$producer" "$log_rel" "$scratch" "$target" "$target_rel" < /dev/null > "$log" 2>&1 &
    ```
@@ -285,6 +295,7 @@ Use the same `$root` resolved above for every path in this section.
    scratch_parent="${XDG_CACHE_HOME:-$HOME/.cache}/qq"
    mkdir -p "$scratch_parent" || { printf 'failed to create scratch parent: %s\n' "$scratch_parent" > "$log"; timeout 5 qq-phase researching --producer "$producer" --status red --detail "failed -- see $log_rel" >/dev/null 2>&1 || true; exit 1; }
    scratch=$(mktemp -d "$scratch_parent/idea-$NN-XXXXXX") || { printf 'failed to create scratch directory under: %s\n' "$scratch_parent" > "$log"; timeout 5 qq-phase researching --producer "$producer" --status red --detail "failed -- see $log_rel" >/dev/null 2>&1 || true; exit 1; }
+   sha256sum "$target" > "$scratch/target.sha256" || { printf 'failed to hash target: %s\n' "$target_rel" > "$log"; timeout 5 qq-phase researching --producer "$producer" --status red --detail "failed -- see $log_rel" >/dev/null 2>&1 || true; rm -rf "$scratch"; exit 1; }
    setsid bash -c '
      root="$1"; brief="$2"; producer="$3"; log_rel="$4"; scratch="$5"; target="$6"; target_rel="$7"
      cd "$root" || exit 1
@@ -299,18 +310,25 @@ Use the same `$root` resolved above for every path in this section.
        rc=$?
      fi
      if [ "$rc" -eq 0 ] && [ -s "$scratch/enriched.md" ]; then
-       original_tmp=$(mktemp "$scratch/original.XXXXXX") &&
-         enriched_original_tmp=$(mktemp "$scratch/enriched-original.XXXXXX") &&
-         sed -n "/^## Original/,/^## Sharpened/{/^## Sharpened/!p;}" "$target" > "$original_tmp" &&
-         sed -n "/^## Original/,/^## Sharpened/{/^## Sharpened/!p;}" "$scratch/enriched.md" > "$enriched_original_tmp" &&
-         [ -s "$original_tmp" ] &&
-         cmp -s "$original_tmp" "$enriched_original_tmp" &&
-         install_tmp=$(mktemp "$target.tmp.XXXXXX") &&
-         cp "$scratch/enriched.md" "$install_tmp" &&
-         mv "$install_tmp" "$target"
-       rc=$?
-       rm -f "${original_tmp:-}" "${enriched_original_tmp:-}"
-       [ "$rc" -eq 0 ] || rm -f "${install_tmp:-}"
+       if ! sha256sum -c "$scratch/target.sha256" >/dev/null 2>&1; then
+         printf 'target changed during research; preserved %s\n' "$scratch/enriched.md"
+         red_detail="target changed -- preserved $scratch/enriched.md"
+         preserve_scratch=1
+         rc=1
+       else
+         original_tmp=$(mktemp "$scratch/original.XXXXXX") &&
+           enriched_original_tmp=$(mktemp "$scratch/enriched-original.XXXXXX") &&
+           sed -n "/^## Original/,/^## Sharpened/{/^## Sharpened/!p;}" "$target" > "$original_tmp" &&
+           sed -n "/^## Original/,/^## Sharpened/{/^## Sharpened/!p;}" "$scratch/enriched.md" > "$enriched_original_tmp" &&
+           [ -s "$original_tmp" ] &&
+           cmp -s "$original_tmp" "$enriched_original_tmp" &&
+           install_tmp=$(mktemp "$target.tmp.XXXXXX") &&
+           cp "$scratch/enriched.md" "$install_tmp" &&
+           mv "$install_tmp" "$target"
+         rc=$?
+         rm -f "${original_tmp:-}" "${enriched_original_tmp:-}"
+         [ "$rc" -eq 0 ] || rm -f "${install_tmp:-}"
+       fi
      elif [ "$rc" -eq 0 ]; then
        rc=1
      fi
@@ -318,9 +336,11 @@ Use the same `$root` resolved above for every path in this section.
        timeout 5 qq-phase done --producer "$producer" --detail "$target_rel" >/dev/null 2>&1 || true
      fi
      if [ "$rc" -ne 0 ]; then
-       timeout 5 qq-phase researching --producer "$producer" --status red --detail "failed -- see $log_rel" >/dev/null 2>&1 || true
+       timeout 5 qq-phase researching --producer "$producer" --status red --detail "${red_detail:-failed -- see $log_rel}" >/dev/null 2>&1 || true
      fi
-     rm -rf "$scratch"
+     if [ "$rc" -eq 0 ] || [ -z "${preserve_scratch:-}" ]; then
+       rm -rf "$scratch"
+     fi
      exit "$rc"
    ' bash "$root" "$brief" "$producer" "$log_rel" "$scratch" "$target" "$target_rel" < /dev/null > "$log" 2>&1 &
    ```
@@ -330,8 +350,9 @@ Use the same `$root` resolved above for every path in this section.
    today, so `/idea` is Claude-invocable for now and the Codex linker is follow-up.
 
    In both, the wrapper stamps the per-idea producer `researching` before the
-   agent starts, `done` after the Original block comparison and atomic install succeed,
-   and red when the agent process exits nonzero, including CLI/auth/flag failures before the model starts.
+   agent starts, `done` after the full-file hash check, Original block comparison, and atomic install
+   succeed, and red when the agent process exits nonzero, the target changed before install, or
+   CLI/auth/flag failures before the model starts.
    `< /dev/null` is load-bearing: an inherited-but-open stdin hangs the worker
    forever before its first token.
 
@@ -351,5 +372,15 @@ Use the same `$root` resolved above for every path in this section.
    that content lands as a normal reviewed diff. Remaining mitigations: wrapper and agent diagnostics in
    `.qq/idea-research-$NN.log`, fetched pages treated as untrusted per the research skill's method, and
    gated landing with human review.
+
+   **Accepted read+network risk (operator decision, 2026-07-08).** The researcher combines repo
+   `Read` access with `WebFetch`/`WebSearch` while processing untrusted fetched pages, so a
+   prompt-injected source could in principle cause it to read repo files and exfiltrate them inside a
+   fetch or search URL. The operator accepted this risk because this is a single-operator repo whose
+   contents are largely public methodology, the researcher is short-lived, and stdout/stderr are captured
+   in `.qq/idea-research-$NN.log`. Writes into the repo remain blocked: the Claude route exposes no
+   write-capable tools and the Codex route uses `--sandbox workspace-write`, so the researcher cannot
+   alter the working tree. If this repo ever holds secrets, drop `--add-dir` and inline the idea text into
+   the brief instead; that costs no research capability.
 
 9. Ack in one line (contract 3) and return to the interrupted task.
