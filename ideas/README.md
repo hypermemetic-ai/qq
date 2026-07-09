@@ -140,3 +140,15 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   batches, contract the old form away. Deliberately not folded into
   `writing-plans` yet — nothing speculative; reach for it when a real wide
   refactor shows up. _(2026-07-08)_
+- **Stop-hook WIP snapshot vs untracked files** _(raised 07-08 — ✅ checked same
+  day, premise false; no action needed)._ Operator idea: the snapshot should
+  also capture untracked files, else a brand-new file in a dying worktree is
+  lost. Verified against `bin/qq-wip-snapshot.sh` **and** an empirical
+  scratch-repo test: untracked files **are already captured** — the temp-index
+  build is `read-tree HEAD` + `git add -A` (adds untracked), the
+  `git status --porcelain` early-exit counts untracked too (an untracked-only
+  change still snapshots), and `refs/wip/<branch>` lives in the *shared* ref
+  store, so the snapshot survives `git worktree remove`. Residual true gaps,
+  both by design: `.gitignore`d files are never captured, and nothing is saved
+  if a session dies without a Stop event firing. Revisit only if either gap
+  bites in practice. _(2026-07-08)_
