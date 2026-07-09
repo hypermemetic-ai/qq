@@ -22,9 +22,9 @@ the verdict is worth something.
   Each returns only its artifact; the reads that produced it stay out of this context.
 - **Codex worker** (`cx-<branch>`, a named herdr pane) — implementation and its own
   repair. Nothing else. One worker per working tree, spawned into the conductor's
-  tab, visible in the sidebar with live idle/working/blocked state, driven over the
-  herdr comms primitives (send / read / wait). Model, reasoning effort, sandbox, and
-  approvals come from `~/.codex/config.toml` (`gpt-5.5` / `xhigh` / `priority` tier /
+  tab, visible in the sidebar with live idle/working/done/blocked state, driven
+  over the herdr comms primitives (send / read / wait). Model, reasoning effort,
+  sandbox, and approvals come from `~/.codex/config.toml` (`gpt-5.5` / `xhigh` / `priority` tier /
   full-access / no-prompt here); pass `-c` overrides only if you must.
 
 Two rules make the separation real:
@@ -82,31 +82,39 @@ here once; every step below refers to it.
 **Worker lifecycle:**
 
 1. **Start** — one worker per working tree, spawned into your own tab
-   (tab-per-task: one tab reads as one task; cap ~3 panes per tab). Find your
-   tab with `herdr pane current` → `tab_id`, then:
+   (tab-per-task: one tab reads as one task; cap ~3 panes per tab). Resolve the
+   run label first (`task-<id>`, including dotted slice ids). Find your tab with
+   `herdr pane current` → `tab_id`, rename it with
+   `herdr tab rename <tab_id> task-<id>`, and label the conductor pane with
+   `herdr agent rename <target> task-<id>` when it has an agent label. Then:
    `herdr agent start cx-<branch> --cwd <tree> --tab <tab_id> --split right
    --no-focus -- codex`. Resolve the pane id from the start output or
    `herdr agent get cx-<branch>` → `pane_id` before any `pane send-keys`.
    Fanning out? `herdr worktree create --branch <name>` first — worktree
    affinity is per-pane via `--cwd`.
-2. **Trust prompt** — `herdr agent read cx-<branch> --source visible`; if the
+2. **Startup prompts** — `herdr agent read cx-<branch> --source visible`; if the
    directory-trust prompt is showing, `herdr pane send-keys <pane> Enter`
-   (option 1 is preselected). Long-term: pre-trust project roots in
+   (option 1 is preselected). If an update offer is showing, dismiss or skip it
+   and keep the run's tool version stable. Long-term: pre-trust project roots in
    `~/.codex/config.toml`.
 3. **Handoff** — write the plan task(s) + the acceptance check to
    `.qq/handoffs/<n>-brief.md` (multi-line text must not ride
    `herdr agent send` — a newline submits early). Then:
    `herdr agent send cx-<branch> "Execute .qq/handoffs/<n>-brief.md; when done
    write .qq/handoffs/<n>-report.md (what changed, files touched, how to
-   verify)."` followed by `herdr pane send-keys <pane> Enter`. The worker edits
-   the tree in place (trusted + full-access) and inherits `AGENTS.md` as its own
+   verify)."` Wait a couple seconds, or read
+   `herdr agent read cx-<branch> --source visible` until the text has reached
+   the pane, then `herdr pane send-keys <pane> Enter`. The worker edits the tree
+   in place (trusted + full-access) and inherits `AGENTS.md` as its own
    instructions, so the behavioral floor already binds it — point it at the plan
    task, don't re-explain the standards.
 4. **Wait** — `herdr agent wait cx-<branch> --status idle --timeout <generous,
-   ms>`. If idle flickers mid-turn, wait for idle twice a few seconds apart
-   before trusting it. On timeout, `herdr agent read cx-<branch>` for signs of
-   life before declaring it stuck. A worker parked on an approval prompt shows
-   **blocked** in the sidebar → read the pane, answer or escalate to the owner.
+   ms>`. Codex surfaces `done` at turn end, and the wait unblocks on that
+   transition — don't poll for a literal `idle`. If status flickers mid-turn,
+   wait for idle twice a few seconds apart before trusting it. On timeout,
+   `herdr agent read cx-<branch>` for signs of life before declaring it stuck. A
+   worker parked on an approval prompt shows **blocked** in the sidebar → read
+   the pane, answer or escalate to the owner.
 5. **Report** — read `.qq/handoffs/<n>-report.md`; the file is the result of
    record. Scrollback (`herdr agent read`) and the live stream (`herdr terminal
    session observe cx-<branch>`, read-only NDJSON — watch without stealing

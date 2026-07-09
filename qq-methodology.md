@@ -39,8 +39,9 @@ repo via a symlinked `@`-import — do not edit a copy; edit it in qq.
   its own git worktree; herdr's sidebar shows which agent is blocked / working /
   done / idle, so you see at a glance which one needs you. Agents can also talk
   to each other directly through herdr — `herdr agent list`, `send <target>
-  <text>` (follow with `herdr pane send-keys <pane> Enter` to submit), `read
-  <target>`, `wait <target> --status idle|working|blocked` — use it when
+  <text>` (then `read <target>` until the text is visible before
+  `herdr pane send-keys <pane> Enter` submits it), `read <target>`,
+  `wait <target> --status idle|working|blocked` — use it when
   coordination helps; there is deliberately no protocol beyond these primitives
   yet.
 - **Cockpit** — the operator's tuned terminal surface, linked from the qq repo:

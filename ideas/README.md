@@ -130,9 +130,10 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   one approach for every worker: own pane, sidebar visibility, reachable via
   #8's send/read/wait.
   ✅ **Mechanics smoke-tested (07-08):** `herdr agent start … -- codex` is
-  auto-detected as agent `codex` with live idle/working state; `send` + `pane
-  send-keys Enter` delivers prompts; `wait --status idle` blocks correctly; and
-  herdr captures the codex **session id**, which dissolves the `resume --last`
+  auto-detected as agent `codex` with live idle/working/done state plus blocked
+  prompts; `send` + a brief read/settle before `pane send-keys Enter` submits
+  prompts; `wait --status idle` unblocks when Codex surfaces `done`; and herdr
+  captures the codex **session id**, which dissolves the `resume --last`
   hazard. **Approved substrate (07-08):** tab-per-task topology, ~3 panes/tab
   cap, per-pane `--cwd` worktree affinity, read-only `herdr terminal session
   observe` for watch/debug only, and dead-pane recovery by explicit
@@ -143,7 +144,7 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   `cx-<branch>` worker panes, `.qq/handoffs/<n>-{brief,report}.md`, idle waits,
   file-based reports, in-pane repair, and explicit `codex resume <session-id>`
   recovery for dead panes. TASK-8.2 captured the live e2e proof and residual
-  records check; design doc:
+  records check; TASK-8.3 banked the pilot lessons and closed the parent; design doc:
   [`docs/plans/2026-07-08-orchestrate-codex-panes.md`](../docs/plans/2026-07-08-orchestrate-codex-panes.md).
   _(2026-07-08)_
 - **#10 · Expand–contract for wide refactors** _(captured 07-08)._ mattpocock
@@ -153,3 +154,9 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   batches, contract the old form away. Deliberately not folded into
   `writing-plans` yet — nothing speculative; reach for it when a real wide
   refactor shows up. _(2026-07-08)_
+- **#11 · Slicing-pilot lessons for serial gated slices** →
+  [`06-slicing-pilot-lessons.md`](06-slicing-pilot-lessons.md).
+  ✅ **Banked from TASK-8 (07-08).** Parent + dependency-linked slice sub-tasks
+  work, but hand-built branch stacks delinearize under the gate; future
+  `writing-plans` / `executing-plans` guidance should land one slice PR at a
+  time, each re-driven after its predecessor reaches `main`. _(2026-07-08)_

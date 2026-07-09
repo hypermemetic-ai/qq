@@ -1,6 +1,6 @@
 ---
 id: TASK-8.2
-title: Live e2e proof for worker-pane Build path
+title: Records retirement via the new Build path live e2e
 status: Done
 assignee:
   - task-8.2-records-e2e
