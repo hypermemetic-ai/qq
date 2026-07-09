@@ -72,8 +72,11 @@ provenance is in [`SKILLS-ATTRIBUTION.md`](./SKILLS-ATTRIBUTION.md).
    (`install.sh --skip-config`, then `claude mcp add --scope user codebase-memory`
    + the `[mcp_servers.codebase-memory]` block in `~/.codex/config.toml`); the
    index is fully derived, lives in `~/.cache`, and auto-refreshes
-   (`auto_index`/`auto_watch`); agents reach it as on-demand MCP tools. The intent
-   registry is `backlog/` ([Backlog.md](https://github.com/MrLesk/Backlog.md),
+   (`auto_index`/`auto_watch`); agents reach it as on-demand MCP tools. TASK-18
+   tracks the remaining qq-specific operationalization gap: verify the main-tree
+   index, stop or accept throwaway gate-worktree indexes, and diagnose the
+   disconnect observed on 2026-07-08. The intent registry is `backlog/`
+   ([Backlog.md](https://github.com/MrLesk/Backlog.md),
    `npm i -g backlog.md`); durable docs target `openwiki/`-style in-repo
    markdown. Today `bin/qq-openwiki-refresh` only runs when `openwiki/`, the
    OpenWiki CLI, and a provider key exist; task-7 is researching the sub-only /

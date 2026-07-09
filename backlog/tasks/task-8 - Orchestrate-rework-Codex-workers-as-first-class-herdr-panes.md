@@ -4,7 +4,7 @@ title: 'Orchestrate rework: Codex workers as first-class herdr panes'
 status: To Do
 assignee: []
 created_date: '2026-07-08 14:41'
-updated_date: '2026-07-08 21:02'
+updated_date: '2026-07-08 21:53'
 labels:
   - parallel-ok
 dependencies: []
@@ -35,5 +35,5 @@ Design doc: docs/plans/2026-07-08-orchestrate-codex-panes.md (written 07-08, rid
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Surface overlap with TASK-11 (both reshape herdr panes/layout around the orchestrate/gate view). Parallel-ok, but if run in the same wave, the two agents should talk via herdr send/read before touching cockpit/herdr config; otherwise sequence 8 → 11.
+Surface overlap with TASK-11 (both reshape herdr panes/layout around the orchestrate/gate view). Parallel-ok, but if run in the same wave, the two agents should talk via herdr send/read before touching cockpit/herdr config; otherwise sequence 8 → 11. PANE TOPOLOGY (operator direction + judged 2026-07-08): tab-per-task — orchestrator pane first in the tab, delegation spawns worker panes in the same tab (agent start --tab/--split; 0.7.2 fixed pane split --current to resolve to the calling pane). Cap ~3 panes/tab; overflow to a second tab or the sidebar/session navigator. Worktree affinity is per-pane (--cwd), so tabs can span worktrees; each task's conductor+worker pair shares that task's worktree (Codex holds the tree, conductor reads only). Design against herdr 0.7.2+ (upgrade lands before the wave): 'herdr terminal session observe' gives a read-only NDJSON ANSI stream of a pane — the conductor can watch a Codex worker without stealing input; 'herdr terminal session control' adds input/resize/takeover authority; session.snapshot bootstraps socket state in one call; layout.updated tracks pane mutations; 'herdr api schema --json' documents the API. Also: 0.7.2 fixes stale saved agent-session references on resumed panes — adjacent to the Codex-resume worktree-scoping this task absorbed (capture session id at first handoff; resume by id; --last banned in parallel operation).
 <!-- SECTION:NOTES:END -->

@@ -95,7 +95,11 @@ qq's worktree model.
   search toward the graph are how you buy the 83%. A thin qq skill (to be
   authored via `writing-skills`) will route agents to it for relational/impact
   queries only. `auto_index=true`, `auto_watch=true` (black-box freshness;
-  index is derived, out-of-repo, 0.2 s to rebuild).
+  index is derived, out-of-repo, 0.2 s to rebuild). **Operationalization
+  follow-up (07-08):** TASK-18 records that adoption did not leave the qq main
+  tree indexed, while throwaway gate worktrees were being indexed; it owns the
+  main-tree query smoke, gate-worktree exclusion/accept decision, multi-worktree
+  verification, and disconnect diagnosis.
 - **OKF: adopt the format direction, defer the dependency.** The spec was 3.5
   weeks old at research time; Google's reference implementations are
   data-catalog-shaped and the sole community plugin failed verification —

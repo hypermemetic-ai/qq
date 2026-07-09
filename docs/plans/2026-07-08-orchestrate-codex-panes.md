@@ -18,10 +18,26 @@ sidebar, addressable via send/read/wait, isolated per worktree.
 
 ## Design
 
+**Pane topology (07-08 update):** one tab per task. The orchestrator pane is
+first; delegated worker panes open in the same tab via herdr 0.7.2+ tab/split
+primitives. Keep roughly three panes per tab; overflow to a second tab or the
+sidebar/session navigator. Worktree affinity stays per pane (`--cwd`), so a
+task's conductor and worker pair share that task's worktree while Codex holds
+the tree and the conductor reads only.
+
+**Herdr 0.7.2+ API substrate:** `herdr terminal session observe` gives the
+conductor a read-only NDJSON ANSI stream for watching a worker without stealing
+input; `herdr terminal session control` is the explicit input/resize/takeover
+surface. `session.snapshot` bootstraps socket state, `layout.updated` tracks pane
+mutations, and `herdr api schema --json` is the reference before wiring against
+the socket API.
+
 **Worker lifecycle (per orchestrate run):**
 1. Start: `herdr agent start cx-<branch> --cwd <tree> --no-focus -- codex`
-   (same workspace as the run's tree; `herdr worktree create` first when
-   fanning out). One worker per working tree, honoring tree ownership.
+   inside the task tab, adding the appropriate tab/split flag once the exact
+   cockpit binding lands (same workspace as the run's tree; `herdr worktree
+   create` first when fanning out). One worker per working tree, honoring tree
+   ownership.
 2. Trust prompt: after start, `herdr agent read cx-<branch> --source visible`;
    if the directory trust prompt is showing, `herdr pane send-keys <pane> Enter`
    (option 1 is preselected). Long-term: pre-trust project roots in
