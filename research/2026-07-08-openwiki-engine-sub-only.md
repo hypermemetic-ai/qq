@@ -222,12 +222,16 @@ The engine decision converts TASK-7's implementation half into:
    AGENTS.md/CLAUDE.md injection by default (qq wires its own imports), keep
    `openwiki/.last-update.json` + `gitHead..HEAD` diff protocol.
 2. Rewrite `bin/qq-openwiki-refresh` to call
-   `timeout 600 codex exec --sandbox workspace-write --cd <repo> --skip-git-repo-check - < "$prompt_file"` — the sandbox flag is mandatory:
+   `timeout 600 codex exec -c approval_policy=never --sandbox workspace-write --cd <repo> --skip-git-repo-check - < "$prompt_file"` — the sandbox flag is mandatory:
    non-interactive codex defaults to a read-only sandbox
    (developers.openai.com/codex/noninteractive), so an unflagged call could
    never write `openwiki/`; the prompt-file stdin form is mandatory because it
    EOF-closes stdin without putting repo context/diffs in shell arguments, while
    raw `codex exec "<prompt>"` can block forever while reading inherited stdin.
+   The non-interactive approval flag surface is version-dependent:
+   `-c approval_policy=never` was verified on codex-cli 0.142.5 and remains
+   present in 0.143.0 help, so re-check `codex exec --help` during
+   implementation rather than copying top-level docs flags.
    Keep the bounded timeout so stalled Codex/model/network calls always reach the
    warn-don't-block path and restore the snapshot. Do not rely on a machine's
    permissive `~/.codex/config.toml`. Keep
