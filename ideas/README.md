@@ -47,11 +47,12 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   only), and resolve parked questions through `no-mistakes axi respond`. A
   14h-orphaned run still sits parked (its work is already on main — safe to
   dismiss). _(2026-07-06 → 08)_
-- **Agents should self-wrap-up on context pressure** _(new, 07-07)._ Make agents
+- **Agents should self-wrap-up on context pressure** _(new, 07-07)._
+  ✅ **Registered as TASK-17 (07-08).** Make agents
   context-aware: as they approach ~200–250k tokens they should proactively start wrapping
   up / handing off on their own, rather than *beginning* fresh work deep in a window ("you
   shouldn't start here"). Relates to `handoff` (the transfer) and the Stop-hook WIP snapshot
-  — this is the *trigger* that should fire the wrap-up. Could grow its own `NN-slug.md`. _(2026-07-07)_
+  — this is the *trigger* that should fire the wrap-up. _(2026-07-07 → 08)_
 - **#6 · Methodology audit → parallel-safety plan** →
   [`05-methodology-audit-parallel-safety.md`](05-methodology-audit-parallel-safety.md).
   Full audit (07-07): the vendored loop skills contradict the gate model (finishing

@@ -1,15 +1,16 @@
 # Driving gate fix loops on security-adjacent parsers
 
-**Date:** 2026-07-08 · **Landing:** task-3 (PR #8) · **Steps involved:** gate review × 9 fix rounds, ~2.5h
+**Date:** 2026-07-08 · **Landing:** task-3 (PR #8) · **Steps involved:** gate review × 11 fix rounds (3 auto + 8 authorized), ~2h review step
 
 ## Symptom
 
 A rewrite of the git rail (argv-aware matching, ~170 lines) entered the gate and
-the review step ran **nine fix rounds** — 30 findings, 12 fix commits, the file
-grew to ~1100 lines — before passing. Each round's fresh reviewer found real
-bypasses in the previous round's own fix code (heredoc handling alone sprouted
-five generations of edge cases). Rounds cost ~10 min each; the landing agent had
-to judge every gate.
+the review step ran **11 fix rounds** (3 within the auto_fix.review budget + 8
+explicitly authorized at fix_review gates) — 30 findings, 12 fix commits, the
+file grew to ~1100 lines — before passing. Each round's fresh reviewer found
+real bypasses in the previous round's own fix code (heredoc handling alone
+sprouted five generations of edge cases). Rounds cost ~10 min each; the landing
+agent had to judge every gate.
 
 ## Root cause
 
@@ -52,11 +53,12 @@ else gets weighed against the written model.
 
 ## Verification
 
-Review passed on round 9 (risk downgraded high→medium→pass). Final state locally
-re-verified on the merge candidate: 150/150 rail block/allow cases, 20/20
-qq-phase/WIP concurrency cases. The test table (tripled by the loop) now locks
-every fixed bypass and every protected false positive, including the documented
-conservative case (double-heredoc pipelines).
+Review passed after the 8th authorized round (risk downgraded
+high→medium→pass). Final state locally re-verified on the merge candidate:
+150/150 rail block/allow cases, 20/20 qq-phase/WIP concurrency cases. The test
+table (tripled by the loop) now locks every fixed bypass and every protected
+false positive, including the documented conservative case (double-heredoc
+pipelines).
 
 ## Reusable rules
 
