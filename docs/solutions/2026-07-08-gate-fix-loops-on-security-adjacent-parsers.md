@@ -64,9 +64,11 @@ pipelines).
 
 - Ship the threat model **in the code header before the gate sees it** — it's
   cheaper than negotiating it round-by-round, and it binds stateless reviewers.
-- Budget ~3 rounds; at the cap, amend the line explicitly (trigger plausibility)
-  rather than silently approving — the amendment goes in `--instructions`, so
-  the run record carries the policy.
+- Budget ~3 rounds as a checkpoint, not a hard stop. At the checkpoint, separate
+  loops surfacing *new, real* defects (still converging) from loops re-litigating
+  resolved findings or trading stylistic preferences; amend the line explicitly
+  (trigger plausibility) rather than silently approving — the amendment goes in
+  `--instructions`, so the run record carries the policy.
 - Every authorized fix round should also grow the committed test table — fixes
   without regression locks re-litigate next landing.
 - Watch file growth: 6× line count through a fix loop is tolerable only because

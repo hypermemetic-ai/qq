@@ -153,7 +153,10 @@ state; `qq-phase clear --producer <id>` removes one slot.
   `git push --prune`, `git push origin :branch`). Unmerged remote deletion
   therefore requires the same verified-supersession + explicit owner
   confirmation procedure and owner action. Unlanded work is never deleted in
-  cleanup — it lands through the gate or stays.
+  cleanup — it lands through the gate or stays. Known unresolved exception:
+  `bin/qq-wave` still force-removes an unconfirmed claim worktree/branch in its
+  rollback path before a worker is alive; TASK-23 tracks whether that scripted
+  path is sanctioned or must become non-destructive.
 
 **Merge gate: all-gated — one landing path.** Green work accumulates on its
 branch; landing is always through the gate — the independent pipeline reviews
@@ -280,4 +283,6 @@ Skills are linked from qq, vendored from MIT sources or authored for qq; see qq'
 force-push, `reset --hard`, `clean -fd`, `git branch -D`, remote branch deletion,
 `reflog expire`, `update-ref -d`, and history rewrites before they execute —
 argv-aware, so a command that merely mentions a dangerous phrase in quoted prose
-is not blocked.
+is not blocked. Its scope is the command the agent hands to the shell; it follows
+inline shell strings, but not git commands hidden inside an already-existing
+script (TASK-23).

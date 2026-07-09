@@ -59,7 +59,7 @@ task is `afk` for unattended execution or `hitl` because it needs operator input
 **silent failure** — A command that returns output and exit 0 while answering a
 different question than the one asked: `axi status` falling back to another
 branch's run, `git grep` eating `--split` as a flag, `${var:+}` firing on `0`.
-The session of 2026-07-08 lost most of its time to seven of these. Working
+The session of 2026-07-08 lost most of its time to this failure class. Working
 assumption: producing output is orthogonal to succeeding, and no-output is never
 evidence of success.
 
@@ -73,3 +73,21 @@ your changes re-applied on top of the gate's files so its hardening survives.
 implemented `qq-frontier --ref <rev>` support lets `bin/qq-wave` read frontier
 state from the same `origin/main` commit that workers are created from, so a
 wave cannot hand out a task whose file the worker's checkout does not contain.
+
+**fresh-context independence** — The property that makes a reviewer able to catch
+the author's mistakes: the reviewer holds no memory of the authoring session, so
+it re-derives findings from the artifact rather than inheriting the author's
+belief about it. It is a property of the *spawn*, not of the vendor — a fresh
+Claude subagent and a fresh codex agent both have it; the author's own continued
+session does not, at any model size. Operator ruling, 2026-07-09.
+
+**refuse, don't sanitise** — When untrusted or model-authored input becomes a
+path, a command, or an identifier, reject anything outside the accepted charset
+rather than stripping it to fit. A sanitiser turns `../../etc/foo` into `etcfoo`
+and proceeds; that is a silent failure wearing a safety costume. The clamp that
+rewrites is indistinguishable, at the call site, from the clamp that validated.
+
+**reproduce before you fix** — A fix is verified only against a test that fails on
+the unfixed code. A harness that passes both before and after has tested nothing;
+it is the same "plausible answer, exit 0" shape as the silent failures it was
+written to catch.

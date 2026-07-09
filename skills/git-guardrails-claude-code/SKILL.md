@@ -26,6 +26,11 @@ that merely *mentions* a dangerous phrase in quoted prose — a commit message, 
 search pattern, an `--instructions` argument — is not blocked. Unparseable lines
 fall back to conservative whole-line matching, failing safe.
 
+Scope limit: this is a Claude Code `PreToolUse` hook, so it inspects the Bash
+command Claude is about to run. It follows inline shell strings in that command,
+but it does not inspect git commands that an invoked script performs internally;
+review script rollback paths separately (TASK-23).
+
 When blocked, Claude sees a message telling it that it does not have authority to access these commands.
 
 ## Steps
@@ -97,7 +102,7 @@ Ask if user wants to add or remove any patterns from the blocked list. Edit the 
 
 ### 5. Verify
 
-Run the bundled case table (57 block/allow cases):
+Run the bundled case table (150 block/allow cases):
 
 ```bash
 bash scripts/test-block-dangerous-git.sh
