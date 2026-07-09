@@ -136,4 +136,11 @@ Resolve the repo root once and use it for every path in this section:
    both, `< /dev/null` is load-bearing: an inherited-but-open stdin hangs the
    worker forever before its first token.
 
+   The researcher deliberately runs full-access: its highest-value output is empirical, and scratch-repo
+   repros need real bash. A tool allowlist cannot scope write paths, so `Write only ideas/NN-slug.md`
+   stays policy either way. Mitigations: always-on git-guardrails hooks bind headless workers too
+   (force-push, `reset --hard`, `branch -D`, remote deletes stay blocked); stdout/stderr stay in
+   `.qq/idea-research-NN.log`; fetched pages stay untrusted per `skills/research/SKILL.md`;
+   only gated landing with human review reaches main. This matches orchestrate's `codex exec --sandbox danger-full-access`.
+
 7. Ack in one line (contract 3) and return to the interrupted task.
