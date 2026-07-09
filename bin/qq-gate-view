@@ -28,13 +28,6 @@
 # right split (operator direction, 2026-07-08). It uses herdr's non-agent pane
 # pattern (split + send-text + Enter), so the viewer never registers in the agent
 # sidebar — that surface is reserved for actual agents.
-#
-# Two scopes, because two kinds of pane need opposite things:
-#   default (branch)  a worker pane owns one branch; showing another task's run
-#                     would be a lie. This is the scope workers must use.
-#   --repo            the conductor's pane sits on `main` and drives no run of its
-#                     own; it wants whichever run is active. Shows one run at a
-#                     time — concurrent runs are TASK-11's rollup, not this.
 set -uo pipefail
 
 usage() {
@@ -50,6 +43,14 @@ require_value() {
   usage
 }
 
+validate_interval() {
+  local value="$1"
+  if [[ ! "$value" =~ ^([0-9]+([.][0-9]*)?|\.[0-9]+)$ ]] || ! awk -v value="$value" 'BEGIN { exit !(value + 0 > 0) }'; then
+    echo "qq-gate-view: --interval must be a positive number of seconds" >&2
+    exit 64
+  fi
+}
+
 interval=5
 spawn_pane="" spawn_cwd="" repo_scope=0
 while [ $# -gt 0 ]; do
@@ -61,6 +62,8 @@ while [ $# -gt 0 ]; do
     *) usage ;;
   esac
 done
+
+validate_interval "$interval"
 
 if [ -n "$spawn_pane" ]; then
   command -v herdr >/dev/null || { echo "qq-gate-view: herdr not on PATH" >&2; exit 1; }
@@ -100,32 +103,6 @@ is_live_status() {
     pending|running) return 0 ;;
     *) return 1 ;;
   esac
-}
-
-run_status_of() { # terminal status of a specific run, branch guard bypassed
-  no-mistakes axi status --run "$1" 2>/dev/null | toon_field status
-}
-
-# `attach` parks on an end-screen when its run finishes, is cancelled, or is
-# superseded by a newer run for the same branch — it waits for a keypress that a
-# viewer pane will never get. So supervise it: attach in the background, poll the
-# run, and reap the TUI once the run reaches a terminal state. Without this the
-# pane freezes on a dead run forever (observed 2026-07-08: a superseded run left
-# the conductor's viewer showing "Pipeline cancelled" while three runs were live).
-attach_supervised() {
-  local run="$1" st
-  no-mistakes attach --run "$run" &
-  local tui=$!
-  while kill -0 "$tui" 2>/dev/null; do
-    st=$(run_status_of "$run")
-    if ! is_live_status "$st"; then
-      sleep 2                       # let the end-screen render, then reap
-      kill "$tui" 2>/dev/null || true
-      break
-    fi
-    sleep 3
-  done
-  wait "$tui" 2>/dev/null || true
 }
 
 toon_field() {
@@ -203,8 +180,6 @@ branch_status() { # echo the axi status block only if it describes this branch
 }
 
 repo_run_id() { # id of whatever run the repo is driving, on any branch
-  # the home view names the active run under `active_run:` (this branch) or
-  # `other_branch_active_run:` (someone else's) — take whichever is present
   no-mistakes axi 2>/dev/null |
     awk '/^(active_run|other_branch_active_run):[[:space:]]*$/ { want = 1; next }
          want && /^[[:space:]]+id:[[:space:]]*/ {
@@ -217,18 +192,42 @@ repo_run_id() { # id of whatever run the repo is driving, on any branch
          want && /^[^[:space:]]/ { want = 0 }'
 }
 
-repo_status() { # whatever run the repo is driving, on any branch
+repo_status() { # a finished run must not mask a live one
   local run
   run=$(repo_run_id)
   if [ -n "$run" ]; then
     no-mistakes axi status --run "$run" 2>/dev/null || true
   else
-    no-mistakes axi status 2>/dev/null || true   # nothing active: most recent
+    no-mistakes axi status 2>/dev/null || true
   fi
 }
 
 current_status() {
   if [ "$repo_scope" = 1 ]; then repo_status; else branch_status; fi
+}
+
+run_status_of() { no-mistakes axi status --run "$1" 2>/dev/null | toon_field status; }
+
+# `attach` parks on an end-screen when its run finishes, is cancelled, or is
+# superseded — waiting for a keypress a viewer pane never gets. Supervise it:
+# attach in the background, poll the run, reap the TUI on a terminal state.
+# Without this the pane freezes on a dead run (observed 2026-07-08: a superseded
+# run left the conductor's viewer on "Pipeline cancelled" while 3 runs were live).
+attach_supervised() {
+  local run="$1" st tui rc
+  no-mistakes attach --run "$run" &
+  tui=$!
+  while kill -0 "$tui" 2>/dev/null; do
+    st=$(run_status_of "$run")
+    if ! is_live_status "$st"; then
+      sleep 2                        # let the end-screen render, then reap
+      kill "$tui" 2>/dev/null || true
+      break
+    fi
+    sleep 3
+  done
+  wait "$tui" 2>/dev/null; rc=$?
+  return "$rc"
 }
 
 while true; do
@@ -251,12 +250,21 @@ hand work to the gate with:  no-mistakes axi run --skip ci --intent \"...\""
     fi
     last_note=""
     attach_supervised "$run"
-    # attach returned: the run reached a terminal state (we reaped it), or the
-    # operator pressed q while it was still live.
+    attach_status=$?
+    # attach returned: either the run ended, or the operator pressed q.
     out=$(no-mistakes axi status --run "$run" 2>/dev/null || true)
     if [ "$repo_scope" != 1 ] && [ "$(toon_field branch <<<"$out")" != "$branch" ]; then out=""; fi
     status=$(toon_field status <<<"$out")
-    is_live_status "$status" && detached_run="$run"
+    if is_live_status "$status"; then
+      if [ "$attach_status" -eq 0 ]; then
+        detached_run="$run"
+        sleep 1
+      else
+        note "attach to $run failed (exit $attach_status) while run is ${status} — retrying."
+        sleep "$interval"
+      fi
+      continue
+    fi
     sleep 1
   else
     # terminal run: keep its outcome on screen, wait for the branch's next run

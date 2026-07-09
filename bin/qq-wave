@@ -45,16 +45,21 @@ root=$(git rev-parse --show-toplevel) || exit 1
 # origin/main too. Reading it from this tree's HEAD would let a conductor on a
 # branch dispatch a task whose file the worker's checkout does not contain
 # (gate finding RV-002, 2026-07-08). One commit, one source of truth — which is
-# also why no "is this tree stale?" guard is needed: the tree is not consulted.
-git -C "$root" fetch -q origin main 2>/dev/null || true
-base=origin/main
-git -C "$root" rev-parse -q --verify "$base" >/dev/null 2>&1 || {
-  echo "qq-wave: cannot resolve $base — fetch origin first" >&2; exit 1; }
+# why no "is this tree stale?" guard is needed: the tree is never consulted.
+origin_main=refs/remotes/origin/main
+if ! git -C "$root" fetch -q origin "+refs/heads/main:$origin_main"; then
+  echo "qq-wave: could not refresh origin/main; refusing to dispatch with stale frontier data." >&2
+  exit 1
+fi
+if ! git -C "$root" rev-parse -q --verify "$origin_main" >/dev/null 2>&1; then
+  echo "qq-wave: origin/main is unavailable; refusing to dispatch with stale frontier data." >&2
+  exit 1
+fi
 
 # the frontier is the only dispatchable set — status To Do, deps Done,
 # unassigned, unclaimed by any task-<id> branch
-frontier_args=(--json --ref "$base")
-[ "$afk" = 1 ] && frontier_args=(--afk --json --ref "$base")
+frontier_args=(--json --ref "$origin_main")
+[ "$afk" = 1 ] && frontier_args=(--afk --json --ref "$origin_main")
 frontier_json=$(qq-frontier "${frontier_args[@]}")
 mapfile -t claimable < <(jq -r '.[].id | sub("^TASK-";"")' <<<"$frontier_json")
 
@@ -67,7 +72,7 @@ fi
 [ "${#ids[@]}" -gt 0 ] || { echo "qq-wave: nothing to launch" >&2; exit 1; }
 
 for id in "${ids[@]}"; do
-  printf '%s\n' "${claimable[@]}" | grep -qx "$id" || {
+  printf '%s\n' "${claimable[@]}" | grep -Fqx -- "$id" || {
     echo "qq-wave: TASK-$id is not on the frontier (claimed, blocked, or not To Do) — refusing" >&2
     echo "         run 'qq-frontier' to see what is dispatchable" >&2
     exit 1
@@ -90,14 +95,14 @@ for id in "${ids[@]}"; do
   branch="task-$id-$(slug "$title")"
 
   if [ "$dry" = 1 ]; then
-    echo "would launch TASK-$id on $branch from $base (tab in $ws, worker + gate viewer)"
+    echo "would launch TASK-$id on $branch (tab in $ws, worker + gate viewer)"
     continue
   fi
 
-  out=$(herdr worktree create --cwd "$root" --branch "$branch" --base "$base" \
+  out=$(herdr worktree create --cwd "$root" --branch "$branch" --base "$origin_main" \
         --label "task-$id" --no-focus --json)
   path=$(jq -r '.. | .path? // empty' <<<"$out" | head -1)
-  [ -n "$path" ] || { echo "qq-wave: worktree create failed for TASK-$id" >&2; continue; }
+  [ -n "$path" ] || { echo "qq-wave: worktree create failed for TASK-$id" >&2; exit 1; }
 
   # explicit placement: a tab per task in the qq workspace, never the stray
   # workspace that `worktree create` opens
@@ -107,12 +112,16 @@ for id in "${ids[@]}"; do
   out=$(herdr agent start "task-$id" ${tab:+--tab "$tab"} --cwd "$path" --no-focus -- \
         claude "$PREAMBLE Your task: TASK-$id. Your branch: $branch.")
   pane=$(jq -r '.result.agent.pane_id // empty' <<<"$out")
-  [ -n "$pane" ] || { echo "qq-wave: agent start failed for TASK-$id" >&2; continue; }
+  [ -n "$pane" ] || { echo "qq-wave: agent start failed for TASK-$id" >&2; exit 1; }
 
   # a fresh worktree path raises Claude Code's trust prompt; accept it or the
   # worker sits silently blocked
   sleep 5; herdr pane send-keys "$pane" Enter >/dev/null 2>&1 || true
 
-  viewer=$(qq-gate-view --spawn "$pane" --cwd "$path" 2>/dev/null || true)
+  if ! viewer=$(qq-gate-view --spawn "$pane" --cwd "$path"); then
+    echo "qq-wave: gate viewer spawn failed for TASK-$id" >&2
+    exit 1
+  fi
+  [ -n "$viewer" ] || { echo "qq-wave: gate viewer spawn returned no pane for TASK-$id" >&2; exit 1; }
   echo "TASK-$id → $branch  (tab ${tab:-?}, worker $pane, viewer ${viewer:-none})"
 done
