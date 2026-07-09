@@ -1,9 +1,11 @@
 ---
 id: TASK-8.2
 title: Records retirement via the new Build path (live e2e)
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - task-8-orchestrate-panes
 created_date: '2026-07-09 00:07'
+updated_date: '2026-07-09 00:14'
 labels:
   - slice
 dependencies:
