@@ -38,10 +38,13 @@ operator's ceremony stays at zero and the transcript stays clean.
 
 Capture lands on `ideas/` — the informal holding pen — not `backlog/`; backlog
 tasks are minted at grooming, in the session that owns the main tree.
+Resolve the repo root before choosing a route:
+`root="$(git rev-parse --show-toplevel)"`.
 
 - **Bare todo** (nothing researchable in it): append one dated bullet under
-  `ideas/README.md` **Backlog** — verbatim, plus a half-line of session context
-  if a "this/that" needs resolving. No file, no stamps, no researcher. Done.
+  `$root/ideas/README.md` **Backlog** — verbatim, plus a half-line of session
+  context if a "this/that" needs resolving. No file, no stamps, no researcher.
+  Done.
 - **Researchable idea** (an open question, a checkable premise, a design
   surface): full path below.
 - **Bare `/idea`** (no text): the idea *is* the current thread — snapshot it as
@@ -56,8 +59,7 @@ tasks are minted at grooming, in the session that owns the main tree.
 
 ## Full path
 
-Resolve the repo root once and use it for every path in this section:
-`root="$(git rev-parse --show-toplevel)"`.
+Use the same `$root` resolved above for every path in this section.
 
 1. Pick NN — the next free two-digit number in `$root/ideas/` — then stamp
    `qq-phase capturing --producer idea-NN`. Choose NN before the first stamp
