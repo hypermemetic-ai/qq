@@ -83,8 +83,15 @@ one-line ack.
   half-line of session context if a "this/that" needs resolving. `Backlog` is
   the last section, so append is the shared-edit form:
 
+  Operator text is never interpolated into a `x="…"` assignment: a stray `"`,
+  `` ` ``, or `$(` in the idea would break out of the string before `printf`'s
+  `%s` safety could apply. Carry it through a quoted heredoc instead.
+
   ```bash
-  todo="<verbatim idea plus needed session context>"
+  todo=$(cat <<'IDEA'
+  <verbatim idea plus needed session context>
+  IDEA
+  )
   today="$(date +%F)"
   flock .qq/ideas-readme.lock bash -c 'printf -- "- %s. _(%s)_\n" "$1" "$2" >> ideas/README.md' bash "$todo" "$today"
   ```
@@ -230,6 +237,11 @@ Use the same `$root` resolved above for every path in this section.
    From a Claude cockpit:
 
    ```bash
+   # $NN and $SLUG are model-authored and become a filesystem path. Refuse
+   # anything outside their charsets rather than sanitising it: a slug of
+   # `../../etc/foo` must fail loudly, not quietly install as `etcfoo`.
+   case "$NN" in ''|*[!0-9]*) printf 'idea: refusing a non-numeric sequence: %s\n' "$NN" >&2; exit 1 ;; esac
+   case "$SLUG" in ''|*[!a-z0-9-]*) printf 'idea: refusing a slug outside [a-z0-9-]: %s\n' "$SLUG" >&2; exit 1 ;; esac
    brief="$root/.qq/idea-brief-$NN.md"
    log="$root/.qq/idea-research-$NN.log"
    log_rel=".qq/idea-research-$NN.log"
@@ -331,6 +343,11 @@ Use the same `$root` resolved above for every path in this section.
    From a Codex cockpit:
 
    ```bash
+   # $NN and $SLUG are model-authored and become a filesystem path. Refuse
+   # anything outside their charsets rather than sanitising it: a slug of
+   # `../../etc/foo` must fail loudly, not quietly install as `etcfoo`.
+   case "$NN" in ''|*[!0-9]*) printf 'idea: refusing a non-numeric sequence: %s\n' "$NN" >&2; exit 1 ;; esac
+   case "$SLUG" in ''|*[!a-z0-9-]*) printf 'idea: refusing a slug outside [a-z0-9-]: %s\n' "$SLUG" >&2; exit 1 ;; esac
    brief="$root/.qq/idea-brief-$NN.md"
    log="$root/.qq/idea-research-$NN.log"
    log_rel=".qq/idea-research-$NN.log"
