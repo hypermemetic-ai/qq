@@ -97,3 +97,7 @@ distinct from its neighbors.>
   person from repeating it. Don't dress a class or table name up as a concept.
 - **Prune stale.** When a new capture contradicts or supersedes an older doc or a
   `CONCEPTS.md` entry, update the old one rather than letting the two drift apart.
+- **Own branch only.** In parallel operation these are shared surfaces: write
+  `docs/solutions/` files and `CONCEPTS.md` entries on your own branch — date+slug
+  filenames and appended entries merge trivially; never edit them in a tree you
+  don't own (see qq-methodology §Parallel operation).

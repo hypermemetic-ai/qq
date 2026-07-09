@@ -159,7 +159,7 @@ After saving the plan, offer execution choice:
 
 **"Plan complete and saved to `docs/plans/<filename>.md`. Two execution options:**
 
-**1. Conducted (recommended)** - I use `orchestrate`: Claude conducts, Codex implements, verification/review stay separate, and the branch lands through the gate
+**1. Conducted (recommended)** - I use `orchestrate`: Claude conducts, Codex implements in a named herdr pane, verification/review stay separate, and the branch lands through the gate
 
 **2. Inline Execution** - Execute tasks in this session using `executing-plans`, with verification checkpoints and a gated finish
 
@@ -167,7 +167,7 @@ After saving the plan, offer execution choice:
 
 **If Conducted chosen:**
 - Use `orchestrate`
-- Codex implements; Claude verifies/reviews; finish through the gate with `no-mistakes axi run --intent "<task + AC>"`, adding `--skip ci` only after confirming no CI exists
+- Codex implements in its worker pane; Claude verifies/reviews; finish through the gate with `no-mistakes axi run --intent "<task + AC>"`, adding `--skip ci` only after confirming no CI exists
 
 **If Inline Execution chosen:**
 - Use `executing-plans`

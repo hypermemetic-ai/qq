@@ -1,9 +1,9 @@
 ---
 id: TASK-8.2
-title: Records retirement via the new Build path (live e2e)
+title: Live e2e proof for worker-pane Build path
 status: Done
 assignee:
-  - task-8-orchestrate-panes
+  - task-8.2-records-e2e
 created_date: '2026-07-09 00:07'
 updated_date: '2026-07-09 00:21'
 labels:

@@ -4,7 +4,10 @@ title: Context-pressure self-wrap-up trigger
 status: To Do
 assignee: []
 created_date: '2026-07-08 22:37'
-labels: []
+updated_date: '2026-07-09 00:50'
+labels:
+  - afk
+  - parallel-ok
 dependencies: []
 priority: medium
 ordinal: 15000

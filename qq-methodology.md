@@ -71,7 +71,16 @@ the gate.
   gated push; they do not commit straight to `main`.
 - **Everything else** (multi-file, ambiguous, irreversible): run the loop below,
   starting at Align — or hand the whole task to `orchestrate`, which conducts the
-  loop end-to-end (Claude aligns / plans / verifies / reviews; Codex implements).
+  loop end-to-end (Claude aligns / plans / verifies / reviews; Codex implements
+  in a named herdr pane).
+
+Triage also flags parallelism — without being asked: every **unclaimed To Do**
+task gets its `parallel-ok` label (or explicit dependencies) and its
+`hitl`/`afk` attendance label at creation or first triage (claimed tasks are
+exempt — see §Parallel operation). When the operator asks for the next task and
+the queue is deep, don't default to serial: run `bin/qq-frontier` and propose a
+wave of independent frontier tasks fanned out via herdr worktrees (see
+§Parallel operation).
 
 Two invariants: **`verification-before-completion` is never skipped**, and
 **no change reaches `main` except through the gate** — the second is what makes
@@ -128,7 +137,8 @@ state; `qq-phase clear --producer <id>` removes one slot.
   `qq-wip list | diff | branch <name>`.
 - **Isolation on demand** — serial work runs in the main tree on a branch; fan out
   parallel agents and each gets its own worktree: `herdr worktree create --branch
-  <name>`, then `herdr agent start <name> --cwd <worktree> -- claude`. Isolation *is*
+  task-<id>-<slug>`, then
+  `herdr agent start <name> --cwd <worktree> -- claude`. Isolation *is*
   the coordination model — no file locks. True shared-file work stays serial in the
   main tree, one agent at a time.
 - **Branches die at merge.** Every GitHub repo sets delete-branch-on-merge
@@ -168,10 +178,73 @@ when the answer asks the gate to fix. The operator's only touchpoints are a
 relayed judgment call and the PR merge click. A parked landing agent shows as
 blocked in herdr; the `qq-phase` status line shows the gate step.
 
+## Parallel operation
+Working the backlog serially wastes the isolation model. When the queue is
+deep, the default posture is a **wave**: independent tasks fanned out to
+parallel workers, one per worktree, each landing through the gate on its own.
+These are the rules that make that safe.
+
+- **The frontier** — the set of claimable tasks: status `To Do`, every
+  dependency `Done`, unassigned, **and no `task-<id>` branch anywhere** (local
+  or remote). `bin/qq-frontier` computes it mechanically (`--afk` filters to
+  unattended-safe work, `--json` for tooling). Background agents and wave
+  dispatchers pick only from the frontier — never from the raw To Do column,
+  which under-reports claims (see below) and over-reports readiness.
+- **Claim-by-assignment** — claiming a task is three moves, atomically on your
+  own branch: create `task-<id>-<slug>`, set the task's assignee to that branch
+  name, commit the claim immediately. Because claims land on `main` only at
+  merge, the registry's assignee field is invisible to other trees while work
+  is in flight — **the branch itself is the cross-tree claim signal**, which is
+  why the frontier checks branches, not just assignees.
+- **Branch naming** — task work branches are `task-<id>-<slug>`
+  (e.g. `task-5-compound-rename`); slices of a parent task are
+  `task-<id>.<n>-<slug>`. Conventional `feat/` / `chore/` prefixes are retired
+  for task work (operator decision, 2026-07-08): the registry already types the
+  intent, and the task id is the join key for claims, Done flips (TASK-16), and
+  the lifecycle view (TASK-11).
+- **Triage labels** — set at task creation or first triage, alongside
+  dependencies: `parallel-ok` (surface-disjoint; safe in a wave) and one of
+  `hitl` (needs the operator in the loop — judgment calls, interactive tests)
+  or `afk` (runs unattended end-to-end; the operator's only touchpoint is the
+  merge click). A task that can't be labeled yet isn't triaged yet. The
+  invariant covers **unclaimed To Do tasks only** (operator decision,
+  2026-07-08): once a task is claimed — a `task-<id>` branch exists — labels
+  are moot for dispatch, and the task file is worker-owned, so cross-tree
+  label backfills are forbidden by the tree-ownership rule.
+- **The dispatchability bar** — a task is handed to a worker only when Align is
+  done: intent resolved with the operator and encoded in the task file plus the
+  dispatch brief. The dispatcher front-loads Align; the worker enters the loop
+  at Plan. Under-specified tasks never go to workers — they stay with the
+  conductor (the operator's main session) for grilling first. A worker that
+  finds real ambiguity anyway stops and asks; grinding ahead is the failure
+  mode, not the protocol.
+- **Worker composition** — a worker starts as one Claude session in its
+  worktree. For conducted work, `orchestrate` turns that session into a task
+  tab: the Claude conductor pane stays first, and Codex implementer panes spawn
+  as **right splits** in the same tab (TASK-8.1; operator direction,
+  2026-07-08; cap ~3 panes per tab; live e2e proof captured in TASK-8.2). The
+  gate's independent review preserves the fresh-eyes property for inline
+  workers; `orchestrate` preserves it earlier by keeping Claude out of Build.
+- **Tree ownership** — one writer per working tree. The main tree belongs to
+  the operator's interactive session; a background producer in a tree it does
+  not own is read-only there and stamps its own `qq-phase` producer slot.
+- **Shared surfaces** — append-and-merge, never cross-tree edits: `CONCEPTS.md`
+  entries and `docs/solutions/` / `research/` files are written on your own
+  branch (date+slug filenames keep merges trivial); `ideas/NN-` sequence
+  numbers are claimed by creating the file on your branch. True shared-file
+  work stays serial in the main tree.
+- **Global config is shared state** — `skills/` and `cockpit/` are live-linked
+  into every session from the main checkout. Edit them in a worktree and land
+  via the gate; never live-edit the linked copies from a worker.
+- **Conductor duties** — dispatching a wave doesn't end the dispatcher's job:
+  watch the herdr sidebar, nudge workers that end a turn on an announcement
+  instead of an action, relay `ask-user` gate findings to the operator, queue
+  dependent tasks behind their blockers, and clean up merged worktrees.
+
 ## Skill index
 | skill | reach for it when |
 |---|---|
-| `orchestrate` | running a non-trivial task through the whole loop end-to-end — Claude conducts, Codex implements |
+| `orchestrate` | running a non-trivial task through the whole loop end-to-end — Claude conducts, Codex implements in a named herdr pane |
 | `grilling` / `grill-me` | starting non-trivial work — pin down intent first |
 | `writing-plans` | turning agreed intent into an executable plan |
 | `executing-plans` | working a plan task-by-task (stops on blockers; won't touch main without consent) |

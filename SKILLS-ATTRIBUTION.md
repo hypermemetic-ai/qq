@@ -48,4 +48,4 @@ noted above. To re-check after an upstream release: fetch each skill's
 | `research` | mattpocock `research` (shape) + Every researcher agents (source-craft) + [open-gsd/gsd-core](https://github.com/open-gsd/gsd-core) research guardrails | MIT |
 | `uat-signoff` | the human-UAT pattern of gsd `gsd-verify-work` ([open-gsd/gsd-core](https://github.com/open-gsd/gsd-core)), distilled runtime-free | MIT |
 | `writing-skills` | Anthropic skill-authoring best-practices + mattpocock `writing-great-skills` + superpowers `writing-skills` (eval-first) | MIT |
-| `orchestrate` | original to qq — conducts the `AGENTS.md` loop as a Claude-conducts / Codex-implements split | MIT |
+| `orchestrate` | original to qq — conducts the `AGENTS.md` loop as a Claude-conducts / Codex-worker-pane split | MIT |

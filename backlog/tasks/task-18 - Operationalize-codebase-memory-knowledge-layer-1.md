@@ -4,8 +4,10 @@ title: Operationalize codebase-memory (knowledge layer 1)
 status: To Do
 assignee: []
 created_date: '2026-07-08 22:37'
+updated_date: '2026-07-09 00:32'
 labels:
   - parallel-ok
+  - afk
 dependencies: []
 priority: medium
 ordinal: 16000

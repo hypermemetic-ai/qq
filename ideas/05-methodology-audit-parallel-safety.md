@@ -3,7 +3,10 @@
 _Banked 2026-07-07. Status: audit complete (three parallel readers + main-session
 verification of every load-bearing claim); sequencing proposed. Update 2026-07-08:
 TASK-3 landed the qq-phase, WIP-ref, and rail hardening from Part 2; Codex resume
-scoping was resolved by TASK-8.
+scoping moved to TASK-8, and TASK-8.1 resolved orchestrate's runtime path by moving
+Codex Build handoffs into named herdr worker panes. Update 2026-07-09: TASK-4
+landed the instruction layer: §Parallel operation, claim-by-task-branch, frontier
+listing, and shared-surface rules.
 Trigger: operator asked "make the whole workflow parallel safe" + "audit the whole
 methodology for coherence, soundness, simplification — then see where concurrency
 fits in."_
@@ -17,10 +20,10 @@ re-homed** (they still speak "Superpowers", reference skills/paths qq doesn't ha
 and — worst — route work *around* the gate), and in **one piece of infrastructure**:
 the Understand-Anything knowledge layer, which is git-tracked *and* auto-rewritten
 per commit in every session — the single biggest parallel hazard in the system.
-Parallelism today is one methodology paragraph ("isolation on demand") plus one
-orchestrate convention ("Codex holds the tree") — directionally right, but with no
-tree-ownership protocol, no shared-file conventions, and three mechanical races
-that instructions alone can't fix.
+At audit time, parallelism was one methodology paragraph ("isolation on demand")
+plus one orchestrate convention ("Codex holds the tree") — directionally right,
+but with no tree-ownership protocol, no shared-file conventions, and three
+mechanical races that instructions alone couldn't fix.
 
 ## Part 1 — Coherence & soundness findings
 
@@ -97,15 +100,15 @@ fine (root-caused in idea #4). The rail allows `git push no-mistakes`.
    keeps fresh-run reset/detail/status/gate state per slot, migrates legacy
    single-slot files on first stamp, and renders every active slot. `qq-phase
    clear` wipes all state; `qq-phase clear --producer <id>` removes one slot.
-3. **`codex exec resume --last` is not worktree-scoped (MED) — resolved by TASK-8.**
-   Two orchestrate runs in two worktrees could cross-resume each other's Codex
-   session — silently corrupting "the reviewer is never the author". TASK-8
-   resolved this with a stronger fix than per-worktree scoping: orchestrate now
-   runs Codex as a named herdr pane worker, herdr captures the Codex session id
-   (`herdr agent get` → `agent_session.value`), and repair happens in-pane. If a
-   pane dies, recover it with `codex resume <session-id>`; `--last` was deleted
-   from orchestrate entirely. The old parenthetical about `orchestrate/SKILL.md:89`
-   missing `< /dev/null` is moot too — the skill no longer has `codex exec` lines.
+3. **`codex exec resume --last` was not worktree-scoped (MED) — resolved for
+   orchestrate by TASK-8.1.** Two old-style orchestrate runs in two worktrees
+   could cross-resume each other's Codex session — silently corrupting "the
+   reviewer is never the author". Current orchestrate no longer uses headless
+   `codex exec`: Codex runs as `cx-<branch>` in a herdr pane, handoffs go through
+   `.qq/handoffs/`, repair stays in-pane, and a dead pane resumes by explicit
+   session id (`herdr agent get` → `agent_session.value` →
+   `codex resume <session-id>`). `--last` is banned in parallel operation.
+   The residual record check and live e2e proof are captured in TASK-8.2.
 4. **Same-tree Stop-hook race (LOW) — resolved by TASK-3.** Two sessions in one
    tree no longer clobber `refs/wip/<branch>`: `qq-wip-snapshot.sh` updates the
    ref with compare-and-swap against the previously read value, retries against
@@ -247,7 +250,8 @@ escape hatch bypassing registry enforcement for ungated commits.
   Wired in `feat/document-stack`: `backlog/` seeded with the live queue,
   `bin/qq-registry-check.sh` as the gate's `commands.test` (a landing that
   doesn't touch `backlog/` is refused), `bin/qq-openwiki-refresh` as
-  `commands.format` (guarded no-op until openwiki is generated + keyed).
+  `commands.format` (guarded no-op until openwiki is generated + configured;
+  TASK-7 later chose the Codex-auth, sub-only refresh follow-up).
 
 - **Layer 3 scope widened: OpenWiki takes *all* descriptive docs**, not just
   business logic — anything that documents what the system *is* consolidates
@@ -297,11 +301,14 @@ questions in the research file.
    to be rewritten, and the worst instruction-level hazards (local merge to
    main, `worktree prune`) live inside it.
 3. **Mechanical hardening** (Part 2, items 2-4): completed for `qq-phase`
-   producer slots, WIP-ref CAS, and argv-aware rail hardening in TASK-3. TASK-8
-   resolved Codex resume scoping and retired the old orchestrate handoff model.
-4. **The instruction layer**: add §Parallel operation to `qq-methodology.md`
-   (tree ownership, shared-surface conventions, global-config rule) and thread
-   the one-line rules into the affected skills.
+   producer slots, WIP-ref CAS, and argv-aware rail hardening in TASK-3. Codex
+   resume scoping and the orchestrate handoff model were resolved for the live
+   skill in TASK-8.1; TASK-8.2 captured the live e2e proof/records check.
+4. **The instruction layer — completed by TASK-4.** `qq-methodology.md` now has
+   §Parallel operation (frontier, claim-by-task-branch, triage labels, tree
+   ownership, shared-surface conventions, global-config rule), `bin/qq-frontier`
+   lists claimable tasks, and the shared-surface one-liners are threaded into
+   the affected skills.
 5. **Then build ideas #2 (`compound`) and #1 (`/idea`)** on the now-safe
    substrate — #1 depends on the multi-producer fix in step 3.
 

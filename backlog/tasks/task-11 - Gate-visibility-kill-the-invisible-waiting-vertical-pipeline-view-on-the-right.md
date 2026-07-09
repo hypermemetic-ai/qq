@@ -6,11 +6,12 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-07-08 15:53'
-updated_date: '2026-07-08 22:52'
+updated_date: '2026-07-09 00:32'
 labels:
   - parallel-ok
+  - afk
 dependencies:
-  - TASK-10
+  - TASK-8
 priority: high
 ordinal: 11000
 ---

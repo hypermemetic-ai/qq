@@ -1,21 +1,16 @@
-# `codex exec` hangs on stdin — always pass `< /dev/null`
+# `codex exec` hangs on stdin — close stdin for headless use
 
-**Superseded 2026-07-08 by TASK-8** (worker-pane Build path,
-`docs/plans/2026-07-08-orchestrate-codex-panes.md`): orchestrate no longer has
-a headless `codex exec` path, so the `< /dev/null` rule below no longer applies
-to orchestrate handoffs. The rationale still applies to background side-quest
-`codex exec` invocations, including the detached `/idea` subprocess described in
-`ideas/01-btw-ideas-skill.md`; this is not a blanket "redirect never needed"
-repeal.
-
-**Status:** _orchestrate handoff guidance superseded; still live for detached
-background `codex exec` invocations._
+**Status:** _superseded for `orchestrate` by TASK-8.1._ Orchestrate no longer
+uses headless `codex exec` handoffs; Codex implementation now runs in a named
+herdr pane (`cx-<branch>`) with file-based `.qq/handoffs/` briefs and reports.
+Keep this note only for background/headless side jobs such as the `/idea`
+researcher pattern.
 
 ## The bug
 `codex exec "<prompt>"` (codex-cli 0.142.5) reads stdin and concatenates it onto
 the prompt arg. It prints `Reading additional input from stdin...` and blocks until
-EOF. Launched non-interactively — a background job, a subshell, any detached
-side-quest worker — stdin is an inherited-but-never-closed pipe, so it waits
+EOF. Launched non-interactively — a background job, a subshell, or any other
+headless helper — stdin is an inherited-but-never-closed pipe, so it waits
 **forever** and never starts the task. It reads as "Codex is slow / the model is
 stuck"; it's actually hung before the first token.
 
@@ -35,11 +30,10 @@ codex exec --sandbox danger-full-access --skip-git-repo-check "$(cat brief.promp
 ```
 
 ## Where it still applies
-- **Detached/background `codex exec` side-quests** — keep using `< /dev/null`,
-  ideally with the prompt-file pattern. The `/idea` subprocess pattern is the
-  live example.
-- **Historical:** this record originally targeted `skills/orchestrate/SKILL.md`
-  Build handoffs. TASK-8 replaced that headless path with worker-pane
-  send/read/wait, so no orchestrate wiring remains.
+- **Background/headless helpers** — if a future detached researcher or one-off
+  helper uses `codex exec`, close stdin explicitly and prefer a prompt file.
+- **Not `orchestrate`** — Build handoffs now run through a visible herdr worker
+  pane, `herdr agent send`/`wait`, and `.qq/handoffs/<n>-report.md` as the result
+  of record. Do not reintroduce `codex exec` as the orchestrate handoff path.
 
-_(2026-07-06)_
+_(2026-07-06; superseded for orchestrate 2026-07-08 by TASK-8.1)_

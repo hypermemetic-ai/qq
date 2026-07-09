@@ -37,11 +37,11 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   free**. The `02-*.md` note now records the built shape; the archived patch is safe to retire
   once merged. _(2026-07-06 → 08)_
 - **#3 · `codex exec` stdin-hang** → [`03-codex-exec-stdin-hang.md`](03-codex-exec-stdin-hang.md).
-  ✅ **Superseded for orchestrate (07-08 by TASK-8).** Orchestrate no longer has
-  a headless `codex exec` Build path, so the `< /dev/null` handoff rule does not
-  apply there anymore; see the supersession note in the record. The rationale
-  survives for background side-quest `codex exec` invocations, including #1's
-  detached subprocess model. _(2026-07-06 → 08)_
+  ✅ **Superseded for orchestrate (TASK-8.1, 07-08).** The old `< /dev/null`
+  rule still matters for detached/headless helpers, but orchestrate Build no
+  longer uses `codex exec`: Codex runs in a visible herdr worker pane with
+  `.qq/handoffs/` brief/report files. Note kept for background-job rationale.
+  _(2026-07-06 → 08)_
 - **#4 · Gate "stall" after a rename** → [`04-gate-stale-path-after-rename.md`](04-gate-stale-path-after-rename.md).
   ✅ **Root-caused (07-07).** (1) stale-path → `no-mistakes init` repairs it. (2) the
   "post-review freeze" was **not** a deadlock — the run parked in `awaiting_approval`
@@ -63,9 +63,10 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   merges around the gate; `superpowers:*` refs baked into every generated plan), three
   mechanical concurrency hazards (then-single-slot `.qq/state.json`, `codex resume --last`
   cross-worktree bleed, WIP-ref race), and a proposed 5-step sequencing. **TASK-3 has now
-  landed the multi-producer phase slots, WIP-ref CAS, and argv-aware rail hardening; TASK-8
-  retired the Codex resume hazard by deleting `--last` from orchestrate's worker-pane Build
-  path.** _(2026-07-07 → 08)_
+  landed the multi-producer phase slots, WIP-ref CAS, and argv-aware rail hardening; TASK-4
+  landed §Parallel operation plus `bin/qq-frontier`; TASK-8.1 resolved orchestrate's Codex
+  resume hazard by moving Build to worker panes and banning `--last`.**
+  _(2026-07-07 → 09)_
 - **#7 · Drop Understand-Anything for an agent-maintained map** → Part 4 of
   [`05-methodology-audit-parallel-safety.md`](05-methodology-audit-parallel-safety.md).
   Operator's call, independently corroborated: the knowledge layer produced both HIGH
@@ -107,9 +108,10 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   smoke-tested (see #6 file Part 4) and adopted — `backlog/` seeded with the
   live queue, `bin/qq-registry-check.sh` wired as the gate's test command,
   `bin/qq-openwiki-refresh` as its format command (guarded no-op until the
-  wiki exists). **Still open:** initial wiki generation is reframed as research
-  under the operator's sub-only / no-API-key constraint (backlog task-7); linked-repo rollout
-  (backlog task-9); the `code-graph` routing skill is **deferred by eval** —
+  wiki exists). **TASK-7 resolved the engine research:** the adopted path is a
+  codex-exec-driven, sub-only refresh plus one-time init; implementation is a
+  follow-up, and linked-repo rollout remains backlog task-9. The `code-graph`
+  routing skill is **deferred by eval** —
   the RED baseline (07-08) showed an unguided agent answers qq-scale
   relational queries correctly with `rg` alone, so per `writing-skills` no
   skill ships without an observed failure (backlog draft-1). The queue now
@@ -122,20 +124,27 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   and watch what they do with them before designing any protocol. ✅ The teaching
   note landed in the methodology's Sessions layer (branch `feat/document-stack`,
   07-08); now we watch. _(2026-07-08)_
-- **#9 · Codex workers get their own herdr pane** _(landed 07-08 by TASK-8)._ TASK-8
-  landed the worker-pane Build path in `skills/orchestrate/SKILL.md`; design:
+- **#9 · Codex workers get their own herdr pane** _(decided 07-08)._ Codex is
+  about to become the main driver, so its workers stop being second-class.
+  Run Codex workers as herdr agents (`herdr agent start <name> -- codex …`) —
+  one approach for every worker: own pane, sidebar visibility, reachable via
+  #8's send/read/wait.
+  ✅ **Mechanics smoke-tested (07-08):** `herdr agent start … -- codex` is
+  auto-detected as agent `codex` with live idle/working state; `send` + `pane
+  send-keys Enter` delivers prompts; `wait --status idle` blocks correctly; and
+  herdr captures the codex **session id**, which dissolves the `resume --last`
+  hazard. **Approved substrate (07-08):** tab-per-task topology, ~3 panes/tab
+  cap, per-pane `--cwd` worktree affinity, read-only `herdr terminal session
+  observe` for watch/debug only, and dead-pane recovery by explicit
+  `codex resume <session-id>` (`--last` banned). Tracked as backlog TASK-8 and
+  sliced as TASK-8.1 (skill rewrite) → TASK-8.2 (records retirement + live e2e)
+  → TASK-8.3 (lessons + close-out). ✅ **TASK-8.1 rewrote `orchestrate` Build
+  (07-08):** handoffs now use
+  `cx-<branch>` worker panes, `.qq/handoffs/<n>-{brief,report}.md`, idle waits,
+  file-based reports, in-pane repair, and explicit `codex resume <session-id>`
+  recovery for dead panes. TASK-8.2 captured the live e2e proof and residual
+  records check; design doc:
   [`docs/plans/2026-07-08-orchestrate-codex-panes.md`](../docs/plans/2026-07-08-orchestrate-codex-panes.md).
-  Codex workers now run as named herdr agents (`herdr agent start <name> -- codex …`):
-  one approach for every worker, with an own pane, sidebar visibility, and #8's
-  send/read/wait primitives. This retired the old headless `codex exec` handoff
-  model, including #3's `< /dev/null` orchestrate workaround, and removed the
-  former `resume --last` cross-worktree hazard from #6 Part 2.3; repair now
-  happens in-pane, and dead panes resume by captured session id.
-  ✅ **Mechanics smoke-tested (07-08):** `herdr agent start … -- codex` was
-  auto-detected as agent `codex` with live idle/working/done state; `send` plus
-  read/settle before `pane send-keys Enter` delivered prompts; `wait --status
-  idle` unblocked on the turn-end transition; and herdr captured the codex
-  **session id**. Tracked as backlog task-8.
   _(2026-07-08)_
 - **#10 · Expand–contract for wide refactors** _(captured 07-08)._ mattpocock
   v1.1's `to-tickets` slices a wide refactor (one mechanical change,
@@ -144,10 +153,3 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   batches, contract the old form away. Deliberately not folded into
   `writing-plans` yet — nothing speculative; reach for it when a real wide
   refactor shows up. _(2026-07-08)_
-- **#11 · Slicing-pilot lessons (TASK-8)** →
-  [`06-slicing-pilot-lessons.md`](06-slicing-pilot-lessons.md).
-  ✅ **Pilot complete (07-08).** Parent + dep-linked slice sub-tasks, slice 0 =
-  the plan landing, one branch + one unattended gate run per slice, stacked.
-  What worked, the stack-vs-gate-rebase friction, and the worker-pane
-  send/wait/done findings — the designated input for the `writing-plans` /
-  `executing-plans` rework. _(2026-07-08)_
