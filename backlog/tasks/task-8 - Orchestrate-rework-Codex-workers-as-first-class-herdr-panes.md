@@ -1,11 +1,11 @@
 ---
 id: TASK-8
 title: 'Orchestrate rework: Codex workers as first-class herdr panes'
-status: In Progress
+status: Done
 assignee:
   - task-8-orchestrate-panes
 created_date: '2026-07-08 14:41'
-updated_date: '2026-07-09 00:08'
+updated_date: '2026-07-09 00:26'
 labels:
   - parallel-ok
 dependencies: []
@@ -21,10 +21,10 @@ Idea #9, decided 07-08: replace headless codex exec with herdr agent start <name
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Codex workers run as named herdr agents with visible pane + status
-- [ ] #2 Conductor hand-off protocol uses wait --status idle plus a file-based report, not scrollback parsing
-- [ ] #3 codex exec resume --last no longer appears anywhere in orchestrate
-- [ ] #4 Planned as parent + dependency-linked slices; each slice lands as its own gated run
+- [x] #1 Codex workers run as named herdr agents with visible pane + status
+- [x] #2 Conductor hand-off protocol uses wait --status idle plus a file-based report, not scrollback parsing
+- [x] #3 codex exec resume --last no longer appears anywhere in orchestrate
+- [x] #4 Planned as parent + dependency-linked slices; each slice lands as its own gated run
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -36,5 +36,5 @@ Design doc: docs/plans/2026-07-08-orchestrate-codex-panes.md (updated 07-08 with
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Surface overlap with TASK-11 (both reshape herdr panes/layout around the orchestrate/gate view). Parallel-ok, but if run in the same wave, the two agents should talk via herdr send/read before touching cockpit/herdr config; otherwise sequence 8 → 11.
+Landed as the slicing pilot: slice 0 (plan, PR #11, gate run 01KX23ECCG passed 0 findings) -> 8.1 skill rewrite -> 8.2 records retirement executed THROUGH the new Build path (live e2e: worker pane w7:pQ, session 019f443a captured at first handoff, two file-based handoffs incl. deliberate red->repair in-pane) -> 8.3 lessons + close-out. AC evidence: (1) skill lifecycle steps 1-7 + live worker cx-task-8.2-records-e2e with sidebar status transitions; (2) wait --status idle + .qq/handoffs/<n>-report.md as report of record, no scrollback parsing (evidence in task-8.2 notes); (3) rg 'resume --last|codex exec' skills/orchestrate/ -> no matches — dead-pane recovery is codex resume <session-id> via herdr agent get, --last banned; (4) task-8.1/8.2/8.3 dep-linked under this parent, each on its own stacked branch with its own axi run. Pilot lessons: ideas/06-slicing-pilot-lessons.md (idea #11). Surface note for TASK-11: orchestrate now spawns worker panes into the conductor's tab (tab-per-task, ~3 panes/tab).
 <!-- SECTION:NOTES:END -->
