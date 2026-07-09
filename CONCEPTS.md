@@ -50,7 +50,7 @@ task is `afk` for unattended execution or `hitl` because it needs operator input
 **silent failure** — A command that returns output and exit 0 while answering a
 different question than the one asked: `axi status` falling back to another
 branch's run, `git grep` eating `--split` as a flag, `${var:+}` firing on `0`.
-The session of 2026-07-08 lost most of its time to six of these. Working
+The session of 2026-07-08 lost most of its time to seven of these. Working
 assumption: producing output is orthogonal to succeeding, and no-output is never
 evidence of success.
 

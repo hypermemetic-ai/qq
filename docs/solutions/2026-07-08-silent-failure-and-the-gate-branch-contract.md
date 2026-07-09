@@ -13,7 +13,7 @@ written down.
 
 ## Reading 1 — the failure shape: commands that answer instead of failing
 
-Six distinct incidents, all the same shape. A command returned output, exit 0,
+Seven distinct incidents, all the same shape. A command returned output, exit 0,
 and a plausible answer that was **wrong**, so the caller proceeded confidently.
 
 | what we ran | what it did instead |
