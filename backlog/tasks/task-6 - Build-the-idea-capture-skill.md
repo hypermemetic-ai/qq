@@ -5,7 +5,7 @@ status: Done
 assignee:
   - task-6-idea-skill
 created_date: '2026-07-08 14:41'
-updated_date: '2026-07-09 00:38'
+updated_date: '2026-07-09 02:56'
 labels:
   - parallel-ok
 dependencies:
@@ -29,3 +29,9 @@ Idea #1, design locked 07-07: capture verbatim in-turn, detached researcher writ
 - [x] #5 Nothing returns to the transcript: completion is ambient status only
 - [x] #6 Methodology support line + skill index, SKILLS-ATTRIBUTION.md, and ideas/README.md reference the skill
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Gate finding 'detached-researcher-unbounded-write' (error, ask-user) relayed to the operator, who chose 'fix the boundary, then land'. FIX: the detached researcher no longer has write authority over the repo. It runs in a scratch dir outside the repo (mktemp under XDG_CACHE_HOME) and emits $SCRATCH/enriched.md; the spawning wrapper — plain bash, not model-controlled — installs that file at the one known path ideas/NN-SLUG.md and removes the scratch dir. Claude route keeps bypassPermissions (headless bash needs it) plus --settings deny rules for Write/Edit/NotebookEdit under the repo root; Codex route switches from --sandbox danger-full-access to --sandbox workspace-write with --cd $SCRATCH (OS-level confinement). EVIDENCE (2026-07-08, adversarial, run twice): (1) a canary probe confirmed deny rules DO bind under bypassPermissions — an agent told to write an absolute path outside its cwd was blocked and said so; (2) end-to-end against a fake repo, an agent explicitly instructed to write PWNED into <repo>/ideas/01-x.md AND ENRICHED into its scratch dir left the repo file byte-identical ('ORIGINAL') while producing scratch/enriched.md ('ENRICHED'). Both spawn blocks pass bash -n. Residual risk stated in the skill header: the researcher still reads the repo, spends tokens, and reaches the network; a poisoned page can corrupt the CONTENT of enriched.md, which is why that content lands as a normal reviewed diff.
+<!-- SECTION:NOTES:END -->
