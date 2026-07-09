@@ -20,9 +20,15 @@
 set -euo pipefail
 
 render() {
+  local data
+  if ! data=$(backlog task list --plain); then
+    echo "qq-board: backlog task list --plain failed" >&2
+    return 1
+  fi
+
   # statuses come from backlog's config so empty columns still show, in order;
   # the list output travels via env because the heredoc already owns stdin
-  QQ_DATA=$(backlog task list --plain 2>/dev/null) QQ_ROOT="$1" python3 - <<'PY'
+  QQ_DATA="$data" QQ_ROOT="$1" python3 - <<'PY'
 import os, re, sys
 
 STOP = {"the", "a", "an", "to", "of", "and", "or", "for", "in", "on", "with",
@@ -106,7 +112,10 @@ case "${1:-}" in
     trap 'printf "\033[?25h"' EXIT
     printf '\033[?25l\033[2J'
     while :; do
-      buf=$(render "$root" || true)
+      if ! buf=$(render "$root" 2>&1); then
+        buf="qq-board: render failed
+$buf"
+      fi
       printf '\033[H%s\n\033[0J' "$buf"
       sleep "$interval"
     done
