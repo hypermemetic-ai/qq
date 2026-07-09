@@ -136,8 +136,9 @@ fine (root-caused in idea #4). The rail allows `git push no-mistakes`.
   into the *main checkout* — an agent editing `skills/` on a branch in the main
   tree changes live behavior for every running session. Rule: skill/cockpit edits
   happen in a worktree and land via the gate like any real work.
-- `handoff:8` writes to bare `/tmp` with no unique-name scheme — point it at the
-  session scratchpad / `mktemp`.
+- `handoff:8` writes to bare `/tmp` with no unique-name scheme — for context
+  handoff, prefer `mktemp`; for reserved operator handoff, TASK-24 now requires a
+  short `/tmp/qq-<verb>-XXXX.sh` path and explicitly rejects session scratchpads.
 
 ## Part 3 — Simplification opportunities
 

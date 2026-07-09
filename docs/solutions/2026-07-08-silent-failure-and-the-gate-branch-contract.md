@@ -184,3 +184,5 @@ worktrees and force-deletes branches in its rollback trap. Registered as TASK-23
 - Should an unlanded-branch delete be an operator action forever? It is today,
   because the rail blocks the agent's direct branch deletion — but `bin/qq-wave`
   force-deletes from inside a script, where the rail cannot see it (TASK-23).
+  TASK-24 now covers the operator-handoff mechanics; TASK-23 still decides
+  whether the rollback path is sanctioned or must become non-destructive.

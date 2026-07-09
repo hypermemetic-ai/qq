@@ -2,6 +2,9 @@
 # Human-in-the-loop reproduction loop.
 # Copy this file, edit the steps below, and run it.
 # The agent runs the script; the user follows prompts in their terminal.
+# This intentionally uses read prompts and requires a real interactive tty.
+# It is not the qq operator-handoff pattern for reserved actions; those scripts
+# are non-interactive, dry-run by default, and destructive only with --yes.
 #
 # Usage:
 #   bash hitl-loop.template.sh

@@ -138,6 +138,10 @@ Type 'discard' to confirm.
 Wait for exact confirmation. If confirmed, use the repo's normal non-destructive
 cleanup path. Do not force-delete branches or remove worktrees unless the owner
 explicitly asked for that exact cleanup and the workspace is known to be yours.
+If the remaining cleanup is reserved for the operator because the git rail blocks
+it, hand back one non-interactive script using the methodology's operator-handoff
+rules: short `/tmp` path, dry run by default, destructive action only with
+`--yes`, run-time precondition checks, explicit exclusions, and final state.
 
 ## Red Flags
 
