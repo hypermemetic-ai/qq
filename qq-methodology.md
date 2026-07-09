@@ -243,7 +243,7 @@ These are the rules that make that safe.
 ## Skill index
 | skill | reach for it when |
 |---|---|
-| `orchestrate` | running a non-trivial task through the whole loop end-to-end — Claude conducts, Codex implements |
+| `orchestrate` | running a non-trivial task through the whole loop end-to-end — Claude conducts, Codex implements in a named herdr pane |
 | `grilling` / `grill-me` | starting non-trivial work — pin down intent first |
 | `writing-plans` | turning agreed intent into an executable plan |
 | `executing-plans` | working a plan task-by-task (stops on blockers; won't touch main without consent) |

@@ -1,14 +1,18 @@
-# `codex exec` hangs on stdin — always pass `< /dev/null`
+# `codex exec` hangs on stdin — close stdin for headless use
 
-**Status:** _known footgun + one-line fix; wire it into `orchestrate`._
+**Status:** _superseded for `orchestrate` by TASK-8.1._ Orchestrate no longer
+uses headless `codex exec` handoffs; Codex implementation now runs in a named
+herdr pane (`cx-<branch>`) with file-based `.qq/handoffs/` briefs and reports.
+Keep this note only for background/headless side jobs such as the `/idea`
+researcher pattern.
 
 ## The bug
 `codex exec "<prompt>"` (codex-cli 0.142.5) reads stdin and concatenates it onto
 the prompt arg. It prints `Reading additional input from stdin...` and blocks until
-EOF. Launched non-interactively — a background job, a subshell, any `orchestrate`
-handoff — stdin is an inherited-but-never-closed pipe, so it waits **forever** and
-never starts the task. It reads as "Codex is slow / the model is stuck"; it's
-actually hung before the first token.
+EOF. Launched non-interactively — a background job, a subshell, or any other
+headless helper — stdin is an inherited-but-never-closed pipe, so it waits
+**forever** and never starts the task. It reads as "Codex is slow / the model is
+stuck"; it's actually hung before the first token.
 
 Not the priority tier, not `--json`, not the prompt: a trivial
 `codex exec "Reply with exactly: ok"` hangs identically across plain / `--json` /
@@ -25,13 +29,11 @@ shell-quoting hell):
 codex exec --sandbox danger-full-access --skip-git-repo-check "$(cat brief.prompt)" < /dev/null
 ```
 
-## Where to wire it (so it never recurs)
-- **`skills/orchestrate/SKILL.md` step 3 (Build)** — the `codex exec` and
-  `codex exec resume --last` handoff lines must show `< /dev/null` (ideally the
-  prompt-file pattern). Today they don't, so every handoff is one open stdin away
-  from hanging.
-- Optional: a thin `bin/qq-codex` wrapper that always appends `< /dev/null` and
-  takes the prompt from a file/arg, so the conductor can't forget — orchestrate
-  calls `qq-codex` instead of raw `codex exec`.
+## Where it still applies
+- **Background/headless helpers** — if a future detached researcher or one-off
+  helper uses `codex exec`, close stdin explicitly and prefer a prompt file.
+- **Not `orchestrate`** — Build handoffs now run through a visible herdr worker
+  pane, `herdr agent send`/`wait`, and `.qq/handoffs/<n>-report.md` as the result
+  of record. Do not reintroduce `codex exec` as the orchestrate handoff path.
 
-_(2026-07-06)_
+_(2026-07-06; superseded for orchestrate 2026-07-08 by TASK-8.1)_
