@@ -80,6 +80,13 @@ Do not offer a local merge or direct `origin` push.
 
 #### Option 1: Land Through The Gate
 
+If the landing is being driven from a herdr pane, keep `qq-gate-view` visible
+instead of relying on bare `no-mistakes attach`. A branch-local pane can run the
+viewer in its own split or spawn one with
+`qq-gate-view --spawn <pane-id> --cwd "$PWD"`; a conductor pane on `main` uses
+`qq-gate-view --repo` to follow the repo's active run. The viewer waits before a
+run exists and re-attaches across fix-round runs.
+
 Run with the intent taken from the backlog task and acceptance criteria this
 landing advances or closes. Use the CI-preserving command by default:
 

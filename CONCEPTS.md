@@ -40,6 +40,15 @@ only after confirming no CI, lets objective review findings auto-fix, relays any
 dependencies are Done, whose assignee is empty, and whose task id has no local
 or remote task branch claim.
 
+**wave dispatch** — `bin/qq-wave` fan-out from the frontier: workers are created
+from `origin/main`, frontier state is read from that same commit, and each task
+gets its own worktree, herdr tab, worker pane, and gate-viewer split.
+
+**gate viewer** — `bin/qq-gate-view`, a pane-local wrapper around the
+`no-mistakes` TUI that follows the current branch's run by default, follows the
+repo's active run with `--repo`, waits before a run exists, survives successive
+runs, and respects detach.
+
 **task branch claim** — The cross-worktree claim signal for task work: a
 `task-<id>-<slug>` or `task-<id>.<n>-<slug>` branch, paired with the task's
 assignee field on the worker's own branch.
@@ -61,14 +70,6 @@ reconciliation with the gate (or with a moved `main`) must be a **merge**, with
 your changes re-applied on top of the gate's files so its hardening survives.
 
 **frontier ref** — The revision a dispatcher reads the registry from. The
-requirement exists now, but explicit `qq-frontier --ref <rev>` support lands
-with TASK-19; on main today `qq-frontier` has only `--afk` / `--json` and reads
-the current committed `HEAD`. The ref must be the same commit workers are
-created from (`origin/main`), or the wave can hand out a task whose file the
-worker's checkout does not contain.
-
-**gate viewer** — The planned TASK-19 `qq-gate-view` tool, not on main yet: a
-pane-local wrapper around `no-mistakes attach` that pins the run id, guards it
-against the branch, and supervises the TUI so a finished or superseded run
-cannot freeze the pane. Branch-scoped for workers; `--repo` for the conductor,
-whose pane drives no run of its own.
+implemented `qq-frontier --ref <rev>` support lets `bin/qq-wave` read frontier
+state from the same `origin/main` commit that workers are created from, so a
+wave cannot hand out a task whose file the worker's checkout does not contain.

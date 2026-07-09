@@ -11,7 +11,7 @@ qq is the source of truth for the methodology. The shared core is
 `@`-imports it. Skills live in `skills/` and are linked into
 `~/.claude/skills` by `bin/qq-link.sh`; cockpit configs in `cockpit/` symlink
 into `~/.config` via `bin/qq-activate.sh`, which also wires the `qq-phase` status
-line.
+line and links the frontier/gate-viewer helpers onto `PATH`.
 
 **Merge gate: all-gated — one landing path.** Everything lands through the
 gate: the landing agent runs `no-mistakes axi run --intent "<task + AC>"`,

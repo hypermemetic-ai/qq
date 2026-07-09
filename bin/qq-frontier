@@ -12,28 +12,35 @@
 #      task-<id>-<slug> / task-<id>.<n>-<slug> branch naming is what makes this
 #      check mechanical.
 #
-# Usage: qq-frontier [--afk] [--json]
-#   --afk    only tasks labeled "afk" (safe to run fully unattended)
-#   --json   machine-readable output
+# Usage: qq-frontier [--afk] [--json] [--ref <rev>]
+#   --afk        only tasks labeled "afk" (safe to run fully unattended)
+#   --json       machine-readable output
+#   --ref <rev>  read the registry from <rev> instead of HEAD. A dispatcher must
+#                read the frontier from the SAME commit its workers are created
+#                from, or it can hand out a task whose file the worker's checkout
+#                does not contain (gate finding RV-002, 2026-07-08).
 set -euo pipefail
 
-afk=0 json=0
-for arg in "$@"; do
-  case "$arg" in
-    --afk) afk=1 ;;
-    --json) json=1 ;;
-    *) echo "usage: qq-frontier [--afk] [--json]" >&2; exit 64 ;;
+afk=0 json=0 ref=HEAD
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --afk) afk=1; shift ;;
+    --json) json=1; shift ;;
+    --ref) [ -n "${2:-}" ] || { echo "qq-frontier: --ref requires a revision" >&2; exit 64; }
+           ref="$2"; shift 2 ;;
+    *) echo "usage: qq-frontier [--afk] [--json] [--ref <rev>]" >&2; exit 64 ;;
   esac
 done
 
 root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "qq-frontier: not in a git repo" >&2; exit 1; }
-git -C "$root" rev-parse --verify -q HEAD >/dev/null || { echo "qq-frontier: no HEAD commit" >&2; exit 1; }
-git -C "$root" cat-file -e HEAD:backlog/tasks 2>/dev/null || { echo "qq-frontier: no committed backlog/tasks in HEAD" >&2; exit 1; }
+git -C "$root" rev-parse --verify -q "$ref" >/dev/null || { echo "qq-frontier: no such revision: $ref" >&2; exit 1; }
+git -C "$root" cat-file -e "$ref:backlog/tasks" 2>/dev/null || { echo "qq-frontier: no committed backlog/tasks in $ref" >&2; exit 1; }
 
-ROOT="$root" AFK="$afk" JSON="$json" python3 - <<'PY'
+ROOT="$root" AFK="$afk" JSON="$json" REF="$ref" python3 - <<'PY'
 import json, os, re, subprocess, sys
 
 root = os.environ["ROOT"]
+ref = os.environ.get("REF", "HEAD")
 afk_only = os.environ["AFK"] == "1"
 as_json = os.environ["JSON"] == "1"
 
@@ -127,17 +134,17 @@ for remote in (line for line in git_text("remote").splitlines() if line):
         fields = line.split(None, 1)
         if len(fields) != 2:
             continue
-        ref = fields[1]
-        if ref.startswith("refs/heads/"):
-            branches.add(ref[len("refs/heads/"):])
+        refname = fields[1]          # never `ref`: that names the registry revision
+        if refname.startswith("refs/heads/"):
+            branches.add(refname[len("refs/heads/"):])
 
 tasks = {}
-task_paths = git_bytes("ls-tree", "-rz", "--name-only", "HEAD", "--", "backlog/tasks").split(b"\0")
+task_paths = git_bytes("ls-tree", "-rz", "--name-only", ref, "--", "backlog/tasks").split(b"\0")
 for raw_path in sorted(path for path in task_paths if path):
     path = raw_path.decode("utf-8", "surrogateescape")
     if not path.endswith(".md"):
         continue
-    text = git_text("show", f"HEAD:{path}")
+    text = git_text("show", f"{ref}:{path}")
     meta = parse_frontmatter(text)
     tid = meta.get("id")
     if tid:

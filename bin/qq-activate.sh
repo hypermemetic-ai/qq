@@ -8,7 +8,7 @@
 #   1. herdr : install claude + codex integrations so herdr tracks agent state
 #   2. Cockpit: symlink tuned terminal configs into ~/.config
 #   3. Skills : symlink qq skills into ~/.claude/skills
-#   4. Hooks : git rail + WIP savepoint + qq-phase on PATH (~/.claude/hooks + ~/.local/bin)
+#   4. Hooks : git rail + WIP savepoint + qq helpers on PATH (~/.claude/hooks + ~/.local/bin)
 #   5. Claude: yolo + qq-phase status line (`qq-phase render`) (~/.claude/settings.json)
 #   6. Codex : yolo — approval_policy="never", sandbox_mode="danger-full-access" (~/.codex/config.toml)
 #   7. Commit + push both repos (meeting-reviewer: qq link artifacts ONLY; your src/tests stay uncommitted)
@@ -73,9 +73,12 @@ ln -sfn "$QQ/bin/qq-wip-snapshot.sh" "$HOME/.claude/hooks/qq-wip-snapshot.sh"
 mkdir -p "$HOME/.local/bin"; ln -sfn "$QQ/bin/qq-wip" "$HOME/.local/bin/qq-wip"
 ln -sfn "$QQ/bin/qq-herdr-pull" "$HOME/.local/bin/qq-herdr-pull"
 ln -sfn "$QQ/bin/qq-phase" "$HOME/.local/bin/qq-phase"
+ln -sfn "$QQ/bin/qq-frontier" "$HOME/.local/bin/qq-frontier"
+ln -sfn "$QQ/bin/qq-gate-view" "$HOME/.local/bin/qq-gate-view"
 echo "     linked wip savepoint + qq-wip (recover: qq-wip list|diff|branch <name>)"
 echo "     linked qq-herdr-pull (prefix+F<N> pulls agent N into the focused pane)"
 echo "     linked qq-phase on PATH (so 'qq-phase <Phase>' producers resolve, not just the status line)"
+echo "     linked qq-frontier (claimable tasks) + qq-gate-view (pane-local gate viewer; --spawn <pane>)"
 
 say "5/7  Claude Code yolo + wire the rail + status line into ~/.claude/settings.json"
 bak "$HOME/.claude/settings.json"
