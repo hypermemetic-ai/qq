@@ -284,3 +284,16 @@ OpenWiki · opportunistic/episodic docs = compound · enforcement = the gate at
 landing. Adjacent same-day decisions (agent-to-agent comms over herdr
 primitives; Codex workers become first-class herdr panes) are banked in
 `ideas/README.md` (#8, #9).
+
+## Addendum 3 (07-08, TASK-7) - OpenWiki engine decision
+
+TASK-7 kept the Layer B decision and narrowed the execution engine. Durable
+descriptive docs still target `openwiki/` and still refresh inside the gate
+transaction, but the follow-up implementation should not depend on the upstream
+OpenWiki CLI plus an API key. The adopted path is a bespoke
+`codex exec`-driven, sub-only refresh that vendors OpenWiki's MIT prompt
+discipline, preserves the `openwiki/.last-update.json` gitHead protocol, and
+keeps the existing self-guarding refresh behavior. The current
+`bin/qq-openwiki-refresh` remains the CLI/API-key-guarded stopgap until that
+follow-up lands; see `research/2026-07-08-openwiki-engine-sub-only.md` and
+`backlog/tasks/task-7 - Generate-the-initial-openwiki-wiki.md`.
