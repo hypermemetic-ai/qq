@@ -60,8 +60,9 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   merges around the gate; `superpowers:*` refs baked into every generated plan), three
   mechanical concurrency hazards (then-single-slot `.qq/state.json`, `codex resume --last`
   cross-worktree bleed, WIP-ref race), and a proposed 5-step sequencing. **TASK-3 has now
-  landed the multi-producer phase slots, WIP-ref CAS, and argv-aware rail hardening; the Codex
-  resume hazard moved to task-8.** _(2026-07-07 → 08)_
+  landed the multi-producer phase slots, WIP-ref CAS, and argv-aware rail hardening; TASK-4
+  landed §Parallel operation plus `bin/qq-frontier`; the Codex resume hazard moved to task-8.**
+  _(2026-07-07 → 09)_
 - **#7 · Drop Understand-Anything for an agent-maintained map** → Part 4 of
   [`05-methodology-audit-parallel-safety.md`](05-methodology-audit-parallel-safety.md).
   Operator's call, independently corroborated: the knowledge layer produced both HIGH

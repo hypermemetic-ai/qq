@@ -135,7 +135,8 @@ state; `qq-phase clear --producer <id>` removes one slot.
   `qq-wip list | diff | branch <name>`.
 - **Isolation on demand** — serial work runs in the main tree on a branch; fan out
   parallel agents and each gets its own worktree: `herdr worktree create --branch
-  <name>`, then `herdr agent start <name> --cwd <worktree> -- claude`. Isolation *is*
+  task-<id>-<slug>`, then
+  `herdr agent start <name> --cwd <worktree> -- claude`. Isolation *is*
   the coordination model — no file locks. True shared-file work stays serial in the
   main tree, one agent at a time.
 - **Branches die at merge.** Every GitHub repo sets delete-branch-on-merge

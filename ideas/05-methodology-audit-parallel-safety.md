@@ -3,7 +3,9 @@
 _Banked 2026-07-07. Status: audit complete (three parallel readers + main-session
 verification of every load-bearing claim); sequencing proposed. Update 2026-07-08:
 TASK-3 landed the qq-phase, WIP-ref, and rail hardening from Part 2; Codex resume
-scoping moved to TASK-8.
+scoping moved to TASK-8. Update 2026-07-09: TASK-4 landed the instruction layer:
+§Parallel operation, claim-by-task-branch, frontier listing, and shared-surface
+rules.
 Trigger: operator asked "make the whole workflow parallel safe" + "audit the whole
 methodology for coherence, soundness, simplification — then see where concurrency
 fits in."_
@@ -296,9 +298,11 @@ questions in the research file.
 3. **Mechanical hardening** (Part 2, items 2-4): completed for `qq-phase`
    producer slots, WIP-ref CAS, and argv-aware rail hardening in TASK-3. Codex
    resume scoping and the orchestrate handoff model moved to TASK-8.
-4. **The instruction layer**: add §Parallel operation to `qq-methodology.md`
-   (tree ownership, shared-surface conventions, global-config rule) and thread
-   the one-line rules into the affected skills.
+4. **The instruction layer — completed by TASK-4.** `qq-methodology.md` now has
+   §Parallel operation (frontier, claim-by-task-branch, triage labels, tree
+   ownership, shared-surface conventions, global-config rule), `bin/qq-frontier`
+   lists claimable tasks, and the shared-surface one-liners are threaded into
+   the affected skills.
 5. **Then build ideas #2 (`compound`) and #1 (`/idea`)** on the now-safe
    substrate — #1 depends on the multi-producer fix in step 3.
 

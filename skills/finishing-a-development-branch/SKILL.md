@@ -36,8 +36,9 @@ git status --short --branch
 git branch --show-current
 ```
 
-If you are on `main` or `master`, stop and create a feature branch before
-continuing. Agents never land changes directly on `main`.
+If you are on `main` or `master`, stop and create a branch before continuing.
+For task-backed work, use `task-<id>-<slug>` (or `task-<id>.<n>-<slug>` for a
+slice). Agents never land changes directly on `main`.
 
 If there are unrelated uncommitted changes, preserve them. Commit only the
 verified work that belongs to this task.
@@ -45,12 +46,14 @@ verified work that belongs to this task.
 ### Step 3: Confirm Registry Touch
 
 If this repo has adopted `backlog/`, make sure the landing includes a Backlog.md
-task create, claim, update, or close. Claim by setting the task `assignee` to
-the current branch. Until TASK-16 automates Done flips, only close or mark a task
-Done at gate handoff: verification green, task changes committed, and Option 1
-about to start. If the gate fails or landing is abandoned, revert the Done flip
-first. The gate's mechanical check only proves the diff touches `backlog/`; the
-PR review is where truthfulness is checked.
+task create, claim, update, or close. Task work claims by creating the
+`task-<id>-<slug>` branch, setting the task `assignee` to that branch, and
+committing the claim immediately; that branch name is the cross-tree claim
+signal used by `bin/qq-frontier`. Until TASK-16 automates Done flips, only close
+or mark a task Done at gate handoff: verification green, task changes committed,
+and Option 1 about to start. If the gate fails or landing is abandoned, revert
+the Done flip first. The gate's mechanical check only proves the diff touches
+`backlog/`; the PR review is where truthfulness is checked.
 
 ### Step 4: Present Options
 
@@ -135,6 +138,6 @@ explicitly asked for that exact cleanup and the workspace is known to be yours.
 
 **Always:**
 - Verify before finishing
-- Work from a feature branch
+- Work from a task branch for task-backed work, never `main`/`master`
 - Preserve unrelated changes
 - Land through the gate with `no-mistakes axi run --intent`; add `--skip ci` only after confirming no CI exists

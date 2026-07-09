@@ -8,7 +8,8 @@ model**. Mechanics smoke-tested 07-08 (scratch workspace): `herdr agent start â€
 `herdr agent send cx-<branch>` + `herdr pane send-keys <pane> Enter` delivers
 prompts; `herdr agent wait cx-<branch> --status idle` blocks until the turn
 ends; herdr captures the codex session id. This plan lands as its own gated
-branch **after** `feat/document-stack` merges._
+task branch; the parent claim is `task-8-orchestrate-panes` and slices use
+`task-8.<n>-<slug>`._
 
 ## Goal
 
