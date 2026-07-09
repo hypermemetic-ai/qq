@@ -124,7 +124,12 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   auto-detected as agent `codex` with live idle/working state; `send` + `pane
   send-keys Enter` delivers prompts; `wait --status idle` blocks correctly; and
   herdr captures the codex **session id**, which dissolves the `resume --last`
-  hazard. Tracked as backlog task-8; design doc:
+  hazard. **Approved substrate (07-08):** tab-per-task topology, ~3 panes/tab
+  cap, per-pane `--cwd` worktree affinity, read-only `herdr terminal session
+  observe` for watch/debug only, and dead-pane recovery by explicit
+  `codex resume <session-id>` (`--last` banned). Tracked as backlog TASK-8 and
+  now sliced as TASK-8.1 (skill rewrite) → TASK-8.2 (records retirement + live
+  e2e) → TASK-8.3 (lessons + close-out); design doc:
   [`docs/plans/2026-07-08-orchestrate-codex-panes.md`](../docs/plans/2026-07-08-orchestrate-codex-panes.md).
   _(2026-07-08)_
 - **#10 · Expand–contract for wide refactors** _(captured 07-08)._ mattpocock

@@ -99,10 +99,14 @@ fine (root-caused in idea #4). The rail allows `git push no-mistakes`.
    clear` wipes all state; `qq-phase clear --producer <id>` removes one slot.
 3. **`codex exec resume --last` is not worktree-scoped (MED).** Two orchestrate
    runs in two worktrees can cross-resume each other's Codex session — silently
-   corrupting "the reviewer is never the author". Fix: capture the session id at
-   first handoff and `codex exec resume <id>`; `--last` is banned in parallel
-   operation. (Also `orchestrate/SKILL.md:89` shows the repair handoff without
-   `< /dev/null` — the one handoff missing the idea-#3 redirect.)
+   corrupting "the reviewer is never the author". Decided follow-through lives
+   in TASK-8: replace headless orchestrate handoffs with named Codex panes
+   pinned by per-pane `--cwd`; herdr captures `agent_session.value`, and a dead
+   pane restarts with explicit `codex resume <id>`; `--last` is banned in
+   parallel operation. Records retirement and live e2e proof are TASK-8.2.
+   (Until the TASK-8.1 skill rewrite lands, `orchestrate/SKILL.md:89` still
+   shows the repair handoff without `< /dev/null` — the one handoff missing the
+   idea-#3 redirect.)
 4. **Same-tree Stop-hook race (LOW) — resolved by TASK-3.** Two sessions in one
    tree no longer clobber `refs/wip/<branch>`: `qq-wip-snapshot.sh` updates the
    ref with compare-and-swap against the previously read value, retries against
