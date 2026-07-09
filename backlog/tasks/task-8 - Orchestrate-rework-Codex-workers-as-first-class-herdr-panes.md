@@ -1,10 +1,11 @@
 ---
 id: TASK-8
 title: 'Orchestrate rework: Codex workers as first-class herdr panes'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - task-8-orchestrate-panes
 created_date: '2026-07-08 14:41'
-updated_date: '2026-07-08 21:53'
+updated_date: '2026-07-09 00:02'
 labels:
   - parallel-ok
 dependencies: []
