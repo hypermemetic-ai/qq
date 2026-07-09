@@ -166,6 +166,10 @@ Resolve the repo root once and use it for every path in this section:
    ' bash "$root" "$brief" "$producer" "$log_rel" < /dev/null > "$log" 2>&1 &
    ```
 
+   This is the researcher-spawn form for a Codex driver; invoking `/idea` from Codex also needs
+   qq skills linked into `~/.codex/skills`, and `bin/qq-link.sh` only links `~/.claude/skills`
+   today, so `/idea` is Claude-invocable for now and the Codex linker is follow-up.
+
    In both, the wrapper stamps the per-idea producer red when the agent process
    exits nonzero, including CLI/auth/flag failures before the model starts.
    `< /dev/null` is load-bearing: an inherited-but-open stdin hangs the worker
