@@ -27,65 +27,118 @@ for arg in "$@"; do
 done
 
 root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "qq-frontier: not in a git repo" >&2; exit 1; }
-tasks_dir="$root/backlog/tasks"
-[ -d "$tasks_dir" ] || { echo "qq-frontier: no backlog/tasks in $root" >&2; exit 1; }
+git -C "$root" rev-parse --verify -q HEAD >/dev/null || { echo "qq-frontier: no HEAD commit" >&2; exit 1; }
+git -C "$root" cat-file -e HEAD:backlog/tasks 2>/dev/null || { echo "qq-frontier: no committed backlog/tasks in HEAD" >&2; exit 1; }
 
-# every branch name, local and remote, with remote prefixes stripped
-branches=$(git -C "$root" for-each-ref --format='%(refname:short)' refs/heads refs/remotes \
-  | sed 's|^[^/]*/||' | sort -u)
+ROOT="$root" AFK="$afk" JSON="$json" python3 - <<'PY'
+import json, os, re, subprocess, sys
 
-BRANCHES="$branches" TASKS_DIR="$tasks_dir" AFK="$afk" JSON="$json" python3 - <<'PY'
-import json, os, re, sys
-
-tasks_dir = os.environ["TASKS_DIR"]
-branches = set(os.environ["BRANCHES"].split())
+root = os.environ["ROOT"]
 afk_only = os.environ["AFK"] == "1"
 as_json = os.environ["JSON"] == "1"
 
-def parse_frontmatter(path):
+def git_text(*args):
+    try:
+        return subprocess.run(
+            ["git", "-C", root, *args],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        ).stdout
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or "").strip()
+        if detail:
+            print(f"qq-frontier: git {' '.join(args)} failed: {detail}", file=sys.stderr)
+        else:
+            print(f"qq-frontier: git {' '.join(args)} failed", file=sys.stderr)
+        sys.exit(exc.returncode or 1)
+
+def git_bytes(*args):
+    try:
+        return subprocess.run(
+            ["git", "-C", root, *args],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ).stdout
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or b"").decode("utf-8", "replace").strip()
+        if detail:
+            print(f"qq-frontier: git {' '.join(args)} failed: {detail}", file=sys.stderr)
+        else:
+            print(f"qq-frontier: git {' '.join(args)} failed", file=sys.stderr)
+        sys.exit(exc.returncode or 1)
+
+def parse_frontmatter(text):
     """Minimal parser for Backlog.md task frontmatter (scalars, string lists,
     and folded/literal block scalars like `title: >-`)."""
     meta, in_fm, key, block = {}, False, None, None
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.rstrip("\n")
-            if line == "---":
-                if in_fm:
-                    return meta
-                in_fm = True
-                continue
-            if not in_fm:
-                continue
-            if block and line.startswith("  "):
-                sep = " " if block[1].startswith(">") else "\n"
-                meta[block[0]] = (meta[block[0]] + sep if meta[block[0]] else "") + line.strip()
-                continue
-            block = None
-            m = re.match(r"^(\w+):\s*(.*)$", line)
-            if m:
-                key, val = m.group(1), m.group(2).strip()
-                if val in (">", ">-", "|", "|-"):
-                    meta[key] = ""
-                    block = (key, val)
-                elif val in ("", "[]"):
-                    meta[key] = [] if val == "[]" else meta.get(key, [])
-                elif val.startswith("[") and val.endswith("]"):
-                    meta[key] = [v.strip().strip("'\"") for v in val[1:-1].split(",") if v.strip()]
-                else:
-                    meta[key] = val.strip("'\"")
-                continue
-            m = re.match(r"^\s+-\s+(.*)$", line)
-            if m and key:
-                meta.setdefault(key, [])
-                if isinstance(meta[key], list):
-                    meta[key].append(m.group(1).strip().strip("'\""))
+    for line in text.splitlines():
+        if line == "---":
+            if in_fm:
+                return meta
+            in_fm = True
+            continue
+        if not in_fm:
+            continue
+        if block and line.startswith("  "):
+            sep = " " if block[1].startswith(">") else "\n"
+            meta[block[0]] = (meta[block[0]] + sep if meta[block[0]] else "") + line.strip()
+            continue
+        block = None
+        m = re.match(r"^(\w+):\s*(.*)$", line)
+        if m:
+            key, val = m.group(1), m.group(2).strip()
+            if val in (">", ">-", "|", "|-"):
+                meta[key] = ""
+                block = (key, val)
+            elif val in ("", "[]"):
+                meta[key] = [] if val == "[]" else meta.get(key, [])
+            elif val.startswith("[") and val.endswith("]"):
+                meta[key] = [v.strip().strip("'\"") for v in val[1:-1].split(",") if v.strip()]
+            else:
+                meta[key] = val.strip("'\"")
+            continue
+        m = re.match(r"^\s+-\s+(.*)$", line)
+        if m and key:
+            meta.setdefault(key, [])
+            if isinstance(meta[key], list):
+                meta[key].append(m.group(1).strip().strip("'\""))
     return meta
 
+branches = set(line for line in git_text("for-each-ref", "--format=%(refname:short)", "refs/heads").splitlines() if line)
+for remote in (line for line in git_text("remote").splitlines() if line):
+    try:
+        out = subprocess.run(
+            ["git", "-C", root, "ls-remote", "--heads", remote, "refs/heads/task-*"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        ).stdout
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or "").strip()
+        print(f"qq-frontier: could not query remote {remote}; refusing stale remote branch data", file=sys.stderr)
+        if detail:
+            print(detail, file=sys.stderr)
+        sys.exit(exc.returncode or 1)
+    for line in out.splitlines():
+        fields = line.split(None, 1)
+        if len(fields) != 2:
+            continue
+        ref = fields[1]
+        if ref.startswith("refs/heads/"):
+            branches.add(ref[len("refs/heads/"):])
+
 tasks = {}
-for name in sorted(os.listdir(tasks_dir)):
-    if not name.endswith(".md"):
+task_paths = git_bytes("ls-tree", "-rz", "--name-only", "HEAD", "--", "backlog/tasks").split(b"\0")
+for raw_path in sorted(path for path in task_paths if path):
+    path = raw_path.decode("utf-8", "surrogateescape")
+    if not path.endswith(".md"):
         continue
-    meta = parse_frontmatter(os.path.join(tasks_dir, name))
+    text = git_text("show", f"HEAD:{path}")
+    meta = parse_frontmatter(text)
     tid = meta.get("id")
     if tid:
         tasks[tid] = meta
