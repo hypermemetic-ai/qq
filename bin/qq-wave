@@ -69,7 +69,7 @@ fi
 [ "${#ids[@]}" -gt 0 ] || { echo "qq-wave: nothing to launch" >&2; exit 1; }
 
 for id in "${ids[@]}"; do
-  printf '%s\n' "${claimable[@]}" | grep -qx "$id" || {
+  printf '%s\n' "${claimable[@]}" | grep -Fqx -- "$id" || {
     echo "qq-wave: TASK-$id is not on the frontier (claimed, blocked, or not To Do) — refusing" >&2
     echo "         run 'qq-frontier' to see what is dispatchable" >&2
     exit 1
