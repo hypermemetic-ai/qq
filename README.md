@@ -38,8 +38,9 @@ remote `task-<id>` branch claim; `--afk` narrows to unattended-safe work and
 the same clean commit workers will branch from.
 
 ## Skills
-16 skills, curated from four MIT collections (mattpocock, superpowers,
-compound-engineering, gsd-core) plus authored pieces for qq. Link them live from
+17 skills, curated from four MIT collections (mattpocock, superpowers,
+compound-engineering, gsd-core) plus five authored pieces for qq, including
+`orchestrate` and `idea` as originals. Link them live from
 `skills/` into `~/.claude/skills/` with `bash bin/qq-link.sh skills`; invoke them
 as `/grilling`, `/executing-plans`, and so on. The index is in `AGENTS.md`; full
 provenance is in [`SKILLS-ATTRIBUTION.md`](./SKILLS-ATTRIBUTION.md).

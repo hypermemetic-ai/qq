@@ -6,7 +6,7 @@ TASK-3 landed the qq-phase, WIP-ref, and rail hardening from Part 2; Codex resum
 scoping moved to TASK-8, and TASK-8.1 resolved orchestrate's runtime path by moving
 Codex Build handoffs into named herdr worker panes. Update 2026-07-09: TASK-4
 landed the instruction layer: §Parallel operation, claim-by-task-branch, frontier
-listing, and shared-surface rules.
+listing, and shared-surface rules. TASK-5 built `compound`; TASK-6 built `/idea`.
 Trigger: operator asked "make the whole workflow parallel safe" + "audit the whole
 methodology for coherence, soundness, simplification — then see where concurrency
 fits in."_
@@ -309,8 +309,8 @@ questions in the research file.
    ownership, shared-surface conventions, global-config rule), `bin/qq-frontier`
    lists claimable tasks, and the shared-surface one-liners are threaded into
    the affected skills.
-5. **Then build ideas #2 (`compound`) and #1 (`/idea`)** on the now-safe
-   substrate — #1 depends on the multi-producer fix in step 3.
+5. **Ideas #2 (`compound`) and #1 (`/idea`) — completed by TASK-5 and TASK-6**
+   on the now-safe substrate; #1 depended on the multi-producer fix in step 3.
 
 Steps 2-4 are each a gate-sized branch. Step 1 is a decision, then a small
 removal branch + a new skill authored via `writing-skills`.

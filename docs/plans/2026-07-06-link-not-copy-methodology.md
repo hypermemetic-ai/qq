@@ -127,7 +127,7 @@ backs up any real file it would replace to `*.qq.bak`. Subcommands:
 ### Acceptance (Handoff 1)
 - `qq-methodology.md` exists; `AGENTS.md` contains `@qq-methodology.md` and no longer
   duplicates the floor/loop/skill-index prose.
-- `bash bin/qq-link.sh skills` run once: `~/.claude/skills/grilling` … all 16 qq
+- `bash bin/qq-link.sh skills` run once: `~/.claude/skills/grilling` … all qq
   skills are symlinks into `skills/`; `no-mistakes` and `typeset-pdf` untouched;
   re-running prints "ok"/idempotent and changes nothing.
 - `bash -n bin/qq-link.sh && shellcheck bin/qq-link.sh` clean (same for the edited

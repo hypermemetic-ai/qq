@@ -109,8 +109,10 @@ enforcement point.
    so the next session doesn't relearn it.
 
 Support, any time: `research` (delegated, cited investigation → `research/`);
-`handoff` (compact state for a fresh agent when context runs low); `writing-skills`
-(author or edit a skill, eval-first).
+`idea` (park a mid-session thought — verbatim to `ideas/`, a detached researcher
+fleshes it out, done shows as ambient status, never a reply); `handoff` (compact
+state for a fresh agent when context runs low); `writing-skills` (author or edit
+a skill, eval-first).
 
 **Progress is stamped.** Long-running work records its current phase to
 `.qq/state.json` via `qq-phase <Phase>` at each boundary — cheap, token-free,
@@ -264,6 +266,7 @@ These are the rules that make that safe.
 | `receiving-code-review` | weighing review feedback — from `code-review` or the gate (verify, don't obey) |
 | `compound` | you just solved something worth not relearning — fires on its own, no prompt |
 | `research` | a task turns into reading legwork |
+| `idea` | a thought interrupts real work — capture it verbatim to `ideas/`, hand the legwork to a detached researcher, stay on task |
 | `handoff` | the context window is filling — hand off to a fresh agent |
 | `writing-skills` | authoring or editing a qq skill (eval-first) |
 | `git-guardrails-claude-code` | (safety rail) blocks destructive git — installed as always-on hooks |
