@@ -5,7 +5,7 @@ status: Done
 assignee:
   - task-7-openwiki-seed
 created_date: '2026-07-08 14:41'
-updated_date: '2026-07-09 00:42'
+updated_date: '2026-07-09 00:48'
 labels:
   - research
   - parallel-ok
@@ -29,11 +29,11 @@ RESEARCH FIRST - nothing here is decided except the constraint and the format. C
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-ENGINE DECISION (2026-07-08, from research/2026-07-08-openwiki-engine-sub-only.md — codex-delegated round, load-bearing claims adversarially verified: 7 CONFIRMED / 1 WEAKENED / 0 REFUTED):
+ENGINE DECISION (2026-07-08, from research/2026-07-08-openwiki-engine-sub-only.md — codex-delegated round, load-bearing claims adversarially verified: 7 CONFIRMED / 1 WEAKENED / 0 REFUTED; gate review findings NM-REVIEW-001/002 verified and folded in):
 
-ADOPTED: bespoke codex-exec-driven refresh. bin/qq-openwiki-refresh will drive 'codex exec' on the ChatGPT sub (same engine+auth the gate already uses via agent: codex) with OpenWiki's MIT prompt discipline vendored into the repo (preserve MIT notice). Keep openwiki/ format, .last-update.json gitHead..HEAD protocol, and all guards; re-key the configured-check from ~/.openwiki/.env to codex auth presence. commands.format stays the hook (document step verified unsteerable; format runs pre-commit in push step; failures warn -> script stays self-guarding).
+ADOPTED: bespoke codex-exec-driven refresh. bin/qq-openwiki-refresh will drive 'codex exec --sandbox workspace-write' on the ChatGPT sub (sandbox flag mandatory — non-interactive codex defaults to a read-only sandbox; same engine+auth the gate already uses via agent: codex) with OpenWiki's MIT prompt discipline vendored into the repo (preserve MIT notice). Keep openwiki/ format, .last-update.json gitHead..HEAD protocol, and all guards; re-key the configured-check from ~/.openwiki/.env to codex auth presence. commands.format stays the hook (document step verified unsteerable; format runs pre-commit in push step; failures warn -> script stays self-guarding).
 FALLBACK: same script on 'claude -p' (documented sub envelope; never --bare). Reserved — Claude sub is the scarce resource (operator load directive).
-REJECTED: OpenWiki CLI + API key (violates sub-only constraint; upstream has no merged sub backend — PRs #76/#181 open, #188 closed); OpenWiki-on-Claude-OAuth shim (the exact third-party credential-routing shape Anthropic prohibits); CodeWiki (real claude-code/codex CLI providers but writes docs/, breaks the openwiki/ format); local models (documented quality failures at that size); steering the gate's document step (no config surface, verified in no-mistakes v1.34.0 source).
+REJECTED: OpenWiki CLI + API key (violates sub-only constraint; upstream has no merged sub backend — PRs #76/#181 open, #188 closed, #205 'self-managed Codex OAuth provider' opened 2026-07-08 and unmerged; #205 calls the Codex backend directly from a non-Codex client = ToS-gray even if merged); OpenWiki-on-Claude-OAuth shim (the exact third-party credential-routing shape Anthropic prohibits); CodeWiki (real claude-code/codex CLI providers but writes docs/, breaks the openwiki/ format); local models (documented quality failures at that size); steering the gate's document step (no config surface, verified in no-mistakes v1.34.0 source).
 ToS: headless codex exec on ChatGPT sub = documented pattern for trusted PRIVATE automation (developers.openai.com/codex/auth/ci-cd-auth); limit exhaustion = credits/blocking, no ban guarantee.
-IMPLEMENTATION RE-PLAN: 5 steps in the research doc ('Implementation re-plan' section) — vendor prompts, rewrite refresh script, one-time init reviewed by operator, .no-mistakes.yaml comment/lint update (commands.* live only after merge to main), TASK-9 rollout note. Follow-up implementation task must be minted from the main-tree session (worktree-minted IDs risk duplicates).
+IMPLEMENTATION RE-PLAN: 5 steps in the research doc ('Implementation re-plan' section) — vendor prompts, rewrite refresh script (workspace-write sandbox), one-time init reviewed by operator, .no-mistakes.yaml comment/lint update (commands.* live only after merge to main), TASK-9 rollout note. Follow-up implementation task must be minted from the main-tree session (worktree-minted IDs risk duplicates).
 <!-- SECTION:NOTES:END -->

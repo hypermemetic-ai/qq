@@ -164,8 +164,14 @@ Verified from no-mistakes v1.34.0 source (cloned at tag) and docs:
   `PROVIDER_CONFIGS[].apiKeyEnvKey`; `needsCredentialSetup()` even wants
   `LANGSMITH_API_KEY` defined). Subscription-CLI backends exist only as open
   issues (#59, #106, #120, #156, #225) and unmerged PRs (#76 and #181 open,
-  #188 closed) — nothing merged on main. No roadmap commitment found.
-  [high, verified]
+  #188 closed; #205 "Add self-managed Codex OAuth provider" opened 2026-07-08,
+  open non-draft) — nothing merged on main. No roadmap commitment found.
+  [high, verified; #205 surfaced by the gate's review and re-verified via gh]
+  Note on #205: it implements a self-managed PKCE flow calling the Codex
+  Responses backend *directly* from OpenWiki — i.e. a non-Codex client on
+  ChatGPT-sub credentials, the same shape Anthropic prohibits on its side and
+  a weaker ToS position than driving the official `codex` binary. Even if it
+  merges, it does not obviously beat option 1.
 - **CodeWiki (FSoft-AI4Code)**: the strongest existing tool for this constraint —
   `CAW_PROVIDERS = {"claude-code", "codex"}` routes every LLM call through the
   local authenticated CLI binaries. But it writes its own `docs/` structure, not
@@ -203,7 +209,11 @@ The engine decision converts TASK-7's implementation half into:
    AGENTS.md/CLAUDE.md injection by default (qq wires its own imports), keep
    `openwiki/.last-update.json` + `gitHead..HEAD` diff protocol.
 2. Rewrite `bin/qq-openwiki-refresh` to call
-   `codex exec --cd <repo> --skip-git-repo-check -o <log> "$(prompt)"` — keeping
+   `codex exec --sandbox workspace-write --cd <repo> --skip-git-repo-check -o <log>
+   "$(prompt)"` — the sandbox flag is mandatory: non-interactive codex defaults to
+   a read-only sandbox (developers.openai.com/codex/noninteractive), so an
+   unflagged call could never write `openwiki/`; do not rely on a machine's
+   permissive `~/.codex/config.toml`. Keep
    every guard (no `openwiki/` → skip; no `codex` binary or no auth → warn+skip;
    snapshot/restore on failure; warn-don't-block) and re-keying the "is it
    configured" check from `~/.openwiki/.env` to codex auth presence
@@ -217,7 +227,8 @@ The engine decision converts TASK-7's implementation half into:
 
 Watch-fors recorded: OpenAI could tighten the CI/CD-auth-on-sub language (it is
 one docs page, not a ToS commitment); OpenWiki upstream may merge a
-subscription backend (issues #59/#156 — re-evaluate option 5→1 migration if so);
+subscription backend (issues #59/#156, PR #205's self-managed Codex OAuth
+provider — re-evaluate if one merges, weighing #205's direct-backend ToS caveat);
 the Anthropic Agent-SDK credits pause may resolve into a cleaner written rule for
 `claude -p`-class automation.
 
