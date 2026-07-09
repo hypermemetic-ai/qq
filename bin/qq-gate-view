@@ -29,14 +29,27 @@
 # sidebar — that surface is reserved for actual agents.
 set -uo pipefail
 
+usage() {
+  echo "usage: qq-gate-view [--interval SECONDS] | --spawn <pane_id> [--cwd PATH]" >&2
+  exit 64
+}
+
+require_value() {
+  local option="$1"
+  local value="${2-}"
+  [ -n "$value" ] && [[ "$value" != --* ]] && return
+  echo "qq-gate-view: $option requires a value" >&2
+  usage
+}
+
 interval=5
 spawn_pane="" spawn_cwd=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --interval) interval="${2:-5}"; shift 2 ;;
-    --spawn) spawn_pane="${2:-}"; shift 2 ;;
-    --cwd) spawn_cwd="${2:-}"; shift 2 ;;
-    *) echo "usage: qq-gate-view [--interval SECONDS] | --spawn <pane_id> [--cwd PATH]" >&2; exit 64 ;;
+    --interval) require_value "$1" "${2-}"; interval="$2"; shift 2 ;;
+    --spawn) require_value "$1" "${2-}"; spawn_pane="$2"; shift 2 ;;
+    --cwd) require_value "$1" "${2-}"; spawn_cwd="$2"; shift 2 ;;
+    *) usage ;;
   esac
 done
 
