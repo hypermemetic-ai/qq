@@ -21,7 +21,7 @@ and a plausible answer that was **wrong**, so the caller proceeded confidently.
 | `no-mistakes axi status` on a branch with no run | reported the *repo's* active run — a different task's pipeline |
 | `no-mistakes attach` (no `--run`) | attached to the repo's active run, not the pane's branch |
 | `no-mistakes attach` on a finished/superseded run | parked on an end-screen forever, awaiting a keypress no pane sends |
-| `rg ... \|\| echo clean` (a worker's marker scan) | pipe masked `rg`'s exit code; conflict markers were committed |
+| `rg ... \|\| echo clean` (a worker's marker scan) | the `\|\| echo clean` fallback masked every nonzero `rg` status; conflict markers were committed |
 | `probe='--split right'; git grep -c "$probe" origin/task-8.3-closeout -- 2>/dev/null \| wc -l` | `git grep` rejected the dash-leading pattern as an unknown option; stderr was suppressed and the pipeline lost the failing exit code, so `wc -l` reported 0 for text present in 5 files. Safe forms put `-e` or `--` before the pattern, and use `-F` for fixed strings. |
 | `${afk:+--afk}` with `afk=0` | expanded — `0` is non-empty — so `--afk` was always passed |
 | `qq-activate.sh` (hardcoded install list) | new `bin/` tools silently never reached `PATH` |
