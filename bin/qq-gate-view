@@ -1,0 +1,94 @@
+#!/bin/bash
+# qq-gate-view — pane-local gate viewer. Attaches the no-mistakes TUI to the
+# gate run for *this pane's branch*, and keeps doing so across successive runs.
+#
+# Why a wrapper instead of `no-mistakes attach`:
+#   - bare `attach` resolves the *repo's* active run, not this worktree's. With
+#     parallel workers, whichever run started last wins, so a pane can end up
+#     watching another task's pipeline. We resolve the run id ourselves and pass
+#     `attach --run <id>`.
+#   - `axi status` is not reliably branch-scoped either: on a branch with no run
+#     of its own it *falls back* to the repo's active run (verified 2026-07-08 —
+#     a fresh worktree reported another task's run). So every status read here is
+#     guarded: we use it only when its `branch:` field matches this worktree.
+#   - a viewer usually spawns *before* its run exists (pane comes up with the
+#     worker). Bare attach exits; this waits.
+#   - a worker drives several runs (fix rounds, stacked slices). One attach
+#     covers one run; this re-attaches to each new run for the branch.
+#
+# Detach (`q`) is respected: the viewer will not re-attach to a run you left,
+# but it will pick up the next one. Ctrl-C exits the viewer entirely.
+#
+# Usage: qq-gate-view [--interval SECONDS]
+set -uo pipefail
+
+interval=5
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --interval) interval="${2:-5}"; shift 2 ;;
+    *) echo "usage: qq-gate-view [--interval SECONDS]" >&2; exit 64 ;;
+  esac
+done
+
+command -v no-mistakes >/dev/null || { echo "qq-gate-view: no-mistakes not on PATH" >&2; exit 1; }
+branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || { echo "qq-gate-view: not in a git repo" >&2; exit 1; }
+
+trap 'printf "\nqq-gate-view: exit\n"; exit 0' INT
+
+detached_run=""
+last_note=""
+
+note() { # print only when the message changes, so the pane stays readable
+  [ "$1" = "$last_note" ] && return
+  last_note="$1"
+  printf '\033[2J\033[H'          # clear, home
+  printf 'qq-gate-view · %s\n\n%s\n' "$branch" "$1"
+}
+
+branch_status() { # echo the axi status block only if it describes this branch
+  local out reported
+  out=$(no-mistakes axi status 2>/dev/null || true)
+  reported=$(sed -n 's/^  branch: \(.*\)$/\1/p' <<<"$out" | head -1)
+  reported=${reported%\"}; reported=${reported#\"}
+  [ "$reported" = "$branch" ] && printf '%s' "$out"
+}
+
+while true; do
+  out=$(branch_status)
+  run=$(sed -n 's/^  id: "\(.*\)"$/\1/p' <<<"$out" | head -1)
+  status=$(sed -n 's/^  status: \(.*\)$/\1/p' <<<"$out" | head -1)
+
+  if [ -z "$run" ]; then
+    note "no gate run for this branch yet — waiting.
+hand work to the gate with:  no-mistakes axi run --skip ci --intent \"...\""
+    sleep "$interval"
+    continue
+  fi
+
+  case "$status" in
+    running)
+      if [ "$run" = "$detached_run" ]; then
+        note "detached from $run (still running) — waiting for the next run."
+        sleep "$interval"
+        continue
+      fi
+      last_note=""
+      no-mistakes attach --run "$run"
+      # attach returned: either the run ended, or the operator pressed q.
+      out=$(branch_status)
+      status=$(sed -n 's/^  status: \(.*\)$/\1/p' <<<"$out" | head -1)
+      [ "$status" = running ] && detached_run="$run"
+      sleep 1
+      ;;
+    *)
+      # terminal run: keep its outcome on screen, wait for the branch's next run
+      outcome=$(sed -n 's/^outcome: \(.*\)$/\1/p' <<<"$out" | head -1)
+      pr=$(sed -n 's/^  pr: "\(.*\)"$/\1/p' <<<"$out" | head -1)
+      note "run $run — ${status}${outcome:+ (${outcome})}${pr:+
+PR: $pr}
+
+waiting for the next run on this branch."
+      sleep "$interval"
+      ;;
+  esac
+done
