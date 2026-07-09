@@ -1,10 +1,11 @@
 ---
 id: TASK-7
 title: Generate the initial openwiki/ wiki
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - task-7-openwiki-seed
 created_date: '2026-07-08 14:41'
-updated_date: '2026-07-08 21:02'
+updated_date: '2026-07-09 00:02'
 labels:
   - research
   - parallel-ok
