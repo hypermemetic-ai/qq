@@ -219,12 +219,15 @@ The engine decision converts TASK-7's implementation half into:
    never write `openwiki/`; the stdin redirect is mandatory because raw
    `codex exec "<prompt>"` can block forever while reading inherited stdin.
    Do not rely on a machine's permissive `~/.codex/config.toml`. Keep
-   every guard (no `openwiki/` → skip; no `codex` binary or no auth → warn+skip;
-   snapshot/restore on failure; warn-don't-block) and re-keying the "is it
-   configured" check from `~/.openwiki/.env` to codex auth presence
-   (`~/.codex/auth.json`).
+   update-mode guards (no `openwiki/` → skip unless `--init`; no `codex` binary
+   or no ChatGPT-managed Codex login → warn+skip; snapshot/restore on failure;
+   warn-don't-block) and re-key the "is it configured" check from
+   `~/.openwiki/.env` to a CODEX_HOME/keyring-aware `codex login status` probe
+   that must report ChatGPT auth (`auth_mode: chatgpt`), not API-key auth.
 3. One-time initial generation: the init-mode prompt through the same script
-   (`--init` flag), reviewed by the operator before first landing.
+   (`--init` flag), bypassing the update-only missing-`openwiki/` skip and
+   creating `openwiki/` only after the ChatGPT-auth probe passes, reviewed by the
+   operator before first landing.
 4. Update `.no-mistakes.yaml` comment + lint list; remember `commands.*` goes
    live only after merge to main (default-branch trust rule).
 5. Roll-out note for TASK-9 (linked repos): the same script works per-repo since
