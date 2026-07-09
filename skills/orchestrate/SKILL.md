@@ -20,10 +20,12 @@ the verdict is worth something.
   UAT sign-off, the final report. Everything interactive or judgment-bearing.
 - **Claude sub-agents** — plan drafting, verification, code-review, compounding.
   Each returns only its artifact; the reads that produced it stay out of this context.
-- **Codex** (`codex exec`) — implementation and its own repair. Nothing else. Model,
-  reasoning effort, sandbox, and approvals come from `~/.codex/config.toml`
-  (`gpt-5.5` / `xhigh` / `priority` tier / full-access / no-prompt here); pass `-c`
-  overrides only if you must.
+- **Codex worker** (`cx-<branch>`, a named herdr pane) — implementation and its own
+  repair. Nothing else. One worker per working tree, spawned into the conductor's
+  tab, visible in the sidebar with live idle/working/blocked state, driven over the
+  herdr comms primitives (send / read / wait). Model, reasoning effort, sandbox, and
+  approvals come from `~/.codex/config.toml` (`gpt-5.5` / `xhigh` / `priority` tier /
+  full-access / no-prompt here); pass `-c` overrides only if you must.
 
 Two rules make the separation real:
 
@@ -52,9 +54,10 @@ the loop.
 
 ### 0 — Triage first
 Trivial + local + reversible (typo, rename, one-liner)? Do it here, run
-`verification-before-completion`, commit on green, then land through the gate per
-AGENTS.md § Git. No Codex, no phases — the command must not turn a rename into a
-ceremony. Everything else conducts the loop below.
+`verification-before-completion`, commit on green to the current working branch —
+small changes batch on a branch and land as one gated push per AGENTS.md § Git;
+nothing commits straight to `main`. No Codex, no phases — the command must not
+turn a rename into a ceremony. Everything else conducts the loop below.
 
 ### 1 — Align (main)
 `grilling` / `grill-me` with the owner: pin intent and resolve the open decision
@@ -65,22 +68,57 @@ Dispatch a Claude sub-agent to draft the plan via `writing-plans`; it returns th
 plan doc, not the reading behind it. Review it in the main session with the owner
 and approve or edit. The approved plan is Codex's brief.
 
-### 3 — Build (Codex implements)
-Hand work to Codex **adaptively**: batch independent, low-risk tasks into one
-handoff; isolate risky or coupled ones. Handoffs are sequential — Codex holds the
-working tree, you wait, then verify; don't edit the tree while Codex has it.
+### 3 — Build (Codex implements, in its own pane)
+Codex runs as a **named herdr agent** — a pane the operator can see and you can
+drive — never a headless subprocess. Hand work over **adaptively**: batch
+independent, low-risk tasks into one handoff; isolate risky or coupled ones.
+Handoffs are sequential — the worker holds the working tree, you wait, then
+verify; don't edit the tree while the worker has it.
 
-- First handoff: `codex exec "<plan task(s) + the acceptance check>" < /dev/null` from
-  the repo root. Codex edits the working tree in place (this repo is trusted +
-  full-access) and inherits `AGENTS.md` as its own instructions, so the behavioral
-  floor already binds it — point it at the plan task, don't re-explain the standards.
-- Later handoffs: `codex exec resume --last "<next task(s)>" < /dev/null` so its
-  context stays warm across the plan.
-- **Always close stdin (`< /dev/null`) on every `codex exec` handoff.** Run
-  non-interactively, `codex exec` blocks forever on `Reading additional input from
-  stdin...` unless stdin is closed — it reads as "Codex is stuck" but it's hung before
-  the first token. The redirect makes it hit EOF and start immediately. For long
-  briefs, prefer a prompt file: `codex exec "$(cat brief.prompt)" < /dev/null`.
+Handoffs ride **`.qq/handoffs/`** (gitignored with the rest of `.qq/`): brief in
+`<n>-brief.md`, report back in `<n>-report.md`, `<n>` = 1, 2, … per run. Stated
+here once; every step below refers to it.
+
+**Worker lifecycle:**
+
+1. **Start** — one worker per working tree, spawned into your own tab
+   (tab-per-task: one tab reads as one task; cap ~3 panes per tab). Find your
+   tab with `herdr pane current` → `tab_id`, then:
+   `herdr agent start cx-<branch> --cwd <tree> --tab <tab_id> --split down
+   --no-focus -- codex`. Fanning out? `herdr worktree create --branch <name>`
+   first — worktree affinity is per-pane via `--cwd`.
+2. **Trust prompt** — `herdr agent read cx-<branch> --source visible`; if the
+   directory-trust prompt is showing, `herdr pane send-keys <pane> Enter`
+   (option 1 is preselected). Long-term: pre-trust project roots in
+   `~/.codex/config.toml`.
+3. **Handoff** — write the plan task(s) + the acceptance check to
+   `.qq/handoffs/<n>-brief.md` (multi-line text must not ride `agent send` — a
+   newline submits early). Then:
+   `herdr agent send cx-<branch> "Execute .qq/handoffs/<n>-brief.md; when done
+   write .qq/handoffs/<n>-report.md (what changed, files touched, how to
+   verify)."` followed by `herdr pane send-keys <pane> Enter`. The worker edits
+   the tree in place (trusted + full-access) and inherits `AGENTS.md` as its own
+   instructions, so the behavioral floor already binds it — point it at the plan
+   task, don't re-explain the standards.
+4. **Wait** — `herdr agent wait cx-<branch> --status idle --timeout <generous,
+   ms>`. If idle flickers mid-turn, wait for idle twice a few seconds apart
+   before trusting it. On timeout, `herdr agent read cx-<branch>` for signs of
+   life before declaring it stuck. A worker parked on an approval prompt shows
+   **blocked** in the sidebar → read the pane, answer or escalate to the owner.
+5. **Report** — read `.qq/handoffs/<n>-report.md`; the file is the result of
+   record. Scrollback (`herdr agent read`) and the live stream (`herdr terminal
+   session observe cx-<branch>`, read-only NDJSON — watch without stealing
+   input) are debug only; never parse them as the result.
+6. **Repair** — the pane session is alive: send failing evidence as a follow-up
+   handoff in the same pane (step 3 mechanics, next `<n>`). If the pane died,
+   recover the session id (`herdr agent get cx-<branch>` →
+   `agent_session.value`) and restart with `herdr agent start cx-<branch> …
+   -- codex resume <session-id>`. `--last` is banned: it is not
+   worktree-scoped, so parallel runs can silently cross-resume each other's
+   sessions.
+7. **Teardown** — on run completion the worker pane stays for the operator to
+   inspect; closing it is the operator's call (or `herdr pane close` when the
+   run created the workspace).
 
 ### 4 — Verify (sub-agent)
 After each handoff, dispatch a Claude sub-agent to run `verification-before-completion`
@@ -90,9 +128,10 @@ not the churn.
 - **Green** → commit the verified work and push the branch for durability; then the
   next handoff, or step 5 once the plan is done. The completed branch lands through
   the gate per AGENTS.md § Git.
-- **Red** → hand the failing evidence back to Codex (`codex exec resume --last`) to
-  fix, then re-verify. After **2** failed Codex rounds on the same failure, stop and
-  bring it to the owner in the main session — don't grind.
+- **Red** → hand the failing evidence back to the worker as a follow-up handoff in
+  the **same pane** (Build step 6), then re-verify. After **2** failed Codex rounds
+  on the same failure, stop and bring it to the owner in the main session — don't
+  grind.
 
 ### 5 — Sign-off (main, gated)
 User-facing, irreversible, or ambiguous change? → `uat-signoff` with the owner,
@@ -125,6 +164,7 @@ paste the verifying evidence, link the review. A
 ## Integration
 Conducts these skills, each in its designed locus: `grilling`, `writing-plans`,
 `verification-before-completion`, `uat-signoff`, `code-review`,
-`receiving-code-review`, `compound`. Implementation is delegated to Codex
-(`codex exec`), never run here. `AGENTS.md` holds the phase definitions and the
+`receiving-code-review`, `compound`. Implementation is delegated to the Codex
+worker pane (`cx-<branch>`, § 3 Build), never run here. `AGENTS.md` holds the
+phase definitions and the
 routing this skill obeys — it is the source of truth; this skill is its invocable form.
