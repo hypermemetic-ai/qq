@@ -96,7 +96,10 @@ written to catch.
 not because it was inconvenient: the rail blocks unmerged-branch deletion, the
 gate parks `ask-user` findings, a PR merge is a human click. The agent stages
 everything around it so the operator's part is one paste at a short,
-per-handoff path created with `mktemp /tmp/qq-<verb>-XXXX.sh` (for example
-`/tmp/qq-cleanup-a3f9.sh`), non-interactive (no `read` — the `!` shell has no
-tty), dry-run by default, re-verifying its own preconditions at run time, and
-refusing on anything it does not recognise.
+per-handoff path created with `mktemp /tmp/qq-<verb>-XXXX.sh`, for example
+`/tmp/qq-cleanup-a3f9.sh`. The script is non-interactive (no `read` — the `!`
+shell has no tty), dry-run by default, destructive only under `--yes`,
+re-verifies preconditions at run time, refuses on anything it does not
+recognise, carries its own guards because the rail never sees the operator's
+shell or git run inside a script, names deliberate exclusions, and prints the
+resulting state.
