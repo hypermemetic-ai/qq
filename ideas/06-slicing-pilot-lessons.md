@@ -32,25 +32,52 @@ itself (design-doc substrate + minted sub-tasks) landed as its own first run.
 4. **Unattended runs queue cleanly.** The gate daemon serializes runs;
    submit-and-continue (background `axi run`, keep working the next slice)
    costs nothing and keeps the worker unattended end-to-end.
-5. **Dependency links carried the sequencing.** `--dep` on the sub-tasks plus
-   stacked branches encoded "land in order" without any coordination protocol.
+5. **Dependency links carried the sequencing.** `--dep` on the sub-tasks
+   encoded "land in order" without any coordination protocol. (The *branch*
+   stacking that accompanied them did not survive the gate — see friction #1;
+   the dep links are the part worth keeping.)
 
 ## Friction to design around
 
-1. **Gate rebase vs stacked branches.** The gate rebases + force-pushes each
-   branch at run time (slice 0's head changed under the stack), so a later
-   slice's PR shows the *cumulative* diff until its predecessors merge. Content
-   is patch-identical, so the gate's per-run rebase dedupes once predecessors
-   land — but: **merge slice PRs in dependency order**, and if a stacked PR
-   looks noisy, a fresh `axi run` on it after the predecessor merges re-rebases
-   it clean. Candidate executing-plans rule.
-2. **Review redundancy on stacks.** Each stacked run re-reviews unmerged
+1. **The gate rebases each slice onto `main`, so a hand-built stack does not
+   stay a stack.** This is the pilot's biggest structural lesson. Each `axi run`
+   independently rebases + force-pushes its branch onto `main` — it has no idea
+   the branch was stacked on a sibling. After four runs the stack had
+   **delinearized**: `slice0` was still an ancestor of `slice1`, but `slice1`
+   was no longer an ancestor of `slice2`, nor `slice2` of `slice3` (verified
+   with `git merge-base --is-ancestor`). One PR was already CONFLICTING against
+   `main` while the others read MERGEABLE — a state that silently invalidates
+   any "just merge them in order" plan, because each merge invalidates the next.
+
+   Don't fight it: **treat slices as serially landed, never as a live stack.**
+   Land slice N, wait for it to hit `main`, then re-drive slice N+1's gate run
+   (its rebase step re-parents it onto the new `main` and updates the PR — the
+   landing agent never force-pushes, and the git rail wouldn't allow it anyway).
+   Only one slice PR should be open-and-green at a time. Merging out of order,
+   or merging a green PR whose predecessor just landed, is how you get a
+   cumulative or conflicted diff. This is the rule `executing-plans` should
+   encode.
+2. **Corollary: a green PR is only green against the `main` it was rebased on.**
+   Re-check `gh pr view <n> --json mergeable` after every merge; expect the
+   successors to flip to CONFLICTING and need a fresh run, not a hand-fix.
+3. **Review redundancy on stacks.** Each stacked run re-reviews unmerged
    predecessor content. Fine at three small slices; on long stacks either
    tolerate it or wait for merges between slices.
-3. **`axi run` is current-branch-bound.** The branch is pinned at submission,
+4. **`axi run` is current-branch-bound.** The branch is pinned at submission,
    so submit, then switch branches freely. One landing agent can drive N slice
    runs from one worktree.
-4. **Gate auto-fixes on a mid-stack branch collide with fix-forward commits
+5. **Never audit registry discoverability mid-stack.** `backlog/config.yml` sets
+   `remote_operations: true` + `check_active_branches: true`, so Backlog.md
+   resolves each task across *all* active branches. With four stacked branches
+   carrying divergent copies of the same task files, `backlog task list
+   --parent/--labels` **under-reports** — and which subset it shows depends on
+   which branch you stand in. (Caught live: a gate reviewer saw only TASK-8.2
+   and concluded dotted sub-task IDs were broken; from another branch the same
+   files showed only TASK-8.1. Copying those exact files + the exact config into
+   a single-branch repo listed all three correctly.) The dotted IDs are
+   Backlog.md's own native subtask form, minted by `task create --parent`.
+   Verify discoverability against the *merged* state, never the stack.
+6. **Gate auto-fixes on a mid-stack branch collide with fix-forward commits
    on the successor.** The slice-2 run's review fixes rewrote the same skill
    hunk slice 3 had already fix-forwarded (both encoding the same lesson,
    different words). Don't leave that to the next run's rebase-fix:
@@ -77,7 +104,12 @@ itself (design-doc substrate + minted sub-tasks) landed as its own first run.
 
 - Plans should emit: parent task + dep-linked slice sub-tasks (minted by the
   task's own worker), slice 0 = the plan landing, one branch + one gated run
-  per slice, stacked; each slice's accept criteria checked in its own landing.
-- Executing-plans should own: claim slice → build → verify → Done-flip →
-  gate run → next slice; merge-order rule from friction #1; abandoned-landing
-  repair = revert the Done flip first.
+  per slice — **branched from `main`, not stacked**; each slice's accept
+  criteria checked in its own landing.
+- Executing-plans should own the serial landing loop: claim slice → build →
+  verify → Done-flip → gate run → **wait for merge to `main`** → re-drive the
+  next slice's run so its rebase re-parents it onto the new `main`. One green
+  slice PR open at a time (friction #1). Abandoned-landing repair = revert the
+  Done flip first.
+- Neither skill should teach hand-built branch stacks: the gate's rebase step
+  owns branch parentage, and the landing agent never force-pushes.

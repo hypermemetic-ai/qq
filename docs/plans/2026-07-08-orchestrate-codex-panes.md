@@ -31,6 +31,31 @@ that genuinely needs more workers fans the extras into a fresh tab. Worktree
 affinity is **per-pane**: `--cwd` pins each worker to its tree — one writer per
 tree, per the methodology's parallel rules.
 
+**The orchestrator→worker relation is carried by convention, not by herdr.**
+Verified against `herdr api schema --json` (0.7.3): there is **no first-class
+parent/child agent relation** — no `parent`, `child`, `group`, or `hierarchy`
+field exists; an agent record carries `agent_session`
+(`source`/`agent`/`kind`/`value`) plus placement (`workspace_id`, `tab_id`,
+`pane_id`, `label`), and the only containment tree is workspace→tab→pane. So
+the grouping **is** the tab, and the durable join key is a **`task-<id>`
+label** on both the tab and its panes:
+
+- the conductor renames its run's tab (`herdr tab rename <tab_id> task-<id>`)
+  and its own pane (`herdr agent rename <target> task-<id>`);
+- worker panes are named `cx-<branch>` with branches named `task-<id>-<slug>`,
+  so every pane in the group carries the task id in its name.
+
+Consumers (TASK-11's lifecycle view) **join on `task-<id>`**, not on tab
+containment — the relation then survives a pane being moved to another tab.
+Containment is the fast path; the label is the source of truth.
+
+_Upstream feature request (flagged for the operator, 2026-07-08):_ a
+first-class parent ref on `herdr agent start` (e.g. `--parent <terminal-id>`,
+surfaced as a `parent` field on the agent record) would make this relation
+structural instead of conventional, and let the sidebar render workers as
+nodes under their orchestrator — the "list of nodes under a parent" the
+operator asked for. Operator's call whether to file it upstream.
+
 **Observation — herdr 0.7.3 socket primitives.** `herdr terminal session
 observe <target>` streams a pane read-only (NDJSON ANSI) — the conductor or
 operator tooling watches a Codex worker live *without stealing input*.

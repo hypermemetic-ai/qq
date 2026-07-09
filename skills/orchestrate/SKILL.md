@@ -88,6 +88,9 @@ here once; every step below refers to it.
    --no-focus -- codex`. Extra panes are **right splits** (side-by-side, never
    `down` — operator decision 2026-07-08). Fanning out? `herdr worktree create
    --branch <name>` first — worktree affinity is per-pane via `--cwd`.
+   herdr has no parent/child agent relation, so label the group once at start:
+   `herdr tab rename <tab_id> task-<id>`. The tab groups the run; the
+   `task-<id>` label is the durable join key if a pane is ever moved.
 2. **Startup prompts** — `herdr agent read cx-<branch> --source visible`; if a
    startup prompt is showing, answer it with `herdr pane send-keys`: directory
    trust → `Enter` (option 1 preselected); update offer → skip it (don't change
