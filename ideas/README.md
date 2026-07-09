@@ -143,3 +143,10 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   batches, contract the old form away. Deliberately not folded into
   `writing-plans` yet — nothing speculative; reach for it when a real wide
   refactor shows up. _(2026-07-08)_
+- **#11 · Slicing-pilot lessons (TASK-8)** →
+  [`06-slicing-pilot-lessons.md`](06-slicing-pilot-lessons.md).
+  ✅ **Pilot complete (07-08).** Parent + dep-linked slice sub-tasks, slice 0 =
+  the plan landing, one branch + one unattended gate run per slice, stacked.
+  What worked, the stack-vs-gate-rebase friction, and the worker-pane
+  send/wait/done findings — the designated input for the `writing-plans` /
+  `executing-plans` rework. _(2026-07-08)_

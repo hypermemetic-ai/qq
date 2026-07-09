@@ -87,24 +87,30 @@ here once; every step below refers to it.
    `herdr agent start cx-<branch> --cwd <tree> --tab <tab_id> --split down
    --no-focus -- codex`. Fanning out? `herdr worktree create --branch <name>`
    first — worktree affinity is per-pane via `--cwd`.
-2. **Trust prompt** — `herdr agent read cx-<branch> --source visible`; if the
-   directory-trust prompt is showing, `herdr pane send-keys <pane> Enter`
-   (option 1 is preselected). Long-term: pre-trust project roots in
+2. **Startup prompts** — `herdr agent read cx-<branch> --source visible`; if a
+   startup prompt is showing, answer it with `herdr pane send-keys`: directory
+   trust → `Enter` (option 1 preselected); update offer → skip it (don't change
+   the tool mid-run). Long-term: pre-trust project roots in
    `~/.codex/config.toml`.
 3. **Handoff** — write the plan task(s) + the acceptance check to
    `.qq/handoffs/<n>-brief.md` (multi-line text must not ride `agent send` — a
    newline submits early). Then:
    `herdr agent send cx-<branch> "Execute .qq/handoffs/<n>-brief.md; when done
    write .qq/handoffs/<n>-report.md (what changed, files touched, how to
-   verify)."` followed by `herdr pane send-keys <pane> Enter`. The worker edits
+   verify)."`, pause ~2s, then `herdr pane send-keys <pane> Enter` — Enter sent
+   immediately can land before the text reaches the composer; if the agent
+   stays idle, `agent read` to check for an unsubmitted prompt and re-send
+   Enter. The worker edits
    the tree in place (trusted + full-access) and inherits `AGENTS.md` as its own
    instructions, so the behavioral floor already binds it — point it at the plan
    task, don't re-explain the standards.
 4. **Wait** — `herdr agent wait cx-<branch> --status idle --timeout <generous,
-   ms>`. If idle flickers mid-turn, wait for idle twice a few seconds apart
-   before trusting it. On timeout, `herdr agent read cx-<branch>` for signs of
-   life before declaring it stuck. A worker parked on an approval prompt shows
-   **blocked** in the sidebar → read the pane, answer or escalate to the owner.
+   ms>`. Codex surfaces `done` at turn end; the wait unblocks on the
+   transition — don't poll for a literal `idle`. If the status flickers
+   mid-turn, wait twice a few seconds apart before trusting it. On timeout,
+   `herdr agent read cx-<branch>` for signs of life before declaring it stuck.
+   A worker parked on an approval prompt shows **blocked** in the sidebar →
+   read the pane, answer or escalate to the owner.
 5. **Report** — read `.qq/handoffs/<n>-report.md`; the file is the result of
    record. Scrollback (`herdr agent read`) and the live stream (`herdr terminal
    session observe cx-<branch>`, read-only NDJSON — watch without stealing
