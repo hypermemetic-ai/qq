@@ -83,6 +83,13 @@ note() { # print only when the message changes, so the pane stays readable
   printf 'qq-gate-view · %s\n\n%s\n' "$branch" "$1"
 }
 
+is_live_status() {
+  case "$1" in
+    pending|running) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 toon_field() {
   local key="$1"
   awk -v key="$key" '
@@ -169,31 +176,28 @@ hand work to the gate with:  no-mistakes axi run --skip ci --intent \"...\""
     continue
   fi
 
-  case "$status" in
-    pending|running)
-      if [ "$run" = "$detached_run" ]; then
-        note "detached from $run (still running) — waiting for the next run."
-        sleep "$interval"
-        continue
-      fi
-      last_note=""
-      no-mistakes attach --run "$run"
-      # attach returned: either the run ended, or the operator pressed q.
-      out=$(no-mistakes axi status --run "$run" 2>/dev/null || true)
-      [ "$(toon_field branch <<<"$out")" = "$branch" ] || out=""
-      status=$(toon_field status <<<"$out")
-      [ "$status" = running ] && detached_run="$run"
-      sleep 1
-      ;;
-    *)
-      # terminal run: keep its outcome on screen, wait for the branch's next run
-      outcome=$(toon_field outcome <<<"$out")
-      pr=$(toon_field pr <<<"$out")
-      note "run $run — ${status}${outcome:+ (${outcome})}${pr:+
+  if is_live_status "$status"; then
+    if [ "$run" = "$detached_run" ]; then
+      note "detached from $run (still ${status}) — waiting for the next run."
+      sleep "$interval"
+      continue
+    fi
+    last_note=""
+    no-mistakes attach --run "$run"
+    # attach returned: either the run ended, or the operator pressed q.
+    out=$(no-mistakes axi status --run "$run" 2>/dev/null || true)
+    [ "$(toon_field branch <<<"$out")" = "$branch" ] || out=""
+    status=$(toon_field status <<<"$out")
+    is_live_status "$status" && detached_run="$run"
+    sleep 1
+  else
+    # terminal run: keep its outcome on screen, wait for the branch's next run
+    outcome=$(toon_field outcome <<<"$out")
+    pr=$(toon_field pr <<<"$out")
+    note "run $run — ${status}${outcome:+ (${outcome})}${pr:+
 PR: $pr}
 
 waiting for the next run on this branch."
-      sleep "$interval"
-      ;;
-  esac
+    sleep "$interval"
+  fi
 done
