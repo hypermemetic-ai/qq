@@ -84,9 +84,10 @@ here once; every step below refers to it.
 1. **Start** — one worker per working tree, spawned into your own tab
    (tab-per-task: one tab reads as one task; cap ~3 panes per tab). Find your
    tab with `herdr pane current` → `tab_id`, then:
-   `herdr agent start cx-<branch> --cwd <tree> --tab <tab_id> --split down
-   --no-focus -- codex`. Fanning out? `herdr worktree create --branch <name>`
-   first — worktree affinity is per-pane via `--cwd`.
+   `herdr agent start cx-<branch> --cwd <tree> --tab <tab_id> --split right
+   --no-focus -- codex`. Extra panes are **right splits** (side-by-side, never
+   `down` — operator decision 2026-07-08). Fanning out? `herdr worktree create
+   --branch <name>` first — worktree affinity is per-pane via `--cwd`.
 2. **Startup prompts** — `herdr agent read cx-<branch> --source visible`; if a
    startup prompt is showing, answer it with `herdr pane send-keys`: directory
    trust → `Enter` (option 1 preselected); update offer → skip it (don't change
