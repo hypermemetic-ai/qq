@@ -56,12 +56,15 @@ tasks are minted at grooming, in the session that owns the main tree.
 
 ## Full path
 
+Resolve the repo root once and use it for every path in this section:
+`root="$(git rev-parse --show-toplevel)"`.
+
 1. Stamp `qq-phase capturing --producer idea` — always with `--producer idea`;
    a bare stamp clobbers the main slot's loop position.
-2. Bank the verbatim: create `ideas/NN-slug.md` containing only the first two
+2. Bank the verbatim: create `$root/ideas/NN-slug.md` containing only the first two
    blocks of the template below — the `_Captured…_` header (status
    `capturing`) and the Original section. NN = next free two-digit number in
-   `ideas/`; take the slug and working title mechanically from the operator's
+   `$root/ideas/`; take the slug and working title mechanically from the operator's
    own words — sharpening starts only after this write exists on disk.
 3. Sharpen in place: add the remaining sections of the template (Sharpened
    plus the two researcher placeholders) and set the header status to
@@ -92,11 +95,11 @@ tasks are minted at grooming, in the session that owns the main tree.
    _(researcher fills — what acting on it involves, naming the next skill)_
    ```
 
-4. Add a pointer bullet for it under `ideas/README.md` **Backlog**, with the
+4. Add a pointer bullet for it under `$root/ideas/README.md` **Backlog**, with the
    next `#N` in the sequence. State the idea, not its live status — status
    lives in the file header and on the status line, and the bullet goes stale
    the moment the researcher lands.
-5. Write the researcher's brief to `.qq/idea-brief-NN.md`:
+5. Write the researcher's brief to `$root/.qq/idea-brief-NN.md`:
 
    ```markdown
    You are a detached researcher working in <absolute repo root>. Nobody reads
@@ -122,13 +125,15 @@ tasks are minted at grooming, in the session that owns the main tree.
 6. Spawn it detached:
 
    ```bash
-   setsid claude -p "$(cat .qq/idea-brief-NN.md)" --permission-mode bypassPermissions \
-     < /dev/null > .qq/idea-research-NN.log 2>&1 &
+   brief="$root/.qq/idea-brief-NN.md"
+   log="$root/.qq/idea-research-NN.log"
+   setsid bash -c 'cd "$1" && exec claude -p "$(cat "$2")" --permission-mode bypassPermissions' \
+     bash "$root" "$brief" < /dev/null > "$log" 2>&1 &
    ```
 
-   From a Codex cockpit: `setsid codex exec --sandbox danger-full-access
-   --skip-git-repo-check "$(cat .qq/idea-brief-NN.md)" < /dev/null >
-   .qq/idea-research-NN.log 2>&1 &`. In both, `< /dev/null` is load-bearing:
-   an inherited-but-open stdin hangs the worker forever before its first token.
+   From a Codex cockpit: `setsid codex exec --cd "$root" --sandbox
+   danger-full-access "$(cat "$brief")" < /dev/null > "$log" 2>&1 &`. In
+   both, `< /dev/null` is load-bearing: an inherited-but-open stdin hangs the
+   worker forever before its first token.
 
 7. Ack in one line (contract 3) and return to the interrupted task.

@@ -147,9 +147,11 @@ researchable as an `NN-slug.md` a detached researcher then enriches in place.
 - **#11 · Harden `qq-phase` against malformed `.qq/state.json`** →
   [`06-qq-phase-malformed-state.md`](06-qq-phase-malformed-state.md).
   Contract: `render` never errors (it feeds the status line — garbage renders as
-  a blank cockpit), the writer never crashes (starts clean). Structural garbage
-  already handled; two confirmed breaks (mixed-type `started_at` sort in
-  `render`; `os.replace` onto a `state.json` directory in the writer) and an
-  open design choice (outer never-error guard + `QQ_PHASE_DEBUG` vs per-field
-  validation). Parked mid-thread from the task-6 session; no code edits yet.
+  a blank cockpit), the writer never crashes (starts clean). Research broadened
+  the matrix beyond the initial two breaks: render still has slot value-type
+  crashes, while writer paths can crash or hang on malformed `state.json`,
+  lock, phase, and `.qq` shapes. Design is settled: render gets an outer
+  never-error guard with stderr/`QQ_PHASE_DEBUG`; writer gets targeted shape
+  repair, bounded locking, type coercion, and regression checks. Parked
+  mid-thread from the task-6 session; no code edits yet.
   _(2026-07-08)_
