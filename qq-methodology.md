@@ -70,7 +70,8 @@ the gate.
   gated push; they do not commit straight to `main`.
 - **Everything else** (multi-file, ambiguous, irreversible): run the loop below,
   starting at Align — or hand the whole task to `orchestrate`, which conducts the
-  loop end-to-end (Claude aligns / plans / verifies / reviews; Codex implements).
+  loop end-to-end (Claude aligns / plans / verifies / reviews; Codex implements
+  in a named herdr pane).
 
 Triage also flags parallelism — without being asked: every **unclaimed To Do**
 task gets its `parallel-ok` label (or explicit dependencies) and its
@@ -216,14 +217,13 @@ These are the rules that make that safe.
   conductor (the operator's main session) for grilling first. A worker that
   finds real ambiguity anyway stops and asks; grinding ahead is the failure
   mode, not the protocol.
-- **Worker composition** — today a worker is one Claude session running
-  Plan → Build → Verify → Review → gate inside its worktree; the gate's
-  independent review preserves the fresh-eyes property even though the worker
-  implements its own plan. Destination (TASK-8): a worker is a *tab* — Claude
-  orchestrator pane first, delegation spawns Codex implementer panes as
-  **right splits** in the same tab (operator direction, 2026-07-08; cap ~3
-  panes per tab) — so a wave becomes parallel `orchestrate` loops, one per
-  task-tab.
+- **Worker composition** — a worker starts as one Claude session in its
+  worktree. For conducted work, `orchestrate` turns that session into a task
+  tab: the Claude conductor pane stays first, and Codex implementer panes spawn
+  as **right splits** in the same tab (TASK-8.1; operator direction,
+  2026-07-08; cap ~3 panes per tab; live e2e proof remains TASK-8.2). The
+  gate's independent review preserves the fresh-eyes property for inline
+  workers; `orchestrate` preserves it earlier by keeping Claude out of Build.
 - **Tree ownership** — one writer per working tree. The main tree belongs to
   the operator's interactive session; a background producer in a tree it does
   not own is read-only there and stamps its own `qq-phase` producer slot.
@@ -243,7 +243,7 @@ These are the rules that make that safe.
 ## Skill index
 | skill | reach for it when |
 |---|---|
-| `orchestrate` | running a non-trivial task through the whole loop end-to-end — Claude conducts, Codex implements |
+| `orchestrate` | running a non-trivial task through the whole loop end-to-end — Claude conducts, Codex implements in a named herdr pane |
 | `grilling` / `grill-me` | starting non-trivial work — pin down intent first |
 | `writing-plans` | turning agreed intent into an executable plan |
 | `executing-plans` | working a plan task-by-task (stops on blockers; won't touch main without consent) |

@@ -45,7 +45,9 @@ of record (that stays file-based, below).
 1. Start: `herdr agent start cx-<branch> --cwd <tree> --tab <conductor-tab>
    --split right --no-focus -- codex`
    (same workspace as the run's tree; `herdr worktree create` first when
-   fanning out). One worker per working tree, honoring tree ownership.
+   fanning out). Resolve the pane id from the start output or
+   `herdr agent get cx-<branch>` → `pane_id`; one worker per working tree,
+   honoring tree ownership.
 2. Trust prompt: after start, `herdr agent read cx-<branch> --source visible`;
    if the directory trust prompt is showing, `herdr pane send-keys <pane> Enter`
    (option 1 is preselected). Long-term: pre-trust project roots in
@@ -55,18 +57,20 @@ of record (that stays file-based, below).
    `herdr agent send cx-<branch> "Execute .qq/handoffs/<n>-brief.md; when done
    write .qq/handoffs/<n>-report.md (what changed, files touched, how to
    verify)."` followed by `herdr pane send-keys <pane> Enter`.
-4. Wait: `herdr agent wait cx-<branch> --status idle --timeout <generous>`;
-   on timeout, `herdr agent read cx-<branch>` for signs of life before declaring
-   it stuck. A worker parked on an approval prompt surfaces as blocked → read
-   the pane, answer or escalate to the owner.
+4. Wait: `herdr agent wait cx-<branch> --status idle --timeout <generous,
+   ms>`; if idle flickers mid-turn, wait for idle twice a few seconds apart
+   before trusting it. On timeout, `herdr agent read cx-<branch>` for signs of
+   life before declaring it stuck. A worker parked on an approval prompt
+   surfaces as blocked → read the pane, answer or escalate to the owner.
 5. Report-back is **file-based**: the conductor reads
    `.qq/handoffs/<n>-report.md`. Scrollback
-   (`herdr agent read cx-<branch>`) is debug/fallback only — never parse it as
-   the result of record.
+   (`herdr agent read cx-<branch>`) and the live stream (`herdr terminal session
+   observe cx-<branch>`) are debug/watch only — never parse them as the result
+   of record.
 6. Repair loop: the pane session is alive — send the failing evidence as a
-   follow-up message in the same pane. `codex exec resume --last` semantics
-   (and its cross-worktree bleed hazard, audit Part 2.3) are deleted, not
-   scoped. If a pane dies, herdr holds the codex session id
+   follow-up handoff in the same pane, using the next `<n>`. `codex exec resume
+   --last` semantics (and its cross-worktree bleed hazard, audit Part 2.3) are
+   deleted, not scoped. If a pane dies, herdr holds the codex session id
    (`herdr agent get cx-<branch>` → `agent_session.value`); restart with
    `herdr agent start cx-<branch> … -- codex resume <session-id>` (flag
    confirmed 07-08: `codex resume [SESSION_ID]`; bare `--last` is banned in
@@ -102,17 +106,17 @@ only from this pilot's lessons (captured in slice 3).
   align step 0 wording with the all-gated routing. *Accept:* no `codex exec`
   invocation remains in the skill; lifecycle steps 1–7 each present and
   unambiguous; brief/report naming (`<n>-brief.md` / `<n>-report.md`) stated
-  once, referenced everywhere else.
-- **Slice 2 — `task-8.2` records retirement, run as the live e2e exercise.**
-  Retire ideas/03 (stdin hang) and close the audit's Part 2.3 resume item —
-  and implement it **through the new Build path itself**: the conductor starts
-  a `cx-` worker pane, drives two handoffs (one clean, one deliberately
-  red→repair via brief scoping), reads file reports back. The old Tasks 3+4
-  merged: the records change *is* the e2e verification workload. *Accept:*
-  records point here; no live doc still teaches `resume --last` as an
-  orchestrate handoff (ideas/01's *background side-quest* `codex exec` model
-  is out of scope — orchestrate is the surface AC #3 names); evidence bundle
-  (commands + reports) in the slice task file.
+  once, referenced everywhere else. Documentation sync marks the old
+  orchestrate stdin-hang/resume records superseded; live e2e evidence stays in
+  slice 2.
+- **Slice 2 — `task-8.2` live e2e proof + residual records check.** The stale
+  records were retired during slice-1 documentation sync; now prove the new
+  Build path **through the path itself**: the conductor starts a `cx-` worker
+  pane, drives two handoffs (one clean, one deliberately red→repair via brief
+  scoping), and reads file reports back. *Accept:* no live doc still teaches
+  `resume --last` as an orchestrate handoff (ideas/01's *background side-quest*
+  `codex exec` model is out of scope — orchestrate is the surface AC #3 names);
+  evidence bundle (commands + reports) in the slice task file.
 - **Slice 3 — `task-8.3` close-out.** Pilot lessons (what the slicing shape
   taught, feeding the writing-plans/executing-plans rework), evidence
   summary, parent AC check-offs, task-8 → Done. *Accept:* lessons recorded;
@@ -127,7 +131,8 @@ only from this pilot's lessons (captured in slice 3).
   activity: if idle flickers mid-turn, add a settle re-check (wait idle twice,
   N s apart).
 - ~~Codex resume-by-id flag name for dead panes~~ — confirmed 07-08:
-  `codex resume [SESSION_ID]` / `codex exec resume [SESSION_ID]`.
+  `codex resume [SESSION_ID]` for pane restart. The headless `exec resume` form
+  exists, but it is not orchestrate's Build path.
 - Stacked slice branches: a later slice's PR shows the cumulative diff until
   its predecessor merges (merge commits preserve SHAs, so it self-corrects).
   Pilot lesson to watch, not a blocker.
