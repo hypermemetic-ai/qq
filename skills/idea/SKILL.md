@@ -247,10 +247,17 @@ Use the same `$root` resolved above for every path in this section.
        rc=$?
      fi
      if [ "$rc" -eq 0 ] && [ -s "$scratch/enriched.md" ]; then
-       install_tmp=$(mktemp "$target.tmp.XXXXXX") &&
+       original_tmp=$(mktemp "$scratch/original.XXXXXX") &&
+         enriched_original_tmp=$(mktemp "$scratch/enriched-original.XXXXXX") &&
+         sed -n "/^## Original/,/^## Sharpened/{/^## Sharpened/!p;}" "$target" > "$original_tmp" &&
+         sed -n "/^## Original/,/^## Sharpened/{/^## Sharpened/!p;}" "$scratch/enriched.md" > "$enriched_original_tmp" &&
+         [ -s "$original_tmp" ] &&
+         cmp -s "$original_tmp" "$enriched_original_tmp" &&
+         install_tmp=$(mktemp "$target.tmp.XXXXXX") &&
          cp "$scratch/enriched.md" "$install_tmp" &&
          mv "$install_tmp" "$target"
        rc=$?
+       rm -f "${original_tmp:-}" "${enriched_original_tmp:-}"
        [ "$rc" -eq 0 ] || rm -f "${install_tmp:-}"
      elif [ "$rc" -eq 0 ]; then
        rc=1
@@ -292,10 +299,17 @@ Use the same `$root` resolved above for every path in this section.
        rc=$?
      fi
      if [ "$rc" -eq 0 ] && [ -s "$scratch/enriched.md" ]; then
-       install_tmp=$(mktemp "$target.tmp.XXXXXX") &&
+       original_tmp=$(mktemp "$scratch/original.XXXXXX") &&
+         enriched_original_tmp=$(mktemp "$scratch/enriched-original.XXXXXX") &&
+         sed -n "/^## Original/,/^## Sharpened/{/^## Sharpened/!p;}" "$target" > "$original_tmp" &&
+         sed -n "/^## Original/,/^## Sharpened/{/^## Sharpened/!p;}" "$scratch/enriched.md" > "$enriched_original_tmp" &&
+         [ -s "$original_tmp" ] &&
+         cmp -s "$original_tmp" "$enriched_original_tmp" &&
+         install_tmp=$(mktemp "$target.tmp.XXXXXX") &&
          cp "$scratch/enriched.md" "$install_tmp" &&
          mv "$install_tmp" "$target"
        rc=$?
+       rm -f "${original_tmp:-}" "${enriched_original_tmp:-}"
        [ "$rc" -eq 0 ] || rm -f "${install_tmp:-}"
      elif [ "$rc" -eq 0 ]; then
        rc=1
@@ -316,8 +330,8 @@ Use the same `$root` resolved above for every path in this section.
    today, so `/idea` is Claude-invocable for now and the Codex linker is follow-up.
 
    In both, the wrapper stamps the per-idea producer `researching` before the
-   agent starts, `done` after the atomic install succeeds, and red when the
-   agent process exits nonzero, including CLI/auth/flag failures before the model starts.
+   agent starts, `done` after the Original block comparison and atomic install succeed,
+   and red when the agent process exits nonzero, including CLI/auth/flag failures before the model starts.
    `< /dev/null` is load-bearing: an inherited-but-open stdin hangs the worker
    forever before its first token.
 
