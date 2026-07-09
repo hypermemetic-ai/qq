@@ -1,9 +1,11 @@
 ---
 id: TASK-8.3
 title: 'Pilot close-out: lessons, evidence, parent Done'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - task-8-orchestrate-panes
 created_date: '2026-07-09 00:08'
+updated_date: '2026-07-09 00:24'
 labels:
   - slice
 dependencies:
