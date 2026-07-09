@@ -17,7 +17,9 @@ operator's ceremony stays at zero and the transcript stays clean.
    suspect is false. "Record the verified answer instead of an unverified
    premise" is the failure mode, not diligence: a raw thought that survives a
    crash beats a polished one that didn't, and the researcher upgrades the
-   record later.
+   record later. One exception to verbatim, in every route: obvious secrets
+   (tokens, keys, passwords) never land on the surface — replace each with a
+   `<redacted: kind>` marker.
 2. **This session captures; the researcher investigates.** Every check —
    including one that looks like a two-minute read of one script — belongs to
    the detached researcher. Your part ends at the spawn; spend your context on
@@ -56,11 +58,18 @@ tasks are minted at grooming, in the session that owns the main tree.
 
 1. Stamp `qq-phase capturing --producer idea` — always with `--producer idea`;
    a bare stamp clobbers the main slot's loop position.
-2. Create `ideas/NN-slug.md` — NN = next free two-digit number in `ideas/`,
-   slug from the sharpened title:
+2. Bank the verbatim: create `ideas/NN-slug.md` containing only the first two
+   blocks of the template below — the `_Captured…_` header (status
+   `capturing`) and the Original section. NN = next free two-digit number in
+   `ideas/`; take the slug and working title mechanically from the operator's
+   own words — sharpening starts only after this write exists on disk.
+3. Sharpen in place: add the remaining sections of the template (Sharpened
+   plus the two researcher placeholders) and set the header status to
+   `researching`. The title may be sharpened in place; never rename the file.
+   The finished shape:
 
    ```markdown
-   # <sharpened title>
+   # <title — the operator's gist at capture, sharpened in step 3>
 
    _Captured YYYY-MM-DD via /idea. Status: researching._
 
@@ -83,11 +92,11 @@ tasks are minted at grooming, in the session that owns the main tree.
    _(researcher fills — what acting on it involves, naming the next skill)_
    ```
 
-3. Add a pointer bullet for it under `ideas/README.md` **Backlog**, with the
+4. Add a pointer bullet for it under `ideas/README.md` **Backlog**, with the
    next `#N` in the sequence. State the idea, not its live status — status
    lives in the file header and on the status line, and the bullet goes stale
    the moment the researcher lands.
-4. Write the researcher's brief to `.qq/idea-brief-NN.md`:
+5. Write the researcher's brief to `.qq/idea-brief-NN.md`:
 
    ```markdown
    You are a detached researcher working in <absolute repo root>. Nobody reads
@@ -110,7 +119,7 @@ tasks are minted at grooming, in the session that owns the main tree.
    "failed — see .qq/idea-research-NN.log" and stop.
    ```
 
-5. Spawn it detached:
+6. Spawn it detached:
 
    ```bash
    setsid claude -p "$(cat .qq/idea-brief-NN.md)" --permission-mode bypassPermissions \
@@ -122,4 +131,4 @@ tasks are minted at grooming, in the session that owns the main tree.
    .qq/idea-research-NN.log 2>&1 &`. In both, `< /dev/null` is load-bearing:
    an inherited-but-open stdin hangs the worker forever before its first token.
 
-6. Ack in one line (contract 3) and return to the interrupted task.
+7. Ack in one line (contract 3) and return to the interrupted task.
