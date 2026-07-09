@@ -1,11 +1,11 @@
 ---
 id: TASK-19
 title: Gate viewer spawns with every pane that drives a run
-status: In Progress
+status: Done
 assignee:
   - task-19-gate-viewer-panes
 created_date: '2026-07-09 01:13'
-updated_date: '2026-07-09 01:13'
+updated_date: '2026-07-09 01:15'
 labels:
   - cockpit
 dependencies: []
@@ -21,7 +21,13 @@ Operator direction (2026-07-08): 'any pane that needs one should spawn with one.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 bin/qq-gate-view attaches only to the current branch's run and never to another branch's run
-- [ ] #2 A viewer pane spawned before any run exists waits, then attaches when the branch's run starts
-- [ ] #3 The wave launcher spawns a viewer as a right split in every task tab
+- [x] #1 bin/qq-gate-view attaches only to the current branch's run and never to another branch's run
+- [x] #2 A viewer pane spawned before any run exists waits, then attaches when the branch's run starts
+- [x] #3 The wave launcher spawns a viewer as a right split in every task tab
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+bin/qq-gate-view wraps 'no-mistakes attach'. Reuse-first: the gate's own TUI does the rendering; the wrapper only fixes scoping and lifetime. AC1 evidence: guard accepts only a status block whose branch: field matches this worktree — verified from the task-19 worktree (repo-active run was task-8's; guard REJECTed) and from the task-14 worktree (own run; ACCEPTed). AC2 evidence: viewer spawned in w7 before any run existed, showed the waiting banner, then attached to this branch's run by id. AC3 evidence: 'qq-gate-view --spawn <pane>' splits a right pane (ratio 0.42), renames it gate-view, and starts the viewer via herdr's non-agent pane pattern (split + send-text + Enter, discovered by task-14) — verified absent from 'herdr agent list', so the sidebar stays reserved for real agents. Findings recorded for TASK-11: (a) bare 'attach' is repo-scoped, (b) 'axi status' silently falls back to the repo's active run on a branch with no run — this is how the task-8 worker went blind to its own parked slice-0 run. TASK-11 subsumes or wraps this; qq-gate-view is the gate segment of the lifecycle view, not a competitor.
+<!-- SECTION:NOTES:END -->

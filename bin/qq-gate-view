@@ -19,16 +19,41 @@
 # Detach (`q`) is respected: the viewer will not re-attach to a run you left,
 # but it will pick up the next one. Ctrl-C exits the viewer entirely.
 #
-# Usage: qq-gate-view [--interval SECONDS]
+# Usage:
+#   qq-gate-view [--interval SECONDS]        run the viewer in this pane
+#   qq-gate-view --spawn <pane_id> [--cwd P] attach a viewer beside that pane
+#
+# `--spawn` is the convention: any pane that drives gate runs gets a viewer as a
+# right split (operator direction, 2026-07-08). It uses herdr's non-agent pane
+# pattern (split + send-text + Enter), so the viewer never registers in the agent
+# sidebar — that surface is reserved for actual agents.
 set -uo pipefail
 
 interval=5
+spawn_pane="" spawn_cwd=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --interval) interval="${2:-5}"; shift 2 ;;
-    *) echo "usage: qq-gate-view [--interval SECONDS]" >&2; exit 64 ;;
+    --spawn) spawn_pane="${2:-}"; shift 2 ;;
+    --cwd) spawn_cwd="${2:-}"; shift 2 ;;
+    *) echo "usage: qq-gate-view [--interval SECONDS] | --spawn <pane_id> [--cwd PATH]" >&2; exit 64 ;;
   esac
 done
+
+if [ -n "$spawn_pane" ]; then
+  command -v herdr >/dev/null || { echo "qq-gate-view: herdr not on PATH" >&2; exit 1; }
+  self=$(readlink -f "$0")
+  cwd=${spawn_cwd:-$(herdr pane get "$spawn_pane" 2>/dev/null | sed -n 's/.*"cwd":"\([^"]*\)".*/\1/p' | head -1)}
+  [ -n "$cwd" ] || { echo "qq-gate-view: cannot resolve cwd for $spawn_pane (pass --cwd)" >&2; exit 1; }
+  viewer=$(herdr pane split "$spawn_pane" --direction right --ratio 0.42 --cwd "$cwd" --no-focus 2>/dev/null \
+           | sed -n 's/.*"pane_id":"\([^"]*\)".*/\1/p' | head -1)
+  [ -n "$viewer" ] || { echo "qq-gate-view: split failed beside $spawn_pane" >&2; exit 1; }
+  herdr pane rename "$viewer" "gate-view" >/dev/null 2>&1 || true
+  herdr pane send-text "$viewer" "$self" >/dev/null 2>&1
+  herdr pane send-keys "$viewer" Enter >/dev/null 2>&1
+  echo "$viewer"
+  exit 0
+fi
 
 command -v no-mistakes >/dev/null || { echo "qq-gate-view: no-mistakes not on PATH" >&2; exit 1; }
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || { echo "qq-gate-view: not in a git repo" >&2; exit 1; }
