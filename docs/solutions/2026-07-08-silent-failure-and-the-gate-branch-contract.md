@@ -66,7 +66,8 @@ Corollary for stacked slices: because each slice's gate run rebases that slice
 onto `main` independently, **a hand-built stack does not stay a stack.** TASK-8's
 pilot ended with slice 1 an ancestor of nothing, slice 2's documentation already
 landed under slice 1's PR, and a PR (#17) re-opened on already-merged content.
-See `ideas/06-slicing-pilot-lessons.md` for the pilot's own verdict.
+The pilot's own verdict is in `ideas/06-slicing-pilot-lessons.md`, which lands
+with TASK-8.3 (PR #16) and is not yet on main at the time of this capture.
 
 ## Reading 3 — the registry lies mid-stack, and that is (mostly) fine
 
