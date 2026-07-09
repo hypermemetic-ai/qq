@@ -43,9 +43,16 @@ root=$(git rev-parse --show-toplevel) || exit 1
 
 # dispatch reads the registry from THIS tree's HEAD, so a stale tree would
 # mis-evaluate the frontier (a merged task still looks claimable). Refuse.
-git -C "$root" fetch -q origin main 2>/dev/null || true
-if git -C "$root" rev-parse -q --verify origin/main >/dev/null 2>&1 &&
-   ! git -C "$root" merge-base --is-ancestor origin/main HEAD; then
+origin_main=refs/remotes/origin/main
+if ! git -C "$root" fetch -q origin "+refs/heads/main:$origin_main"; then
+  echo "qq-wave: could not refresh origin/main; refusing to dispatch with stale frontier data." >&2
+  exit 1
+fi
+if ! git -C "$root" rev-parse -q --verify "$origin_main" >/dev/null 2>&1; then
+  echo "qq-wave: origin/main is unavailable; refusing to dispatch with stale frontier data." >&2
+  exit 1
+fi
+if ! git -C "$root" merge-base --is-ancestor "$origin_main" HEAD; then
   echo "qq-wave: this tree's HEAD is behind origin/main — the frontier would be stale." >&2
   echo "         launch waves from the main checkout, up to date with origin/main." >&2
   exit 1
@@ -92,7 +99,7 @@ for id in "${ids[@]}"; do
   out=$(herdr worktree create --cwd "$root" --branch "$branch" --base origin/main \
         --label "task-$id" --no-focus --json)
   path=$(jq -r '.. | .path? // empty' <<<"$out" | head -1)
-  [ -n "$path" ] || { echo "qq-wave: worktree create failed for TASK-$id" >&2; continue; }
+  [ -n "$path" ] || { echo "qq-wave: worktree create failed for TASK-$id" >&2; exit 1; }
 
   # explicit placement: a tab per task in the qq workspace, never the stray
   # workspace that `worktree create` opens
@@ -102,12 +109,16 @@ for id in "${ids[@]}"; do
   out=$(herdr agent start "task-$id" ${tab:+--tab "$tab"} --cwd "$path" --no-focus -- \
         claude "$PREAMBLE Your task: TASK-$id. Your branch: $branch.")
   pane=$(jq -r '.result.agent.pane_id // empty' <<<"$out")
-  [ -n "$pane" ] || { echo "qq-wave: agent start failed for TASK-$id" >&2; continue; }
+  [ -n "$pane" ] || { echo "qq-wave: agent start failed for TASK-$id" >&2; exit 1; }
 
   # a fresh worktree path raises Claude Code's trust prompt; accept it or the
   # worker sits silently blocked
   sleep 5; herdr pane send-keys "$pane" Enter >/dev/null 2>&1 || true
 
-  viewer=$(qq-gate-view --spawn "$pane" --cwd "$path" 2>/dev/null || true)
+  if ! viewer=$(qq-gate-view --spawn "$pane" --cwd "$path"); then
+    echo "qq-wave: gate viewer spawn failed for TASK-$id" >&2
+    exit 1
+  fi
+  [ -n "$viewer" ] || { echo "qq-wave: gate viewer spawn returned no pane for TASK-$id" >&2; exit 1; }
   echo "TASK-$id → $branch  (tab ${tab:-?}, worker $pane, viewer ${viewer:-none})"
 done
