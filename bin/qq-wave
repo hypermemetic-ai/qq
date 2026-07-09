@@ -137,14 +137,18 @@ for id in "${ids[@]}"; do
     continue
   fi
 
-  rollback_claim=1
+  rollback_claim=0
   rollback_id="$id"
   rollback_branch="$branch"
   rollback_path=""
   rollback_tab=""
   rollback_workspace=""
-  out=$(herdr worktree create --cwd "$root" --branch "$branch" --base "$origin_main" \
-        --label "task-$id" --no-focus --json)
+  if ! out=$(herdr worktree create --cwd "$root" --branch "$branch" --base "$origin_main" \
+        --label "task-$id" --no-focus --json); then
+    echo "qq-wave: worktree create failed for TASK-$id" >&2
+    exit 1
+  fi
+  rollback_claim=1
   path=$(jq -r '.. | .path? // empty' <<<"$out" | head -1)
   rollback_path="$path"
   rollback_workspace=$(jq -r '.. | .workspace_id? // empty' <<<"$out" | head -1)
