@@ -1,9 +1,11 @@
 ---
 id: TASK-8.1
 title: 'Orchestrate skill rewrite: worker-pane lifecycle'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - task-8-orchestrate-panes
 created_date: '2026-07-09 00:07'
+updated_date: '2026-07-09 00:11'
 labels:
   - slice
 dependencies: []
