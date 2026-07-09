@@ -22,7 +22,7 @@ the verdict is worth something.
   Each returns only its artifact; the reads that produced it stay out of this context.
 - **Codex worker** (`cx-<branch>`, a named herdr pane) — implementation and its own
   repair. Nothing else. One worker per working tree, spawned into the conductor's
-  tab, visible in the sidebar with live idle/working/blocked state, driven over the
+  tab, visible in the sidebar with live idle/working/blocked/done state, driven over the
   herdr comms primitives (send / read / wait). Model, reasoning effort, sandbox, and
   approvals come from `~/.codex/config.toml` (`gpt-5.5` / `xhigh` / `priority` tier /
   full-access / no-prompt here); pass `-c` overrides only if you must.
@@ -104,12 +104,11 @@ here once; every step below refers to it.
    verify)."`. Before submitting, wait a couple seconds or read
    `herdr agent read cx-<branch> --source visible` until the text is in the
    pane, then `herdr pane send-keys <pane> Enter` — Enter sent immediately can
-   land before the text reaches the composer; if the agent stays idle after
-   submitting, `agent read` to check for an unsubmitted prompt and re-send
-   Enter. The worker edits the tree in place (trusted + full-access) and
-   inherits `AGENTS.md` as its own instructions, so the behavioral floor
-   already binds it — point it at the plan task, don't re-explain the
-   standards.
+   land before the text reaches the composer. If the agent stays idle, `agent
+   read` to check for an unsubmitted prompt and re-send Enter. The worker edits
+   the tree in place (trusted + full-access) and inherits `AGENTS.md` as its own
+   instructions, so the behavioral floor already binds it — point it at the
+   plan task, don't re-explain the standards.
 4. **Wait** — `herdr agent wait cx-<branch> --status idle --timeout <generous,
    ms>`. Codex surfaces `done` at turn end; the wait unblocks on the
    transition — don't poll for a literal `idle`. If the status flickers
@@ -178,5 +177,5 @@ Conducts these skills, each in its designed locus: `grilling`, `writing-plans`,
 `verification-before-completion`, `uat-signoff`, `code-review`,
 `receiving-code-review`, `compound`. Implementation is delegated to the Codex
 worker pane (`cx-<branch>`, § 3 Build), never run here. `AGENTS.md` holds the
-phase definitions and the
-routing this skill obeys — it is the source of truth; this skill is its invocable form.
+phase definitions and the routing this skill obeys — it is the source of truth;
+this skill is its invocable form.

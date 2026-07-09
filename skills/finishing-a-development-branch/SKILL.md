@@ -45,8 +45,12 @@ verified work that belongs to this task.
 ### Step 3: Confirm Registry Touch
 
 If this repo has adopted `backlog/`, make sure the landing includes a Backlog.md
-task create, claim, update, or close. The gate's mechanical check only proves the
-diff touches `backlog/`; the PR review is where truthfulness is checked.
+task create, claim, update, or close. Claim by setting the task `assignee` to
+the current branch. Until TASK-16 automates Done flips, only close or mark a task
+Done at gate handoff: verification green, task changes committed, and Option 1
+about to start. If the gate fails or landing is abandoned, revert the Done flip
+first. The gate's mechanical check only proves the diff touches `backlog/`; the
+PR review is where truthfulness is checked.
 
 ### Step 4: Present Options
 

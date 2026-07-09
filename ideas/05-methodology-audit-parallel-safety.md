@@ -192,8 +192,10 @@ proper is a **three-layer coverage model**:
 > something covering business logic. THEN I think we have everything covered:
 > files+graph tools, intent vs reality, business logic.
 
-1. **Structure** — files + deterministic graph tools (✅ adopted:
-   codebase-memory-mcp, on-demand MCP).
+1. **Structure** — files + deterministic graph tools (✅ layer choice adopted:
+   codebase-memory-mcp, on-demand MCP; operationalization gap registered as
+   TASK-18 after 2026-07-08 found no qq-main index and noisy gate-worktree
+   indexing).
 2. **Intent vs reality** — an exhaustive registry of what the operator wants and
    where the implementation stands against each item. Trust condition:
    **total coverage, updated at landing** — partial coverage cannot serve as

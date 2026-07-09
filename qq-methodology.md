@@ -13,13 +13,20 @@ repo via a symlinked `@`-import — do not edit a copy; edit it in qq.
     `get_architecture`, …): a deterministic structural map, fully derived,
     out-of-repo (`~/.cache`), auto-refreshed. Reach for it when a relational
     question (impact, dependencies, architecture) gets expensive by grep;
-    plain file reading is still the default.
+    plain file reading is still the default. For qq itself, TASK-18 owns the
+    remaining operationalization pass: prove the main-tree index, decide how to
+    handle throwaway gate-worktree indexes, and diagnose the 2026-07-08
+    disconnect.
   - *Intent + work status* — `backlog/` (Backlog.md): the registry of what the
     operator wants and where work stands, one markdown file per task
     (`backlog task create/edit/list`, `backlog board`). Create tasks in the
     session that owns the main tree and **commit the new task file immediately**
     — IDs are minted from committed branch state, so uncommitted tasks in
-    parallel worktrees can mint duplicates. Workers only edit tasks they claim.
+    parallel worktrees can mint duplicates. Workers claim by setting `assignee`
+    to their branch and only edit tasks they claim. Until TASK-16 automates Done
+    flips in the gate's document step, move a task to Done only in the
+    gate-handoff registry commit after verification is green; if the landing
+    fails or is abandoned, revert that flip first.
     The gate enforces the mechanical trust prerequisite: a landing that doesn't
     touch the registry is refused; semantic correctness is still reviewed in
     the PR (see Git below).
@@ -32,8 +39,9 @@ repo via a symlinked `@`-import — do not edit a copy; edit it in qq.
   its own git worktree; herdr's sidebar shows which agent is blocked / working /
   done / idle, so you see at a glance which one needs you. Agents can also talk
   to each other directly through herdr — `herdr agent list`, `send <target>
-  <text>` (follow with `herdr pane send-keys <pane> Enter` to submit), `read
-  <target>`, `wait <target> --status idle|working|blocked` — use it when
+  <text>` (then `read <target>` until the text is visible before
+  `herdr pane send-keys <pane> Enter` submits it), `read <target>`,
+  `wait <target> --status idle|working|blocked` — use it when
   coordination helps; there is deliberately no protocol beyond these primitives
   yet.
 - **Cockpit** — the operator's tuned terminal surface, linked from the qq repo:
