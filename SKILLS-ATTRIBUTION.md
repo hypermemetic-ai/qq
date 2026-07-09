@@ -19,13 +19,14 @@ copyright notices are retained inside each vendored skill directory.
 | `finishing-a-development-branch` | [obra/superpowers](https://github.com/obra/superpowers) | Jesse Vincent | MIT |
 | `verification-before-completion` | [obra/superpowers](https://github.com/obra/superpowers) | Jesse Vincent | MIT |
 | `receiving-code-review` | [obra/superpowers](https://github.com/obra/superpowers) | Jesse Vincent | MIT |
-| `ce-compound` | [EveryInc/compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin) | Kieran Klaassen & Trevin Chow (Every) | MIT |
+| `compound` | [EveryInc/compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin) | Kieran Klaassen & Trevin Chow (Every) | MIT |
 | `git-guardrails-claude-code` | [mattpocock/skills](https://github.com/mattpocock/skills) | Matt Pocock | MIT |
 
 `diagnosing-bugs` carries a small qq addendum (a fix-attempt circuit-breaker
 from superpowers `systematic-debugging`, and an optional scratchpad idea distilled
-from gsd `gsd-debug`). `ce-compound` has been slimmed from its upstream 727-line
-form to a lean, self-contained ~94-line capture skill. `git-guardrails-claude-code`'s
+from gsd `gsd-debug`). `compound` (vendored as upstream's `ce-compound`, renamed)
+has been slimmed from its upstream 727-line form to a lean, self-contained
+~100-line capture skill that fires on its own judgment instead of asking. `git-guardrails-claude-code`'s
 hook is modified from upstream to allow normal `git push` while still blocking
 force-push, remote branch deletion, `reset --hard`, `clean -f`, `branch -D`,
 `checkout/restore .`, `reflog expire`, `update-ref -d`, and history rewrites;

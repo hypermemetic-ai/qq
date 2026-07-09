@@ -6,9 +6,10 @@ they get their own herdr pane, like Claude workers, so there is **one worker
 model**. Mechanics smoke-tested 07-08 (scratch workspace): `herdr agent start …
 -- codex` is auto-detected as agent `codex` with live idle/working state;
 `herdr agent send cx-<branch>` + `herdr pane send-keys <pane> Enter` delivers
-prompts; `herdr agent wait cx-<branch> --status idle` blocks until the turn
-ends; herdr captures the codex session id. This plan lands as its own gated
-branch **after** `feat/document-stack` merges._
+prompts after a brief read/settle before Enter; `herdr agent wait
+cx-<branch> --status idle` blocks until the turn ends; herdr captures the codex
+session id. This plan lands as its own gated branch **after**
+`feat/document-stack` merges._
 
 ## Goal
 
@@ -35,10 +36,10 @@ observe <target>` streams a pane read-only (NDJSON ANSI) — the conductor or
 operator tooling watches a Codex worker live *without stealing input*.
 `herdr terminal session control <target> [--takeover]` exists for input
 bridges; orchestrate does not use it — the conductor drives workers only via
-`agent send` + `pane send-keys`. Snapshot/layout events (`session.snapshot`,
-`layout.updated`) ride the same socket; discover the full surface with
-`herdr api schema --json`. Observation is debug/watch only — never the report
-of record (that stays file-based, below).
+`agent send`, read/settle, then `pane send-keys`. Snapshot/layout events
+(`session.snapshot`, `layout.updated`) ride the same socket; discover the full
+surface with `herdr api schema --json`. Observation is debug/watch only —
+never the report of record (that stays file-based, below).
 
 **Worker lifecycle (per orchestrate run):**
 1. Start: `herdr agent start cx-<branch> --cwd <tree> --tab <conductor-tab>
@@ -53,7 +54,9 @@ of record (that stays file-based, below).
    must not ride `herdr agent send` — a newline submits early). Then
    `herdr agent send cx-<branch> "Execute .qq/handoffs/<n>-brief.md; when done
    write .qq/handoffs/<n>-report.md (what changed, files touched, how to
-   verify)."` followed by `herdr pane send-keys <pane> Enter`.
+   verify)."`. Wait a couple seconds or read
+   `herdr agent read cx-<branch> --source visible` until the text is in the
+   pane, then `herdr pane send-keys <pane> Enter`.
 4. Wait: `herdr agent wait cx-<branch> --status idle --timeout <generous>`;
    on timeout, `herdr agent read cx-<branch>` for signs of life before declaring
    it stuck. A worker parked on an approval prompt surfaces as blocked → read

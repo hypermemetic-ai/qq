@@ -86,8 +86,9 @@ enforcement point.
    spec* review; the gate's pipeline is the *independent correctness* review
    (bugs / security / perf) — complementary, not redundant. `receiving-code-review`
    weighs either one's findings instead of rubber-stamping them.
-7. **Compound** — `ce-compound`: capture the solved problem to `docs/solutions/`
-   and durable vocabulary to `CONCEPTS.md`, so the next session doesn't relearn it.
+7. **Compound** — `compound`: fires on its own after a verified solve — captures
+   the solved problem to `docs/solutions/` and durable vocabulary to `CONCEPTS.md`,
+   so the next session doesn't relearn it.
 
 Support, any time: `research` (delegated, cited investigation → `research/`);
 `handoff` (compact state for a fresh agent when context runs low); `writing-skills`
@@ -173,7 +174,7 @@ blocked in herdr; the `qq-phase` status line shows the gate step.
 | `diagnosing-bugs` | a bug, failing test, or unexpected behavior |
 | `code-review` | reviewing a diff — author-side Standards + Intent (design & spec); the gate reviews correctness |
 | `receiving-code-review` | weighing review feedback — from `code-review` or the gate (verify, don't obey) |
-| `ce-compound` | you just solved something worth not relearning |
+| `compound` | you just solved something worth not relearning — fires on its own, no prompt |
 | `research` | a task turns into reading legwork |
 | `handoff` | the context window is filling — hand off to a fresh agent |
 | `writing-skills` | authoring or editing a qq skill (eval-first) |

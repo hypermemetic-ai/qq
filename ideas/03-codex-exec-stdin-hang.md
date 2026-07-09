@@ -8,15 +8,16 @@ to orchestrate handoffs. The rationale still applies to background side-quest
 `ideas/01-btw-ideas-skill.md`; this is not a blanket "redirect never needed"
 repeal.
 
-**Status:** _known footgun + one-line fix; wire it into `orchestrate`._
+**Status:** _orchestrate handoff guidance superseded; still live for detached
+background `codex exec` invocations._
 
 ## The bug
 `codex exec "<prompt>"` (codex-cli 0.142.5) reads stdin and concatenates it onto
 the prompt arg. It prints `Reading additional input from stdin...` and blocks until
-EOF. Launched non-interactively — a background job, a subshell, any `orchestrate`
-handoff — stdin is an inherited-but-never-closed pipe, so it waits **forever** and
-never starts the task. It reads as "Codex is slow / the model is stuck"; it's
-actually hung before the first token.
+EOF. Launched non-interactively — a background job, a subshell, any detached
+side-quest worker — stdin is an inherited-but-never-closed pipe, so it waits
+**forever** and never starts the task. It reads as "Codex is slow / the model is
+stuck"; it's actually hung before the first token.
 
 Not the priority tier, not `--json`, not the prompt: a trivial
 `codex exec "Reply with exactly: ok"` hangs identically across plain / `--json` /
@@ -33,13 +34,12 @@ shell-quoting hell):
 codex exec --sandbox danger-full-access --skip-git-repo-check "$(cat brief.prompt)" < /dev/null
 ```
 
-## Where to wire it (so it never recurs)
-- **`skills/orchestrate/SKILL.md` step 3 (Build)** — the `codex exec` and
-  `codex exec resume --last` handoff lines must show `< /dev/null` (ideally the
-  prompt-file pattern). Today they don't, so every handoff is one open stdin away
-  from hanging.
-- Optional: a thin `bin/qq-codex` wrapper that always appends `< /dev/null` and
-  takes the prompt from a file/arg, so the conductor can't forget — orchestrate
-  calls `qq-codex` instead of raw `codex exec`.
+## Where it still applies
+- **Detached/background `codex exec` side-quests** — keep using `< /dev/null`,
+  ideally with the prompt-file pattern. The `/idea` subprocess pattern is the
+  live example.
+- **Historical:** this record originally targeted `skills/orchestrate/SKILL.md`
+  Build handoffs. TASK-8 replaced that headless path with worker-pane
+  send/read/wait, so no orchestrate wiring remains.
 
 _(2026-07-06)_

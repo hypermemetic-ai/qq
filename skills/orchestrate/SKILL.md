@@ -98,13 +98,15 @@ here once; every step below refers to it.
    newline submits early). Then:
    `herdr agent send cx-<branch> "Execute .qq/handoffs/<n>-brief.md; when done
    write .qq/handoffs/<n>-report.md (what changed, files touched, how to
-   verify)."`, pause ~2s, then `herdr pane send-keys <pane> Enter` — Enter sent
-   immediately can land before the text reaches the composer; if the agent
-   stays idle, `agent read` to check for an unsubmitted prompt and re-send
-   Enter. The worker edits
-   the tree in place (trusted + full-access) and inherits `AGENTS.md` as its own
-   instructions, so the behavioral floor already binds it — point it at the plan
-   task, don't re-explain the standards.
+   verify)."`. Before submitting, wait a couple seconds or read
+   `herdr agent read cx-<branch> --source visible` until the text is in the
+   pane, then `herdr pane send-keys <pane> Enter` — Enter sent immediately can
+   land before the text reaches the composer; if the agent stays idle after
+   submitting, `agent read` to check for an unsubmitted prompt and re-send
+   Enter. The worker edits the tree in place (trusted + full-access) and
+   inherits `AGENTS.md` as its own instructions, so the behavioral floor
+   already binds it — point it at the plan task, don't re-explain the
+   standards.
 4. **Wait** — `herdr agent wait cx-<branch> --status idle --timeout <generous,
    ms>`. Codex surfaces `done` at turn end; the wait unblocks on the
    transition — don't poll for a literal `idle`. If the status flickers
@@ -150,8 +152,9 @@ Codex wrote the code and Claude reviews it, so this is a genuine second pair of 
 Weigh the feedback with `receiving-code-review` — don't rubber-stamp it.
 
 ### 7 — Compound (sub-agent)
-Solved something worth not relearning? → dispatch `ce-compound` to capture it to
-`docs/solutions/` + `CONCEPTS.md`. Returns the files for a glance.
+After verified work, dispatch `compound`; it decides whether the solve earned a
+capture. If it writes, it returns the `docs/solutions/` + `CONCEPTS.md` files for
+a glance; if not, it exits quietly.
 
 ## Done means
 Report to the owner only when the plan's tasks are implemented by Codex,
@@ -170,6 +173,7 @@ paste the verifying evidence, link the review. A
 ## Integration
 Conducts these skills, each in its designed locus: `grilling`, `writing-plans`,
 `verification-before-completion`, `uat-signoff`, `code-review`,
-`receiving-code-review`, `ce-compound`. Implementation is delegated to the Codex
-worker pane (`cx-<branch>`, § 3 Build), never run here. `AGENTS.md` holds the phase definitions and the
+`receiving-code-review`, `compound`. Implementation is delegated to the Codex
+worker pane (`cx-<branch>`, § 3 Build), never run here. `AGENTS.md` holds the
+phase definitions and the
 routing this skill obeys — it is the source of truth; this skill is its invocable form.

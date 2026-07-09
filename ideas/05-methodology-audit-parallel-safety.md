@@ -295,8 +295,8 @@ questions in the research file.
    to be rewritten, and the worst instruction-level hazards (local merge to
    main, `worktree prune`) live inside it.
 3. **Mechanical hardening** (Part 2, items 2-4): completed for `qq-phase`
-   producer slots, WIP-ref CAS, and argv-aware rail hardening in TASK-3. Codex
-   resume scoping and the orchestrate handoff model moved to TASK-8.
+   producer slots, WIP-ref CAS, and argv-aware rail hardening in TASK-3. TASK-8
+   resolved Codex resume scoping and retired the old orchestrate handoff model.
 4. **The instruction layer**: add §Parallel operation to `qq-methodology.md`
    (tree ownership, shared-surface conventions, global-config rule) and thread
    the one-line rules into the affected skills.
