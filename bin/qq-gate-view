@@ -42,6 +42,14 @@ require_value() {
   usage
 }
 
+validate_interval() {
+  local value="$1"
+  if [[ ! "$value" =~ ^([0-9]+([.][0-9]*)?|\.[0-9]+)$ ]] || ! awk -v value="$value" 'BEGIN { exit !(value + 0 > 0) }'; then
+    echo "qq-gate-view: --interval must be a positive number of seconds" >&2
+    exit 64
+  fi
+}
+
 interval=5
 spawn_pane="" spawn_cwd=""
 while [ $# -gt 0 ]; do
@@ -52,6 +60,8 @@ while [ $# -gt 0 ]; do
     *) usage ;;
   esac
 done
+
+validate_interval "$interval"
 
 if [ -n "$spawn_pane" ]; then
   command -v herdr >/dev/null || { echo "qq-gate-view: herdr not on PATH" >&2; exit 1; }
@@ -184,11 +194,21 @@ hand work to the gate with:  no-mistakes axi run --skip ci --intent \"...\""
     fi
     last_note=""
     no-mistakes attach --run "$run"
+    attach_status=$?
     # attach returned: either the run ended, or the operator pressed q.
     out=$(no-mistakes axi status --run "$run" 2>/dev/null || true)
     [ "$(toon_field branch <<<"$out")" = "$branch" ] || out=""
     status=$(toon_field status <<<"$out")
-    is_live_status "$status" && detached_run="$run"
+    if is_live_status "$status"; then
+      if [ "$attach_status" -eq 0 ]; then
+        detached_run="$run"
+        sleep 1
+      else
+        note "attach to $run failed (exit $attach_status) while run is ${status} — retrying."
+        sleep "$interval"
+      fi
+      continue
+    fi
     sleep 1
   else
     # terminal run: keep its outcome on screen, wait for the branch's next run
