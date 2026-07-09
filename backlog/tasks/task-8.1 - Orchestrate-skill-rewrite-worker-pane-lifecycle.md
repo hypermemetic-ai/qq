@@ -17,7 +17,7 @@ ordinal: 13000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Slice 1 of TASK-8 (pilot). Rewrite skills/orchestrate/SKILL.md to the worker-pane lifecycle in docs/plans/2026-07-08-orchestrate-codex-panes.md: § Who-does-what + § 3 Build (herdr agent start cx-<branch> --cwd <tree> --tab <conductor-tab> --split, trust prompt, brief via .qq/handoffs/<n>-brief.md, send + send-keys Enter, wait --status idle, file-based report), § 4 Verify repair in-pane, pane topology (tab-per-task, ~3 panes/tab cap), observe primitives (terminal session observe = debug/watch only), resume-by-id for dead panes. Drop the stdin-hang section and every codex exec invocation; align step 0 with all-gated routing.
+Slice 1 of TASK-8 (pilot). Rewrite skills/orchestrate/SKILL.md to the worker-pane lifecycle in docs/plans/2026-07-08-orchestrate-codex-panes.md: § Who-does-what + § 3 Build (herdr agent start cx-<branch> --cwd <tree> --tab <conductor-tab> --split, trust prompt, brief via .qq/handoffs/<n>-brief.md, send + read/settle + send-keys Enter, wait --status idle, file-based report), § 4 Verify repair in-pane, pane topology (tab-per-task, ~3 panes/tab cap), observe primitives (terminal session observe = debug/watch only), resume-by-id for dead panes. Drop the stdin-hang section and every codex exec invocation; align step 0 with all-gated routing.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

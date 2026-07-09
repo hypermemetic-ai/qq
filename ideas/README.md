@@ -132,9 +132,10 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   former `resume --last` cross-worktree hazard from #6 Part 2.3; repair now
   happens in-pane, and dead panes resume by captured session id.
   ✅ **Mechanics smoke-tested (07-08):** `herdr agent start … -- codex` was
-  auto-detected as agent `codex` with live idle/working state; `send` + `pane
-  send-keys Enter` delivered prompts; `wait --status idle` blocked correctly;
-  and herdr captured the codex **session id**. Tracked as backlog task-8.
+  auto-detected as agent `codex` with live idle/working state; `send` plus
+  read/settle before `pane send-keys Enter` delivered prompts; `wait --status
+  idle` blocked correctly; and herdr captured the codex **session id**. Tracked
+  as backlog task-8.
   _(2026-07-08)_
 - **#10 · Expand–contract for wide refactors** _(captured 07-08)._ mattpocock
   v1.1's `to-tickets` slices a wide refactor (one mechanical change,

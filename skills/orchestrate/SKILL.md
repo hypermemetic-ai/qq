@@ -98,13 +98,13 @@ here once; every step below refers to it.
    newline submits early). Then:
    `herdr agent send cx-<branch> "Execute .qq/handoffs/<n>-brief.md; when done
    write .qq/handoffs/<n>-report.md (what changed, files touched, how to
-   verify)."`, pause ~2s, then `herdr pane send-keys <pane> Enter` — Enter sent
-   immediately can land before the text reaches the composer; if the agent
-   stays idle, `agent read` to check for an unsubmitted prompt and re-send
-   Enter. The worker edits
+   verify)."`. Before submitting, wait a couple seconds or read
+   `herdr agent read cx-<branch> --source visible` until the text is in the pane,
+   then `herdr pane send-keys <pane> Enter`. If the agent stays idle, `agent
+   read` to check for an unsubmitted prompt and re-send Enter. The worker edits
    the tree in place (trusted + full-access) and inherits `AGENTS.md` as its own
-   instructions, so the behavioral floor already binds it — point it at the plan
-   task, don't re-explain the standards.
+   instructions, so the behavioral floor already binds it — point it at the
+   plan task, don't re-explain the standards.
 4. **Wait** — `herdr agent wait cx-<branch> --status idle --timeout <generous,
    ms>`. Codex surfaces `done` at turn end; the wait unblocks on the
    transition — don't poll for a literal `idle`. If the status flickers
