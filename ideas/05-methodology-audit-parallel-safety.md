@@ -104,7 +104,7 @@ fine (root-caused in idea #4). The rail allows `git push no-mistakes`.
    pinned by per-pane `--cwd`; herdr captures `agent_session.value`, and a dead
    pane restarts with explicit `codex resume <id>`; `--last` is banned in
    parallel operation. Records retirement and live e2e proof are TASK-8.2.
-   (Until the TASK-8.1 skill rewrite lands, `orchestrate/SKILL.md:89` still
+   (Until the TASK-8.1 skill rewrite lands, `skills/orchestrate/SKILL.md` still
    shows the repair handoff without `< /dev/null` — the one handoff missing the
    idea-#3 redirect.)
 4. **Same-tree Stop-hook race (LOW) — resolved by TASK-3.** Two sessions in one
@@ -153,7 +153,7 @@ fine (root-caused in idea #4). The rail allows `git push no-mistakes`.
 - `bin/qq-activate.sh` vs `bin/qq-link.sh`: two symlink-with-backup
   implementations and two backup schemes; consolidate. Rail should be linked,
   not copied.
-- Phase-stamping spec is fully stated in both `orchestrate/SKILL.md:40-48` and
+- Phase-stamping spec is fully stated in both `skills/orchestrate/SKILL.md` and
   `qq-methodology.md:69-75`; make one point at the other.
 
 ## Part 4 — Idea #7: drop Understand-Anything for an agent-maintained map

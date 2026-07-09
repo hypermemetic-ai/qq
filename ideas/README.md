@@ -125,7 +125,7 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   <name> -- codex …`) — one approach for every worker: own pane, sidebar
   visibility, reachable via #8's send/read/wait. Touches `orchestrate`'s Build
   handoff (the `codex exec` + `< /dev/null` model, and the `resume --last`
-  cross-worktree hazard in #6 Part 2.3) — a gated branch of its own.
+  cross-worktree hazard in #6 Part 2.3) — a gated parent plus slice branches.
   ✅ **Mechanics smoke-tested (07-08):** `herdr agent start … -- codex` is
   auto-detected as agent `codex` with live idle/working state; `send` + `pane
   send-keys Enter` delivers prompts; `wait --status idle` blocks correctly; and

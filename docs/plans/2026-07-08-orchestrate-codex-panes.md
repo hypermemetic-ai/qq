@@ -7,8 +7,8 @@ model**. Mechanics smoke-tested 07-08 (scratch workspace): `herdr agent start â€
 -- codex` is auto-detected as agent `codex` with live idle/working state;
 `herdr agent send cx-<branch>` + `herdr pane send-keys <pane> Enter` delivers
 prompts; `herdr agent wait cx-<branch> --status idle` blocks until the turn
-ends; herdr captures the codex session id. This plan lands as its own gated
-branch **after** `feat/document-stack` merges._
+ends; herdr captures the codex session id. This doc is slice 0 of the gated
+TASK-8 slicing pilot; later slices land on dependency-linked branches._
 
 ## Goal
 
@@ -126,7 +126,7 @@ only from this pilot's lessons (captured in slice 3).
   activity: if idle flickers mid-turn, add a settle re-check (wait idle twice,
   N s apart).
 - ~~Codex resume-by-id flag name for dead panes~~ â€” confirmed 07-08:
-  `codex resume [SESSION_ID]` / `codex exec resume [SESSION_ID]`.
+  `codex resume [SESSION_ID]`.
 - Stacked slice branches: a later slice's PR shows the cumulative diff until
   its predecessor merges (merge commits preserve SHAs, so it self-corrects).
   Pilot lesson to watch, not a blocker.
