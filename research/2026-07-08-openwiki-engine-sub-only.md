@@ -38,12 +38,17 @@ upstream has no merged subscription path.
 
 Why this wins:
 
-- **ToS-clean on both sides.** OpenAI documents non-interactive `codex exec` for
-  scripts and CI as a first-class use case, and documents ChatGPT-managed auth in
-  CI/CD as a supported advanced pattern restricted to *trusted private automation* —
-  which is exactly what the qq gate is (local daemon, single operator, private
-  repos). API keys are only the *recommended default*, not a requirement. Verified
-  against developers.openai.com and OpenAI ToS text. [high confidence, verified]
+- **ToS-clean on both sides when scoped to the local operator machine.** OpenAI
+  documents non-interactive `codex exec` for scripts and CI as a first-class use
+  case, and documents ChatGPT-managed auth in CI/CD as a supported advanced
+  pattern restricted to *trusted private automation*. The qq gate uses that shape
+  as a local daemon on the operator's own machine under their interactive ChatGPT
+  login, never as hosted CI or a fork-triggered workflow. This decision does not
+  authorize putting `~/.codex/auth.json` or any subscription credential into
+  hosted CI, GitHub Actions, or fork-triggered workflows for this public repo;
+  OpenAI's auth guide explicitly excludes public/open-source repositories. API
+  keys are only the *recommended default*, not a requirement. Verified against
+  developers.openai.com and OpenAI ToS text. [high confidence, verified]
 - **One engine, one auth, zero marginal cost.** The gate's review/document/lint
   stages already run `codex exec` (no-mistakes `agent: codex`, confirmed in
   no-mistakes source: `internal/agent/codex.go` passes prompts to `codex exec`).
@@ -68,12 +73,16 @@ Why this wins:
   (developers.openai.com/codex/noninteractive). [high, verified]
 - ChatGPT-managed auth (`auth_mode: "chatgpt"`) in CI/CD is documented as an
   advanced supported pattern for "trusted private automation"; explicitly NOT for
-  public/open-source or fork-triggered CI (developers.openai.com/codex/auth/ci-cd-auth). [high, verified]
+  public/open-source repositories or fork-triggered CI
+  (developers.openai.com/codex/auth/ci-cd-auth). The adopted qq design is local
+  operator-machine `codex exec`, not hosted CI, and it does not authorize putting
+  `~/.codex/auth.json` or subscription credentials into GitHub Actions or any
+  other public-repo runner. [high, verified]
 - The official `openai/codex-action` GitHub Action is API-key-only — irrelevant
   here (the gate is local), but it kills any "use the official action on the sub"
   idea. [high]
 - OpenAI ToS prohibitions that matter: credential sharing, rate-limit
-  circumvention, automated *data extraction*. None reaches private single-operator
+  circumvention, automated *data extraction*. None reaches local single-operator
   automation with your own account. Limit exhaustion → buy credits / blocked until
   window resets; no primary source frames normal exhaustion as ban-worthy.
   [verified but WEAKENED by the adversarial pass: "not bans" is not a guarantee —
@@ -85,8 +94,9 @@ Why this wins:
   per-landing surgical update fits comfortably; a full re-init is the only
   quota-noticeable event. [high]
 
-**Operator's hypothesis confirmed** — with the two written conditions: private
-trusted automation only, no rate-limit circumvention.
+**Operator's hypothesis confirmed** — with the written conditions: local trusted
+operator-machine automation only, no hosted/public-CI or fork-triggered
+subscription credentials, no rate-limit circumvention.
 
 ### 2. Anthropic's restriction as written — `claude -p` is INSIDE the envelope
 
@@ -192,7 +202,7 @@ Verified from no-mistakes v1.34.0 source (cloned at tag) and docs:
 
 | # | Option | ToS standing | Cost | Maintenance quality | Verdict |
 |---|---|---|---|---|---|
-| 1 | **Bespoke `codex exec` refresh, OpenWiki MIT prompts vendored** | Documented pattern (trusted private automation) | ChatGPT-sub quota only; surgical updates are small | gpt-5.5 xhigh ≥ every engine any wiki tool ships by default | **ADOPTED** |
+| 1 | **Bespoke `codex exec` refresh, OpenWiki MIT prompts vendored** | Local operator Codex CLI; no hosted/public CI credentials | ChatGPT-sub quota only; surgical updates are small | gpt-5.5 xhigh ≥ every engine any wiki tool ships by default | **ADOPTED** |
 | 2 | Same script, `claude -p` engine (never `--bare` — it skips OAuth) | Documented (`-p` + CI docs) | Claude-sub quota — the scarce resource | Equivalent | Fallback, reserved |
 | 3 | CodeWiki (claude-code/codex providers) | Same CLI primitives | Same | Good, but `docs/` format ≠ `openwiki/`; wholesale adoption | Rejected — format break |
 | 4 | openwiki-cc / openwiki-for-claude-code / deepwiki-skill | `claude -p` envelope | Claude-sub quota | OpenWiki-format capable | Rejected — wrong sub, third-party churn |
@@ -242,11 +252,14 @@ The engine decision converts TASK-7's implementation half into:
    codex auth is machine-global.
 
 Watch-fors recorded: OpenAI could tighten the CI/CD-auth-on-sub language (it is
-one docs page, not a ToS commitment); OpenWiki upstream may merge a
-subscription backend (issues #59/#156, PR #151's ChatGPT-login provider and
-PR #205's self-managed Codex OAuth provider — re-evaluate if one merges, weighing
-the direct-backend ToS caveat); the Anthropic Agent-SDK credits pause may resolve
-into a cleaner written rule for `claude -p`-class automation.
+one docs page, not a ToS commitment), and the public-repo caveat remains strict:
+do not place `~/.codex/auth.json` or subscription credentials into hosted CI,
+GitHub Actions, or fork-triggered workflows for this public repo; OpenWiki
+upstream may merge a subscription backend (issues #59/#156, PR #151's
+ChatGPT-login provider and PR #205's self-managed Codex OAuth provider —
+re-evaluate if one merges, weighing the direct-backend ToS caveat); the
+Anthropic Agent-SDK credits pause may resolve into a cleaner written rule for
+`claude -p`-class automation.
 
 ## Verification note
 
@@ -256,8 +269,8 @@ at pinned tags, PR/issue states, the RepoDoc paper). Verdicts:
 
 | # | Load-bearing claim | Verdict |
 |---|---|---|
-| 1 | `codex exec` documented for scripts/CI; ChatGPT-managed auth documented for trusted private automation | CONFIRMED |
-| 2 | Limit exhaustion → credits/blocking; no written prohibition on private scripted sub use | WEAKENED (holds, minus any "no bans" guarantee) |
+| 1 | `codex exec` documented for scripts/CI; ChatGPT-managed auth documented for trusted private automation, excluding public/open-source repos | CONFIRMED |
+| 2 | Limit exhaustion → credits/blocking; no written prohibition on local scripted sub use | WEAKENED (holds, minus any "no bans" guarantee) |
 | 3 | `claude -p` headless/CI on subs documented incl. `CLAUDE_CODE_OAUTH_TOKEN`; written ban targets third-party credential routing | CONFIRMED |
 | 4 | no-mistakes document step unsteerable; `commands.format` in push step pre-commit; failures warn; default-branch trust rule | CONFIRMED |
 | 5 | OpenWiki upstream API-key-only; sub-compatible PRs unmerged (#76/#151/#181/#205 open, #188 closed) | CONFIRMED (PR states corrected) |
