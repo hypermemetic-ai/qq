@@ -11,8 +11,8 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
 ## Backlog
 
 > **Session 2026-07-07 worked this folder; statuses below are current. #5 is now
-> built (writer + status-line reader) and landing via the gate — remaining build
-> order: #2 (`compound`) → #1 (`/idea`). Design is locked — no more design
+> built (writer + status-line reader), and #2 is built as `compound` — remaining
+> build order: #1 (`/idea`). Design is locked — no more design
 > questions, just build.**
 
 - **#1 · The `/idea` capture skill** → [`01-btw-ideas-skill.md`](01-btw-ideas-skill.md).
@@ -21,7 +21,8 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   capture verbatim in-turn → detached researcher writes `ideas/NN-slug.md` → completion
   shows as **ambient status on #5's surface, never a reply in the transcript**. Rides #5;
   build last. _(2026-07-06 → 07)_
-- **#2 · Auto-compound + rename to `compound`** _(decided 07-07)._ Drop the `ce` prefix —
+- **#2 · Auto-compound + rename to `compound`** ✅ **Done (TASK-5, 2026-07-09).**
+  Drop the `ce` prefix —
   we own it, call it **`compound`** (rename `skills/ce-compound/` + all refs + the
   `~/.claude/skills` link). And stop asking: it **auto-fires when appropriate**, with the
   appropriateness judgment living *inside* the skill, not a yes/no prompt. _(2026-07-06 → 07)_

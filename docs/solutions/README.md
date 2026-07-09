@@ -1,6 +1,7 @@
 # Solutions
 
-One Markdown file per solved problem, written by `ce-compound` after a fix lands.
+One Markdown file per solved problem, written by `compound` after a verified
+fix or decision earns capture.
 Each captures: the symptom, the real root cause, the fix, and how it was verified —
 so the next agent (or the next you) doesn't rediscover it from scratch.
 
