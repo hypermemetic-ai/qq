@@ -191,9 +191,15 @@ you must hand one back, the operator's part is a single paste and everything
 around it is yours. These rules are the encoded cost of getting it wrong twice
 (2026-07-09):
 
-- **One line, short path.** Write the script to `/tmp/qq-<verb>.sh`. Never the
-  session scratchpad: that path is ~90 characters, terminals wrap it, and a
-  wrapped path is a broken path.
+- **One line, short unique path.** Stage with `script=$(mktemp
+  /tmp/qq-<verb>-XXXX.sh)` and write the script there. `mktemp` creates with
+  `O_EXCL`, so it never overwrites or reuses a name; the resulting path (for
+  example `/tmp/qq-cleanup-a3f9.sh`) is still short enough not to wrap. Never a
+  fixed, predictable path in a shared directory: the operator may paste and run
+  it under `--yes` without re-reviewing the current contents, and a stale file
+  from an earlier session or one written by a concurrent session executes just
+  as readily. Never the session scratchpad: that path is ~90 characters,
+  terminals wrap it, and a wrapped path is a broken path.
 - **Never interactive.** The operator's `!` shell has no tty. `read` sees EOF
   instantly, and under `set -e` the script then exits *after* printing its
   verification — output that reads like success while nothing happened. Gate the
