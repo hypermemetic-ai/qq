@@ -239,9 +239,10 @@ Use the same `$root` resolved above for every path in this section.
    scratch_parent="${XDG_CACHE_HOME:-$HOME/.cache}/qq"
    mkdir -p "$scratch_parent" || { printf 'failed to create scratch parent: %s\n' "$scratch_parent" > "$log"; timeout 5 qq-phase researching --producer "$producer" --status red --detail "failed -- see $log_rel" >/dev/null 2>&1 || true; exit 1; }
    scratch=$(mktemp -d "$scratch_parent/idea-$NN-XXXXXX") || { printf 'failed to create scratch directory under: %s\n' "$scratch_parent" > "$log"; timeout 5 qq-phase researching --producer "$producer" --status red --detail "failed -- see $log_rel" >/dev/null 2>&1 || true; exit 1; }
-   sha256sum "$target" > "$scratch/target.sha256" || { printf 'failed to hash target: %s\n' "$target_rel" > "$log"; timeout 5 qq-phase researching --producer "$producer" --status red --detail "failed -- see $log_rel" >/dev/null 2>&1 || true; rm -rf "$scratch"; exit 1; }
+   target_hash="$(sha256sum "$target")" || { printf 'failed to hash target: %s\n' "$target_rel" > "$log"; timeout 5 qq-phase researching --producer "$producer" --status red --detail "failed -- see $log_rel" >/dev/null 2>&1 || true; rm -rf "$scratch"; exit 1; }
+   target_hash="${target_hash%% *}"
    setsid bash -c '
-     root="$1"; brief="$2"; producer="$3"; log_rel="$4"; scratch="$5"; target="$6"; target_rel="$7"
+     root="$1"; brief="$2"; producer="$3"; log_rel="$4"; scratch="$5"; target="$6"; target_rel="$7"; target_hash="$8"
      cd "$root" || exit 1
      timeout 5 qq-phase researching --producer "$producer" --detail "$target_rel" >/dev/null 2>&1 || true
      prompt="$(cat "$brief")"
@@ -257,7 +258,14 @@ Use the same `$root` resolved above for every path in this section.
        rc=$?
      fi
      if [ "$rc" -eq 0 ] && [ -s "$scratch/enriched.md" ]; then
-       if ! sha256sum -c "$scratch/target.sha256" >/dev/null 2>&1; then
+       # Baseline is passed by value; anything in scratch is researcher-controlled input.
+       if [ -f "$target" ]; then
+         current_hash="$(sha256sum "$target")" || current_hash=""
+         current_hash="${current_hash%% *}"
+       else
+         current_hash=""
+       fi
+       if [ "$current_hash" != "$target_hash" ]; then
          printf 'target changed during research; preserved %s\n' "$scratch/enriched.md"
          red_detail="target changed -- preserved $scratch/enriched.md"
          preserve_scratch=1
@@ -289,7 +297,7 @@ Use the same `$root` resolved above for every path in this section.
        rm -rf "$scratch"
      fi
      exit "$rc"
-   ' bash "$root" "$brief" "$producer" "$log_rel" "$scratch" "$target" "$target_rel" < /dev/null > "$log" 2>&1 &
+   ' bash "$root" "$brief" "$producer" "$log_rel" "$scratch" "$target" "$target_rel" "$target_hash" < /dev/null > "$log" 2>&1 &
    ```
 
    From a Codex cockpit:
@@ -304,9 +312,10 @@ Use the same `$root` resolved above for every path in this section.
    scratch_parent="${XDG_CACHE_HOME:-$HOME/.cache}/qq"
    mkdir -p "$scratch_parent" || { printf 'failed to create scratch parent: %s\n' "$scratch_parent" > "$log"; timeout 5 qq-phase researching --producer "$producer" --status red --detail "failed -- see $log_rel" >/dev/null 2>&1 || true; exit 1; }
    scratch=$(mktemp -d "$scratch_parent/idea-$NN-XXXXXX") || { printf 'failed to create scratch directory under: %s\n' "$scratch_parent" > "$log"; timeout 5 qq-phase researching --producer "$producer" --status red --detail "failed -- see $log_rel" >/dev/null 2>&1 || true; exit 1; }
-   sha256sum "$target" > "$scratch/target.sha256" || { printf 'failed to hash target: %s\n' "$target_rel" > "$log"; timeout 5 qq-phase researching --producer "$producer" --status red --detail "failed -- see $log_rel" >/dev/null 2>&1 || true; rm -rf "$scratch"; exit 1; }
+   target_hash="$(sha256sum "$target")" || { printf 'failed to hash target: %s\n' "$target_rel" > "$log"; timeout 5 qq-phase researching --producer "$producer" --status red --detail "failed -- see $log_rel" >/dev/null 2>&1 || true; rm -rf "$scratch"; exit 1; }
+   target_hash="${target_hash%% *}"
    setsid bash -c '
-     root="$1"; brief="$2"; producer="$3"; log_rel="$4"; scratch="$5"; target="$6"; target_rel="$7"
+     root="$1"; brief="$2"; producer="$3"; log_rel="$4"; scratch="$5"; target="$6"; target_rel="$7"; target_hash="$8"
      cd "$root" || exit 1
      timeout 5 qq-phase researching --producer "$producer" --detail "$target_rel" >/dev/null 2>&1 || true
      prompt="$(cat "$brief")"
@@ -319,7 +328,14 @@ Use the same `$root` resolved above for every path in this section.
        rc=$?
      fi
      if [ "$rc" -eq 0 ] && [ -s "$scratch/enriched.md" ]; then
-       if ! sha256sum -c "$scratch/target.sha256" >/dev/null 2>&1; then
+       # Baseline is passed by value; anything in scratch is researcher-controlled input.
+       if [ -f "$target" ]; then
+         current_hash="$(sha256sum "$target")" || current_hash=""
+         current_hash="${current_hash%% *}"
+       else
+         current_hash=""
+       fi
+       if [ "$current_hash" != "$target_hash" ]; then
          printf 'target changed during research; preserved %s\n' "$scratch/enriched.md"
          red_detail="target changed -- preserved $scratch/enriched.md"
          preserve_scratch=1
@@ -351,7 +367,7 @@ Use the same `$root` resolved above for every path in this section.
        rm -rf "$scratch"
      fi
      exit "$rc"
-   ' bash "$root" "$brief" "$producer" "$log_rel" "$scratch" "$target" "$target_rel" < /dev/null > "$log" 2>&1 &
+   ' bash "$root" "$brief" "$producer" "$log_rel" "$scratch" "$target" "$target_rel" "$target_hash" < /dev/null > "$log" 2>&1 &
    ```
 
    This is the researcher-spawn form for a Codex driver; invoking `/idea` from Codex also needs
