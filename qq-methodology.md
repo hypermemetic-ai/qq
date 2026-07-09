@@ -221,7 +221,7 @@ These are the rules that make that safe.
   worktree. For conducted work, `orchestrate` turns that session into a task
   tab: the Claude conductor pane stays first, and Codex implementer panes spawn
   as **right splits** in the same tab (TASK-8.1; operator direction,
-  2026-07-08; cap ~3 panes per tab; live e2e proof remains TASK-8.2). The
+  2026-07-08; cap ~3 panes per tab; live e2e proof captured in TASK-8.2). The
   gate's independent review preserves the fresh-eyes property for inline
   workers; `orchestrate` preserves it earlier by keeping Claude out of Build.
 - **Tree ownership** — one writer per working tree. The main tree belongs to

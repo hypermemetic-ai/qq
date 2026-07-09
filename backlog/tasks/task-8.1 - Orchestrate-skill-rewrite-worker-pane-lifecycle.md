@@ -31,5 +31,5 @@ Slice 1 of TASK-8 (pilot). Rewrite skills/orchestrate/SKILL.md to the worker-pan
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Verified 2026-07-08: rg 'codex exec|resume --last|/dev/null' skills/orchestrate/SKILL.md -> no matches; lifecycle steps 1-7 are in the Build section; .qq/handoffs/ convention defined once in Build intro (5 references); dead-pane recovery = herdr agent get -> agent_session.value -> codex resume <session-id>, --last banned. Documentation sync retired the old orchestrate stdin-hang/resume records in ideas/03, ideas/05, and ideas/README.md; task-8.2 remains the live e2e proof.
+Verified 2026-07-08: rg 'codex exec|resume --last|/dev/null' skills/orchestrate/SKILL.md -> no matches; lifecycle steps 1-7 are in the Build section; .qq/handoffs/ convention defined once in Build intro (5 references); dead-pane recovery = herdr agent get -> agent_session.value -> codex resume <session-id>, --last banned. Documentation sync retired the old orchestrate stdin-hang/resume records in ideas/03, ideas/05, and ideas/README.md; TASK-8.2 captured the live e2e proof and residual records check.
 <!-- SECTION:NOTES:END -->

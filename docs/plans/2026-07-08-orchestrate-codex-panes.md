@@ -107,16 +107,16 @@ only from this pilot's lessons (captured in slice 3).
   invocation remains in the skill; lifecycle steps 1–7 each present and
   unambiguous; brief/report naming (`<n>-brief.md` / `<n>-report.md`) stated
   once, referenced everywhere else. Documentation sync marks the old
-  orchestrate stdin-hang/resume records superseded; live e2e evidence stays in
-  slice 2.
+  orchestrate stdin-hang/resume records superseded; live e2e evidence is
+  recorded in slice 2.
 - **Slice 2 — `task-8.2` live e2e proof + residual records check.** The stale
-  records were retired during slice-1 documentation sync; now prove the new
-  Build path **through the path itself**: the conductor starts a `cx-` worker
-  pane, drives two handoffs (one clean, one deliberately red→repair via brief
-  scoping), and reads file reports back. *Accept:* no live doc still teaches
-  `resume --last` as an orchestrate handoff (ideas/01's *background side-quest*
-  `codex exec` model is out of scope — orchestrate is the surface AC #3 names);
-  evidence bundle (commands + reports) in the slice task file.
+  records were retired during slice-1 documentation sync; TASK-8.2 proved the
+  new Build path **through the path itself**: the conductor started a `cx-`
+  worker pane, drove two handoffs (one clean, one deliberately red→repair via
+  brief scoping), and read file reports back. *Accepted:* no live doc still
+  teaches `resume --last` as an orchestrate handoff (ideas/01's *background
+  side-quest* `codex exec` model is out of scope — orchestrate is the surface
+  AC #3 names); evidence bundle (commands + reports) is in the slice task file.
 - **Slice 3 — `task-8.3` close-out.** Pilot lessons (what the slicing shape
   taught, feeding the writing-plans/executing-plans rework), evidence
   summary, parent AC check-offs, task-8 → Done. *Accept:* lessons recorded;

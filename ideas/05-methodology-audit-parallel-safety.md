@@ -108,7 +108,7 @@ fine (root-caused in idea #4). The rail allows `git push no-mistakes`.
    `.qq/handoffs/`, repair stays in-pane, and a dead pane resumes by explicit
    session id (`herdr agent get` → `agent_session.value` →
    `codex resume <session-id>`). `--last` is banned in parallel operation.
-   Records retirement and live e2e proof remain TASK-8.2.
+   The residual record check and live e2e proof are captured in TASK-8.2.
 4. **Same-tree Stop-hook race (LOW) — resolved by TASK-3.** Two sessions in one
    tree no longer clobber `refs/wip/<branch>`: `qq-wip-snapshot.sh` updates the
    ref with compare-and-swap against the previously read value, retries against
@@ -302,7 +302,7 @@ questions in the research file.
 3. **Mechanical hardening** (Part 2, items 2-4): completed for `qq-phase`
    producer slots, WIP-ref CAS, and argv-aware rail hardening in TASK-3. Codex
    resume scoping and the orchestrate handoff model were resolved for the live
-   skill in TASK-8.1; TASK-8.2 keeps the live e2e proof/records check.
+   skill in TASK-8.1; TASK-8.2 captured the live e2e proof/records check.
 4. **The instruction layer — completed by TASK-4.** `qq-methodology.md` now has
    §Parallel operation (frontier, claim-by-task-branch, triage labels, tree
    ownership, shared-surface conventions, global-config rule), `bin/qq-frontier`

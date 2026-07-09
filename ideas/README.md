@@ -141,7 +141,8 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   (07-08):** handoffs now use
   `cx-<branch>` worker panes, `.qq/handoffs/<n>-{brief,report}.md`, idle waits,
   file-based reports, in-pane repair, and explicit `codex resume <session-id>`
-  recovery for dead panes. Live e2e proof remains in task-8.2; design doc:
+  recovery for dead panes. TASK-8.2 captured the live e2e proof and residual
+  records check; design doc:
   [`docs/plans/2026-07-08-orchestrate-codex-panes.md`](../docs/plans/2026-07-08-orchestrate-codex-panes.md).
   _(2026-07-08)_
 - **#10 · Expand–contract for wide refactors** _(captured 07-08)._ mattpocock

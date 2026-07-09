@@ -14,7 +14,7 @@ ordinal: 3000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Audit ideas/05 Part 2 items 2-4: .qq/state.json producer slots (--producer keyed under producers{}), WIP-ref CAS on refs/wip/<branch>, rail argv-aware tightening (inspect actual git invocations; add push --delete, reflog expire, update-ref -d). Codex resume scoping was resolved by TASK-8.1's orchestrate worker-pane rewrite; TASK-8.2 keeps the live e2e proof. OBSERVED FALSE POSITIVE (2026-07-08): before this fix, the rail pattern-matched the entire command line including quoted argument prose — a 'no-mistakes axi respond --instructions' call was blocked because its quoted instruction text mentioned the branch force-delete pattern as words. Fix should match the actual git invocation (argv-aware or anchored to command position), not substrings anywhere in the line.
+Audit ideas/05 Part 2 items 2-4: .qq/state.json producer slots (--producer keyed under producers{}), WIP-ref CAS on refs/wip/<branch>, rail argv-aware tightening (inspect actual git invocations; add push --delete, reflog expire, update-ref -d). Codex resume scoping was resolved by TASK-8.1's orchestrate worker-pane rewrite; TASK-8.2 captured the live e2e proof. OBSERVED FALSE POSITIVE (2026-07-08): before this fix, the rail pattern-matched the entire command line including quoted argument prose — a 'no-mistakes axi respond --instructions' call was blocked because its quoted instruction text mentioned the branch force-delete pattern as words. Fix should match the actual git invocation (argv-aware or anchored to command position), not substrings anywhere in the line.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
