@@ -1,0 +1,186 @@
+#!/bin/bash
+# qq-frontier — list the claimable frontier of the backlog registry.
+#
+# A task is on the frontier iff, from this tree's committed view:
+#   1. status is "To Do"
+#   2. every dependency has status "Done"
+#   3. assignee is empty
+#   4. no task-<id> branch exists locally or on a remote — the branch IS the
+#      cross-tree claim signal. Worker claims (assignee edits) are committed on
+#      the worker's own branch and reach main only at merge, so the registry's
+#      assignee field under-reports in-flight claims from any other tree. The
+#      task-<id>-<slug> / task-<id>.<n>-<slug> branch naming is what makes this
+#      check mechanical.
+#
+# Usage: qq-frontier [--afk] [--json]
+#   --afk    only tasks labeled "afk" (safe to run fully unattended)
+#   --json   machine-readable output
+set -euo pipefail
+
+afk=0 json=0
+for arg in "$@"; do
+  case "$arg" in
+    --afk) afk=1 ;;
+    --json) json=1 ;;
+    *) echo "usage: qq-frontier [--afk] [--json]" >&2; exit 64 ;;
+  esac
+done
+
+root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "qq-frontier: not in a git repo" >&2; exit 1; }
+git -C "$root" rev-parse --verify -q HEAD >/dev/null || { echo "qq-frontier: no HEAD commit" >&2; exit 1; }
+git -C "$root" cat-file -e HEAD:backlog/tasks 2>/dev/null || { echo "qq-frontier: no committed backlog/tasks in HEAD" >&2; exit 1; }
+
+ROOT="$root" AFK="$afk" JSON="$json" python3 - <<'PY'
+import json, os, re, subprocess, sys
+
+root = os.environ["ROOT"]
+afk_only = os.environ["AFK"] == "1"
+as_json = os.environ["JSON"] == "1"
+
+def git_text(*args):
+    try:
+        return subprocess.run(
+            ["git", "-C", root, *args],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        ).stdout
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or "").strip()
+        if detail:
+            print(f"qq-frontier: git {' '.join(args)} failed: {detail}", file=sys.stderr)
+        else:
+            print(f"qq-frontier: git {' '.join(args)} failed", file=sys.stderr)
+        sys.exit(exc.returncode or 1)
+
+def git_bytes(*args):
+    try:
+        return subprocess.run(
+            ["git", "-C", root, *args],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ).stdout
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or b"").decode("utf-8", "replace").strip()
+        if detail:
+            print(f"qq-frontier: git {' '.join(args)} failed: {detail}", file=sys.stderr)
+        else:
+            print(f"qq-frontier: git {' '.join(args)} failed", file=sys.stderr)
+        sys.exit(exc.returncode or 1)
+
+def parse_frontmatter(text):
+    """Minimal parser for Backlog.md task frontmatter (scalars, string lists,
+    and folded/literal block scalars like `title: >-`)."""
+    meta, in_fm, key, block = {}, False, None, None
+    for line in text.splitlines():
+        if line == "---":
+            if in_fm:
+                return meta
+            in_fm = True
+            continue
+        if not in_fm:
+            continue
+        if block and line.startswith("  "):
+            sep = " " if block[1].startswith(">") else "\n"
+            meta[block[0]] = (meta[block[0]] + sep if meta[block[0]] else "") + line.strip()
+            continue
+        block = None
+        m = re.match(r"^(\w+):\s*(.*)$", line)
+        if m:
+            key, val = m.group(1), m.group(2).strip()
+            if val in (">", ">-", "|", "|-"):
+                meta[key] = ""
+                block = (key, val)
+            elif val in ("", "[]"):
+                meta[key] = [] if val == "[]" else meta.get(key, [])
+            elif val.startswith("[") and val.endswith("]"):
+                meta[key] = [v.strip().strip("'\"") for v in val[1:-1].split(",") if v.strip()]
+            else:
+                meta[key] = val.strip("'\"")
+            continue
+        m = re.match(r"^\s+-\s+(.*)$", line)
+        if m and key:
+            meta.setdefault(key, [])
+            if isinstance(meta[key], list):
+                meta[key].append(m.group(1).strip().strip("'\""))
+    return meta
+
+branches = set(line for line in git_text("for-each-ref", "--format=%(refname:short)", "refs/heads").splitlines() if line)
+for remote in (line for line in git_text("remote").splitlines() if line):
+    try:
+        out = subprocess.run(
+            ["git", "-C", root, "ls-remote", "--heads", remote, "refs/heads/task-*"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        ).stdout
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or "").strip()
+        print(f"qq-frontier: could not query remote {remote}; refusing stale remote branch data", file=sys.stderr)
+        if detail:
+            print(detail, file=sys.stderr)
+        sys.exit(exc.returncode or 1)
+    for line in out.splitlines():
+        fields = line.split(None, 1)
+        if len(fields) != 2:
+            continue
+        ref = fields[1]
+        if ref.startswith("refs/heads/"):
+            branches.add(ref[len("refs/heads/"):])
+
+tasks = {}
+task_paths = git_bytes("ls-tree", "-rz", "--name-only", "HEAD", "--", "backlog/tasks").split(b"\0")
+for raw_path in sorted(path for path in task_paths if path):
+    path = raw_path.decode("utf-8", "surrogateescape")
+    if not path.endswith(".md"):
+        continue
+    text = git_text("show", f"HEAD:{path}")
+    meta = parse_frontmatter(text)
+    tid = meta.get("id")
+    if tid:
+        tasks[tid] = meta
+
+def branch_claimed(tid):
+    num = tid.split("-", 1)[1]
+    pat = re.compile(r"^task-%s([.-]|$)" % re.escape(num))
+    return any(pat.match(b) for b in branches)
+
+frontier = []
+for tid, meta in tasks.items():
+    if meta.get("status") != "To Do":
+        continue
+    if meta.get("assignee"):
+        continue
+    deps = meta.get("dependencies") or []
+    unmet = [d for d in deps if tasks.get(d, {}).get("status") != "Done"]
+    for d in deps:
+        if d not in tasks:
+            print(f"qq-frontier: {tid} depends on unknown {d} (treated as unmet)", file=sys.stderr)
+    if unmet:
+        continue
+    if branch_claimed(tid):
+        continue
+    labels = meta.get("labels") or []
+    if afk_only and "afk" not in labels:
+        continue
+    frontier.append({
+        "id": tid,
+        "title": meta.get("title", ""),
+        "priority": meta.get("priority", "medium"),
+        "ordinal": int(meta.get("ordinal", 0) or 0),
+        "labels": labels,
+    })
+
+prio_rank = {"high": 0, "medium": 1, "low": 2}
+frontier.sort(key=lambda t: (prio_rank.get(t["priority"], 1), t["ordinal"]))
+
+if as_json:
+    print(json.dumps(frontier, indent=2))
+else:
+    for t in frontier:
+        labels = " [" + ",".join(t["labels"]) + "]" if t["labels"] else ""
+        print(f'{t["id"]}\t{t["priority"]}\t{t["title"]}{labels}')
+PY

@@ -23,7 +23,7 @@ To delegate: launch a background subagent with the question, a pointer to this m
 
 ## Output
 
-Write one file to `research/YYYY-MM-DD-<topic>.md`. Match the repo's existing notes convention if it has one; if there is no `research/` directory, create it there and say so in the header.
+Write one file to `research/YYYY-MM-DD-<topic>.md`. Match the repo's existing notes convention if it has one; if there is no `research/` directory, create it there and say so in the header. `research/` is a shared surface in parallel operation: write on your own branch — the date+slug filename claims the name and keeps merges trivial (see qq-methodology §Parallel operation).
 
 - **Header** — overall confidence for the document, plus a one-line note on what this research is worth to the reader (what it settles, what it opens up).
 - **Findings** — each claim inline-cited to the source that backs it (URL, or `path:line` for code) and tagged `HIGH` / `MEDIUM` / `LOW` confidence. Cite only a source you actually opened this session: a claim pinned to "the docs" or "the migration guide" with no resolvable URL is memory in disguise, not a citation — verify it or mark it a gap. The tag reflects source quality and convergence, not how sure you feel.

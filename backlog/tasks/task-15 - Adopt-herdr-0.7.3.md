@@ -4,8 +4,11 @@ title: Adopt herdr 0.7.3
 status: To Do
 assignee: []
 created_date: '2026-07-08 22:37'
+updated_date: '2026-07-09 00:50'
 labels:
   - cockpit
+  - hitl
+  - parallel-ok
 dependencies: []
 priority: medium
 ordinal: 13000

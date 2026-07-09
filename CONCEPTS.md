@@ -35,3 +35,14 @@ agent starts `no-mistakes axi run --intent "<task + AC>"`, adds `--skip ci`
 only after confirming no CI, lets objective review findings auto-fix, relays any
 `ask-user` findings for operator judgment, and answers the gate with
 `no-mistakes axi respond`.
+
+**frontier** — The mechanically claimable backlog set: To Do tasks whose
+dependencies are Done, whose assignee is empty, and whose task id has no local
+or remote task branch claim.
+
+**task branch claim** — The cross-worktree claim signal for task work: a
+`task-<id>-<slug>` or `task-<id>.<n>-<slug>` branch, paired with the task's
+assignee field on the worker's own branch.
+
+**attendance label** — The triage label that says whether an unclaimed To Do
+task is `afk` for unattended execution or `hitl` because it needs operator input.

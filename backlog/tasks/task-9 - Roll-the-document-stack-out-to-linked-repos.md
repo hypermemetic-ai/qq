@@ -5,7 +5,9 @@ status: To Do
 assignee: []
 created_date: '2026-07-08 14:41'
 updated_date: '2026-07-09 01:40'
-labels: []
+labels:
+  - afk
+  - parallel-ok
 dependencies: []
 priority: medium
 ordinal: 9000

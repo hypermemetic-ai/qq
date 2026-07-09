@@ -1,10 +1,11 @@
 ---
 id: TASK-4
 title: Add §Parallel operation to the methodology
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - task-4-parallel-operation
 created_date: '2026-07-08 14:41'
-updated_date: '2026-07-08 23:12'
+updated_date: '2026-07-09 00:34'
 labels:
   - parallel-ok
 dependencies:
@@ -22,7 +23,13 @@ Add §Parallel operation to qq-methodology.md: tree-ownership protocol (one writ
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Frontier definition, claim-by-assignment, and hitl/afk labels documented in §Parallel operation
-- [ ] #2 bin/qq-frontier lists exactly the claimable tasks (status To Do, deps Done, unassigned)
-- [ ] #3 Triage/routing text tells agents to flag parallelizable work (label + blocked-by) and to propose herdr fan-out waves unprompted when the queue is deep
+- [x] #1 Frontier definition, claim-by-assignment, and hitl/afk labels documented in §Parallel operation
+- [x] #2 bin/qq-frontier lists exactly the claimable tasks (status To Do, deps Done, unassigned)
+- [x] #3 Triage/routing text tells agents to flag parallelizable work (label + blocked-by) and to propose herdr fan-out waves unprompted when the queue is deep
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Landed via task-4-parallel-operation. §Parallel operation added to qq-methodology.md: frontier definition (To Do + deps Done + unassigned + no task-<id> branch anywhere — the branch is the cross-tree claim signal, closing the hole where worker claims are invisible from main until merge), claim-by-assignment, task-<id>-<slug> / task-<id>.<n>-<slug> branch naming (feat/chore prefixes retired), parallel-ok + hitl/afk triage labels, dispatchability bar (dispatcher front-loads Align; workers enter at Plan; under-specified tasks stay with the conductor — from operator exchange 2026-07-08 on worker/orchestrate roles), worker composition (interim Claude-solo, destination TASK-8 tab-per-task with Codex right-split panes), tree ownership, shared-surface conventions, global-config rule, conductor duties. Routing section: triage flags parallel-ok + hitl/afk unprompted and proposes frontier waves on deep queues. bin/qq-frontier built (--afk/--json); verified against live registry (5 claimable; tasks 6/7/8/14 excluded via branch claims, 11 via new dep on TASK-8) plus synthetic slice-branch test (task-16.1-* correctly claims TASK-16). Retro-labeled open tasks hitl/afk; recorded TASK-11 dep on TASK-8. One-liners threaded into compound and research skills (own-branch shared-surface rule).
+<!-- SECTION:NOTES:END -->
