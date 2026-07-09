@@ -1,9 +1,11 @@
 ---
 id: TASK-19
 title: Gate viewer spawns with every pane that drives a run
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - task-19-gate-viewer-panes
 created_date: '2026-07-09 01:13'
+updated_date: '2026-07-09 01:13'
 labels:
   - cockpit
 dependencies: []
