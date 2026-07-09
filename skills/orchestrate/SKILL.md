@@ -104,7 +104,7 @@ Codex wrote the code and Claude reviews it, so this is a genuine second pair of 
 Weigh the feedback with `receiving-code-review` — don't rubber-stamp it.
 
 ### 7 — Compound (sub-agent)
-Solved something worth not relearning? → dispatch `ce-compound` to capture it to
+Solved something worth not relearning? → dispatch `compound` to capture it to
 `docs/solutions/` + `CONCEPTS.md`. Returns the files for a glance.
 
 ## Done means
@@ -124,6 +124,6 @@ paste the verifying evidence, link the review. A
 ## Integration
 Conducts these skills, each in its designed locus: `grilling`, `writing-plans`,
 `verification-before-completion`, `uat-signoff`, `code-review`,
-`receiving-code-review`, `ce-compound`. Implementation is delegated to Codex
+`receiving-code-review`, `compound`. Implementation is delegated to Codex
 (`codex exec`), never run here. `AGENTS.md` holds the phase definitions and the
 routing this skill obeys — it is the source of truth; this skill is its invocable form.

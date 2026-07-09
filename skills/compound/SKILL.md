@@ -1,9 +1,9 @@
 ---
-name: ce-compound
-description: Captures a just-solved problem as a durable solution doc under docs/solutions/ and records project-specific domain vocabulary in CONCEPTS.md. Use right after fixing a non-trivial bug or settling a decision worth not relearning, once the fix is verified and the reasoning is still fresh, so the next person spends minutes instead of hours.
+name: compound
+description: Captures a just-solved problem as a durable solution doc under docs/solutions/ and records project-specific domain vocabulary in CONCEPTS.md. Fires on its own right after a non-trivial fix or decision is verified — invoke it without asking the operator; the skill judges for itself whether the solve earns a capture and exits quietly when it doesn't.
 ---
 
-# ce-compound
+# compound
 
 You just solved something worth not relearning. Capture it now, while the context is
 fresh, so the next person — or the next you — spends minutes instead of hours. Each
@@ -11,11 +11,16 @@ capture compounds: solve once, document once, look up forever.
 
 *Derived and slimmed from EveryInc/compound-engineering-plugin `ce-compound` (MIT).*
 
-## When this fires
+## When this fires — and who decides
 
-You just fixed a non-trivial bug or settled a decision, and the fix is verified working.
-Capture the problems whose root cause took real thought to find. Skip trivial typos and
-obvious errors — they don't earn a doc.
+This skill auto-fires: invoke it yourself right after a fix or decision is verified,
+without asking the operator first. The appropriateness judgment lives here, not in a
+yes/no prompt.
+
+Capture when you just fixed a non-trivial bug or settled a decision, the fix is
+verified working, and the root cause or reasoning took real thought to reach. Skip
+trivial typos and obvious errors — they don't earn a doc. If nothing clears that bar,
+stop: write nothing, and don't announce the non-capture.
 
 ## Two artifacts
 

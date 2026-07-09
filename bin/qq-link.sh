@@ -64,8 +64,22 @@ link_skills() {
   local skill_dir
   local name
   local count=0
+  local link
 
   mkdir -p "$HOME/.claude/skills"
+  # A renamed or removed skill leaves its old link dangling; prune links that
+  # point into this repo's skills/ but no longer resolve.
+  for link in "$HOME/.claude/skills"/*; do
+    [ -L "$link" ] || continue
+    case "$(readlink "$link")" in
+      "$QQ"/skills/*)
+        if [ ! -e "$link" ]; then
+          rm "$link"
+          printf 'pruned: %s (dangling)\n' "$link"
+        fi
+        ;;
+    esac
+  done
   for skill_dir in "$QQ"/skills/*/; do
     [ -d "$skill_dir" ] || continue
     name="$(basename "${skill_dir%/}")"
@@ -147,7 +161,7 @@ seed_concepts() {
 # Concepts
 
 Durable domain vocabulary for this system. Each entry is a term and its precise,
-project-specific meaning. Appended by `ce-compound` as concepts stabilize; read by
+project-specific meaning. Appended by `compound` as concepts stabilize; read by
 agents to speak the same language across sessions.
 
 <!-- entries: `**term** — one-line definition grounded in this codebase.` -->
