@@ -108,9 +108,10 @@ it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
   smoke-tested (see #6 file Part 4) and adopted — `backlog/` seeded with the
   live queue, `bin/qq-registry-check.sh` wired as the gate's test command,
   `bin/qq-openwiki-refresh` as its format command (guarded no-op until the
-  wiki exists). **Still open:** initial wiki generation is reframed as research
-  under the operator's sub-only / no-API-key constraint (backlog task-7); linked-repo rollout
-  (backlog task-9); the `code-graph` routing skill is **deferred by eval** —
+  wiki exists). **TASK-7 resolved the engine research:** the adopted path is a
+  codex-exec-driven, sub-only refresh plus one-time init; implementation is a
+  follow-up, and linked-repo rollout remains backlog task-9. The `code-graph`
+  routing skill is **deferred by eval** —
   the RED baseline (07-08) showed an unguided agent answers qq-scale
   relational queries correctly with `rg` alone, so per `writing-skills` no
   skill ships without an observed failure (backlog draft-1). The queue now

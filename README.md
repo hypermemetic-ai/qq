@@ -83,9 +83,9 @@ provenance is in [`SKILLS-ATTRIBUTION.md`](./SKILLS-ATTRIBUTION.md).
    disconnect observed on 2026-07-08. The intent registry is `backlog/`
    ([Backlog.md](https://github.com/MrLesk/Backlog.md),
    `npm i -g backlog.md`); durable docs target `openwiki/`-style in-repo
-   markdown. Today `bin/qq-openwiki-refresh` only runs when `openwiki/`, the
-   OpenWiki CLI, and a provider key exist; task-7 is researching the sub-only /
-   no-key engine path before initial generation.
+   markdown. TASK-7's engine research/decision is complete: follow-up work is a
+   codex-exec-driven, sub-only refresh implementation plus initial wiki
+   generation.
 8. **Sessions** — install herdr (`brew install herdr`), then
    `herdr integration install claude codex` so it tracks agent state. Fan out with
    task branches (`task-<id>-<slug>`, or `task-<id>.<n>-<slug>` for slices):

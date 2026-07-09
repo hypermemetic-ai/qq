@@ -250,7 +250,8 @@ escape hatch bypassing registry enforcement for ungated commits.
   Wired in `feat/document-stack`: `backlog/` seeded with the live queue,
   `bin/qq-registry-check.sh` as the gate's `commands.test` (a landing that
   doesn't touch `backlog/` is refused), `bin/qq-openwiki-refresh` as
-  `commands.format` (guarded no-op until openwiki is generated + keyed).
+  `commands.format` (guarded no-op until openwiki is generated + configured;
+  TASK-7 later chose the Codex-auth, sub-only refresh follow-up).
 
 - **Layer 3 scope widened: OpenWiki takes *all* descriptive docs**, not just
   business logic — anything that documents what the system *is* consolidates
