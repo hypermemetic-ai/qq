@@ -20,6 +20,10 @@ ordinal: 29000
 Remove every live subsystem that competes with the settled seven-entity model. qq remains a thin harness: Backlog.md owns Tasks; Git/GitHub own Repository, Change, and Check; skills are stateless capabilities; OpenWiki, codebase-memory MCP, and compound own Knowledge; the operator and replaceable agents are Actors. Adopt GitHub Flow and native GitHub ruleset/Actions enforcement rather than any qq-owned gate or lifecycle platform.
 <!-- SECTION:DESCRIPTION:END -->
 
+## Implementation Notes
+
+- [Fowler smells in code review](../../research/2026-07-09-fowler-smells-in-code-review.md)
+
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [ ] #1 Every retained live file maps to Repository, Task, Change, Check, Skill, Knowledge item, Actor, or the minimal wiring required to expose them
