@@ -1,3 +1,12 @@
+---
+id: doc-12
+title: 'qq simplification synthesis: harness, not platform'
+type: other
+created_date: '2026-07-10 20:56'
+updated_date: '2026-07-10 21:02'
+tags:
+  - research
+---
 # qq simplification synthesis: harness, not platform
 
 _2026-07-09 · Overall confidence: **HIGH**. This reconciles the landing-system
@@ -39,7 +48,7 @@ The ruleset targets the default branch and requires a PR, conversation
 resolution, a strict deterministic CI check from GitHub Actions, and no deletion
 or non-fast-forward update. It grants no routine bypass and keeps manual merge.
 No merge queue is enabled initially. [Landing-system
-research](./2026-07-09-wholesale-landing-system.md) **[HIGH]**
+research](<./doc-13 - Wholesale-landing-system-for-qq-adopt-GitHubs-native-gate.md>) **[HIGH]**
 
 GitHub and Mergify both position queues around busy or concurrently merged
 branches; Mergify's own guide says to skip one at low PR volume when concurrent
@@ -59,7 +68,7 @@ Do not adopt Superpowers, Compound Engineering, GSD, Spec Kit, OpenSpec, or BMAD
 as a global lifecycle. Their useful skills and ideas remain donors, but their
 complete workflows recreate mandatory artifacts, hard gates, phase state,
 subagent orchestration, or virtual-team machinery. [Lifecycle
-research](./2026-07-09-proven-development-lifecycle.md) **[HIGH]**
+research](<./doc-11 - Proven-development-lifecycle-for-qq-use-GitHub-Flow-not-an-agent-framework.md>) **[HIGH]**
 
 GitHub Flow is the lifecycle. Skills scale the ceremony:
 
@@ -83,7 +92,7 @@ every relevant skill without changing the delivery path. **[HIGH]**
 - The substantive skill library: grilling, planning/execution, debugging,
   verification, review/review reception, UAT, research, handoff, writing-skills,
   and compound.
-- OpenWiki, codebase-memory MCP, `docs/solutions/`, and `CONCEPTS.md`.
+- OpenWiki, codebase-memory MCP, Backlog `solutions` documents, and `CONCEPTS.md`.
 - Cockpit components that are directly useful to the operator.
 - The small WIP snapshot if it continues to earn its keep.
 

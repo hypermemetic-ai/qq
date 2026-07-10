@@ -3,13 +3,73 @@
 qq is an operator-owned harness for agentic development: shared working
 principles, useful skills, and project knowledge.
 
-## Start every work item
+## Orient, align, act
 
-1. Read `CONCEPTS.md`. Use its vocabulary consistently in reasoning,
-   conversation, code, Tasks, and documentation.
-2. Invoke `grilling` for every new work item. Its skill defines the narrow
-   impact-free exception, explicit opt-out, and approved-continuation behavior.
-3. Invoke every other skill whose trigger matches the work.
+Knowledge is useful only when an agent encounters it before planning. Use each
+surface for the question it owns:
+
+| Surface | Question it answers | Use |
+|---|---|---|
+| `CONCEPTS.md` | What do project terms mean? | Read before every work item and use its vocabulary consistently. |
+| Backlog Tasks | What does the operator intend, and where does the work stand? | Search and update Tasks through the `backlog` CLI. |
+| Backlog documents and decisions | What authored evidence, ideas, lessons, plans, or settled decisions already exist? | Search the shared index and read or mutate records only through Backlog commands. |
+| `openwiki/` | What is the current landed system? | Read the relevant pages before changing described behavior. |
+| codebase-memory | How does the code relate structurally? | Use its graph for architecture, dependency, call-path, and impact questions. |
+| Backlog `solutions` documents and `compound` | What reusable lesson was already learned? | Read relevant lessons during orientation; capture new ones only after a verified, non-obvious solve. |
+
+Source files and fresh Checks remain the final evidence. When a derived
+Knowledge item conflicts with them, rely on source and surface the inconsistency
+to the owning tool or Actor.
+
+### codebase-memory tool map
+
+The generated block below applies to relational code discovery in step 4. Use
+plain text search for literals, messages, configuration, and non-code files.
+
+<!-- codebase-memory-mcp:start -->
+# Codebase Knowledge Graph (codebase-memory-mcp)
+
+This project uses codebase-memory-mcp to maintain a knowledge graph of the codebase.
+ALWAYS prefer MCP graph tools over grep/glob/file-search for code discovery.
+
+## Priority Order
+1. `search_graph` — find functions, classes, routes, variables by pattern
+2. `trace_path` — trace who calls a function or what it calls
+3. `get_code_snippet` — read specific function/class source code
+4. `query_graph` — run Cypher queries for complex patterns
+5. `get_architecture` — high-level project summary
+
+## When to fall back to grep/glob
+- Searching for string literals, error messages, config values
+- Searching non-code files (Dockerfiles, shell scripts, configs)
+- When MCP tools return insufficient results
+
+## Examples
+- Find a handler: `search_graph(name_pattern=".*OrderHandler.*")`
+- Who calls it: `trace_path(function_name="OrderHandler", direction="inbound")`
+- Read source: `get_code_snippet(qualified_name="pkg/orders.OrderHandler")`
+<!-- codebase-memory-mcp:end -->
+
+Start every work item in this order:
+
+1. Read `CONCEPTS.md`.
+2. When `backlog/config.yml` exists, run `backlog instructions overview`, then
+   use `backlog search "<request>" --plain` to search Tasks, documents, and
+   decisions before planning. Read relevant matches through the corresponding
+   Backlog commands. Do not mutate Backlog during alignment. After approval,
+   use the relevant CLI commands to create or update records; never edit
+   Backlog-managed Markdown by hand.
+3. Read the relevant OpenWiki pages and any matching Backlog `solutions` or
+   `research` documents. If a Repository has no `openwiki/` yet, inspect its
+   authored documentation and source instead.
+4. Use codebase-memory when the question is relational. Use `list_projects` or
+   `index_status` to confirm the Repository is indexed; run `index_repository`
+   when it is absent or after material uncommitted or branch changes. Use
+   `detect_changes` for Change-impact analysis, not as a freshness test, and
+   verify important conclusions in source.
+5. Invoke `grilling`. Its skill defines the narrow impact-free exception,
+   explicit opt-out, and approved-continuation behavior.
+6. Invoke every other Skill whose trigger matches the work.
 
 ## Behavioral floor
 
@@ -118,18 +178,6 @@ helps. Use `herdr agent list`, `herdr agent get`, `herdr agent read`, and
 `herdr agent wait` to find, inspect, and wait for one another. `herdr agent send`
 delivers literal text without Enter; use `herdr pane run` with the pane id when
 the message should be submitted as a turn. No additional protocol is required.
-
-## Knowledge
-
-`CONCEPTS.md` is the system's shared language. Use its terms consistently and
-keep it aligned through `compound`.
-
-Use codebase-memory whenever its structural view makes sense for the question.
-
-OpenWiki describes the current system.
-
-`idea`, `research`, and `compound` own their respective Knowledge items under
-`docs/`. Follow those skills for their formats and behavior.
 
 ## Runtime neutrality
 

@@ -1,3 +1,13 @@
+---
+id: doc-4
+title: no-mistakes Gate — Trial Report & GO/NO-GO Verdict
+type: specification
+created_date: '2026-07-10 20:56'
+updated_date: '2026-07-10 20:56'
+tags:
+  - plan
+  - historical
+---
 # no-mistakes Gate — Trial Report & GO/NO-GO Verdict
 
 > **Superseded gate policy (2026-07-08):** This report captures the July 6 trial

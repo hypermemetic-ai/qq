@@ -1,3 +1,13 @@
+---
+id: doc-6
+title: 'Orchestrate rework: Codex workers as first-class herdr panes'
+type: specification
+created_date: '2026-07-10 20:56'
+updated_date: '2026-07-10 20:56'
+tags:
+  - plan
+  - historical
+---
 # Orchestrate rework: Codex workers as first-class herdr panes
 
 _2026-07-08 · design for backlog **task-8** (idea #9). Decided 07-08: Codex is
@@ -106,7 +116,8 @@ never the report of record (that stays file-based, below).
    inspect; `qq-phase done` marks the run. Closing panes is the operator's
    call (or `herdr pane close` when the workspace was created by the run).
 
-**What this deletes:** the `< /dev/null` stdin-hang rule (ideas/03) — panes
+**What this deletes:** the `< /dev/null` stdin-hang rule from the retired idea
+record — panes
 are interactive; there is no headless path left in orchestrate.
 
 **Comms:** this is the first real consumer of the herdr agent-comms
@@ -136,13 +147,13 @@ branch after the previous slice reaches `main`. `writing-plans` /
   unambiguous; brief/report naming (`<n>-brief.md` / `<n>-report.md`) stated
   once, referenced everywhere else.
 - **Slice 2 — `task-8.2` records retirement, run as the live e2e exercise.**
-  Retire ideas/03 (stdin hang) and close the audit's Part 2.3 resume item —
+  Retire the stdin-hang idea and close the audit's Part 2.3 resume item —
   and implement it **through the new Build path itself**: the conductor starts
   a `cx-` worker pane, drives two handoffs (one clean, one deliberately
   red→repair via brief scoping), reads file reports back. The old Tasks 3+4
   merged: the records change *is* the e2e verification workload. *Accept:*
   records point here; no live doc still teaches `resume --last` as an
-  orchestrate handoff (ideas/01's *background side-quest* `codex exec` model
+  orchestrate handoff (the retired *background side-quest* `codex exec` model
   is out of scope — orchestrate is the surface AC #3 names); evidence bundle
   (commands + reports) in the slice task file.
 - **Slice 3 — `task-8.3` close-out.** Pilot lessons (what the slicing shape
@@ -164,5 +175,5 @@ branch after the previous slice reaches `main`. `writing-plans` /
   pilot's real trap.** Each gate run is main-relative and does not update
   successor branches, so a hand-built stack is not a stack. Slices land
   **serially**: one green PR at a time, merge `origin/main` into the next slice
-  branch after its predecessor merges, then re-drive that run. See
-  `ideas/06-slicing-pilot-lessons.md` friction #1.
+  branch after its predecessor merges, then re-drive that run. This was the
+  pilot's first recorded friction.

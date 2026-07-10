@@ -1,3 +1,13 @@
+---
+id: doc-2
+title: 'Plan — methodology by link, not copy (drop the plugin)'
+type: specification
+created_date: '2026-07-10 20:56'
+updated_date: '2026-07-10 21:07'
+tags:
+  - plan
+  - historical
+---
 # Plan — methodology by link, not copy (drop the plugin)
 
 > **Superseded gate examples (2026-07-08):** This dated plan's merge-gate
@@ -158,7 +168,7 @@ backs up any real file it would replace to `*.qq.bak`. Subcommands:
      loop, skill index) — it comes from the import now.
 3. `README.md` line ~60: "installed **qq plugin** (invoke as `qq:<name>`)" →
    "skills linked from qq into `~/.claude/skills` (invoke as `/<name>`)".
-4. `docs/plans/2026-07-06-chunk-3-calendar-oauth.md` line 3: `qq:executing-plans` →
+4. `meeting-reviewer/docs/plans/2026-07-06-chunk-3-calendar-oauth.md` line 3: `qq:executing-plans` →
    `executing-plans`.
 
 ### Acceptance (Handoff 2)

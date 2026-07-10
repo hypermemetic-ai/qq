@@ -1,3 +1,12 @@
+---
+id: doc-10
+title: Fowler smells in code review
+type: other
+created_date: '2026-07-10 20:56'
+updated_date: '2026-07-10 20:56'
+tags:
+  - research
+---
 # Fowler smells in code review
 
 - **Owning task:** TASK-32 — Collapse qq to the minimum entity set

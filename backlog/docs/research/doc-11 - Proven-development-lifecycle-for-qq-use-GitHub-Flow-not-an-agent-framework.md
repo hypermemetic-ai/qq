@@ -1,3 +1,12 @@
+---
+id: doc-11
+title: 'Proven development lifecycle for qq: use GitHub Flow, not an agent framework'
+type: other
+created_date: '2026-07-10 20:56'
+updated_date: '2026-07-10 20:56'
+tags:
+  - research
+---
 # Proven development lifecycle for qq: use GitHub Flow, not an agent framework
 
 _2026-07-09 · Overall confidence: **HIGH** on fit and lifecycle shape;

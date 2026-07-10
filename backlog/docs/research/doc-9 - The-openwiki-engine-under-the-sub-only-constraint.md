@@ -1,4 +1,20 @@
+---
+id: doc-9
+title: The openwiki/ engine under the sub-only constraint
+type: other
+created_date: '2026-07-10 20:56'
+updated_date: '2026-07-10 20:56'
+tags:
+  - research
+---
 # The openwiki/ engine under the sub-only constraint
+
+> **Superseded 2026-07-10 by operator decision.** OpenWiki PR #151 merged a
+> local ChatGPT OAuth provider, and the operator chose that upstream path over
+> the bespoke `codex exec` runner. Until the provider reaches npm, the operator
+> machine uses the pinned source build recorded in the Repository README. The
+> report below preserves the evidence and decision made against the 2026-07-08
+> upstream state; it is no longer the live engine instruction.
 
 _2026-07-08 · codex-delegated research round (operator directive: research legwork runs
 on the ChatGPT sub, not the Claude session). 5 parallel `codex exec` research runs

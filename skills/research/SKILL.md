@@ -17,9 +17,22 @@ Delegate the reading; retain the judgment. For substantial research, launch a fr
 
 ## Output
 
-Write exactly one final report under the Repository root at `docs/research/YYYY-MM-DD-<topic>.md`. When multiple researchers contribute, keep their raw notes temporary and reconcile them into this report. Reconcile older durable reports only when the owning task explicitly asks; the synthesis is that task's one research report, not an automatic extra document.
+Search the shared Backlog index for the question before creating anything. Write
+exactly one final report as a Backlog document: create it with `backlog doc
+create "<title>" -p research -t other`, then set its complete body and
+`research` tag through `backlog doc update`. When multiple researchers
+contribute, keep their raw notes temporary and reconcile them into this report.
+Reconcile an older durable report only when the owning Task explicitly asks;
+locate it through `backlog doc search`, read the CLI-generated Markdown by its
+stable document ID under `backlog/docs/` as data, and replace its body only with
+`backlog doc update`. Never edit managed Markdown directly.
 
-If an owning Backlog task exists, add one relative Markdown link to the report under its Implementation Notes. The report is evidence attached to that Task, not a separate source of current system truth.
+If an owning Backlog Task exists, first read it with `backlog task view
+<task-id> --plain` and collect its complete Documentation list. `--doc`
+replaces that list; it does not append. Attach the report with `backlog task
+edit <task-id> --doc <existing-document> ... --doc <doc-id>`, passing every
+existing document ID and URL plus the new report ID exactly once. The report is
+evidence attached to that Task, not a separate source of current system truth.
 
 Keep the report dense:
 

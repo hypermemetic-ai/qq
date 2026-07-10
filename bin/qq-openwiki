@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# Run OpenWiki locally without retaining its generated GitHub recurrence setup.
+set -euo pipefail
+
+die() {
+  printf 'qq-openwiki: %s\n' "$*" >&2
+  exit 1
+}
+
+case "${1:-}" in
+  --init | --update) mode="$1"; shift ;;
+  *) die "usage: qq-openwiki {--init|--update} [OpenWiki options or message]" ;;
+esac
+
+case "${OPENWIKI_PROVIDER:-}" in
+  "" | openai-chatgpt) ;;
+  *) die "OPENWIKI_PROVIDER must be openai-chatgpt (local ChatGPT OAuth only)" ;;
+esac
+
+if [ -n "${OPENWIKI_BIN:-}" ]; then
+  case "$OPENWIKI_BIN" in
+    /*) ;;
+    *) die "OPENWIKI_BIN must be an absolute executable file: $OPENWIKI_BIN" ;;
+  esac
+  if [ ! -f "$OPENWIKI_BIN" ] || [ ! -x "$OPENWIKI_BIN" ]; then
+    die "OPENWIKI_BIN must be an absolute executable file: $OPENWIKI_BIN"
+  fi
+  openwiki_bin="$OPENWIKI_BIN"
+else
+  openwiki_bin="$(command -v openwiki 2>/dev/null || true)"
+  [ -n "$openwiki_bin" ] || die "openwiki not found; set OPENWIKI_BIN to its absolute path"
+fi
+
+command -v git >/dev/null 2>&1 || die "git not found"
+command -v flock >/dev/null 2>&1 || die "flock not found"
+command -v python3 >/dev/null 2>&1 || die "python3 not found"
+command -v sha256sum >/dev/null 2>&1 || die "sha256sum not found"
+
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a Git worktree"
+cd "$root"
+
+workflow=".github/workflows/openwiki-update.yml"
+if [ -e "$workflow" ] || [ -L "$workflow" ]; then
+  die "refusing to replace existing $workflow"
+fi
+
+if [ "$mode" = "--update" ]; then
+  branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+  [ "$branch" = "openwiki/update" ] \
+    || die "updates require the dedicated openwiki/update branch (current: ${branch:-detached})"
+  [ -d openwiki ] || die "openwiki/ is absent; initialize it first"
+  [ -z "$(git status --porcelain --untracked-files=all)" ] \
+    || die "update worktree must be clean"
+  main="$(git rev-parse --verify origin/main 2>/dev/null)" \
+    || die "origin/main is unavailable; fetch origin first"
+  [ "$(git rev-parse HEAD)" = "$main" ] \
+    || die "openwiki/update must equal current origin/main; fetch and fast-forward it first"
+elif [ -e openwiki ]; then
+  die "openwiki/ already exists; use --update"
+fi
+
+common_dir="$(git rev-parse --git-common-dir)"
+case "$common_dir" in
+  /*) ;;
+  *) common_dir="$(cd "$(dirname "$common_dir")" && pwd -P)/$(basename "$common_dir")" ;;
+esac
+lock_key="$(printf '%s' "$common_dir" | sha256sum | cut -d' ' -f1)"
+lock_root="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/qq-openwiki"
+umask 077
+mkdir -p "$lock_root"
+exec 9>"$lock_root/$lock_key.lock"
+flock -n 9 || die "another OpenWiki writer is active for this Repository"
+
+rewrite_local_setup() {
+  local require_block="$1"
+
+  rm -f "$workflow"
+  rmdir .github/workflows .github 2>/dev/null || true
+
+  python3 - "$require_block" AGENTS.md CLAUDE.md <<'PY'
+import os
+import sys
+
+required = sys.argv[1] == "yes"
+start = "<!-- OPENWIKI:START -->"
+end = "<!-- OPENWIKI:END -->"
+snippet = """<!-- OPENWIKI:START -->
+
+## OpenWiki
+
+This repository uses OpenWiki for recurring code documentation. Start with `openwiki/quickstart.md`, then follow its links.
+
+OpenWiki is a derived orientation surface. Verify important conclusions in source and fresh Checks.
+
+<!-- OPENWIKI:END -->"""
+
+seen = set()
+for name in sys.argv[2:]:
+    if not os.path.exists(name):
+        continue
+    target = os.path.realpath(name)
+    if target in seen:
+        continue
+    seen.add(target)
+    with open(name, encoding="utf-8") as handle:
+        content = handle.read()
+    start_count = content.count(start)
+    end_count = content.count(end)
+    if start_count == end_count == 0:
+        if not required:
+            continue
+        next_content = f"{content.rstrip()}\n\n{snippet}\n" if content.strip() else f"{snippet}\n"
+    elif start_count == end_count == 1:
+        before, remainder = content.split(start, 1)
+        _, after = remainder.split(end, 1)
+        next_content = f"{before}{snippet}{after}"
+    else:
+        raise SystemExit(f"qq-openwiki: malformed OpenWiki markers in {name}")
+    with open(name, "w", encoding="utf-8") as handle:
+        handle.write(next_content)
+PY
+}
+
+set +e
+OPENWIKI_PROVIDER="openai-chatgpt" \
+  "$openwiki_bin" code "$mode" --print "$@"
+run_status=$?
+set -e
+
+cleanup_status=0
+if [ "$run_status" -eq 0 ]; then
+  rewrite_local_setup yes || cleanup_status=$?
+else
+  rewrite_local_setup no || cleanup_status=$?
+fi
+
+[ "$run_status" -eq 0 ] || exit "$run_status"
+[ "$cleanup_status" -eq 0 ] || exit "$cleanup_status"

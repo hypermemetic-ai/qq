@@ -1,3 +1,12 @@
+---
+id: doc-14
+title: Karpathy guidelines retention audit
+type: other
+created_date: '2026-07-10 20:56'
+updated_date: '2026-07-10 20:56'
+tags:
+  - research
+---
 # Karpathy guidelines retention audit
 
 _Overall confidence: **HIGH** · Settles which parts of the Karpathy-inspired

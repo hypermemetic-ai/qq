@@ -1,3 +1,12 @@
+---
+id: doc-13
+title: 'Wholesale landing system for qq: adopt GitHub''s native gate'
+type: other
+created_date: '2026-07-10 20:56'
+updated_date: '2026-07-10 20:56'
+tags:
+  - research
+---
 # Wholesale landing system for qq: adopt GitHub's native gate
 
 _2026-07-09 · Overall confidence: **HIGH**. This settles the baseline landing

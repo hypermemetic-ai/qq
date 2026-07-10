@@ -12,12 +12,16 @@ future work would learn nothing from a record, exit silently.
 A diff is not a lesson. The subject is the reusable cause, rationale, or
 invariant; implementation changes are supporting evidence.
 
-1. Read `docs/solutions/` and `CONCEPTS.md` before writing. Reuse the
-   established vocabulary. When an existing record covers the same lesson,
-   update it in place rather than creating another; preserve its filename and
-   original date.
-2. Otherwise create `docs/solutions/YYYY-MM-DD-<slug>.md` with:
-   - frontmatter: `title`, `date`, and focused `tags`;
+1. Search Backlog's shared index for relevant `solutions` documents and read
+   `CONCEPTS.md` before writing. Reuse the established vocabulary. When an
+   existing document covers the same lesson, locate its CLI-generated Markdown
+   by stable document ID under `backlog/docs/`, read it as data, and replace its
+   complete body through `backlog doc update`. Never edit managed Markdown
+   directly.
+2. Otherwise run `backlog doc create "<title>" -p solutions -t guide`, then
+   populate it with `backlog doc update <id> --content <body> --tags
+   "solution,<focused-tags>"`. Let Backlog own identity, dates, paths, and
+   frontmatter. Use this body:
    - `# <title>`;
    - `## Symptom`: the observed failure or decision pressure;
    - `## Root cause`: why it happened or why the decision follows;

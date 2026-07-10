@@ -1,3 +1,13 @@
+---
+id: doc-3
+title: no-mistakes Gate Integration Implementation Plan
+type: specification
+created_date: '2026-07-10 20:56'
+updated_date: '2026-07-10 21:07'
+tags:
+  - plan
+  - historical
+---
 # no-mistakes Gate Integration Implementation Plan
 
 > **Superseded gate policy (2026-07-08):** This dated plan preserves the initial
@@ -14,7 +24,7 @@
 
 **Architecture:** no-mistakes is a Go binary that installs a local git-remote *gate*. `git push no-mistakes` spins up a disposable worktree and runs a fixed pipeline (`intent → rebase → review → test → document → lint → push → pr → ci`) against the diff, forwarding to the push target and opening a PR only when every stage is green. It is agent-agnostic (uses the local `claude`/`codex`/`opencode` CLI) and reads `commands.{test,lint,format}` from the repo's default branch to stay deterministic. We keep hypercore's *front half* (align/plan/build) and *design+spec* review untouched, hand the *correctness+land* tail to the gate, and demote `verification-before-completion` to a cheap pre-push smoke test.
 
-**Tech Stack:** Go binary (installed via `docs/install.sh`), `git`, `gh` (GitHub PRs), `claude` CLI (pipeline agent), `shellcheck` (hypercore's lint command), Markdown (the rules/skills we edit).
+**Tech Stack:** Go binary (installed via upstream no-mistakes `docs/install.sh`), `git`, `gh` (GitHub PRs), `claude` CLI (pipeline agent), `shellcheck` (hypercore's lint command), Markdown (the rules/skills we edit).
 
 ## Global Constraints
 
@@ -33,7 +43,7 @@
 
 **Files:**
 - Create (scratch, outside repo): `/tmp/claude-1000/-home-qqp-projects-hypercore/f9defa21-2a38-44ab-b1ca-ed862d265e4b/scratchpad/nm-trial/` (clone + local bare upstream)
-- Create: `docs/plans/2026-07-06-no-mistakes-trial-report.md` (the decision-quality report — the only in-repo artifact of this task)
+- Create: `backlog/docs/plans/doc-4 - no-mistakes-Gate-—-Trial-Report-GO-NO-GO-Verdict.md` (the decision-quality report — the only in-repo artifact of this task)
 
 **Interfaces:**
 - Produces: **`init-manifest`** — the exact list of paths `no-mistakes init` creates/modifies in a repo, and a yes/no on whether any collide with hypercore's `AGENTS.md`, `CLAUDE.md` (symlink → `AGENTS.md`), or `skills/`. Tasks 2 and 3 consume this to decide collision handling.
@@ -129,7 +139,7 @@ Expected: an `.no-mistakes/evidence/...` trail exists. To also observe the `pr` 
 
 - [ ] **Step 8: Write the trial report and render the GO/NO-GO verdict**
 
-Create `docs/plans/2026-07-06-no-mistakes-trial-report.md` containing: `init-manifest` (full path list + collision yes/no), per-stage observations, the PR-body shape (if captured), rough token cost, and a one-line **`trial-verdict`: GO** or **NO-GO** with reason.
+Create `backlog/docs/plans/doc-4 - no-mistakes-Gate-—-Trial-Report-GO-NO-GO-Verdict.md` containing: `init-manifest` (full path list + collision yes/no), per-stage observations, the PR-body shape (if captured), rough token cost, and a one-line **`trial-verdict`: GO** or **NO-GO** with reason.
 
 **NO-GO if any of:** init overwrites/modifies `AGENTS.md`/`CLAUDE.md`/`skills/` and the change can't be redirected or gitignored; the pipeline cannot complete a trivial change; or `shellcheck` can't be wired as the lint baseline. On NO-GO, stop and surface the blocker — do not start Task 2.
 
@@ -137,7 +147,7 @@ Create `docs/plans/2026-07-06-no-mistakes-trial-report.md` containing: `init-man
 
 ```bash
 cd /home/qqp/projects/hypercore
-git add docs/plans/2026-07-06-no-mistakes-trial-report.md
+git add 'backlog/docs/plans/doc-4 - no-mistakes-Gate-—-Trial-Report-GO-NO-GO-Verdict.md'
 git commit -m "docs: no-mistakes gate trial report + GO/NO-GO verdict"
 ```
 
@@ -386,7 +396,7 @@ Expected: a gate-produced PR, checks green, merged to `main`. This is the `dogfo
 **Precondition:** `dogfood-evidence`.
 
 **Files:**
-- Create: `/home/qqp/projects/hypercore/docs/solutions/no-mistakes-gate.md`
+- Create through `backlog doc create`: a `solutions` document titled `no-mistakes gate`
 - Modify: `/home/qqp/projects/hypercore/CONCEPTS.md`
 
 **Interfaces:**
@@ -395,7 +405,7 @@ Expected: a gate-produced PR, checks green, merged to `main`. This is the `dogfo
 
 - [ ] **Step 1: Write the solution doc**
 
-Create `docs/solutions/no-mistakes-gate.md` covering: the decision (blast-radius, layered), the load-bearing insight (**the two reviews are complementary, not redundant** — gate = correctness, `code-review` = design+spec), why we demoted `verification-before-completion` rather than deleting it, the trial's `init-manifest` findings, and the exact `git push no-mistakes` flow. Follow the format in `docs/solutions/README.md`.
+Create a Backlog `solutions` document titled `no-mistakes gate` covering: the decision (blast-radius, layered), the load-bearing insight (**the two reviews are complementary, not redundant** — gate = correctness, `code-review` = design+spec), why we demoted `verification-before-completion` rather than deleting it, the trial's `init-manifest` findings, and the exact `git push no-mistakes` flow. Follow the format in Backlog document `doc-15` (`Solutions`).
 
 - [ ] **Step 2: Add vocabulary to CONCEPTS.md**
 
@@ -405,7 +415,7 @@ Add terms: **the gate** (no-mistakes as external blast-radius enforcement), **au
 
 ```bash
 cd /home/qqp/projects/hypercore
-git add docs/solutions/no-mistakes-gate.md CONCEPTS.md
+git add backlog/docs/solutions CONCEPTS.md
 git commit -m "docs: capture no-mistakes gate decision + vocabulary"
 git push origin main
 ```

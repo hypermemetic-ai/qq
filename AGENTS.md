@@ -7,8 +7,10 @@ and operator-facing utilities used across linked Repositories.
 
 - Edit shared operating guidance in `qq-methodology.md`.
 - Edit Skills in `skills/`; installed or linked copies are consumers.
-- Record durable intent and status in Backlog.md.
-- Keep research, ideas, solutions, and historical design material under `docs/`.
+- Manage durable intent, status, authored documents, and decisions through the
+  Backlog CLI. Never edit Backlog-managed Markdown directly.
+- Keep plans, research, ideas, solutions, and historical design material as
+  categorized Backlog documents under `backlog/docs/`.
 - Keep project vocabulary in `CONCEPTS.md`.
 
 ## Repository verification
@@ -20,3 +22,13 @@ and operator-facing utilities used across linked Repositories.
 ## Methodology
 
 @qq-methodology.md
+
+<!-- OPENWIKI:START -->
+
+## OpenWiki
+
+This repository uses OpenWiki for recurring code documentation. Start with `openwiki/quickstart.md`, then follow its links.
+
+OpenWiki is a derived orientation surface. Verify important conclusions in source and fresh Checks.
+
+<!-- OPENWIKI:END -->

@@ -1,3 +1,13 @@
+---
+id: doc-5
+title: qq-ac Reframe Implementation Plan
+type: specification
+created_date: '2026-07-10 20:56'
+updated_date: '2026-07-10 21:02'
+tags:
+  - plan
+  - historical
+---
 # qq-ac Reframe Implementation Plan
 
 > **Superseded gate examples (2026-07-08):** This dated plan's Phase 3 fallback
@@ -33,7 +43,7 @@ The **naming map** — apply everywhere in-repo. Copy these tokens verbatim.
 
 **Do NOT rename** (generic, not hypercore-branded): the `y()` and `br()` shell wrappers; `refs/wip/<branch>` (branch-scoped); the `no-mistakes` remote/gate.
 
-**Leave archival, do not rewrite:** existing `docs/plans/2026-07-06-no-mistakes-*.md` and other dated docs — they are truthful historical records of "hypercore" work. The knowledge graph (`.understand-anything/`) regenerates on commit; do not hand-edit it.
+**Leave archival, do not rewrite:** existing `backlog/docs/plans/doc-{3,4}*.md` and other dated docs — they are truthful historical records of "hypercore" work. The knowledge graph (`.understand-anything/`) regenerates on commit; do not hand-edit it.
 
 **Cockpit tools (all installed, verified):** yazi 26.5.6 · broot · glow 2.1.2 · mdcat 2.10.1 · herdr 0.7.1. No multiplexer (tmux/zellij absent) — "panes" = herdr panes.
 
@@ -126,7 +136,7 @@ git mv bin/hc-wip-snapshot.sh bin/qq-wip-snapshot.sh
 
 - [ ] **Step 4: Verify no stale wip tokens remain and scripts still parse.**
 ```bash
-rg -n 'hc-wip' . -g '!docs/plans/2026-07-06-no-mistakes-*' ; echo "exit=$? (want 1)"
+rg -n 'hc-wip' . -g '!backlog/docs/plans/doc-{3,4}*' ; echo "exit=$? (want 1)"
 bash -n bin/qq-wip-snapshot.sh && echo "snapshot syntax OK"
 ```
 Expected: no matches (`exit=1`); `snapshot syntax OK`.
@@ -227,12 +237,12 @@ git add .claude-plugin && git commit -m "qq-ac: rename plugin + marketplace (nam
 
 - [ ] **Step 3: Create `cockpit/README.md`.** One screen: what each config is, the flow ("herdr `prefix+f` spawns a pane running `qqy` → yazi at repo root → Enter on a `.md` renders in-pane via mdcat or glow-tuned, sized to the pane"), and that they're symlinked (edit here or in `~/.config` — same file).
 
-- [ ] **Step 4: Sweep the remaining files.** `SKILLS-ATTRIBUTION.md`, `.no-mistakes.yaml`, `block-dangerous-git.sh` (comments), and any `skills/*/SKILL.md` hit by `rg -l hypercore`: replace `hypercore`→`qq-ac` where it names the project (leave prose that references upstream skill *sources* accurate). Do **not** touch `docs/plans/2026-07-06-no-mistakes-*.md` (archival).
+- [ ] **Step 4: Sweep the remaining files.** `SKILLS-ATTRIBUTION.md`, `.no-mistakes.yaml`, `block-dangerous-git.sh` (comments), and any `skills/*/SKILL.md` hit by `rg -l hypercore`: replace `hypercore`→`qq-ac` where it names the project (leave prose that references upstream skill *sources* accurate). Do **not** touch `backlog/docs/plans/doc-{3,4}*.md` (archival).
 
 - [ ] **Step 5: Verify the sweep is complete.**
 ```bash
 rg -n 'hypercore|HYPERCORE|hc-wip|\bhcy\b|\bhcbr\b' . \
-  -g '!docs/plans/2026-07-06-no-mistakes-*' -g '!.understand-anything/**' -g '!**/*.qqac.bak'
+  -g '!backlog/docs/plans/doc-{3,4}*' -g '!.understand-anything/**' -g '!**/*.qqac.bak'
 echo "exit=$? (want 1 = clean, except intentional upstream-source mentions)"
 ```
 Expected: only intentional matches (e.g. a sentence crediting an upstream repo), if any — review each. No project-identity `hypercore` left.

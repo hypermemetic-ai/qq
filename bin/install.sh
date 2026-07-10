@@ -166,6 +166,7 @@ link_one "$QQ/cockpit/herdr/config.toml" "$HOME/.config/herdr/config.toml" "cock
 link_one "$QQ/cockpit/shell/file-navigation.bash" "$HOME/.config/shell/file-navigation.bash" "cockpit/file-navigation.bash"
 
 link_one "$QQ/bin/qq-herdr-pull" "$HOME/.local/bin/qq-herdr-pull" "command/qq-herdr-pull"
+link_one "$QQ/bin/qq-openwiki" "$HOME/.local/bin/qq-openwiki" "command/qq-openwiki"
 link_one "$QQ/bin/qq-wip" "$HOME/.local/bin/qq-wip" "command/qq-wip"
 link_one "$QQ/bin/qq-wip-snapshot.sh" "$HOME/.codex/hooks/qq-wip-snapshot.sh" "hook/qq-wip-snapshot.sh"
 install_wip_hook

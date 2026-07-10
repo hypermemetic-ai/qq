@@ -1,3 +1,12 @@
+---
+id: doc-8
+title: 'Replacing Understand-Anything: an agent-maintained codebase-knowledge stack'
+type: other
+created_date: '2026-07-10 20:56'
+updated_date: '2026-07-10 21:10'
+tags:
+  - research
+---
 # Replacing Understand-Anything: an agent-maintained codebase-knowledge stack
 
 _2026-07-07 · deep-research round (5 search angles → 21 primary sources fetched →
@@ -107,14 +116,14 @@ qq's worktree model.
   knowledge files OKF-compatible (plain markdown, optional YAML frontmatter);
   revisit when a codebase-oriented OKF implementation exists.
 - **SUPERSEDED same day:** the initial conclusion that compound's surfaces
-  (`CONCEPTS.md`, `docs/solutions/`) cover pillars 2/3 was overruled by the
+  (`CONCEPTS.md`, Backlog `solutions` documents) cover pillars 2/3 was overruled by the
   operator — compound is *episodic memory*, a different document type, never
   exhaustive. The knowledge layer proper is a three-layer model: structure
   (graph+files, adopted) · **intent vs reality** (exhaustive registry of wants
   + implementation status, "for EVERYTHING or we can't trust it as truth",
   updated at landing) · **business logic** (domain flows/rules). Layers 2+3 are
-  the subject of deep-research round 2 (2026-07-07, report lands separately in
-  `research/`); see `ideas/05-methodology-audit-parallel-safety.md` Part 4.
+  the subject of deep-research round 2 (2026-07-07, preserved separately as
+  Backlog `research` document `doc-7`).
 
 ## Caveats worth knowing
 

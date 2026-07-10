@@ -1,3 +1,12 @@
+---
+id: doc-7
+title: 'Knowledge layers 2+3: intent-vs-reality and business logic'
+type: other
+created_date: '2026-07-10 20:56'
+updated_date: '2026-07-10 21:10'
+tags:
+  - research
+---
 # Knowledge layers 2+3: intent-vs-reality and business logic
 
 _2026-07-07 · deep-research round 2 (5 search angles → 21 sources fetched → 105
@@ -5,7 +14,7 @@ claims extracted → **selective verification by operator direction**: only the 
 load-bearing claims got an adversarial check, one skeptic each — 9 confirmed,
 3 refuted; the other 42 supporting claims, including most of the tool-landscape
 detail, are accepted at face value and flagged as such). Companion to
-`2026-07-07-understand-anything-replacement.md`, which adopted layer 1
+Backlog document `doc-8`, which adopted layer 1
 (structure = files + codebase-memory-mcp). Fast-moving field: comparison
 sources date May–June 2026; OpenWiki's latest release is dated the research day
 itself._
@@ -281,11 +290,14 @@ The full settled document stack as of 07-08 (operator): structure =
 codebase-memory-mcp (an efficient, different way for agents to look at the
 codebase) · intent + work status = Backlog.md · durable descriptive docs =
 OpenWiki · opportunistic/episodic docs = compound · enforcement = the gate at
-landing. Adjacent same-day decisions (agent-to-agent comms over herdr
-primitives; Codex workers become first-class herdr panes) are banked in
-`ideas/README.md` (#8, #9).
+landing.
 
 ## Addendum 3 (07-08, TASK-7) - OpenWiki engine decision
+
+> **Superseded 2026-07-10.** The operator adopted upstream OpenWiki's local
+> ChatGPT OAuth provider after PR #151 merged. See
+> Backlog document `doc-9` for the dated evidence and
+> its current supersession note.
 
 TASK-7 kept the Layer B decision and narrowed the execution engine. Durable
 descriptive docs still target `openwiki/` and still refresh inside the gate
@@ -295,5 +307,4 @@ OpenWiki CLI plus an API key. The adopted path is a bespoke
 discipline, preserves the `openwiki/.last-update.json` gitHead protocol, and
 keeps the existing self-guarding refresh behavior. The current
 `bin/qq-openwiki-refresh` remains the CLI/API-key-guarded stopgap until that
-follow-up lands; see `research/2026-07-08-openwiki-engine-sub-only.md` and
-`backlog/tasks/task-7 - Generate-the-initial-openwiki-wiki.md`.
+follow-up lands; see Backlog document `doc-9`; the historical TASK-7 record was erased during the minimum-entity refactor.
