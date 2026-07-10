@@ -1,93 +1,174 @@
 #!/usr/bin/env bash
-# qq preflight — checks the external surface and prints exact setup steps.
-# Safe by design: it inspects and instructs; it does not install system packages
-# or use sudo on your behalf. Re-run any time; it is idempotent.
+# Install qq's live Codex and cockpit surfaces from this checkout.
 set -euo pipefail
 
-bold() { printf '\033[1m%s\033[0m\n' "$1"; }
-ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
-miss() { printf '  \033[33m•\033[0m %s\n' "$1"; }
+QQ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
-have() { command -v "$1" >/dev/null 2>&1; }
-
-pkg_hint() {
-  # $1 = tool, $2 = brew formula, $3 = apt package (or "-")
-  if have brew;      then echo "brew install $2"
-  elif have apt-get; then [ "$3" = "-" ] && echo "(no apt package — see $1 docs)" || echo "sudo apt install $3"
-  else echo "see $1 install docs"; fi
+die() {
+  printf 'qq install: %s\n' "$*" >&2
+  exit 1
 }
 
-bold "qq preflight"
-echo
+resolved_path() {
+  readlink -f "$1" 2>/dev/null || true
+}
 
-bold "Externals (fast filesystem + GitHub)"
-for t in rg fd eza gh; do
-  if have "$t"; then ok "$t"; else
-    case "$t" in
-      rg)  miss "rg (ripgrep)  →  $(pkg_hint ripgrep ripgrep ripgrep)";;
-      fd)  miss "fd            →  $(pkg_hint fd fd fd-find)";;
-      eza) miss "eza           →  $(pkg_hint eza eza -)";;
-      gh)  miss "gh (GitHub)   →  $(pkg_hint gh gh gh)";;
-    esac
+link_one() {
+  local src="$1"
+  local dst="$2"
+  local label="$3"
+
+  [ -e "$src" ] || die "missing source for $label: $src"
+  mkdir -p "$(dirname "$dst")"
+
+  if [ -L "$dst" ]; then
+    if [ "$(resolved_path "$dst")" = "$(resolved_path "$src")" ]; then
+      printf 'ok: %s\n' "$label"
+      return
+    fi
+    die "refusing to replace unmanaged symlink: $dst -> $(readlink "$dst")"
   fi
-done
-echo
+  [ ! -e "$dst" ] || die "refusing to replace unmanaged path: $dst"
 
-bold "Sessions — herdr (agent multiplexer)"
-if have herdr; then ok "herdr"; else
-  miss "herdr  →  brew install herdr"
-  miss "        (or: curl -fsSL https://herdr.dev/install.sh | sh)"
-fi
-echo
+  ln -s "$src" "$dst"
+  printf 'linked: %s\n' "$label"
+}
 
-bold "Cockpit — terminal surface"
-for t in yazi broot glow mdcat; do
-  if have "$t"; then ok "$t"; else
-    case "$t" in
-      yazi)  miss "yazi   →  $(pkg_hint yazi yazi -)";;
-      broot) miss "broot  →  $(pkg_hint broot broot -)";;
-      glow)  miss "glow   →  $(pkg_hint glow glow -)";;
-      mdcat) miss "mdcat  →  $(pkg_hint mdcat mdcat -)";;
+sync_skills() {
+  local dst="$HOME/.codex/skills"
+  local link skill name
+
+  mkdir -p "$dst"
+  for link in "$dst"/*; do
+    [ -L "$link" ] || continue
+    case "$(readlink "$link")" in
+      "$QQ"/skills/*)
+        if [ ! -e "$link" ]; then
+          rm "$link"
+          printf 'pruned: skill/%s\n' "$(basename "$link")"
+        fi
+        ;;
     esac
-  fi
-done
-echo
+  done
 
-bold "Knowledge — the document stack"
-if have codebase-memory-mcp; then ok "codebase-memory-mcp (code graph, out-of-repo index)"; else
-  miss "codebase-memory-mcp  →  see github.com/DeusData/codebase-memory-mcp"
-  miss "  install.sh --skip-config, then wire MCP for Claude Code + Codex manually"
-fi
-if have backlog; then ok "backlog (intent + work status registry)"; else
-  miss "backlog  →  npm i -g backlog.md"
-fi
-if have openwiki; then
-  openwiki_env="$HOME/.openwiki/.env"
-  if [ ! -f "$openwiki_env" ]; then
-    miss "openwiki installed but ~/.openwiki/.env is missing"
-  elif grep -qs "PASTE_KEY_HERE" "$openwiki_env"; then
-    miss "openwiki installed but ~/.openwiki/.env still needs a real API key"
-  else ok "openwiki (durable descriptive docs)"; fi
-else
-  miss "openwiki  →  npm i -g openwiki  (then set provider/key in ~/.openwiki/.env)"
-fi
-echo
+  for skill in "$QQ"/skills/*; do
+    [ -f "$skill/SKILL.md" ] || continue
+    name="$(basename "$skill")"
+    link_one "$skill" "$dst/$name" "skill/$name"
+  done
+}
 
-bold "External docs — Context7 MCP"
-if [ -f .mcp.json ]; then ok ".mcp.json present — approve the context7 server on next session start"; else
-  miss ".mcp.json missing"
-fi
-miss "optional: export CONTEXT7_API_KEY=... to raise rate limits"
-echo
+prune_removed_commands() {
+  local dst="$HOME/.local/bin"
+  local link
 
-bold "Skills"
-if [ -d skills ]; then
-  n=$(find skills -maxdepth 2 -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')
-  ok "$n skills in ./skills/"
-  miss "link skills live: bash bin/qq-link.sh skills"
-  miss "link a repo: bash bin/qq-link.sh repo <path>"
-else
-  miss "skills/ not found — run from the qq repo root"
-fi
-echo
-bold "Done. Address any '•' items above."
+  mkdir -p "$dst"
+  for link in "$dst"/*; do
+    [ -L "$link" ] || continue
+    case "$(readlink "$link")" in
+      "$QQ"/bin/*)
+        if [ ! -e "$link" ]; then
+          rm "$link"
+          printf 'pruned: command/%s\n' "$(basename "$link")"
+        fi
+        ;;
+    esac
+  done
+}
+
+install_wip_hook() {
+  local hooks="$HOME/.codex/hooks.json"
+  local command="bash '$HOME/.codex/hooks/qq-wip-snapshot.sh'"
+
+  mkdir -p "$(dirname "$hooks")"
+  python3 - "$hooks" "$command" <<'PY'
+import json
+import os
+import stat
+import sys
+import tempfile
+
+path, command = sys.argv[1:]
+data = {}
+mode = 0o600
+if os.path.islink(path):
+    raise SystemExit(f"qq install: refusing symlinked hook config: {path}")
+if os.path.exists(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"qq install: refusing malformed {path}: {exc}")
+    if not isinstance(data, dict):
+        raise SystemExit(f"qq install: refusing non-object {path}")
+    mode = stat.S_IMODE(os.stat(path).st_mode)
+
+hooks = data.setdefault("hooks", {})
+if not isinstance(hooks, dict):
+    raise SystemExit(f"qq install: refusing non-object hooks in {path}")
+stop = hooks.setdefault("Stop", [])
+if not isinstance(stop, list):
+    raise SystemExit(f"qq install: refusing non-list hooks.Stop in {path}")
+
+matches = []
+ambiguous = []
+for entry in stop:
+    if not isinstance(entry, dict):
+        continue
+    commands = entry.get("hooks")
+    if not isinstance(commands, list):
+        continue
+    for hook in commands:
+        if not isinstance(hook, dict):
+            continue
+        existing = str(hook.get("command", ""))
+        if existing == command:
+            matches.append(hook)
+        elif "qq-wip-snapshot" in existing:
+            ambiguous.append(existing)
+
+if ambiguous:
+    raise SystemExit(f"qq install: refusing unrecognized qq-wip-snapshot hook in {path}")
+if len(matches) > 1:
+    raise SystemExit(f"qq install: refusing duplicate qq-wip-snapshot hooks in {path}")
+if matches:
+    matches[0].update({"command": command, "timeout": 10, "type": "command"})
+else:
+    stop.append({"hooks": [{"command": command, "timeout": 10, "type": "command"}]})
+
+parent = os.path.dirname(path)
+fd, temporary = tempfile.mkstemp(prefix="hooks.", suffix=".json", dir=parent)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2)
+        handle.write("\n")
+    os.chmod(temporary, mode)
+    os.replace(temporary, path)
+except BaseException:
+    try:
+        os.unlink(temporary)
+    except FileNotFoundError:
+        pass
+    raise
+PY
+  printf 'ok: Codex WIP Stop hook\n'
+}
+
+link_one "$QQ/qq-methodology.md" "$HOME/.codex/AGENTS.md" "Codex methodology"
+sync_skills
+prune_removed_commands
+
+link_one "$QQ/cockpit/yazi/yazi.toml" "$HOME/.config/yazi/yazi.toml" "cockpit/yazi.toml"
+link_one "$QQ/cockpit/yazi/keymap.toml" "$HOME/.config/yazi/keymap.toml" "cockpit/yazi-keymap.toml"
+link_one "$QQ/cockpit/glow/glow.yml" "$HOME/.config/glow/glow.yml" "cockpit/glow.yml"
+link_one "$QQ/cockpit/glow/tuned.json" "$HOME/.config/glow/tuned.json" "cockpit/glow-theme.json"
+link_one "$QQ/cockpit/herdr/config.toml" "$HOME/.config/herdr/config.toml" "cockpit/herdr.toml"
+link_one "$QQ/cockpit/shell/file-navigation.bash" "$HOME/.config/shell/file-navigation.bash" "cockpit/file-navigation.bash"
+
+link_one "$QQ/bin/qq-herdr-pull" "$HOME/.local/bin/qq-herdr-pull" "command/qq-herdr-pull"
+link_one "$QQ/bin/qq-wip" "$HOME/.local/bin/qq-wip" "command/qq-wip"
+link_one "$QQ/bin/qq-wip-snapshot.sh" "$HOME/.codex/hooks/qq-wip-snapshot.sh" "hook/qq-wip-snapshot.sh"
+install_wip_hook
+
+printf 'qq install: links complete\n'
+printf 'qq install: confirm the WIP hook in a new Codex session with /hooks; Codex skips it until trusted.\n'

@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Delegates review of a branch, PR, or work in progress to a fresh read-only reviewer and returns verified findings. Use when the user asks to review changes, a PR, a branch, or work since a fixed point.
+description: Delegates review of a branch, PR, or work in progress to a fresh read-only reviewer and returns verified findings. Run automatically once for every non-trivial Change after implementation and local verification, before commit, push, pull request creation, and final GitHub-side Checks; rerun after material post-review changes. Also use when the operator asks to review changes, a PR, a branch, or work since a fixed point.
 ---
 
 # Review with fresh context
@@ -8,18 +8,38 @@ description: Delegates review of a branch, PR, or work in progress to a fresh re
 1. Define the exact change surface. Honor a supplied base; otherwise infer the
    target branch and merge-base. For work in progress, include committed,
    staged, unstaged, and untracked changes.
-2. Find the owning Backlog task or supplied intent and the relevant repository
-   rules.
-3. Give that surface, intent, and those rules to one fresh read-only reviewer as
-   a leaf worker that performs the review directly. Have it inspect surrounding
-   code, callers, and tests, and report only material findings introduced by the
-   change across correctness, security, reliability, intent, and non-tool-enforced
-   standards. Each finding needs a file/line and concrete failure path.
-4. Use Fowler's code smells as maintenance heuristics, never violations. Report
+2. Reconcile the owning Task or specification with later approved operator
+   decisions. If they conflict, intent remains unclear, or the surface contains
+   unrelated work, stop and align before delegation.
+3. Prepare a factual review brief:
+   - repository path, base, head, and working-tree state;
+   - a changed-path map grouped by behavior, with mechanical moves, generated
+     files, and historical material identified;
+   - current intent, acceptance criteria, explicit inclusions and exclusions,
+     and applicable repository rules;
+   - commands and results from relevant local Checks.
+
+   Give the reviewer repository coordinates, not a pasted full diff. Do not
+   include the author's conclusions, suspected findings, or development
+   transcript.
+4. Delegate to one fresh read-only leaf reviewer. State that the review is an
+   approved continuation: do not repeat grilling, delegate another review,
+   modify state, rerun the full Check suite, or audit unrelated local or external
+   systems. Have the reviewer inspect relevant diffs, surrounding callers, and
+   tests directly. Use targeted reads; test only suspected failure paths.
+   Review mechanical moves and deletions through their invariants rather than
+   reading unchanged or historical bodies line by line.
+5. Request only material findings introduced by the Change across correctness,
+   security, reliability, intent, and non-tool-enforced standards. Each finding
+   needs a file and line, a concrete failure path, and supporting evidence.
+6. Use Fowler's code smells as maintenance heuristics, never violations. Report
    one only when the diff or history shows a concrete future cost; weigh
    counterevidence such as deliberate bounded-context duplication, generated or
    boundary code, adapters/facades, and compatibility constraints. Prescribe no
    refactoring from a label alone.
-5. Verify every finding against the repository and reproduce it when practical.
-   Deduplicate, rank by impact, and report only confirmed findings. State when
-   none remain. Stop at review unless the user asks for fixes.
+7. Verify every returned finding against the Repository and reproduce it when
+   practical. Deduplicate, rank by impact, and report only confirmed findings.
+   State when none remain. Stop at review unless the operator asks for fixes.
+8. A reviewer error or missing final report is not a review. Retry the unchanged
+   brief with a fresh reviewer. Do not narrow scope or alter intent merely to
+   obtain a pass; repeated reviewer unavailability is a blocker.

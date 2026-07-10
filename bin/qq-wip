@@ -16,7 +16,13 @@ git rev-parse --quiet --verify "$ref" >/dev/null 2>&1 \
   || { echo "no snapshots on '${branch}' (ref ${ref})"; exit 0; }
 
 case "${1:-list}" in
-  list)   git log --format='%h  %cd  %s' --date=iso "$ref" | head -50 ;;
+  list)
+          exclude_head=()
+          git rev-parse --quiet --verify HEAD >/dev/null 2>&1 \
+            && exclude_head=(--not HEAD)
+          git log --format='%h  %cd  %s' --date=iso --max-count=50 \
+            --grep='^wip: ' "$ref" "${exclude_head[@]}"
+          ;;
   diff)   git --no-pager diff HEAD "$ref" ;;
   branch) [ -n "${2:-}" ] || { echo "usage: qq-wip branch <name>"; exit 1; }
           git branch "$2" "$ref" \

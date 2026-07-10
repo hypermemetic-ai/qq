@@ -1,18 +1,8 @@
-# Ideas
+# Archived idea records
 
-Informal backlog — dump thoughts here as they come, no ceremony. One line is
-fine; a rough paragraph is fine. Nothing here is a commitment or a plan — it's a
-holding pen. Groom it whenever: promote an idea to a plan (`writing-plans`), fold
-it into `AGENTS.md`, or just delete it.
-
-Quick thoughts go as bullets under **Backlog**. When an idea outgrows a line, give
-it its own `NN-slug.md` file in this folder and leave a one-line pointer here.
-
-This folder is the output surface of the `/idea` skill (`skills/idea/SKILL.md`):
-mid-session it captures a bare todo as a verbatim bullet, and anything
-researchable as an `NN-slug.md` a detached researcher then enriches in place.
-Bare `/idea` with no text parks a handoff-style snapshot of the current thread
-as an `NN-slug.md`; if there is nothing researchable, no researcher is spawned.
+This directory preserves the earlier numbered idea and design records. Their
+descriptions are historical and may refer to retired Skills or infrastructure.
+The live `idea` Skill captures new thoughts in `docs/ideas.md`.
 
 ## Backlog
 
@@ -151,7 +141,7 @@ as an `NN-slug.md`; if there is nothing researchable, no researcher is spawned.
   file-based reports, in-pane repair, and explicit `codex resume <session-id>`
   recovery for dead panes. TASK-8.2 captured the live e2e proof and residual
   records check; TASK-8.3 banked the pilot lessons and closed the parent; design doc:
-  [`docs/plans/2026-07-08-orchestrate-codex-panes.md`](../docs/plans/2026-07-08-orchestrate-codex-panes.md).
+  [`docs/plans/2026-07-08-orchestrate-codex-panes.md`](../plans/2026-07-08-orchestrate-codex-panes.md).
   _(2026-07-08)_
 - **#10 · Expand–contract for wide refactors** _(captured 07-08)._ mattpocock
   v1.1's `to-tickets` slices a wide refactor (one mechanical change,

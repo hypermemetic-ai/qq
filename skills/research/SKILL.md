@@ -17,7 +17,7 @@ Delegate the reading; retain the judgment. For substantial research, launch a fr
 
 ## Output
 
-Write exactly one final report to `research/YYYY-MM-DD-<topic>.md`. When multiple researchers contribute, keep their raw notes temporary and reconcile them into this report. Reconcile older durable reports only when the owning task explicitly asks; the synthesis is that task's one research report, not an automatic extra document.
+Write exactly one final report under the Repository root at `docs/research/YYYY-MM-DD-<topic>.md`. When multiple researchers contribute, keep their raw notes temporary and reconcile them into this report. Reconcile older durable reports only when the owning task explicitly asks; the synthesis is that task's one research report, not an automatic extra document.
 
 If an owning Backlog task exists, add one relative Markdown link to the report under its Implementation Notes. The report is evidence attached to that Task, not a separate source of current system truth.
 

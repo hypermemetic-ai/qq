@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # qq-wip-snapshot — snapshot the working tree to refs/wip/<branch> WITHOUT touching
-# HEAD, the index, or any working file. Runs on every Claude Code Stop as a
-# "never lose an agent's work" savepoint that fills the gap commit-on-green leaves
-# (verified work is committed; in-flight work between green points is not).
+# HEAD, the index, or any working file. Runs on every Codex Stop as a recovery
+# point for in-flight work that has not been committed yet.
 #
 # Non-destructive by construction: it builds the snapshot in a temporary index and
 # only ever writes new git objects + moves refs/wip/<branch>. The ref update is
@@ -31,7 +30,9 @@ tmp_index="$(git rev-parse --git-dir)/qq-wip-index.$$"
 trap 'rm -f "$tmp_index"' EXIT
 GIT_INDEX_FILE="$tmp_index" git read-tree HEAD 2>/dev/null \
   || GIT_INDEX_FILE="$tmp_index" git read-tree --empty
-GIT_INDEX_FILE="$tmp_index" git add -A 2>/dev/null || true
+# Never advance the recovery ref with a partial tree. A Stop hook must not fail
+# its caller, so collection failure exits cleanly and preserves the last snapshot.
+GIT_INDEX_FILE="$tmp_index" git add -A 2>/dev/null || exit 0
 tree=$(GIT_INDEX_FILE="$tmp_index" git write-tree)
 
 # Skip if the snapshot would equal HEAD's tree (clean) or the last snapshot (no change).

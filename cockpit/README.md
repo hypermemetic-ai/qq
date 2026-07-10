@@ -1,10 +1,8 @@
 # Cockpit
 
-`cockpit/` is the source of truth for the human-driven terminal surface. The
-activation script symlinks each file into `~/.config`, so editing here or through
-the live config path edits the same file. It also wires the Claude Code status
-line from `bin/qq-phase render`; that reader lives beside the scripts because it
-both writes and renders `.qq/state.json`.
+`cockpit/` is the source of truth for the human-driven terminal surface.
+`bin/install.sh` symlinks each file into `~/.config`, so editing here or through
+the live config path edits the same file.
 
 ## Files
 - `yazi/yazi.toml` — pane-first file navigation; markdown opens in-pane through

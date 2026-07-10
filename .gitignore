@@ -1,10 +1,10 @@
-# no-mistakes gate — ignore local scratch/evidence; keep .no-mistakes.yaml tracked
+# legacy local tool scratch and evidence
 .no-mistakes/
 
 # herdr session scratch (logs / pids) — local runtime state, never tracked
 .ntm/
 
-# background-work progress — transient per-repo state a status widget reads
+# qq-local runtime state
 .qq/
 
 # retired knowledge-layer plugin residue — the code graph now lives out-of-repo
