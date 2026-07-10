@@ -1,13 +1,22 @@
 ---
 name: compound
-description: Captures reusable learning from a verified, non-obvious solve and keeps project vocabulary aligned. Runs automatically after a fix or decision whose reasoning future work would otherwise have to rediscover.
+description: Captures settled, reusable learning and keeps project vocabulary aligned. Use when no Change is needed and the operator has settled a non-obvious decision or accepted a verified, non-obvious diagnosis, or when a dependent Change has been reviewed, verified, and landed, if future work would otherwise have to rediscover the reasoning.
 ---
 
 # Capture reusable learning
 
-Make the applicability decision yourself immediately after the solve. Capture
-when the verified root cause or reasoning is non-obvious and reusable. When
-future work would learn nothing from a record, exit silently.
+Capture settled Knowledge only. An operator decision that needs no Change is
+eligible once settled by the operator; a no-Change diagnosis is eligible only
+once verified and accepted by the operator. A lesson that depends on a Change
+is eligible only after review, verification, and landing.
+
+Candidate designs, active findings, unmerged implementations, and author
+conclusions are not Knowledge. Capture a rejected approach only after the
+operator has settled its rejection and reasoning.
+
+Make the applicability decision when the subject becomes eligible. Capture when
+the verified root cause or reasoning is non-obvious and reusable. When future
+work would learn nothing from a record, exit silently.
 
 A diff is not a lesson. The subject is the reusable cause, rationale, or
 invariant; implementation changes are supporting evidence.

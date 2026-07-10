@@ -88,6 +88,13 @@ Before implementing:
 - If a simpler approach exists, say so. Push back when warranted.
 - If something is unclear, stop. Name the confusion and resolve it.
 
+Stop and resume alignment before making an architectural commitment that was
+not already approved: durable state or a new source of truth; lifecycle or
+background behavior; a coordination, retry, or recovery protocol; authority or
+side effects; a trust boundary; a public compatibility obligation; operational
+burden; or a shifted responsibility. Unexpected implementation growth is
+evidence that alignment may have drifted, not a violation by itself.
+
 ### 2. Simplicity First
 
 Write the minimum code that solves the agreed problem. Nothing speculative.

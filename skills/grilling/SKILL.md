@@ -16,7 +16,11 @@ Look up discoverable facts instead of asking the operator. Put every decision to
 the operator. If inspection reveals no open decision, state the proposed
 interpretation and scope as one confirmation question.
 
+Close alignment by stating the intended outcome, the ownership boundary—
+responsibilities added or changed plus explicit non-goals—and the evidence that
+will demonstrate success.
+
 Do not enact the work until the operator confirms shared understanding. Treat
 approval or an instruction to proceed as authorization to carry out the aligned
 work without reopening settled decisions. If a new decision emerges during the
-work, stop and resume the interview.
+work or the work crosses the ownership boundary, stop and resume alignment.
