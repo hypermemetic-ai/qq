@@ -62,15 +62,23 @@ repo via a symlinked `@`-import — do not edit a copy; edit it in qq.
 4. **Goal-driven** — define verifiable success criteria, then loop until verified.
 
 ## Routing
-Triage every task by size and reversibility first. **Triage scales ceremony,
-never the landing path** — there is one workflow, and everything lands through
-the gate.
-- **Trivial + local + reversible** (typo, rename, one-liner): skip Align/Plan —
-  just do it, run `verification-before-completion`, commit on green to the
-  current working branch. Small changes batch on a branch and land as one
-  gated push; they do not commit straight to `main`.
-- **Everything else** (multi-file, ambiguous, irreversible): run the loop below,
-  starting at Align — or hand the whole task to `orchestrate`, which conducts the
+Start every new work item with Align: run `grilling` before acting, even when the
+request seems clear. Skip Align only when the operator explicitly opts out, or
+the action is entirely obvious and mechanical, has effectively no impact, and
+admits no meaningful choice. Size, locality, reversibility, and line count do
+not earn an exemption. Do not restart Align merely to carry out work already
+aligned and approved.
+
+After Align (or an allowed skip), triage by size and reversibility. **Triage
+scales ceremony, never the landing path** — there is one workflow, and everything
+lands through the gate.
+
+- **Local + reversible:** skip Plan — carry out the agreed work, run
+  `verification-before-completion`, and commit on green to the current working
+  branch. Small changes batch on a branch and land as one gated push; they do
+  not commit straight to `main`.
+- **Everything else** (multi-file, ambiguous, irreversible): continue through
+  the loop below — or hand the whole task to `orchestrate`, which conducts the
   loop end-to-end (Claude aligns / plans / verifies / reviews; Codex implements
   in a named herdr pane).
 
@@ -88,8 +96,8 @@ the intent registry (`backlog/`) trustworthy: one landing path means one
 enforcement point.
 
 ## The loop
-1. **Align** — `grilling` / `grill-me`: resolve intent and open decision branches
-   before building.
+1. **Align** — `grilling`: default-on for every new work item; resolve intent and
+   open decision branches before acting.
 2. **Plan** — `writing-plans`: turn the agreed intent into an executable,
    step-by-step plan. Work it with `executing-plans`; land it with
    `finishing-a-development-branch` — through the gate, like everything else.
@@ -295,7 +303,7 @@ These are the rules that make that safe.
 | skill | reach for it when |
 |---|---|
 | `orchestrate` | running a non-trivial task through the whole loop end-to-end — Claude conducts, Codex implements in a named herdr pane |
-| `grilling` / `grill-me` | starting non-trivial work — pin down intent first |
+| `grilling` | starting any new work item unless explicitly opted out or truly impact-free — pin down intent first |
 | `writing-plans` | turning agreed intent into an executable plan |
 | `executing-plans` | working a plan task-by-task (stops on blockers; won't touch main without consent) |
 | `finishing-a-development-branch` | landing finished work — the gate does rebase / push / PR, so this narrows to the merge decision |

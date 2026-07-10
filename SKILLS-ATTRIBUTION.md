@@ -10,7 +10,6 @@ copyright notices are retained inside each vendored skill directory.
 | skill | source repo | author | license |
 |---|---|---|---|
 | `grilling` | [mattpocock/skills](https://github.com/mattpocock/skills) | Matt Pocock | MIT |
-| `grill-me` | [mattpocock/skills](https://github.com/mattpocock/skills) | Matt Pocock | MIT |
 | `handoff` | [mattpocock/skills](https://github.com/mattpocock/skills) | Matt Pocock | MIT |
 | `diagnosing-bugs` | [mattpocock/skills](https://github.com/mattpocock/skills) | Matt Pocock | MIT |
 | `code-review` | [mattpocock/skills](https://github.com/mattpocock/skills) | Matt Pocock | MIT |
@@ -22,7 +21,9 @@ copyright notices are retained inside each vendored skill directory.
 | `compound` | [EveryInc/compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin) | Kieran Klaassen & Trevin Chow (Every) | MIT |
 | `git-guardrails-claude-code` | [mattpocock/skills](https://github.com/mattpocock/skills) | Matt Pocock | MIT |
 
-`diagnosing-bugs` carries a small qq addendum (a fix-attempt circuit-breaker
+`grilling` keeps upstream's interview mechanics but carries qq's default-on
+trigger and alignment contract. `diagnosing-bugs` carries a small qq addendum
+(a fix-attempt circuit-breaker
 from superpowers `systematic-debugging`, and an optional scratchpad idea distilled
 from gsd `gsd-debug`). `compound` (vendored as upstream's `ce-compound`, renamed)
 has been slimmed from its upstream 727-line form to a lean, self-contained
