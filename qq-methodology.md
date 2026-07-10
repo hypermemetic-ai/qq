@@ -175,9 +175,11 @@ and rerun affected Checks before presenting the candidate for merge.
 
 Agents are invited to communicate directly through herdr whenever coordination
 helps. Use `herdr agent list`, `herdr agent get`, `herdr agent read`, and
-`herdr agent wait` to find, inspect, and wait for one another. `herdr agent send`
-delivers literal text without Enter; use `herdr pane run` with the pane id when
-the message should be submitted as a turn. No additional protocol is required.
+`herdr agent wait` to find, inspect, and wait for one another. Message text in
+herdr is literal: escaped sequences such as `\n` are displayed literally and are
+not formatting, so send agent prompts as clean single-line text.
+`herdr agent send` writes without Enter; use `herdr pane run` with the pane
+id to submit the line as a turn. No additional protocol is required.
 
 ## Runtime neutrality
 
