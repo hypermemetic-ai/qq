@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Delegates review of a branch, PR, or work in progress to a fresh read-only reviewer and returns verified findings. Run automatically once for every non-trivial Change after implementation and local verification, before commit, push, pull request creation, and final GitHub-side Checks; rerun after material post-review changes. Also use when the operator asks to review changes, a PR, a branch, or work since a fixed point.
+description: Delegates review of a branch, PR, or work in progress to a fresh read-only reviewer and returns verified findings. Run automatically once for every non-trivial Change after implementation and local verification, before commit, push, pull request creation, and final GitHub-side Checks; review the exact post-review delta after in-scope fixes. Also use when the operator asks to review changes, a PR, a branch, or work since a fixed point.
 ---
 
 # Review with fresh context
@@ -40,6 +40,15 @@ description: Delegates review of a branch, PR, or work in progress to a fresh re
 7. Verify every returned finding against the Repository and reproduce it when
    practical. Deduplicate, rank by impact, and report only confirmed findings.
    State when none remain. Stop at review unless the operator asks for fixes.
-8. A reviewer error or missing final report is not a review. Retry the unchanged
+8. Treat a confirmed finding as evidence, not authorization to expand the
+   Change. It is a fix candidate only when the Change introduced it, it is
+   reproducible in an explicitly supported state, it falls within the agreed
+   intent and inclusions, and the remedy is the smallest causal correction.
+   Otherwise report it separately and stop.
+9. If a remedy would materially widen the Change surface, stop and align with
+   the operator. After an in-scope fix, rerun affected Checks and review the
+   exact delta from the last reviewed tree. Restart the full review only when
+   intent or scope materially changes.
+10. A reviewer error or missing final report is not a review. Retry the unchanged
    brief with a fresh reviewer. Do not narrow scope or alter intent merely to
    obtain a pass; repeated reviewer unavailability is a blocker.
