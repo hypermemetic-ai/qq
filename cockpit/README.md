@@ -7,7 +7,8 @@ the live config path edits the same file.
 ## Files
 - `yazi/yazi.toml` — pane-first file navigation; markdown opens in-pane through
   mdcat by default, with tuned Glow as the alternate opener.
-- `yazi/keymap.toml` — `!` opens a shell here; `g H` jumps to `~/projects/qq`.
+- `yazi/keymap.toml` — `Enter` enters folders or opens files, `!` opens a shell
+  here, and `g H` jumps to `~/projects/qq`.
 - `glow/glow.yml` — fixed-width, no-pager Glow defaults for pane rendering.
 - `glow/tuned.json` — the hand-tuned Markdown theme used by Glow.
 - `herdr/config.toml` — tokyo-night, onboarding suppressed, priority-sorted
@@ -18,7 +19,7 @@ the live config path edits the same file.
 
 ## Flow
 Herdr `prefix+f` spawns a pane running `qqy`; `qqy` opens yazi at the repo root;
-Enter on a `.md` file renders in-pane via mdcat or Glow tuned to the pane width.
+Enter descends into a folder or renders a `.md` file in-pane via mdcat or Glow.
 `prefix+shift+f` opens broot at the same root through `qqbr`. `prefix+F<N>`
 pulls the Nth priority-sorted agent into the focused pane; `prefix+0` pulls the
 agent that most needs attention.
