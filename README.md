@@ -1,6 +1,6 @@
 # qq
 
-qq is surlej's operator-owned harness for agentic development. This repository
+qq is qqp's operator-owned harness for agentic development. This repository
 is the source of its shared methodology, skills, project knowledge, and cockpit
 preferences.
 
