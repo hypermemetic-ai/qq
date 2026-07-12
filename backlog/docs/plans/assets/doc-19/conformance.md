@@ -1,29 +1,8 @@
----
-id: doc-19
-title: 'Plan — Land TASK-8 PR1: BPMN plan artifacts'
-type: other
-created_date: '2026-07-12 16:46'
-updated_date: '2026-07-12 17:07'
-tags:
-  - plans
----
-# Plan — Land TASK-8 PR1: BPMN plan artifacts
+# BPMN conformance report
 
-**Owning task:** TASK-8 (with TASK-6 sharing the pipeline foundation) · **Branch:** `feat/task-8-bpmn-plan-artifacts` · **Status:** landed — PR #32 merged 2026-07-12 (7f88432)
+Plan: /home/qqp/projects/qq/backlog/docs/plans/assets/doc-19/qq_task8_pr1.bpmn
 
-This is the first real plan artifact produced by the flow it delivers (TASK-8 AC #1). Every element carries a spot-checkable `Evidence: file:lines` stamp in `bpmn:documentation` and a `qq:evidence` extension; the pipeline verified the stamps survive layout losslessly at generation time. Evidence line numbers reference the files as committed in this PR.
-
-![PR1 plan diagram](assets/doc-19/qq_task8_pr1.png)
-
-**Files:** `assets/doc-19/plan-spec.json` (source spec) · `qq_task8_pr1.bpmn` (semantic model) · `qq_task8_pr1.png` (publishable render; carries the visible BPMN.io watermark — the SVG variant is deliberately not stored because it lacks one). All intermediates regenerate deterministically from the spec via `skills/bpmn-plans/pipeline`.
-
-**Scope of PR1:** bundled pipeline package under `skills/bpmn-plans/pipeline/` (codegen, qq-subset bpmnlint plugin, layout+render, conformance CLI, 13-test suite), the `bpmn-plans` Skill, the one-line grilling close hook, and this plan document. Conformance report appended below.
-
-## Conformance report (post-landing, 2026-07-12)
-
-Plan: `assets/doc-19/qq_task8_pr1.bpmn` · completions: `assets/doc-19/completions.json`
-
-### Summary
+## Summary
 
 - Flow nodes: 15
 - Accounted: 15
@@ -32,7 +11,7 @@ Plan: `assets/doc-19/qq_task8_pr1.bpmn` · completions: `assets/doc-19/completio
 - Unknown completion IDs: 0
 - Strict verdict: PASS
 
-### Per-element status
+## Per-element status
 
 | ID | Name | Type | Status | Evidence / note |
 | --- | --- | --- | --- | --- |

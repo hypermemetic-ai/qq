@@ -1,0 +1,17 @@
+{
+  "start": { "status": "done", "evidence": "Branch feat/task-8-bpmn-plan-artifacts cut from main @ 2f83548; scope recorded in backlog/tasks/task-8." },
+  "build_pkg": { "status": "done", "evidence": "skills/bpmn-plans/pipeline in commit 7116afc; npm ci reproducible; 13/13 tests green with rendering." },
+  "author_skill": { "status": "done", "evidence": "skills/bpmn-plans/SKILL.md and the grilling close hook in commit 7116afc." },
+  "validate_skills": { "status": "done", "evidence": "skill-creator quick_validate: 'Skill is valid!' for bpmn-plans and grilling.", "note": "Executed only after the operator asked whether the validator had been used — the process miss that spawned TASK-9. Validation then passed clean." },
+  "dogfood": { "status": "done", "evidence": "backlog/docs/plans/assets/doc-19: plan-spec.json -> qq_task8_pr1.bpmn/.png, round-trip lossless." },
+  "verify": { "status": "done", "evidence": "npm test 13/13 (run independently twice); example spec and the real doc-19 plan through the full chain, deterministic." },
+  "gw_checks": { "status": "done", "evidence": "'yes' taken — all checks green on first pass." },
+  "review": { "status": "done", "evidence": "One fresh-context read-only reviewer; 4 confirmed findings (dangling AGENTS.md evidence stamps, imprecise task-8 line refs, unwatermarked SVG in assets, empty decision-1 body)." },
+  "gw_review": { "status": "diverged", "evidence": "'no' taken once (4 findings), then proceeded to open_pr.", "note": "The plan's loop implies the post-fix delta re-enters independent review. In reality the owning agent verified the delta itself: affected checks were rerun (regeneration lossless, byte-identical determinism), but no second fresh reviewer was spawned. Accepted because the delta was small and mechanical (evidence re-pointing, asset pruning, doc body fill)." },
+  "fix": { "status": "done", "evidence": "All 4 findings fixed in one pass; artifacts regenerated; affected checks rerun (pipeline regeneration lossless)." },
+  "open_pr": { "status": "done", "evidence": "Commit 7116afc (31 files, foreign AGENTS.md/cockpit edits excluded); PR #32 opened with the plan diagram embedded." },
+  "operator_gate": { "status": "done", "evidence": "Operator reviewed PR #32 with the diagram and merged." },
+  "gw_merge": { "status": "done", "evidence": "'merge' taken." },
+  "landed": { "status": "done", "evidence": "Merge commit 7f88432 on main; pipeline and skill live." },
+  "rework": { "status": "skipped", "note": "Branch not taken — no changes were requested at the operator gate." }
+}

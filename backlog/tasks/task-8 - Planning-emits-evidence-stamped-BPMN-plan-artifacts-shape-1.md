@@ -1,10 +1,10 @@
 ---
 id: TASK-8
 title: Planning emits evidence-stamped BPMN plan artifacts (shape 1)
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-07-12 16:02'
-updated_date: '2026-07-12 16:47'
+updated_date: '2026-07-12 17:07'
 labels: []
 dependencies: []
 documentation:
@@ -33,7 +33,7 @@ DEPENDS: TASK-6 pipeline pieces (codegen helper, lint config + subset plugin, re
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [ ] #1 A planning flow exists that emits a subset-conforming, evidence-stamped .bpmn + rendered PNG for a real task, and the operator has reviewed at least one such plan-diagram before work started
-- [ ] #2 A conformance check exists that, given a plan .bpmn and the executed work's record, reports per-task/per-gateway conformance and divergences
-- [ ] #3 Plan artifacts are attached to their owning Backlog task (not the wiki)
+- [x] #2 A conformance check exists that, given a plan .bpmn and the executed work's record, reports per-task/per-gateway conformance and divergences
+- [x] #3 Plan artifacts are attached to their owning Backlog task (not the wiki)
 - [ ] #4 At plan approval (the grilling close), the agent presents the rendered plan diagram to the operator alongside the confirmation question
 <!-- AC:END -->
