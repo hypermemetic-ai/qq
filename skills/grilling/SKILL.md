@@ -18,7 +18,9 @@ interpretation and scope as one confirmation question.
 
 Close alignment by stating the intended outcome, the ownership boundary—
 responsibilities added or changed plus explicit non-goals—and the evidence that
-will demonstrate success.
+will demonstrate success. When the work warrants a plan diagram (`bpmn-plans`
+Skill), present the rendered diagram alongside this closing confirmation so the
+operator approves the plan visually.
 
 Do not enact the work until the operator confirms shared understanding. Treat
 approval or an instruction to proceed as authorization to carry out the aligned

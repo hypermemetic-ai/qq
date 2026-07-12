@@ -1,0 +1,245 @@
+{
+  "id": "qq_task8_pr1",
+  "name": "Land TASK-8 PR1: BPMN plan artifacts",
+  "elements": [
+    {
+      "id": "start",
+      "type": "startEvent",
+      "name": "PR1 scoped",
+      "documentation": "Operator committed shape 1 and directed TASK-6 + TASK-8; PR1 delivers the TASK-8 core on branch feat/task-8-bpmn-plan-artifacts.",
+      "evidence": {
+        "file": "backlog/tasks/task-8 - Planning-emits-evidence-stamped-BPMN-plan-artifacts-shape-1.md",
+        "lines": "18"
+      }
+    },
+    {
+      "id": "build_pkg",
+      "type": "serviceTask",
+      "name": "Build bundled pipeline package",
+      "documentation": "skills/bpmn-plans/pipeline: codegen, qq subset linter plugin, layout+render, conformance CLI, tests.",
+      "evidence": {
+        "file": "skills/bpmn-plans/pipeline/README.md",
+        "lines": "1-16"
+      }
+    },
+    {
+      "id": "author_skill",
+      "type": "serviceTask",
+      "name": "Author bpmn-plans Skill and grilling hook",
+      "documentation": "SKILL.md procedure (spec, generate, store, link, approve, conform) plus the one-line grilling close hook.",
+      "evidence": {
+        "file": "skills/bpmn-plans/SKILL.md",
+        "lines": "1-10"
+      }
+    },
+    {
+      "id": "validate_skills",
+      "type": "serviceTask",
+      "name": "Validate touched Skills",
+      "documentation": "skill-creator quick_validate on bpmn-plans and grilling; mechanical Check ticketed as TASK-9.",
+      "evidence": {
+        "file": "openwiki/architecture.md",
+        "lines": "66"
+      }
+    },
+    {
+      "id": "dogfood",
+      "type": "serviceTask",
+      "name": "Generate this plan through the pipeline",
+      "documentation": "This diagram is the first real plan artifact (AC #1) and the approval exhibit for the PR.",
+      "evidence": {
+        "file": "backlog/tasks/task-8 - Planning-emits-evidence-stamped-BPMN-plan-artifacts-shape-1.md",
+        "lines": "35"
+      }
+    },
+    {
+      "id": "verify",
+      "type": "serviceTask",
+      "name": "Run tests and end-to-end example",
+      "documentation": "npm ci reproducibility, 13-test suite with rendering, example spec through the full chain.",
+      "evidence": {
+        "file": "skills/bpmn-plans/pipeline/test/pipeline.test.mjs",
+        "lines": "1-20"
+      }
+    },
+    {
+      "id": "gw_checks",
+      "type": "exclusiveGateway",
+      "name": "Checks green?",
+      "documentation": "Only green work is committed.",
+      "evidence": {
+        "file": "AGENTS.md",
+        "lines": "103-105"
+      }
+    },
+    {
+      "id": "fix",
+      "type": "serviceTask",
+      "name": "Fix and rerun affected Checks",
+      "documentation": "Smallest causal correction, then rerun what the fix touches.",
+      "evidence": {
+        "file": "AGENTS.md",
+        "lines": "103-105"
+      }
+    },
+    {
+      "id": "review",
+      "type": "serviceTask",
+      "name": "Independent code-review",
+      "documentation": "Fresh-context review of the non-trivial Change per the code-review Skill.",
+      "evidence": {
+        "file": "skills/code-review/SKILL.md",
+        "lines": "1-10"
+      }
+    },
+    {
+      "id": "gw_review",
+      "type": "exclusiveGateway",
+      "name": "Findings resolved?",
+      "documentation": "Review findings are fixed in scope or reported; no scope-narrowing to obtain a pass.",
+      "evidence": {
+        "file": "skills/code-review/SKILL.md",
+        "lines": "1-10"
+      }
+    },
+    {
+      "id": "open_pr",
+      "type": "serviceTask",
+      "name": "Commit green work, push, open PR",
+      "documentation": "GitHub Flow; backlog records for tasks 6-9, docs and decision ride along; foreign uncommitted edits (AGENTS.md, cockpit) stay out.",
+      "evidence": {
+        "file": "AGENTS.md",
+        "lines": "103-105"
+      }
+    },
+    {
+      "id": "operator_gate",
+      "type": "userTask",
+      "name": "Operator reviews plan diagram and PR",
+      "documentation": "Operator judges this diagram and the Change; first operator-reviewed plan artifact.",
+      "evidence": {
+        "file": "backlog/tasks/task-8 - Planning-emits-evidence-stamped-BPMN-plan-artifacts-shape-1.md",
+        "lines": "35-38"
+      }
+    },
+    {
+      "id": "gw_merge",
+      "type": "exclusiveGateway",
+      "name": "Approved?",
+      "documentation": "The operator merges; changes requested reopen alignment.",
+      "evidence": {
+        "file": "AGENTS.md",
+        "lines": "103-105"
+      }
+    },
+    {
+      "id": "landed",
+      "type": "endEvent",
+      "name": "PR1 merged — plan pipeline live",
+      "documentation": "TASK-8 core landed; conformance report follows post-landing.",
+      "evidence": {
+        "file": "backlog/tasks/task-8 - Planning-emits-evidence-stamped-BPMN-plan-artifacts-shape-1.md",
+        "lines": "35-38"
+      }
+    },
+    {
+      "id": "rework",
+      "type": "endEvent",
+      "name": "Changes requested — replan",
+      "error": true,
+      "documentation": "Material plan change means a regenerated diagram and fresh confirmation.",
+      "evidence": {
+        "file": "skills/grilling/SKILL.md",
+        "lines": "19-23"
+      }
+    }
+  ],
+  "flows": [
+    {
+      "id": "f_start_build",
+      "source": "start",
+      "target": "build_pkg"
+    },
+    {
+      "id": "f_build_skill",
+      "source": "build_pkg",
+      "target": "author_skill"
+    },
+    {
+      "id": "f_skill_validate",
+      "source": "author_skill",
+      "target": "validate_skills"
+    },
+    {
+      "id": "f_validate_dogfood",
+      "source": "validate_skills",
+      "target": "dogfood"
+    },
+    {
+      "id": "f_dogfood_verify",
+      "source": "dogfood",
+      "target": "verify"
+    },
+    {
+      "id": "f_verify_gw",
+      "source": "verify",
+      "target": "gw_checks"
+    },
+    {
+      "id": "f_gw_fix",
+      "source": "gw_checks",
+      "target": "fix",
+      "name": "no"
+    },
+    {
+      "id": "f_fix_verify",
+      "source": "fix",
+      "target": "verify"
+    },
+    {
+      "id": "f_gw_review",
+      "source": "gw_checks",
+      "target": "review",
+      "name": "yes"
+    },
+    {
+      "id": "f_review_gw",
+      "source": "review",
+      "target": "gw_review"
+    },
+    {
+      "id": "f_gwr_fix",
+      "source": "gw_review",
+      "target": "fix",
+      "name": "no"
+    },
+    {
+      "id": "f_gwr_pr",
+      "source": "gw_review",
+      "target": "open_pr",
+      "name": "yes"
+    },
+    {
+      "id": "f_pr_gate",
+      "source": "open_pr",
+      "target": "operator_gate"
+    },
+    {
+      "id": "f_gate_gw",
+      "source": "operator_gate",
+      "target": "gw_merge"
+    },
+    {
+      "id": "f_gwm_landed",
+      "source": "gw_merge",
+      "target": "landed",
+      "name": "merge"
+    },
+    {
+      "id": "f_gwm_rework",
+      "source": "gw_merge",
+      "target": "rework",
+      "name": "changes requested"
+    }
+  ]
+}

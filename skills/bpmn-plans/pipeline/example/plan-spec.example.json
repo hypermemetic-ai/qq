@@ -1,0 +1,141 @@
+{
+  "id": "qq_release_plan",
+  "name": "Prepare and approve a qq release",
+  "elements": [
+    {
+      "id": "release_requested",
+      "type": "startEvent",
+      "name": "Release requested",
+      "documentation": "A release work item has an agreed scope and acceptance criteria.",
+      "evidence": {
+        "file": "backlog/tasks/task-42 - prepare-qq-release.md",
+        "lines": "8-19"
+      }
+    },
+    {
+      "id": "inspect_change",
+      "type": "serviceTask",
+      "name": "Inspect the exact change",
+      "documentation": "Resolve the changed surface and the checks that cover it.",
+      "evidence": {
+        "file": "AGENTS.md",
+        "lines": "35-49"
+      }
+    },
+    {
+      "id": "prepare_release_notes",
+      "type": "manualTask",
+      "name": "Prepare release notes",
+      "documentation": "Summarize observable behavior and operator-relevant caveats.",
+      "evidence": {
+        "file": "backlog/docs/solutions/doc-17 - release-process.md",
+        "lines": "41-56"
+      }
+    },
+    {
+      "id": "verify_release",
+      "type": "serviceTask",
+      "name": "Run release checks",
+      "documentation": "Run the repository checks against the release candidate.",
+      "evidence": {
+        "file": "skills/code-review/SKILL.md",
+        "lines": "47-58"
+      }
+    },
+    {
+      "id": "owner_approval",
+      "type": "userTask",
+      "name": "Operator reviews release",
+      "documentation": "The operator decides whether the verified release is acceptable.",
+      "evidence": {
+        "file": "skills/uat-signoff/SKILL.md",
+        "lines": "11-25"
+      }
+    },
+    {
+      "id": "approval_decision",
+      "type": "exclusiveGateway",
+      "name": "Release approved?",
+      "documentation": "The approval decision selects publish or return-for-revision.",
+      "evidence": {
+        "file": "CONCEPTS.md",
+        "lines": "73-81"
+      }
+    },
+    {
+      "id": "publish_release",
+      "type": "serviceTask",
+      "name": "Publish release artifacts",
+      "documentation": "Publish the approved artifacts and record the released version.",
+      "evidence": {
+        "file": "backlog/docs/solutions/doc-17 - release-process.md",
+        "lines": "71-84"
+      }
+    },
+    {
+      "id": "release_published",
+      "type": "endEvent",
+      "name": "Release published",
+      "documentation": "The approved release and its evidence are available.",
+      "evidence": {
+        "file": "backlog/tasks/task-42 - prepare-qq-release.md",
+        "lines": "52-60"
+      }
+    },
+    {
+      "id": "revision_requested",
+      "type": "endEvent",
+      "name": "Revision requested",
+      "documentation": "The candidate returns to planning with the operator's note.",
+      "error": true,
+      "evidence": {
+        "file": "skills/uat-signoff/SKILL.md",
+        "lines": "27-34"
+      }
+    }
+  ],
+  "flows": [
+    {
+      "id": "flow_request_inspect",
+      "source": "release_requested",
+      "target": "inspect_change"
+    },
+    {
+      "id": "flow_inspect_notes",
+      "source": "inspect_change",
+      "target": "prepare_release_notes"
+    },
+    {
+      "id": "flow_notes_verify",
+      "source": "prepare_release_notes",
+      "target": "verify_release"
+    },
+    {
+      "id": "flow_verify_approval",
+      "source": "verify_release",
+      "target": "owner_approval"
+    },
+    {
+      "id": "flow_approval_decision",
+      "source": "owner_approval",
+      "target": "approval_decision"
+    },
+    {
+      "id": "flow_approved",
+      "source": "approval_decision",
+      "target": "publish_release",
+      "name": "approved"
+    },
+    {
+      "id": "flow_revision",
+      "source": "approval_decision",
+      "target": "revision_requested",
+      "name": "changes requested"
+    },
+    {
+      "id": "flow_publish_done",
+      "source": "publish_release",
+      "target": "release_published"
+    }
+  ]
+}

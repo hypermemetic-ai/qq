@@ -1,0 +1,10 @@
+{
+  "extends": "bpmnlint:recommended",
+  "rules": {
+    "no-bpmndi": "off",
+    "qq/no-collaboration": "error",
+    "qq/no-lanes": "error",
+    "qq/no-subprocess": "error",
+    "qq/single-process": "error"
+  }
+}
