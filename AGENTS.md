@@ -5,105 +5,45 @@ principles, skills, and project knowledge.
 
 ## Invariants
 
-These hold for every Actor, every work item, and every runtime. They favor
-caution over speed; scale their application to the work without weakening
-them.
+These rules apply to every work item.
 
-**Act within what was granted.** Scope, authority, and side effects come from
-the operator, not from momentum. When the work wants more than was approved,
-stop and re-align.
+**Stay within the agreement.** The operator owns intent, scope, and
+consequential decisions. Act within what was agreed; stop and realign when the
+work requires a new commitment or side effect.
 
-**Don't assume. Don't hide confusion. Surface tradeoffs.** State your
-assumptions. When several interpretations exist, present them instead of
-silently choosing one. When a simpler approach exists, say so — push back when
-warranted. When something stays unclear, stop and name it.
+**Make uncertainty visible.** State material assumptions, ambiguities, and
+tradeoffs before they shape the work. When alternatives matter, recommend one;
+when the choice belongs to the operator, ask.
 
-**Do the minimum that solves the agreed problem. Nothing speculative.** No
-features beyond the request, no abstractions for single-use code, no
-flexibility nobody asked for, no handling for cases that cannot occur. If 200
-lines could be 50, rewrite. If a senior engineer would call the result
-overcomplicated, simplify. Context follows the same rule: load what the task
-needs, not what might someday help.
+**Solve the agreed problem—no more, no less.** Choose the simplest change that
+achieves the agreed outcome. Do not add speculative capability, unrelated
+refactors, or out-of-scope cleanup.
 
-**Touch only what you must. Clean up only your own mess.** Leave adjacent
-code, comments, and formatting alone, and match the existing style even where
-you would choose another. Remove what your change orphaned; mention
-pre-existing dead code instead of deleting it. Every changed line traces to
-the request.
+**Use evidence to decide and report.** Define observable success before acting.
+Inspect the evidence behind material conclusions, and claim completion only
+when fresh Checks demonstrate the intended outcome.
 
-**Re-align before committing to architecture.** Durable state or a new source
-of truth, lifecycle or background behavior, a coordination or recovery
-protocol, a trust boundary, a compatibility obligation, operational burden, a
-responsibility moved between Actors — none of these enters the work
-unapproved. Unexpected growth means alignment may have drifted; treat it as a
-signal, not a violation.
+## Context
 
-**Define success criteria. Loop until verified.** Turn intent into observable
-outcomes: a failing reproduction the fix makes pass, tests that reject the
-invalid inputs, proof the behavior survived the refactor. For multi-step work,
-say the plan first, each step paired with its check. Claim completion only on
-fresh Checks that observed the changed behavior — read their full output and
-make sure they answered the question you meant to ask.
+Read `CONCEPTS.md` before working and use its vocabulary.
 
-**Don't rediscover what you were handed. Don't borrow conclusions.** When
-work arrives with its orientation resolved — intent, decisions, locations,
-results — work from it. What you conclude is different: inspect the evidence
-it rests on yourself. Another Actor's conclusion can point at evidence; it can
-never be your evidence. When a supplied fact is missing, stale, or
-contradicted by source, resolve that one fact with its owner instead of
-restarting discovery.
+Start with the assignment and context already provided. Resolve only what is
+missing, using the surfaces present in the Repository:
 
-**Keep the methodology portable.** These rules mean the same thing in every
-agent runtime. Expose Skills, knowledge, and tools through each runtime's
-native discovery, and keep anything runtime-specific disposable.
+- Tasks record durable intent and work status.
+- Backlog documents and decisions preserve evidence, lessons, and settled choices.
+- `openwiki/` describes the landed system.
+- codebase-memory is the first stop for architecture, dependencies, call paths,
+  or impact.
 
-## Starting work
+Use source files and fresh Checks to verify material conclusions. When a
+derived surface conflicts with them, trust source and Checks and report the
+conflict.
 
-Knowledge helps only when it arrives before planning. Each surface owns one
-kind of question:
+## Delivery
 
-| Surface | Owns |
-|---|---|
-| `CONCEPTS.md` | the shared vocabulary |
-| Backlog Tasks | operator intent, acceptance criteria, and work status |
-| Backlog documents and decisions | authored evidence, plans, lessons, and settled decisions |
-| `openwiki/` | the current landed system |
-| codebase-memory | structural code questions: architecture, dependencies, call paths, impact |
-
-Derived surfaces answer quickly; source files and fresh Checks decide. When
-they disagree, trust source and report the inconsistency to the owning tool or
-Actor.
-
-For a work item that arrives without resolved orientation:
-
-1. Read `CONCEPTS.md` and use its vocabulary.
-2. Where `backlog/config.yml` exists, run `backlog instructions overview`,
-   then `backlog search "<request>" --plain`, and read the matches that bear
-   on the request. Backlog records change only through the `backlog` CLI, and
-   never during alignment.
-3. Read the OpenWiki pages and the Backlog `solutions` and `research`
-   documents the request touches. Without an `openwiki/`, read the authored
-   documentation and source instead.
-4. Ask codebase-memory the relational questions. Confirm the Repository is
-   indexed (`list_projects`, `index_status`) and reindex after material
-   uncommitted or branch changes; `detect_changes` analyzes a Change's
-   impact, it does not test freshness. Verify what matters in source.
-5. Invoke `grilling`; its Skill owns the narrow exceptions.
-6. Invoke every other Skill whose trigger matches the work.
-
-Agents coordinate directly through herdr whenever it helps; the
-`agent-messaging` Skill owns the commands.
-
-## Tasks and Changes
-
-Backlog.md registers durable intent. Keep the owning Task aligned with the
-operator's decisions, and mark it Done only when its acceptance criteria are
-verified and its Change has landed.
-
-A Change lands through GitHub Flow: branch, implement and verify coherent
-units of work, pass an independent `code-review` when the Change is
-non-trivial, commit only green work and push each green commit, open the pull
-request, and pass the Repository's final GitHub Checks. The operator merges.
+Changes land through GitHub Flow after their Checks pass and the operator
+merges.
 
 <!-- codebase-memory-mcp:start -->
 # Codebase Knowledge Graph (codebase-memory-mcp)
