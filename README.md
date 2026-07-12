@@ -86,7 +86,7 @@ Temporary debt (2026-07-10): ChatGPT OAuth merged in OpenWiki PR #151 after the
 release contains PR #151; installing 0.1.0 from npm before then removes OAuth
 support.
 
-Its credentials stay under `~/.openwiki/` and must never be committed.
+Its credentials stay under `~/.openwiki/`, uncommitted.
 
 OpenWiki is a local single-writer derived surface owned by a separate maintainer
 Actor, not by source-change agents. An advance of `main` is the maintainer's
