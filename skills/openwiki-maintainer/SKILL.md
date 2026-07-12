@@ -16,8 +16,10 @@ only and deliver generated documentation as a separate Change.
    through current `origin/main`.
 3. Ignore advances that change only `openwiki/`. If no described behavior could
    have changed, stop without creating a Change.
-4. If another OpenWiki update Change is active, wait. Later merges remain in the
-   landed range for the next run; never create a competing writer.
+4. An update Change that is open but unmerged documents a superseded tree.
+   Discard it and regenerate from current `origin/main`; generated pages carry
+   no value worth waiting for. Never create a competing writer — replace the
+   stale one.
 
 Do not require the source-change agent to update, enqueue, or assess OpenWiki.
 
@@ -25,9 +27,9 @@ Do not require the source-change agent to update, enqueue, or assess OpenWiki.
 
 1. Use the one local worktree whose branch is `openwiki/update`.
 2. Require a clean worktree.
-3. Fast-forward the branch until `HEAD` equals fetched `origin/main`. If it has
-   unmerged commits, an update Change is already active; wait rather than
-   rewriting it.
+3. Reset the branch until `HEAD` equals fetched `origin/main`. Unmerged
+   commits on it belong to a superseded update Change; drop them — every page
+   regenerates from landed state.
 4. Keep provider credentials outside the Repository under `~/.openwiki/`.
 
 ## Generate and verify
@@ -47,7 +49,10 @@ Do not require the source-change agent to update, enqueue, or assess OpenWiki.
 ## Deliver and continue observing
 
 Commit and push only green generated work, open a documentation-only pull
-request, pass final Checks, and leave merge authority to the operator. After it
-lands, fast-forward the dedicated branch on the next observed advance of
-`main`. If `main` advanced while this Change was active, process that accumulated
-range in the next run.
+request, pass final Checks, and leave merge authority to the operator. A
+regenerated update pushes over the same branch — force-push with lease; the
+single writer owns its history — and refreshes the standing pull request in
+place. If `main` advances while the pull request is open, supersede
+it: start over from the new state rather than queuing behind your own Change.
+After it lands, fast-forward the dedicated branch on the next observed advance
+of `main`.
