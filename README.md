@@ -40,9 +40,9 @@ wiring needed to expose it.
 
 ## Delivery
 
-GitHub Flow is the delivery path: branch, verified implementation, independent
-`code-review` for every non-trivial Change, green commits, pull request, final
-GitHub Checks, and operator merge.
+GitHub Flow is the delivery path. The `deliver-change` Skill owns the agent
+procedure for carrying an authorized Change to a green pull request; the
+operator merges.
 
 ## Install qq
 
@@ -110,5 +110,6 @@ codebase-memory-mcp config set auto_watch true
 ```
 
 After restarting the agent runtime, index each long-lived Repository root once.
-Freshness and usage rules ride with the agents in `AGENTS.md`;
-`openwiki/operations.md` describes the running stack.
+codebase-memory's stock agent adapter owns usage guidance, while its configured
+indexer and watcher own freshness. `openwiki/operations.md` describes the
+running stack.
