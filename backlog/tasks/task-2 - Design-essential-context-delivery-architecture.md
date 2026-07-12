@@ -1,11 +1,11 @@
 ---
 id: TASK-2
 title: Design essential-context delivery architecture
-status: In Progress
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-07-12 03:02'
-updated_date: '2026-07-12 03:10'
+updated_date: '2026-07-12 04:58'
 labels:
   - research
   - architecture
