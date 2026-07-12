@@ -84,8 +84,10 @@ For a work item that arrives without resolved orientation:
 3. Read the OpenWiki pages and the Backlog `solutions` and `research`
    documents the request touches. Without an `openwiki/`, read the authored
    documentation and source instead.
-4. Ask codebase-memory the relational questions and verify what matters in
-   source.
+4. Ask codebase-memory the relational questions. Confirm the Repository is
+   indexed (`list_projects`, `index_status`) and reindex after material
+   uncommitted or branch changes; `detect_changes` analyzes a Change's
+   impact, it does not test freshness. Verify what matters in source.
 5. Invoke `grilling`; its Skill owns the narrow exceptions.
 6. Invoke every other Skill whose trigger matches the work.
 
