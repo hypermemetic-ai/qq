@@ -26,52 +26,52 @@ command = "bash -ic 'qqbr; exec bash -i'"
 [[keys.command]]
 key = "prefix+0"
 type = "shell"
-command = "/home/qqp/projects/qq/bin/qq-herdr-pull next"
+command = "qq-herdr-pull next"
 
 [[keys.command]]
 key = "prefix+f1"
 type = "shell"
-command = "/home/qqp/projects/qq/bin/qq-herdr-pull 1"
+command = "qq-herdr-pull 1"
 
 [[keys.command]]
 key = "prefix+f2"
 type = "shell"
-command = "/home/qqp/projects/qq/bin/qq-herdr-pull 2"
+command = "qq-herdr-pull 2"
 
 [[keys.command]]
 key = "prefix+f3"
 type = "shell"
-command = "/home/qqp/projects/qq/bin/qq-herdr-pull 3"
+command = "qq-herdr-pull 3"
 
 [[keys.command]]
 key = "prefix+f4"
 type = "shell"
-command = "/home/qqp/projects/qq/bin/qq-herdr-pull 4"
+command = "qq-herdr-pull 4"
 
 [[keys.command]]
 key = "prefix+f5"
 type = "shell"
-command = "/home/qqp/projects/qq/bin/qq-herdr-pull 5"
+command = "qq-herdr-pull 5"
 
 [[keys.command]]
 key = "prefix+f6"
 type = "shell"
-command = "/home/qqp/projects/qq/bin/qq-herdr-pull 6"
+command = "qq-herdr-pull 6"
 
 [[keys.command]]
 key = "prefix+f7"
 type = "shell"
-command = "/home/qqp/projects/qq/bin/qq-herdr-pull 7"
+command = "qq-herdr-pull 7"
 
 [[keys.command]]
 key = "prefix+f8"
 type = "shell"
-command = "/home/qqp/projects/qq/bin/qq-herdr-pull 8"
+command = "qq-herdr-pull 8"
 
 [[keys.command]]
 key = "prefix+f9"
 type = "shell"
-command = "/home/qqp/projects/qq/bin/qq-herdr-pull 9"
+command = "qq-herdr-pull 9"
 
 [ui]
 agent_panel_sort = "priority"
