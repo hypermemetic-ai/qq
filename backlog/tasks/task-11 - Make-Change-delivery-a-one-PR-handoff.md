@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-07-12 18:30'
-updated_date: '2026-07-12 18:56'
+updated_date: '2026-07-12 20:18'
 labels:
   - methodology
   - delivery
@@ -40,7 +40,7 @@ Correct the end-of-Change contract exposed by PRs #32/#33 and #34/#35. Task stat
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-1. Preserve the settled branch-dimensional Task model and record the GitHub-mechanics evidence. 2. Rewrite deliver-change around Task completion before merge handoff, both feedback branches, explicit browser dispatch, and read-only post-merge verification. 3. Validate the Skill, forward-use it, and obtain independent review. 4. Deliver the source Change in PR #37 and run browser UAT; record the bootstrap divergence when the operator merged during that self-hosting check. 5. Use the one operator-authorized reconciliation PR to preserve the waived criterion, successful UAT, landing evidence, final summary, and Done status without changing the general flow.
+1. Preserve the observed regressions: unsupported ad hoc gh JSON field and browser visibility that vanished when the tool process exited. 2. Amend deliver-change with a minimal tested status query and a durable graphical launch whose persistence is verified before merge monitoring. 3. Validate through skill-creator, focused assertions, fresh-context review, and operator-confirmed browser UAT. 4. Finalize TASK-11 inside the corrective pull request before handoff.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -59,10 +59,20 @@ Independent fresh-context code-review inspected the exact committed-plus-working
 Bootstrap divergence, explicitly waived by the operator on 2026-07-12: original acceptance criterion #1 was 'The original Change carries its Task's checked acceptance criteria, final summary, and Done status before final merge handoff.' Browser visibility was itself this Change's UAT, so PR #37 had to be exposed before Task finalization; the operator merged while that UAT page was open. This self-hosting exception does not alter the ordinary flow, where implementation Checks and UAT precede final Task handoff.
 
 Browser UAT passed after a persistent diagnostic invocation traced gh → xdg-open → gio → Zen and the operator confirmed the PR page was visible. PR #37 landed reviewed head 53a9e338ab8472ab0b7567e6516f0a4c1246c9df as merge commit aad436b093cb02463f7a97a1abbe6f8243b02e75. The first immediate gh exit had proven dispatch only and produced no observable Zen process or window, exactly the distinction the revised Skill now requires agents to report.
+
+Regression reopened by the operator on 2026-07-12: the delivery actor guessed unsupported gh field baseRefOid, then gh pr view --web and a window-observation loop produced only transient Zen visibility because the browser remained a descendant of the short-lived tool process. A detached setsid launch remained visible across a later tool call, establishing the causal boundary and the required observable outcome.
+
+Corrective local Checks: skill-creator quick_validate reports 'Skill is valid'; git diff --check passes; gh 2.45 accepts exactly state, mergedAt, mergeable, mergeStateStatus, statusCheckRollup, and url; command discovery finds setsid and xdg-open. A cold detached Zen launch remained present across a later tool call, and the documented setsid -f xdg-open route preserved the PR-specific window across another later observation; the surviving browser owns a distinct session rather than the short-lived tool session.
+
+Fresh-context forward use received only the revised Skill and a generic green-PR scenario. It derived the tested gh query, durable setsid opener, later PR-specific observation, retry/stop behavior, and the rule that monitoring begins only after persistent visibility. Its one actionable clarity finding was that url binding was implicit; the Skill now explicitly binds url from the returned .url value.
+
+Code review: the first delegated reviewer failed to return a report and was replaced without changing the brief or delta; silence was not treated as a pass. The fresh replacement reviewer returned no material findings. Owning verification confirmed the procedure uses only tested fields, makes persistence the browser success condition, preserves runtime fallback, stops before monitoring on failure, and leaves operator merge authority unchanged.
+
+Hands-on browser UAT accepted by the operator: after the detached launch and later persistence observations, the operator explicitly reported 'I see merged #39.' This verifies the actual page remained visible rather than merely dispatching or flashing.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Changed deliver-change so a Task is finalized inside its original pull request before operator handoff, while GitHub merge records final acceptance. Existing-criteria failures reopen the same Task; changed intent requires approved follow-up work. The Skill now dispatches the actual PR page, distinguishes dispatch from visible confirmation, never merges, and verifies landing without post-merge Task mutation. Structural validation, focused assertions, a clean forward-use scenario, independent review, and operator-confirmed Zen browser UAT passed. The source Change landed through PR #37 as merge commit aad436b093cb02463f7a97a1abbe6f8243b02e75; this final record documents the explicitly waived self-hosting criterion as a one-time bootstrap exception.
+Corrected deliver-change after a reproduced silent browser handoff and unsupported ad hoc gh query. The Skill now uses a minimal tested PR field set, binds the returned URL, launches it through a durable graphical process when tool descendants are reaped, requires persistent PR-specific visibility before merge monitoring, and retries/stops with the URL on failure. skill-creator validation, focused gh and process checks, a clean forward-use exercise, fresh-context review with no material findings, and operator-confirmed browser UAT all passed.
 <!-- SECTION:FINAL_SUMMARY:END -->

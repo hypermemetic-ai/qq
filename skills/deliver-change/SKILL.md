@@ -36,15 +36,24 @@ delegated agents bounded assignments; do not hand them this lifecycle.
    declined because the operator's intent changed or grew, leave the Task Done
    and do not absorb that new commitment: create follow-up work only with
    approval.
-7. When the pull request is green, reviewed, and finalized, resolve its URL and
-   run `gh pr view <number-or-URL> --web` from the operator's graphical
-   session. A successful command proves browser dispatch, not visibility:
-   report the URL and use `uat-signoff` when the page itself must be observed.
-   Never treat printing the URL as opening the page. If dispatch fails, report
-   the failure and URL. Never merge the pull request. Watch its state for up to
-   three minutes; if it remains open, report the URL and current Checks, then
-   stop.
-8. If the operator merges during that window or later resumes the work, fetch
+7. When the pull request is green, reviewed, and finalized, inspect it with
+   `gh pr view <number-or-URL> --json state,mergedAt,mergeable,mergeStateStatus,statusCheckRollup,url`.
+   Do not guess JSON field names; correct any rejected query before handoff.
+   Confirm it is still open and unmerged with applicable Checks green, and set
+   `url` to the returned `.url` value.
+8. Open the resolved URL in the operator's graphical browser through a process
+   that survives the tool call. In a Linux tool shell that reaps ordinary
+   descendants, first confirm the graphical environment and available commands,
+   then use `setsid -f xdg-open "$url" >/dev/null 2>&1`; otherwise use the
+   runtime's durable native opener. Confirm that the PR-specific page remains
+   visible after the launching call has returned, using later window observation
+   and `uat-signoff` when operator confirmation is required. Dispatch, a printed
+   URL, or momentary appearance is not visibility. If persistent visibility is
+   not confirmed, retry once through a durable opener, report the URL, and stop.
+9. Never merge the pull request. After browser visibility is established, watch
+   its state for up to three minutes. If it remains open, report the URL and
+   current Checks, then stop.
+10. If the operator merges during that window or later resumes the work, fetch
    and verify the pull request's landed state, then report its merge evidence.
    Do not alter the completed Task or open a Task-finalization Change. If the
    operator closes or rejects it, report that disposition and apply step 6.
