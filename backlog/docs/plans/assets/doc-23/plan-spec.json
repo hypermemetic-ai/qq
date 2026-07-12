@@ -1,0 +1,264 @@
+{
+  "id": "recover_git_state",
+  "name": "Recover approved outputs and reconcile Git state",
+  "elements": [
+    {
+      "id": "scope_aligned",
+      "type": "startEvent",
+      "name": "Recovery scope aligned",
+      "documentation": "The operator approved delivery of the three local outputs and removal of the enumerated stale Git state.",
+      "evidence": {
+        "file": "backlog/tasks/task-13 - Recover-approved-local-outputs-and-reconcile-Git-state.md",
+        "lines": "22-34"
+      }
+    },
+    {
+      "id": "revalidate_inventory",
+      "type": "serviceTask",
+      "name": "Revalidate Git inventory",
+      "documentation": "Confirm the approved recovery files remain intact and every cleanup target still satisfies its safety precondition.",
+      "evidence": {
+        "file": "backlog/tasks/task-13 - Recover-approved-local-outputs-and-reconcile-Git-state.md",
+        "lines": "30-34"
+      }
+    },
+    {
+      "id": "prepare_change",
+      "type": "serviceTask",
+      "name": "Create isolated recovery Change",
+      "documentation": "Fetch origin and create a Herdr-managed worktree from explicit origin/main, then transfer the approved outputs and planning records.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "11-25"
+      }
+    },
+    {
+      "id": "verification_entry",
+      "type": "exclusiveGateway",
+      "name": "Enter verification",
+      "documentation": "Merge the initial implementation path and any bounded review-fix loop before rerunning verification.",
+      "evidence": {
+        "file": "skills/code-review/SKILL.md",
+        "lines": "78-84"
+      }
+    },
+    {
+      "id": "verify_recovery",
+      "type": "serviceTask",
+      "name": "Run recovery checks",
+      "documentation": "Verify content equivalence, document structure, TOML parsing, Task/plan linkage, diff hygiene, and recovery independence from the primary checkout.",
+      "evidence": {
+        "file": "backlog/tasks/task-13 - Recover-approved-local-outputs-and-reconcile-Git-state.md",
+        "lines": "30-32"
+      }
+    },
+    {
+      "id": "review_change",
+      "type": "serviceTask",
+      "name": "Run fresh-context review",
+      "documentation": "Delegate one read-only review of the exact uncommitted Change after local checks.",
+      "evidence": {
+        "file": "skills/code-review/SKILL.md",
+        "lines": "44-68"
+      }
+    },
+    {
+      "id": "review_decision",
+      "type": "exclusiveGateway",
+      "name": "Change green?",
+      "documentation": "Only a locally verified Change with no confirmed material findings may be committed.",
+      "evidence": {
+        "file": "skills/code-review/SKILL.md",
+        "lines": "70-88"
+      }
+    },
+    {
+      "id": "fix_in_scope",
+      "type": "serviceTask",
+      "name": "Fix confirmed in-scope findings",
+      "documentation": "Apply only the smallest causal corrections within the approved boundary, then rerun affected checks and review the delta.",
+      "evidence": {
+        "file": "skills/code-review/SKILL.md",
+        "lines": "78-84"
+      }
+    },
+    {
+      "id": "publish_change",
+      "type": "serviceTask",
+      "name": "Commit, push, and open PR",
+      "documentation": "Commit the green recovery unit, push it, and open one pull request carrying intent and check evidence.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "26-31"
+      }
+    },
+    {
+      "id": "prove_preservation",
+      "type": "serviceTask",
+      "name": "Prove remote preservation",
+      "documentation": "Confirm the pushed branch and pull request contain every approved output before deleting any local recovery source.",
+      "evidence": {
+        "file": "backlog/tasks/task-13 - Recover-approved-local-outputs-and-reconcile-Git-state.md",
+        "lines": "30-33"
+      }
+    },
+    {
+      "id": "preservation_decision",
+      "type": "exclusiveGateway",
+      "name": "Recovery safely represented?",
+      "documentation": "Cleanup may proceed only when the approved content is independently recoverable from committed and pushed Git state.",
+      "evidence": {
+        "file": "backlog/tasks/task-13 - Recover-approved-local-outputs-and-reconcile-Git-state.md",
+        "lines": "31-33"
+      }
+    },
+    {
+      "id": "preservation_failed",
+      "type": "endEvent",
+      "name": "Cleanup blocked",
+      "documentation": "Stop without deleting local state when remote preservation cannot be proven.",
+      "error": true,
+      "evidence": {
+        "file": "backlog/tasks/task-13 - Recover-approved-local-outputs-and-reconcile-Git-state.md",
+        "lines": "31-34"
+      }
+    },
+    {
+      "id": "clean_local_git",
+      "type": "serviceTask",
+      "name": "Remove obsolete local Git state",
+      "documentation": "Clean and synchronize primary main; remove six merged worktrees and branches, three superseded stashes, and all historical WIP refs; do not rescue 8ed35f2.",
+      "evidence": {
+        "file": "backlog/tasks/task-13 - Recover-approved-local-outputs-and-reconcile-Git-state.md",
+        "lines": "33-34"
+      }
+    },
+    {
+      "id": "verify_git_invariants",
+      "type": "serviceTask",
+      "name": "Verify final Git invariants",
+      "documentation": "Freshly check worktree count and cleanliness, local branch containment, stash/WIP absence, main synchronization, remote recovery branch, and orphan non-preservation.",
+      "evidence": {
+        "file": "backlog/tasks/task-13 - Recover-approved-local-outputs-and-reconcile-Git-state.md",
+        "lines": "31-34"
+      }
+    },
+    {
+      "id": "finalize_change",
+      "type": "serviceTask",
+      "name": "Finalize Task and PR checks",
+      "documentation": "Record acceptance evidence, mark the Task Done inside the same Change, push finalization, and pass applicable GitHub checks.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "32-50"
+      }
+    },
+    {
+      "id": "disposition_entry",
+      "type": "exclusiveGateway",
+      "name": "Enter operator disposition",
+      "documentation": "Merge the initial handoff and any later resume before checking the pull request's current disposition.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "46-66"
+      }
+    },
+    {
+      "id": "operator_disposition",
+      "type": "userTask",
+      "name": "Operator reviews PR",
+      "documentation": "Present the durable pull-request page; the operator alone decides whether and when to merge.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "51-64"
+      }
+    },
+    {
+      "id": "disposition_decision",
+      "type": "exclusiveGateway",
+      "name": "PR disposition?",
+      "documentation": "A merged or rejected pull request determines the terminal path; a still-open pull request pauses for later operator disposition.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "60-66"
+      }
+    },
+    {
+      "id": "await_operator_resume",
+      "type": "userTask",
+      "name": "Await later operator disposition",
+      "documentation": "The green pull request remains open until the operator merges, rejects, or resumes the delivery check.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "60-66"
+      }
+    },
+    {
+      "id": "change_rejected",
+      "type": "endEvent",
+      "name": "Change rejected",
+      "documentation": "Report the rejection and realign without silently replacing the Task or expanding intent.",
+      "error": true,
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "38-45"
+      }
+    },
+    {
+      "id": "sync_primary_after_merge",
+      "type": "serviceTask",
+      "name": "Synchronize primary main after merge",
+      "documentation": "Fetch the landed pull request and fast-forward the clean primary checkout so the recovered outputs, including the live Herdr setting, are present on main.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "63-70"
+      }
+    },
+    {
+      "id": "record_conformance",
+      "type": "serviceTask",
+      "name": "Verify landing and record conformance",
+      "documentation": "After merge, verify landed state, account for every plan node, and append the conformance report to the plan document.",
+      "evidence": {
+        "file": "skills/bpmn-plans/SKILL.md",
+        "lines": "58-69"
+      }
+    },
+    {
+      "id": "git_reconciled",
+      "type": "endEvent",
+      "name": "Outputs live and Git reconciled",
+      "documentation": "The approved outputs are landed, local Git state is clean, and plan conformance is recorded.",
+      "evidence": {
+        "file": "backlog/tasks/task-13 - Recover-approved-local-outputs-and-reconcile-Git-state.md",
+        "lines": "30-34"
+      }
+    }
+  ],
+  "flows": [
+    { "id": "flow_start_inventory", "source": "scope_aligned", "target": "revalidate_inventory" },
+    { "id": "flow_inventory_prepare", "source": "revalidate_inventory", "target": "prepare_change" },
+    { "id": "flow_prepare_entry", "source": "prepare_change", "target": "verification_entry" },
+    { "id": "flow_entry_verify", "source": "verification_entry", "target": "verify_recovery" },
+    { "id": "flow_verify_review", "source": "verify_recovery", "target": "review_change" },
+    { "id": "flow_review_decide", "source": "review_change", "target": "review_decision" },
+    { "id": "flow_review_pass", "source": "review_decision", "target": "publish_change", "name": "green" },
+    { "id": "flow_review_fix", "source": "review_decision", "target": "fix_in_scope", "name": "finding" },
+    { "id": "flow_fix_entry", "source": "fix_in_scope", "target": "verification_entry" },
+    { "id": "flow_publish_prove", "source": "publish_change", "target": "prove_preservation" },
+    { "id": "flow_prove_decide", "source": "prove_preservation", "target": "preservation_decision" },
+    { "id": "flow_preserved", "source": "preservation_decision", "target": "clean_local_git", "name": "yes" },
+    { "id": "flow_not_preserved", "source": "preservation_decision", "target": "preservation_failed", "name": "no" },
+    { "id": "flow_clean_verify", "source": "clean_local_git", "target": "verify_git_invariants" },
+    { "id": "flow_git_finalize", "source": "verify_git_invariants", "target": "finalize_change" },
+    { "id": "flow_finalize_entry", "source": "finalize_change", "target": "disposition_entry" },
+    { "id": "flow_entry_operator", "source": "disposition_entry", "target": "operator_disposition" },
+    { "id": "flow_operator_decide", "source": "operator_disposition", "target": "disposition_decision" },
+    { "id": "flow_still_open", "source": "disposition_decision", "target": "await_operator_resume", "name": "still open" },
+    { "id": "flow_resume_disposition", "source": "await_operator_resume", "target": "disposition_entry" },
+    { "id": "flow_rejected", "source": "disposition_decision", "target": "change_rejected", "name": "rejected" },
+    { "id": "flow_merged", "source": "disposition_decision", "target": "sync_primary_after_merge", "name": "merged" },
+    { "id": "flow_sync_conformance", "source": "sync_primary_after_merge", "target": "record_conformance" },
+    { "id": "flow_conformance_done", "source": "record_conformance", "target": "git_reconciled" }
+  ]
+}
