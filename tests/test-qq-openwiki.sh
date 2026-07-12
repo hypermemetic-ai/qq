@@ -54,6 +54,7 @@ git -C "$repo" init -q -b main
 git -C "$repo" config user.email test@example.com
 git -C "$repo" config user.name Test
 printf '# Instructions\n\nKeep this text.\n' >"$repo/AGENTS.md"
+cp "$repo/AGENTS.md" "$tmp/agents-original"
 mkdir -p "$repo/openwiki"
 printf '# Quickstart\n' >"$repo/openwiki/quickstart.md"
 git -C "$repo" add .
@@ -73,17 +74,13 @@ unset OPENWIKI_PROVIDER
 
 test ! -e "$repo/.github/workflows/openwiki-update.yml"
 test ! -d "$repo/.github"
-grep -q 'Keep this text.' "$repo/AGENTS.md"
-grep -q 'OpenWiki is a derived orientation surface.' "$repo/AGENTS.md"
-if grep -q 'scheduled OpenWiki GitHub Actions' "$repo/AGENTS.md"; then
-  echo 'scheduled workflow guidance survived local cleanup' >&2
-  exit 1
-fi
+cmp "$tmp/agents-original" "$repo/AGENTS.md"
+test ! -e "$repo/CLAUDE.md"
+test ! -L "$repo/CLAUDE.md"
 test "$(cat "$tmp/args")" = 'code --update --print'
 test "$(cat "$tmp/provider")" = 'openai-chatgpt'
 
-git -C "$repo" restore AGENTS.md openwiki/quickstart.md
-rm -f "$repo/CLAUDE.md"
+git -C "$repo" restore openwiki/quickstart.md
 test -z "$(git -C "$repo" status --porcelain)"
 
 (
@@ -92,9 +89,33 @@ test -z "$(git -C "$repo" status --porcelain)"
 )
 test "$(cat "$tmp/args")" = 'code --update --print'
 test "$(cat "$tmp/provider")" = 'openai-chatgpt'
+cmp "$tmp/agents-original" "$repo/AGENTS.md"
+test ! -e "$repo/CLAUDE.md"
 
-git -C "$repo" restore AGENTS.md openwiki/quickstart.md
-rm -f "$repo/CLAUDE.md"
+git -C "$repo" restore openwiki/quickstart.md
+test -z "$(git -C "$repo" status --porcelain)"
+
+shared_agents="$tmp/shared-AGENTS.md"
+printf '# Shared instructions\n\nDo not change this target.\n' >"$shared_agents"
+cp "$shared_agents" "$tmp/shared-AGENTS.expected"
+rm "$repo/AGENTS.md"
+ln -s "$shared_agents" "$repo/AGENTS.md"
+printf '# Claude instructions\n\nKeep this file.\n' >"$repo/CLAUDE.md"
+cp "$repo/CLAUDE.md" "$tmp/CLAUDE.expected"
+git -C "$repo" add AGENTS.md CLAUDE.md
+git -C "$repo" commit -qm 'use shared agent instructions'
+git -C "$repo" update-ref refs/remotes/origin/main "$(git -C "$repo" rev-parse HEAD)"
+
+(
+  cd "$repo"
+  "$QQ_OPENWIKI" --update
+)
+test -L "$repo/AGENTS.md"
+test "$(readlink "$repo/AGENTS.md")" = "$shared_agents"
+cmp "$tmp/shared-AGENTS.expected" "$shared_agents"
+cmp "$tmp/CLAUDE.expected" "$repo/CLAUDE.md"
+test ! -e "$repo/.github/workflows/openwiki-update.yml"
+git -C "$repo" restore openwiki/quickstart.md
 test -z "$(git -C "$repo" status --porcelain)"
 
 rm -f "$FAKE_LOG" "$FAKE_PROVIDER_LOG"
@@ -152,8 +173,11 @@ fi
 grep -q 'another OpenWiki writer is active' "$tmp/second.err"
 wait "$first_pid"
 
-git -C "$repo" restore AGENTS.md openwiki/quickstart.md
-rm -f "$repo/CLAUDE.md"
+test -L "$repo/AGENTS.md"
+test "$(readlink "$repo/AGENTS.md")" = "$shared_agents"
+cmp "$tmp/shared-AGENTS.expected" "$shared_agents"
+cmp "$tmp/CLAUDE.expected" "$repo/CLAUDE.md"
+git -C "$repo" restore openwiki/quickstart.md
 unset FAKE_STARTED FAKE_SLEEP
 set +e
 (
@@ -164,10 +188,9 @@ failure_status=$?
 set -e
 test "$failure_status" -eq 42
 test ! -e "$repo/.github/workflows/openwiki-update.yml"
-grep -q 'OpenWiki is a derived orientation surface.' "$repo/AGENTS.md"
-if grep -q 'scheduled OpenWiki GitHub Actions' "$repo/AGENTS.md"; then
-  echo 'failed run retained scheduled workflow guidance' >&2
-  exit 1
-fi
+test -L "$repo/AGENTS.md"
+test "$(readlink "$repo/AGENTS.md")" = "$shared_agents"
+cmp "$tmp/shared-AGENTS.expected" "$shared_agents"
+cmp "$tmp/CLAUDE.expected" "$repo/CLAUDE.md"
 
 printf 'test-qq-openwiki: pass\n'

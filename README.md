@@ -23,8 +23,8 @@ wiring needed to expose it.
 
 ## Repository surfaces
 
-- [`qq-methodology.md`](./qq-methodology.md) is the shared operating guidance.
-- [`AGENTS.md`](./AGENTS.md) contains instructions specific to this repository.
+- [`AGENTS.md`](./AGENTS.md) is the shared operating guidance. Linked
+  Repositories can inherit the same file through a root-level symlink.
 - `skills/` contains stateless capabilities discovered through each agent
   runtime's native skill surface.
 - `backlog/` holds Tasks, authored documents, and decisions managed through the
@@ -35,9 +35,8 @@ wiring needed to expose it.
   historical designs, cited investigations, and reusable lessons.
 - herdr provides named agent sessions and direct agent-to-agent messaging.
 - `cockpit/` contains the operator's terminal configuration.
-- `bin/` installs the live qq surfaces, runs guarded local OpenWiki updates,
-  supports herdr pane movement, and preserves recoverable snapshots of
-  in-flight work.
+- `bin/` installs the live qq surfaces, runs guarded local OpenWiki updates, and
+  supports herdr pane movement.
 
 ## Delivery
 
@@ -53,19 +52,14 @@ From the qq Repository root, run:
 bash bin/install.sh
 ```
 
-The installer live-links the shared methodology and Skills into Codex, links
-the cockpit configuration and retained commands, and registers the WIP recovery
-hook. It prunes links to qq Skills that no longer exist and refuses to replace
-paths it does not manage. Run it again after adding or removing a Skill.
+The installer live-links Skills into Codex and links the cockpit configuration
+and retained commands. It prunes links to qq Skills and commands that no longer
+exist and refuses to replace paths it does not manage. Run it again after adding
+or removing a Skill.
 
-In the next Codex session, run `/hooks`, review the WIP hook, and trust it. Codex
-skips new or changed hooks until they are explicitly trusted; WIP recovery is
-not active until `/hooks` shows it as trusted.
-
-Verify the methodology target with `readlink -f ~/.codex/AGENTS.md`. New Codex
-sessions load it globally and layer each Repository's local `AGENTS.md`
-afterward. Other agent runtimes expose the same source through their native
-instruction discovery.
+The installer does not manage repository instructions. A linked Repository can
+point its root `AGENTS.md` symlink directly to qq's `AGENTS.md`, keeping one
+source of truth without adding global guidance to unrelated Repositories.
 
 ## Knowledge runtime
 
@@ -98,12 +92,13 @@ OpenWiki is a local single-writer derived surface owned by a separate maintainer
 Actor, not by source-change agents. An advance of `main` is the maintainer's
 input. The `openwiki-maintainer` Skill owns observation, generation, review, and
 delivery from its dedicated worktree; `qq-openwiki` supplies deterministic
-branch, freshness, and process-lock guards.
+branch, freshness, process-lock, and root-instruction restoration guards.
 
 Temporary debt (2026-07-10): upstream code mode unconditionally writes a
 scheduled GitHub Actions workflow and scheduled-workflow agent guidance.
-`qq-openwiki` removes that generated plumbing after every local run. Remove this
-compatibility behavior when OpenWiki supports local-only code recurrence.
+`qq-openwiki` removes that generated workflow and restores the pre-run root
+instruction state after every local run. Remove this compatibility behavior
+when OpenWiki supports local-only code recurrence without managing agent files.
 
 codebase-memory 0.9 or later maintains its derived graph outside the Repository.
 Enable initial indexing and background Git change detection:
