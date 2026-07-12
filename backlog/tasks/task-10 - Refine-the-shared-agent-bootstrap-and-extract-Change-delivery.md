@@ -1,11 +1,11 @@
 ---
 id: TASK-10
 title: Refine the shared agent bootstrap and extract Change delivery
-status: In Progress
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-07-12 17:02'
-updated_date: '2026-07-12 17:19'
+updated_date: '2026-07-12 17:30'
 labels:
   - architecture
   - context-engineering
@@ -47,3 +47,9 @@ Implemented the approved safe-cold-start kernel and deliver-change ownership spl
 
 After origin/main advanced through TASK-8, the worktree fast-forwarded to 7f88432fb5669eae445b6970cdb494496d002405 and all focused Checks were rerun successfully. A fresh visible read-only reviewer resolved that base change explicitly, inspected the exact rebased working-tree delta and the OpenWiki/TASK-9 ownership boundaries, verified both adapter hashes and diff whitespace, and returned no material findings.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Reduced AGENTS.md to a safe cold-start kernel with four universal invariants, compact Context routing, and the operator merge boundary; moved conditional delivery into the deliver-change Skill; preserved the stock codebase-memory and OpenWiki adapter blocks and left OpenWiki scheduler behavior unchanged. Validation covered the Skill validator, isolated installation, OpenWiki regression test, shell syntax, exact adapter hashes, diff hygiene, and an independent review with no material findings. The reviewed commit 23448a63e1d5a725ff9fb7220570c68c519601e8 landed through PR #34 as merge commit 8887dac31e1e80b56356975605932d91e17e6264.
+<!-- SECTION:FINAL_SUMMARY:END -->
