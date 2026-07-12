@@ -5,13 +5,19 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-07-12 18:30'
+updated_date: '2026-07-12 18:31'
 labels:
   - methodology
   - delivery
 dependencies: []
+documentation:
+  - doc-20
 modified_files:
   - skills/deliver-change/SKILL.md
   - openwiki/workflows.md
+  - >-
+    backlog/docs/research/doc-20 -
+    GitHub-merge-coupling-for-branch-resident-Task-status.md
 ordinal: 8000
 ---
 
@@ -37,3 +43,9 @@ Correct the end-of-Change contract exposed by PRs #32/#33 and #34/#35. Task stat
 <!-- SECTION:PLAN:BEGIN -->
 1. Preserve the settled branch-dimensional Task model and record the GitHub-mechanics evidence. 2. Rewrite deliver-change around Task completion before merge handoff, explicit browser dispatch, and read-only post-merge verification. 3. Align current workflow documentation. 4. Validate and independently review the exact delta. 5. Open this Change's PR in the operator browser, record UAT, finalize this Task in the same PR, then verify any eventual merge without a follow-up Change.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Research confirmed that native GitHub merge cannot transform a branch-resident Task file. The operator retained the original Task/Change split and declined automation or a status-surface migration; doc-20 records the evidence.
+<!-- SECTION:NOTES:END -->
