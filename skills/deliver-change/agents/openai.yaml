@@ -1,4 +1,4 @@
 interface:
   display_name: "Deliver Change"
-  short_description: "Drive an authorized Change to operator merge"
-  default_prompt: "Use $deliver-change to take this authorized repository modification through a green pull request and operator merge."
+  short_description: "Drive a Change to one-PR operator handoff"
+  default_prompt: "Use $deliver-change to take this authorized repository modification through Task completion, a green pull request, and operator handoff."

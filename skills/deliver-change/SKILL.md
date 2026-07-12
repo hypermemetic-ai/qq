@@ -1,6 +1,6 @@
 ---
 name: deliver-change
-description: Owns GitHub Flow delivery for every authorized Repository modification intended to land, from an aligned assignment through a green pull request and verified operator merge. Use only in the operator-facing accountable agent after alignment; do not use for read-only work, explicitly local experiments, or delegated research, implementation, or review within a Change another agent owns.
+description: Owns one-PR GitHub Flow delivery for every authorized Repository modification intended to land, from an aligned assignment through Task completion, a green pull-request handoff, and verification of the operator's disposition. Use only in the operator-facing accountable agent after alignment; do not use for read-only work, explicitly local experiments, or delegated research, implementation, or review within a Change another agent owns.
 ---
 
 # Deliver a Change
@@ -22,10 +22,29 @@ delegated agents bounded assignments; do not hand them this lifecycle.
 4. Commit only green units, push each green commit, and open a pull request
    that carries the Task intent and Check evidence. Pass the Repository's final
    GitHub Checks.
-5. When the pull request is green and reviewed, open its merge page for the
-   operator and watch its state for up to three minutes. Never merge it. If it
-   remains open, report the URL and current Checks, then stop without marking
-   the Task Done.
-6. If the operator merges during that window or later resumes the work, verify
-   that the Change landed before following Backlog's task-finalization
-   instructions and marking the Task Done.
+5. Before the final merge handoff, follow Backlog's task-finalization
+   instructions inside this Change: verify the acceptance criteria, record the
+   final summary, mark the Task Done, and push that finalization through the
+   same pull request. Rerun Checks affected by the final commit. Done records
+   that the agreed Task work is complete; it does not claim that the operator
+   accepted or landed its Change.
+6. If a Check or operator feedback shows that an existing acceptance criterion
+   is unmet, return the same Task to an active status and correct it in this
+   Change while its pull request remains open. If that Change is already
+   closed or unavailable, realign its branch disposition without replacing
+   the Task; the unmet criterion is not new work. If completed work is
+   declined because the operator's intent changed or grew, leave the Task Done
+   and do not absorb that new commitment: create follow-up work only with
+   approval.
+7. When the pull request is green, reviewed, and finalized, resolve its URL and
+   run `gh pr view <number-or-URL> --web` from the operator's graphical
+   session. A successful command proves browser dispatch, not visibility:
+   report the URL and use `uat-signoff` when the page itself must be observed.
+   Never treat printing the URL as opening the page. If dispatch fails, report
+   the failure and URL. Never merge the pull request. Watch its state for up to
+   three minutes; if it remains open, report the URL and current Checks, then
+   stop.
+8. If the operator merges during that window or later resumes the work, fetch
+   and verify the pull request's landed state, then report its merge evidence.
+   Do not alter the completed Task or open a Task-finalization Change. If the
+   operator closes or rejects it, report that disposition and apply step 6.
