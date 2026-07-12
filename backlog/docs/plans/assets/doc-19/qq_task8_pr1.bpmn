@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:qq="http://qq.local/schema/evidence" id="qq_task8_pr1_definitions" targetNamespace="http://qq.local/schema/bpmn">
+  <bpmn:process id="qq_task8_pr1" name="Land TASK-8 PR1: BPMN plan artifacts" isExecutable="false">
+    <bpmn:startEvent id="start" name="PR1 scoped">
+      <bpmn:documentation>Operator committed shape 1 and directed TASK-6 + TASK-8; PR1 delivers the TASK-8 core on branch feat/task-8-bpmn-plan-artifacts. Evidence: backlog/tasks/task-8 - Planning-emits-evidence-stamped-BPMN-plan-artifacts-shape-1.md:18</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="backlog/tasks/task-8 - Planning-emits-evidence-stamped-BPMN-plan-artifacts-shape-1.md" lines="18" />
+      </bpmn:extensionElements>
+      <bpmn:outgoing>f_start_build</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="build_pkg" name="Build bundled pipeline package">
+      <bpmn:documentation>skills/bpmn-plans/pipeline: codegen, qq subset linter plugin, layout+render, conformance CLI, tests. Evidence: skills/bpmn-plans/pipeline/README.md:1-16</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/bpmn-plans/pipeline/README.md" lines="1-16" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f_start_build</bpmn:incoming>
+      <bpmn:outgoing>f_build_skill</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="author_skill" name="Author bpmn-plans Skill and grilling hook">
+      <bpmn:documentation>SKILL.md procedure (spec, generate, store, link, approve, conform) plus the one-line grilling close hook. Evidence: skills/bpmn-plans/SKILL.md:1-10</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/bpmn-plans/SKILL.md" lines="1-10" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f_build_skill</bpmn:incoming>
+      <bpmn:outgoing>f_skill_validate</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="validate_skills" name="Validate touched Skills">
+      <bpmn:documentation>skill-creator quick_validate on bpmn-plans and grilling; mechanical Check ticketed as TASK-9. Evidence: openwiki/architecture.md:66</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="openwiki/architecture.md" lines="66" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f_skill_validate</bpmn:incoming>
+      <bpmn:outgoing>f_validate_dogfood</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="dogfood" name="Generate this plan through the pipeline">
+      <bpmn:documentation>This diagram is the first real plan artifact (AC #1) and the approval exhibit for the PR. Evidence: backlog/tasks/task-8 - Planning-emits-evidence-stamped-BPMN-plan-artifacts-shape-1.md:35</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="backlog/tasks/task-8 - Planning-emits-evidence-stamped-BPMN-plan-artifacts-shape-1.md" lines="35" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f_validate_dogfood</bpmn:incoming>
+      <bpmn:outgoing>f_dogfood_verify</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="verify" name="Run tests and end-to-end example">
+      <bpmn:documentation>npm ci reproducibility, 13-test suite with rendering, example spec through the full chain. Evidence: skills/bpmn-plans/pipeline/test/pipeline.test.mjs:1-20</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/bpmn-plans/pipeline/test/pipeline.test.mjs" lines="1-20" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f_dogfood_verify</bpmn:incoming>
+      <bpmn:incoming>f_fix_verify</bpmn:incoming>
+      <bpmn:outgoing>f_verify_gw</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="gw_checks" name="Checks green?">
+      <bpmn:documentation>Only green work is committed. Evidence: AGENTS.md:103-105</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="AGENTS.md" lines="103-105" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f_verify_gw</bpmn:incoming>
+      <bpmn:outgoing>f_gw_fix</bpmn:outgoing>
+      <bpmn:outgoing>f_gw_review</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="fix" name="Fix and rerun affected Checks">
+      <bpmn:documentation>Smallest causal correction, then rerun what the fix touches. Evidence: AGENTS.md:103-105</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="AGENTS.md" lines="103-105" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f_gw_fix</bpmn:incoming>
+      <bpmn:incoming>f_gwr_fix</bpmn:incoming>
+      <bpmn:outgoing>f_fix_verify</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="review" name="Independent code-review">
+      <bpmn:documentation>Fresh-context review of the non-trivial Change per the code-review Skill. Evidence: skills/code-review/SKILL.md:1-10</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/code-review/SKILL.md" lines="1-10" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f_gw_review</bpmn:incoming>
+      <bpmn:outgoing>f_review_gw</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="gw_review" name="Findings resolved?">
+      <bpmn:documentation>Review findings are fixed in scope or reported; no scope-narrowing to obtain a pass. Evidence: skills/code-review/SKILL.md:1-10</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/code-review/SKILL.md" lines="1-10" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f_review_gw</bpmn:incoming>
+      <bpmn:outgoing>f_gwr_fix</bpmn:outgoing>
+      <bpmn:outgoing>f_gwr_pr</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="open_pr" name="Commit green work, push, open PR">
+      <bpmn:documentation>GitHub Flow; backlog records for tasks 6-9, docs and decision ride along; foreign uncommitted edits (AGENTS.md, cockpit) stay out. Evidence: AGENTS.md:103-105</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="AGENTS.md" lines="103-105" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f_gwr_pr</bpmn:incoming>
+      <bpmn:outgoing>f_pr_gate</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:userTask id="operator_gate" name="Operator reviews plan diagram and PR">
+      <bpmn:documentation>Operator judges this diagram and the Change; first operator-reviewed plan artifact. Evidence: backlog/tasks/task-8 - Planning-emits-evidence-stamped-BPMN-plan-artifacts-shape-1.md:35-38</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="backlog/tasks/task-8 - Planning-emits-evidence-stamped-BPMN-plan-artifacts-shape-1.md" lines="35-38" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f_pr_gate</bpmn:incoming>
+      <bpmn:outgoing>f_gate_gw</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:exclusiveGateway id="gw_merge" name="Approved?">
+      <bpmn:documentation>The operator merges; changes requested reopen alignment. Evidence: AGENTS.md:103-105</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="AGENTS.md" lines="103-105" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f_gate_gw</bpmn:incoming>
+      <bpmn:outgoing>f_gwm_landed</bpmn:outgoing>
+      <bpmn:outgoing>f_gwm_rework</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="landed" name="PR1 merged — plan pipeline live">
+      <bpmn:documentation>TASK-8 core landed; conformance report follows post-landing. Evidence: backlog/tasks/task-8 - Planning-emits-evidence-stamped-BPMN-plan-artifacts-shape-1.md:35-38</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="backlog/tasks/task-8 - Planning-emits-evidence-stamped-BPMN-plan-artifacts-shape-1.md" lines="35-38" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f_gwm_landed</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="rework" name="Changes requested — replan">
+      <bpmn:documentation>Material plan change means a regenerated diagram and fresh confirmation. Evidence: skills/grilling/SKILL.md:19-23</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/grilling/SKILL.md" lines="19-23" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f_gwm_rework</bpmn:incoming>
+      <bpmn:errorEventDefinition />
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="f_start_build" sourceRef="start" targetRef="build_pkg" />
+    <bpmn:sequenceFlow id="f_build_skill" sourceRef="build_pkg" targetRef="author_skill" />
+    <bpmn:sequenceFlow id="f_skill_validate" sourceRef="author_skill" targetRef="validate_skills" />
+    <bpmn:sequenceFlow id="f_validate_dogfood" sourceRef="validate_skills" targetRef="dogfood" />
+    <bpmn:sequenceFlow id="f_dogfood_verify" sourceRef="dogfood" targetRef="verify" />
+    <bpmn:sequenceFlow id="f_verify_gw" sourceRef="verify" targetRef="gw_checks" />
+    <bpmn:sequenceFlow id="f_gw_fix" name="no" sourceRef="gw_checks" targetRef="fix" />
+    <bpmn:sequenceFlow id="f_fix_verify" sourceRef="fix" targetRef="verify" />
+    <bpmn:sequenceFlow id="f_gw_review" name="yes" sourceRef="gw_checks" targetRef="review" />
+    <bpmn:sequenceFlow id="f_review_gw" sourceRef="review" targetRef="gw_review" />
+    <bpmn:sequenceFlow id="f_gwr_fix" name="no" sourceRef="gw_review" targetRef="fix" />
+    <bpmn:sequenceFlow id="f_gwr_pr" name="yes" sourceRef="gw_review" targetRef="open_pr" />
+    <bpmn:sequenceFlow id="f_pr_gate" sourceRef="open_pr" targetRef="operator_gate" />
+    <bpmn:sequenceFlow id="f_gate_gw" sourceRef="operator_gate" targetRef="gw_merge" />
+    <bpmn:sequenceFlow id="f_gwm_landed" name="merge" sourceRef="gw_merge" targetRef="landed" />
+    <bpmn:sequenceFlow id="f_gwm_rework" name="changes requested" sourceRef="gw_merge" targetRef="rework" />
+  </bpmn:process>
+</bpmn:definitions>
