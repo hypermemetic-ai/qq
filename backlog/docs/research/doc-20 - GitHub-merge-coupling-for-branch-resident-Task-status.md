@@ -3,14 +3,16 @@ id: doc-20
 title: GitHub merge coupling for branch-resident Task status
 type: other
 created_date: '2026-07-12 18:31'
-updated_date: '2026-07-12 18:31'
+updated_date: '2026-07-12 18:32'
 tags:
   - research
 ---
 # GitHub merge coupling for branch-resident Task status
 
-Owning Task: TASK-11  
-Overall confidence: HIGH  
+Owning Task: TASK-11
+
+Overall confidence: HIGH
+
 Settles: retain branch-resident Backlog Task status as work status and GitHub pull-request state as Change delivery status; do not add merge-time or post-merge status automation.
 
 ## Findings
