@@ -10,8 +10,15 @@ delegated agents bounded assignments; do not hand them this lifecycle.
 
 1. Bind the Change to the agreed outcome and current Repository state. Follow
    Backlog's task-execution instructions for Task operations, and confirm that
-   the branch or worktree isolates this Change from unrelated work. Return to
-   alignment before acting on any new consequential decision.
+   the branch or worktree isolates this Change from unrelated work. When a new
+   checkout is needed, resolve the Repository root and an explicitly agreed,
+   freshly fetched base, then run
+   `herdr worktree create --cwd <root> --branch <branch> --base <base> --no-focus --json`;
+   never omit `--base` and inherit an incidental `HEAD`. When the checkout
+   already exists, attach it with
+   `herdr worktree open --cwd <root> --path <absolute-path> --no-focus --json`.
+   Treat the returned workspace as the Change's home for its panes and agents.
+   Return to alignment before acting on any new consequential decision.
 2. Implement and verify coherent units. When a decision needs durable,
    multi-source evidence, delegate that question through `research` and retain
    the judgment. Keep the Task aligned through the Backlog CLI and run the
@@ -57,3 +64,9 @@ delegated agents bounded assignments; do not hand them this lifecycle.
    and verify the pull request's landed state, then report its merge evidence.
    Do not alter the completed Task or open a Task-finalization Change. If the
    operator closes or rejects it, report that disposition and apply step 6.
+   After a terminal disposition leaves no further work in this Change, remove
+   an ephemeral checkout only when its worktree is clean, using
+   `herdr worktree remove --workspace <workspace-id> --json`; never force
+   removal by default. Checkout removal does not own branch deletion, and
+   explicitly dedicated long-lived worktrees remain in place until their owner
+   retires them.
