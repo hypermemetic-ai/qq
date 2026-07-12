@@ -35,6 +35,14 @@ node bin/qq-bpmn.mjs all <plan-spec.json> <outdir>
 Nonzero exit means the plan violates the subset or lost evidence in layout —
 fix the spec, never the pipeline output.
 
+After the command succeeds, immediately open the generated
+`<outdir>/<plan-id>.png` in the operator's graphical image-viewer application
+through a process that survives the tool call. On graphical Linux, use
+`setsid -f xdg-open "<outdir>/<plan-id>.png" >/dev/null 2>&1`; otherwise use the
+runtime's durable native opener. A tool-result preview, path, or link does not
+substitute for a persistent viewer window. Confirm the window remains visible
+after the launch call returns before continuing.
+
 ## Store and link
 
 1. `backlog doc create "Plan — <work title>" -p plans -t other`, then set the
@@ -49,11 +57,11 @@ fix the spec, never the pipeline output.
 
 ## Approval
 
-When closing alignment (grilling's final confirmation), present the rendered
-diagram to the operator with the question — give the PNG path and, where the
-session allows, render it inline or as a private artifact page. The operator
-approves the diagram; material plan changes after approval mean a regenerated
-diagram and a fresh confirmation.
+When closing alignment (grilling's final confirmation), keep the rendered
+diagram visible in that graphical image-viewer window alongside the question
+and give the PNG path for reference. The operator approves the diagram;
+material plan changes after approval mean a regenerated diagram, a fresh
+image-viewer presentation, and a fresh confirmation.
 
 ## Conformance after the work lands
 

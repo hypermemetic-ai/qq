@@ -2,9 +2,10 @@
 id: TASK-8
 title: Planning emits evidence-stamped BPMN plan artifacts (shape 1)
 status: In Progress
-assignee: []
+assignee:
+  - '@codex'
 created_date: '2026-07-12 16:02'
-updated_date: '2026-07-12 17:07'
+updated_date: '2026-07-12 22:00'
 labels: []
 dependencies: []
 documentation:
@@ -35,5 +36,21 @@ DEPENDS: TASK-6 pipeline pieces (codegen helper, lint config + subset plugin, re
 - [ ] #1 A planning flow exists that emits a subset-conforming, evidence-stamped .bpmn + rendered PNG for a real task, and the operator has reviewed at least one such plan-diagram before work started
 - [x] #2 A conformance check exists that, given a plan .bpmn and the executed work's record, reports per-task/per-gateway conformance and divergences
 - [x] #3 Plan artifacts are attached to their owning Backlog task (not the wiki)
-- [ ] #4 At plan approval (the grilling close), the agent presents the rendered plan diagram to the operator alongside the confirmation question
+- [x] #4 At plan approval (the grilling close), the agent presents the rendered plan diagram to the operator alongside the confirmation question
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Require successful plan generation to open the rendered PNG in the runtime image viewer.
+2. Keep that rendered image surfaced with the grilling approval question; retain the PNG path only as a reference.
+3. Validate the changed Skill, inspect the diff, and run one operator UAT check with a real plan PNG.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Approved addendum: make image-viewer presentation mandatory at generation and approval; no pipeline or generation changes.
+
+UAT accepted 2026-07-12: the initial tool-result preview produced no visible viewer; after switching to a durable desktop opener, the operator confirmed the persistent xviewer window worked.
+<!-- SECTION:NOTES:END -->
