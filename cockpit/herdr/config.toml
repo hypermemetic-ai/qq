@@ -74,4 +74,4 @@ type = "shell"
 command = "qq-herdr-pull 9"
 
 [ui]
-agent_panel_sort = "priority"
+agent_panel_sort = "spaces"
