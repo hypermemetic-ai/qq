@@ -1,11 +1,11 @@
 ---
 id: TASK-19
 title: Activate the OpenWiki maintainer from operator merges
-status: In Progress
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-07-13 03:21'
-updated_date: '2026-07-13 15:17'
+updated_date: '2026-07-13 15:26'
 labels: []
 dependencies: []
 documentation:
@@ -29,7 +29,7 @@ When the operator confirms a pull-request merge on GitHub, a generic Tampermonke
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 A generic Tampermonkey userscript reacts only to the final merge-confirmation action on any GitHub pull-request page and invokes the local qq-openwiki scheme with the canonical PR URL
-- [ ] #2 The local handler refuses malformed input, discovers the corresponding checkout under configurable roots, matches its GitHub origin, and requires the Repository to be linked to qq through the canonical root AGENTS.md symlink
+- [x] #2 The local handler refuses malformed input, discovers the corresponding checkout under configurable roots, matches its GitHub origin, and requires the Repository to be linked to qq through the canonical root AGENTS.md symlink
 - [x] #3 The handler independently verifies through gh that the PR was merged into main by the authenticated operator
 - [x] #4 Merges from openwiki/update are ignored and each merge commit is dispatched at most once per Repository
 - [x] #5 Activation launches a missing dedicated maintainer session or wakes the existing session through Herdr in that Repository's openwiki/update worktree
@@ -48,6 +48,8 @@ When the operator confirms a pull-request merge on GitHub, a generic Tampermonke
 
 <!-- SECTION:NOTES:BEGIN -->
 Validation passed: shellcheck; Bash syntax checks; Python compilation; Node syntax check; test-qq-herdr-pull, test-qq-openwiki, and test-qq-openwiki-activate; git diff check; strict BPMN conformance; isolated real xdg-mime registration with custom XDG_DATA_HOME. Fresh-context review and exact post-fix review found no remaining actionable findings. GitHub PR #55 is CLEAN and mergeable with no applicable status checks. Live Zen/Tampermonkey activation is intentionally the post-land acceptance check.
+
+First live acceptance after PR #56 exposed a configured-root boundary defect: the browser bridge fired, but an empty .git marker on /home/qqp/projects caused the search container itself to hide the matching descendant checkout. The operator confirmed that QQ_PROJECT_ROOTS entries are containers, never candidates. PR #57 corrects that boundary and excludes the complete configured-root set so overlapping roots cannot re-enter as candidates. Both regressions failed against their prior behavior and pass after correction. Fresh checks passed: Bash syntax, shellcheck, Python compilation, complete test-qq-openwiki-activate suite, and git diff check. Fresh-context review found the overlapping-root gap; it was reproduced and fixed, and exact-delta review found no material findings. PR #57 is OPEN, MERGEABLE, CLEAN, with no configured GitHub checks.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
@@ -59,3 +61,9 @@ created: 2026-07-13 15:17
 First live activation after PR #56 merged exposed an unmet discovery case: QQ_PROJECT_ROOTS names search containers, but repository detection was applied to the container itself. An empty /home/qqp/projects/.git marker hid the valid descendant /home/qqp/projects/qq, so the browser bridge fired without dispatching the maintainer. Operator approved the narrow correction: only descendant candidates, with existing exact-origin and linkage checks preserved, plus focused regression coverage.
 ---
 <!-- COMMENTS:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Hardened the merge activator after its first live dispatch attempt: configured project roots are now search containers only, valid descendant checkouts remain selected by exact normalized GitHub origin and qq linkage, and overlapping roots cannot become false candidates. Added the live root-marker and overlapping-root regressions, preserved the existing activation design, resolved independent review, and delivered the correction in clean PR #57.
+<!-- SECTION:FINAL_SUMMARY:END -->
