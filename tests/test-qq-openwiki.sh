@@ -12,8 +12,15 @@ mkdir -p "$fake_bin" "$repo"
 cat >"$fake_bin/openwiki" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' "$*" >"$FAKE_LOG"
+: >"$FAKE_LOG"
+index=1
+for argument in "$@"; do
+  printf '%s' "$argument" >"$FAKE_LOG.$index"
+  index=$((index + 1))
+done
+printf '%s' "$#" >"$FAKE_LOG.count"
 printf '%s\n' "$OPENWIKI_PROVIDER" >"$FAKE_PROVIDER_LOG"
+printf '%s\n' "$QQ_OPENWIKI_NODE_BIN" >"$FAKE_RUNTIME_NODE_LOG"
 if [ -n "${FAKE_STARTED:-}" ]; then
   : >"$FAKE_STARTED"
   sleep "${FAKE_SLEEP:-0}"
@@ -49,6 +56,7 @@ if [ -n "${FAKE_FAIL:-}" ]; then
 fi
 SH
 chmod +x "$fake_bin/openwiki"
+ln -s "$(command -v node)" "$fake_bin/node"
 
 git -C "$repo" init -q -b main
 git -C "$repo" config user.email test@example.com
@@ -65,6 +73,7 @@ git -C "$repo" switch -qc openwiki/update
 export PATH="$fake_bin:$PATH"
 export FAKE_LOG="$tmp/args"
 export FAKE_PROVIDER_LOG="$tmp/provider"
+export FAKE_RUNTIME_NODE_LOG="$tmp/runtime-node"
 unset OPENWIKI_PROVIDER
 
 (
@@ -77,17 +86,37 @@ test ! -d "$repo/.github"
 cmp "$tmp/agents-original" "$repo/AGENTS.md"
 test ! -e "$repo/CLAUDE.md"
 test ! -L "$repo/CLAUDE.md"
-test "$(cat "$tmp/args")" = 'code --update --print'
+test "$(<"$tmp/args.count")" = 4
+test "$(<"$tmp/args.1")" = code
+test "$(<"$tmp/args.2")" = --update
+test "$(<"$tmp/args.3")" = --print
+grep -Fq 'You, the internal OpenWiki generator, own diagram selection and authorship during this run.' \
+  "$tmp/args.4"
+grep -Fq 'There is no diagram quota.' "$tmp/args.4"
+grep -Fq 'Prefer a compact process abstraction over mirroring every source statement.' "$tmp/args.4"
+grep -Fq 'Make the embedded image a link to the same PNG' "$tmp/args.4"
+grep -Fq 'verifies every cited source file and line range inside the Repository' "$tmp/args.4"
+grep -Fq "QQ_OPENWIKI_NODE_BIN=$(<"$tmp/runtime-node")" "$tmp/args.4"
+grep -Fq "$QQ_OPENWIKI-bpmn openwiki/processes/<id>.json" "$tmp/args.4"
+grep -Fq "$QQ_OPENWIKI-bpmn --check openwiki/processes/<id>.json" "$tmp/args.4"
+grep -Fq 'run the publisher in --check mode for every retained spec in stable filename order' \
+  "$tmp/args.4"
 test "$(cat "$tmp/provider")" = 'openai-chatgpt'
+test -x "$(<"$tmp/runtime-node")"
 
 git -C "$repo" restore openwiki/quickstart.md
 test -z "$(git -C "$repo" status --porcelain)"
 
 (
   cd "$repo"
-  OPENWIKI_PROVIDER=openai-chatgpt "$QQ_OPENWIKI" --update
+  OPENWIKI_PROVIDER=openai-chatgpt "$QQ_OPENWIKI" --update \
+    --modelId gpt-5.5 'focus on lifecycle'
 )
-test "$(cat "$tmp/args")" = 'code --update --print'
+test "$(<"$tmp/args.count")" = 7
+test "$(<"$tmp/args.4")" = --modelId
+test "$(<"$tmp/args.5")" = gpt-5.5
+test "$(<"$tmp/args.6")" = 'focus on lifecycle'
+grep -Fq 'OpenWiki BPMN authoring extension:' "$tmp/args.7"
 test "$(cat "$tmp/provider")" = 'openai-chatgpt'
 cmp "$tmp/agents-original" "$repo/AGENTS.md"
 test ! -e "$repo/CLAUDE.md"

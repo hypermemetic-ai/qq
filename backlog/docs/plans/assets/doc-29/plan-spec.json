@@ -1,0 +1,446 @@
+{
+  "id": "task6_openwiki_internal_bpmn",
+  "name": "Teach OpenWiki generation to author helpful BPMN",
+  "elements": [
+    {
+      "id": "intent_recovered",
+      "type": "startEvent",
+      "name": "Internal-generator intent recovered",
+      "documentation": "Resume the operator-settled outcome: OpenWiki internal generation authors useful BPMN alongside Markdown; the outer maintainer only invokes, verifies, and delivers.",
+      "evidence": {
+        "file": "backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md",
+        "lines": "44-53"
+      }
+    },
+    {
+      "id": "confirm_extension_seam",
+      "type": "serviceTask",
+      "name": "Confirm internal-agent extension seam",
+      "documentation": "Verify how qq-openwiki forwards caller input into the installed OpenWiki update and how the existing wrapper and tests preserve its run boundary.",
+      "evidence": {
+        "file": "bin/qq-openwiki",
+        "lines": "10-17,158-172"
+      }
+    },
+    {
+      "id": "build_wiki_publish_command",
+      "type": "serviceTask",
+      "name": "Build reliable wiki publish command",
+      "documentation": "Expose the locked pipeline as one internal-agent-friendly command that requires complete node and edge evidence, deterministic generation, the matching semantic BPMN, and the visibly attributed PNG without publishing intermediate SVG output.",
+      "evidence": {
+        "file": "skills/bpmn-plans/pipeline/README.md",
+        "lines": "1-7,37-52,169-197"
+      }
+    },
+    {
+      "id": "inject_generator_guidance",
+      "type": "serviceTask",
+      "name": "Teach generator when and how to diagram",
+      "documentation": "Have qq-openwiki supply stable guidance to the internal OpenWiki agent: choose BPMN only where it materially clarifies a process, author it with the Markdown, embed the PNG, maintain existing diagrams, and impose no prescribed diagram or quota while preserving caller instructions.",
+      "evidence": {
+        "file": "backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md",
+        "lines": "44-53"
+      }
+    },
+    {
+      "id": "install_and_document_tool",
+      "type": "serviceTask",
+      "name": "Install and document generator tool",
+      "documentation": "Make the reusable publication command available to OpenWiki runs through the existing qq installer and document the internal generation contract at its source-owned surfaces.",
+      "evidence": {
+        "file": "bin/install.sh",
+        "lines": "124-147"
+      }
+    },
+    {
+      "id": "verification_entry",
+      "type": "exclusiveGateway",
+      "name": "Verification entry",
+      "documentation": "Merge the initial implementation and all in-scope correction paths before re-running the complete focused verification sequence.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "30-39"
+      }
+    },
+    {
+      "id": "run_automated_checks",
+      "type": "serviceTask",
+      "name": "Run pipeline, wrapper, and installer checks",
+      "documentation": "Exercise wiki publication, evidence refusal, deterministic output, message and option preservation, installation, existing wrapper invariants, and the rendering-enabled pipeline suite.",
+      "evidence": {
+        "file": "backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md",
+        "lines": "35-47"
+      }
+    },
+    {
+      "id": "checks_green",
+      "type": "exclusiveGateway",
+      "name": "Automated checks green?",
+      "documentation": "Only a mechanically verified capability advances to the real internal-agent smoke run.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "30-36"
+      }
+    },
+    {
+      "id": "fix_check_failures",
+      "type": "serviceTask",
+      "name": "Fix in-scope check failures",
+      "documentation": "Correct the smallest causal implementation defect and return through the complete focused checks.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "30-36"
+      }
+    },
+    {
+      "id": "run_internal_agent_smoke",
+      "type": "serviceTask",
+      "name": "Run real internal OpenWiki smoke test",
+      "documentation": "Run the installed OpenWiki internal generator against a disposable repository containing a diagram-worthy process; do not invoke the outer maintainer or directly author the generated wiki.",
+      "evidence": {
+        "file": "backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md",
+        "lines": "44-53"
+      }
+    },
+    {
+      "id": "assess_generated_wiki",
+      "type": "userTask",
+      "name": "Judge generated diagram usefulness",
+      "documentation": "Inspect whether the internal agent actually selected a worthwhile process, produced an accurate readable diagram, and used it to clarify rather than decorate or replace the Markdown narrative.",
+      "evidence": {
+        "file": "backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md",
+        "lines": "21-32,44-53"
+      }
+    },
+    {
+      "id": "diagram_helpful",
+      "type": "exclusiveGateway",
+      "name": "Helpful BPMN generated?",
+      "documentation": "The capability succeeds only when a real diagram-worthy generation run produces useful embedded BPMN, not merely when prompt text and commands exist.",
+      "evidence": {
+        "file": "backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md",
+        "lines": "36-46"
+      }
+    },
+    {
+      "id": "tune_generation_capability",
+      "type": "serviceTask",
+      "name": "Tune tool or generator guidance",
+      "documentation": "If the internal agent omits a warranted diagram or produces an unhelpful one, adjust only the tool or guidance responsible and repeat mechanical and behavioral verification.",
+      "evidence": {
+        "file": "backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md",
+        "lines": "44-53"
+      }
+    },
+    {
+      "id": "fresh_context_review",
+      "type": "userTask",
+      "name": "Run fresh-context review",
+      "documentation": "Give the exact locally verified Change to an independent read-only reviewer before commit or publication.",
+      "evidence": {
+        "file": "skills/code-review/SKILL.md",
+        "lines": "44-68"
+      }
+    },
+    {
+      "id": "confirmed_findings",
+      "type": "exclusiveGateway",
+      "name": "Confirmed findings?",
+      "documentation": "The accountable agent verifies each reported failure path and changes only confirmed findings introduced within the agreed scope.",
+      "evidence": {
+        "file": "skills/code-review/SKILL.md",
+        "lines": "70-84"
+      }
+    },
+    {
+      "id": "fix_review_findings",
+      "type": "serviceTask",
+      "name": "Fix confirmed review findings",
+      "documentation": "Apply the smallest in-scope correction and return through focused checks, behavioral smoke, and exact-delta review.",
+      "evidence": {
+        "file": "skills/code-review/SKILL.md",
+        "lines": "78-84"
+      }
+    },
+    {
+      "id": "open_source_pr",
+      "type": "serviceTask",
+      "name": "Open one source PR",
+      "documentation": "Commit and push the green reviewed generator capability and open one pull request carrying TASK-6 intent and Check evidence.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "37-45"
+      }
+    },
+    {
+      "id": "pr_green",
+      "type": "exclusiveGateway",
+      "name": "PR green?",
+      "documentation": "The source Change is ready only when its applicable GitHub checks pass and the demonstrated internal-generation behavior remains intact.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "37-45,54-58"
+      }
+    },
+    {
+      "id": "fix_pr_failures",
+      "type": "serviceTask",
+      "name": "Fix in-scope PR failures",
+      "documentation": "Correct an in-scope handoff failure and return through local verification, internal-agent smoke, and fresh review.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "30-39"
+      }
+    },
+    {
+      "id": "green_handoff",
+      "type": "endEvent",
+      "name": "Internal-generation PR green",
+      "documentation": "TASK-6 reaches a green source-PR handoff with the internal OpenWiki agent proven able to choose and author helpful BPMN alongside Markdown.",
+      "evidence": {
+        "file": "backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md",
+        "lines": "35-53"
+      }
+    }
+  ],
+  "flows": [
+    {
+      "id": "flow_start_seam",
+      "source": "intent_recovered",
+      "target": "confirm_extension_seam",
+      "documentation": "The recovered boundary is grounded in the actual internal-agent extension seam before code changes begin.",
+      "evidence": {
+        "file": "backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md",
+        "lines": "44-53"
+      }
+    },
+    {
+      "id": "flow_seam_command",
+      "source": "confirm_extension_seam",
+      "target": "build_wiki_publish_command",
+      "documentation": "The confirmed update-message seam is paired with a reliable tool the internal agent can invoke.",
+      "evidence": {
+        "file": "bin/qq-openwiki",
+        "lines": "158-172"
+      }
+    },
+    {
+      "id": "flow_command_guidance",
+      "source": "build_wiki_publish_command",
+      "target": "inject_generator_guidance",
+      "documentation": "The internal agent is taught to use the publication command only when BPMN adds explanatory value.",
+      "evidence": {
+        "file": "backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md",
+        "lines": "44-53"
+      }
+    },
+    {
+      "id": "flow_guidance_install",
+      "source": "inject_generator_guidance",
+      "target": "install_and_document_tool",
+      "documentation": "The generation contract and its command must be available together in installed qq environments.",
+      "evidence": {
+        "file": "bin/install.sh",
+        "lines": "124-147"
+      }
+    },
+    {
+      "id": "flow_install_verification",
+      "source": "install_and_document_tool",
+      "target": "verification_entry",
+      "documentation": "The coherent implementation unit enters the common verification loop.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "30-36"
+      }
+    },
+    {
+      "id": "flow_verification_checks",
+      "source": "verification_entry",
+      "target": "run_automated_checks",
+      "documentation": "Initial implementation and every correction use the same focused mechanical checks.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "30-36"
+      }
+    },
+    {
+      "id": "flow_checks_gate",
+      "source": "run_automated_checks",
+      "target": "checks_green",
+      "documentation": "Observed automated results determine whether real internal-agent generation can begin.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "30-36"
+      }
+    },
+    {
+      "id": "flow_checks_fail",
+      "source": "checks_green",
+      "target": "fix_check_failures",
+      "name": "no",
+      "documentation": "A failing focused Check requires an in-scope correction.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "30-36"
+      }
+    },
+    {
+      "id": "flow_check_fix_verification",
+      "source": "fix_check_failures",
+      "target": "verification_entry",
+      "documentation": "Every check correction returns through the complete focused suite.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "30-36"
+      }
+    },
+    {
+      "id": "flow_checks_smoke",
+      "source": "checks_green",
+      "target": "run_internal_agent_smoke",
+      "name": "yes",
+      "documentation": "Green mechanics advance to a real OpenWiki internal-generation run.",
+      "evidence": {
+        "file": "backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md",
+        "lines": "44-53"
+      }
+    },
+    {
+      "id": "flow_smoke_assess",
+      "source": "run_internal_agent_smoke",
+      "target": "assess_generated_wiki",
+      "documentation": "The generated files and page are inspected for actual explanatory quality, not mere existence.",
+      "evidence": {
+        "file": "backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md",
+        "lines": "36-46"
+      }
+    },
+    {
+      "id": "flow_assess_gate",
+      "source": "assess_generated_wiki",
+      "target": "diagram_helpful",
+      "documentation": "The qualitative verdict controls whether the capability is ready for independent review.",
+      "evidence": {
+        "file": "backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md",
+        "lines": "36-46"
+      }
+    },
+    {
+      "id": "flow_helpful_tune",
+      "source": "diagram_helpful",
+      "target": "tune_generation_capability",
+      "name": "no",
+      "documentation": "Missing, decorative, inaccurate, or unreadable BPMN requires an in-scope tool or guidance adjustment.",
+      "evidence": {
+        "file": "backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md",
+        "lines": "35-53"
+      }
+    },
+    {
+      "id": "flow_tune_verification",
+      "source": "tune_generation_capability",
+      "target": "verification_entry",
+      "documentation": "Every behavioral adjustment repeats mechanical checks and the real internal-agent smoke run.",
+      "evidence": {
+        "file": "backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md",
+        "lines": "44-53"
+      }
+    },
+    {
+      "id": "flow_helpful_review",
+      "source": "diagram_helpful",
+      "target": "fresh_context_review",
+      "name": "yes",
+      "documentation": "A useful, verified internal-generation result advances to independent review.",
+      "evidence": {
+        "file": "skills/code-review/SKILL.md",
+        "lines": "44-68"
+      }
+    },
+    {
+      "id": "flow_review_findings",
+      "source": "fresh_context_review",
+      "target": "confirmed_findings",
+      "documentation": "The accountable agent verifies every material review report against the exact Change.",
+      "evidence": {
+        "file": "skills/code-review/SKILL.md",
+        "lines": "70-84"
+      }
+    },
+    {
+      "id": "flow_findings_fix",
+      "source": "confirmed_findings",
+      "target": "fix_review_findings",
+      "name": "yes",
+      "documentation": "Confirmed in-scope findings receive the smallest causal correction.",
+      "evidence": {
+        "file": "skills/code-review/SKILL.md",
+        "lines": "78-84"
+      }
+    },
+    {
+      "id": "flow_review_fix_verification",
+      "source": "fix_review_findings",
+      "target": "verification_entry",
+      "documentation": "Review corrections are mechanically and behaviorally re-observed before exact-delta review.",
+      "evidence": {
+        "file": "skills/code-review/SKILL.md",
+        "lines": "78-84"
+      }
+    },
+    {
+      "id": "flow_findings_pr",
+      "source": "confirmed_findings",
+      "target": "open_source_pr",
+      "name": "no",
+      "documentation": "A locally green Change with no confirmed findings can be committed and published.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "34-39"
+      }
+    },
+    {
+      "id": "flow_pr_gate",
+      "source": "open_source_pr",
+      "target": "pr_green",
+      "documentation": "The published Change must pass its applicable GitHub checks before handoff.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "37-45,54-58"
+      }
+    },
+    {
+      "id": "flow_pr_fail",
+      "source": "pr_green",
+      "target": "fix_pr_failures",
+      "name": "no",
+      "documentation": "An in-scope PR failure returns to implementation verification and review.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "30-39"
+      }
+    },
+    {
+      "id": "flow_pr_fix_verification",
+      "source": "fix_pr_failures",
+      "target": "verification_entry",
+      "documentation": "PR corrections repeat every required local and independent Check before another handoff.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "30-39"
+      }
+    },
+    {
+      "id": "flow_pr_handoff",
+      "source": "pr_green",
+      "target": "green_handoff",
+      "name": "yes",
+      "documentation": "A green source pull request ends the planned implementation flow.",
+      "evidence": {
+        "file": "skills/bpmn-plans/SKILL.md",
+        "lines": "28-34"
+      }
+    }
+  ]
+}

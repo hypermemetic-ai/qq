@@ -35,25 +35,29 @@ Do not require the source-change agent to update, enqueue, or assess OpenWiki.
 ## Generate and verify
 
 1. Run `qq-openwiki --update`, or `qq-openwiki --init` only for explicit initial
-   setup. The wrapper holds the per-Repository lock and removes upstream's
-   GitHub recurrence plumbing.
-2. Read OpenWiki's complete output, then verify its claims independently.
-3. Reconcile the landed processes described by the wiki with JSON model specs
-   under `openwiki/processes/`. Name each spec `<id>.json` with a matching BPMN
-   process `id`. Use the flat subset documented in
-   `skills/bpmn-plans/pipeline/README.md`, and require source-backed
-   `documentation` plus `evidence.file` and `evidence.lines` on every flow node
-   and sequence flow. Add a diagram only when it materially clarifies a process.
-4. Regenerate every current process spec through the locked shared pipeline.
-   Run `npm ci` under `skills/bpmn-plans/pipeline/`, then run its
-   `node bin/qq-bpmn.mjs all <spec> <temporary-output>` command for each spec in
-   stable filename order. Require clean lint and a lossless round-trip verdict.
-   Publish only the semantic `<id>.bpmn` and visibly attributed `<id>.png`
-   beside the spec; never hand-edit generated artifacts or publish the SVG.
-5. Regenerate into a second temporary directory and require byte-identical
-   semantic BPMN and PNG outputs. Embed each published PNG from the wiki page
-   that describes its process, inspect the render, and spot-check element and
-   edge evidence against the cited source lines.
+   setup. The wrapper holds the per-Repository lock, removes upstream's GitHub
+   recurrence plumbing, and instructs OpenWiki's internal generator to decide
+   which processes benefit from BPMN and to author their specs, artifacts, and
+   Markdown links during the same run.
+2. Read OpenWiki's complete output, then verify its claims independently. The
+   internal generator owns both narrative and diagram authorship; this Actor
+   reviews the result and does not fill gaps by editing generated content.
+3. Inventory `openwiki/processes/*.json` in stable filename order. For each
+   retained spec, require the matching semantic `<id>.bpmn`, visibly attributed
+   `<id>.png`, and a link from the Markdown page that explains the process. Run
+   `qq-openwiki-bpmn --check <spec>` and require clean lint, a lossless evidence
+   round trip, repeat-generation determinism, and exact published artifacts.
+4. Inspect every rendered PNG. Confirm that each diagram materially clarifies
+   its process, stays legible, agrees with the surrounding narrative, and has
+   source-backed documentation and evidence on every node and edge. Spot-check
+   the cited file and line ranges against landed source. Also look for stale
+   diagram links or previously modeled processes that changed or disappeared.
+5. If a useful diagram is missing, a retained one is unhelpful or stale, any
+   evidence is unsupported, or an artifact fails verification, do not author,
+   patch, regenerate, or delete diagram content yourself. Discard the generated
+   output, return the dedicated branch to current `origin/main`, and rerun
+   `qq-openwiki --update` with concise evidence-backed feedback about the
+   observed problem. Repeat verification on the wholly regenerated result.
 6. Require the resulting Change to remain within `openwiki/` and the marked
    OpenWiki instruction block. Reject any generated GitHub workflow, provider
    credential, or unrelated source edit.

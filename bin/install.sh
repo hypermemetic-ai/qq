@@ -121,6 +121,15 @@ install_openwiki_activation_handler() {
   printf 'installed: qq-openwiki:// activation handler\n'
 }
 
+install_bpmn_pipeline() {
+  local pipeline="$QQ/skills/bpmn-plans/pipeline"
+
+  command -v npm >/dev/null 2>&1 || die "npm is required for the bundled BPMN pipeline"
+  npm ci --prefix "$pipeline" --no-audit --no-fund
+  printf 'installed: locked BPMN pipeline dependencies\n'
+}
+
+install_bpmn_pipeline
 sync_skills
 prune_removed_commands
 
@@ -134,6 +143,7 @@ link_one "$QQ/cockpit/shell/file-navigation.bash" "$HOME/.config/shell/file-navi
 
 link_one "$QQ/bin/qq-herdr-pull" "$HOME/.local/bin/qq-herdr-pull" "command/qq-herdr-pull"
 link_one "$QQ/bin/qq-openwiki" "$HOME/.local/bin/qq-openwiki" "command/qq-openwiki"
+link_one "$QQ/bin/qq-openwiki-bpmn" "$HOME/.local/bin/qq-openwiki-bpmn" "command/qq-openwiki-bpmn"
 link_one "$QQ/bin/qq-openwiki-activate" "$HOME/.local/bin/qq-openwiki-activate" "command/qq-openwiki-activate"
 link_one "$QQ/browser/openwiki-merge-activator.user.js" "$QQ_DATA_HOME/qq/openwiki-merge-activator.user.js" "browser/openwiki-merge-activator.user.js"
 

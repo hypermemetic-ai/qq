@@ -22,6 +22,8 @@ Run the CLI directly with Node or through the package's `qq-bpmn` bin:
 node bin/qq-bpmn.mjs build example/plan-spec.example.json out/plan.bpmn
 node bin/qq-bpmn.mjs render out/plan.bpmn out/rendered
 node bin/qq-bpmn.mjs all example/plan-spec.example.json out/example
+node bin/qq-bpmn.mjs wiki /repo/openwiki/processes/order_lifecycle.json
+node bin/qq-bpmn.mjs wiki /repo/openwiki/processes/order_lifecycle.json --check
 node bin/qq-bpmn.mjs conform out/example/qq_release_plan.bpmn completions.json
 node bin/qq-bpmn.mjs conform out/example/qq_release_plan.bpmn completions.json -o report.md --strict
 ```
@@ -31,6 +33,23 @@ node bin/qq-bpmn.mjs conform out/example/qq_release_plan.bpmn completions.json -
 `all` names the semantic BPMN after the plan's `id` and then runs the complete
 pipeline. The round-trip JSON's top-level `lossless` property must be `true`;
 loss exits nonzero.
+
+`wiki` is the publishing mode for an OpenWiki-authored process spec. It
+requires the JSON filename to match the process `id` and requires non-empty
+documentation plus `evidence.file` and `evidence.lines` on every node and
+sequence flow. Each evidence file must be a normalized Repository-relative
+path that resolves to a regular file without escaping through a symlink; line
+references use positive numbers or comma-separated inclusive ranges such as
+`12-19,27-32` and must exist in that file. It runs the complete pipeline twice
+in isolated temporary directories and refuses non-byte-identical semantic BPMN
+or PNG output. A successful publish writes only `<id>.bpmn` and the visibly
+attributed `<id>.png` beside the source JSON; layout, round-trip, and SVG
+intermediates remain temporary. `--check` performs the same repeat generation
+and requires the two published artifacts to match without rewriting them.
+
+OpenWiki's internal generator calls this mode through `qq-openwiki-bpmn`, which
+additionally confines the input to a direct, non-symlink-escaped child of the
+current Repository's `openwiki/processes/` directory.
 
 `conform` accounts for every BPMN flow node. Its completions file is an object
 keyed by element id:

@@ -274,7 +274,11 @@ cat >"$INSTALL_BIN/update-desktop-database" <<'EOF'
 #!/usr/bin/env bash
 printf 'update-desktop-database %s\n' "$*" >>"$INSTALL_LOG"
 EOF
-chmod +x "$INSTALL_BIN/xdg-mime" "$INSTALL_BIN/update-desktop-database"
+cat >"$INSTALL_BIN/npm" <<'EOF'
+#!/usr/bin/env bash
+printf 'npm %s\n' "$*" >>"$INSTALL_LOG"
+EOF
+chmod +x "$INSTALL_BIN/xdg-mime" "$INSTALL_BIN/update-desktop-database" "$INSTALL_BIN/npm"
 export INSTALL_LOG
 : >"$INSTALL_LOG"
 HOME="$INSTALL_HOME" XDG_DATA_HOME="$INSTALL_DATA" PATH="$INSTALL_BIN:$PATH" bash "$INSTALLER" >"$TMP/install.out"
@@ -285,9 +289,11 @@ desktop-file-validate "$desktop"
 assert_contains "$(<"$desktop")" "Exec=\"$INSTALL_HOME/.local/bin/qq-openwiki-activate\" %u"
 assert_contains "$(<"$desktop")" 'MimeType=x-scheme-handler/qq-openwiki;'
 [ -L "$INSTALL_DATA/qq/openwiki-merge-activator.user.js" ] || fail "userscript link missing"
+[ -L "$INSTALL_HOME/.local/bin/qq-openwiki-bpmn" ] || fail "OpenWiki BPMN command link missing"
 [ ! -e "$INSTALL_HOME/.local/share/applications/qq-openwiki-activate.desktop" ] || fail "installer ignored XDG_DATA_HOME"
 [ "$(<"$INSTALL_HOME/.config/mimeapps.list")" = 'keep=this-entry' ] || fail "unrelated MIME state changed"
 assert_contains "$(<"$INSTALL_LOG")" 'xdg-mime default qq-openwiki-activate.desktop x-scheme-handler/qq-openwiki'
+assert_contains "$(<"$INSTALL_LOG")" "npm ci --prefix $ROOT/skills/bpmn-plans/pipeline --no-audit --no-fund"
 
 UNMANAGED_HOME="$TMP/unmanaged-home"
 mkdir -p "$UNMANAGED_HOME/.local/share/applications"

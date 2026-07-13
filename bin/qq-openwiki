@@ -31,6 +31,32 @@ else
   [ -n "$openwiki_bin" ] || die "openwiki not found; set OPENWIKI_BIN to its absolute path"
 fi
 
+self="$(readlink -f -- "${BASH_SOURCE[0]}")"
+diagram_tool="$(dirname "$self")/qq-openwiki-bpmn"
+if [ ! -f "$diagram_tool" ] || [ ! -x "$diagram_tool" ]; then
+  die "OpenWiki BPMN publisher is missing or not executable: $diagram_tool"
+fi
+printf -v diagram_tool_command '%q' "$diagram_tool"
+if [ -n "${QQ_OPENWIKI_NODE_BIN:-}" ]; then
+  case "$QQ_OPENWIKI_NODE_BIN" in
+    /*) node_bin="$QQ_OPENWIKI_NODE_BIN" ;;
+    *) die "QQ_OPENWIKI_NODE_BIN must be an absolute executable file" ;;
+  esac
+else
+  node_bin="$(command -v node 2>/dev/null || true)"
+  if [ -z "$node_bin" ] && [ -x "$(dirname "$openwiki_bin")/node" ]; then
+    node_bin="$(dirname "$openwiki_bin")/node"
+  fi
+fi
+[ -n "${node_bin:-}" ] \
+  || die "node not found; set QQ_OPENWIKI_NODE_BIN to its absolute path"
+node_bin="$(readlink -f -- "$node_bin")"
+if [ ! -f "$node_bin" ] || [ ! -x "$node_bin" ]; then
+  die "QQ_OPENWIKI_NODE_BIN must be an absolute executable file"
+fi
+printf -v node_bin_command '%q' "$node_bin"
+diagram_publish_command="QQ_OPENWIKI_NODE_BIN=$node_bin_command $diagram_tool_command"
+
 command -v git >/dev/null 2>&1 || die "git not found"
 command -v flock >/dev/null 2>&1 || die "flock not found"
 command -v sha256sum >/dev/null 2>&1 || die "sha256sum not found"
@@ -129,9 +155,21 @@ trap 'restore_local_setup >/dev/null 2>&1 || true' EXIT
 shadow_agent_symlink AGENTS.md
 shadow_agent_symlink CLAUDE.md
 
+diagram_instruction="$(printf '%s\n' \
+  'OpenWiki BPMN authoring extension:' \
+  'You, the internal OpenWiki generator, own diagram selection and authorship during this run. While inspecting source and writing the narrative wiki, decide whether any concrete multi-step, branching, lifecycle, retry, or failure process would become materially easier to understand as BPMN. There is no diagram quota. Do not diagram a process when prose is equally clear.' \
+  'For each useful process, create openwiki/processes/<id>.json. The filename must equal the stable BPMN process id. The JSON object requires id, name, elements, and flows. Every element requires id, type, name, non-empty documentation, and evidence with non-empty source-relative file and lines strings. Every flow requires id, source, target, non-empty documentation, and the same evidence object; name is optional. Supported element types are startEvent, endEvent, serviceTask, userTask, manualTask, exclusiveGateway, and boundaryEvent. An error end event may set error=true. A boundaryEvent also sets attachedTo and kind=error or kind=timer; timer boundaries require an ISO 8601 duration, and cancelActivity is optional.' \
+  "After writing a spec, publish it with exactly: $diagram_publish_command openwiki/processes/<id>.json" \
+  "Verify a published spec with exactly: $diagram_publish_command --check openwiki/processes/<id>.json" \
+  'That command verifies every cited source file and line range inside the Repository, lints and lays out the model, checks lossless evidence round trips and repeat-generation determinism, then publishes only <id>.bpmn and the visibly attributed <id>.png beside the spec. Treat both as generated artifacts: never hand-edit them and never publish pipeline SVG, layout, or round-trip intermediates.' \
+  'Prefer a compact process abstraction over mirroring every source statement. Keep labels short and combine low-level steps when that preserves the material decisions and outcomes. If the rendered result is panoramic or its labels will be unreadable at a typical Markdown content width, simplify the model or omit it.' \
+  'Embed each generated PNG from the Markdown page that explains the process, using the correct relative image path and retaining enough prose to orient the reader. Make the embedded image a link to the same PNG so full resolution is one click away. Inspect the rendered result and keep it only when it genuinely clarifies the process.' \
+  'On updates, evaluate existing openwiki/processes specs and Markdown links too. Update and republish diagrams that remain useful; remove the JSON, BPMN, PNG, and link together when the process is gone, materially changed beyond recognition, or no longer benefits from a diagram. Before finishing, run the publisher in --check mode for every retained spec in stable filename order.' \
+  'Keep all authored wiki and diagram files under openwiki/.')"
+
 set +e
-OPENWIKI_PROVIDER="openai-chatgpt" \
-  "$openwiki_bin" code "$mode" --print "$@"
+OPENWIKI_PROVIDER="openai-chatgpt" QQ_OPENWIKI_NODE_BIN="$node_bin" \
+  "$openwiki_bin" code "$mode" --print "$@" "$diagram_instruction"
 run_status=$?
 set -e
 

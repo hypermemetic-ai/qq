@@ -7,11 +7,13 @@ import { parseArgs } from 'node:util';
 import { conformFiles } from '../lib/conformance.mjs';
 import { buildPlanFile, generateBpmn, readPlanSpec } from '../lib/generate.mjs';
 import { PipelineError, runPipeline } from '../lib/pipeline.mjs';
+import { publishWikiProcess } from '../lib/wiki.mjs';
 
 const usage = `Usage:
   qq-bpmn build <spec.json> <out.bpmn>
   qq-bpmn render <in.bpmn> <outdir>
   qq-bpmn all <spec.json> <outdir>
+  qq-bpmn wiki <spec.json> [--check]
   qq-bpmn conform <plan.bpmn> <completions.json> [-o report.md] [--strict]`;
 
 class CliError extends Error {
@@ -48,6 +50,30 @@ async function all(specArgument, outdirArgument) {
   await writeFile(bpmnPath, xml, 'utf8');
   console.log(`Wrote ${bpmnPath}`);
   await runPipeline(bpmnPath, outdir);
+}
+
+async function wiki(arguments_) {
+  let parsed;
+
+  try {
+    parsed = parseArgs({
+      args: arguments_,
+      allowPositionals: true,
+      strict: true,
+      options: {
+        check: {
+          type: 'boolean'
+        }
+      }
+    });
+  } catch (error) {
+    throw new CliError(`${error.message}\n\n${usage}`);
+  }
+
+  requirePositionals('wiki', parsed.positionals, 1);
+  await publishWikiProcess(resolve(parsed.positionals[0]), {
+    check: parsed.values.check === true
+  });
 }
 
 async function conform(arguments_) {
@@ -113,6 +139,9 @@ async function main() {
     case 'all':
       requirePositionals(command, arguments_, 2);
       await all(...arguments_);
+      break;
+    case 'wiki':
+      await wiki(arguments_);
       break;
     case 'conform':
       await conform(arguments_);

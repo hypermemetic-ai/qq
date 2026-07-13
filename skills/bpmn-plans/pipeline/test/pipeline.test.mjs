@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
@@ -11,6 +11,7 @@ import { BpmnModdle } from 'bpmn-moddle';
 import { buildConformanceReport } from '../lib/conformance.mjs';
 import { generateBpmn } from '../lib/generate.mjs';
 import { lintBpmnXml, PipelineError, runPipeline } from '../lib/pipeline.mjs';
+import { publishWikiProcess, validateWikiSpec, WikiPublishError } from '../lib/wiki.mjs';
 
 const packageDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const examplePath = join(packageDirectory, 'example', 'plan-spec.example.json');
@@ -325,6 +326,176 @@ test('generator rejects generated-id collisions, parser-reserved ids, and mixed 
     /must be an ISO 8601 duration/
   );
   await generateBpmn(timerSpec('P1W'));
+});
+
+test('OpenWiki specs require traceable Repository evidence on every documented node and flow', async (t) => {
+  const repository = await temporaryDirectory(t, 'wiki-validation');
+  const outside = await temporaryDirectory(t, 'wiki-validation-outside');
+  const processesDirectory = join(repository, 'openwiki', 'processes');
+  const sourceDirectory = join(repository, 'src');
+  const specPath = join(processesDirectory, 'documented_process.json');
+  await mkdir(processesDirectory, { recursive: true });
+  await mkdir(sourceDirectory, { recursive: true });
+  await writeFile(
+    join(sourceDirectory, 'process.mjs'),
+    `${Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join('\n')}\n`,
+    'utf8'
+  );
+  await writeFile(join(outside, 'escaped.mjs'), 'outside\n', 'utf8');
+  await symlink(join(outside, 'escaped.mjs'), join(sourceDirectory, 'escaped.mjs'));
+
+  const evidence = { file: 'src/process.mjs', lines: '1-12' };
+  const spec = {
+    id: 'documented_process',
+    name: 'Documented process',
+    elements: [
+      {
+        id: 'start',
+        type: 'startEvent',
+        name: 'Start',
+        documentation: 'The process begins.',
+        evidence
+      },
+      {
+        id: 'done',
+        type: 'endEvent',
+        name: 'Done',
+        documentation: 'The process completes.',
+        evidence
+      }
+    ],
+    flows: [
+      {
+        id: 'flow_done',
+        source: 'start',
+        target: 'done',
+        documentation: 'Control passes directly to completion.',
+        evidence
+      }
+    ]
+  };
+
+  await validateWikiSpec(spec, specPath);
+  await assert.rejects(
+    () => validateWikiSpec(spec, join(processesDirectory, 'wrong-name.json')),
+    (error) => error instanceof WikiPublishError && /filename must match process id/.test(error.message)
+  );
+
+  for (const [mutate, expected] of [
+    [ (candidate) => { candidate.elements[0].documentation = ''; }, /elements\[0\]\.documentation/ ],
+    [ (candidate) => { delete candidate.flows[0].documentation; }, /flows\[0\]\.documentation/ ],
+    [ (candidate) => { delete candidate.flows[0].evidence; }, /flows\[0\]\.evidence/ ],
+    [ (candidate) => { candidate.flows[0].evidence.file = '../../outside.mjs'; }, /normalized Repository-relative path/ ],
+    [ (candidate) => { candidate.flows[0].evidence.file = '/tmp/outside.mjs'; }, /normalized Repository-relative path/ ],
+    [ (candidate) => { candidate.flows[0].evidence.file = 'src/escaped.mjs'; }, /resolves outside the Repository/ ],
+    [ (candidate) => { candidate.flows[0].evidence.file = 'src/missing.mjs'; }, /could not be resolved inside the Repository/ ],
+    [ (candidate) => { candidate.flows[0].evidence.lines = 'not-a-range'; }, /positive line numbers or inclusive ranges/ ],
+    [ (candidate) => { candidate.flows[0].evidence.lines = '12-4'; }, /reversed range/ ],
+    [ (candidate) => { candidate.flows[0].evidence.lines = '1-21'; }, /exceeds .* 20 line/ ]
+  ]) {
+    const candidate = structuredClone(spec);
+    mutate(candidate);
+    await assert.rejects(
+      () => validateWikiSpec(candidate, specPath),
+      expected
+    );
+  }
+});
+
+test('OpenWiki publishing emits only deterministic semantic BPMN and PNG artifacts', async (t) => {
+  if (process.env.QQ_BPMN_SKIP_RENDER === '1') {
+    t.skip('QQ_BPMN_SKIP_RENDER=1');
+    return;
+  }
+
+  try {
+    const puppeteer = await import('puppeteer');
+    await access(puppeteer.default.executablePath(), fsConstants.X_OK);
+  } catch (error) {
+    t.skip(`Chrome unavailable: ${error.message}`);
+    return;
+  }
+
+  const repository = await temporaryDirectory(t, 'wiki-publish');
+  const directory = join(repository, 'openwiki', 'processes');
+  await mkdir(directory, { recursive: true });
+  await mkdir(join(repository, 'src'), { recursive: true });
+  await writeFile(
+    join(repository, 'src', 'lifecycle.mjs'),
+    `${Array.from({ length: 30 }, (_, index) => `line ${index + 1}`).join('\n')}\n`,
+    'utf8'
+  );
+  const evidence = { file: 'src/lifecycle.mjs', lines: '4-27' };
+  const spec = {
+    id: 'widget_lifecycle',
+    name: 'Widget lifecycle',
+    elements: [
+      {
+        id: 'requested',
+        type: 'startEvent',
+        name: 'Widget requested',
+        documentation: 'A caller requests a widget.',
+        evidence
+      },
+      {
+        id: 'build',
+        type: 'serviceTask',
+        name: 'Build widget',
+        documentation: 'The service builds the requested widget.',
+        evidence
+      },
+      {
+        id: 'built',
+        type: 'endEvent',
+        name: 'Widget built',
+        documentation: 'The completed widget is returned.',
+        evidence
+      }
+    ],
+    flows: [
+      {
+        id: 'flow_request_build',
+        source: 'requested',
+        target: 'build',
+        documentation: 'A valid request starts construction.',
+        evidence
+      },
+      {
+        id: 'flow_build_done',
+        source: 'build',
+        target: 'built',
+        documentation: 'Successful construction produces the widget.',
+        evidence
+      }
+    ]
+  };
+  const specPath = join(directory, `${spec.id}.json`);
+  await writeFile(specPath, `${JSON.stringify(spec, null, 2)}\n`, 'utf8');
+
+  const published = await publishWikiProcess(specPath, { logger: silentLogger });
+  const firstBpmn = await readFile(published.bpmnPath);
+  const firstPng = await readFile(published.pngPath);
+  assert.deepEqual((await readdir(directory)).sort(), [
+    'widget_lifecycle.bpmn',
+    'widget_lifecycle.json',
+    'widget_lifecycle.png'
+  ]);
+  assert.doesNotMatch(firstBpmn.toString('utf8'), /<bpmndi:BPMNDiagram/);
+  assert.deepEqual(firstPng.subarray(0, 8), Buffer.from([ 137, 80, 78, 71, 13, 10, 26, 10 ]));
+
+  const check = spawnSync(process.execPath, [ cliPath, 'wiki', specPath, '--check' ], {
+    encoding: 'utf8'
+  });
+  assert.equal(check.status, 0, check.stderr);
+  assert.deepEqual(await readFile(published.bpmnPath), firstBpmn);
+  assert.deepEqual(await readFile(published.pngPath), firstPng);
+
+  await writeFile(published.pngPath, Buffer.from('stale'));
+  const stale = spawnSync(process.execPath, [ cliPath, 'wiki', '--check', specPath ], {
+    encoding: 'utf8'
+  });
+  assert.equal(stale.status, 1, stale.stderr);
+  assert.match(stale.stderr, /PNG does not match deterministic generation/);
 });
 
 test('rendered SVG and PNG are visible and deterministic when Chrome is available', async (t) => {

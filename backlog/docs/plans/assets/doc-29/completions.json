@@ -1,0 +1,83 @@
+{
+  "intent_recovered": {
+    "status": "done",
+    "evidence": "TASK-6 corrected implementation plan, notes, and comment #3"
+  },
+  "confirm_extension_seam": {
+    "status": "done",
+    "evidence": "Installed OpenWiki commands/prompt/backend inspection and bin/qq-openwiki prompt-forwarding test"
+  },
+  "build_wiki_publish_command": {
+    "status": "done",
+    "evidence": "bin/qq-openwiki-bpmn and skills/bpmn-plans/pipeline/lib/wiki.mjs"
+  },
+  "inject_generator_guidance": {
+    "status": "done",
+    "evidence": "bin/qq-openwiki: internal-generator authoring instruction and preserved caller-argument tests"
+  },
+  "install_and_document_tool": {
+    "status": "done",
+    "evidence": "bin/install.sh, README.md, pipeline README, and installer integration test"
+  },
+  "verification_entry": {
+    "status": "done",
+    "evidence": "Focused verification rerun after implementation and both correction loops"
+  },
+  "run_automated_checks": {
+    "status": "done",
+    "evidence": "16 BPMN tests; four shell suites; shellcheck; Bash syntax; Skill validation; git diff check"
+  },
+  "checks_green": {
+    "status": "done",
+    "evidence": "All local Checks green before real generation and publication"
+  },
+  "fix_check_failures": {
+    "status": "done",
+    "evidence": "Restricted-PATH Node failure reproduced; exact inline runtime command added and wrapper tests rerun"
+  },
+  "run_internal_agent_smoke": {
+    "status": "done",
+    "evidence": "Real OpenWiki init in disposable fulfillment repo; outcome recorded in PR #56 body"
+  },
+  "assess_generated_wiki": {
+    "status": "done",
+    "evidence": "TASK-6 comment #4 records operator acceptance of the final 975x450 diagram"
+  },
+  "diagram_helpful": {
+    "status": "done",
+    "evidence": "Internal model simplified its first panoramic render; final clickable diagram passed operator UAT"
+  },
+  "tune_generation_capability": {
+    "status": "done",
+    "evidence": "Compactness/click-through guidance and inline Node runtime were added after real smoke evidence"
+  },
+  "fresh_context_review": {
+    "status": "done",
+    "evidence": "Fresh read-only TASK-6 Change review completed before commit"
+  },
+  "confirmed_findings": {
+    "status": "done",
+    "evidence": "Reviewer evidence-traceability finding reproduced against validateWikiSpec"
+  },
+  "fix_review_findings": {
+    "status": "done",
+    "evidence": "Repository-confined source/range validation added; same reviewer found no material exact-delta findings"
+  },
+  "open_source_pr": {
+    "status": "done",
+    "evidence": "https://github.com/hypermemetic-ai/qq/pull/56"
+  },
+  "pr_green": {
+    "status": "done",
+    "evidence": "PR #56 is OPEN, MERGEABLE, CLEAN, with no configured status checks"
+  },
+  "fix_pr_failures": {
+    "status": "skipped",
+    "evidence": "No GitHub-side Check failures were reported for PR #56",
+    "note": "The failure branch was not taken."
+  },
+  "green_handoff": {
+    "status": "done",
+    "evidence": "PR #56 reached the approved plan boundary before same-PR conformance and Task finalization"
+  }
+}

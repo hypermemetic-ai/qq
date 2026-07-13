@@ -52,10 +52,11 @@ From the qq Repository root, run:
 bash bin/install.sh
 ```
 
-The installer live-links Skills into Codex and links the cockpit configuration
-and retained commands. It prunes links to qq Skills and commands that no longer
-exist and refuses to replace paths it does not manage. Run it again after adding
-or removing a Skill.
+The installer live-links Skills into Codex, links the cockpit configuration and
+retained commands, and installs the locked dependencies for qq's BPMN
+publisher. It prunes links to qq Skills and commands that no longer exist and
+refuses to replace paths it does not manage. Run it again after adding or
+removing a Skill.
 
 The installer does not manage repository instructions. A linked Repository can
 point its root `AGENTS.md` symlink directly to qq's `AGENTS.md`, keeping one
@@ -74,10 +75,21 @@ qq-openwiki --init
 qq-openwiki --update
 ```
 
+During that same OpenWiki model run, the internal generator decides which
+source-backed processes materially benefit from BPMN; there is no diagram
+quota. For each useful process it authors a JSON model under
+`openwiki/processes/`, invokes qq's guarded deterministic publisher, and embeds
+the generated PNG in the relevant narrative page.
+`qq-openwiki-bpmn --check openwiki/processes/<id>.json` independently verifies
+a retained model and its published semantic BPMN and PNG.
+
 In a restricted fresh-agent or service environment, set `OPENWIKI_BIN` to the
 OpenWiki executable's absolute path. The wrapper validates and invokes that
 path directly; when it is unset, the wrapper falls back to `command -v
-openwiki`. It does not use a login shell for executable discovery.
+openwiki`. It does not use a login shell for executable discovery. When Node is
+also absent from `PATH` and is not beside that OpenWiki executable, set
+`QQ_OPENWIKI_NODE_BIN` to Node's absolute path; the wrapper carries the
+validated runtime into OpenWiki's diagram-publishing commands.
 
 Temporary debt (2026-07-10): ChatGPT OAuth merged in OpenWiki PR #151 after the
 0.1.0 npm release. The operator machine is therefore built from upstream commit
@@ -90,9 +102,11 @@ Its credentials stay under `~/.openwiki/`, uncommitted.
 
 OpenWiki is a local single-writer derived surface owned by a separate maintainer
 Actor, not by source-change agents. An advance of `main` is the maintainer's
-input. The `openwiki-maintainer` Skill owns observation, generation, review, and
-delivery from its dedicated worktree; `qq-openwiki` supplies deterministic
-branch, freshness, process-lock, and root-instruction restoration guards.
+input. The `openwiki-maintainer` Skill owns observation, activation, independent
+verification, and delivery from its dedicated worktree; OpenWiki's internal
+generator owns narrative and diagram authorship. `qq-openwiki` supplies the
+diagram-authoring instruction plus deterministic branch, freshness,
+process-lock, and root-instruction restoration guards.
 
 ### Merge-triggered maintenance
 
