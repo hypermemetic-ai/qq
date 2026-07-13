@@ -57,9 +57,11 @@ delegated agents bounded assignments; do not hand them this lifecycle.
    and `uat-signoff` when operator confirmation is required. Dispatch, a printed
    URL, or momentary appearance is not visibility. If persistent visibility is
    not confirmed, retry once through a durable opener, report the URL, and stop.
-9. Never merge the pull request. After browser visibility is established, watch
-   its state for up to three minutes. If it remains open, report the URL and
-   current Checks, then stop.
+9. Never merge the pull request. After browser visibility is established, start
+   a three-minute monitoring window and poll its state at reasonable intervals
+   until it is merged or closed, or the full three minutes elapse. A still-open
+   poll is not a stopping condition. If it remains open when the full window
+   elapses, report the URL and current Checks, then stop.
 10. If the operator merges during that window or later resumes the work, fetch
    and reinspect the pull request with step 7's fields. Verify its landed state,
    including that `.mergeCommit.oid` is reachable from freshly fetched
