@@ -1,7 +1,7 @@
 ---
 id: TASK-21
 title: Bound OpenWiki correction retries and reject defective diagram bundles
-status: In Progress
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-07-13 16:15'
@@ -30,11 +30,11 @@ Operator finding from the first live BPMN-bearing OpenWiki refresh: a complete g
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A materially defective optional diagram is rejected as one complete JSON/BPMN/PNG/Markdown-link bundle without discarding independently verified narrative output; the outer maintainer never rewrites diagram semantics.
-- [ ] #2 For a complete generated result with material findings, the maintainer gives the internal generator one consolidated correction brief against the current generated set, verifies the correction, and uses another round only when evidence identifies a remaining material defect with a clear remedy; it stops and preserves evidence when corrections cease to converge.
-- [ ] #3 Incomplete or failed generation and a newer landed main still reset and regenerate from current origin/main, preserving the single-writer and supersede-in-place decisions.
-- [ ] #4 Diagram acceptance is based on material semantic correctness, source evidence, and actual readability at the embed plus linked full resolution; aspect ratio alone is not a rejection condition.
-- [ ] #5 Focused methodology Checks plus fresh-context code review pass before the follow-up Change is committed or published.
+- [x] #1 A materially defective optional diagram is rejected as one complete JSON/BPMN/PNG/Markdown-link bundle without discarding independently verified narrative output; the outer maintainer never rewrites diagram semantics.
+- [x] #2 For a complete generated result with material findings, the maintainer gives the internal generator one consolidated correction brief against the current generated set, verifies the correction, and uses another round only when evidence identifies a remaining material defect with a clear remedy; it stops and preserves evidence when corrections cease to converge.
+- [x] #3 Incomplete or failed generation and a newer landed main still reset and regenerate from current origin/main, preserving the single-writer and supersede-in-place decisions.
+- [x] #4 Diagram acceptance is based on material semantic correctness, source evidence, and actual readability at the embed plus linked full resolution; aspect ratio alone is not a rejection condition.
+- [x] #5 Focused methodology Checks plus fresh-context code review pass before the follow-up Change is committed or published.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -88,3 +88,9 @@ created: 2026-07-13 17:18
 Reopened after operator review of the landed behavior: acceptance criterion 2 encoded an arbitrary one-correction cap and whole-result discard that were not intended. The follow-up preserves bounded convergence without a numeric review-round limit.
 ---
 <!-- COMMENTS:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Corrected the PR #58 overconstraint in follow-up PR #59. OpenWiki now consolidates verified material findings and lets its internal generator revise the current generated set through a guarded staged-baseline correction mode. Further rounds require a remaining material defect, a clear remedy, and evidence of convergence; cosmetic or non-converging rounds stop without discarding the baseline or attempted delta. Focused and broad local Checks passed, realistic forward tests resolved cleanly, and fresh-context code review returned no material findings.
+<!-- SECTION:FINAL_SUMMARY:END -->
