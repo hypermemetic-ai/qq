@@ -112,6 +112,75 @@ test -x "$(<"$tmp/runtime-node")"
 git -C "$repo" restore openwiki/quickstart.md
 test -z "$(git -C "$repo" status --porcelain)"
 
+rm -f "$FAKE_LOG" "$FAKE_PROVIDER_LOG"
+if (
+  cd "$repo"
+  "$QQ_OPENWIKI" --correct 'address verified findings' \
+    >"$tmp/correct-clean.out" 2>"$tmp/correct-clean.err"
+); then
+  echo 'correction without a staged generated snapshot unexpectedly succeeded' >&2
+  exit 1
+fi
+grep -q 'correction requires a staged generated snapshot' \
+  "$tmp/correct-clean.err"
+test ! -e "$FAKE_LOG"
+test ! -e "$FAKE_PROVIDER_LOG"
+
+printf 'reviewed generated result\n' >>"$repo/openwiki/quickstart.md"
+git -C "$repo" add -A
+(
+  cd "$repo"
+  "$QQ_OPENWIKI" --correct 'address verified findings'
+)
+test "$(<"$tmp/args.count")" = 5
+test "$(<"$tmp/args.1")" = code
+test "$(<"$tmp/args.2")" = --update
+test "$(<"$tmp/args.3")" = --print
+test "$(<"$tmp/args.4")" = 'address verified findings'
+grep -Fq 'OpenWiki BPMN authoring extension:' "$tmp/args.5"
+grep -Fq 'reviewed generated result' \
+  <(git -C "$repo" diff --cached -- openwiki/quickstart.md)
+grep -Fq 'updated' <(git -C "$repo" diff -- openwiki/quickstart.md)
+test ! -e "$repo/.github/workflows/openwiki-update.yml"
+cmp "$tmp/agents-original" "$repo/AGENTS.md"
+git -C "$repo" restore --worktree .
+git -C "$repo" restore --staged .
+git -C "$repo" restore --worktree .
+test -z "$(git -C "$repo" status --porcelain)"
+
+printf 'out-of-scope change\n' >>"$repo/AGENTS.md"
+git -C "$repo" add AGENTS.md
+rm -f "$FAKE_LOG" "$FAKE_PROVIDER_LOG"
+if (
+  cd "$repo"
+  "$QQ_OPENWIKI" --correct >"$tmp/correct-scope.out" 2>"$tmp/correct-scope.err"
+); then
+  echo 'out-of-scope correction snapshot unexpectedly succeeded' >&2
+  exit 1
+fi
+grep -q 'correction snapshot is outside openwiki/' "$tmp/correct-scope.err"
+test ! -e "$FAKE_LOG"
+test ! -e "$FAKE_PROVIDER_LOG"
+git -C "$repo" restore --staged --worktree AGENTS.md
+
+printf 'reviewed generated result\n' >>"$repo/openwiki/quickstart.md"
+git -C "$repo" add -A
+printf 'unreviewed local edit\n' >>"$repo/openwiki/quickstart.md"
+if (
+  cd "$repo"
+  "$QQ_OPENWIKI" --correct \
+    >"$tmp/correct-unstaged.out" 2>"$tmp/correct-unstaged.err"
+); then
+  echo 'correction with an unstaged baseline unexpectedly succeeded' >&2
+  exit 1
+fi
+grep -q 'correction baseline must be fully staged' \
+  "$tmp/correct-unstaged.err"
+git -C "$repo" restore --worktree .
+git -C "$repo" restore --staged .
+git -C "$repo" restore --worktree .
+test -z "$(git -C "$repo" status --porcelain)"
+
 (
   cd "$repo"
   OPENWIKI_PROVIDER=openai-chatgpt "$QQ_OPENWIKI" --update \
