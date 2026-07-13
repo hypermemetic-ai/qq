@@ -1,9 +1,10 @@
 # qq BPMN pipeline
 
-This package turns a small JSON plan specification into a single-process BPMN
-diagram with source evidence on every flow node. It lints the semantic model,
-adds deterministic diagram interchange (DI), verifies that documentation and
-`qq:evidence` extensions survived layout, and renders SVG and PNG artifacts.
+This package turns a small JSON diagram specification into a single-process
+BPMN diagram with source evidence on every required element. The same schema
+supports plan artifacts and OpenWiki process models. It lints the semantic
+model, adds deterministic diagram interchange (DI), verifies that documentation
+and `qq:evidence` extensions survived layout, and renders SVG and PNG artifacts.
 
 The package requires Node.js 20 or newer. Install the locked dependencies and
 run the tests from this directory:
@@ -117,6 +118,14 @@ optional and is useful for labeled gateway branches:
   "name": "approved"
 }
 ```
+
+A flow may also carry `documentation` and the same required-shape `evidence`
+object used by flow nodes. When evidence is present, generation stamps the
+sequence flow with losslessly checked `bpmn:documentation` and `qq:evidence`.
+Omitting both remains supported for historical plan specifications;
+`documentation` without `evidence` is rejected instead of being silently
+discarded. OpenWiki process models require evidence on every flow as well as
+every node.
 
 See [`example/plan-spec.example.json`](example/plan-spec.example.json) for a
 complete plan.

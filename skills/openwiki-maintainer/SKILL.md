@@ -38,12 +38,28 @@ Do not require the source-change agent to update, enqueue, or assess OpenWiki.
    setup. The wrapper holds the per-Repository lock and removes upstream's
    GitHub recurrence plumbing.
 2. Read OpenWiki's complete output, then verify its claims independently.
-3. Require the resulting Change to remain within `openwiki/` and the marked
+3. Reconcile the landed processes described by the wiki with JSON model specs
+   under `openwiki/processes/`. Name each spec `<id>.json` with a matching BPMN
+   process `id`. Use the flat subset documented in
+   `skills/bpmn-plans/pipeline/README.md`, and require source-backed
+   `documentation` plus `evidence.file` and `evidence.lines` on every flow node
+   and sequence flow. Add a diagram only when it materially clarifies a process.
+4. Regenerate every current process spec through the locked shared pipeline.
+   Run `npm ci` under `skills/bpmn-plans/pipeline/`, then run its
+   `node bin/qq-bpmn.mjs all <spec> <temporary-output>` command for each spec in
+   stable filename order. Require clean lint and a lossless round-trip verdict.
+   Publish only the semantic `<id>.bpmn` and visibly attributed `<id>.png`
+   beside the spec; never hand-edit generated artifacts or publish the SVG.
+5. Regenerate into a second temporary directory and require byte-identical
+   semantic BPMN and PNG outputs. Embed each published PNG from the wiki page
+   that describes its process, inspect the render, and spot-check element and
+   edge evidence against the cited source lines.
+6. Require the resulting Change to remain within `openwiki/` and the marked
    OpenWiki instruction block. Reject any generated GitHub workflow, provider
    credential, or unrelated source edit.
-4. Check Markdown links and source claims, search for stale descriptions, run
+7. Check Markdown links and source claims, search for stale descriptions, run
    `git diff --check`, and run any Repository-specific documentation Checks.
-5. Invoke `code-review` with fresh-context independence. Resolve confirmed
+8. Invoke `code-review` with fresh-context independence. Resolve confirmed
    findings and rerun affected Checks.
 
 ## Deliver and continue observing

@@ -160,6 +160,58 @@ test('generator is deterministic and pipeline preserves all example evidence', a
   assert.match(await readFile(result.paths.layout, 'utf8'), /<bpmndi:BPMNDiagram/);
 });
 
+test('generator preserves optional sequence-flow evidence without breaking legacy flows', async (t) => {
+  const directory = await temporaryDirectory(t, 'flow-evidence');
+  const nodeEvidence = { file: 'src/process.mjs', lines: '1-12' };
+  const flowEvidence = { file: 'src/process.mjs', lines: '13-18' };
+  const xml = await generateBpmn({
+    id: 'flow_evidence_fixture',
+    name: 'Flow evidence fixture',
+    elements: [
+      { id: 'start', type: 'startEvent', name: 'Start', evidence: nodeEvidence },
+      { id: 'work', type: 'serviceTask', name: 'Work', evidence: nodeEvidence },
+      { id: 'end', type: 'endEvent', name: 'End', evidence: nodeEvidence }
+    ],
+    flows: [
+      {
+        id: 'flow_traced',
+        source: 'start',
+        target: 'work',
+        documentation: 'Source establishes this transition.',
+        evidence: flowEvidence
+      },
+      { id: 'flow_legacy', source: 'work', target: 'end' }
+    ]
+  });
+  const { rootElement, warnings } = await new BpmnModdle().fromXML(xml);
+  assert.deepEqual(warnings, []);
+  const [ process ] = rootElement.rootElements;
+  const byId = new Map(process.flowElements.map((element) => [ element.id, element ]));
+  const traced = byId.get('flow_traced');
+  const legacy = byId.get('flow_legacy');
+
+  assert.equal(traced.documentation.length, 1);
+  assert.ok(traced.documentation[0].text.endsWith(
+    `Evidence: ${flowEvidence.file}:${flowEvidence.lines}`
+  ));
+  assert.equal(traced.extensionElements.values.length, 1);
+  assert.equal(traced.extensionElements.values[0].$type, 'qq:evidence');
+  assert.equal(traced.extensionElements.values[0].file, flowEvidence.file);
+  assert.equal(traced.extensionElements.values[0].lines, flowEvidence.lines);
+  assert.equal(legacy.documentation, undefined);
+  assert.equal(legacy.extensionElements, undefined);
+
+  const inputPath = join(directory, 'flow-evidence.bpmn');
+  await writeFile(inputPath, xml, 'utf8');
+  const result = await runPipeline(inputPath, join(directory, 'pipeline'), {
+    logger: silentLogger,
+    render: false
+  });
+  assert.equal(result.roundTrip.lossless, true);
+  assert.equal(result.roundTrip.documentationBefore.length, 4);
+  assert.equal(result.roundTrip.extensionBefore.length, 4);
+});
+
 test('generator supports timer and error boundary events with deterministic evidence', async () => {
   const evidence = { file: 'src/worker.mjs', lines: '10-24' };
   const base = (id, type, name, extras = {}) => ({
@@ -240,6 +292,13 @@ test('generator rejects generated-id collisions, parser-reserved ids, and mixed 
   await assert.rejects(
     () => generateBpmn(linearSpec('constructor')),
     /reserved by the BPMN parser/
+  );
+
+  const undocumentedFlowEvidence = linearSpec();
+  undocumentedFlowEvidence.flows[0].documentation = 'This would otherwise be discarded.';
+  await assert.rejects(
+    () => generateBpmn(undocumentedFlowEvidence),
+    /flows\[0\]\.evidence is required when documentation is provided/
   );
 
   const timerSpec = (duration) => ({

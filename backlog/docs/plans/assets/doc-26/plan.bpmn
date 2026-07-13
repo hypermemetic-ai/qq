@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:qq="http://qq.local/schema/evidence" id="qq_task6_source_enablement_definitions" targetNamespace="http://qq.local/schema/bpmn">
+  <bpmn:process id="qq_task6_source_enablement" name="TASK-6 source enablement" isExecutable="false">
+    <bpmn:startEvent id="source_change_authorized" name="Source Change approved">
+      <bpmn:documentation>The operator approves the first Change in the two-Change TASK-6 delivery. Evidence: backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md:57-60</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md" lines="57-60" />
+      </bpmn:extensionElements>
+      <bpmn:outgoing>flow_start_extend</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="extend_flow_evidence" name="Add optional flow evidence">
+      <bpmn:documentation>Accept and stamp evidence on sequence flows without invalidating historical plan specs that omit it. Evidence: skills/bpmn-plans/pipeline/lib/generate.mjs:110-130,278-292</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/bpmn-plans/pipeline/lib/generate.mjs" lines="110-130,278-292" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_start_extend</bpmn:incoming>
+      <bpmn:outgoing>flow_extend_contract</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="update_maintainer_contract" name="Define wiki diagram refresh">
+      <bpmn:documentation>Teach the dedicated maintainer procedure to require evidence on every wiki node and edge, regenerate through the shared pipeline, publish attributed PNGs, and verify determinism. Evidence: skills/openwiki-maintainer/SKILL.md:41-56</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="41-56" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_extend_contract</bpmn:incoming>
+      <bpmn:outgoing>flow_contract_docs</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="update_tests_docs" name="Update pipeline tests and docs">
+      <bpmn:documentation>Cover backward compatibility, lossless sequence-flow evidence, the existing subset gate, and the maintainer-facing generation contract. Evidence: skills/bpmn-plans/pipeline/README.md:57-139</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/bpmn-plans/pipeline/README.md" lines="57-139" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_contract_docs</bpmn:incoming>
+      <bpmn:outgoing>flow_docs_checks</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="run_checks" name="Run focused checks">
+      <bpmn:documentation>Run the full BPMN pipeline suite, validate changed Skills, and inspect the repository diff. Evidence: skills/deliver-change/SKILL.md:22-28</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/deliver-change/SKILL.md" lines="22-28" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_entry_checks</bpmn:incoming>
+      <bpmn:outgoing>flow_checks_gate</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="verification_entry" name="Verification entry">
+      <bpmn:documentation>Merge the initial implementation path and every correction path before rerunning focused checks. Evidence: skills/deliver-change/SKILL.md:22-31</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/deliver-change/SKILL.md" lines="22-31" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_docs_checks</bpmn:incoming>
+      <bpmn:incoming>flow_fix_checks</bpmn:incoming>
+      <bpmn:incoming>flow_fix_review_checks</bpmn:incoming>
+      <bpmn:incoming>flow_fix_pr_checks</bpmn:incoming>
+      <bpmn:outgoing>flow_entry_checks</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:exclusiveGateway id="checks_green" name="Checks green?">
+      <bpmn:documentation>Only verified source enablement advances to independent review. Evidence: skills/deliver-change/SKILL.md:22-31</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/deliver-change/SKILL.md" lines="22-31" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_checks_gate</bpmn:incoming>
+      <bpmn:outgoing>flow_checks_fail</bpmn:outgoing>
+      <bpmn:outgoing>flow_checks_review</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="fix_check_failures" name="Fix check failures">
+      <bpmn:documentation>Correct only in-scope failures and rerun the checks that observe them. Evidence: skills/deliver-change/SKILL.md:22-28</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/deliver-change/SKILL.md" lines="22-28" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_checks_fail</bpmn:incoming>
+      <bpmn:outgoing>flow_fix_checks</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="fresh_context_review" name="Run fresh-context review">
+      <bpmn:documentation>Delegate the exact verified delta to an independent read-only reviewer before commit or publication. Evidence: skills/deliver-change/SKILL.md:26-28</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/deliver-change/SKILL.md" lines="26-28" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_checks_review</bpmn:incoming>
+      <bpmn:outgoing>flow_review_findings</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="confirmed_findings" name="Confirmed findings?">
+      <bpmn:documentation>The owning agent verifies reviewer findings and distinguishes real in-scope defects from non-findings. Evidence: skills/deliver-change/SKILL.md:26-28</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/deliver-change/SKILL.md" lines="26-28" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_review_findings</bpmn:incoming>
+      <bpmn:outgoing>flow_findings_fix</bpmn:outgoing>
+      <bpmn:outgoing>flow_findings_pr</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="fix_review_findings" name="Fix confirmed findings">
+      <bpmn:documentation>Resolve confirmed in-scope findings and rerun affected checks before another handoff attempt. Evidence: skills/deliver-change/SKILL.md:26-28</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/deliver-change/SKILL.md" lines="26-28" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_findings_fix</bpmn:incoming>
+      <bpmn:outgoing>flow_fix_review_checks</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="open_source_pr" name="Open source enablement PR">
+      <bpmn:documentation>Commit and push the green reviewed source Change and open its pull request with Check evidence. Evidence: skills/deliver-change/SKILL.md:29-31</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/deliver-change/SKILL.md" lines="29-31" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_findings_pr</bpmn:incoming>
+      <bpmn:outgoing>flow_pr_gate</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="pr_green" name="PR green?">
+      <bpmn:documentation>The first Change is ready only when its applicable GitHub Checks pass. Evidence: skills/deliver-change/SKILL.md:29-31,46-50</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/deliver-change/SKILL.md" lines="29-31,46-50" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_pr_gate</bpmn:incoming>
+      <bpmn:outgoing>flow_pr_fail</bpmn:outgoing>
+      <bpmn:outgoing>flow_pr_handoff</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="fix_pr_failures" name="Fix PR failures">
+      <bpmn:documentation>Correct an in-scope handoff failure and return through local verification and review. Evidence: skills/deliver-change/SKILL.md:22-31</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/deliver-change/SKILL.md" lines="22-31" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_pr_fail</bpmn:incoming>
+      <bpmn:outgoing>flow_fix_pr_checks</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="green_handoff" name="Source PR green for handoff">
+      <bpmn:documentation>The source enablement Change is ready for operator disposition; Task 6 remains active for the separate maintainer Change. Evidence: backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md:3-6,43-46</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md" lines="3-6,43-46" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_pr_handoff</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="flow_start_extend" sourceRef="source_change_authorized" targetRef="extend_flow_evidence" />
+    <bpmn:sequenceFlow id="flow_extend_contract" sourceRef="extend_flow_evidence" targetRef="update_maintainer_contract" />
+    <bpmn:sequenceFlow id="flow_contract_docs" sourceRef="update_maintainer_contract" targetRef="update_tests_docs" />
+    <bpmn:sequenceFlow id="flow_docs_checks" sourceRef="update_tests_docs" targetRef="verification_entry" />
+    <bpmn:sequenceFlow id="flow_entry_checks" sourceRef="verification_entry" targetRef="run_checks" />
+    <bpmn:sequenceFlow id="flow_checks_gate" sourceRef="run_checks" targetRef="checks_green" />
+    <bpmn:sequenceFlow id="flow_checks_fail" name="no" sourceRef="checks_green" targetRef="fix_check_failures" />
+    <bpmn:sequenceFlow id="flow_fix_checks" sourceRef="fix_check_failures" targetRef="verification_entry" />
+    <bpmn:sequenceFlow id="flow_checks_review" name="yes" sourceRef="checks_green" targetRef="fresh_context_review" />
+    <bpmn:sequenceFlow id="flow_review_findings" sourceRef="fresh_context_review" targetRef="confirmed_findings" />
+    <bpmn:sequenceFlow id="flow_findings_fix" name="yes" sourceRef="confirmed_findings" targetRef="fix_review_findings" />
+    <bpmn:sequenceFlow id="flow_fix_review_checks" sourceRef="fix_review_findings" targetRef="verification_entry" />
+    <bpmn:sequenceFlow id="flow_findings_pr" name="no" sourceRef="confirmed_findings" targetRef="open_source_pr" />
+    <bpmn:sequenceFlow id="flow_pr_gate" sourceRef="open_source_pr" targetRef="pr_green" />
+    <bpmn:sequenceFlow id="flow_pr_fail" name="no" sourceRef="pr_green" targetRef="fix_pr_failures" />
+    <bpmn:sequenceFlow id="flow_fix_pr_checks" sourceRef="fix_pr_failures" targetRef="verification_entry" />
+    <bpmn:sequenceFlow id="flow_pr_handoff" name="yes" sourceRef="pr_green" targetRef="green_handoff" />
+  </bpmn:process>
+</bpmn:definitions>

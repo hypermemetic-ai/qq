@@ -117,6 +117,16 @@ function validateFlow(flow, index) {
   if (flow.name !== undefined) {
     requireString(flow.name, `${label}.name`);
   }
+
+  if (flow.documentation !== undefined) {
+    requireString(flow.documentation, `${label}.documentation`, { allowEmpty: true });
+  }
+
+  if (flow.evidence !== undefined) {
+    validateEvidence(flow.evidence, `${label}.evidence`);
+  } else if (flow.documentation !== undefined) {
+    throw new PlanSpecError(`${label}.evidence is required when documentation is provided`);
+  }
 }
 
 export function validatePlanSpec(spec) {
@@ -271,6 +281,7 @@ export async function generateBpmn(spec) {
     const flow = moddle.create('bpmn:SequenceFlow', {
       id: flowSpec.id,
       ...(flowSpec.name === undefined ? {} : { name: flowSpec.name }),
+      ...(flowSpec.evidence === undefined ? {} : evidenceProperties(moddle, flowSpec)),
       sourceRef,
       targetRef
     });

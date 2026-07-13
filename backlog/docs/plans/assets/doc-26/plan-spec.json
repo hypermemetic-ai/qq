@@ -1,0 +1,175 @@
+{
+  "id": "qq_task6_source_enablement",
+  "name": "TASK-6 source enablement",
+  "elements": [
+    {
+      "id": "source_change_authorized",
+      "type": "startEvent",
+      "name": "Source Change approved",
+      "documentation": "The operator approves the first Change in the two-Change TASK-6 delivery.",
+      "evidence": {
+        "file": "backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md",
+        "lines": "57-60"
+      }
+    },
+    {
+      "id": "extend_flow_evidence",
+      "type": "serviceTask",
+      "name": "Add optional flow evidence",
+      "documentation": "Accept and stamp evidence on sequence flows without invalidating historical plan specs that omit it.",
+      "evidence": {
+        "file": "skills/bpmn-plans/pipeline/lib/generate.mjs",
+        "lines": "110-130,278-292"
+      }
+    },
+    {
+      "id": "update_maintainer_contract",
+      "type": "serviceTask",
+      "name": "Define wiki diagram refresh",
+      "documentation": "Teach the dedicated maintainer procedure to require evidence on every wiki node and edge, regenerate through the shared pipeline, publish attributed PNGs, and verify determinism.",
+      "evidence": {
+        "file": "skills/openwiki-maintainer/SKILL.md",
+        "lines": "41-56"
+      }
+    },
+    {
+      "id": "update_tests_docs",
+      "type": "serviceTask",
+      "name": "Update pipeline tests and docs",
+      "documentation": "Cover backward compatibility, lossless sequence-flow evidence, the existing subset gate, and the maintainer-facing generation contract.",
+      "evidence": {
+        "file": "skills/bpmn-plans/pipeline/README.md",
+        "lines": "57-139"
+      }
+    },
+    {
+      "id": "run_checks",
+      "type": "serviceTask",
+      "name": "Run focused checks",
+      "documentation": "Run the full BPMN pipeline suite, validate changed Skills, and inspect the repository diff.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "22-28"
+      }
+    },
+    {
+      "id": "verification_entry",
+      "type": "exclusiveGateway",
+      "name": "Verification entry",
+      "documentation": "Merge the initial implementation path and every correction path before rerunning focused checks.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "22-31"
+      }
+    },
+    {
+      "id": "checks_green",
+      "type": "exclusiveGateway",
+      "name": "Checks green?",
+      "documentation": "Only verified source enablement advances to independent review.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "22-31"
+      }
+    },
+    {
+      "id": "fix_check_failures",
+      "type": "serviceTask",
+      "name": "Fix check failures",
+      "documentation": "Correct only in-scope failures and rerun the checks that observe them.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "22-28"
+      }
+    },
+    {
+      "id": "fresh_context_review",
+      "type": "serviceTask",
+      "name": "Run fresh-context review",
+      "documentation": "Delegate the exact verified delta to an independent read-only reviewer before commit or publication.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "26-28"
+      }
+    },
+    {
+      "id": "confirmed_findings",
+      "type": "exclusiveGateway",
+      "name": "Confirmed findings?",
+      "documentation": "The owning agent verifies reviewer findings and distinguishes real in-scope defects from non-findings.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "26-28"
+      }
+    },
+    {
+      "id": "fix_review_findings",
+      "type": "serviceTask",
+      "name": "Fix confirmed findings",
+      "documentation": "Resolve confirmed in-scope findings and rerun affected checks before another handoff attempt.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "26-28"
+      }
+    },
+    {
+      "id": "open_source_pr",
+      "type": "serviceTask",
+      "name": "Open source enablement PR",
+      "documentation": "Commit and push the green reviewed source Change and open its pull request with Check evidence.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "29-31"
+      }
+    },
+    {
+      "id": "pr_green",
+      "type": "exclusiveGateway",
+      "name": "PR green?",
+      "documentation": "The first Change is ready only when its applicable GitHub Checks pass.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "29-31,46-50"
+      }
+    },
+    {
+      "id": "fix_pr_failures",
+      "type": "serviceTask",
+      "name": "Fix PR failures",
+      "documentation": "Correct an in-scope handoff failure and return through local verification and review.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "22-31"
+      }
+    },
+    {
+      "id": "green_handoff",
+      "type": "endEvent",
+      "name": "Source PR green for handoff",
+      "documentation": "The source enablement Change is ready for operator disposition; Task 6 remains active for the separate maintainer Change.",
+      "evidence": {
+        "file": "backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md",
+        "lines": "3-6,43-46"
+      }
+    }
+  ],
+  "flows": [
+    { "id": "flow_start_extend", "source": "source_change_authorized", "target": "extend_flow_evidence" },
+    { "id": "flow_extend_contract", "source": "extend_flow_evidence", "target": "update_maintainer_contract" },
+    { "id": "flow_contract_docs", "source": "update_maintainer_contract", "target": "update_tests_docs" },
+    { "id": "flow_docs_checks", "source": "update_tests_docs", "target": "verification_entry" },
+    { "id": "flow_entry_checks", "source": "verification_entry", "target": "run_checks" },
+    { "id": "flow_checks_gate", "source": "run_checks", "target": "checks_green" },
+    { "id": "flow_checks_fail", "source": "checks_green", "target": "fix_check_failures", "name": "no" },
+    { "id": "flow_fix_checks", "source": "fix_check_failures", "target": "verification_entry" },
+    { "id": "flow_checks_review", "source": "checks_green", "target": "fresh_context_review", "name": "yes" },
+    { "id": "flow_review_findings", "source": "fresh_context_review", "target": "confirmed_findings" },
+    { "id": "flow_findings_fix", "source": "confirmed_findings", "target": "fix_review_findings", "name": "yes" },
+    { "id": "flow_fix_review_checks", "source": "fix_review_findings", "target": "verification_entry" },
+    { "id": "flow_findings_pr", "source": "confirmed_findings", "target": "open_source_pr", "name": "no" },
+    { "id": "flow_pr_gate", "source": "open_source_pr", "target": "pr_green" },
+    { "id": "flow_pr_fail", "source": "pr_green", "target": "fix_pr_failures", "name": "no" },
+    { "id": "flow_fix_pr_checks", "source": "fix_pr_failures", "target": "verification_entry" },
+    { "id": "flow_pr_handoff", "source": "pr_green", "target": "green_handoff", "name": "yes" }
+  ]
+}
