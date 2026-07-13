@@ -1,11 +1,11 @@
 ---
 id: TASK-15
 title: Keep BPMN conformance inside the owning PR
-status: In Progress
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-07-13 00:24'
-updated_date: '2026-07-13 00:36'
+updated_date: '2026-07-13 00:40'
 labels: []
 dependencies: []
 documentation:
@@ -48,4 +48,12 @@ Updated bpmn-plans prospectively: planned nodes end at a green owning-PR handoff
 A valid fresh-context forward test read the revised Skill and selected one owning PR, strict conformance before Task Done, a same-PR closeout commit, final checks after that commit, and no post-merge conformance Change. An earlier test was discarded because its prompt prohibited reading the filesystem Skill.
 
 Independent fresh-context review found one plan evidence citation that pointed at the later finalized-handoff gate and created a sequencing cycle. The citation now points at the pre-finalization publish-and-GitHub-check step; the regenerated diagram is visually byte-identical, all evidence ranges resolve, and the exact corrective delta has no material findings.
+
+Strict doc-25 conformance was generated and reviewed inside owning PR #47 before Task finalization: 12/12 nodes accounted, zero unaccounted, zero divergent, zero unknown, PASS; fresh closeout review found no material findings.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Revised bpmn-plans so planned execution ends at a green owning-PR handoff, strict conformance and Task finalization remain same-PR closeout metadata, and merge/disposition/main-sync activities stay outside BPMN. Preserved historical records, validated and forward-tested the Skill, resolved the independent plan-evidence finding, published the implementation in PR #47, then generated and reviewed strict 12/12 conformance on the same branch before marking this Task Done.
+<!-- SECTION:FINAL_SUMMARY:END -->

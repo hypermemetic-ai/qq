@@ -1,36 +1,4 @@
----
-id: doc-25
-title: Plan — Keep BPMN conformance inside the owning PR
-type: other
-created_date: '2026-07-13 00:25'
-updated_date: '2026-07-13 00:37'
-tags:
-  - plan
-  - bpmn
-  - conformance
-  - delivery
----
-# Plan — Keep BPMN conformance inside the owning PR
-
-## Intent
-
-Revise `bpmn-plans` prospectively so planned execution ends when the implementation Change is green in its owning pull request. Conformance artifacts and Task finalization are same-PR closeout metadata outside the BPMN nodes; operator disposition and local-main synchronization remain delivery activities outside conformance. Historical plan records remain unchanged.
-
-## Diagram
-
-![BPMN plan](assets/doc-25/plan.png)
-
-## Artifacts
-
-- Plan spec: `assets/doc-25/plan-spec.json`
-- Semantic BPMN: `assets/doc-25/plan.bpmn`
-- Published render: `assets/doc-25/plan.png`
-- Executed completions: `assets/doc-25/completions.json`
-- Conformance report: `assets/doc-25/conformance.md`
-
-The diagram is the approved execution contract. Conformance and Task finalization are same-PR closeout metadata outside its flow nodes.
-
-## Conformance report (same-PR closeout, 2026-07-13)
+# BPMN conformance report
 
 Plan: `backlog/docs/plans/assets/doc-25/plan.bpmn`
 
