@@ -122,14 +122,17 @@ def project_roots() -> list[Path]:
 def repositories_below(root: Path) -> list[Path]:
     repositories: list[Path] = []
     for current, directories, files in os.walk(root):
+        git_marker = ".git" in directories or ".git" in files
         directories[:] = [
             name
             for name in directories
             if name not in {"node_modules", "vendor", "target", "dist", "build"}
-            and (not name.startswith(".") or name == ".git")
+            and not name.startswith(".")
         ]
-        if ".git" in directories or ".git" in files:
-            repositories.append(Path(current).resolve())
+        repository = Path(current).resolve()
+        # Configured roots are search containers, never repository candidates.
+        if repository != root and git_marker:
+            repositories.append(repository)
             directories[:] = []
     return repositories
 
@@ -145,11 +148,14 @@ def remote_slug(repository: Path, git: str) -> str | None:
 
 def linked_repository(slug: str) -> Path | None:
     git = executable("QQ_GIT_BIN", "git")
+    roots = project_roots()
+    containers = set(roots)
     matches = {
         repository
-        for root in project_roots()
+        for root in roots
         for repository in repositories_below(root)
-        if (remote_slug(repository, git) or "").casefold() == slug.casefold()
+        if repository not in containers
+        and (remote_slug(repository, git) or "").casefold() == slug.casefold()
     }
     if len(matches) > 1:
         raise ActivationError(f"multiple local checkouts match GitHub Repository {slug}")

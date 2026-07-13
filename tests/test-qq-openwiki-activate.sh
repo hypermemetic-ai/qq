@@ -51,6 +51,10 @@ PROJECTS="$TMP/projects"
 FAKE_BIN="$TMP/fake-bin"
 mkdir -p "$HOME_DIR" "$PROJECTS" "$FAKE_BIN"
 
+# QQ_PROJECT_ROOTS names search containers, not candidate repositories. A Git
+# marker on the container must not hide valid descendant checkouts.
+mkdir -p "$PROJECTS/.git"
+
 make_repository "$PROJECTS/widget" "Acme/widget" true
 make_openwiki_worktree "$PROJECTS/widget" "$TMP/worktrees/widget-openwiki"
 make_repository "$PROJECTS/project" "other/project" true
@@ -153,6 +157,16 @@ fi
 
 WIDGET_URL=https://github.com/acme/widget/pull/7
 WIDGET_ACTIVATION='qq-openwiki://activate?pr=https%3A%2F%2Fgithub.com%2Facme%2Fwidget%2Fpull%2F7'
+
+export QQ_OPENWIKI_ACTIVATE_STATE_DIR="$TMP/state-overlapping-roots"
+export QQ_PROJECT_ROOTS="$PROJECTS:$PROJECTS/widget"
+gh_before="$(wc -l <"$FAKE_GH_LOG")"
+output="$($ACTIVATOR "$WIDGET_URL")"
+assert_contains "$output" '"status": "ignored"'
+gh_after="$(wc -l <"$FAKE_GH_LOG")"
+[ "$gh_before" -eq "$gh_after" ] || fail "configured container reached GitHub verification"
+export QQ_PROJECT_ROOTS="$PROJECTS"
+
 export QQ_OPENWIKI_ACTIVATE_STATE_DIR="$TMP/state-launch"
 output="$($ACTIVATOR "$WIDGET_ACTIVATION")"
 assert_contains "$output" '"status": "dispatched"'
