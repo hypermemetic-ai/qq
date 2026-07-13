@@ -1,11 +1,11 @@
 ---
 id: TASK-21
 title: Bound OpenWiki correction retries and reject defective diagram bundles
-status: Done
+status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-07-13 16:15'
-updated_date: '2026-07-13 17:00'
+updated_date: '2026-07-13 17:39'
 labels:
   - openwiki
   - methodology
@@ -13,6 +13,11 @@ labels:
 dependencies: []
 documentation:
   - doc-30
+modified_files:
+  - bin/qq-openwiki
+  - skills/openwiki-maintainer/SKILL.md
+  - tests/test-qq-openwiki.sh
+  - tests/test-openwiki-maintainer.sh
 priority: high
 ordinal: 18000
 ---
@@ -25,17 +30,17 @@ Operator finding from the first live BPMN-bearing OpenWiki refresh: a complete g
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [x] #1 A materially defective optional diagram is rejected as one complete JSON/BPMN/PNG/Markdown-link bundle without discarding independently verified narrative output; the outer maintainer never rewrites diagram semantics.
-- [x] #2 For one landed origin/main SHA, a complete generated result receives at most one evidence-backed whole-generation correction retry; if the corrected result remains materially invalid, the maintainer preserves the evidence, does not commit or push, and stops for operator direction.
-- [x] #3 Incomplete or failed generation and a newer landed main still reset and regenerate from current origin/main, preserving the single-writer and supersede-in-place decisions.
-- [x] #4 Diagram acceptance is based on material semantic correctness, source evidence, and actual readability at the embed plus linked full resolution; aspect ratio alone is not a rejection condition.
-- [x] #5 Focused wrapper and methodology Checks plus fresh-context code review pass before the Change is committed or published.
+- [ ] #1 A materially defective optional diagram is rejected as one complete JSON/BPMN/PNG/Markdown-link bundle without discarding independently verified narrative output; the outer maintainer never rewrites diagram semantics.
+- [ ] #2 For a complete generated result with material findings, the maintainer gives the internal generator one consolidated correction brief against the current generated set, verifies the correction, and uses another round only when evidence identifies a remaining material defect with a clear remedy; it stops and preserves evidence when corrections cease to converge.
+- [ ] #3 Incomplete or failed generation and a newer landed main still reset and regenerate from current origin/main, preserving the single-writer and supersede-in-place decisions.
+- [ ] #4 Diagram acceptance is based on material semantic correctness, source evidence, and actual readability at the embed plus linked full resolution; aspect ratio alone is not a rejection condition.
+- [ ] #5 Focused methodology Checks plus fresh-context code review pass before the follow-up Change is committed or published.
 <!-- AC:END -->
 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-1. Rewrite openwiki-maintainer verification recovery so defective optional diagrams are mechanically rejected as a complete bundle, non-diagram correction reruns are capped at one per target SHA, repeated failures preserve evidence and stop, and newer-main/incomplete-run reset semantics remain bounded and intact. 2. Tighten qq-openwiki's internal-generator guidance around semantic edge tracing, embed-plus-full-resolution readability, aspect-ratio neutrality, standalone image links, and narrative independence. 3. Update focused wrapper assertions and run wrapper, syntax, lint, Skill-validation, BPMN, and diff Checks. 4. Run fresh-context review, correct only confirmed in-scope findings, and review the exact delta. 5. Commit, push, open one PR, pass final Checks, record strict plan conformance and Task finalization, and hand off the green Change.
+1. Replace the complete-result whole-generation retry rule with consolidated in-place correction by the internal generator. 2. Make another correction round conditional on a verified material defect, a clear remedy, and continued convergence; exclude polish-driven rounds. 3. Add focused policy assertions and run Skill and Repository Checks. 4. Obtain fresh-context review, deliver the follow-up through one pull request, and re-finalize TASK-21.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -52,6 +57,14 @@ Exact-delta review found that bundle deletion was still irreversible if its own 
 A focused forward test of the removal-failure branch restored the worktree from the staged snapshot before unstaging, preserved the complete corrected result and review evidence, prohibited reset/rerun/commit/push, and reported no ambiguity. The same fresh-context reviewer then inspected the exact transactional correction and returned no material findings: the staged index preserves new and modified bundle files plus the Markdown link, git diff -- exposes the removal, and the required restore order reaches the stop branch with intact uncommitted evidence.
 
 Final validation: tests/test-qq-openwiki.sh and tests/test-qq-openwiki-bpmn.sh passed; affected Bash syntax and shellcheck passed; quick_validate.py reported the Skill valid; BPMN pipeline passed 16/16 tests; doc-30 regenerated with zero lint errors and a lossless evidence round trip; strict conformance accounted for 16/16 flow nodes with zero divergence or unknowns; git diff checks passed; final fresh-context exact-delta review returned no material findings; PR #58 is OPEN, MERGEABLE, CLEAN, with no configured GitHub checks.
+
+Operator clarification after PR #58: the one-correction cap was an overconstraint. Review feedback should drive consolidated correction of the current generated set, with additional rounds available only while evidence shows material convergence; the rule should not prescribe whole-result discard or invite a prolonged review loop.
+
+Fresh-context forward testing applied the revised Skill to three correction states. It selected a second round only after a first round materially reduced verified findings and left a clear remedy; rejected a cosmetic-only round; and stopped with the staged baseline plus attempted delta intact when findings did not improve and a comparable defect appeared. Its only initial ambiguity was that exact-delta review did not explicitly name code-review or untracked files. Step 8 now requires code-review on the exact correction delta, including untracked files, against the staged baseline; the same tester confirmed the ambiguity was resolved with no new material conflict.
+
+The installed OpenWiki agent prompt explicitly instructs update runs to account for uncommitted local changes, confirming that correction against a staged generated baseline is supported upstream; the prior clean-worktree restriction existed in qq-openwiki. Final local checks passed: the policy regression, wrapper integration, activation, BPMN wrapper, and herdr-pull suites; Bash syntax; shellcheck; Skill quick validation; and git diff checks. Fresh-context code review of the exact working-tree Change returned no material findings.
+
+Live-run observation during the follow-up exposed the rollout race: after acknowledging the operator clarification, the abf100 maintainer still followed the landed PR #58 rule and reset/cleaned its first generated result before starting the already-running whole-set correction. That discarded set was no longer recoverable. The maintainer was instructed to finish the active generator, preserve its output, and perform no further reset, clean, or whole-set correction before the follow-up workflow lands.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
@@ -68,10 +81,10 @@ created: 2026-07-13 16:30
 ---
 Explicit non-goals from alignment: do not change the platform-level progress-update cadence, OpenWiki provider/model, BPMN schema/layout/publisher, activation, single-writer locking, internal-generator semantic authorship, or supersede-on-new-main behavior.
 ---
+
+author: @codex
+created: 2026-07-13 17:18
+---
+Reopened after operator review of the landed behavior: acceptance criterion 2 encoded an arbitrary one-correction cap and whole-result discard that were not intended. The follow-up preserves bounded convergence without a numeric review-round limit.
+---
 <!-- COMMENTS:END -->
-
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Replaced OpenWiki's destructive unbounded correction loop with transactional optional-diagram rejection, one whole-generation correction per target SHA, bounded upstream retries, and evidence-preserving stops. Grounded diagram generation in semantic edge tracing and actual readability, verified realistic recovery branches, resolved independent review findings, and delivered the green Change in PR #58.
-<!-- SECTION:FINAL_SUMMARY:END -->

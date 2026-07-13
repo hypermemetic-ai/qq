@@ -81,20 +81,29 @@ Do not require the source-change agent to update, enqueue, or assess OpenWiki.
    If any removal Check or review fails, run `git restore --worktree .` before
    `git restore --staged .` to restore and then unstage the complete result, and
    follow step 8.
-8. For each target `origin/main` commit, permit at most one evidence-backed
-   whole-generation correction after a complete result has a non-diagram defect
-   or a diagram bundle cannot be rejected cleanly. Discard that result, return
-   the dedicated branch to current `origin/main`, and rerun
-   `qq-openwiki --update` with concise feedback. Repeat verification on the
-   wholly regenerated result. If the corrected result remains materially
-   invalid, do not reset, commit, push, or rerun: preserve the worktree and
-   evidence, report the defects, and stop for operator direction. A newer
-   `origin/main` commit is a new target and supersedes the old result under
-   Observe landed state.
-9. An upstream error or interrupted generation has no reviewable result. Discard
-   its partial output, return the branch to current `origin/main`, and retry once
-   for that target. If the retry also fails, leave the branch clean, report both
-   failures, and stop instead of creating an unbounded service-retry loop.
+8. When a complete result has a verified non-diagram defect or a diagram bundle
+   cannot be rejected cleanly, stage the complete scope-checked generated set
+   with `git add -A` as the current correction baseline. Treat that snapshot as
+   non-deliverable until the result is green. Consolidate all verified material
+   findings into a concise correction brief for the internal generator, then
+   run `qq-openwiki --correct` so it can correct the current generated set it
+   authored. Rerun affected Checks and the full-set invariants, then invoke
+   `code-review` on the exact correction delta—including untracked files—against
+   the staged baseline. When a round closes or materially reduces the findings
+   without introducing comparable defects, run `git add -A` to advance the
+   baseline. Reserve another correction round for evidence of a remaining
+   material defect, a clear remedy, and continued convergence; polish or
+   speculative improvement does not justify one. End correction when the
+   generator command fails, or when a round fails to materially reduce the
+   findings or introduces comparable defects. Leave the current worktree,
+   staged baseline, and evidence intact, report the unresolved defects, and stop
+   for operator direction. A newer `origin/main` commit is a new target and
+   supersedes the old result under Observe landed state.
+9. An upstream error or interrupted initial generation has no reviewable result.
+   Discard its partial output, return the branch to current `origin/main`, and
+   retry once for that target. If the retry also fails, leave the branch clean,
+   report both failures, and stop instead of creating an unbounded service-retry
+   loop.
 
 ## Deliver and continue observing
 
