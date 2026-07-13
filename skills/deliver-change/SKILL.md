@@ -44,7 +44,7 @@ delegated agents bounded assignments; do not hand them this lifecycle.
    and do not absorb that new commitment: create follow-up work only with
    approval.
 7. When the pull request is green, reviewed, and finalized, inspect it with
-   `gh pr view <number-or-URL> --json state,mergedAt,mergeable,mergeStateStatus,statusCheckRollup,url`.
+   `gh pr view <number-or-URL> --json state,mergedAt,mergeCommit,mergeable,mergeStateStatus,statusCheckRollup,url`.
    Do not guess JSON field names; correct any rejected query before handoff.
    Confirm it is still open and unmerged with applicable Checks green, and set
    `url` to the returned `.url` value.
@@ -61,10 +61,42 @@ delegated agents bounded assignments; do not hand them this lifecycle.
    its state for up to three minutes. If it remains open, report the URL and
    current Checks, then stop.
 10. If the operator merges during that window or later resumes the work, fetch
-   and verify the pull request's landed state, then report its merge evidence.
-   Do not alter the completed Task or open a Task-finalization Change. If the
-   operator closes or rejects it, report that disposition and apply step 6.
-   After a terminal disposition leaves no further work in this Change, remove
+   and reinspect the pull request with step 7's fields. Verify its landed state,
+   including that `.mergeCommit.oid` is reachable from freshly fetched
+   `origin/main` using
+   `git merge-base --is-ancestor <merge-commit> origin/main`. Do not alter the
+   completed Task or open a Task-finalization Change. If the operator closes or
+   rejects it, report that disposition and apply step 6.
+11. After a merged disposition is verified, synchronize the local checkout that
+   `git worktree list --porcelain` registers for `refs/heads/main`; fetch alone
+   does not update its working tree or a standing Backlog board. Require exactly
+   one such checkout, its symbolic `HEAD` still on `refs/heads/main`, and an
+   empty `git status --porcelain --untracked-files=all`. Establish exclusive use
+   of that checkout for the checks and integration; if another Actor may change
+   its branch or working tree, refuse synchronization. If discovery or an
+   initial gate fails, report the observed registrations, checkout path when
+   available, branch, status, `.mergeCommit.oid`, local `HEAD` when available,
+   and `origin/main`, then stop without creating a checkout, repairing its
+   registration, or fetching from it. Only after the initial gates pass, run
+   `git -C <main-checkout> fetch origin main`, repeat the branch and cleanliness
+   checks, and capture `git -C <main-checkout> rev-parse origin/main` as an
+   immutable `<target-main>`. Before mutation, require both
+   `git -C <main-checkout> merge-base --is-ancestor HEAD <target-main>` and
+   the merge commit ancestry check against `<target-main>` to pass:
+   `git -C <main-checkout> merge-base --is-ancestor <merge-commit> <target-main>`.
+   If any condition fails, report the same evidence plus `<target-main>` and the
+   merge-base when ancestry fails, without switching branches, stashing,
+   cleaning, resetting, pulling, or otherwise changing its local branch or
+   working tree. Otherwise integrate only the validated object with
+   `git -C <main-checkout> merge --ff-only <target-main>`; do not merge the
+   mutable `origin/main` ref or use `pull`. Repeat the branch and cleanliness
+   checks, require its `HEAD` to equal `<target-main>` exactly, and require
+   `git -C <main-checkout> merge-base --is-ancestor <merge-commit> HEAD` to pass
+   before reporting the final SHAs. Do not claim post-merge synchronization
+   complete on any failed final check. A refused or failed synchronization is
+   remaining work: retain the Change checkout and resume after the blocking
+   primary-checkout state is resolved.
+12. After a terminal disposition leaves no further work in this Change, remove
    an ephemeral checkout only when its worktree is clean, using
    `herdr worktree remove --workspace <workspace-id> --json`; never force
    removal by default. Checkout removal does not own branch deletion, and
