@@ -1,4 +1,4 @@
 interface:
   display_name: "Deliver Change"
-  short_description: "Drive a Change to one-PR operator handoff"
-  default_prompt: "Use $deliver-change to take this authorized repository modification through Task completion, a green pull request, and operator handoff."
+  short_description: "Drive a Change through verified PR disposition"
+  default_prompt: "Use $deliver-change to take this authorized repository modification through Task completion, a green pull request, operator disposition, and safe post-merge synchronization."
