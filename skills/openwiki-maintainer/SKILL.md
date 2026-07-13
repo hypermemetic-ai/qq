@@ -1,6 +1,6 @@
 ---
 name: openwiki-maintainer
-description: Own asynchronous, single-writer OpenWiki initialization and refreshes in response to a Repository's main branch advancing. Invoke only as the dedicated OpenWiki maintainer Actor, when that Actor observes a merge to main, or when explicitly assigned initial OpenWiki setup. Never invoke from or as part of the source Change that caused the merge.
+description: Dedicated OpenWiki maintainer Actor only. Invoke exclusively when that Actor either observes main advance or is explicitly assigned initial OpenWiki setup, to perform the resulting single-writer refresh or initialization. Do not invoke for source Changes or for work that merely reads, reviews, modifies, tests, or documents OpenWiki, this Skill, or the maintainer workflow.
 ---
 
 # Maintain OpenWiki
