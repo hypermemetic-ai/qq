@@ -1,0 +1,95 @@
+{
+  "plan_approved": {
+    "status": "done",
+    "evidence": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+    "note": "TASK-22 comment #2 records operator approval of doc-31."
+  },
+  "implement_openwiki_merge": {
+    "status": "done",
+    "evidence": "skills/openwiki-maintainer/SKILL.md"
+  },
+  "guard_current_target": {
+    "status": "done",
+    "evidence": "tests/test-openwiki-maintainer.sh",
+    "note": "The behavioral Git fixture proves a concurrent main advance rejects the ordinary non-force publication."
+  },
+  "preserve_operator_merge": {
+    "status": "done",
+    "evidence": "skills/openwiki-maintainer/SKILL.md; skills/deliver-change/SKILL.md",
+    "note": "The self-merge exception is limited to the dedicated OpenWiki maintainer; PR #61 remains operator-merged."
+  },
+  "defer_plan_open": {
+    "status": "done",
+    "evidence": "skills/bpmn-plans/SKILL.md"
+  },
+  "present_once": {
+    "status": "done",
+    "evidence": "tests/test-bpmn-plans.sh; backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+    "note": "The policy check enforces final-boundary presentation and TASK-22 comment #3 records the accepted one-window UAT."
+  },
+  "retain_specific_detail": {
+    "status": "done",
+    "evidence": "skills/bpmn-plans/SKILL.md; tests/test-bpmn-plans.sh"
+  },
+  "add_delivery_call": {
+    "status": "done",
+    "evidence": "skills/bpmn-plans/pipeline/lib/generate.mjs; skills/bpmn-plans/pipeline/test/pipeline.test.mjs"
+  },
+  "wrap_plan_layout": {
+    "status": "done",
+    "evidence": "skills/bpmn-plans/pipeline/lib/layout.mjs; skills/bpmn-plans/pipeline/test/pipeline.test.mjs"
+  },
+  "preserve_openwiki_layout": {
+    "status": "done",
+    "evidence": "skills/bpmn-plans/pipeline/lib/wiki.mjs; skills/bpmn-plans/pipeline/test/pipeline.test.mjs",
+    "note": "The isolation regression compares OpenWiki layout output byte-for-byte with bpmn-auto-layout."
+  },
+  "add_focused_checks": {
+    "status": "done",
+    "evidence": "tests/test-openwiki-maintainer.sh; tests/test-bpmn-plans.sh; skills/bpmn-plans/pipeline/test/pipeline.test.mjs"
+  },
+  "check_retry_join": {
+    "status": "done",
+    "evidence": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+    "note": "TASK-22 comment #4 records the final post-fix verification pass."
+  },
+  "run_behavior_checks": {
+    "status": "done",
+    "evidence": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+    "note": "All 18 pipeline tests, six workflow wrappers, shell checks, and deterministic plan reproduction passed."
+  },
+  "checks_green": {
+    "status": "done",
+    "evidence": "https://github.com/hypermemetic-ai/qq/pull/61",
+    "note": "PR #61 is open, mergeable, and CLEAN; GitHub reports no configured branch checks, so the recorded fresh local suite is the applicable check evidence."
+  },
+  "fix_in_scope_failure": {
+    "status": "done",
+    "evidence": "skills/openwiki-maintainer/SKILL.md; skills/bpmn-plans/pipeline/lib/layout.mjs; tests/test-openwiki-maintainer.sh; skills/bpmn-plans/pipeline/test/pipeline.test.mjs",
+    "note": "Independent review findings about target races, wide-label overlap, and label-crossing edges were fixed and the exact deltas re-reviewed cleanly."
+  },
+  "operator_uat": {
+    "status": "done",
+    "evidence": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+    "note": "TASK-22 comment #3 records the hands-on review of the single final presentation."
+  },
+  "uat_accepted": {
+    "status": "done",
+    "evidence": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+    "note": "The operator replied proceed after reviewing the final plan presentation."
+  },
+  "fix_presentation": {
+    "status": "skipped",
+    "note": "The approval presentation was accepted, so the rejection-only correction path was not taken."
+  },
+  "complete_qq_delivery": {
+    "status": "done",
+    "evidence": "https://github.com/hypermemetic-ai/qq/pull/61",
+    "note": "The reviewed, locally green source Change was committed, pushed, and handed off in the ordinary operator-merged PR."
+  },
+  "green_pr_ready": {
+    "status": "done",
+    "evidence": "https://github.com/hypermemetic-ai/qq/pull/61",
+    "note": "PR #61 is open, mergeable, and CLEAN at the planned handoff boundary."
+  }
+}
