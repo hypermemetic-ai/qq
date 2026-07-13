@@ -1,0 +1,230 @@
+{
+  "id": "task_22_openwiki_merge_plan_approval",
+  "name": "Automate OpenWiki merge and make plan approval readable",
+  "elements": [
+    {
+      "id": "plan_approved",
+      "type": "startEvent",
+      "name": "Plan approved",
+      "documentation": "Begin only after the stored task-specific diagram has been presented once and approved by the operator.",
+      "evidence": {
+        "file": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+        "lines": "40-44"
+      }
+    },
+    {
+      "id": "implement_openwiki_merge",
+      "type": "serviceTask",
+      "name": "Automate guarded OpenWiki merge",
+      "documentation": "Make the dedicated maintainer merge its own documentation-only pull request after final review, scope, and Check validation.",
+      "evidence": {
+        "file": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+        "lines": "29-30"
+      }
+    },
+    {
+      "id": "guard_current_target",
+      "type": "serviceTask",
+      "name": "Refuse stale generation targets",
+      "documentation": "Require the generated target to remain current immediately before merge; regenerate or stop when main has advanced.",
+      "evidence": {
+        "file": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+        "lines": "29-29"
+      }
+    },
+    {
+      "id": "preserve_operator_merge",
+      "type": "serviceTask",
+      "name": "Keep ordinary merge authority",
+      "documentation": "Confine autonomous merge authority to OpenWiki maintenance so every ordinary Change remains operator-merged.",
+      "evidence": {
+        "file": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+        "lines": "30-30"
+      }
+    },
+    {
+      "id": "defer_plan_open",
+      "type": "serviceTask",
+      "name": "Move open to approval boundary",
+      "documentation": "Finish generation, storage, linking, and verification before any plan viewer is opened.",
+      "evidence": {
+        "file": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+        "lines": "31-31"
+      }
+    },
+    {
+      "id": "present_once",
+      "type": "serviceTask",
+      "name": "Open final plan exactly once",
+      "documentation": "Present only the final plan version, once, alongside the explicit approval question; never present intermediate candidates.",
+      "evidence": {
+        "file": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+        "lines": "31-31"
+      }
+    },
+    {
+      "id": "retain_specific_detail",
+      "type": "serviceTask",
+      "name": "Retain task-specific detail",
+      "documentation": "Keep every work-specific action, decision, failure path, and acceptance Check in the plan.",
+      "evidence": {
+        "file": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+        "lines": "32-32"
+      }
+    },
+    {
+      "id": "add_delivery_call",
+      "type": "serviceTask",
+      "name": "Add collapsed delivery call",
+      "documentation": "Teach plan generation to represent inherited qq delivery as one reusable collapsed call activity instead of expanded invariant nodes.",
+      "evidence": {
+        "file": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+        "lines": "32-32"
+      }
+    },
+    {
+      "id": "wrap_plan_layout",
+      "type": "serviceTask",
+      "name": "Balance plan-only layout",
+      "documentation": "Add deterministic plan-mode wrapping that keeps labels readable and the main flow traceable without flattening the diagram into a strip.",
+      "evidence": {
+        "file": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+        "lines": "33-33"
+      }
+    },
+    {
+      "id": "preserve_openwiki_layout",
+      "type": "serviceTask",
+      "name": "Preserve OpenWiki layout",
+      "documentation": "Leave OpenWiki diagram publishing and its existing layout path unchanged while applying wrapping only to plan mode.",
+      "evidence": {
+        "file": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+        "lines": "33-33"
+      }
+    },
+    {
+      "id": "add_focused_checks",
+      "type": "serviceTask",
+      "name": "Add policy and pipeline checks",
+      "documentation": "Cover merge scope and freshness guards, exactly-once presentation, call activity generation, wrapped plan layout, determinism, and OpenWiki isolation.",
+      "evidence": {
+        "file": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+        "lines": "34-34"
+      }
+    },
+    {
+      "id": "check_retry_join",
+      "type": "exclusiveGateway",
+      "name": "Checks ready to run",
+      "documentation": "Join the initial implementation path and either task-specific correction path before running one coherent focused Check suite.",
+      "evidence": {
+        "file": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+        "lines": "34-34"
+      }
+    },
+    {
+      "id": "run_behavior_checks",
+      "type": "serviceTask",
+      "name": "Run focused behavior checks",
+      "documentation": "Run the affected Skill, BPMN pipeline, layout, rendering, determinism, and isolation Checks on the coherent Change.",
+      "evidence": {
+        "file": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+        "lines": "33-34"
+      }
+    },
+    {
+      "id": "checks_green",
+      "type": "exclusiveGateway",
+      "name": "Behavior checks green?",
+      "documentation": "Decide whether the autonomous-merge safeguards and both plan-mode and OpenWiki-mode pipeline contracts pass their fresh Checks.",
+      "evidence": {
+        "file": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+        "lines": "29-34"
+      }
+    },
+    {
+      "id": "fix_in_scope_failure",
+      "type": "serviceTask",
+      "name": "Fix in-scope behavior failure",
+      "documentation": "Correct the smallest causal implementation or test defect and rerun every affected focused Check.",
+      "evidence": {
+        "file": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+        "lines": "29-34"
+      }
+    },
+    {
+      "id": "operator_uat",
+      "type": "userTask",
+      "name": "Review one final presentation",
+      "documentation": "Have the operator observe one final approval presentation and judge its timing, uniqueness, legibility, and retained task-specific content.",
+      "evidence": {
+        "file": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+        "lines": "31-34"
+      }
+    },
+    {
+      "id": "uat_accepted",
+      "type": "exclusiveGateway",
+      "name": "Approval experience accepted?",
+      "documentation": "Decide whether the single final presentation satisfies the operator-visible acceptance boundary.",
+      "evidence": {
+        "file": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+        "lines": "34-34"
+      }
+    },
+    {
+      "id": "fix_presentation",
+      "type": "serviceTask",
+      "name": "Fix rejected presentation",
+      "documentation": "Correct an in-scope timing, duplication, layout, or content problem, then rerun the focused behavior Checks before presenting a new final version.",
+      "evidence": {
+        "file": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+        "lines": "31-34"
+      }
+    },
+    {
+      "id": "complete_qq_delivery",
+      "type": "callActivity",
+      "name": "Complete qq Change delivery",
+      "calledElement": "qq_change_delivery",
+      "documentation": "Invoke the inherited qq delivery procedure only after every work-specific Check and acceptance step is complete; keep its invariant internals collapsed here.",
+      "evidence": {
+        "file": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+        "lines": "32-32"
+      }
+    },
+    {
+      "id": "green_pr_ready",
+      "type": "endEvent",
+      "name": "Green PR ready",
+      "documentation": "End with the reviewed, verified Change green in its pull request and ready for operator disposition.",
+      "evidence": {
+        "file": "backlog/tasks/task-22 - Automate-OpenWiki-merge-and-make-plan-approval-readable.md",
+        "lines": "43-44"
+      }
+    }
+  ],
+  "flows": [
+    { "id": "f01", "source": "plan_approved", "target": "implement_openwiki_merge" },
+    { "id": "f02", "source": "implement_openwiki_merge", "target": "guard_current_target" },
+    { "id": "f03", "source": "guard_current_target", "target": "preserve_operator_merge" },
+    { "id": "f04", "source": "preserve_operator_merge", "target": "defer_plan_open" },
+    { "id": "f05", "source": "defer_plan_open", "target": "present_once" },
+    { "id": "f06", "source": "present_once", "target": "retain_specific_detail" },
+    { "id": "f07", "source": "retain_specific_detail", "target": "add_delivery_call" },
+    { "id": "f08", "source": "add_delivery_call", "target": "wrap_plan_layout" },
+    { "id": "f09", "source": "wrap_plan_layout", "target": "preserve_openwiki_layout" },
+    { "id": "f10", "source": "preserve_openwiki_layout", "target": "add_focused_checks" },
+    { "id": "f11", "source": "add_focused_checks", "target": "check_retry_join" },
+    { "id": "f11a", "source": "check_retry_join", "target": "run_behavior_checks" },
+    { "id": "f12", "source": "run_behavior_checks", "target": "checks_green" },
+    { "id": "f13", "source": "checks_green", "target": "fix_in_scope_failure", "name": "no" },
+    { "id": "f14", "source": "fix_in_scope_failure", "target": "check_retry_join" },
+    { "id": "f15", "source": "checks_green", "target": "operator_uat", "name": "yes" },
+    { "id": "f16", "source": "operator_uat", "target": "uat_accepted" },
+    { "id": "f17", "source": "uat_accepted", "target": "fix_presentation", "name": "no" },
+    { "id": "f18", "source": "fix_presentation", "target": "check_retry_join" },
+    { "id": "f19", "source": "uat_accepted", "target": "complete_qq_delivery", "name": "yes" },
+    { "id": "f20", "source": "complete_qq_delivery", "target": "green_pr_ready" }
+  ]
+}

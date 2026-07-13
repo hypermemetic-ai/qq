@@ -18,6 +18,14 @@ Write a plan-spec JSON per `pipeline/README.md`. Rules:
   events attach to tasks.
 - Operator and judgment steps are `userTask`; mechanical steps are
   `serviceTask`; decisions are `exclusiveGateway` with labeled outgoing flows.
+- Preserve the complete task-specific execution contract: every work-specific
+  action, decision, failure path, and acceptance Check remains an explicit flow
+  node. Never simplify or remove that content to improve the diagram layout.
+- After the last task-specific Check and acceptance step, add exactly one
+  `callActivity` named `Complete qq Change delivery` with
+  `calledElement: "qq_change_delivery"`. It invokes the inherited delivery
+  procedure without expanding generic review, commit, push, pull-request, and
+  GitHub-Check mechanics into every plan.
 - Every element carries `evidence: {file, lines}` pointing at what justifies
   the step — the owning Task, acceptance criteria, source files, or the Skill
   being followed. The pipeline stamps it into `bpmn:documentation` and
@@ -25,13 +33,13 @@ Write a plan-spec JSON per `pipeline/README.md`. Rules:
 
 ## Process boundary
 
-End the BPMN process when the planned implementation is green in its owning
-pull request and ready for handoff. Do not add flow nodes for conformance
-recording or Task finalization; they are closeout metadata about the executed
-plan, not planned execution. Do not add operator review, merge, rejection,
-disposition waiting, primary-main synchronization, branch/worktree cleanup, or
-other post-handoff delivery activities. `deliver-change` owns those activities
-outside BPMN conformance.
+End the BPMN process with `Complete qq Change delivery` flowing immediately to
+an end event named `Green PR ready`. The call activity covers inherited
+pre-handoff delivery mechanics; do not redraw those invariants as plan-specific
+nodes. Do not add flow nodes for conformance recording or Task finalization;
+they are closeout metadata about the executed plan. Operator disposition,
+merge, post-merge synchronization, and cleanup remain after the green-PR
+boundary and outside BPMN conformance.
 
 ## Generate
 
@@ -45,13 +53,10 @@ node bin/qq-bpmn.mjs all <plan-spec.json> <outdir>
 Nonzero exit means the plan violates the subset or lost evidence in layout —
 fix the spec, never the pipeline output.
 
-After the command succeeds, immediately open the generated
-`<outdir>/<plan-id>.png` in the operator's graphical image-viewer application
-through a process that survives the tool call. On graphical Linux, use
-`setsid -f xdg-open "<outdir>/<plan-id>.png" >/dev/null 2>&1`; otherwise use the
-runtime's durable native opener. A tool-result preview, path, or link does not
-substitute for a persistent viewer window. Confirm the window remains visible
-after the launch call returns before continuing.
+Generation is not presentation. Do not launch the operator's persistent
+graphical viewer while generating or regenerating candidates, privately
+inspecting layout, storing artifacts, linking documents, or running validation.
+Intermediate candidates must never create operator-facing windows.
 
 ## Store and link
 
@@ -67,11 +72,22 @@ after the launch call returns before continuing.
 
 ## Approval
 
-When closing alignment (grilling's final confirmation), keep the rendered
-diagram visible in that graphical image-viewer window alongside the question
-and give the PNG path for reference. The operator approves the diagram;
-material plan changes after approval mean a regenerated diagram, a fresh
-image-viewer presentation, and a fresh confirmation.
+Only after the final plan version is generated, stored, linked, and verified—and
+the approval question is ready—launch that version exactly once in the
+operator's graphical image-viewer application. Immediately send grilling's
+final confirmation with the visible diagram and PNG path alongside the
+question. On graphical Linux, use
+`setsid -f xdg-open "<stored-plan.png>" >/dev/null 2>&1`; otherwise use the
+runtime's durable native opener. A tool-result preview, path, or link does not
+substitute for a persistent viewer window. Confirm the window remains visible
+after the launch call returns, but do not invoke the opener again for the same
+version.
+
+The operator approves the diagram. A material plan change after presentation
+creates a new final version: regenerate, store, link, and verify it before
+launching that revised version exactly once with a fresh confirmation. Never
+reopen an unchanged version merely because intermediate work or messaging
+continues.
 
 ## Same-PR conformance before Task finalization
 

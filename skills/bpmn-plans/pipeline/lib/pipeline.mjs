@@ -3,10 +3,11 @@ import { createRequire } from 'node:module';
 import { dirname, join, parse, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { layoutProcess } from 'bpmn-auto-layout';
 import { BpmnModdle } from 'bpmn-moddle';
 import bpmnlint from 'bpmnlint';
 import NodeResolver from 'bpmnlint/lib/resolver/node-resolver.js';
+
+import { layoutBpmnXml, LAYOUT_MODES } from './layout.mjs';
 
 const { Linter } = bpmnlint;
 const packageDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -305,6 +306,7 @@ export async function renderBpmn(layoutPath, svgPath, pngPath, { logger = consol
 
 export async function runPipeline(inputArgument, outdirArgument, {
   logger = console,
+  layoutMode = LAYOUT_MODES.PLAN,
   render = true
 } = {}) {
   const inputPath = resolve(inputArgument);
@@ -319,8 +321,8 @@ export async function runPipeline(inputArgument, outdirArgument, {
   logger.log(`Linting ${inputPath}`);
   const findings = await lintBpmnXml(inputXml, { logger, sourceLabel: inputPath });
 
-  logger.log(`Laying out ${inputPath}`);
-  const layoutXml = await layoutProcess(inputXml);
+  logger.log(`Laying out ${inputPath} in ${layoutMode} mode`);
+  const layoutXml = await layoutBpmnXml(inputXml, { mode: layoutMode });
   await mkdir(outdir, { recursive: true });
   await writeFile(layoutPath, layoutXml, 'utf8');
   logger.log(`Wrote ${layoutPath}`);
@@ -350,6 +352,7 @@ export async function runPipeline(inputArgument, outdirArgument, {
   return {
     inputPath,
     outdir,
+    layoutMode,
     findings,
     roundTrip,
     paths: {

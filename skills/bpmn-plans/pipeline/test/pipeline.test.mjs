@@ -6,10 +6,12 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
+import { layoutProcess } from 'bpmn-auto-layout';
 import { BpmnModdle } from 'bpmn-moddle';
 
 import { buildConformanceReport } from '../lib/conformance.mjs';
 import { generateBpmn } from '../lib/generate.mjs';
+import { layoutBpmnXml, LAYOUT_MODES } from '../lib/layout.mjs';
 import { lintBpmnXml, PipelineError, runPipeline } from '../lib/pipeline.mjs';
 import { publishWikiProcess, validateWikiSpec, WikiPublishError } from '../lib/wiki.mjs';
 
@@ -57,6 +59,135 @@ async function expectRule(xml, rule) {
       return true;
     }
   );
+}
+
+async function diagramGeometry(xml) {
+  const { rootElement, warnings } = await new BpmnModdle().fromXML(xml);
+  assert.deepEqual(warnings, []);
+  const plane = rootElement.diagrams[0].plane;
+  const shapes = plane.planeElement.filter((element) =>
+    element.$instanceOf('bpmndi:BPMNShape')
+  );
+  const edges = plane.planeElement.filter((element) =>
+    element.$instanceOf('bpmndi:BPMNEdge')
+  );
+  const left = Math.min(...shapes.map(({ bounds }) => bounds.x));
+  const top = Math.min(...shapes.map(({ bounds }) => bounds.y));
+  const right = Math.max(...shapes.map(({ bounds }) => bounds.x + bounds.width));
+  const bottom = Math.max(...shapes.map(({ bounds }) => bounds.y + bounds.height));
+
+  return {
+    width: right - left,
+    height: bottom - top,
+    shapes: new Map(shapes.map((shape) => [ shape.bpmnElement.id, shape.bounds ])),
+    edges
+  };
+}
+
+function callActivitySpec() {
+  const evidence = { file: 'skills/deliver-change/SKILL.md', lines: '1-20' };
+
+  return {
+    id: 'call_activity_fixture',
+    name: 'Call activity fixture',
+    elements: [
+      { id: 'start', type: 'startEvent', name: 'Start', evidence },
+      {
+        id: 'delivery',
+        type: 'callActivity',
+        name: 'Complete qq Change delivery',
+        calledElement: 'qq_change_delivery',
+        evidence
+      },
+      { id: 'end', type: 'endEvent', name: 'Green PR ready', evidence }
+    ],
+    flows: [
+      { id: 'flow_delivery', source: 'start', target: 'delivery' },
+      { id: 'flow_ready', source: 'delivery', target: 'end' }
+    ]
+  };
+}
+
+function boundaryEventSpec({
+  timeoutName = 'Timed out',
+  failureName = 'Work failed'
+} = {}) {
+  const evidence = { file: 'src/worker.mjs', lines: '10-24' };
+  const element = (id, type, name, extras = {}) => ({
+    id,
+    type,
+    name,
+    documentation: `${name} behavior.`,
+    evidence,
+    ...extras
+  });
+
+  return {
+    id: 'boundary_fixture',
+    name: 'Boundary event fixture',
+    elements: [
+      element('start', 'startEvent', 'Start'),
+      element('work', 'serviceTask', 'Work'),
+      element('done', 'endEvent', 'Done'),
+      element('timeout', 'boundaryEvent', timeoutName, {
+        attachedTo: 'work',
+        kind: 'timer',
+        duration: 'PT30M'
+      }),
+      element('failed', 'boundaryEvent', failureName, {
+        attachedTo: 'work',
+        kind: 'error',
+        cancelActivity: false
+      }),
+      element('timeout_end', 'endEvent', 'Timeout end', { error: true }),
+      element('failure_end', 'endEvent', 'Failure end', { error: true })
+    ],
+    flows: [
+      { id: 'flow_start', source: 'start', target: 'work' },
+      { id: 'flow_done', source: 'work', target: 'done' },
+      { id: 'flow_timeout', source: 'timeout', target: 'timeout_end' },
+      { id: 'flow_failure', source: 'failed', target: 'failure_end' }
+    ]
+  };
+}
+
+function svgElementBounds(svg, id) {
+  const escapedId = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = svg.match(new RegExp(
+    `data-element-id="${escapedId}"[^>]*transform="matrix\\(1 0 0 1 ([^ ]+) ([^)]+)\\)"` +
+    '[\\s\\S]*?<rect class="djs-hit djs-hit-all"[^>]*width="([^"]+)"[^>]*height="([^"]+)"'
+  ));
+
+  assert.ok(match, `missing rendered bounds for ${id}`);
+  return {
+    x: Number(match[1]),
+    y: Number(match[2]),
+    width: Number(match[3]),
+    height: Number(match[4])
+  };
+}
+
+function svgConnectionStart(svg, id) {
+  const escapedId = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = svg.match(new RegExp(
+    `data-element-id="${escapedId}"[\\s\\S]*?` +
+    '<path data-corner-radius="[^"]+"[^>]* d="M\\s*([^,]+),([^L]+)L'
+  ));
+
+  assert.ok(match, `missing rendered connection for ${id}`);
+  return { x: Number(match[1]), y: Number(match[2]) };
+}
+
+function horizontalClearance(point, bounds) {
+  if (point.x < bounds.x) {
+    return bounds.x - point.x;
+  }
+
+  if (point.x > bounds.x + bounds.width) {
+    return point.x - (bounds.x + bounds.width);
+  }
+
+  return 0;
 }
 
 test('qq/no-collaboration rejects collaborations and participants', async () => {
@@ -213,43 +344,81 @@ test('generator preserves optional sequence-flow evidence without breaking legac
   assert.equal(result.roundTrip.extensionBefore.length, 4);
 });
 
+test('generator emits reusable collapsed call activities', async () => {
+  const spec = callActivitySpec();
+  const first = await generateBpmn(spec);
+  const second = await generateBpmn(spec);
+  assert.equal(first, second);
+
+  const { rootElement, warnings } = await new BpmnModdle().fromXML(first);
+  assert.deepEqual(warnings, []);
+  const [ process ] = rootElement.rootElements;
+  const delivery = process.flowElements.find(({ id }) => id === 'delivery');
+  assert.equal(delivery.$type, 'bpmn:CallActivity');
+  assert.equal(delivery.calledElement, 'qq_change_delivery');
+  assert.equal(delivery.documentation.length, 1);
+  await lintBpmnXml(first, { logger: silentLogger });
+  const report = await buildConformanceReport(first, {
+    start: { status: 'done', evidence: 'out/start.txt' },
+    delivery: { status: 'done', evidence: 'out/delivery.txt' },
+    end: { status: 'done', evidence: 'out/end.txt' }
+  });
+  assert.match(
+    report.markdown,
+    /\| delivery \| Complete qq Change delivery \| CallActivity \| done \|/
+  );
+  assert.equal(report.strictFailed, false);
+
+  const missingTarget = structuredClone(spec);
+  delete missingTarget.elements[1].calledElement;
+  await assert.rejects(
+    () => generateBpmn(missingTarget),
+    /elements\[1\]\.calledElement must be a non-empty string/
+  );
+});
+
+test('plan layout wraps long flows deterministically while OpenWiki keeps its existing layout', async () => {
+  const evidence = { file: 'src/plan.mjs', lines: '1-20' };
+  const elements = [
+    { id: 'start', type: 'startEvent', name: 'Plan approved', evidence },
+    ...Array.from({ length: 16 }, (_, index) => ({
+      id: `work_${index + 1}`,
+      type: 'serviceTask',
+      name: `Task-specific work ${index + 1}`,
+      evidence
+    })),
+    { id: 'end', type: 'endEvent', name: 'Green PR ready', evidence }
+  ];
+  const flows = elements.slice(1).map((element, index) => ({
+    id: `flow_${index + 1}`,
+    source: elements[index].id,
+    target: element.id
+  }));
+  const semantic = await generateBpmn({
+    id: 'wrapped_plan_fixture',
+    name: 'Wrapped plan fixture',
+    elements,
+    flows
+  });
+  const firstPlan = await layoutBpmnXml(semantic);
+  const secondPlan = await layoutBpmnXml(semantic, { mode: LAYOUT_MODES.PLAN });
+  assert.equal(firstPlan, secondPlan);
+
+  const existingOpenWiki = await layoutProcess(semantic);
+  const isolatedOpenWiki = await layoutBpmnXml(semantic, { mode: LAYOUT_MODES.OPENWIKI });
+  assert.equal(isolatedOpenWiki, existingOpenWiki);
+
+  const planGeometry = await diagramGeometry(firstPlan);
+  const wikiGeometry = await diagramGeometry(isolatedOpenWiki);
+  assert.ok(planGeometry.width / planGeometry.height < 3);
+  assert.ok(planGeometry.width < wikiGeometry.width);
+  assert.ok(planGeometry.height > wikiGeometry.height);
+  assert.equal(planGeometry.edges.length, flows.length);
+  assert.ok(planGeometry.edges.every(({ waypoint }) => waypoint.length >= 2));
+});
+
 test('generator supports timer and error boundary events with deterministic evidence', async () => {
-  const evidence = { file: 'src/worker.mjs', lines: '10-24' };
-  const base = (id, type, name, extras = {}) => ({
-    id,
-    type,
-    name,
-    documentation: `${name} behavior.`,
-    evidence,
-    ...extras
-  });
-  const xml = await generateBpmn({
-    id: 'boundary_fixture',
-    name: 'Boundary event fixture',
-    elements: [
-      base('start', 'startEvent', 'Start'),
-      base('work', 'serviceTask', 'Work'),
-      base('done', 'endEvent', 'Done'),
-      base('timeout', 'boundaryEvent', 'Timed out', {
-        attachedTo: 'work',
-        kind: 'timer',
-        duration: 'PT30M'
-      }),
-      base('failed', 'boundaryEvent', 'Failed', {
-        attachedTo: 'work',
-        kind: 'error',
-        cancelActivity: false
-      }),
-      base('timeout_end', 'endEvent', 'Timeout end', { error: true }),
-      base('failure_end', 'endEvent', 'Failure end', { error: true })
-    ],
-    flows: [
-      { id: 'flow_start', source: 'start', target: 'work' },
-      { id: 'flow_done', source: 'work', target: 'done' },
-      { id: 'flow_timeout', source: 'timeout', target: 'timeout_end' },
-      { id: 'flow_failure', source: 'failed', target: 'failure_end' }
-    ]
-  });
+  const xml = await generateBpmn(boundaryEventSpec());
   const { rootElement } = await new BpmnModdle().fromXML(xml);
   const [ process ] = rootElement.rootElements;
   const byId = new Map(process.flowElements.map((element) => [ element.id, element ]));
@@ -261,6 +430,21 @@ test('generator supports timer and error boundary events with deterministic evid
   assert.equal(byId.get('failed').cancelActivity, false);
   assert.equal(byId.get('failed').eventDefinitions[0].$type, 'bpmn:ErrorEventDefinition');
   assert.equal(byId.get('timeout_end').eventDefinitions[0].$type, 'bpmn:ErrorEventDefinition');
+
+  const geometry = await diagramGeometry(await layoutBpmnXml(xml));
+  const workBounds = geometry.shapes.get('work');
+
+  for (const boundaryId of [ 'timeout', 'failed' ]) {
+    const boundaryBounds = geometry.shapes.get(boundaryId);
+    assert.equal(
+      boundaryBounds.y + boundaryBounds.height / 2,
+      workBounds.y + workBounds.height
+    );
+    const outgoing = geometry.edges.find(({ bpmnElement }) =>
+      bpmnElement.sourceRef.id === boundaryId
+    );
+    assert.equal(outgoing.waypoint[0].y, boundaryBounds.y + boundaryBounds.height);
+  }
 });
 
 test('generator rejects generated-id collisions, parser-reserved ids, and mixed week durations', async () => {
@@ -535,6 +719,45 @@ test('rendered SVG and PNG are visible and deterministic when Chrome is availabl
   assert.ok(firstPng.readUInt32BE(16) > 100);
   assert.ok(firstPng.readUInt32BE(20) > 100);
   assert.ok(firstPng.length > 10_000);
+
+  const callPath = join(directory, 'call-activity.bpmn');
+  await writeFile(callPath, await generateBpmn(callActivitySpec()), 'utf8');
+  const callResult = await runPipeline(callPath, join(directory, 'call-activity'), {
+    logger: silentLogger
+  });
+  const callSvg = await readFile(callResult.paths.svg, 'utf8');
+  const callPng = await readFile(callResult.paths.png);
+  assert.match(callSvg, /data-element-id="delivery"/);
+  assert.deepEqual(callPng.subarray(0, 8), Buffer.from([ 137, 80, 78, 71, 13, 10, 26, 10 ]));
+
+  const boundaryPath = join(directory, 'boundary-events.bpmn');
+  const wideBoundarySpec = boundaryEventSpec({
+    timeoutName: 'WWWWWWWWWW',
+    failureName: 'MMMMMMMMMM'
+  });
+  await writeFile(boundaryPath, await generateBpmn(wideBoundarySpec), 'utf8');
+  const boundaryResult = await runPipeline(boundaryPath, join(directory, 'boundary-events'), {
+    logger: silentLogger
+  });
+  const boundarySvg = await readFile(boundaryResult.paths.svg, 'utf8');
+  const timeoutLabel = svgElementBounds(boundarySvg, 'timeout_label');
+  const failureLabel = svgElementBounds(boundarySvg, 'failed_label');
+  const timeoutFlowStart = svgConnectionStart(boundarySvg, 'flow_timeout');
+  const failureFlowStart = svgConnectionStart(boundarySvg, 'flow_failure');
+  assert.ok(
+    failureLabel.x - (timeoutLabel.x + timeoutLabel.width) >= 8,
+    `boundary labels overlap: ${JSON.stringify({ timeoutLabel, failureLabel })}`
+  );
+  assert.ok(
+    horizontalClearance(timeoutFlowStart, timeoutLabel) >= 8 &&
+      horizontalClearance(failureFlowStart, failureLabel) >= 8,
+    `boundary flows cross labels: ${JSON.stringify({
+      timeoutLabel,
+      timeoutFlowStart,
+      failureLabel,
+      failureFlowStart
+    })}`
+  );
 });
 
 test('conformance reports done, diverged, unaccounted, and unknown paths', async () => {

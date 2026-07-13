@@ -12,6 +12,7 @@ const elementTypes = new Map([
   [ 'serviceTask', 'ServiceTask' ],
   [ 'userTask', 'UserTask' ],
   [ 'manualTask', 'ManualTask' ],
+  [ 'callActivity', 'CallActivity' ],
   [ 'exclusiveGateway', 'ExclusiveGateway' ],
   [ 'boundaryEvent', 'BoundaryEvent' ]
 ]);
@@ -84,6 +85,10 @@ function validateElement(element, index) {
       element.error !== undefined &&
       typeof element.error !== 'boolean') {
     throw new PlanSpecError(`${label}.error must be a boolean when provided`);
+  }
+
+  if (element.type === 'callActivity') {
+    requireId(element.calledElement, `${label}.calledElement`);
   }
 
   if (element.type === 'boundaryEvent') {
@@ -251,6 +256,10 @@ export async function generateBpmn(spec) {
 
     if (elementSpec.type === 'boundaryEvent') {
       properties.cancelActivity = elementSpec.cancelActivity ?? true;
+    }
+
+    if (elementSpec.type === 'callActivity') {
+      properties.calledElement = elementSpec.calledElement;
     }
 
     const element = moddle.create(`bpmn:${elementTypes.get(elementSpec.type)}`, properties);
