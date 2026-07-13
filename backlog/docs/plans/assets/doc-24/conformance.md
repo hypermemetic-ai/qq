@@ -1,36 +1,4 @@
----
-id: doc-24
-title: Plan — Synchronize primary main after browser merges
-type: other
-created_date: '2026-07-12 23:47'
-updated_date: '2026-07-13 00:16'
-tags:
-  - plan
-  - git
-  - delivery
-  - backlog
----
-# Plan — Synchronize primary main after browser merges
-
-## Intent
-
-After the operator merges a Change in GitHub, make the accountable `deliver-change` agent safely fast-forward the single local `main` checkout so Backlog files and the standing Herdr board reflect landed state. Refuse dirty, absent, branch-mismatched, or non-fast-forward states without mutation.
-
-## Diagram
-
-![BPMN plan](assets/doc-24/plan.png)
-
-## Artifacts
-
-- Plan spec: `assets/doc-24/plan-spec.json`
-- Semantic BPMN: `assets/doc-24/plan.bpmn`
-- Published render: `assets/doc-24/plan.png`
-- Executed completions: `assets/doc-24/completions.json`
-- Conformance report: `assets/doc-24/conformance.md`
-
-The diagram is the approved execution contract.
-
-## Conformance report (post-landing, 2026-07-13)
+# BPMN conformance report
 
 Plan: `backlog/docs/plans/assets/doc-24/plan.bpmn`
 
