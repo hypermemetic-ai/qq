@@ -11,9 +11,9 @@ qq currently retains eleven stateless Skills. A Skill is invoked when its descri
 | `compound` | Capture a verified, non-obvious, reusable lesson. | Do not create ceremony for routine outcomes or unverified speculation. |
 | `idea` | Append an explicitly triggered idea verbatim to the single Backlog `Ideas` document. | Discover and mutate it through Backlog commands; no interpretation, research, commit, staging, or push. |
 | `agent-messaging` | Coordinate with live agents through Herdr list/get/read/wait and atomic submitted turns. | Resolve live terminal identities after pane movement; use `pane run` for a submitted turn, not separate text and Enter calls. |
-| `bpmn-plans` | Plan complex authorized work with evidence-stamped BPMN artifacts. | Planning artifacts do not authorize implementation; OpenWiki publication adds stricter evidence and determinism checks. |
+| `bpmn-plans` | Plan complex authorized work with evidence-stamped BPMN artifacts; retain task-specific flow and collapse inherited delivery into one call activity ending at `Green PR ready`. | Planning artifacts do not authorize implementation; only the final verified version is presented, once, and OpenWiki publication adds stricter evidence and determinism checks. |
 | `deliver-change` | Accountable one-PR delivery from an aligned assignment through Task finalization, operator disposition, synchronization, and cleanup. | Only the operator-facing accountable agent owns this lifecycle; delegated agents do not. |
-| `openwiki-maintainer` | Dedicated ownership of the derived OpenWiki surface. | The maintainer reviews and delivers generator output; it does not author narrative or diagrams itself. |
+| `openwiki-maintainer` | Dedicated ownership of the derived OpenWiki surface. | The maintainer reviews generator output rather than authoring it, and may self-merge only its fully revalidated documentation Change through the guarded non-force path. |
 | `uat-signoff` | Obtain owner confirmation for user-visible or subjective behavior after autonomous checks. | UAT is not authorization for destructive, monetary, irreversible, or outbound actions. |
 
 ## How Skills compose

@@ -1,0 +1,135 @@
+{
+  "id": "openwiki_guarded_merge",
+  "name": "Guarded OpenWiki merge",
+  "elements": [
+    {
+      "id": "green_docs_pr",
+      "type": "startEvent",
+      "name": "Green docs PR",
+      "documentation": "The reviewed OpenWiki-only change is pushed and its documentation pull request has passed applicable final checks.",
+      "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "109-115" }
+    },
+    {
+      "id": "revalidate_pr",
+      "type": "serviceTask",
+      "name": "Revalidate PR",
+      "documentation": "Recheck that the pull request is open, mergeable, clean, on the expected branches, at the reviewed head, and confined to the permitted documentation scope.",
+      "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "115-123" }
+    },
+    {
+      "id": "pr_eligible",
+      "type": "exclusiveGateway",
+      "name": "PR eligible?",
+      "documentation": "Only an exact, green, documentation-only pull request may enter the autonomous merge path; uncertainty or drift blocks it.",
+      "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "115-123" }
+    },
+    {
+      "id": "blocked",
+      "type": "endEvent",
+      "name": "Merge blocked",
+      "documentation": "Stop without merging when checks, identity, scope, or pull-request state are not proven safe.",
+      "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "119-123" }
+    },
+    {
+      "id": "check_target",
+      "type": "serviceTask",
+      "name": "Check target freshness",
+      "documentation": "Fetch main and read the pull request base SHA immediately before merge, comparing both with the immutable target captured for this run.",
+      "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "124-130" }
+    },
+    {
+      "id": "target_current",
+      "type": "exclusiveGateway",
+      "name": "Target current?",
+      "documentation": "The merge may continue only while both remote main and the pull request base still equal the frozen target.",
+      "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "124-130" }
+    },
+    {
+      "id": "regenerate",
+      "type": "endEvent",
+      "name": "Regenerate from main",
+      "documentation": "A stale documentation result is superseded and regenerated from the newly landed main state rather than merged or queued.",
+      "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "20-23,128-130" }
+    },
+    {
+      "id": "build_merge",
+      "type": "serviceTask",
+      "name": "Build verified merge",
+      "documentation": "Create a two-parent merge commit without moving local refs, using the reviewed documentation tree and the frozen target and reviewed head as parents, then verify its tree and parent order.",
+      "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "131-147" }
+    },
+    {
+      "id": "push_merge",
+      "type": "serviceTask",
+      "name": "Push once to main",
+      "documentation": "Publish the verified merge commit with one ordinary non-force push; Git and branch protection reject a stale or disallowed update.",
+      "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "149-155" }
+    },
+    {
+      "id": "push_accepted",
+      "type": "exclusiveGateway",
+      "name": "Push accepted?",
+      "documentation": "Separate a successful atomic publication from a refusal that must be inspected rather than bypassed or blindly retried.",
+      "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "149-158" }
+    },
+    {
+      "id": "inspect_refusal",
+      "type": "serviceTask",
+      "name": "Inspect refusal",
+      "documentation": "Fetch and inspect the new remote state after a refused push to distinguish a superseding main advance from another unresolved failure.",
+      "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "156-158" }
+    },
+    {
+      "id": "target_advanced",
+      "type": "exclusiveGateway",
+      "name": "Target advanced?",
+      "documentation": "A concurrent main advance supersedes this generated result; any other unresolved refusal preserves evidence and stops.",
+      "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "156-158" }
+    },
+    {
+      "id": "regenerate_after_race",
+      "type": "endEvent",
+      "name": "Regenerate from main",
+      "documentation": "A concurrent main winner supersedes the stale documentation result and requires regeneration from landed state.",
+      "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "151-158" }
+    },
+    {
+      "id": "failure_stop",
+      "type": "endEvent",
+      "name": "Preserve evidence and stop",
+      "documentation": "Do not retry around the guard when the refusal is not explained by a stale target; retain evidence for operator direction.",
+      "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "156-158" }
+    },
+    {
+      "id": "verify_landing",
+      "type": "serviceTask",
+      "name": "Verify landing",
+      "documentation": "After the push succeeds, confirm GitHub reports the pull request merged and fetched main equals the constructed merge commit.",
+      "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "158-161" }
+    },
+    {
+      "id": "merged",
+      "type": "endEvent",
+      "name": "OpenWiki merged",
+      "documentation": "The documentation update is landed and the dedicated maintainer continues observing future main advances.",
+      "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "158-161" }
+    }
+  ],
+  "flows": [
+    { "id": "flow_start_revalidate", "source": "green_docs_pr", "target": "revalidate_pr", "documentation": "A green documentation pull request enters final remote-state validation.", "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "111-119" } },
+    { "id": "flow_revalidate_decide", "source": "revalidate_pr", "target": "pr_eligible", "documentation": "Evaluate the freshly observed checks, identity, and scope together.", "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "115-123" } },
+    { "id": "flow_pr_yes", "source": "pr_eligible", "target": "check_target", "name": "yes", "documentation": "An exact, clean, green, in-scope pull request proceeds to the last freshness guard.", "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "115-128" } },
+    { "id": "flow_pr_no", "source": "pr_eligible", "target": "blocked", "name": "no", "documentation": "Any unrelated path, failed or pending check, changed head, or uncertain state blocks merge.", "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "119-123" } },
+    { "id": "flow_target_decide", "source": "check_target", "target": "target_current", "documentation": "Compare fetched main and the REST-reported pull request base with the immutable run target.", "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "124-130" } },
+    { "id": "flow_target_yes", "source": "target_current", "target": "build_merge", "name": "yes", "documentation": "Only a still-current target permits construction of the merge commit.", "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "128-136" } },
+    { "id": "flow_target_no", "source": "target_current", "target": "regenerate", "name": "no", "documentation": "An advanced base or main supersedes this result and returns maintenance to generation from landed state.", "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "128-130" } },
+    { "id": "flow_build_push", "source": "build_merge", "target": "push_merge", "documentation": "A merge object is published only after its reviewed tree and parent identities are verified.", "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "134-150" } },
+    { "id": "flow_push_decide", "source": "push_merge", "target": "push_accepted", "documentation": "The ordinary non-force push is the atomic race and branch-protection guard.", "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "149-156" } },
+    { "id": "flow_push_yes", "source": "push_accepted", "target": "verify_landing", "name": "yes", "documentation": "A successful push must still be confirmed through GitHub and a fresh fetch.", "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "158-160" } },
+    { "id": "flow_push_no", "source": "push_accepted", "target": "inspect_refusal", "name": "no", "documentation": "A refused update is inspected without force, bypass, or a retry around the guard.", "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "153-158" } },
+    { "id": "flow_refusal_decide", "source": "inspect_refusal", "target": "target_advanced", "documentation": "The fetched state determines whether the generated result became stale or another failure remains unresolved.", "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "156-158" } },
+    { "id": "flow_advanced_yes", "source": "target_advanced", "target": "regenerate_after_race", "name": "yes", "documentation": "A concurrent main winner supersedes the stale documentation result.", "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "151-158" } },
+    { "id": "flow_advanced_no", "source": "target_advanced", "target": "failure_stop", "name": "no", "documentation": "An unresolved non-stale refusal preserves its evidence and stops for direction.", "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "156-158" } },
+    { "id": "flow_verify_merged", "source": "verify_landing", "target": "merged", "documentation": "Confirmed GitHub merge state and remote main identity complete the guarded publication.", "evidence": { "file": "skills/openwiki-maintainer/SKILL.md", "lines": "158-161" } }
+  ]
+}

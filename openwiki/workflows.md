@@ -21,6 +21,8 @@ The accountable agent follows `deliver-change`:
 
 Fresh-context review remains after implementation and local verification but before the first commit or publication. The detailed refusal rules for browser visibility, primary-main synchronization, and workspace cleanup are canonical in `skills/deliver-change/SKILL.md:11-124`.
 
+For non-trivial work, `bpmn-plans` preserves every task-specific action, decision, failure path, and acceptance Check, then collapses the inherited review/commit/push/PR/Checks mechanics into one `Complete qq Change delivery` call activity immediately before `Green PR ready`. Merge, synchronization, cleanup, conformance recording, and Task finalization remain outside that modeled boundary. Candidate generation is private: only the final stored, linked, verified plan is opened for the operator, exactly once when its approval question is ready; an unchanged version is not reopened (`skills/bpmn-plans/SKILL.md:21-42`, `56-90`).
+
 ## Verification and review
 
 A Check must observe the intended subject, not merely exit successfully. Read complete output and guard against **silent failure**—plausible output that answered a different question.
@@ -51,6 +53,10 @@ Use `idea` only for messages beginning with `idea:` or explicit `$idea`; append 
 
 ## Documentation update point
 
-OpenWiki maintenance is not a step in the source agent's Task-to-Change flow. After an eligible operator merge, the browser/local activation adapter launches or wakes a separate maintainer Actor. That Actor regenerates from landed `origin/main`, independently reviews narrative and any diagrams, and delivers a documentation-only pull request. If `main` advances first, the old generated Change is superseded rather than queued (`skills/openwiki-maintainer/SKILL.md:12-33`, `108-117`).
+OpenWiki maintenance is not a step in the source agent's Task-to-Change flow. After an eligible operator merge, the browser/local activation adapter launches or wakes a separate maintainer Actor. That Actor regenerates from landed `origin/main`, independently reviews narrative and any diagrams, and delivers a documentation-only pull request. If `main` advances first, the old generated Change is superseded rather than queued (`skills/openwiki-maintainer/SKILL.md:12-33`, `109-130`).
+
+That green documentation Change is the sole exception to ordinary operator-controlled merging. The maintainer revalidates PR state, checks, reviewed head, and exact scope; requires both fetched `origin/main` and the PR's live base SHA to equal the run's immutable target; builds and verifies a two-parent merge commit without moving local refs; and makes one ordinary non-force push to `main`. A concurrent advance is rejected atomically and causes regeneration, while another unresolved refusal preserves evidence and stops. It never uses GitHub merge commands, queues, force, admin, or protection bypasses (`skills/openwiki-maintainer/SKILL.md:115-161`).
+
+[![Guarded OpenWiki merge process](processes/openwiki_guarded_merge.png)](processes/openwiki_guarded_merge.png)
 
 Review correction is intentionally bounded. A diagram-only defect may remove its JSON/BPMN/PNG/link as one reversible bundle when the page remains coherent. Other defects return the fully staged generated result to `qq-openwiki --correct`; another round is allowed only when findings materially decrease without comparable regressions. Initial generation gets one clean retry, not an unbounded loop (`skills/openwiki-maintainer/SKILL.md:66-106`).

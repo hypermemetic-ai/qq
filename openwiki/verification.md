@@ -24,7 +24,7 @@ A green Check must demonstrate that it observed the intended subject. A successf
 | `cockpit/` | Parse with owning tools where available; exercise key bindings in Herdr/yazi; verify linked paths | Machine-specific absolute paths and missing external binaries |
 | `bin/qq-openwiki` | `bash tests/test-qq-openwiki.sh`; `bash tests/test-openwiki-maintainer.sh`; `git diff --check` | Wrong branch or stale-base acceptance, dirty/staged-boundary errors, concurrent writers, unbounded correction, retained generated workflow/guidance, altered authored instruction text |
 | OpenWiki activation | `bash tests/test-qq-openwiki-activate.sh` | Wrong Repository/root discovery, ineligible merge dispatch, duplicate activation, recursive update activation, unsafe retry after uncertain dispatch |
-| OpenWiki BPMN | `bash tests/test-qq-openwiki-bpmn.sh`; `npm test --prefix skills/bpmn-plans/pipeline`; run `qq-openwiki-bpmn --check` for every retained spec | Escaped or stale evidence, unsupported edges, non-deterministic output, stale artifacts, unreadable or unhelpful images |
+| OpenWiki BPMN and plans | `bash tests/test-bpmn-plans.sh`; `bash tests/test-qq-openwiki-bpmn.sh`; `npm test --prefix skills/bpmn-plans/pipeline`; run `qq-openwiki-bpmn --check` for every retained spec | Lost task-specific flow, wrong green-PR boundary, repeated viewer launch, escaped or stale evidence, unsupported edges, non-deterministic output, stale artifacts, unreadable or unhelpful images |
 | `openwiki/` | Verify links and source references; search for retired concepts; compare key claims to current source and diff | Source Changes editing generated pages, duplicated or stale documentation |
 
 Do not run `bin/install.sh` against a real user HOME merely to test it; isolate user-level mutation.
@@ -38,7 +38,7 @@ A discovered pre-existing defect or broader opportunity does not automatically b
 ## Current coverage gaps
 
 - No committed general CI workflow is visible; “final GitHub Checks” remain a delivery requirement assembled from the affected behavior's focused checks.
-- Focused harnesses now cover OpenWiki generation/correction, merge activation, BPMN publication, and Herdr workspace adoption, but they do not replace live browser, desktop-protocol, Herdr, or graphical readability checks.
+- Focused harnesses now cover OpenWiki generation/correction, guarded merge race behavior, merge activation, BPMN plan policy/publication, and Herdr workspace adoption, but they do not replace live GitHub metadata and branch-protection checks, browser/desktop-protocol behavior, Herdr behavior, or graphical readability checks. Raster rendering assertions are also skipped when Chrome is unavailable or `QQ_BPMN_SKIP_RENDER=1`.
 - Installer behavior has a wide user-level blast radius despite careful refusal logic.
 - Historical Backlog documents include obsolete gate/orchestration architecture and can mislead search-driven agents.
 

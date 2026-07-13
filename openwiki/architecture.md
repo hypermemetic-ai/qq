@@ -11,7 +11,7 @@ qq is deliberately a thin harness. It composes upstream ownership surfaces inste
 - OpenWiki describes the current system.
 - codebase-memory maintains a derived structural graph outside the Repository.
 - herdr supplies named sessions and direct agent messaging.
-- The operator owns judgment, acceptance, and merge authority.
+- The operator owns judgment, acceptance, and merge authority for ordinary source Changes; only the OpenWiki maintainer's fully revalidated, documentation-only Change has a guarded non-force self-merge exception.
 
 This boundary is the result of an explicit simplification. Recent history removed the former custom gate, phase, wave, frontier, registry, and orchestration machinery. The retained repository should be evaluated as a policy/knowledge/cockpit layer with a few narrow adapters—not as an incomplete workflow platform. The merge activator is one such adapter: it verifies a GitHub merge and wakes the separate OpenWiki maintainer, but does not own source delivery or merge authority.
 

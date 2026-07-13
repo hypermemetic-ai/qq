@@ -1,0 +1,221 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:qq="http://qq.local/schema/evidence" id="openwiki_guarded_merge_definitions" targetNamespace="http://qq.local/schema/bpmn">
+  <bpmn:process id="openwiki_guarded_merge" name="Guarded OpenWiki merge" isExecutable="false">
+    <bpmn:startEvent id="green_docs_pr" name="Green docs PR">
+      <bpmn:documentation>The reviewed OpenWiki-only change is pushed and its documentation pull request has passed applicable final checks. Evidence: skills/openwiki-maintainer/SKILL.md:109-115</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="109-115" />
+      </bpmn:extensionElements>
+      <bpmn:outgoing>flow_start_revalidate</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="revalidate_pr" name="Revalidate PR">
+      <bpmn:documentation>Recheck that the pull request is open, mergeable, clean, on the expected branches, at the reviewed head, and confined to the permitted documentation scope. Evidence: skills/openwiki-maintainer/SKILL.md:115-123</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="115-123" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_start_revalidate</bpmn:incoming>
+      <bpmn:outgoing>flow_revalidate_decide</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="pr_eligible" name="PR eligible?">
+      <bpmn:documentation>Only an exact, green, documentation-only pull request may enter the autonomous merge path; uncertainty or drift blocks it. Evidence: skills/openwiki-maintainer/SKILL.md:115-123</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="115-123" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_revalidate_decide</bpmn:incoming>
+      <bpmn:outgoing>flow_pr_yes</bpmn:outgoing>
+      <bpmn:outgoing>flow_pr_no</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="blocked" name="Merge blocked">
+      <bpmn:documentation>Stop without merging when checks, identity, scope, or pull-request state are not proven safe. Evidence: skills/openwiki-maintainer/SKILL.md:119-123</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="119-123" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_pr_no</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:serviceTask id="check_target" name="Check target freshness">
+      <bpmn:documentation>Fetch main and read the pull request base SHA immediately before merge, comparing both with the immutable target captured for this run. Evidence: skills/openwiki-maintainer/SKILL.md:124-130</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="124-130" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_pr_yes</bpmn:incoming>
+      <bpmn:outgoing>flow_target_decide</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="target_current" name="Target current?">
+      <bpmn:documentation>The merge may continue only while both remote main and the pull request base still equal the frozen target. Evidence: skills/openwiki-maintainer/SKILL.md:124-130</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="124-130" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_target_decide</bpmn:incoming>
+      <bpmn:outgoing>flow_target_yes</bpmn:outgoing>
+      <bpmn:outgoing>flow_target_no</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="regenerate" name="Regenerate from main">
+      <bpmn:documentation>A stale documentation result is superseded and regenerated from the newly landed main state rather than merged or queued. Evidence: skills/openwiki-maintainer/SKILL.md:20-23,128-130</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="20-23,128-130" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_target_no</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:serviceTask id="build_merge" name="Build verified merge">
+      <bpmn:documentation>Create a two-parent merge commit without moving local refs, using the reviewed documentation tree and the frozen target and reviewed head as parents, then verify its tree and parent order. Evidence: skills/openwiki-maintainer/SKILL.md:131-147</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="131-147" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_target_yes</bpmn:incoming>
+      <bpmn:outgoing>flow_build_push</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="push_merge" name="Push once to main">
+      <bpmn:documentation>Publish the verified merge commit with one ordinary non-force push; Git and branch protection reject a stale or disallowed update. Evidence: skills/openwiki-maintainer/SKILL.md:149-155</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="149-155" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_build_push</bpmn:incoming>
+      <bpmn:outgoing>flow_push_decide</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="push_accepted" name="Push accepted?">
+      <bpmn:documentation>Separate a successful atomic publication from a refusal that must be inspected rather than bypassed or blindly retried. Evidence: skills/openwiki-maintainer/SKILL.md:149-158</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="149-158" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_push_decide</bpmn:incoming>
+      <bpmn:outgoing>flow_push_yes</bpmn:outgoing>
+      <bpmn:outgoing>flow_push_no</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="inspect_refusal" name="Inspect refusal">
+      <bpmn:documentation>Fetch and inspect the new remote state after a refused push to distinguish a superseding main advance from another unresolved failure. Evidence: skills/openwiki-maintainer/SKILL.md:156-158</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="156-158" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_push_no</bpmn:incoming>
+      <bpmn:outgoing>flow_refusal_decide</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="target_advanced" name="Target advanced?">
+      <bpmn:documentation>A concurrent main advance supersedes this generated result; any other unresolved refusal preserves evidence and stops. Evidence: skills/openwiki-maintainer/SKILL.md:156-158</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="156-158" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_refusal_decide</bpmn:incoming>
+      <bpmn:outgoing>flow_advanced_yes</bpmn:outgoing>
+      <bpmn:outgoing>flow_advanced_no</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="regenerate_after_race" name="Regenerate from main">
+      <bpmn:documentation>A concurrent main winner supersedes the stale documentation result and requires regeneration from landed state. Evidence: skills/openwiki-maintainer/SKILL.md:151-158</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="151-158" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_advanced_yes</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="failure_stop" name="Preserve evidence and stop">
+      <bpmn:documentation>Do not retry around the guard when the refusal is not explained by a stale target; retain evidence for operator direction. Evidence: skills/openwiki-maintainer/SKILL.md:156-158</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="156-158" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_advanced_no</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:serviceTask id="verify_landing" name="Verify landing">
+      <bpmn:documentation>After the push succeeds, confirm GitHub reports the pull request merged and fetched main equals the constructed merge commit. Evidence: skills/openwiki-maintainer/SKILL.md:158-161</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="158-161" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_push_yes</bpmn:incoming>
+      <bpmn:outgoing>flow_verify_merged</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="merged" name="OpenWiki merged">
+      <bpmn:documentation>The documentation update is landed and the dedicated maintainer continues observing future main advances. Evidence: skills/openwiki-maintainer/SKILL.md:158-161</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="158-161" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_verify_merged</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="flow_start_revalidate" sourceRef="green_docs_pr" targetRef="revalidate_pr">
+      <bpmn:documentation>A green documentation pull request enters final remote-state validation. Evidence: skills/openwiki-maintainer/SKILL.md:111-119</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="111-119" />
+      </bpmn:extensionElements>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_revalidate_decide" sourceRef="revalidate_pr" targetRef="pr_eligible">
+      <bpmn:documentation>Evaluate the freshly observed checks, identity, and scope together. Evidence: skills/openwiki-maintainer/SKILL.md:115-123</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="115-123" />
+      </bpmn:extensionElements>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_pr_yes" name="yes" sourceRef="pr_eligible" targetRef="check_target">
+      <bpmn:documentation>An exact, clean, green, in-scope pull request proceeds to the last freshness guard. Evidence: skills/openwiki-maintainer/SKILL.md:115-128</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="115-128" />
+      </bpmn:extensionElements>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_pr_no" name="no" sourceRef="pr_eligible" targetRef="blocked">
+      <bpmn:documentation>Any unrelated path, failed or pending check, changed head, or uncertain state blocks merge. Evidence: skills/openwiki-maintainer/SKILL.md:119-123</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="119-123" />
+      </bpmn:extensionElements>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_target_decide" sourceRef="check_target" targetRef="target_current">
+      <bpmn:documentation>Compare fetched main and the REST-reported pull request base with the immutable run target. Evidence: skills/openwiki-maintainer/SKILL.md:124-130</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="124-130" />
+      </bpmn:extensionElements>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_target_yes" name="yes" sourceRef="target_current" targetRef="build_merge">
+      <bpmn:documentation>Only a still-current target permits construction of the merge commit. Evidence: skills/openwiki-maintainer/SKILL.md:128-136</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="128-136" />
+      </bpmn:extensionElements>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_target_no" name="no" sourceRef="target_current" targetRef="regenerate">
+      <bpmn:documentation>An advanced base or main supersedes this result and returns maintenance to generation from landed state. Evidence: skills/openwiki-maintainer/SKILL.md:128-130</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="128-130" />
+      </bpmn:extensionElements>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_build_push" sourceRef="build_merge" targetRef="push_merge">
+      <bpmn:documentation>A merge object is published only after its reviewed tree and parent identities are verified. Evidence: skills/openwiki-maintainer/SKILL.md:134-150</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="134-150" />
+      </bpmn:extensionElements>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_push_decide" sourceRef="push_merge" targetRef="push_accepted">
+      <bpmn:documentation>The ordinary non-force push is the atomic race and branch-protection guard. Evidence: skills/openwiki-maintainer/SKILL.md:149-156</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="149-156" />
+      </bpmn:extensionElements>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_push_yes" name="yes" sourceRef="push_accepted" targetRef="verify_landing">
+      <bpmn:documentation>A successful push must still be confirmed through GitHub and a fresh fetch. Evidence: skills/openwiki-maintainer/SKILL.md:158-160</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="158-160" />
+      </bpmn:extensionElements>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_push_no" name="no" sourceRef="push_accepted" targetRef="inspect_refusal">
+      <bpmn:documentation>A refused update is inspected without force, bypass, or a retry around the guard. Evidence: skills/openwiki-maintainer/SKILL.md:153-158</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="153-158" />
+      </bpmn:extensionElements>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_refusal_decide" sourceRef="inspect_refusal" targetRef="target_advanced">
+      <bpmn:documentation>The fetched state determines whether the generated result became stale or another failure remains unresolved. Evidence: skills/openwiki-maintainer/SKILL.md:156-158</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="156-158" />
+      </bpmn:extensionElements>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_advanced_yes" name="yes" sourceRef="target_advanced" targetRef="regenerate_after_race">
+      <bpmn:documentation>A concurrent main winner supersedes the stale documentation result. Evidence: skills/openwiki-maintainer/SKILL.md:151-158</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="151-158" />
+      </bpmn:extensionElements>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_advanced_no" name="no" sourceRef="target_advanced" targetRef="failure_stop">
+      <bpmn:documentation>An unresolved non-stale refusal preserves its evidence and stops for direction. Evidence: skills/openwiki-maintainer/SKILL.md:156-158</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="156-158" />
+      </bpmn:extensionElements>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_verify_merged" sourceRef="verify_landing" targetRef="merged">
+      <bpmn:documentation>Confirmed GitHub merge state and remote main identity complete the guarded publication. Evidence: skills/openwiki-maintainer/SKILL.md:158-161</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/openwiki-maintainer/SKILL.md" lines="158-161" />
+      </bpmn:extensionElements>
+    </bpmn:sequenceFlow>
+  </bpmn:process>
+</bpmn:definitions>

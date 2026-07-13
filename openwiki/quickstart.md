@@ -1,6 +1,6 @@
 # qq OpenWiki quickstart
 
-qq is an operator-owned harness for agentic software development. It is not an application server or autonomous workflow engine: it supplies shared language, operating guidance, stateless agent skills, durable knowledge surfaces, terminal preferences, and a few installation and workflow utilities. The human operator retains intent, judgment, acceptance, and merge authority; agents are replaceable collaborators. See [`README.md`](../README.md), [`CONCEPTS.md`](../CONCEPTS.md), and [`AGENTS.md`](../AGENTS.md).
+qq is an operator-owned harness for agentic software development. It is not an application server or autonomous workflow engine: it supplies shared language, operating guidance, stateless agent skills, durable knowledge surfaces, terminal preferences, and a few installation and workflow utilities. The human operator retains intent, judgment, acceptance, and merge authority for ordinary source Changes; the sole narrow exception is the OpenWiki maintainer's fully revalidated, documentation-only Change, which may use its guarded non-force merge path. See [`README.md`](../README.md), [`CONCEPTS.md`](../CONCEPTS.md), and [`AGENTS.md`](../AGENTS.md).
 
 ## The model
 
