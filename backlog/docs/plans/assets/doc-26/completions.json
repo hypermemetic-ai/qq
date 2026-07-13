@@ -1,0 +1,62 @@
+{
+  "source_change_authorized": {
+    "status": "done",
+    "evidence": "backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md"
+  },
+  "extend_flow_evidence": {
+    "status": "done",
+    "evidence": "skills/bpmn-plans/pipeline/lib/generate.mjs"
+  },
+  "update_maintainer_contract": {
+    "status": "done",
+    "evidence": "skills/openwiki-maintainer/SKILL.md"
+  },
+  "update_tests_docs": {
+    "status": "done",
+    "evidence": "skills/bpmn-plans/pipeline/test/pipeline.test.mjs and skills/bpmn-plans/pipeline/README.md"
+  },
+  "verification_entry": {
+    "status": "done",
+    "evidence": "backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md#implementation-notes"
+  },
+  "run_checks": {
+    "status": "done",
+    "evidence": "npm test: 14/14 pass; both changed Skills valid; git diff --check clean"
+  },
+  "checks_green": {
+    "status": "done",
+    "evidence": "npm test: 14/14 pass with rendering enabled"
+  },
+  "fix_check_failures": {
+    "status": "done",
+    "evidence": "skills/bpmn-plans/pipeline/test/pipeline.test.mjs:201"
+  },
+  "fresh_context_review": {
+    "status": "done",
+    "evidence": "backlog/tasks/task-6 - Build-diagram-generation-skill-model-toolchain-selection.md#implementation-notes"
+  },
+  "confirmed_findings": {
+    "status": "done",
+    "evidence": "backlog/docs/plans/assets/doc-26/plan-spec.json"
+  },
+  "fix_review_findings": {
+    "status": "done",
+    "evidence": "backlog/docs/plans/assets/doc-26/plan-spec.json and plan.bpmn"
+  },
+  "open_source_pr": {
+    "status": "done",
+    "evidence": "https://github.com/hypermemetic-ai/qq/pull/51"
+  },
+  "pr_green": {
+    "status": "done",
+    "evidence": "PR #51 mergeStateStatus=CLEAN, mergeable=MERGEABLE, statusCheckRollup=[]"
+  },
+  "fix_pr_failures": {
+    "status": "skipped",
+    "note": "PR #51 was immediately mergeable and clean with no configured GitHub checks."
+  },
+  "green_handoff": {
+    "status": "done",
+    "evidence": "https://github.com/hypermemetic-ai/qq/pull/51"
+  }
+}
