@@ -5,6 +5,8 @@ BPMN diagram with source evidence on every required element. The same schema
 supports plan artifacts and OpenWiki process models. It lints the semantic
 model, adds deterministic diagram interchange (DI), verifies that documentation
 and `qq:evidence` extensions survived layout, and renders SVG and PNG artifacts.
+Plan rendering uses balanced graph wrapping; OpenWiki publishing deliberately
+retains its established automatic-layout path.
 
 The package requires Node.js 20 or newer. Install the locked dependencies and
 run the tests from this directory:
@@ -31,8 +33,10 @@ node bin/qq-bpmn.mjs conform out/example/qq_release_plan.bpmn completions.json -
 `build` writes semantic BPMN without DI. `render` writes
 `<name>.layout.bpmn`, `<name>.roundtrip.json`, `<name>.svg`, and `<name>.png`.
 `all` names the semantic BPMN after the plan's `id` and then runs the complete
-pipeline. The round-trip JSON's top-level `lossless` property must be `true`;
-loss exits nonzero.
+plan-mode pipeline. Plan mode retains every modeled node and edge while using
+deterministic layered wrapping to avoid panoramic strip diagrams. The
+round-trip JSON's top-level `lossless` property must be `true`; loss exits
+nonzero.
 
 `wiki` is the publishing mode for an OpenWiki-authored process spec. It
 requires the JSON filename to match the process `id` and requires non-empty
@@ -119,6 +123,8 @@ Supported `type` values are:
 - `serviceTask`
 - `userTask`
 - `manualTask`
+- `callActivity`; provide a BPMN-safe `calledElement` id naming the reusable
+  procedure. Plans use this collapsed activity for inherited qq delivery.
 - `exclusiveGateway`
 - `boundaryEvent`
 
@@ -160,6 +166,9 @@ rules are errors:
   silently drops them.
 - `qq/no-subprocess` rejects subprocesses, ad hoc subprocesses, and
   transactions because the renderer shows them collapsed and hides the plan.
+- A call activity remains allowed: it names a separately governed reusable
+  procedure without embedding or concealing task-specific flow nodes in this
+  process.
 - `qq/single-process` requires exactly one process so layout and conformance
   have one unambiguous plan root.
 
@@ -189,8 +198,10 @@ the SVG when a visibly attributed published diagram is required.
 
 Repeated generation from the same spec is byte-identical. IDs come from the
 spec, serialization follows element and flow order, and no timestamps or
-random identifiers are introduced. The layout and round-trip JSON are stable
-with the committed lockfile. The renderer's generated SVG marker ids are
+random identifiers are introduced. Plan mode uses a fixed ELK layered-wrapping
+profile and model order; OpenWiki mode continues to use `bpmn-auto-layout`.
+Both layouts and the round-trip JSON are stable with the committed lockfile.
+The renderer's generated SVG marker ids are
 canonicalized in document order, making repeated SVG renders byte-identical in
 the same environment. PNG renders are byte-identical when Chrome, fonts, OS,
 and package versions are unchanged; raster bytes are not promised across

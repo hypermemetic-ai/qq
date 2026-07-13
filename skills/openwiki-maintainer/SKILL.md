@@ -1,6 +1,6 @@
 ---
 name: openwiki-maintainer
-description: Dedicated OpenWiki maintainer Actor only. Invoke exclusively when that Actor either observes main advance or is explicitly assigned initial OpenWiki setup, to perform the resulting single-writer refresh or initialization. Do not invoke for source Changes or for work that merely reads, reviews, modifies, tests, or documents OpenWiki, this Skill, or the maintainer workflow.
+description: Dedicated OpenWiki maintainer Actor only. Invoke exclusively when that Actor either observes main advance or is explicitly assigned initial OpenWiki setup, to perform the resulting single-writer refresh or initialization and guarded self-merge. Do not invoke for source Changes or for work that merely reads, reviews, modifies, tests, or documents OpenWiki, this Skill, or the maintainer workflow.
 ---
 
 # Maintain OpenWiki
@@ -11,7 +11,8 @@ only and deliver generated documentation as a separate Change.
 
 ## Observe landed state
 
-1. Fetch `origin/main` in the dedicated maintainer worktree.
+1. Fetch `origin/main` in the dedicated maintainer worktree and record its exact
+   commit as the immutable `target_main` for this run.
 2. Read `openwiki/.last-update.json` when it exists and inspect the landed range
    through current `origin/main`.
 3. Ignore advances that change only `openwiki/`. If no described behavior could
@@ -107,11 +108,54 @@ Do not require the source-change agent to update, enqueue, or assess OpenWiki.
 
 ## Deliver and continue observing
 
-Commit and push only green generated work, open a documentation-only pull
-request, pass final Checks, and leave merge authority to the operator. A
-regenerated update pushes over the same branch — force-push with lease; the
-single writer owns its history — and refreshes the standing pull request in
-place. If `main` advances while the pull request is open, supersede
-it: start over from the new state rather than queuing behind your own Change.
-After it lands, fast-forward the dedicated branch on the next observed advance
-of `main`.
+1. Commit and push only the reviewed, green generated work, then open or refresh
+   the documentation-only pull request from `openwiki/update` to `main`. A
+   regenerated update pushes over the same branch with force-with-lease; the
+   single writer owns its history.
+2. Pass every applicable final Check. Inspect the remote pull request again and
+   require it to remain open, mergeable and clean, to use the expected base and
+   head branches, and to point at the exact reviewed local head commit. Capture
+   the pull-request number as `pr` and that commit as `head_sha`; verify the
+   remote `headRefOid` equals `head_sha`. Recheck its changed-file inventory:
+   only paths under `openwiki/` and, when present, the file containing the marked
+   OpenWiki instruction block may differ; only lines inside that marked block
+   may change in the latter file. Any unrelated path, failed or pending Check,
+   changed head, or uncertain state blocks merge.
+3. Immediately before merge, fetch `origin/main` without changing the working
+   tree. Read the pull request's current base commit from the REST response as
+   `base_sha` with
+   `gh api "repos/{owner}/{repo}/pulls/$pr" --jq '.base.sha'`. Require both
+   fetched `origin/main` and `base_sha` to equal `target_main`. If either has
+   advanced, do not merge: supersede the pull request and regenerate from the
+   new landed state under Observe landed state.
+4. This dedicated documentation Change is the sole exception to the ordinary
+   operator-merge boundary. It does not require operator review, approval, or a
+   merge action. After steps 1-3 pass, require `target_main` to be an ancestor of
+   `head_sha`. Create a two-parent merge commit object whose tree equals
+   `head_sha`, whose first parent is `target_main`, and whose second parent is
+   `head_sha`; verify those parents and the tree before publication. Creating
+   the object must not move a local ref or change the worktree.
+
+   ```sh
+   tree_sha="$(git rev-parse "$head_sha^{tree}")"
+   merge_sha="$(
+     printf 'Merge OpenWiki pull request #%s\n' "$pr" |
+       git commit-tree "$tree_sha" -p "$target_main" -p "$head_sha"
+   )"
+   test "$(git rev-parse "$merge_sha^{tree}")" = "$tree_sha"
+   test "$(git show -s --format='%P' "$merge_sha")" = "$target_main $head_sha"
+   ```
+
+5. Publish that verified merge commit with the single ordinary, non-force ref
+   update `git push origin "$merge_sha:refs/heads/main"`. The merge commit
+   descends only from `target_main`, so Git rejects the update as non-fast-forward
+   or stale if `main` wins a concurrent advance; the server also enforces every
+   configured branch protection. Never use `gh pr merge`, auto-merge, a merge
+   queue, `--force`, `--admin`, or any protection bypass, and never delete the
+   persistent `openwiki/update` branch.
+6. If the push refuses or the target changes, do not retry around the guard.
+   Fetch and inspect the new state; supersede a stale result, or preserve the
+   evidence and stop on any other unresolved failure. After success, verify that
+   GitHub reports the pull request merged and that fetched `origin/main` equals
+   `merge_sha`. Fast-forward the dedicated branch on the next observed
+   OpenWiki-only advance of `main`, then continue observing.

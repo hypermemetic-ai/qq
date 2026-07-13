@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 
 import { generateBpmn, readPlanSpec } from './generate.mjs';
+import { LAYOUT_MODES } from './layout.mjs';
 import { runPipeline } from './pipeline.mjs';
 
 export class WikiPublishError extends Error {}
@@ -157,7 +158,10 @@ async function generateOnce(spec, directory, logger) {
   const bpmnPath = join(directory, `${spec.id}.bpmn`);
   await writeFile(bpmnPath, await generateBpmn(spec), 'utf8');
   logger.log(`Wrote ${bpmnPath}`);
-  const result = await runPipeline(bpmnPath, directory, { logger });
+  const result = await runPipeline(bpmnPath, directory, {
+    logger,
+    layoutMode: LAYOUT_MODES.OPENWIKI
+  });
 
   return {
     bpmn: await readFile(bpmnPath),
