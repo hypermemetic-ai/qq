@@ -1,0 +1,197 @@
+{
+  "id": "populate_herdr_change_workspace",
+  "name": "Populate Herdr Change workspaces",
+  "elements": [
+    {
+      "id": "start",
+      "type": "startEvent",
+      "name": "Fix approved",
+      "documentation": "The operator authorized the causal correction after the empty-workspace diagnosis.",
+      "evidence": {
+        "file": "backlog/tasks/task-18 - Populate-Herdr-Change-workspaces-with-the-accountable-agent.md",
+        "lines": "21-39"
+      }
+    },
+    {
+      "id": "extend_helper",
+      "type": "serviceTask",
+      "name": "Extend shared pane mover",
+      "documentation": "Add a fail-fast workspace-adoption mode to qq-herdr-pull while preserving the existing detached operator modes and their notification behavior.",
+      "evidence": {
+        "file": "backlog/tasks/task-18 - Populate-Herdr-Change-workspaces-with-the-accountable-agent.md",
+        "lines": "34-39"
+      }
+    },
+    {
+      "id": "update_skill",
+      "type": "serviceTask",
+      "name": "Adopt helper in delivery workflow",
+      "documentation": "Teach deliver-change to invoke the shared mover for the returned workspace and anchor all subsequent work to its checkout; document both caller modes.",
+      "evidence": {
+        "file": "backlog/tasks/task-18 - Populate-Herdr-Change-workspaces-with-the-accountable-agent.md",
+        "lines": "34-39"
+      }
+    },
+    {
+      "id": "checks_entry",
+      "type": "exclusiveGateway",
+      "name": "Enter verification",
+      "documentation": "Initial implementation and every correction converge on the same focused verification pass.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "22-28"
+      }
+    },
+    {
+      "id": "run_checks",
+      "type": "serviceTask",
+      "name": "Validate Skill and handoff invariants",
+      "documentation": "Validate both caller modes with mocks, Skill structure, diff hygiene, move-before-close ordering, checkout anchoring, and the live accountable-pane topology.",
+      "evidence": {
+        "file": "backlog/tasks/task-18 - Populate-Herdr-Change-workspaces-with-the-accountable-agent.md",
+        "lines": "34-39"
+      }
+    },
+    {
+      "id": "checks_green",
+      "type": "exclusiveGateway",
+      "name": "Checks green?",
+      "documentation": "Only a fresh passing observation of the intended handoff may advance to review.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "22-28"
+      }
+    },
+    {
+      "id": "repair_entry",
+      "type": "exclusiveGateway",
+      "name": "Enter correction",
+      "documentation": "Failed Checks and verified review findings converge on one bounded correction path.",
+      "evidence": {
+        "file": "skills/code-review/SKILL.md",
+        "lines": "72-84"
+      }
+    },
+    {
+      "id": "repair",
+      "type": "serviceTask",
+      "name": "Correct in-scope failure",
+      "documentation": "Apply the smallest correction for a failed check or confirmed review finding, then rerun the focused checks.",
+      "evidence": {
+        "file": "skills/code-review/SKILL.md",
+        "lines": "72-84"
+      }
+    },
+    {
+      "id": "review",
+      "type": "serviceTask",
+      "name": "Run fresh-context review",
+      "documentation": "Give one read-only reviewer the complete intent, exact delta, and passing Check evidence before publication.",
+      "evidence": {
+        "file": "skills/code-review/SKILL.md",
+        "lines": "15-50"
+      }
+    },
+    {
+      "id": "review_clear",
+      "type": "exclusiveGateway",
+      "name": "Review clear?",
+      "documentation": "Advance only when no verified material finding remains in the Change.",
+      "evidence": {
+        "file": "skills/code-review/SKILL.md",
+        "lines": "70-88"
+      }
+    },
+    {
+      "id": "publish",
+      "type": "serviceTask",
+      "name": "Publish green pull request",
+      "documentation": "Commit and push the reviewed Change, open its pull request, and require applicable GitHub Checks to pass.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "29-31"
+      }
+    },
+    {
+      "id": "ready",
+      "type": "endEvent",
+      "name": "Green PR ready",
+      "documentation": "The reviewed fix is green in its owning pull request and ready for operator handoff.",
+      "evidence": {
+        "file": "backlog/tasks/task-18 - Populate-Herdr-Change-workspaces-with-the-accountable-agent.md",
+        "lines": "28-39"
+      }
+    }
+  ],
+  "flows": [
+    {
+      "id": "flow_start_helper",
+      "source": "start",
+      "target": "extend_helper"
+    },
+    {
+      "id": "flow_helper_update",
+      "source": "extend_helper",
+      "target": "update_skill"
+    },
+    {
+      "id": "flow_update_entry",
+      "source": "update_skill",
+      "target": "checks_entry"
+    },
+    {
+      "id": "flow_entry_checks",
+      "source": "checks_entry",
+      "target": "run_checks"
+    },
+    {
+      "id": "flow_checks_gateway",
+      "source": "run_checks",
+      "target": "checks_green"
+    },
+    {
+      "id": "flow_checks_yes",
+      "source": "checks_green",
+      "target": "review",
+      "name": "yes"
+    },
+    {
+      "id": "flow_checks_no",
+      "source": "checks_green",
+      "target": "repair_entry",
+      "name": "no"
+    },
+    {
+      "id": "flow_repair_checks",
+      "source": "repair",
+      "target": "checks_entry"
+    },
+    {
+      "id": "flow_review_gateway",
+      "source": "review",
+      "target": "review_clear"
+    },
+    {
+      "id": "flow_review_yes",
+      "source": "review_clear",
+      "target": "publish",
+      "name": "yes"
+    },
+    {
+      "id": "flow_review_no",
+      "source": "review_clear",
+      "target": "repair_entry",
+      "name": "no"
+    },
+    {
+      "id": "flow_repair_entry",
+      "source": "repair_entry",
+      "target": "repair"
+    },
+    {
+      "id": "flow_publish_ready",
+      "source": "publish",
+      "target": "ready"
+    }
+  ]
+}

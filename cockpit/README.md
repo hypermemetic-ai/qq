@@ -22,4 +22,8 @@ Herdr `prefix+f` spawns a pane running `qqy`; `qqy` opens yazi at the repo root;
 Enter descends into a folder or renders a `.md` file in-pane via mdcat or Glow.
 `prefix+shift+f` opens broot at the same root through `qqbr`. `prefix+F<N>`
 pulls the Nth priority-sorted agent into the focused pane; `prefix+0` pulls the
-agent that most needs attention.
+agent that most needs attention. Those operator bindings use
+`qq-herdr-pull <N|next>`. Accountable agents use
+`qq-herdr-pull --workspace <workspace-id>` immediately after creating a Change
+workspace; that mode fails loudly unless the target contains exactly one idle
+shell placeholder, then moves the agent before closing the placeholder.

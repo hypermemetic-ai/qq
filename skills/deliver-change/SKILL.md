@@ -17,8 +17,16 @@ delegated agents bounded assignments; do not hand them this lifecycle.
    never omit `--base` and inherit an incidental `HEAD`. When the checkout
    already exists, attach it with
    `herdr worktree open --cwd <root> --path <absolute-path> --no-focus --json`.
-   Treat the returned workspace as the Change's home for its panes and agents.
-   Return to alignment before acting on any new consequential decision.
+   Retain the response's workspace id and checkout path. Immediately run
+   `qq-herdr-pull --workspace <workspace-id>` from the accountable agent pane;
+   it safely no-ops when that pane is already there and otherwise refuses any
+   target except the workspace's sole idle shell placeholder. Stop before
+   Repository mutation if adoption fails. Moving a live terminal does not
+   change the agent process's working directory, so run every subsequent tool
+   in `<checkout-path>` (or use `git -C <checkout-path>`) and verify that path's
+   top level before editing. Treat the returned workspace and checkout as the
+   Change's home. Return to alignment before acting on any new consequential
+   decision.
 2. Implement and verify coherent units. When a decision needs durable,
    multi-source evidence, delegate that question through `research` and retain
    the judgment. Keep the Task aligned through the Backlog CLI and run the
@@ -99,8 +107,18 @@ delegated agents bounded assignments; do not hand them this lifecycle.
    remaining work: retain the Change checkout and resume after the blocking
    primary-checkout state is resolved.
 12. After a terminal disposition leaves no further work in this Change, remove
-   an ephemeral checkout only when its worktree is clean, using
-   `herdr worktree remove --workspace <workspace-id> --json`; never force
-   removal by default. Checkout removal does not own branch deletion, and
-   explicitly dedicated long-lived worktrees remain in place until their owner
-   retires them.
+   an ephemeral checkout only when its worktree is clean. If the accountable
+   pane still occupies that workspace, require it to be the workspace's only
+   pane, then leave a disposable keeper behind with `herdr pane split
+   <current-pane> --direction right --cwd <change-checkout> --no-focus`; verify
+   the returned pane is an idle shell in the Change workspace. Move the
+   accountable pane into a new tab of the validated primary workspace with
+   `herdr pane move <current-pane> --new-tab --workspace
+   <primary-workspace-id> --focus`; require `.result.move_result.changed` to be
+   true, the returned pane to belong to the primary workspace, and the Change
+   workspace to remain open around the keeper. Anchor later tools in the
+   primary checkout before continuing. Then run
+   `herdr worktree remove --workspace <change-workspace-id> --json`; never force
+   removal by default or remove the workspace containing the reporting agent.
+   Checkout removal does not own branch deletion, and explicitly dedicated
+   long-lived worktrees remain in place until their owner retires them.

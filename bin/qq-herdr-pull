@@ -1,25 +1,41 @@
 #!/usr/bin/env bash
-# qq-herdr-pull — pull an agent into the focused herdr pane, replacing it.
+# qq-herdr-pull — replace a herdr placeholder pane with an agent pane.
 #
-# The mirror of focus_agent (prefix+alt+N, "go to agent N"): instead of jumping
-# you to the agent, this brings the agent to you. The agent's pane is moved into
-# your tab and the pane you were in is closed, so the agent takes its place.
+# Operator mode is the mirror of focus_agent (prefix+alt+N, "go to agent N"):
+# instead of jumping to the agent, it brings the selected agent to the focused
+# pane. This mode is bound as a detached custom key, so failures are best-effort
+# notifications and the command exits successfully.
+#
+# Agent mode lets an accountable agent adopt a freshly created Change
+# workspace. It moves the calling agent into that workspace and replaces its
+# sole idle shell pane. This mode is fail-fast because delivery automation must
+# be able to stop before it edits the wrong checkout.
 #
 # herdr's `pane swap` is within-tab only (it refuses cross-tab with reason
-# "cross_tab"), so this uses `pane move` + `pane close` to cross tabs.
+# "cross_tab"), so both modes share `pane move` + `pane close`.
 #
-# Bound in cockpit/herdr/config.toml as detached (type = "shell") custom keys, so
-# there is no visible command pane. herdr injects $HERDR_PANE_ID = the pane the
-# key was pressed in, which is what gets replaced; a query fallback covers the
-# case where the env is absent.
+#   qq-herdr-pull <N>                  operator: pull agent N to the focused pane
+#   qq-herdr-pull next                 operator: pull the highest-priority agent
+#   qq-herdr-pull --workspace <id>     agent: adopt a pristine workspace
 #
-#   qq-herdr-pull <N>     pull the Nth agent in sidebar order (same N as prefix+alt+N)
-#   qq-herdr-pull next    pull the agent that most needs you (blocked > working > idle)
-#
-# Selection order follows `herdr agent list`, which is the order the sidebar
-# renders. Number N is 1-based and counts every agent including your own pane;
-# pulling yourself is a safe no-op (it will not close your own pane).
+# Selection order for operator mode follows `herdr agent list`, which is the
+# order the sidebar renders. Number N is 1-based and counts every agent,
+# including the focused pane; pulling yourself is a safe no-op.
 set -euo pipefail
+
+mode="operator"
+sel="${1:-}"
+workspace=""
+if [ "$sel" = "--workspace" ]; then
+  mode="agent"
+  workspace="${2:-}"
+  if [ "$#" -ne 2 ] || [ -z "$workspace" ]; then
+    printf 'qq-herdr-pull: usage: qq-herdr-pull --workspace <workspace-id>\n' >&2
+    exit 1
+  fi
+elif [ "$#" -ne 1 ]; then
+  sel=""
+fi
 
 # Resolve the herdr binary: env hint, PATH, then the known Homebrew location.
 if [ -n "${HERDR_BIN_PATH:-}" ] && [ -x "${HERDR_BIN_PATH}" ]; then
@@ -29,82 +45,162 @@ elif command -v herdr >/dev/null 2>&1; then
 elif [ -x /home/linuxbrew/.linuxbrew/bin/herdr ]; then
   HERDR="/home/linuxbrew/.linuxbrew/bin/herdr"
 else
-  echo "qq-herdr-pull: herdr not found" >&2
-  exit 0
+  printf 'qq-herdr-pull: herdr not found\n' >&2
+  [ "$mode" = "operator" ] && exit 0
+  exit 1
 fi
 
-# Detached from any pane, so surface problems as a herdr toast, never a hard fail.
 note() { "$HERDR" notification show "qq-pull" --body "$1" >/dev/null 2>&1 || true; }
-die()  { note "$1"; exit 0; }
+die() {
+  if [ "$mode" = "operator" ]; then
+    note "$1"
+    exit 0
+  fi
+  printf 'qq-herdr-pull: %s\n' "$1" >&2
+  exit 1
+}
 
-# jq drives every selection path below. Under `set -e` a missing jq would abort
-# the command substitution before die() could toast, so the binding would fail
-# silently — guard it up front instead.
 command -v jq >/dev/null 2>&1 || die "jq not found — required by qq-herdr-pull"
 
-sel="${1:-}"
-[ -n "$sel" ] || die "usage: qq-herdr-pull <N|next>"
+source=""
+target=""
+target_tab=""
 
-# Target = the pane the key was pressed in. Prefer the injected env; fall back to
-# whatever herdr currently reports as focused (the detached shell does not steal it).
-target="${HERDR_PANE_ID:-}"
-if [ -z "$target" ]; then
-  target="$("$HERDR" pane current --current 2>/dev/null \
-    | jq -r '.result.pane.pane_id // empty')" || true
+if [ "$mode" = "agent" ]; then
+  # Query first: HERDR_PANE_ID is injected when a pane starts and can retain its
+  # old public id after a cross-workspace move. `pane current --current`
+  # resolves the calling terminal to its live pane id.
+  current="$({ "$HERDR" pane current --current 2>/dev/null || true; })"
+  source="$(jq -r '.result.pane.pane_id // empty' <<<"$current" 2>/dev/null)" || true
+  [ -n "$source" ] || die "cannot resolve calling agent pane"
+  source_agent="$(jq -r '.result.pane.agent // empty' <<<"$current" 2>/dev/null)" || true
+  [ -n "$source_agent" ] || die "calling pane '$source' is not an agent"
+
+  current_workspace="$(jq -r '.result.pane.workspace_id // empty' <<<"$current" 2>/dev/null)" || true
+  if [ "$current_workspace" = "$workspace" ]; then
+    printf 'workspace=%s pane=%s changed=false\n' "$workspace" "$source"
+    exit 0
+  fi
+
+  workspace_info="$({ "$HERDR" workspace get "$workspace" 2>/dev/null || true; })"
+  resolved_workspace="$(jq -r '.result.workspace.workspace_id // empty' \
+    <<<"$workspace_info" 2>/dev/null)" || true
+  [ "$resolved_workspace" = "$workspace" ] || die "workspace '$workspace' not found"
+
+  panes="$({ "$HERDR" pane list --workspace "$workspace" 2>/dev/null || true; })"
+  pane_count="$(jq -r '.result.panes | length // 0' <<<"$panes" 2>/dev/null)" || true
+  [ -n "$pane_count" ] || die "cannot inspect workspace '$workspace' panes"
+  [ "$pane_count" = "1" ] \
+    || die "workspace '$workspace' must contain exactly one placeholder pane (found $pane_count)"
+
+  target="$(jq -r '.result.panes[0].pane_id // empty' <<<"$panes" 2>/dev/null)" || true
+  target_tab="$(jq -r '.result.panes[0].tab_id // empty' <<<"$panes" 2>/dev/null)" || true
+  target_agent="$(jq -r '.result.panes[0].agent // empty' <<<"$panes" 2>/dev/null)" || true
+  if [ -z "$target" ] || [ -z "$target_tab" ]; then
+    die "cannot resolve workspace placeholder"
+  fi
+  [ -z "$target_agent" ] || die "workspace '$workspace' is already occupied by an agent"
+
+  process_info="$({ "$HERDR" pane process-info --pane "$target" 2>/dev/null || true; })"
+  jq -e '
+    .result.process_info as $p
+    | ($p.shell_pid != null)
+      and ($p.foreground_process_group_id == $p.shell_pid)
+      and (($p.foreground_processes | length) == 1)
+      and ($p.foreground_processes[0].pid == $p.shell_pid)
+  ' <<<"$process_info" >/dev/null \
+    || die "workspace '$workspace' pane '$target' is not an idle shell placeholder"
+else
+  [ -n "$sel" ] || die "usage: qq-herdr-pull <N|next>"
+
+  # Detached keybindings receive the pane where the key was pressed. Fall back
+  # to the focused pane when invoked manually without the injected identity.
+  target="${HERDR_PANE_ID:-}"
+  if [ -z "$target" ]; then
+    target="$({ "$HERDR" pane current --current 2>/dev/null || true; } \
+      | jq -r '.result.pane.pane_id // empty' 2>/dev/null)" || true
+  fi
+  [ -n "$target" ] || die "cannot resolve focused pane"
+
+  agents="$({ "$HERDR" agent list 2>/dev/null || true; })"
+  agent_list_type="$(jq -r '.result.type // empty' <<<"$agents" 2>/dev/null)" || true
+  [ -n "$agent_list_type" ] || die "herdr agent list failed"
+
+  case "$sel" in
+    next)
+      source="$(jq -r --arg me "$target" '
+        [.result.agents[] | select(.pane_id != $me)]
+        | sort_by(
+            if   .agent_status == "blocked" then 0
+            elif .agent_status == "working" then 1
+            elif .agent_status == "idle"    then 2
+            else 3 end)
+        | .[0].pane_id // empty' <<<"$agents" 2>/dev/null)" || true
+      ;;
+    *[!0-9]* | "")
+      die "usage: qq-herdr-pull <N|next>"
+      ;;
+    *)
+      # jq index -1 means the last element, so reject zero explicitly.
+      if [ "$sel" -lt 1 ]; then
+        die "agent number must be 1 or higher (got '$sel')"
+      fi
+      source="$(jq -r --argjson n "$sel" '.result.agents[$n-1].pane_id // empty' \
+        <<<"$agents" 2>/dev/null)" || true
+      ;;
+  esac
+
+  [ -n "$source" ] || die "no agent for '$sel'"
+
+  if [ "$source" = "$target" ]; then
+    note "#$sel is already your pane"
+    exit 0
+  fi
+
+  target_tab="$({ "$HERDR" pane get "$target" 2>/dev/null || true; } \
+    | jq -r '.result.pane.tab_id // empty' 2>/dev/null)" || true
+  [ -n "$target_tab" ] || die "cannot resolve focused tab"
 fi
-[ -n "$target" ] || die "cannot resolve focused pane"
 
-agents="$("$HERDR" agent list 2>/dev/null)" || die "herdr agent list failed"
-
-case "$sel" in
-  next)
-    # Whoever most needs attention, excluding your own pane.
-    source="$(jq -r --arg me "$target" '
-      [.result.agents[] | select(.pane_id != $me)]
-      | sort_by(
-          if   .agent_status == "blocked" then 0
-          elif .agent_status == "working" then 1
-          elif .agent_status == "idle"    then 2
-          else 3 end)
-      | .[0].pane_id // empty' <<<"$agents")"
-    ;;
-  *[!0-9]* | "")
-    die "usage: qq-herdr-pull <N|next>"
-    ;;
-  *)
-    # Reject 0 (and any non-positive): jq reads index -1 as the LAST agent, so a
-    # bare `0` would silently pull the wrong pane instead of being an invalid
-    # 1-based number.
-    if [ "$sel" -lt 1 ]; then
-      die "agent number must be 1 or higher (got '$sel')"
-    fi
-    source="$(jq -r --argjson n "$sel" '.result.agents[$n-1].pane_id // empty' <<<"$agents")"
-    ;;
-esac
-
-[ -n "$source" ] || die "no agent for '$sel'"
-
-# Dry run for testing: report the resolved pair and stop before mutating layout.
+# Dry run reports the fully validated pair and stops before layout mutation.
 if [ -n "${QQ_HERDR_PULL_DRY:-}" ]; then
-  printf 'target=%s source=%s\n' "$target" "$source"
+  if [ "$mode" = "agent" ]; then
+    printf 'workspace=%s target=%s source=%s\n' "$workspace" "$target" "$source"
+  else
+    printf 'target=%s source=%s\n' "$target" "$source"
+  fi
   exit 0
 fi
 
-# Pulling your own pane would mean closing it — refuse.
-if [ "$source" = "$target" ]; then
-  note "#$sel is already your pane"
-  exit 0
+# Move first. A move failure leaves both the source and placeholder intact.
+move_result="$({
+  "$HERDR" pane move "$source" --tab "$target_tab" --target-pane "$target" \
+    --split right --focus 2>/dev/null
+})" || die "move failed ($source -> $target_tab)"
+
+move_changed="$(jq -r '.result.move_result.changed // false' \
+  <<<"$move_result" 2>/dev/null)" || true
+move_reason="$(jq -r '.result.move_result.reason // "unknown"' \
+  <<<"$move_result" 2>/dev/null)" || true
+if [ "$move_changed" != "true" ]; then
+  die "move not applied ($source -> $target_tab; reason: ${move_reason:-unknown})"
 fi
 
-# The tab to move the agent into = the focused pane's tab.
-target_tab="$("$HERDR" pane get "$target" 2>/dev/null | jq -r '.result.pane.tab_id // empty')"
-[ -n "$target_tab" ] || die "cannot resolve focused tab"
+moved_pane="$(jq -r '.result.move_result.pane.pane_id // empty' \
+  <<<"$move_result" 2>/dev/null)" || true
+[ -n "$moved_pane" ] || die "move succeeded without a returned pane id; placeholder '$target' remains"
 
-# Move the agent in beside the focused pane and grab focus, then close the pane
-# you were in so the agent takes its place. Only close if the move succeeded —
-# never destroy your pane for nothing.
-"$HERDR" pane move "$source" --tab "$target_tab" --target-pane "$target" --split right --focus >/dev/null 2>&1 \
-  || die "move failed ($source -> $target_tab)"
+# Close only after Herdr confirms the agent moved. A close failure is visible to
+# automation and preserves both panes for recovery.
+if ! "$HERDR" pane close "$target" >/dev/null 2>&1; then
+  if [ "$mode" = "operator" ]; then
+    note "agent moved in, but could not close old pane $target"
+    exit 0
+  fi
+  die "agent moved to '$moved_pane', but placeholder '$target' could not be closed"
+fi
 
-"$HERDR" pane close "$target" >/dev/null 2>&1 \
-  || note "agent moved in, but could not close old pane $target"
+if [ "$mode" = "agent" ]; then
+  printf 'workspace=%s pane=%s replaced=%s changed=true\n' \
+    "$workspace" "$moved_pane" "$target"
+fi

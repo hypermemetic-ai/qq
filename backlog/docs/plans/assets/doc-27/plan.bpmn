@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:qq="http://qq.local/schema/evidence" id="populate_herdr_change_workspace_definitions" targetNamespace="http://qq.local/schema/bpmn">
+  <bpmn:process id="populate_herdr_change_workspace" name="Populate Herdr Change workspaces" isExecutable="false">
+    <bpmn:startEvent id="start" name="Fix approved">
+      <bpmn:documentation>The operator authorized the causal correction after the empty-workspace diagnosis. Evidence: backlog/tasks/task-18 - Populate-Herdr-Change-workspaces-with-the-accountable-agent.md:21-39</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="backlog/tasks/task-18 - Populate-Herdr-Change-workspaces-with-the-accountable-agent.md" lines="21-39" />
+      </bpmn:extensionElements>
+      <bpmn:outgoing>flow_start_helper</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="extend_helper" name="Extend shared pane mover">
+      <bpmn:documentation>Add a fail-fast workspace-adoption mode to qq-herdr-pull while preserving the existing detached operator modes and their notification behavior. Evidence: backlog/tasks/task-18 - Populate-Herdr-Change-workspaces-with-the-accountable-agent.md:34-39</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="backlog/tasks/task-18 - Populate-Herdr-Change-workspaces-with-the-accountable-agent.md" lines="34-39" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_start_helper</bpmn:incoming>
+      <bpmn:outgoing>flow_helper_update</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="update_skill" name="Adopt helper in delivery workflow">
+      <bpmn:documentation>Teach deliver-change to invoke the shared mover for the returned workspace and anchor all subsequent work to its checkout; document both caller modes. Evidence: backlog/tasks/task-18 - Populate-Herdr-Change-workspaces-with-the-accountable-agent.md:34-39</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="backlog/tasks/task-18 - Populate-Herdr-Change-workspaces-with-the-accountable-agent.md" lines="34-39" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_helper_update</bpmn:incoming>
+      <bpmn:outgoing>flow_update_entry</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="checks_entry" name="Enter verification">
+      <bpmn:documentation>Initial implementation and every correction converge on the same focused verification pass. Evidence: skills/deliver-change/SKILL.md:22-28</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/deliver-change/SKILL.md" lines="22-28" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_update_entry</bpmn:incoming>
+      <bpmn:incoming>flow_repair_checks</bpmn:incoming>
+      <bpmn:outgoing>flow_entry_checks</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="run_checks" name="Validate Skill and handoff invariants">
+      <bpmn:documentation>Validate both caller modes with mocks, Skill structure, diff hygiene, move-before-close ordering, checkout anchoring, and the live accountable-pane topology. Evidence: backlog/tasks/task-18 - Populate-Herdr-Change-workspaces-with-the-accountable-agent.md:34-39</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="backlog/tasks/task-18 - Populate-Herdr-Change-workspaces-with-the-accountable-agent.md" lines="34-39" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_entry_checks</bpmn:incoming>
+      <bpmn:outgoing>flow_checks_gateway</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="checks_green" name="Checks green?">
+      <bpmn:documentation>Only a fresh passing observation of the intended handoff may advance to review. Evidence: skills/deliver-change/SKILL.md:22-28</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/deliver-change/SKILL.md" lines="22-28" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_checks_gateway</bpmn:incoming>
+      <bpmn:outgoing>flow_checks_yes</bpmn:outgoing>
+      <bpmn:outgoing>flow_checks_no</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:exclusiveGateway id="repair_entry" name="Enter correction">
+      <bpmn:documentation>Failed Checks and verified review findings converge on one bounded correction path. Evidence: skills/code-review/SKILL.md:72-84</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/code-review/SKILL.md" lines="72-84" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_checks_no</bpmn:incoming>
+      <bpmn:incoming>flow_review_no</bpmn:incoming>
+      <bpmn:outgoing>flow_repair_entry</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="repair" name="Correct in-scope failure">
+      <bpmn:documentation>Apply the smallest correction for a failed check or confirmed review finding, then rerun the focused checks. Evidence: skills/code-review/SKILL.md:72-84</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/code-review/SKILL.md" lines="72-84" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_repair_entry</bpmn:incoming>
+      <bpmn:outgoing>flow_repair_checks</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="review" name="Run fresh-context review">
+      <bpmn:documentation>Give one read-only reviewer the complete intent, exact delta, and passing Check evidence before publication. Evidence: skills/code-review/SKILL.md:15-50</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/code-review/SKILL.md" lines="15-50" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_checks_yes</bpmn:incoming>
+      <bpmn:outgoing>flow_review_gateway</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="review_clear" name="Review clear?">
+      <bpmn:documentation>Advance only when no verified material finding remains in the Change. Evidence: skills/code-review/SKILL.md:70-88</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/code-review/SKILL.md" lines="70-88" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_review_gateway</bpmn:incoming>
+      <bpmn:outgoing>flow_review_yes</bpmn:outgoing>
+      <bpmn:outgoing>flow_review_no</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="publish" name="Publish green pull request">
+      <bpmn:documentation>Commit and push the reviewed Change, open its pull request, and require applicable GitHub Checks to pass. Evidence: skills/deliver-change/SKILL.md:29-31</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/deliver-change/SKILL.md" lines="29-31" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_review_yes</bpmn:incoming>
+      <bpmn:outgoing>flow_publish_ready</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="ready" name="Green PR ready">
+      <bpmn:documentation>The reviewed fix is green in its owning pull request and ready for operator handoff. Evidence: backlog/tasks/task-18 - Populate-Herdr-Change-workspaces-with-the-accountable-agent.md:28-39</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="backlog/tasks/task-18 - Populate-Herdr-Change-workspaces-with-the-accountable-agent.md" lines="28-39" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_publish_ready</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="flow_start_helper" sourceRef="start" targetRef="extend_helper" />
+    <bpmn:sequenceFlow id="flow_helper_update" sourceRef="extend_helper" targetRef="update_skill" />
+    <bpmn:sequenceFlow id="flow_update_entry" sourceRef="update_skill" targetRef="checks_entry" />
+    <bpmn:sequenceFlow id="flow_entry_checks" sourceRef="checks_entry" targetRef="run_checks" />
+    <bpmn:sequenceFlow id="flow_checks_gateway" sourceRef="run_checks" targetRef="checks_green" />
+    <bpmn:sequenceFlow id="flow_checks_yes" name="yes" sourceRef="checks_green" targetRef="review" />
+    <bpmn:sequenceFlow id="flow_checks_no" name="no" sourceRef="checks_green" targetRef="repair_entry" />
+    <bpmn:sequenceFlow id="flow_repair_checks" sourceRef="repair" targetRef="checks_entry" />
+    <bpmn:sequenceFlow id="flow_review_gateway" sourceRef="review" targetRef="review_clear" />
+    <bpmn:sequenceFlow id="flow_review_yes" name="yes" sourceRef="review_clear" targetRef="publish" />
+    <bpmn:sequenceFlow id="flow_review_no" name="no" sourceRef="review_clear" targetRef="repair_entry" />
+    <bpmn:sequenceFlow id="flow_repair_entry" sourceRef="repair_entry" targetRef="repair" />
+    <bpmn:sequenceFlow id="flow_publish_ready" sourceRef="publish" targetRef="ready" />
+  </bpmn:process>
+</bpmn:definitions>
