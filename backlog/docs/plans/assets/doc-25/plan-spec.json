@@ -1,0 +1,141 @@
+{
+  "id": "one_pr_bpmn_conformance",
+  "name": "Keep BPMN conformance inside the owning PR",
+  "elements": [
+    {
+      "id": "scope_approved",
+      "type": "startEvent",
+      "name": "One-PR conformance scope approved",
+      "documentation": "Historical records remain intact; the procedure changes prospectively to same-PR closeout.",
+      "evidence": {
+        "file": "backlog/tasks/task-15 - Keep-BPMN-conformance-inside-the-owning-PR.md",
+        "lines": "19-29"
+      }
+    },
+    {
+      "id": "update_skill",
+      "type": "serviceTask",
+      "name": "Update bpmn-plans boundary",
+      "documentation": "Make plans end at green PR handoff and move conformance plus Task finalization into same-PR closeout metadata.",
+      "evidence": {
+        "file": "backlog/tasks/task-15 - Keep-BPMN-conformance-inside-the-owning-PR.md",
+        "lines": "24-27"
+      }
+    },
+    {
+      "id": "verification_entry",
+      "type": "exclusiveGateway",
+      "name": "Enter verification",
+      "documentation": "Join initial implementation and corrected-delta paths before rerunning all affected checks.",
+      "evidence": {
+        "file": "skills/code-review/SKILL.md",
+        "lines": "78-83"
+      }
+    },
+    {
+      "id": "validate_skill",
+      "type": "serviceTask",
+      "name": "Validate Skill and metadata",
+      "documentation": "Run the Skill validator, parse interface metadata, and inspect trigger/procedure coherence.",
+      "evidence": {
+        "file": "backlog/tasks/task-15 - Keep-BPMN-conformance-inside-the-owning-PR.md",
+        "lines": "28-28"
+      }
+    },
+    {
+      "id": "forward_test",
+      "type": "serviceTask",
+      "name": "Exercise one-PR closeout",
+      "documentation": "Use fresh contexts to test same-PR conformance, changed-after-conformance, and disposition exclusions.",
+      "evidence": {
+        "file": "backlog/tasks/task-15 - Keep-BPMN-conformance-inside-the-owning-PR.md",
+        "lines": "24-28"
+      }
+    },
+    {
+      "id": "review_change",
+      "type": "serviceTask",
+      "name": "Run fresh-context review",
+      "documentation": "Delegate independent read-only review of the exact implementation and plan artifacts.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "26-28"
+      }
+    },
+    {
+      "id": "review_decision",
+      "type": "exclusiveGateway",
+      "name": "Implementation green?",
+      "documentation": "Branch on whether verified material findings remain.",
+      "evidence": {
+        "file": "skills/code-review/SKILL.md",
+        "lines": "72-83"
+      }
+    },
+    {
+      "id": "fix_findings",
+      "type": "serviceTask",
+      "name": "Fix in-scope findings",
+      "documentation": "Apply only the smallest causal corrections and rerun affected checks.",
+      "evidence": {
+        "file": "skills/code-review/SKILL.md",
+        "lines": "78-83"
+      }
+    },
+    {
+      "id": "publish_pr",
+      "type": "serviceTask",
+      "name": "Publish the owning PR",
+      "documentation": "Commit the reviewed planned work, push it, and open its one owning pull request.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "29-31"
+      }
+    },
+    {
+      "id": "pr_decision",
+      "type": "exclusiveGateway",
+      "name": "Owning PR green?",
+      "documentation": "Use applicable GitHub checks and mergeability as the planned handoff gate.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "29-31"
+      }
+    },
+    {
+      "id": "fix_pr_failure",
+      "type": "serviceTask",
+      "name": "Correct failed PR checks",
+      "documentation": "Correct only in-scope failures and return through validation and review before republishing.",
+      "evidence": {
+        "file": "skills/deliver-change/SKILL.md",
+        "lines": "38-45"
+      }
+    },
+    {
+      "id": "green_pr_handoff",
+      "type": "endEvent",
+      "name": "Change green for PR handoff",
+      "documentation": "The planned implementation is green in its owning PR. Conformance and Task finalization are same-PR closeout metadata outside the BPMN nodes.",
+      "evidence": {
+        "file": "backlog/tasks/task-15 - Keep-BPMN-conformance-inside-the-owning-PR.md",
+        "lines": "24-27"
+      }
+    }
+  ],
+  "flows": [
+    { "id": "f1", "source": "scope_approved", "target": "update_skill" },
+    { "id": "f2", "source": "update_skill", "target": "verification_entry" },
+    { "id": "f3", "source": "verification_entry", "target": "validate_skill" },
+    { "id": "f4", "source": "validate_skill", "target": "forward_test" },
+    { "id": "f5", "source": "forward_test", "target": "review_change" },
+    { "id": "f6", "source": "review_change", "target": "review_decision" },
+    { "id": "f7", "source": "review_decision", "target": "fix_findings", "name": "findings" },
+    { "id": "f8", "source": "fix_findings", "target": "verification_entry" },
+    { "id": "f9", "source": "review_decision", "target": "publish_pr", "name": "green" },
+    { "id": "f10", "source": "publish_pr", "target": "pr_decision" },
+    { "id": "f11", "source": "pr_decision", "target": "fix_pr_failure", "name": "not green" },
+    { "id": "f12", "source": "fix_pr_failure", "target": "verification_entry" },
+    { "id": "f13", "source": "pr_decision", "target": "green_pr_handoff", "name": "green" }
+  ]
+}
