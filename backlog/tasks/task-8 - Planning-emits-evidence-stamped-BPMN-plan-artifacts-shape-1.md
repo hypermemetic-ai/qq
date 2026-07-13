@@ -1,11 +1,11 @@
 ---
 id: TASK-8
 title: Planning emits evidence-stamped BPMN plan artifacts (shape 1)
-status: In Progress
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-07-12 16:02'
-updated_date: '2026-07-12 22:00'
+updated_date: '2026-07-13 02:01'
 labels: []
 dependencies: []
 documentation:
@@ -33,7 +33,7 @@ DEPENDS: TASK-6 pipeline pieces (codegen helper, lint config + subset plugin, re
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A planning flow exists that emits a subset-conforming, evidence-stamped .bpmn + rendered PNG for a real task, and the operator has reviewed at least one such plan-diagram before work started
+- [x] #1 A planning flow exists that emits a subset-conforming, evidence-stamped .bpmn + rendered PNG for a real task, and the operator has reviewed at least one such plan-diagram before work started
 - [x] #2 A conformance check exists that, given a plan .bpmn and the executed work's record, reports per-task/per-gateway conformance and divergences
 - [x] #3 Plan artifacts are attached to their owning Backlog task (not the wiki)
 - [x] #4 At plan approval (the grilling close), the agent presents the rendered plan diagram to the operator alongside the confirmation question
@@ -54,3 +54,9 @@ Approved addendum: make image-viewer presentation mandatory at generation and ap
 
 UAT accepted 2026-07-12: the initial tool-result preview produced no visible viewer; after switching to a durable desktop opener, the operator confirmed the persistent xviewer window worked.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Delivered evidence-stamped BPMN plan artifacts through PR #32, including Backlog plans-document storage, rendered approval presentation, and post-hoc conformance reporting. PR #42 made plan presentation durable in xviewer; operator UAT accepted the persistent viewer behavior on 2026-07-12. All acceptance criteria are satisfied.
+<!-- SECTION:FINAL_SUMMARY:END -->

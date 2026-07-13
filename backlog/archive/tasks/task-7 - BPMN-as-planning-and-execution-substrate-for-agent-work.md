@@ -4,7 +4,7 @@ title: BPMN as planning and execution substrate for agent work
 status: To Do
 assignee: []
 created_date: '2026-07-12 15:58'
-updated_date: '2026-07-12 16:03'
+updated_date: '2026-07-13 02:01'
 labels: []
 dependencies: []
 ordinal: 5000
@@ -44,5 +44,11 @@ Operator decision 2026-07-12: shape 1 (plan-artifact-only) adopted now — imple
 created: 2026-07-12 16:03
 ---
 Correction to #1: research round NOT launched — operator deferred it (2026-07-12, 'let it be'). Task stays open until deliberately picked up.
+---
+
+author: operator
+created: 2026-07-13 02:01
+---
+Retired by operator on 2026-07-12: execution-substrate research is no longer wanted. Shape 1 remains delivered by TASK-8; no engine or agent-native runtime investigation will be pursued.
 ---
 <!-- COMMENTS:END -->
