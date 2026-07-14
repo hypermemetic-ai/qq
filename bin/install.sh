@@ -15,6 +15,14 @@ case "$QQ_DATA_HOME" in
   *) die "XDG_DATA_HOME must be an absolute path" ;;
 esac
 
+if [ -n "${XDG_CONFIG_HOME:-}" ]; then
+  case "$XDG_CONFIG_HOME" in
+    /*) ;;
+    *) die "XDG_CONFIG_HOME must be an absolute path" ;;
+  esac
+fi
+QQ_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+
 resolved_path() {
   readlink -f "$1" 2>/dev/null || true
 }
@@ -82,43 +90,122 @@ prune_removed_commands() {
   done
 }
 
-install_openwiki_activation_handler() {
+remove_openwiki_mime_registration() {
+  local mimeapps="$1"
+  local final_newline=0
+  local temporary
+
+  [ -f "$mimeapps" ] || return 0
+  [ ! -L "$mimeapps" ] || return 0
+  grep -Fq 'qq-openwiki-activate.desktop' "$mimeapps" || return 0
+
+  if [ -s "$mimeapps" ] &&
+      [ "$(tail -c 1 "$mimeapps" | od -An -t u1 | tr -d '[:space:]')" = 10 ]; then
+    final_newline=1
+  fi
+
+  temporary="$(mktemp "$(dirname "$mimeapps")/.mimeapps.list.XXXXXX")"
+  if ! awk \
+    -v mimetype='x-scheme-handler/qq-openwiki' \
+    -v application='qq-openwiki-activate.desktop' \
+    -v final_newline="$final_newline" '
+      BEGIN {
+        prefix = mimetype "="
+        section = ""
+        records = 0
+      }
+      {
+        line = $0
+        comparable = line
+        sub(/\r$/, "", comparable)
+        if (comparable ~ /^\[/) {
+          section = comparable
+        } else if ((section == "[Default Applications]" ||
+                    section == "[Added Associations]") && index(line, prefix) == 1) {
+          value = substr(line, length(prefix) + 1)
+          carriage_return = ""
+          if (substr(value, length(value), 1) == "\r") {
+            carriage_return = "\r"
+            value = substr(value, 1, length(value) - 1)
+          }
+
+          count = 0
+          remaining = value
+          while ((separator = index(remaining, ";")) != 0) {
+            entries[++count] = substr(remaining, 1, separator - 1)
+            remaining = substr(remaining, separator + 1)
+          }
+          entries[++count] = remaining
+
+          kept = 0
+          removed = 0
+          output = ""
+          for (i = 1; i <= count; i++) {
+            if (entries[i] == application) {
+              removed = 1
+            } else {
+              output = output (kept ? ";" : "") entries[i]
+              kept++
+            }
+          }
+          if (removed) {
+            if (substr(value, length(value), 1) == ";" &&
+              substr(output, length(output), 1) != ";") {
+              output = output ";"
+            }
+            line = prefix output carriage_return
+          }
+        }
+
+        if (records++) {
+          printf "\n"
+        }
+        printf "%s", line
+      }
+      END {
+        if (final_newline) {
+          printf "\n"
+        }
+      }
+    ' "$mimeapps" >"$temporary"; then
+    rm -f "$temporary"
+    die "could not remove retired OpenWiki MIME registration from $mimeapps"
+  fi
+
+  chmod --reference="$mimeapps" "$temporary"
+  if cmp -s "$mimeapps" "$temporary"; then
+    rm -f "$temporary"
+  else
+    mv -f "$temporary" "$mimeapps"
+    printf 'pruned: desktop/OpenWiki MIME registration\n'
+  fi
+}
+
+cleanup_openwiki_activation_handler() {
   local applications="$QQ_DATA_HOME/applications"
   local desktop="$applications/qq-openwiki-activate.desktop"
-  local command_path="$HOME/.local/bin/qq-openwiki-activate"
-  local escaped_command temporary
 
-  command -v xdg-mime >/dev/null 2>&1 || die "xdg-mime is required for the OpenWiki activation handler"
-  mkdir -p "$applications"
-  [ ! -L "$desktop" ] || die "refusing symlinked desktop entry: $desktop"
-  if [ -e "$desktop" ] && ! grep -Fxq 'X-qq-managed=true' "$desktop"; then
-    die "refusing to replace unmanaged desktop entry: $desktop"
+  if [ -f "$desktop" ] && [ ! -L "$desktop" ] &&
+      grep -Fxq 'X-qq-managed=true' "$desktop"; then
+    remove_openwiki_mime_registration "$QQ_CONFIG_HOME/mimeapps.list"
+    remove_openwiki_mime_registration "$applications/mimeapps.list"
+    rm "$desktop"
+    printf 'pruned: desktop/qq-openwiki-activate.desktop\n'
+    if command -v update-desktop-database >/dev/null 2>&1; then
+      update-desktop-database "$applications"
+    fi
   fi
+}
 
-  escaped_command="${command_path//\\/\\\\}"
-  escaped_command="${escaped_command//\"/\\\"}"
-  escaped_command="${escaped_command//\`/\\\`}"
-  escaped_command="${escaped_command//\$/\\\$}"
-  temporary="$(mktemp "$applications/.qq-openwiki-activate.desktop.XXXXXX")"
-  trap 'rm -f "$temporary"' RETURN
-  printf '%s\n' \
-    '[Desktop Entry]' \
-    'Type=Application' \
-    'Name=qq OpenWiki Activator' \
-    'NoDisplay=true' \
-    'Terminal=false' \
-    "Exec=\"$escaped_command\" %u" \
-    'MimeType=x-scheme-handler/qq-openwiki;' \
-    'X-qq-managed=true' >"$temporary"
-  chmod 0644 "$temporary"
-  mv -f "$temporary" "$desktop"
-  trap - RETURN
+prune_removed_openwiki_links() {
+  local link="$QQ_DATA_HOME/qq/openwiki-merge-activator.user.js"
 
-  xdg-mime default qq-openwiki-activate.desktop x-scheme-handler/qq-openwiki
-  if command -v update-desktop-database >/dev/null 2>&1; then
-    update-desktop-database "$applications"
+  if [ -L "$link" ] &&
+      [ "$(readlink "$link")" = "$QQ/browser/openwiki-merge-activator.user.js" ] &&
+      [ ! -e "$link" ]; then
+    rm "$link"
+    printf 'pruned: browser/openwiki-merge-activator.user.js\n'
   fi
-  printf 'installed: qq-openwiki:// activation handler\n'
 }
 
 install_bpmn_pipeline() {
@@ -132,7 +219,9 @@ install_bpmn_pipeline() {
 install_bpmn_pipeline
 sync_skills "$HOME/.codex/skills"
 sync_skills "$HOME/.claude/skills"
+cleanup_openwiki_activation_handler
 prune_removed_commands
+prune_removed_openwiki_links
 
 link_one "$QQ/cockpit/yazi/yazi.toml" "$HOME/.config/yazi/yazi.toml" "cockpit/yazi.toml"
 link_one "$QQ/cockpit/yazi/keymap.toml" "$HOME/.config/yazi/keymap.toml" "cockpit/yazi-keymap.toml"
@@ -146,10 +235,5 @@ link_one "$QQ/bin/qq-herdr-home" "$HOME/.local/bin/qq-herdr-home" "command/qq-he
 link_one "$QQ/bin/qq-herdr-pull" "$HOME/.local/bin/qq-herdr-pull" "command/qq-herdr-pull"
 link_one "$QQ/bin/qq-openwiki" "$HOME/.local/bin/qq-openwiki" "command/qq-openwiki"
 link_one "$QQ/bin/qq-openwiki-bpmn" "$HOME/.local/bin/qq-openwiki-bpmn" "command/qq-openwiki-bpmn"
-link_one "$QQ/bin/qq-openwiki-activate.py" "$HOME/.local/bin/qq-openwiki-activate" "command/qq-openwiki-activate"
-link_one "$QQ/browser/openwiki-merge-activator.user.js" "$QQ_DATA_HOME/qq/openwiki-merge-activator.user.js" "browser/openwiki-merge-activator.user.js"
-
-install_openwiki_activation_handler
 
 printf 'qq install: links complete\n'
-printf 'Tampermonkey userscript: https://raw.githubusercontent.com/hypermemetic-ai/qq/main/browser/openwiki-merge-activator.user.js\n'

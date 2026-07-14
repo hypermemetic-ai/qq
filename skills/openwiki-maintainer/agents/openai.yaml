@@ -1,4 +1,4 @@
 interface:
   display_name: "OpenWiki Maintainer"
-  short_description: "Refresh generated wiki after main advances"
-  default_prompt: "Use $openwiki-maintainer to process landed changes and deliver the next OpenWiki update Change."
+  short_description: "Run an explicitly assigned wiki refresh"
+  default_prompt: "Use $openwiki-maintainer for the assigned wiki refresh and open a docs-only pull request for operator merge."
