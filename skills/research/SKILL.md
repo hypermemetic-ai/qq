@@ -5,16 +5,34 @@ description: Delegates decision-grade investigation to a fresh read-only researc
 
 # Research
 
-Delegate the reading; retain the judgment. For substantial research, follow
-`agent-messaging`'s canonical temporary-delegate procedure to start a fresh
-read-only researcher; start Codex with `--sandbox read-only
---ask-for-approval never`. Give it the exact question, constraints, this method, and
-the relevant Repository paths; outside Herdr, use the cleanest fresh-context
-mechanism available and report that pane placement was unavailable. The
-researcher returns findings directly or writes raw notes under the OS temporary
-directory. The owning agent spot-checks load-bearing citations, decides what the
-findings mean, and writes the Repository artifacts, then retires the researcher
-under `agent-messaging`'s close-and-verify procedure.
+Delegate the reading; retain the judgment. For substantial research, write
+the exact question, constraints, this method, and the relevant Repository
+paths into a brief file under the OS temporary directory, then launch a
+fresh read-only researcher through Codex's non-interactive runner, adopting
+its native access control instead of any owned delegate machinery:
+
+```sh
+codex exec \
+  -c 'skills.include_instructions=false' \
+  -c 'skills.bundled.enabled=false' \
+  --sandbox read-only \
+  --skip-git-repo-check \
+  -C <working-root> \
+  -o <findings-path> \
+  "Read <brief-path> fully and perform the research it specifies. You are
+the researcher; the brief is your complete orientation. Do not invoke
+skills or delegate. Your final message is the findings report."
+```
+
+Substitute only the bracketed paths; the rest of the prompt stays exactly
+this text. Never place the question or any other free text on the command
+line, where shell quoting can execute embedded text before the sandbox
+exists. The runner gives the
+researcher a fresh session with no Skills in context and an OS-enforced
+read-only sandbox, and writes its final findings to `<findings-path>`
+itself; process exit retires it. The owning agent spot-checks load-bearing
+citations, decides what the findings mean, and writes the Repository
+artifacts.
 
 ## Method
 

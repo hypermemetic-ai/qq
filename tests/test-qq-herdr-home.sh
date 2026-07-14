@@ -167,9 +167,11 @@ grep -Fq -- 'herdr agent start <name> --workspace <id> --tab <owning-tab-id> --c
   "$ROOT/skills/agent-messaging/SKILL.md"
 grep -Fq -- 'herdr agent wait <name> --status idle' \
   "$ROOT/skills/agent-messaging/SKILL.md"
-grep -Fq -- "\`agent-messaging\`'s canonical temporary-delegate procedure" \
-  "$ROOT/skills/code-review/SKILL.md"
-grep -Fq -- "\`agent-messaging\`'s canonical temporary-delegate procedure" \
-  "$ROOT/skills/research/SKILL.md"
+grep -Fq -- "-c 'skills.include_instructions=false'" "$ROOT/skills/code-review/SKILL.md"
+grep -Fq -- "-c 'skills.bundled.enabled=false'" "$ROOT/skills/code-review/SKILL.md"
+grep -Fq -- '--sandbox read-only' "$ROOT/skills/code-review/SKILL.md"
+grep -Fq -- "-c 'skills.include_instructions=false'" "$ROOT/skills/research/SKILL.md"
+grep -Fq -- "-c 'skills.bundled.enabled=false'" "$ROOT/skills/research/SKILL.md"
+grep -Fq -- '--sandbox read-only' "$ROOT/skills/research/SKILL.md"
 
 printf 'test-qq-herdr-home: pass\n'

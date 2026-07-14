@@ -43,14 +43,35 @@ inherits the other's conclusions.
 
 ## Delegate the judgment
 
-4. Follow `agent-messaging`'s canonical temporary-delegate procedure to start
-   one fresh read-only reviewer with no inherited conversation history. Start
-   Codex with `--sandbox read-only --ask-for-approval never` and give it the
-   complete brief from step 3. Outside Herdr, use the cleanest fresh-context
-   mechanism available and report that pane placement was unavailable. State
-   that the brief completes orientation: no start-of-work sequence, no broad
-   searches of intent or knowledge surfaces, no unrelated skills, no further
-   delegation, no state changes, no full Check-suite reruns.
+4. Launch one fresh read-only reviewer through Codex's non-interactive
+   runner, adopting its native access control instead of any owned delegate
+   machinery. Keep the brief and report under the OS temporary directory:
+
+   ```sh
+   codex exec \
+     -c 'skills.include_instructions=false' \
+     -c 'skills.bundled.enabled=false' \
+     --sandbox read-only \
+     --skip-git-repo-check \
+     -C <repository-root> \
+     -o <report-path> \
+     "Read <brief-path> fully and perform the review it specifies. You are
+   the reviewer; the brief is your complete orientation. Do not invoke
+   skills or delegate. Your final message is the review report."
+   ```
+
+   The runner enforces mechanically what prose cannot: a fresh session with
+   no inherited conversation, no Skills in the reviewer's context — this
+   skill and its delegation step never enter it — an OS-enforced read-only
+   sandbox, and the final message written to `<report-path>` by the CLI
+   itself. Substitute only the bracketed paths; the rest of the prompt stays
+   exactly this text — never place free text on the command line, where
+   shell quoting can execute embedded text before the sandbox exists. State
+   in the brief that it completes orientation: no start-of-work sequence, no
+   broad searches of intent or knowledge surfaces, no full Check-suite
+   reruns. Run the command as an ordinary process in the Change's work
+   session, wait for it to exit, then read the report file; process exit
+   retires the reviewer.
 5. The reviewer tests the Change's responsibilities against the brief, then
    inspects the exact diff, the surrounding callers and tests, and the
    failure paths it suspects. A correctly implemented but unapproved
@@ -59,9 +80,9 @@ inherits the other's conclusions.
    historical bodies.
 6. A brief with a hole gets a context-gap report, not improvisation: the
    exact missing or contradictory fact, why the verdict depends on it, and
-   the evidence already inspected. Supply exactly that fact to the same
-   reviewer; without it the review cannot proceed. A context gap is neither a
-   finding nor a pass.
+   the evidence already inspected. Amend the brief with exactly that fact and
+   rerun step 4 fresh; without it the review cannot proceed. A context gap is
+   neither a finding nor a pass.
 7. Request only material findings the Change introduced, across correctness,
    security, reliability, intent, and standards no tool enforces. Treat code
    smells as maintenance heuristics, never violations: report one only when
@@ -85,10 +106,7 @@ inherits the other's conclusions.
    an in-scope fix, rerun the affected Checks and review the exact delta from
    the last reviewed tree. If a remedy would materially widen the Change,
    stop and align with the operator.
-10. Handle an explicit context gap through step 6. A reviewer error or missing
-    final report is not a review: retire that delegate under
-    `agent-messaging`'s close-and-verify procedure, then retry the unchanged
-    brief with a fresh reviewer. After the final report and any step 9 delta
-    review, retire every reviewer the same way. Never narrow scope or soften
-    intent to obtain a pass; repeated reviewer unavailability or cleanup failure
-    is a blocker.
+10. Handle an explicit context gap through step 6. A reviewer error, a nonzero
+    exit, or a missing or empty report file is not a review: rerun the
+    unchanged brief as a fresh step 4 invocation. Never narrow scope or soften
+    intent to obtain a pass; repeated reviewer failure is a blocker.
