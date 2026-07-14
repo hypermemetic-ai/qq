@@ -4,6 +4,8 @@ set -euo pipefail
 QQ_OPENWIKI="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)/bin/qq-openwiki"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
+export XDG_RUNTIME_DIR="$tmp/runtime"
+export XDG_STATE_HOME="$tmp/state"
 
 fake_bin="$tmp/bin"
 repo="$tmp/repo"
@@ -50,6 +52,10 @@ for name in ("AGENTS.md", "CLAUDE.md"):
         content = f"{content.rstrip()}\n\n{generated}\n" if content.strip() else f"{generated}\n"
     path.write_text(content)
 PY
+if [ -n "${FAKE_KILL_PARENT:-}" ]; then
+  kill -KILL "$PPID"
+  exit 0
+fi
 printf 'updated\n' >>openwiki/quickstart.md
 if [ -n "${FAKE_FAIL:-}" ]; then
   exit "$FAKE_FAIL"
@@ -208,6 +214,60 @@ cp "$repo/CLAUDE.md" "$tmp/CLAUDE.expected"
 git -C "$repo" add AGENTS.md CLAUDE.md
 git -C "$repo" commit -qm 'use shared agent instructions'
 git -C "$repo" update-ref refs/remotes/origin/main "$(git -C "$repo" rev-parse HEAD)"
+
+(
+  cd "$repo"
+  "$QQ_OPENWIKI" --update
+)
+test -L "$repo/AGENTS.md"
+test "$(readlink "$repo/AGENTS.md")" = "$shared_agents"
+cmp "$tmp/shared-AGENTS.expected" "$shared_agents"
+cmp "$tmp/CLAUDE.expected" "$repo/CLAUDE.md"
+test ! -e "$repo/.github/workflows/openwiki-update.yml"
+git -C "$repo" restore openwiki/quickstart.md
+test -z "$(git -C "$repo" status --porcelain)"
+
+sibling="$tmp/sibling"
+git -C "$repo" worktree add -q -b sibling "$sibling" HEAD
+snapshot_key="$(printf '%s' "$repo/.git" | sha256sum | cut -d' ' -f1)"
+snapshot_dir="$XDG_STATE_HOME/qq/openwiki/$snapshot_key"
+set +e
+(
+  cd "$repo"
+  FAKE_KILL_PARENT=1 "$QQ_OPENWIKI" --update \
+    >"$tmp/crash.out" 2>"$tmp/crash.err"
+) 2>"$tmp/crash-shell.err"
+crash_status=$?
+set -e
+test "$crash_status" -eq 137
+test -d "$snapshot_dir"
+IFS= read -r -d '' snapshot_root <"$snapshot_dir/worktree-root"
+test "$snapshot_root" = "$repo"
+test -L "$snapshot_dir/AGENTS.md"
+test "$(readlink "$snapshot_dir/AGENTS.md")" = "$shared_agents"
+cmp "$tmp/CLAUDE.expected" "$snapshot_dir/CLAUDE.md"
+test ! -L "$repo/AGENTS.md"
+test -e "$repo/.github/workflows/openwiki-update.yml"
+
+set +e
+(
+  cd "$sibling"
+  "$QQ_OPENWIKI" --update \
+    >"$tmp/sibling-recovery.out" 2>"$tmp/sibling-recovery.err"
+)
+sibling_status=$?
+set -e
+test "$sibling_status" -eq 1
+grep -q 'updates require the dedicated openwiki/update branch' \
+  "$tmp/sibling-recovery.err"
+test ! -e "$snapshot_dir"
+test -L "$repo/AGENTS.md"
+test "$(readlink "$repo/AGENTS.md")" = "$shared_agents"
+cmp "$tmp/shared-AGENTS.expected" "$shared_agents"
+cmp "$tmp/CLAUDE.expected" "$repo/CLAUDE.md"
+test ! -e "$repo/.github/workflows/openwiki-update.yml"
+test -z "$(git -C "$repo" status --porcelain)"
+test -z "$(git -C "$sibling" status --porcelain)"
 
 (
   cd "$repo"

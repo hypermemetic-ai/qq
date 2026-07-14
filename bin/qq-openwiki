@@ -72,6 +72,7 @@ command -v sha256sum >/dev/null 2>&1 || die "sha256sum not found"
 
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a Git worktree"
 cd "$root"
+root="$(pwd -P)"
 
 require_correction_snapshot() {
   local path
@@ -93,11 +94,21 @@ require_correction_snapshot() {
     || die "correction baseline must be fully staged"
 }
 
-common_dir="$(git rev-parse --git-common-dir)"
-case "$common_dir" in
-  /*) ;;
-  *) common_dir="$(cd "$(dirname "$common_dir")" && pwd -P)/$(basename "$common_dir")" ;;
-esac
+absolute_common_dir() {
+  local worktree="$1"
+  local directory
+
+  directory="$(git -C "$worktree" rev-parse --git-common-dir 2>/dev/null)" \
+    || return 1
+  case "$directory" in
+    /*) ;;
+    *) directory="$(cd "$worktree/$(dirname "$directory")" && pwd -P)/$(basename "$directory")" ;;
+  esac
+  printf '%s\n' "$directory"
+}
+
+common_dir="$(absolute_common_dir "$root")" \
+  || die "failed to resolve the Repository common directory"
 lock_key="$(printf '%s' "$common_dir" | sha256sum | cut -d' ' -f1)"
 lock_root="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/qq-openwiki"
 umask 077
@@ -106,6 +117,110 @@ exec 9>"$lock_root/$lock_key.lock"
 flock -n 9 || die "another OpenWiki writer is active for this Repository"
 
 workflow=".github/workflows/openwiki-update.yml"
+if [ -n "${XDG_STATE_HOME:-}" ]; then
+  state_home="$XDG_STATE_HOME"
+elif [ -n "${HOME:-}" ]; then
+  state_home="$HOME/.local/state"
+else
+  die "XDG_STATE_HOME or HOME is required for durable snapshots"
+fi
+state_root="$state_home/qq/openwiki"
+state_dir="$state_root/$lock_key"
+preparing_state_dir="$state_root/.$lock_key.preparing"
+restored_state_dir="$state_root/.$lock_key.restored"
+snapshot_root_file="$state_dir/worktree-root"
+mkdir -p -- "$state_root"
+if [ ! -d "$state_root" ] || [ -L "$state_root" ]; then
+  die "refusing unsupported snapshot root: $state_root"
+fi
+chmod 700 -- "$state_root"
+
+cleanup_done=0
+restore_root="$root"
+
+load_snapshot_root() {
+  local actual_root
+  local snapshot_common_dir
+  local trailing
+
+  if [ ! -f "$snapshot_root_file" ] || [ -L "$snapshot_root_file" ]; then
+    die "durable OpenWiki snapshot has no valid worktree root"
+  fi
+  exec 8<"$snapshot_root_file" \
+    || die "failed to read the durable OpenWiki snapshot root"
+  if ! IFS= read -r -d '' restore_root <&8; then
+    exec 8<&-
+    die "durable OpenWiki snapshot has no valid worktree root"
+  fi
+  if IFS= read -r -n 1 trailing <&8; then
+    : "$trailing"
+    exec 8<&-
+    die "durable OpenWiki snapshot has an invalid worktree root"
+  fi
+  exec 8<&-
+
+  case "$restore_root" in
+    /*) ;;
+    *) die "durable OpenWiki snapshot has an invalid worktree root" ;;
+  esac
+  if [ ! -d "$restore_root" ] || [ -L "$restore_root" ]; then
+    die "durable OpenWiki snapshot worktree is unavailable: $restore_root"
+  fi
+  actual_root="$(git -C "$restore_root" rev-parse --show-toplevel 2>/dev/null)" \
+    || die "durable OpenWiki snapshot worktree is unavailable: $restore_root"
+  actual_root="$(cd "$actual_root" && pwd -P)"
+  [ "$actual_root" = "$restore_root" ] \
+    || die "durable OpenWiki snapshot worktree has changed: $restore_root"
+  snapshot_common_dir="$(absolute_common_dir "$restore_root")" \
+    || die "failed to validate the durable OpenWiki snapshot Repository"
+  [ "$snapshot_common_dir" = "$common_dir" ] \
+    || die "durable OpenWiki snapshot belongs to a different Repository"
+}
+
+restore_local_setup() {
+  local name
+  local path
+  local status=0
+
+  [ "$cleanup_done" -eq 0 ] || return 0
+  cleanup_done=1
+  rm -f "$restore_root/$workflow" || status=1
+  rmdir "$restore_root/.github/workflows" "$restore_root/.github" 2>/dev/null || true
+
+  for name in AGENTS.md CLAUDE.md; do
+    path="$restore_root/$name"
+    if [ -d "$path" ] && [ ! -L "$path" ]; then
+      status=1
+      continue
+    fi
+    rm -f -- "$path" || status=1
+    if [ -L "$state_dir/$name" ] || [ -f "$state_dir/$name" ]; then
+      cp -a -- "$state_dir/$name" "$path" || status=1
+    fi
+  done
+
+  if [ "$status" -eq 0 ]; then
+    rm -rf -- "$restored_state_dir" || status=1
+  fi
+  if [ "$status" -eq 0 ]; then
+    mv -T -- "$state_dir" "$restored_state_dir" || status=1
+  fi
+  if [ ! -e "$state_dir" ] && [ ! -L "$state_dir" ]; then
+    rm -rf -- "$restored_state_dir" || status=1
+  fi
+  return "$status"
+}
+
+rm -rf -- "$preparing_state_dir" "$restored_state_dir" \
+  || die "failed to clean incomplete snapshot state"
+if [ -e "$state_dir" ] || [ -L "$state_dir" ]; then
+  if [ ! -d "$state_dir" ] || [ -L "$state_dir" ]; then
+    die "refusing unsupported snapshot path: $state_dir"
+  fi
+  load_snapshot_root
+  restore_local_setup || die "failed to restore stale OpenWiki snapshot"
+fi
+
 if [ -e "$workflow" ] || [ -L "$workflow" ]; then
   die "refusing to replace existing $workflow"
 fi
@@ -129,16 +244,17 @@ elif [ -e openwiki ]; then
   die "openwiki/ already exists; use --update"
 fi
 
-state_dir="$(mktemp -d "$lock_root/$lock_key.state.XXXXXX")"
-cleanup_done=0
+mkdir -- "$preparing_state_dir" \
+  || die "failed to prepare durable OpenWiki snapshot"
+printf '%s\0' "$root" >"$preparing_state_dir/worktree-root"
 
 snapshot_agent_file() {
   local name="$1"
 
   if [ -L "$name" ] || [ -f "$name" ]; then
-    cp -a -- "$name" "$state_dir/$name"
+    cp -a -- "$name" "$preparing_state_dir/$name"
   elif [ -e "$name" ]; then
-    rm -rf -- "$state_dir"
+    rm -rf -- "$preparing_state_dir"
     die "refusing unsupported agent-instruction path: $name"
   else
     return 0
@@ -159,31 +275,12 @@ shadow_agent_symlink() {
   fi
 }
 
-restore_local_setup() {
-  local name
-  local status=0
-
-  [ "$cleanup_done" -eq 0 ] || return 0
-  cleanup_done=1
-  rm -f "$workflow" || status=1
-  rmdir .github/workflows .github 2>/dev/null || true
-
-  for name in AGENTS.md CLAUDE.md; do
-    if [ -d "$name" ] && [ ! -L "$name" ]; then
-      status=1
-      continue
-    fi
-    rm -f -- "$name" || status=1
-    if [ -L "$state_dir/$name" ] || [ -f "$state_dir/$name" ]; then
-      mv -- "$state_dir/$name" "$name" || status=1
-    fi
-  done
-  rm -rf -- "$state_dir" || status=1
-  return "$status"
-}
-
 snapshot_agent_file AGENTS.md
 snapshot_agent_file CLAUDE.md
+mv -T -- "$preparing_state_dir" "$state_dir" \
+  || die "failed to activate durable OpenWiki snapshot"
+restore_root="$root"
+cleanup_done=0
 trap 'restore_local_setup >/dev/null 2>&1 || true' EXIT
 shadow_agent_symlink AGENTS.md
 shadow_agent_symlink CLAUDE.md
