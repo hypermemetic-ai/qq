@@ -11,7 +11,7 @@ review artifact, the execution contract, and the conformance baseline.
 
 ## Authoring the plan spec
 
-Write a plan-spec JSON per `pipeline/README.md`. Rules:
+Write a plan-spec JSON per the [pipeline README](../../tools/bpmn-pipeline/README.md). Rules:
 
 - One flat process — no pools, lanes, or subprocesses (the linter rejects
   them; they render wrong). Failure exits are error end events. Boundary
@@ -43,7 +43,7 @@ boundary and outside BPMN conformance.
 
 ## Generate
 
-From `skills/bpmn-plans/pipeline/` (first use: `npm ci`; rendering needs
+From `tools/bpmn-pipeline/` (first use: `npm ci`; rendering needs
 Chrome — see README):
 
 ```sh

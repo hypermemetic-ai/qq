@@ -62,7 +62,7 @@ case "$(basename "$spec_path")" in
 esac
 
 self="$(readlink -f -- "${BASH_SOURCE[0]}")"
-cli="$(cd "$(dirname "$self")/../skills/bpmn-plans/pipeline/bin" && pwd -P)/qq-bpmn.mjs"
+cli="$(cd "$(dirname "$self")/../tools/bpmn-pipeline/bin" && pwd -P)/qq-bpmn.mjs"
 [ -f "$cli" ] || die "bundled BPMN pipeline is missing: $cli"
 
 arguments=("$cli" wiki "$spec_path")
