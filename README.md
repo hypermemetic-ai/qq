@@ -53,11 +53,11 @@ From the qq Repository root, run:
 bash bin/install.sh
 ```
 
-The installer live-links Skills into Codex, links the cockpit configuration and
-retained commands, and installs the locked dependencies for qq's BPMN
-publisher. It prunes links to qq Skills and commands that no longer exist and
-refuses to replace paths it does not manage. Run it again after adding or
-removing a Skill.
+The installer live-links Skills into Codex and Claude Code, links the cockpit
+configuration and retained commands, and installs the locked dependencies for
+qq's BPMN publisher. It prunes links to qq Skills and commands that no longer
+exist and refuses to replace paths it does not manage. Run it again after adding
+or removing a Skill.
 
 The installer does not manage repository instructions. A linked Repository can
 point its root `AGENTS.md` symlink directly to qq's `AGENTS.md`, keeping one

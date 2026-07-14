@@ -313,7 +313,16 @@ INSTALL_HOME="$TMP/install-home"
 INSTALL_DATA="$INSTALL_HOME/custom-data"
 INSTALL_BIN="$TMP/install-bin"
 INSTALL_LOG="$TMP/install.log"
-mkdir -p "$INSTALL_HOME/.config" "$INSTALL_BIN"
+EXTERNAL_SKILL="$TMP/external-skill"
+mkdir -p \
+  "$INSTALL_HOME/.config" \
+  "$INSTALL_HOME/.claude/skills/external-directory" \
+  "$EXTERNAL_SKILL" \
+  "$INSTALL_BIN"
+printf '%s\n' untouched >"$INSTALL_HOME/.claude/skills/external-directory/sentinel"
+printf '%s\n' untouched >"$EXTERNAL_SKILL/sentinel"
+ln -s "$EXTERNAL_SKILL" "$INSTALL_HOME/.claude/skills/external-link"
+ln -s "$ROOT/skills/removed-skill" "$INSTALL_HOME/.claude/skills/removed-skill"
 printf '%s\n' 'keep=this-entry' >"$INSTALL_HOME/.config/mimeapps.list"
 cat >"$INSTALL_BIN/xdg-mime" <<'EOF'
 #!/usr/bin/env bash
@@ -340,10 +349,31 @@ assert_contains "$(<"$desktop")" 'MimeType=x-scheme-handler/qq-openwiki;'
 [ -L "$INSTALL_DATA/qq/openwiki-merge-activator.user.js" ] || fail "userscript link missing"
 [ -L "$INSTALL_HOME/.local/bin/qq-herdr-home" ] || fail "Herdr home command link missing"
 [ -L "$INSTALL_HOME/.local/bin/qq-openwiki-bpmn" ] || fail "OpenWiki BPMN command link missing"
+[ ! -L "$INSTALL_HOME/.claude/skills/removed-skill" ] || fail "removed qq Claude skill link was not pruned"
+[ "$(<"$INSTALL_HOME/.claude/skills/external-directory/sentinel")" = untouched ] || fail "unmanaged Claude skill directory changed"
+[ "$(readlink "$INSTALL_HOME/.claude/skills/external-link")" = "$EXTERNAL_SKILL" ] || fail "unmanaged Claude skill link changed"
+for skill in "$ROOT"/skills/*; do
+  [ -f "$skill/SKILL.md" ] || continue
+  name="$(basename "$skill")"
+  for runtime in codex claude; do
+    link="$INSTALL_HOME/.$runtime/skills/$name"
+    [ -L "$link" ] || fail "$runtime skill link missing: $name"
+    [ "$(readlink -f "$link")" = "$(readlink -f "$skill")" ] || fail "$runtime skill link has wrong target: $name"
+  done
+done
 [ ! -e "$INSTALL_HOME/.local/share/applications/qq-openwiki-activate.desktop" ] || fail "installer ignored XDG_DATA_HOME"
 [ "$(<"$INSTALL_HOME/.config/mimeapps.list")" = 'keep=this-entry' ] || fail "unrelated MIME state changed"
 assert_contains "$(<"$INSTALL_LOG")" 'xdg-mime default qq-openwiki-activate.desktop x-scheme-handler/qq-openwiki'
 assert_contains "$(<"$INSTALL_LOG")" "npm ci --prefix $ROOT/tools/bpmn-pipeline --no-audit --no-fund"
+
+UNMANAGED_SKILL_HOME="$TMP/unmanaged-skill-home"
+mkdir -p "$UNMANAGED_SKILL_HOME/.claude/skills/deliver-change"
+printf '%s\n' untouched >"$UNMANAGED_SKILL_HOME/.claude/skills/deliver-change/sentinel"
+if HOME="$UNMANAGED_SKILL_HOME" PATH="$INSTALL_BIN:$PATH" bash "$INSTALLER" >"$TMP/unmanaged-skill.out" 2>"$TMP/unmanaged-skill.err"; then
+  fail "installer replaced unmanaged Claude skill path"
+fi
+[ "$(<"$UNMANAGED_SKILL_HOME/.claude/skills/deliver-change/sentinel")" = untouched ] || fail "unmanaged Claude skill path changed"
+assert_contains "$(<"$TMP/unmanaged-skill.err")" "refusing to replace unmanaged path: $UNMANAGED_SKILL_HOME/.claude/skills/deliver-change"
 
 UNMANAGED_HOME="$TMP/unmanaged-home"
 mkdir -p "$UNMANAGED_HOME/.local/share/applications"

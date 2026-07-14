@@ -41,7 +41,7 @@ link_one() {
 }
 
 sync_skills() {
-  local dst="$HOME/.codex/skills"
+  local dst="$1"
   local link skill name
 
   mkdir -p "$dst"
@@ -130,7 +130,8 @@ install_bpmn_pipeline() {
 }
 
 install_bpmn_pipeline
-sync_skills
+sync_skills "$HOME/.codex/skills"
+sync_skills "$HOME/.claude/skills"
 prune_removed_commands
 
 link_one "$QQ/cockpit/yazi/yazi.toml" "$HOME/.config/yazi/yazi.toml" "cockpit/yazi.toml"
