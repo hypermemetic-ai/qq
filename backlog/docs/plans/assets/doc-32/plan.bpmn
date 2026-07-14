@@ -2,16 +2,16 @@
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:qq="http://qq.local/schema/evidence" id="align_identity_and_work_sessions_definitions" targetNamespace="http://qq.local/schema/bpmn">
   <bpmn:process id="align_identity_and_work_sessions" name="Align operator identity and Herdr work-session topology" isExecutable="false">
     <bpmn:startEvent id="start" name="Alignment complete">
-      <bpmn:documentation>Begin from the operator-aligned identity and Herdr topology outcome. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:20-29,48-55</bpmn:documentation>
+      <bpmn:documentation>Begin from the operator-aligned identity and Herdr topology outcome. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:49-52,77-90</bpmn:documentation>
       <bpmn:extensionElements>
-        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="20-29,48-55" />
+        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="49-52,77-90" />
       </bpmn:extensionElements>
       <bpmn:outgoing>flow_start_approve</bpmn:outgoing>
     </bpmn:startEvent>
     <bpmn:userTask id="approve_plan" name="Approve identity and work-session plan">
-      <bpmn:documentation>The operator reviews the final rendered plan before implementation begins. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:26-29</bpmn:documentation>
+      <bpmn:documentation>The operator reviews the final rendered plan before implementation begins. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:87-90</bpmn:documentation>
       <bpmn:extensionElements>
-        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="26-29" />
+        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="87-90" />
       </bpmn:extensionElements>
       <bpmn:incoming>flow_start_approve</bpmn:incoming>
       <bpmn:outgoing>flow_approve_decision</bpmn:outgoing>
@@ -34,99 +34,99 @@
       <bpmn:errorEventDefinition />
     </bpmn:endEvent>
     <bpmn:serviceTask id="configure_identity" name="Configure qqp-dev Git identity">
-      <bpmn:documentation>Set the active global Git name and established GitHub noreply address without rewriting prior history. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:50-50</bpmn:documentation>
+      <bpmn:documentation>Set the active global Git name and established GitHub noreply address without rewriting prior history. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:79-79</bpmn:documentation>
       <bpmn:extensionElements>
-        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="50-50" />
+        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="79-79" />
       </bpmn:extensionElements>
       <bpmn:incoming>flow_plan_yes</bpmn:incoming>
       <bpmn:outgoing>flow_identity_refs</bpmn:outgoing>
     </bpmn:serviceTask>
     <bpmn:serviceTask id="replace_identity_refs" name="Replace current legacy identity references">
-      <bpmn:documentation>Update current managed qq references and verify deciq contains no current legacy handle. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:50-50</bpmn:documentation>
+      <bpmn:documentation>Update current managed qq references and verify deciq contains no current legacy handle. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:79-79</bpmn:documentation>
       <bpmn:extensionElements>
-        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="50-50" />
+        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="79-79" />
       </bpmn:extensionElements>
       <bpmn:incoming>flow_identity_refs</bpmn:incoming>
       <bpmn:outgoing>flow_refs_verify</bpmn:outgoing>
     </bpmn:serviceTask>
     <bpmn:serviceTask id="verify_identity" name="Verify active and tracked identity">
-      <bpmn:documentation>Check global authorship, current tracked content in both repositories, and the no-history-rewrite boundary. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:50-50,55-55</bpmn:documentation>
+      <bpmn:documentation>Check global authorship, current tracked content in both repositories, and the no-history-rewrite boundary. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:79-79,84-84</bpmn:documentation>
       <bpmn:extensionElements>
-        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="50-50,55-55" />
+        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="79-79,84-84" />
       </bpmn:extensionElements>
       <bpmn:incoming>flow_refs_verify</bpmn:incoming>
       <bpmn:outgoing>flow_verify_identity</bpmn:outgoing>
     </bpmn:serviceTask>
     <bpmn:exclusiveGateway id="identity_correct" name="Identity correct?">
-      <bpmn:documentation>Stop if active authorship or any current tracked reference still uses the former identity. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:50-50</bpmn:documentation>
+      <bpmn:documentation>Stop if active authorship or any current tracked reference still uses the former identity. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:79-79</bpmn:documentation>
       <bpmn:extensionElements>
-        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="50-50" />
+        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="79-79" />
       </bpmn:extensionElements>
       <bpmn:incoming>flow_verify_identity</bpmn:incoming>
       <bpmn:outgoing>flow_identity_yes</bpmn:outgoing>
       <bpmn:outgoing>flow_identity_no</bpmn:outgoing>
     </bpmn:exclusiveGateway>
     <bpmn:endEvent id="identity_failed" name="Identity check failed">
-      <bpmn:documentation>Do not continue while identity evidence is incomplete or implies history rewriting. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:50-50</bpmn:documentation>
+      <bpmn:documentation>Do not continue while identity evidence is incomplete or implies history rewriting. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:79-79</bpmn:documentation>
       <bpmn:extensionElements>
-        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="50-50" />
+        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="79-79" />
       </bpmn:extensionElements>
       <bpmn:incoming>flow_identity_no</bpmn:incoming>
       <bpmn:errorEventDefinition />
     </bpmn:endEvent>
     <bpmn:serviceTask id="encode_home_model" name="Encode persistent project homes">
-      <bpmn:documentation>Define the sole main-checkout Herdr home, its dedicated Backlog-board tab, and its operator-owned general tabs. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:23-23,51-51</bpmn:documentation>
+      <bpmn:documentation>Define the sole main-checkout Herdr home, its dedicated Backlog-board tab, and its operator-owned general tabs. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:52-52,80-80</bpmn:documentation>
       <bpmn:extensionElements>
-        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="23-23,51-51" />
+        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="52-52,80-80" />
       </bpmn:extensionElements>
       <bpmn:incoming>flow_identity_yes</bpmn:incoming>
       <bpmn:outgoing>flow_home_sessions</bpmn:outgoing>
     </bpmn:serviceTask>
     <bpmn:serviceTask id="encode_work_sessions" name="Encode grouped worktree sessions">
-      <bpmn:documentation>Create or open each Change worktree from its project home, give the work session a unique operator-agreed change label matching [A-Za-z0-9-]{1,15}, and move the current accountable conversation there before mutation. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:44-44,52-52</bpmn:documentation>
+      <bpmn:documentation>Create or open each Change worktree from its project home, give the work session a unique operator-agreed change label matching [A-Za-z0-9-]{1,15}, and move the current accountable conversation there before mutation. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:67-67,81-81</bpmn:documentation>
       <bpmn:extensionElements>
-        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="44-44,52-52" />
+        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="67-67,81-81" />
       </bpmn:extensionElements>
       <bpmn:incoming>flow_home_sessions</bpmn:incoming>
       <bpmn:outgoing>flow_sessions_completion</bpmn:outgoing>
     </bpmn:serviceTask>
     <bpmn:serviceTask id="encode_completion_focus" name="Focus home board without retiring work">
-      <bpmn:documentation>After terminal disposition, keep the worktree session intact and focus the synchronized main home's unique Backlog board. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:54-54</bpmn:documentation>
+      <bpmn:documentation>After terminal disposition, keep the worktree session intact and focus the synchronized main home's unique Backlog board. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:83-83</bpmn:documentation>
       <bpmn:extensionElements>
-        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="54-54" />
+        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="83-83" />
       </bpmn:extensionElements>
       <bpmn:incoming>flow_sessions_completion</bpmn:incoming>
       <bpmn:outgoing>flow_completion_delegates</bpmn:outgoing>
     </bpmn:serviceTask>
     <bpmn:serviceTask id="place_delegates" name="Place reviewers and researchers to the right">
-      <bpmn:documentation>Make fresh read-only reviewer and researcher agents no-focus right splits in the owning work session, with an explicit non-Herdr fallback. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:53-53</bpmn:documentation>
+      <bpmn:documentation>Make fresh read-only reviewer and researcher agents no-focus right splits in the owning work session, with an explicit non-Herdr fallback. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:82-82</bpmn:documentation>
       <bpmn:extensionElements>
-        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="53-53" />
+        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="82-82" />
       </bpmn:extensionElements>
       <bpmn:incoming>flow_completion_delegates</bpmn:incoming>
       <bpmn:outgoing>flow_delegates_checks</bpmn:outgoing>
     </bpmn:serviceTask>
     <bpmn:serviceTask id="add_checks" name="Add focused lifecycle checks">
-      <bpmn:documentation>Cover home discovery, grouped session entry and short unique labeling, delegate placement, board focus, preservation, and identity invariants. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:29-29,55-55</bpmn:documentation>
+      <bpmn:documentation>Cover home discovery, grouped session entry and short unique labeling, delegate placement, board focus, preservation, and identity invariants. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:84-84,87-90</bpmn:documentation>
       <bpmn:extensionElements>
-        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="29-29,55-55" />
+        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="84-84,87-90" />
       </bpmn:extensionElements>
       <bpmn:incoming>flow_delegates_checks</bpmn:incoming>
       <bpmn:outgoing>flow_add_entry</bpmn:outgoing>
     </bpmn:serviceTask>
     <bpmn:exclusiveGateway id="checks_entry" name="Run or rerun checks">
-      <bpmn:documentation>Join the initial and repaired paths before executing the same focused Check set. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:29-29,55-55</bpmn:documentation>
+      <bpmn:documentation>Join the initial and repaired paths before executing the same focused Check set. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:84-84,87-90</bpmn:documentation>
       <bpmn:extensionElements>
-        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="29-29,55-55" />
+        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="84-84,87-90" />
       </bpmn:extensionElements>
       <bpmn:incoming>flow_add_entry</bpmn:incoming>
       <bpmn:incoming>flow_repair_rerun</bpmn:incoming>
       <bpmn:outgoing>flow_entry_run</bpmn:outgoing>
     </bpmn:exclusiveGateway>
     <bpmn:serviceTask id="run_checks" name="Run focused automated checks">
-      <bpmn:documentation>Execute the checks that observe the exact changed workflow and diff hygiene. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:55-55</bpmn:documentation>
+      <bpmn:documentation>Execute the checks that observe the exact changed workflow and diff hygiene. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:84-84,93-96</bpmn:documentation>
       <bpmn:extensionElements>
-        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="55-55" />
+        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="84-84,93-96" />
       </bpmn:extensionElements>
       <bpmn:incoming>flow_entry_run</bpmn:incoming>
       <bpmn:outgoing>flow_run_gateway</bpmn:outgoing>
@@ -149,34 +149,34 @@
       <bpmn:outgoing>flow_repair_rerun</bpmn:outgoing>
     </bpmn:serviceTask>
     <bpmn:serviceTask id="exercise_live_topology" name="Exercise live home and work-session topology">
-      <bpmn:documentation>Verify qq and deciq homes remain on main, their child work sessions use the approved short labels, the current qq work session stays grouped and intact, and no unrelated session moves. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:34-45,51-55</bpmn:documentation>
+      <bpmn:documentation>Verify qq and deciq homes remain on main, their child work sessions use the approved short labels, the current qq work session stays grouped and intact, and no unrelated session moves. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:55-68,80-84,93-96</bpmn:documentation>
       <bpmn:extensionElements>
-        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="34-45,51-55" />
+        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="55-68,80-84,93-96" />
       </bpmn:extensionElements>
       <bpmn:incoming>flow_checks_yes</bpmn:incoming>
       <bpmn:outgoing>flow_live_gateway</bpmn:outgoing>
     </bpmn:serviceTask>
     <bpmn:exclusiveGateway id="topology_safe" name="Live topology safe?">
-      <bpmn:documentation>Stop if a home leaves main, a work session label is duplicate, unapproved, or fails [A-Za-z0-9-]{1,15}, the session is moved or removed, the board is not focused, or another live session changes. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:51-55</bpmn:documentation>
+      <bpmn:documentation>Stop if a home leaves main, a work session label is duplicate, unapproved, or fails [A-Za-z0-9-]{1,15}, the session is moved or removed, the board is not focused, or another live session changes. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:80-84</bpmn:documentation>
       <bpmn:extensionElements>
-        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="51-55" />
+        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="80-84" />
       </bpmn:extensionElements>
       <bpmn:incoming>flow_live_gateway</bpmn:incoming>
       <bpmn:outgoing>flow_topology_yes</bpmn:outgoing>
       <bpmn:outgoing>flow_topology_no</bpmn:outgoing>
     </bpmn:exclusiveGateway>
     <bpmn:endEvent id="topology_failed" name="Live topology check failed">
-      <bpmn:documentation>Preserve all live sessions and return for correction or operator realignment. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:55-55</bpmn:documentation>
+      <bpmn:documentation>Preserve all live sessions and return for correction or operator realignment. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:84-84</bpmn:documentation>
       <bpmn:extensionElements>
-        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="55-55" />
+        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="84-84" />
       </bpmn:extensionElements>
       <bpmn:incoming>flow_topology_no</bpmn:incoming>
       <bpmn:errorEventDefinition />
     </bpmn:endEvent>
     <bpmn:userTask id="operator_uat" name="Accept home and work-session behavior">
-      <bpmn:documentation>The operator confirms the persistent home, short recognizable work-session labels, right-split delegation, and board-return experience. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:34-45,51-55</bpmn:documentation>
+      <bpmn:documentation>The operator confirms the persistent home, short recognizable work-session labels, right-split delegation, and board-return experience. Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md:55-74,80-84,93-96</bpmn:documentation>
       <bpmn:extensionElements>
-        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="34-45,51-55" />
+        <qq:evidence file="backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md" lines="55-74,80-84,93-96" />
       </bpmn:extensionElements>
       <bpmn:incoming>flow_topology_yes</bpmn:incoming>
       <bpmn:outgoing>flow_uat_gateway</bpmn:outgoing>

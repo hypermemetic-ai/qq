@@ -9,7 +9,7 @@
       "documentation": "Begin from the operator-aligned identity and Herdr topology outcome.",
       "evidence": {
         "file": "backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md",
-        "lines": "20-29,48-55"
+        "lines": "49-52,77-90"
       }
     },
     {
@@ -19,7 +19,7 @@
       "documentation": "The operator reviews the final rendered plan before implementation begins.",
       "evidence": {
         "file": "backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md",
-        "lines": "26-29"
+        "lines": "87-90"
       }
     },
     {
@@ -50,7 +50,7 @@
       "documentation": "Set the active global Git name and established GitHub noreply address without rewriting prior history.",
       "evidence": {
         "file": "backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md",
-        "lines": "50-50"
+        "lines": "79-79"
       }
     },
     {
@@ -60,7 +60,7 @@
       "documentation": "Update current managed qq references and verify deciq contains no current legacy handle.",
       "evidence": {
         "file": "backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md",
-        "lines": "50-50"
+        "lines": "79-79"
       }
     },
     {
@@ -70,7 +70,7 @@
       "documentation": "Check global authorship, current tracked content in both repositories, and the no-history-rewrite boundary.",
       "evidence": {
         "file": "backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md",
-        "lines": "50-50,55-55"
+        "lines": "79-79,84-84"
       }
     },
     {
@@ -80,7 +80,7 @@
       "documentation": "Stop if active authorship or any current tracked reference still uses the former identity.",
       "evidence": {
         "file": "backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md",
-        "lines": "50-50"
+        "lines": "79-79"
       }
     },
     {
@@ -91,7 +91,7 @@
       "documentation": "Do not continue while identity evidence is incomplete or implies history rewriting.",
       "evidence": {
         "file": "backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md",
-        "lines": "50-50"
+        "lines": "79-79"
       }
     },
     {
@@ -101,7 +101,7 @@
       "documentation": "Define the sole main-checkout Herdr home, its dedicated Backlog-board tab, and its operator-owned general tabs.",
       "evidence": {
         "file": "backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md",
-        "lines": "23-23,51-51"
+        "lines": "52-52,80-80"
       }
     },
     {
@@ -111,7 +111,7 @@
       "documentation": "Create or open each Change worktree from its project home, give the work session a unique operator-agreed change label matching [A-Za-z0-9-]{1,15}, and move the current accountable conversation there before mutation.",
       "evidence": {
         "file": "backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md",
-        "lines": "44-44,52-52"
+        "lines": "67-67,81-81"
       }
     },
     {
@@ -121,7 +121,7 @@
       "documentation": "After terminal disposition, keep the worktree session intact and focus the synchronized main home's unique Backlog board.",
       "evidence": {
         "file": "backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md",
-        "lines": "54-54"
+        "lines": "83-83"
       }
     },
     {
@@ -131,7 +131,7 @@
       "documentation": "Make fresh read-only reviewer and researcher agents no-focus right splits in the owning work session, with an explicit non-Herdr fallback.",
       "evidence": {
         "file": "backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md",
-        "lines": "53-53"
+        "lines": "82-82"
       }
     },
     {
@@ -141,7 +141,7 @@
       "documentation": "Cover home discovery, grouped session entry and short unique labeling, delegate placement, board focus, preservation, and identity invariants.",
       "evidence": {
         "file": "backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md",
-        "lines": "29-29,55-55"
+        "lines": "84-84,87-90"
       }
     },
     {
@@ -151,7 +151,7 @@
       "documentation": "Join the initial and repaired paths before executing the same focused Check set.",
       "evidence": {
         "file": "backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md",
-        "lines": "29-29,55-55"
+        "lines": "84-84,87-90"
       }
     },
     {
@@ -161,7 +161,7 @@
       "documentation": "Execute the checks that observe the exact changed workflow and diff hygiene.",
       "evidence": {
         "file": "backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md",
-        "lines": "55-55"
+        "lines": "84-84,93-96"
       }
     },
     {
@@ -191,7 +191,7 @@
       "documentation": "Verify qq and deciq homes remain on main, their child work sessions use the approved short labels, the current qq work session stays grouped and intact, and no unrelated session moves.",
       "evidence": {
         "file": "backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md",
-        "lines": "34-45,51-55"
+        "lines": "55-68,80-84,93-96"
       }
     },
     {
@@ -201,7 +201,7 @@
       "documentation": "Stop if a home leaves main, a work session label is duplicate, unapproved, or fails [A-Za-z0-9-]{1,15}, the session is moved or removed, the board is not focused, or another live session changes.",
       "evidence": {
         "file": "backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md",
-        "lines": "51-55"
+        "lines": "80-84"
       }
     },
     {
@@ -212,7 +212,7 @@
       "documentation": "Preserve all live sessions and return for correction or operator realignment.",
       "evidence": {
         "file": "backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md",
-        "lines": "55-55"
+        "lines": "84-84"
       }
     },
     {
@@ -222,7 +222,7 @@
       "documentation": "The operator confirms the persistent home, short recognizable work-session labels, right-split delegation, and board-return experience.",
       "evidence": {
         "file": "backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md",
-        "lines": "34-45,51-55"
+        "lines": "55-74,80-84,93-96"
       }
     },
     {
