@@ -23,7 +23,7 @@ This boundary is the result of an explicit simplification. Recent history remove
 
 ### Stateless capabilities
 
-Each immediate `skills/<name>/` directory with a `SKILL.md` is a capability selected by trigger. Skills guide agent behavior but do not own persistent workflow state. See the [skill catalog](skills.md).
+Each immediate `skills/<name>/` directory with a `SKILL.md` is a capability selected by trigger. Skills guide agent behavior but do not own persistent workflow state. Shared executable infrastructure instead lives under `tools/`; in particular, `tools/bpmn-pipeline/` owns the bundled planning and OpenWiki diagram runtime while `skills/bpmn-plans/` remains its stateless procedure (`bin/install.sh:124-134`; `bin/qq-openwiki-bpmn:57-62`). See the [skill catalog](skills.md).
 
 ### Knowledge stack
 
@@ -54,6 +54,7 @@ qq has no application database or internal service API. Durable state is intenti
 - Backlog owns Task, authored-document, and decision records.
 - Herdr workspaces and named sessions hold live terminal placement, not Repository truth.
 - Agent runtime configuration and credentials live outside the Repository.
+- Temporary OpenWiki instruction-file snapshots are durable external state under `${XDG_STATE_HOME:-$HOME/.local/state}/qq/openwiki/`, keyed by Git common directory so a later invocation can safely restore the recorded originating worktree after interruption (`bin/qq-openwiki:100-126`, `131-212`).
 - OpenWiki credentials stay under `~/.openwiki/` and must never be committed.
 - codebase-memory’s graph is external and derived; indexing may need refresh after material branch or uncommitted changes.
 
@@ -61,7 +62,7 @@ qq has no application database or internal service API. Durable state is intenti
 
 ### Add or change a Skill
 
-Create or edit `skills/<name>/SKILL.md`, keep it stateless and trigger-driven, validate it with Codex’s `skill-creator` validator, then rerun `bash bin/install.sh`. The installer discovers Skill directories automatically and prunes dead qq-owned Skill links.
+Create or edit `skills/<name>/SKILL.md`, keep it stateless and trigger-driven, validate it with Codex’s `skill-creator` validator, then rerun `bash bin/install.sh`. The installer discovers Skill directories automatically and synchronizes qq-owned links for both Codex and Claude Code, pruning dead links in each runtime (`bin/install.sh:43-65`, `132-134`).
 
 ### Add a command or cockpit surface
 
@@ -78,7 +79,7 @@ present-system description belongs in this wiki.
 
 ### Support another runtime
 
-Keep content runtime-neutral and expose it through that runtime’s native instruction and skill discovery. The current installer is Codex-specific (`~/.codex`), so another runtime needs its own wiring rather than a new qq-owned compatibility engine.
+Keep content runtime-neutral and expose it through each runtime’s native instruction and skill discovery. The installer currently wires Skills into Codex (`~/.codex/skills`) and Claude Code (`~/.claude/skills`); any additional runtime needs equivalent native wiring rather than a new qq-owned compatibility engine (`bin/install.sh:132-134`).
 
 ## Change hazards
 
