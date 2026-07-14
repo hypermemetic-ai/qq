@@ -1,25 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+tests_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+TEST_NAME="test-openwiki-maintainer"
+# shellcheck source=tests/helpers.sh
+source "$tests_dir/helpers.sh"
+root="$(cd "$tests_dir/.." && pwd -P)"
 skill="$root/skills/openwiki-maintainer/SKILL.md"
 normalized="$(tr '\n\t' '  ' <"$skill" | sed -E 's/ +/ /g')"
 ordinary_delivery="$(tr '\n\t' '  ' <"$root/skills/deliver-change/SKILL.md" | sed -E 's/ +/ /g')"
 
 require_policy() {
   local text="$1"
-  if ! grep -Fq "$text" <<<"$normalized"; then
-    printf 'missing OpenWiki maintainer policy: %s\n' "$text" >&2
-    exit 1
-  fi
+  assert_contains "$normalized" "$text" "missing OpenWiki maintainer policy: $text"
 }
 
 reject_policy() {
   local text="$1"
-  if grep -Fq "$text" <<<"$normalized"; then
-    printf 'obsolete OpenWiki maintainer policy remains: %s\n' "$text" >&2
-    exit 1
-  fi
+  assert_not_contains "$normalized" "$text" "obsolete OpenWiki maintainer policy remains: $text"
 }
 
 require_policy 'Consolidate all verified material findings into a concise correction brief for the internal generator'
@@ -53,13 +51,11 @@ reject_policy 'Discard that result'
 reject_policy 'leave merge authority to the operator'
 
 if [[ "$(grep -Fc 'gh pr merge' "$skill")" -ne 1 ]]; then
-  printf 'OpenWiki maintainer policy must mention gh pr merge only in its prohibition\n' >&2
-  exit 1
+  fail 'OpenWiki maintainer policy must mention gh pr merge only in its prohibition'
 fi
 
 if ! grep -Fq 'Never merge the pull request.' <<<"$ordinary_delivery"; then
-  printf 'ordinary Change delivery no longer preserves operator merge authority\n' >&2
-  exit 1
+  fail 'ordinary Change delivery no longer preserves operator merge authority'
 fi
 
 tmp="$(mktemp -d)"
@@ -105,8 +101,7 @@ concurrent_main="$(git -C "$concurrent" rev-parse HEAD)"
 git -C "$concurrent" push -q origin HEAD:refs/heads/main
 
 if git -C "$seed" push origin "$merge_sha:refs/heads/main" >"$tmp/stale-push.log" 2>&1; then
-  printf 'ordinary OpenWiki merge push accepted a stale target\n' >&2
-  exit 1
+  fail 'ordinary OpenWiki merge push accepted a stale target'
 fi
 [[ "$(git --git-dir="$remote" rev-parse refs/heads/main)" == "$concurrent_main" ]]
 

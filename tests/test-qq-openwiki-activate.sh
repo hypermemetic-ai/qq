@@ -1,24 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+TEST_NAME="test-qq-openwiki-activate"
+# shellcheck source=tests/helpers.sh
+source "$TESTS_DIR/helpers.sh"
+ROOT="$(cd "$TESTS_DIR/.." && pwd -P)"
 ACTIVATOR="$ROOT/bin/qq-openwiki-activate"
 USERSCRIPT="$ROOT/browser/openwiki-merge-activator.user.js"
 INSTALLER="$ROOT/bin/install.sh"
 REAL_GIT="$(command -v git)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-
-fail() {
-  printf 'FAIL: %s\n' "$*" >&2
-  exit 1
-}
-
-assert_contains() {
-  local haystack="$1"
-  local needle="$2"
-  [[ "$haystack" == *"$needle"* ]] || fail "expected '$needle' in: $haystack"
-}
 
 notification_count() {
   awk '$1 == "notification" && $2 == "show" { count += 1 } END { print count + 0 }' "$FAKE_HERDR_LOG"
@@ -171,8 +164,8 @@ namespace = runpy.run_path(sys.argv[1])
 os.environ["PATH"] = "/usr/bin:/bin"
 os.environ.pop("QQ_HERDR_BIN", None)
 os.environ.pop("QQ_CODEX_BIN", None)
-assert namespace["executable"]("QQ_HERDR_BIN", "herdr") == "/home/linuxbrew/.linuxbrew/bin/herdr"
-codex = namespace["executable"]("QQ_CODEX_BIN", "codex")
+assert namespace["executable"]("herdr") == "/home/linuxbrew/.linuxbrew/bin/herdr"
+codex = namespace["executable"]("codex")
 assert codex == "/home/linuxbrew/.linuxbrew/bin/codex"
 assert os.environ["PATH"].split(os.pathsep)[0] == "/home/linuxbrew/.linuxbrew/bin"
 completed = namespace["subprocess"].run([codex, "--version"], capture_output=True, text=True)

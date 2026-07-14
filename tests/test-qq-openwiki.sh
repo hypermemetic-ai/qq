@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-QQ_OPENWIKI="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)/bin/qq-openwiki"
+TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+TEST_NAME="test-qq-openwiki"
+# shellcheck source=tests/helpers.sh
+source "$TESTS_DIR/helpers.sh"
+QQ_OPENWIKI="$(cd "$TESTS_DIR/.." && pwd -P)/bin/qq-openwiki"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 export XDG_RUNTIME_DIR="$tmp/runtime"
@@ -22,7 +26,7 @@ for argument in "$@"; do
 done
 printf '%s' "$#" >"$FAKE_LOG.count"
 printf '%s\n' "$OPENWIKI_PROVIDER" >"$FAKE_PROVIDER_LOG"
-printf '%s\n' "$QQ_OPENWIKI_NODE_BIN" >"$FAKE_RUNTIME_NODE_LOG"
+printf '%s\n' "$QQ_NODE_BIN" >"$FAKE_RUNTIME_NODE_LOG"
 if [ -n "${FAKE_STARTED:-}" ]; then
   : >"$FAKE_STARTED"
   sleep "${FAKE_SLEEP:-0}"
@@ -84,7 +88,7 @@ unset OPENWIKI_PROVIDER
 
 (
   cd "$repo"
-  PATH=/usr/bin:/bin OPENWIKI_BIN="$fake_bin/openwiki" "$QQ_OPENWIKI" --update
+  PATH=/usr/bin:/bin QQ_OPENWIKI_BIN="$fake_bin/openwiki" "$QQ_OPENWIKI" --update
 )
 
 test ! -e "$repo/.github/workflows/openwiki-update.yml"
@@ -107,7 +111,7 @@ grep -Fq 'Put the linked image on a standalone Markdown line' "$tmp/args.4"
 grep -Fq 'keep the surrounding narrative coherent without the optional image' "$tmp/args.4"
 grep -Fq 'Make the embedded image a link to the same PNG' "$tmp/args.4"
 grep -Fq 'verifies every cited source file and line range inside the Repository' "$tmp/args.4"
-grep -Fq "QQ_OPENWIKI_NODE_BIN=$(<"$tmp/runtime-node")" "$tmp/args.4"
+grep -Fq "QQ_NODE_BIN=$(<"$tmp/runtime-node")" "$tmp/args.4"
 grep -Fq "$QQ_OPENWIKI-bpmn openwiki/processes/<id>.json" "$tmp/args.4"
 grep -Fq "$QQ_OPENWIKI-bpmn --check openwiki/processes/<id>.json" "$tmp/args.4"
 grep -Fq 'run the publisher in --check mode for every retained spec in stable filename order' \
@@ -124,8 +128,7 @@ if (
   "$QQ_OPENWIKI" --correct 'address verified findings' \
     >"$tmp/correct-clean.out" 2>"$tmp/correct-clean.err"
 ); then
-  echo 'correction without a staged generated snapshot unexpectedly succeeded' >&2
-  exit 1
+  fail 'correction without a staged generated snapshot unexpectedly succeeded'
 fi
 grep -q 'correction requires a staged generated snapshot' \
   "$tmp/correct-clean.err"
@@ -161,8 +164,7 @@ if (
   cd "$repo"
   "$QQ_OPENWIKI" --correct >"$tmp/correct-scope.out" 2>"$tmp/correct-scope.err"
 ); then
-  echo 'out-of-scope correction snapshot unexpectedly succeeded' >&2
-  exit 1
+  fail 'out-of-scope correction snapshot unexpectedly succeeded'
 fi
 grep -q 'correction snapshot is outside openwiki/' "$tmp/correct-scope.err"
 test ! -e "$FAKE_LOG"
@@ -177,8 +179,7 @@ if (
   "$QQ_OPENWIKI" --correct \
     >"$tmp/correct-unstaged.out" 2>"$tmp/correct-unstaged.err"
 ); then
-  echo 'correction with an unstaged baseline unexpectedly succeeded' >&2
-  exit 1
+  fail 'correction with an unstaged baseline unexpectedly succeeded'
 fi
 grep -q 'correction baseline must be fully staged' \
   "$tmp/correct-unstaged.err"
@@ -287,8 +288,7 @@ if (
   OPENWIKI_PROVIDER=anthropic "$QQ_OPENWIKI" --update \
     >"$tmp/provider-conflict.out" 2>"$tmp/provider-conflict.err"
 ); then
-  echo 'conflicting OPENWIKI_PROVIDER unexpectedly succeeded' >&2
-  exit 1
+  fail 'conflicting OPENWIKI_PROVIDER unexpectedly succeeded'
 fi
 grep -q 'OPENWIKI_PROVIDER must be openai-chatgpt (local ChatGPT OAuth only)' \
   "$tmp/provider-conflict.err"
@@ -299,23 +299,21 @@ non_executable="$tmp/not-executable"
 : >"$non_executable"
 if (
   cd "$repo"
-  OPENWIKI_BIN="$non_executable" "$QQ_OPENWIKI" --update \
+  QQ_OPENWIKI_BIN="$non_executable" "$QQ_OPENWIKI" --update \
     >"$tmp/non-executable.out" 2>"$tmp/non-executable.err"
 ); then
-  echo 'non-executable OPENWIKI_BIN unexpectedly succeeded' >&2
-  exit 1
+  fail 'non-executable QQ_OPENWIKI_BIN unexpectedly succeeded'
 fi
-grep -q 'OPENWIKI_BIN must be an absolute executable file' "$tmp/non-executable.err"
+grep -q 'QQ_OPENWIKI_BIN must be an absolute executable file' "$tmp/non-executable.err"
 
 if (
   cd "$repo"
-  OPENWIKI_BIN=openwiki "$QQ_OPENWIKI" --update \
+  QQ_OPENWIKI_BIN=openwiki "$QQ_OPENWIKI" --update \
     >"$tmp/relative.out" 2>"$tmp/relative.err"
 ); then
-  echo 'relative OPENWIKI_BIN unexpectedly succeeded' >&2
-  exit 1
+  fail 'relative QQ_OPENWIKI_BIN unexpectedly succeeded'
 fi
-grep -q 'OPENWIKI_BIN must be an absolute executable file' "$tmp/relative.err"
+grep -q 'QQ_OPENWIKI_BIN must be an absolute executable file' "$tmp/relative.err"
 
 export FAKE_STARTED="$tmp/started"
 export FAKE_SLEEP=2
@@ -330,8 +328,7 @@ for _ in $(seq 1 100); do
 done
 test -e "$FAKE_STARTED"
 if (cd "$repo" && "$QQ_OPENWIKI" --update >"$tmp/second.out" 2>"$tmp/second.err"); then
-  echo 'concurrent writer unexpectedly succeeded' >&2
-  exit 1
+  fail 'concurrent writer unexpectedly succeeded'
 fi
 grep -q 'another OpenWiki writer is active' "$tmp/second.err"
 wait "$first_pid"

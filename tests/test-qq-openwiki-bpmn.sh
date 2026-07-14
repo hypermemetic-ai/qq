@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+TEST_NAME="test-qq-openwiki-bpmn"
+# shellcheck source=tests/helpers.sh
+source "$TESTS_DIR/helpers.sh"
+ROOT="$(cd "$TESTS_DIR/.." && pwd -P)"
 WRAPPER="$ROOT/bin/qq-openwiki-bpmn"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-
-fail() {
-  printf 'FAIL: %s\n' "$*" >&2
-  exit 1
-}
 
 FAKE_BIN="$TMP/bin"
 REPO="$TMP/repo"
@@ -59,7 +58,7 @@ export FAKE_NODE_LOG="$TMP/node.log"
 
 (
   cd "$REPO"
-  PATH=/usr/bin:/bin QQ_OPENWIKI_NODE_BIN="$FAKE_BIN/node" \
+  PATH=/usr/bin:/bin QQ_NODE_BIN="$FAKE_BIN/node" \
     "$WRAPPER" openwiki/processes/order_lifecycle.json
 )
 [ "$(<"$FAKE_NODE_LOG.2")" = wiki ] \
@@ -67,12 +66,12 @@ export FAKE_NODE_LOG="$TMP/node.log"
 
 if (
   cd "$REPO"
-  QQ_OPENWIKI_NODE_BIN=node "$WRAPPER" openwiki/processes/order_lifecycle.json \
+  QQ_NODE_BIN=node "$WRAPPER" openwiki/processes/order_lifecycle.json \
     >"$TMP/relative-node.out" 2>"$TMP/relative-node.err"
 ); then
   fail "relative inherited Node path was accepted"
 fi
-grep -q 'QQ_OPENWIKI_NODE_BIN must be an absolute executable file' "$TMP/relative-node.err"
+grep -q 'QQ_NODE_BIN must be an absolute executable file' "$TMP/relative-node.err"
 
 for rejected in \
   openwiki/processes/nested/hidden.json \

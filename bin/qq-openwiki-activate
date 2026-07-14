@@ -10,7 +10,6 @@ import os
 from pathlib import Path
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 import time
@@ -34,25 +33,31 @@ class ActivationError(RuntimeError):
     """A refused activation or failed local dispatch."""
 
 
-def executable(env_name: str, command: str) -> str:
-    override = os.environ.get(env_name)
-    if override:
-        path = Path(override)
-        if not path.is_absolute() or not path.is_file() or not os.access(path, os.X_OK):
-            raise ActivationError(f"{env_name} must name an absolute executable file")
-        return str(path)
-    found = shutil.which(command)
-    if found:
-        return found
-    for directory in (Path("/home/linuxbrew/.linuxbrew/bin"), Path("/opt/homebrew/bin")):
-        fallback = directory / command
-        if fallback.is_file() and os.access(fallback, os.X_OK):
-            current_path = os.environ.get("PATH", "")
-            entries = current_path.split(os.pathsep) if current_path else []
-            if str(directory) not in entries:
-                os.environ["PATH"] = os.pathsep.join([str(directory), *entries])
-            return str(fallback)
-    raise ActivationError(f"{command} not found; set {env_name} to its absolute path")
+def executable(command: str) -> str:
+    resolver = Path(__file__).resolve().parent / "lib" / "qq-bin.sh"
+    try:
+        completed = subprocess.run(
+            [str(resolver), command],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ActivationError(f"binary resolver failed for {command}: {error}") from error
+    if completed.returncode != 0:
+        detail = completed.stderr.strip().removeprefix("qq-bin: ")
+        raise ActivationError(detail or f"binary resolver failed for {command}")
+    fields = completed.stdout.split("\0")
+    if len(fields) != 3 or fields[2] or not fields[0]:
+        raise ActivationError(f"binary resolver returned invalid output for {command}")
+    path, path_prepend, _ = fields
+    if path_prepend:
+        current_path = os.environ.get("PATH", "")
+        entries = current_path.split(os.pathsep) if current_path else []
+        if path_prepend not in entries:
+            os.environ["PATH"] = os.pathsep.join([path_prepend, *entries])
+    return path
 
 
 def run(arguments: list[str], *, timeout: float = 20) -> str:
@@ -148,7 +153,7 @@ def remote_slug(repository: Path, git: str) -> str | None:
 
 
 def linked_repository(slug: str) -> Path | None:
-    git = executable("QQ_GIT_BIN", "git")
+    git = executable("git")
     roots = project_roots()
     containers = set(roots)
     matches = {
@@ -189,7 +194,7 @@ def verify_merge(url: str) -> dict[str, str] | None:
     if repository is None:
         return None
 
-    gh = executable("QQ_GH_BIN", "gh")
+    gh = executable("gh")
     operator = run([gh, "api", "user", "--jq", ".login"]).strip()
     if not operator:
         raise ActivationError("GitHub authenticated operator login is empty")
@@ -235,7 +240,7 @@ def verify_merge(url: str) -> dict[str, str] | None:
 
 
 def openwiki_worktree(repository: Path) -> Path:
-    git = executable("QQ_GIT_BIN", "git")
+    git = executable("git")
     output = run([git, "-C", str(repository), "worktree", "list", "--porcelain"])
     matches: list[Path] = []
     current: Path | None = None
@@ -386,8 +391,8 @@ def retryable_marker(path: Path) -> bool:
 def dispatch(merge: dict[str, str], marker: Path, *, exclusive_marker: bool) -> str:
     repository = Path(merge["repository"])
     worktree = openwiki_worktree(repository)
-    herdr = executable("QQ_HERDR_BIN", "herdr")
-    codex = executable("QQ_CODEX_BIN", "codex")
+    herdr = executable("herdr")
+    codex = executable("codex")
     agent_name = maintainer_name(merge["slug"])
     active = named_agent(herdr, agent_name)
     if active is not None and (
@@ -504,7 +509,7 @@ def activate(url: str) -> dict[str, str]:
 
 def notify_activation_error(error: ActivationError) -> None:
     try:
-        herdr = executable("QQ_HERDR_BIN", "herdr")
+        herdr = executable("herdr")
         subprocess.run(
             [herdr, "notification", "show", "qq-openwiki-activate", "--body", str(error)],
             check=False,

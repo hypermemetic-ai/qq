@@ -1,33 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+tests_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+TEST_NAME="test-grilling"
+# shellcheck source=tests/helpers.sh
+source "$tests_dir/helpers.sh"
+root="$(cd "$tests_dir/.." && pwd -P)"
 skill="$root/skills/grilling/SKILL.md"
 description="$(grep -m1 '^description:' "$skill")"
 normalized="$(tr '\n\t' '  ' <"$skill" | sed -E 's/ +/ /g')"
 
 require_description() {
   local text="$1"
-  if ! grep -Fq "$text" <<<"$description"; then
-    printf 'missing grilling trigger boundary: %s\n' "$text" >&2
-    exit 1
-  fi
+  assert_contains "$description" "$text" "missing grilling trigger boundary: $text"
 }
 
 require_policy() {
   local text="$1"
-  if ! grep -Fq "$text" <<<"$normalized"; then
-    printf 'missing grilling Actor-boundary policy: %s\n' "$text" >&2
-    exit 1
-  fi
+  assert_contains "$normalized" "$text" "missing grilling Actor-boundary policy: $text"
 }
 
 reject_description() {
   local text="$1"
-  if grep -Fq "$text" <<<"$description"; then
-    printf 'over-broad grilling trigger remains: %s\n' "$text" >&2
-    exit 1
-  fi
+  assert_not_contains "$description" "$text" "over-broad grilling trigger remains: $text"
 }
 
 require_description 'used only by the accountable owning agent'

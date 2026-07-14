@@ -1,24 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+tests_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+TEST_NAME="test-bpmn-plans"
+# shellcheck source=tests/helpers.sh
+source "$tests_dir/helpers.sh"
+root="$(cd "$tests_dir/.." && pwd -P)"
 skill="$root/skills/bpmn-plans/SKILL.md"
 normalized="$(tr '\n\t' '  ' <"$skill" | sed -E 's/ +/ /g')"
 
 require_policy() {
   local text="$1"
-  if ! grep -Fq "$text" <<<"$normalized"; then
-    printf 'missing BPMN plan policy: %s\n' "$text" >&2
-    exit 1
-  fi
+  assert_contains "$normalized" "$text" "missing BPMN plan policy: $text"
 }
 
 reject_policy() {
   local text="$1"
-  if grep -Fq "$text" <<<"$normalized"; then
-    printf 'obsolete BPMN plan policy remains: %s\n' "$text" >&2
-    exit 1
-  fi
+  assert_not_contains "$normalized" "$text" "obsolete BPMN plan policy remains: $text"
 }
 
 require_policy 'every work-specific action, decision, failure path, and acceptance Check remains an explicit flow node'
@@ -35,8 +33,7 @@ require_policy 'Never reopen an unchanged version'
 reject_policy 'After the command succeeds, immediately open the generated'
 
 if [[ "$(grep -Fc 'setsid -f xdg-open' "$skill")" -ne 1 ]]; then
-  printf 'BPMN plan policy must contain exactly one durable opener command\n' >&2
-  exit 1
+  fail 'BPMN plan policy must contain exactly one durable opener command'
 fi
 
 printf 'test-bpmn-plans: pass\n'

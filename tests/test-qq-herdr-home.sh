@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+TEST_NAME="test-qq-herdr-home"
+# shellcheck source=tests/helpers.sh
+source "$TESTS_DIR/helpers.sh"
+ROOT="$(cd "$TESTS_DIR/.." && pwd -P)"
 HOME_CMD="$ROOT/bin/qq-herdr-home"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-
-fail() {
-  printf 'test-qq-herdr-home: %s\n' "$*" >&2
-  exit 1
-}
 
 repo="$tmp/repo"
 git init -q -b main "$repo"
@@ -83,7 +82,7 @@ esac
 SH
 chmod +x "$fake"
 
-export HERDR_BIN_PATH="$fake"
+export QQ_HERDR_BIN="$fake"
 export FAKE_LOG="$log"
 export FAKE_MAIN="$main_checkout"
 export FAKE_REPO_KEY="$repo_key"
@@ -100,8 +99,7 @@ expect_failure() {
   if "$HOME_CMD" "$@" >"$tmp/out" 2>"$tmp/err"; then
     fail "unexpected success: $expected"
   fi
-  grep -Fq "$expected" "$tmp/err" \
-    || fail "missing failure text: $expected"
+  assert_file_contains "$tmp/err" "$expected" "missing failure text: $expected"
 }
 
 reset_fake

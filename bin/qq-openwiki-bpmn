@@ -7,6 +7,10 @@ die() {
   exit 1
 }
 
+self="$(readlink -f -- "${BASH_SOURCE[0]}")"
+# shellcheck source=bin/lib/qq-bin.sh
+source "$(dirname "$self")/lib/qq-bin.sh"
+
 check=false
 case "$#" in
   1)
@@ -24,19 +28,8 @@ case "$#" in
 esac
 
 command -v git >/dev/null 2>&1 || die "git not found"
-if [ -n "${QQ_OPENWIKI_NODE_BIN:-}" ]; then
-  case "$QQ_OPENWIKI_NODE_BIN" in
-    /*) ;;
-    *) die "QQ_OPENWIKI_NODE_BIN must be an absolute executable file" ;;
-  esac
-  if [ ! -f "$QQ_OPENWIKI_NODE_BIN" ] || [ ! -x "$QQ_OPENWIKI_NODE_BIN" ]; then
-    die "QQ_OPENWIKI_NODE_BIN must be an absolute executable file"
-  fi
-  node_bin="$QQ_OPENWIKI_NODE_BIN"
-else
-  node_bin="$(command -v node 2>/dev/null || true)"
-  [ -n "$node_bin" ] || die "node not found"
-fi
+qq_resolve_bin node || die "$QQ_BIN_ERROR"
+node_bin="$QQ_BIN_RESULT"
 
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a Git worktree"
 root="$(cd "$root" && pwd -P)"
@@ -61,7 +54,6 @@ case "$(basename "$spec_path")" in
   *) die "process spec must have a .json filename" ;;
 esac
 
-self="$(readlink -f -- "${BASH_SOURCE[0]}")"
 cli="$(cd "$(dirname "$self")/../tools/bpmn-pipeline/bin" && pwd -P)/qq-bpmn.mjs"
 [ -f "$cli" ] || die "bundled BPMN pipeline is missing: $cli"
 

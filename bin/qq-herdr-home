@@ -13,6 +13,10 @@ die() {
   exit 1
 }
 
+self="$(readlink -f -- "${BASH_SOURCE[0]}")"
+# shellcheck source=bin/lib/qq-bin.sh
+source "$(dirname "$self")/lib/qq-bin.sh"
+
 [ "$#" -eq 3 ] || usage
 action="$1"
 [ "$2" = "--repo" ] || usage
@@ -22,15 +26,8 @@ case "$action" in
   *) usage ;;
 esac
 
-if [ -n "${HERDR_BIN_PATH:-}" ] && [ -x "${HERDR_BIN_PATH}" ]; then
-  HERDR="${HERDR_BIN_PATH}"
-elif command -v herdr >/dev/null 2>&1; then
-  HERDR="herdr"
-elif [ -x /home/linuxbrew/.linuxbrew/bin/herdr ]; then
-  HERDR="/home/linuxbrew/.linuxbrew/bin/herdr"
-else
-  die "herdr not found"
-fi
+qq_resolve_bin herdr || die "$QQ_BIN_ERROR"
+HERDR="$QQ_BIN_RESULT"
 
 command -v git >/dev/null 2>&1 || die "git not found"
 command -v jq >/dev/null 2>&1 || die "jq not found"

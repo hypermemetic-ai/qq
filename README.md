@@ -84,13 +84,15 @@ the generated PNG in the relevant narrative page.
 `qq-openwiki-bpmn --check openwiki/processes/<id>.json` independently verifies
 a retained model and its published semantic BPMN and PNG.
 
-In a restricted fresh-agent or service environment, set `OPENWIKI_BIN` to the
+In a restricted fresh-agent or service environment, set `QQ_OPENWIKI_BIN` to the
 OpenWiki executable's absolute path. The wrapper validates and invokes that
-path directly; when it is unset, the wrapper falls back to `command -v
-openwiki`. It does not use a login shell for executable discovery. When Node is
-also absent from `PATH` and is not beside that OpenWiki executable, set
-`QQ_OPENWIKI_NODE_BIN` to Node's absolute path; the wrapper carries the
-validated runtime into OpenWiki's diagram-publishing commands.
+path directly; when it is unset, the shared resolver checks `PATH` and known
+Homebrew locations. It does not use a login shell for executable discovery.
+When Node is also absent from those locations and is not beside that OpenWiki
+executable, set `QQ_NODE_BIN` to Node's absolute path; the wrapper carries the
+validated runtime into OpenWiki's diagram-publishing commands. The same
+`QQ_<TOOL>_BIN` convention applies to Herdr, GitHub CLI, Git, and Codex where
+qq resolves those tools.
 
 Temporary debt (2026-07-10): ChatGPT OAuth merged in OpenWiki PR #151 after the
 0.1.0 npm release. The operator machine is therefore built from upstream commit

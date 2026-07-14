@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PULL="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)/bin/qq-herdr-pull"
+TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+TEST_NAME="test-qq-herdr-pull"
+# shellcheck source=tests/helpers.sh
+source "$TESTS_DIR/helpers.sh"
+PULL="$(cd "$TESTS_DIR/.." && pwd -P)/bin/qq-herdr-pull"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
@@ -68,7 +72,7 @@ esac
 SH
 chmod +x "$fake"
 
-export HERDR_BIN_PATH="$fake"
+export QQ_HERDR_BIN="$fake"
 export FAKE_LOG="$log"
 
 reset_fake() {
@@ -84,25 +88,16 @@ expect_agent_failure() {
   local expected="$1"
   shift
   if "$PULL" --workspace target >"$tmp/out" 2>"$tmp/err"; then
-    printf 'agent mode unexpectedly succeeded: %s\n' "$expected" >&2
-    exit 1
+    fail "agent mode unexpectedly succeeded: $expected"
   fi
-  grep -Fq "$expected" "$tmp/err"
-}
-
-assert_not_called() {
-  local pattern="$1"
-  if grep -q "$pattern" "$log"; then
-    printf 'unexpected fake herdr call matching %s\n' "$pattern" >&2
-    exit 1
-  fi
+  assert_file_contains "$tmp/err" "$expected"
 }
 
 reset_fake
 output="$(QQ_HERDR_PULL_DRY=1 "$PULL" --workspace target)"
 test "$output" = 'workspace=target target=target:p1 source=source:p1'
-assert_not_called '^pane move '
-assert_not_called '^pane close '
+assert_file_not_matches "$log" '^pane move '
+assert_file_not_matches "$log" '^pane close '
 
 reset_fake
 output="$("$PULL" --workspace target)"
@@ -114,41 +109,41 @@ reset_fake
 export FAKE_CURRENT_WORKSPACE=target FAKE_CURRENT_PANE=target:p7
 output="$("$PULL" --workspace target)"
 test "$output" = 'workspace=target pane=target:p7 changed=false'
-assert_not_called '^pane list '
+assert_file_not_matches "$log" '^pane list '
 
 reset_fake
 export FAKE_PANE_COUNT=2
 expect_agent_failure "must contain exactly one placeholder pane (found 2)"
-assert_not_called '^pane move '
-assert_not_called '^pane close '
+assert_file_not_matches "$log" '^pane move '
+assert_file_not_matches "$log" '^pane close '
 
 reset_fake
 export FAKE_CURRENT_AGENT_JSON=null
 expect_agent_failure "calling pane 'source:p1' is not an agent"
-assert_not_called '^workspace get '
-assert_not_called '^pane move '
+assert_file_not_matches "$log" '^workspace get '
+assert_file_not_matches "$log" '^pane move '
 
 reset_fake
 export FAKE_TARGET_AGENT=codex
 expect_agent_failure "already occupied by an agent"
-assert_not_called '^pane move '
+assert_file_not_matches "$log" '^pane move '
 
 reset_fake
 export FAKE_BUSY=1
 expect_agent_failure "is not an idle shell placeholder"
-assert_not_called '^pane move '
+assert_file_not_matches "$log" '^pane move '
 
 reset_fake
 export FAKE_MOVE_FAIL=1
 expect_agent_failure "move failed (source:p1 -> target:t1)"
 grep -q '^pane move ' "$log"
-assert_not_called '^pane close '
+assert_file_not_matches "$log" '^pane close '
 
 reset_fake
 export FAKE_MOVE_UNCHANGED=1
 expect_agent_failure "move not applied (source:p1 -> target:t1; reason: zoomed_tab)"
 grep -q '^pane move ' "$log"
-assert_not_called '^pane close '
+assert_file_not_matches "$log" '^pane close '
 
 reset_fake
 export FAKE_CLOSE_FAIL=1
@@ -172,20 +167,20 @@ grep -q '^pane close operator:p1$' "$log"
 reset_fake
 HERDR_PANE_ID=operator:p1 "$PULL" 0
 grep -q '^notification show ' "$log"
-assert_not_called '^pane move '
+assert_file_not_matches "$log" '^pane move '
 
 reset_fake
 export FAKE_MOVE_FAIL=1
 HERDR_PANE_ID=operator:p1 "$PULL" 1
 grep -q '^pane move ' "$log"
 grep -q '^notification show ' "$log"
-assert_not_called '^pane close '
+assert_file_not_matches "$log" '^pane close '
 
 reset_fake
 export FAKE_MOVE_UNCHANGED=1
 HERDR_PANE_ID=operator:p1 "$PULL" 1
 grep -q '^pane move ' "$log"
 grep -q '^notification show ' "$log"
-assert_not_called '^pane close '
+assert_file_not_matches "$log" '^pane close '
 
 printf 'test-qq-herdr-pull: pass\n'

@@ -37,18 +37,15 @@ elif [ "$#" -ne 1 ]; then
   sel=""
 fi
 
-# Resolve the herdr binary: env hint, PATH, then the known Homebrew location.
-if [ -n "${HERDR_BIN_PATH:-}" ] && [ -x "${HERDR_BIN_PATH}" ]; then
-  HERDR="${HERDR_BIN_PATH}"
-elif command -v herdr >/dev/null 2>&1; then
-  HERDR="herdr"
-elif [ -x /home/linuxbrew/.linuxbrew/bin/herdr ]; then
-  HERDR="/home/linuxbrew/.linuxbrew/bin/herdr"
-else
-  printf 'qq-herdr-pull: herdr not found\n' >&2
+self="$(readlink -f -- "${BASH_SOURCE[0]}")"
+# shellcheck source=bin/lib/qq-bin.sh
+source "$(dirname "$self")/lib/qq-bin.sh"
+if ! qq_resolve_bin herdr; then
+  printf 'qq-herdr-pull: %s\n' "$QQ_BIN_ERROR" >&2
   [ "$mode" = "operator" ] && exit 0
   exit 1
 fi
+HERDR="$QQ_BIN_RESULT"
 
 note() { "$HERDR" notification show "qq-pull" --body "$1" >/dev/null 2>&1 || true; }
 die() {
