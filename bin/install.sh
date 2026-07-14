@@ -122,7 +122,7 @@ install_openwiki_activation_handler() {
 }
 
 install_bpmn_pipeline() {
-  local pipeline="$QQ/skills/bpmn-plans/pipeline"
+  local pipeline="$QQ/tools/bpmn-pipeline"
 
   command -v npm >/dev/null 2>&1 || die "npm is required for the bundled BPMN pipeline"
   npm ci --prefix "$pipeline" --no-audit --no-fund

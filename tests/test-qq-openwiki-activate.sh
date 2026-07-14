@@ -343,7 +343,7 @@ assert_contains "$(<"$desktop")" 'MimeType=x-scheme-handler/qq-openwiki;'
 [ ! -e "$INSTALL_HOME/.local/share/applications/qq-openwiki-activate.desktop" ] || fail "installer ignored XDG_DATA_HOME"
 [ "$(<"$INSTALL_HOME/.config/mimeapps.list")" = 'keep=this-entry' ] || fail "unrelated MIME state changed"
 assert_contains "$(<"$INSTALL_LOG")" 'xdg-mime default qq-openwiki-activate.desktop x-scheme-handler/qq-openwiki'
-assert_contains "$(<"$INSTALL_LOG")" "npm ci --prefix $ROOT/skills/bpmn-plans/pipeline --no-audit --no-fund"
+assert_contains "$(<"$INSTALL_LOG")" "npm ci --prefix $ROOT/tools/bpmn-pipeline --no-audit --no-fund"
 
 UNMANAGED_HOME="$TMP/unmanaged-home"
 mkdir -p "$UNMANAGED_HOME/.local/share/applications"

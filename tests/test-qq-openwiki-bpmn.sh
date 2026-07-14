@@ -44,7 +44,7 @@ export FAKE_NODE_LOG="$TMP/node.log"
   "$WRAPPER" openwiki/processes/order_lifecycle.json
 )
 [ "$(<"$FAKE_NODE_LOG.count")" = 3 ] || fail "publish invocation had the wrong argument count"
-[ "$(<"$FAKE_NODE_LOG.1")" = "$ROOT/skills/bpmn-plans/pipeline/bin/qq-bpmn.mjs" ] \
+[ "$(<"$FAKE_NODE_LOG.1")" = "$ROOT/tools/bpmn-pipeline/bin/qq-bpmn.mjs" ] \
   || fail "wrapper did not resolve the bundled pipeline"
 [ "$(<"$FAKE_NODE_LOG.2")" = wiki ] || fail "wrapper did not select wiki publishing"
 [ "$(<"$FAKE_NODE_LOG.3")" = "$REPO/openwiki/processes/order_lifecycle.json" ] \
