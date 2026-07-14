@@ -3,7 +3,7 @@ id: doc-38
 title: 'Plan — Own the gates: qq kernel convergence'
 type: specification
 created_date: '2026-07-14 05:09'
-updated_date: '2026-07-14 05:10'
+updated_date: '2026-07-14 17:38'
 ---
 # Plan — Own the gates: qq kernel convergence (Phases 1–4)
 
@@ -95,3 +95,16 @@ by more than half.
 Phases land in order, one pull request each. Phase 1 first: every later phase
 deletes or rewrites guarded behavior, and the CI floor plus hooks make those
 deletions safe.
+
+## Amendments
+
+- 2026-07-14 — Phase 1's hook guard is reclassified as a drift-net
+  (CONCEPTS.md; lesson in doc-39): it intercepts a well-meaning Actor's
+  accidental mandate violation and is not a security boundary. Exact
+  enforcement of "only the operator merges" moved to the resource layer
+  (TASK-36): a GitHub ruleset on `main` requires a pull request with green
+  `bpmn-tests` and `shell-tests` for every actor, admins included, and
+  rejects direct pushes, force pushes, and deletion. Agent-credential
+  separation (a dedicated machine account) was deferred by operator
+  decision and is tracked as follow-up work. The review-ownership verdict
+  behind these rules is doc-40.
