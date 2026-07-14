@@ -5,7 +5,21 @@ description: Delegates decision-grade investigation to a fresh read-only researc
 
 # Research
 
-Delegate the reading; retain the judgment. For substantial research, launch a fresh background researcher with the exact question, constraints, this method, and the relevant repo paths. Keep that researcher read-only in the repo: it returns findings directly or writes raw notes under the OS temporary directory. The owning agent spot-checks load-bearing citations, decides what the findings mean, and writes the repository artifacts.
+Delegate the reading; retain the judgment. For substantial research, launch a
+fresh researcher with the exact question, constraints, this method, and the
+relevant repo paths. Inside Herdr, resolve the owning pane's live workspace and
+tab, then use `herdr agent start <unique-researcher-name> --cwd <checkout> --tab
+<owning-tab> --split right --no-focus -- codex --sandbox read-only
+--ask-for-approval never <brief-prompt>`. Keep the complete brief in an OS
+temporary file and make `<brief-prompt>` a short pointer to it. Confirm the
+returned pane shares the owning work session and tab, is a right split, did not
+take focus, and reports a new agent session before sending work. Do not choose a
+runtime mechanism that cannot guarantee this placement while Herdr is available.
+Outside Herdr, use the cleanest fresh-context mechanism available and report
+that pane placement was unavailable. The researcher remains read-only in the
+repo: it returns findings directly or writes raw notes under the OS temporary
+directory. The owning agent spot-checks load-bearing citations, decides what the
+findings mean, and writes the repository artifacts.
 
 ## Method
 

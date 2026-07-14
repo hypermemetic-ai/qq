@@ -141,6 +141,7 @@ link_one "$QQ/cockpit/glow/tuned.json" "$HOME/.config/glow/tuned.json" "cockpit/
 link_one "$QQ/cockpit/herdr/config.toml" "$HOME/.config/herdr/config.toml" "cockpit/herdr.toml"
 link_one "$QQ/cockpit/shell/file-navigation.bash" "$HOME/.config/shell/file-navigation.bash" "cockpit/file-navigation.bash"
 
+link_one "$QQ/bin/qq-herdr-home" "$HOME/.local/bin/qq-herdr-home" "command/qq-herdr-home"
 link_one "$QQ/bin/qq-herdr-pull" "$HOME/.local/bin/qq-herdr-pull" "command/qq-herdr-pull"
 link_one "$QQ/bin/qq-openwiki" "$HOME/.local/bin/qq-openwiki" "command/qq-openwiki"
 link_one "$QQ/bin/qq-openwiki-bpmn" "$HOME/.local/bin/qq-openwiki-bpmn" "command/qq-openwiki-bpmn"

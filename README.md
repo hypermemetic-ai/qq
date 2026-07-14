@@ -1,6 +1,6 @@
 # qq
 
-qq is qqp's operator-owned harness for agentic development. This repository
+qq is qqp-dev's operator-owned harness for agentic development. This repository
 is the source of its shared methodology, skills, project knowledge, and cockpit
 preferences.
 
@@ -33,10 +33,11 @@ wiring needed to expose it.
 - The single `Ideas` Backlog document is the idea capture surface.
 - Backlog document categories `plans`, `research`, and `solutions` retain
   historical designs, cited investigations, and reusable lessons.
-- herdr provides named agent sessions and direct agent-to-agent messaging.
+- herdr provides persistent `main` project homes, short-labeled grouped
+  worktree sessions, named agents, and direct agent-to-agent messaging.
 - `cockpit/` contains the operator's terminal configuration.
 - `bin/` installs the live qq surfaces, runs guarded local OpenWiki updates, and
-  supports herdr pane movement.
+  validates Herdr project-home focus and pane movement.
 
 ## Delivery
 

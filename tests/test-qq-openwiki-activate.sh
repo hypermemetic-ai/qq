@@ -303,6 +303,7 @@ desktop-file-validate "$desktop"
 assert_contains "$(<"$desktop")" "Exec=\"$INSTALL_HOME/.local/bin/qq-openwiki-activate\" %u"
 assert_contains "$(<"$desktop")" 'MimeType=x-scheme-handler/qq-openwiki;'
 [ -L "$INSTALL_DATA/qq/openwiki-merge-activator.user.js" ] || fail "userscript link missing"
+[ -L "$INSTALL_HOME/.local/bin/qq-herdr-home" ] || fail "Herdr home command link missing"
 [ -L "$INSTALL_HOME/.local/bin/qq-openwiki-bpmn" ] || fail "OpenWiki BPMN command link missing"
 [ ! -e "$INSTALL_HOME/.local/share/applications/qq-openwiki-activate.desktop" ] || fail "installer ignored XDG_DATA_HOME"
 [ "$(<"$INSTALL_HOME/.config/mimeapps.list")" = 'keep=this-entry' ] || fail "unrelated MIME state changed"

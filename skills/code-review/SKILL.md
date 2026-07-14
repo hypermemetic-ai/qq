@@ -43,8 +43,17 @@ inherits the other's conclusions.
 
 ## Delegate the judgment
 
-4. Spawn one fresh read-only reviewer with no inherited conversation history,
-   through the cleanest fresh-context mechanism the runtime offers. State
+4. Spawn one fresh read-only reviewer with no inherited conversation history.
+   Inside Herdr, resolve the owning pane's live workspace and tab, then use
+   `herdr agent start <unique-reviewer-name> --cwd <checkout> --tab
+   <owning-tab> --split right --no-focus -- codex --sandbox read-only
+   --ask-for-approval never <brief-prompt>`. Keep the complete brief in an OS
+   temporary file and make `<brief-prompt>` a short pointer to it. Confirm the
+   returned reviewer pane shares the owning work session and tab, is a right
+   split, did not take focus, and reports a new agent session before sending
+   work. Do not choose a runtime mechanism that cannot guarantee this placement
+   while Herdr is available. Outside Herdr, use the cleanest fresh-context
+   mechanism available and report that pane placement was unavailable. State
    that the brief completes orientation: no start-of-work sequence, no broad
    searches of intent or knowledge surfaces, no unrelated skills, no further
    delegation, no state changes, no full Check-suite reruns.
