@@ -9,7 +9,7 @@
       "documentation": "Begin from the operator-settled retry and notification behavior recorded in TASK-26.",
       "evidence": {
         "file": "backlog/tasks/task-26 - Surface-and-retry-failed-OpenWiki-merge-activations.md",
-        "lines": "20-29"
+        "lines": "34-43"
       }
     },
     {
@@ -19,7 +19,7 @@
       "documentation": "Confirm that the execution contract implements the settled TASK-26 outcome without broadening activation behavior.",
       "evidence": {
         "file": "backlog/tasks/task-26 - Surface-and-retry-failed-OpenWiki-merge-activations.md",
-        "lines": "20-38"
+        "lines": "34-52"
       }
     },
     {
@@ -50,7 +50,7 @@
       "documentation": "Rewrite a marker to failed when dispatch raises after marker creation, retry only that explicit state, and retain successful dispatch dedupe.",
       "evidence": {
         "file": "backlog/tasks/task-26 - Surface-and-retry-failed-OpenWiki-merge-activations.md",
-        "lines": "20-27"
+        "lines": "34-41"
       }
     },
     {
@@ -60,7 +60,7 @@
       "documentation": "Make the protocol-handler entry path raise a best-effort Herdr desktop notification for each surfaced ActivationError.",
       "evidence": {
         "file": "backlog/tasks/task-26 - Surface-and-retry-failed-OpenWiki-merge-activations.md",
-        "lines": "21,28"
+        "lines": "35,42"
       }
     },
     {
@@ -70,7 +70,7 @@
       "documentation": "Extend the isolated activation harness so the old blackhole and silent-error behavior fails observably.",
       "evidence": {
         "file": "backlog/tasks/task-26 - Surface-and-retry-failed-OpenWiki-merge-activations.md",
-        "lines": "26-29"
+        "lines": "40-43"
       }
     },
     {
@@ -120,7 +120,7 @@
       "documentation": "Confirm failed dispatch retry, completed dispatch dedupe, ActivationError notification, and focused regression coverage from fresh results.",
       "evidence": {
         "file": "backlog/tasks/task-26 - Surface-and-retry-failed-OpenWiki-merge-activations.md",
-        "lines": "26-29"
+        "lines": "40-43"
       }
     },
     {
