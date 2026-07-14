@@ -4,7 +4,7 @@
 
 Start from the assignment and context already provided, and read `CONCEPTS.md` before working. Resolve only material gaps through the surfaces that own them: Backlog Tasks, documents, and decisions for durable intent and history; relevant OpenWiki pages for the landed system; codebase-memory for architecture, dependencies, call paths, and impact; and source plus fresh Checks for verification. Use Backlog's CLI for its records. If a derived surface is stale or conflicts with source and Checks, trust the latter and report the conflict.
 
-For a genuinely new work item, `grilling` owns the default alignment interview and its exceptions. It does not rerun merely because already aligned work continues. Other procedures apply only when the relevant Skill's trigger and actor boundary match; there is no blanket requirement to invoke every Skill or search every knowledge surface.
+For a genuinely new work item, `grilling` owns the default alignment interview only when the Actor is the operator-facing accountable owner. Spawned, delegated, review, research, maintainer, and event-triggered Actors treat bounded assignments as aligned and execute within their boundary; if a new consequential decision or scope gap appears, they stop and return it to the assigning or owning Actor rather than asking the operator or expanding scope. The owner resumes alignment when such a decision emerges or the work crosses the agreed boundary. Grilling does not rerun merely because already aligned work continues. Other procedures apply only when the relevant Skill's trigger and actor boundary match; there is no blanket requirement to invoke every Skill or search every knowledge surface.
 
 ## Task-to-Change delivery
 

@@ -4,7 +4,7 @@ qq currently retains eleven stateless Skills. A Skill is invoked when its descri
 
 | Skill | Trigger and responsibility | Important boundary |
 |---|---|---|
-| `grilling` | Default alignment for new work; inspect first, ask one decision question at a time, recommend an answer, and obtain confirmation. | Skip only on explicit opt-out or genuinely impact-free mechanical work. |
+| `grilling` | Owner-only alignment for genuinely new work; inspect first, ask one decision question at a time, recommend an answer, and obtain confirmation. | Only the operator-facing accountable owner invokes it. Non-owning Actors execute bounded assignments as aligned and return consequential decisions or scope gaps to their assigning or owning Actor. |
 | `code-review` | Fresh-context, read-only review of a non-trivial Change against intent, scope, and evidence. | Findings/fixes must be material, evidenced, introduced by the Change, and in scope. |
 | `diagnosing-bugs` | Evidence-first investigation of difficult or unexplained failures. | Diagnosis does not authorize a fix; reproduce before fixing. |
 | `research` | Multi-source investigation supporting a decision. | Fresh researcher gathers evidence; owning agent retains judgment and verifies key citations. |
@@ -18,7 +18,7 @@ qq currently retains eleven stateless Skills. A Skill is invoked when its descri
 
 ## How Skills compose
 
-`grilling` runs at the alignment boundary. Other Skills can compose around the work: `research` or `diagnosing-bugs` may establish evidence; `bpmn-plans` can make an approved complex plan inspectable; `deliver-change` keeps delivery accountability with the operator-facing agent; `agent-messaging` coordinates live delegates; `uat-signoff` may validate subjective behavior; `code-review` independently reviews the completed Change; and `compound` captures a durable lesson only after verification. OpenWiki procedure remains confined to its narrowly triggered Skill.
+For the operator-facing accountable owner, `grilling` runs at the alignment boundary. Other Skills can compose around the work: `research` or `diagnosing-bugs` may establish evidence; `bpmn-plans` can make an approved complex plan inspectable; `deliver-change` keeps delivery accountability with the operator-facing agent; `agent-messaging` coordinates live delegates; `uat-signoff` may validate subjective behavior; `code-review` independently reviews the completed Change; and `compound` captures a durable lesson only after verification. OpenWiki procedure remains confined to its narrowly triggered Skill.
 
 There is no global skill phase machine. Follow each Skill’s current `SKILL.md` and the shared operating floor in root `AGENTS.md`.
 
