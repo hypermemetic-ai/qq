@@ -33,8 +33,8 @@ missing, using the surfaces present in the Repository:
 - Tasks record durable intent and work status.
 - Backlog documents and decisions preserve evidence, lessons, and settled choices.
 - `openwiki/` describes the landed system.
-- codebase-memory is the first stop for architecture, dependencies, call paths,
-  or impact.
+- codebase-memory answers structural questions such as architecture,
+  dependencies, call paths, or impact.
 
 Use source files and fresh Checks to verify material conclusions. When a
 derived surface conflicts with them, trust source and Checks and report the
@@ -48,22 +48,28 @@ merges.
 <!-- codebase-memory-mcp:start -->
 # Codebase Knowledge Graph (codebase-memory-mcp)
 
-This project uses codebase-memory-mcp to maintain a knowledge graph of the codebase.
-ALWAYS prefer MCP graph tools over grep/glob/file-search for code discovery.
+This project uses codebase-memory-mcp to maintain a knowledge graph of the
+codebase. It is one of several discovery tools: use the graph for structural
+questions such as callers and impact, and text search for literals or unknown
+shapes. Choose whichever answers the question fastest, then verify material
+conclusions in source.
 
-## Priority Order
+## Tool inventory
+
 1. `search_graph` — find functions, classes, routes, variables by pattern
 2. `trace_path` — trace who calls a function or what it calls
 3. `get_code_snippet` — read specific function/class source code
 4. `query_graph` — run Cypher queries for complex patterns
 5. `get_architecture` — high-level project summary
 
-## When to fall back to grep/glob
+## When text search fits
+
 - Searching for string literals, error messages, config values
 - Searching non-code files (Dockerfiles, shell scripts, configs)
-- When MCP tools return insufficient results
+- Exploring an unknown shape before choosing a structural query
 
 ## Examples
+
 - Find a handler: `search_graph(name_pattern=".*OrderHandler.*")`
 - Who calls it: `trace_path(function_name="OrderHandler", direction="inbound")`
 - Read source: `get_code_snippet(qualified_name="pkg/orders.OrderHandler")`

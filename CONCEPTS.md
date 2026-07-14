@@ -25,6 +25,10 @@ locally or through GitHub Actions.
 **Knowledge item** — A durable artifact that preserves system description,
 research, an idea, a reusable lesson, or shared vocabulary.
 
+**managed Backlog markdown** — Markdown owned by Backlog and edited only
+through the Backlog CLI. When associating documents with a Task, `--doc`
+replaces the complete list; it does not append to it.
+
 **GitHub Flow** — The delivery path from branch through pull request and final
 Checks to operator merge and automatic branch deletion.
 

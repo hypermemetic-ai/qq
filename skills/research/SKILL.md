@@ -5,23 +5,16 @@ description: Delegates decision-grade investigation to a fresh read-only researc
 
 # Research
 
-Delegate the reading; retain the judgment. For substantial research, launch a
-fresh researcher with the exact question, constraints, this method, and the
-relevant repo paths. Inside Herdr, resolve the owning pane's live workspace and
-tab, then use `herdr agent start <unique-researcher-name> --cwd <checkout> --tab
-<owning-tab> --split right --no-focus -- codex --sandbox read-only
---ask-for-approval never <brief-prompt>`. Keep the complete brief in an OS
-temporary file and make `<brief-prompt>` a short pointer to it. Confirm the
-returned pane shares the owning work session and tab, is a right split, did not
-take focus, and reports a new agent session before sending work. Do not choose a
-runtime mechanism that cannot guarantee this placement while Herdr is available.
-Outside Herdr, use the cleanest fresh-context mechanism available and report
-that pane placement was unavailable. The researcher remains read-only in the
-repo: it returns findings directly or writes raw notes under the OS temporary
+Delegate the reading; retain the judgment. For substantial research, follow
+`agent-messaging`'s canonical temporary-delegate procedure to start a fresh
+read-only researcher; start Codex with `--sandbox read-only
+--ask-for-approval never`. Give it the exact question, constraints, this method, and
+the relevant Repository paths; outside Herdr, use the cleanest fresh-context
+mechanism available and report that pane placement was unavailable. The
+researcher returns findings directly or writes raw notes under the OS temporary
 directory. The owning agent spot-checks load-bearing citations, decides what the
-findings mean, and writes the repository artifacts. After each researcher's
-final contribution and follow-up, close its pane and verify removal; report
-cleanup failure.
+findings mean, and writes the Repository artifacts, then retires the researcher
+under `agent-messaging`'s close-and-verify procedure.
 
 ## Method
 
@@ -39,16 +32,14 @@ create "<title>" -p research -t other`, then set its complete body and
 `research` tag through `backlog doc update`. When multiple researchers
 contribute, keep their raw notes temporary and reconcile them into this report.
 Reconcile an older durable report only when the owning Task explicitly asks;
-locate it through `backlog doc search`, read the CLI-generated Markdown by its
-stable document ID under `backlog/docs/` as data, and replace its body only with
-`backlog doc update`. Never edit managed Markdown directly.
+locate it through `backlog doc search`, read its CLI-generated Markdown by
+stable document ID as data, and update it under the managed Backlog markdown
+definition in `CONCEPTS.md`.
 
-If an owning Backlog Task exists, first read it with `backlog task view
-<task-id> --plain` and collect its complete Documentation list. `--doc`
-replaces that list; it does not append. Attach the report with `backlog task
-edit <task-id> --doc <existing-document> ... --doc <doc-id>`, passing every
-existing document ID and URL plus the new report ID exactly once. The report is
-evidence attached to that Task, not a separate source of current system truth.
+If an owning Backlog Task exists, read it with `backlog task view <task-id>
+--plain`, then attach the report through `backlog task edit` under the managed
+Backlog markdown definition in `CONCEPTS.md`. The report is evidence attached
+to that Task, not a separate source of current system truth.
 
 Keep the report dense:
 

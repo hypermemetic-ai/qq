@@ -163,7 +163,13 @@ grep -Fq '[A-Za-z0-9-]{1,15}' "$ROOT/skills/deliver-change/SKILL.md"
 grep -Fq 'unique among work sessions under' "$ROOT/skills/deliver-change/SKILL.md"
 grep -Fq ".label\` equal to \`<change-label>" "$ROOT/skills/deliver-change/SKILL.md"
 grep -Fq 'qq-herdr-home focus-board --repo <root>' "$ROOT/skills/deliver-change/SKILL.md"
-grep -Fq -- '--split right --no-focus' "$ROOT/skills/code-review/SKILL.md"
-grep -Fq -- '--split right --no-focus' "$ROOT/skills/research/SKILL.md"
+grep -Fq -- 'herdr agent start <name> --workspace <id> --tab <owning-tab-id> --cwd <path> --split right --no-focus -- <argv...>' \
+  "$ROOT/skills/agent-messaging/SKILL.md"
+grep -Fq -- 'herdr agent wait <name> --status idle' \
+  "$ROOT/skills/agent-messaging/SKILL.md"
+grep -Fq -- "\`agent-messaging\`'s canonical temporary-delegate procedure" \
+  "$ROOT/skills/code-review/SKILL.md"
+grep -Fq -- "\`agent-messaging\`'s canonical temporary-delegate procedure" \
+  "$ROOT/skills/research/SKILL.md"
 
 printf 'test-qq-herdr-home: pass\n'

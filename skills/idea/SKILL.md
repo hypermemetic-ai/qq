@@ -16,9 +16,9 @@ Capture the supplied thought, then return to the work already in progress.
    category directory using `backlog doc create "Ideas" -t other`, then
    initialize it through `backlog doc update <id> --content "# Ideas" --tags
    ideas`. Never create an `ideas/` directory.
-4. Locate the CLI-generated Markdown by that stable document ID under
-   `backlog/docs/` and read it as data so the existing body is preserved. Never
-   edit that file directly; every mutation goes through `backlog doc update`.
+4. Locate the CLI-generated Markdown by stable document ID, read it as data so
+   the existing body is preserved, and follow the managed Backlog markdown
+   definition in `CONCEPTS.md`.
 5. Read the local date and time as `YYYY-MM-DD HH:MM` and form a complete
    replacement body by appending:
 

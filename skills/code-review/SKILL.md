@@ -43,16 +43,10 @@ inherits the other's conclusions.
 
 ## Delegate the judgment
 
-4. Spawn one fresh read-only reviewer with no inherited conversation history.
-   Inside Herdr, resolve the owning pane's live workspace and tab, then use
-   `herdr agent start <unique-reviewer-name> --cwd <checkout> --tab
-   <owning-tab> --split right --no-focus -- codex --sandbox read-only
-   --ask-for-approval never <brief-prompt>`. Keep the complete brief in an OS
-   temporary file and make `<brief-prompt>` a short pointer to it. Confirm the
-   returned reviewer pane shares the owning work session and tab, is a right
-   split, did not take focus, and reports a new agent session before sending
-   work. Do not choose a runtime mechanism that cannot guarantee this placement
-   while Herdr is available. Outside Herdr, use the cleanest fresh-context
+4. Follow `agent-messaging`'s canonical temporary-delegate procedure to start
+   one fresh read-only reviewer with no inherited conversation history. Start
+   Codex with `--sandbox read-only --ask-for-approval never` and give it the
+   complete brief from step 3. Outside Herdr, use the cleanest fresh-context
    mechanism available and report that pane placement was unavailable. State
    that the brief completes orientation: no start-of-work sequence, no broad
    searches of intent or knowledge surfaces, no unrelated skills, no further
@@ -92,8 +86,9 @@ inherits the other's conclusions.
    the last reviewed tree. If a remedy would materially widen the Change,
    stop and align with the operator.
 10. Handle an explicit context gap through step 6. A reviewer error or missing
-    final report is not a review: close its pane and verify removal, then retry
-    the unchanged brief with a fresh reviewer. After the final report and any
-    step 9 delta review, close every reviewer pane and verify removal. Never
-    narrow scope or soften intent to obtain a pass; repeated reviewer
-    unavailability or cleanup failure is a blocker.
+    final report is not a review: retire that delegate under
+    `agent-messaging`'s close-and-verify procedure, then retry the unchanged
+    brief with a fresh reviewer. After the final report and any step 9 delta
+    review, retire every reviewer the same way. Never narrow scope or soften
+    intent to obtain a pass; repeated reviewer unavailability or cleanup failure
+    is a blocker.

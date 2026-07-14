@@ -24,9 +24,8 @@ invariant; implementation changes are supporting evidence.
 1. Search Backlog's shared index for relevant `solutions` documents and read
    `CONCEPTS.md` before writing. Reuse the established vocabulary. When an
    existing document covers the same lesson, locate its CLI-generated Markdown
-   by stable document ID under `backlog/docs/`, read it as data, and replace its
-   complete body through `backlog doc update`. Never edit managed Markdown
-   directly.
+   by stable document ID, read it as data, and update it under the managed
+   Backlog markdown definition in `CONCEPTS.md`.
 2. Otherwise run `backlog doc create "<title>" -p solutions -t guide`, then
    populate it with `backlog doc update <id> --content <body> --tags
    "solution,<focused-tags>"`. Let Backlog own identity, dates, paths, and

@@ -78,47 +78,30 @@ delegated agents bounded assignments; do not hand them this lifecycle.
    and `uat-signoff` when operator confirmation is required. Dispatch, a printed
    URL, or momentary appearance is not visibility. If persistent visibility is
    not confirmed, retry once through a durable opener, report the URL, and stop.
-9. Never merge the pull request. After browser visibility is established, start
-   a three-minute monitoring window and poll its state at reasonable intervals
-   until it is merged or closed, or the full three minutes elapse. A still-open
-   poll is not a stopping condition. If it remains open when the full window
-   elapses, report the URL and current Checks, then stop.
-10. If the operator merges during that window or later resumes the work, fetch
-   and reinspect the pull request with step 7's fields. Verify its landed state,
-   including that `.mergeCommit.oid` is reachable from freshly fetched
-   `origin/main` using
+9. Never merge the pull request. After browser visibility is established, send
+   the operator a handoff notification with `herdr notification show "Pull
+   request ready" --body "$url" --sound request` (or the runtime's equivalent),
+   report the URL, and stop. Proceed to post-merge steps only when the
+   operator's merge is observed on a later resume or message.
+10. On that later resume or message, reinspect the pull request with step 7's
+   fields. Proceed only after verifying its merged state and that
+   `.mergeCommit.oid` is reachable from freshly fetched `origin/main` using
    `git merge-base --is-ancestor <merge-commit> origin/main`. Do not alter the
    completed Task or open a Task-finalization Change. If the operator closes or
    rejects it, report that disposition and apply step 6.
-11. After a merged disposition is verified, synchronize the local checkout that
-   `git worktree list --porcelain` registers for `refs/heads/main`; fetch alone
-   does not update its working tree or a standing Backlog board. Require exactly
-   one such checkout, its symbolic `HEAD` still on `refs/heads/main`, and an
-   empty `git status --porcelain --untracked-files=all`. Establish exclusive use
-   of that checkout for the checks and integration; if another Actor may change
-   its branch or working tree, refuse synchronization. If discovery or an
-   initial gate fails, report the observed registrations, checkout path when
-   available, branch, status, `.mergeCommit.oid`, local `HEAD` when available,
-   and `origin/main`, then stop without creating a checkout, repairing its
-   registration, or fetching from it. Only after the initial gates pass, run
-   `git -C <main-checkout> fetch origin main`, repeat the branch and cleanliness
-   checks, and capture `git -C <main-checkout> rev-parse origin/main` as an
-   immutable `<target-main>`. Before mutation, require both
-   `git -C <main-checkout> merge-base --is-ancestor HEAD <target-main>` and
-   the merge commit ancestry check against `<target-main>` to pass:
-   `git -C <main-checkout> merge-base --is-ancestor <merge-commit> <target-main>`.
-   If any condition fails, report the same evidence plus `<target-main>` and the
-   merge-base when ancestry fails, without switching branches, stashing,
-   cleaning, resetting, pulling, or otherwise changing its local branch or
-   working tree. Otherwise integrate only the validated object with
-   `git -C <main-checkout> merge --ff-only <target-main>`; do not merge the
-   mutable `origin/main` ref or use `pull`. Repeat the branch and cleanliness
-   checks, require its `HEAD` to equal `<target-main>` exactly, and require
-   `git -C <main-checkout> merge-base --is-ancestor <merge-commit> HEAD` to pass
-   before reporting the final SHAs. Do not claim post-merge synchronization
-   complete on any failed final check. A refused or failed synchronization is
-   remaining work: retain the Change checkout and resume after the blocking
-   primary-checkout state is resolved.
+11. After a merged disposition is verified, use `git worktree list --porcelain`
+   to find the local checkout registered for `refs/heads/main`. Require exactly
+   one such checkout, an empty `git status --porcelain --untracked-files=all`,
+   and symbolic `HEAD` on `refs/heads/main`. Establish exclusive use of that
+   checkout before mutating it—coordinate through agent messaging when another
+   Actor may hold it—and refuse synchronization while it is contested. With
+   those preconditions satisfied,
+   run `git -C <main-checkout> pull --ff-only origin main`, then verify
+   `git -C <main-checkout> merge-base --is-ancestor <merge-commit> HEAD`. If
+   discovery, a precondition, the pull, or final verification fails, report the
+   observed state and stop; never create, switch, stash, clean, reset, or
+   otherwise repair the checkout. Retain the Change checkout until the failed
+   synchronization can be resumed safely.
 12. After a terminal disposition leaves no further work in this Change, leave
    its accountable pane, operator-created panes and tabs, worktree workspace,
    and checkout intact for inspection. Capture the calling terminal's live pane,

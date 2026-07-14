@@ -7,8 +7,26 @@ description: Coordinates directly with other live agents through herdr, includin
 
 herdr names every agent session and exposes it to the others. `herdr agent
 list` shows who is live, `herdr agent get <name>` inspects one, `herdr agent
-read <name>` reads its pane, and `herdr agent wait <name>` blocks until it
-finishes.
+read <name>` reads its pane, and `herdr agent wait <name> --status idle` blocks
+until its current turn finishes.
+
+## Temporary delegates
+
+When another Skill calls for a temporary delegate, resolve the owning pane's
+live workspace and tab ids and start the delegate with:
+
+```sh
+herdr agent start <name> --workspace <id> --tab <owning-tab-id> --cwd <path> --split right --no-focus -- <argv...>
+```
+
+Use a unique name. Keep the complete brief in an OS temporary file and make the
+runtime prompt in `<argv...>` a short pointer to it. Confirm the returned pane
+shares the owning workspace and tab, is a right split, did not take focus, and
+reports a new agent session before sending work. Read its progress or final result with
+`herdr agent read <name>` after `herdr agent wait <name> --status idle`; retain
+the pane through any required follow-up. The owner then closes it with `herdr
+pane close <pane-id>` and verifies that it no longer resolves. Report cleanup
+failure, and never close the accountable or an operator-created pane.
 
 Message text is literal: escape sequences such as `\n` render as characters,
 not formatting, so send prompts as clean single-line text. Use `herdr agent
@@ -28,11 +46,6 @@ is needed, resolve its current `.result.agent.pane_id`, then send the reply with
 Never leave an inter-agent reply only in the receiving agent's transcript. If
 the source no longer resolves, report that the reply is unrouteable instead of
 guessing a destination.
-
-The agent that starts a temporary delegate owns its pane. Retain it through the
-final result and any required follow-up; then close it with `herdr pane close
-<pane-id>` and verify it no longer resolves. Report cleanup failure; never close
-the accountable or an operator-created pane.
 
 No correlation IDs or acknowledgement protocol exists. Coordinate when it
 helps; skip the ceremony when it does not.
