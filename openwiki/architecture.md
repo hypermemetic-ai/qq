@@ -44,7 +44,7 @@ OpenWiki and codebase-memory are upstream tools, not vendored qq subsystems. Der
 
 ### Operator layer
 
-`cockpit/` stores the human terminal surface for Herdr, yazi, broot, Glow, and shell navigation. `bin/install.sh` live-links cockpit files, Skills, and retained commands into user configuration, installs the BPMN pipeline dependencies, and registers the local OpenWiki activation protocol. `bin/qq-herdr-pull` supports both operator pane pulling and fail-fast adoption of a Herdr Change workspace by its accountable agent (`bin/qq-herdr-pull:1-23`, `69-112`). Herdr workspaces organize live interaction; Git worktrees remain the source of checkout identity and state.
+`cockpit/` stores the human terminal surface for Herdr, yazi, broot, Glow, and shell navigation. `bin/install.sh` live-links cockpit files, Skills, and retained commands into user configuration, installs the BPMN pipeline dependencies, and registers the local OpenWiki activation protocol. Each Repository has one persistent Herdr **project home** bound to its sole primary `main` checkout; linked-worktree **work sessions** grouped beneath it contain all Change-specific panes, tabs, and agents until the operator retires them. `bin/qq-herdr-home` validates that boundary and the home's dedicated single-pane Backlog-board tab, while `bin/qq-herdr-pull` supports operator pane pulling and fail-fast adoption of a Change work session by its accountable agent (`bin/qq-herdr-home:38-140`; `bin/qq-herdr-pull:69-112`). Herdr organizes live interaction; Git worktrees remain the source of checkout identity and state.
 
 ## Data and state boundaries
 

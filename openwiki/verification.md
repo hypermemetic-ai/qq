@@ -19,6 +19,7 @@ A green Check must demonstrate that it observed the intended subject. A successf
 | `skills/*/SKILL.md` | Skill validator; inspect trigger/procedure coherence; scenario-test changed instructions; `git diff --check` | Ambiguous triggers, duplicated methodology, hidden state, scope expansion, restored ceremony |
 | `AGENTS.md` / `CONCEPTS.md` | Cross-check terms and ordering across README, Skills, and linked-repository instructions; render/read Markdown; `git diff --check` | Conflicting authority, changed business rules, stale references to retired systems |
 | `bin/*.sh` | `bash -n` for syntax plus isolated behavioral tests with temporary HOME/repository and mocked dependencies | User-config mutation, quoting, symlink ownership, fail-open paths, race behavior |
+| `bin/qq-herdr-home` | `bash tests/test-qq-herdr-home.sh` | Exactly one primary `main` checkout and persistent home; matching Git common directory; unique single-pane Backlog board; focus confirmation without moving or closing work-session panes |
 | `bin/qq-herdr-pull` | `bash tests/test-qq-herdr-pull.sh`; exercise `QQ_HERDR_PULL_DRY` before live layout testing | Operator-mode best effort versus agent-mode failure; live pane identity; sole idle placeholder; confirmed move before close |
 | `bin/install.sh` | Temporary HOME/data directory: repeat install, stale managed link pruning, unmanaged destination refusal, locked BPMN install, desktop entry and MIME registration | Accidental overwrite of user paths, partial installation, unmanaged desktop replacement |
 | `cockpit/` | Parse with owning tools where available; exercise key bindings in Herdr/yazi; verify linked paths | Machine-specific absolute paths and missing external binaries |
@@ -38,7 +39,7 @@ A discovered pre-existing defect or broader opportunity does not automatically b
 ## Current coverage gaps
 
 - No committed general CI workflow is visible; “final GitHub Checks” remain a delivery requirement assembled from the affected behavior's focused checks.
-- Focused harnesses now cover OpenWiki generation/correction, guarded merge race behavior, merge activation, BPMN plan policy/publication, and Herdr workspace adoption, but they do not replace live GitHub metadata and branch-protection checks, browser/desktop-protocol behavior, Herdr behavior, or graphical readability checks. Raster rendering assertions are also skipped when Chrome is unavailable or `QQ_BPMN_SKIP_RENDER=1`.
+- Focused harnesses now cover OpenWiki generation/correction, guarded merge race behavior, merge activation, BPMN plan policy/publication, Herdr home/board validation, and work-session adoption, but they do not replace live GitHub metadata and branch-protection checks, browser/desktop-protocol behavior, Herdr behavior, or graphical readability checks. Raster rendering assertions are also skipped when Chrome is unavailable or `QQ_BPMN_SKIP_RENDER=1`.
 - Installer behavior has a wide user-level blast radius despite careful refusal logic.
 - Historical Backlog documents include obsolete gate/orchestration architecture and can mislead search-driven agents.
 

@@ -12,10 +12,10 @@ The installer resolves the checkout from its own location, installs the locked B
 
 - each `skills/*` directory containing `SKILL.md` to `~/.codex/skills/`;
 - yazi, Glow, Herdr, and shell cockpit files to `~/.config/`;
-- `qq-herdr-pull`, `qq-openwiki`, `qq-openwiki-bpmn`, and `qq-openwiki-activate` to `~/.local/bin/`;
+- `qq-herdr-home`, `qq-herdr-pull`, `qq-openwiki`, `qq-openwiki-bpmn`, and `qq-openwiki-activate` to `~/.local/bin/`;
 - the OpenWiki merge userscript into the qq data directory.
 
-It also installs a managed desktop entry and registers `qq-openwiki://` as a local protocol handler. The installer prunes dead links into this checkout and refuses to replace unmanaged paths or desktop entries (`bin/install.sh:43-65`, `85-150`). It does not manage repository instruction files; linked Repositories point their own root `AGENTS.md` symlink to qq's canonical `AGENTS.md`.
+It also installs a managed desktop entry and registers `qq-openwiki://` as a local protocol handler. The installer prunes dead links into this checkout and refuses to replace unmanaged paths or desktop entries (`bin/install.sh:43-65`, `85-151`). It does not manage repository instruction files; linked Repositories point their own root `AGENTS.md` symlink to qq's canonical `AGENTS.md`.
 
 ## Cockpit
 
@@ -29,7 +29,11 @@ It also installs a managed desktop entry and registers `qq-openwiki://` as a loc
 
 Typical flow: `prefix+f` launches `qqy` at the Repository root, `prefix+shift+f` launches `qqbr`, `prefix+F<N>` pulls the Nth agent into focus, and `prefix+0` pulls the agent most needing attention. See [`cockpit/README.md`](../cockpit/README.md).
 
-## Herdr pane pulling
+## Herdr homes and pane movement
+
+A Repository's persistent **project home** is the Herdr workspace for its sole primary `main` checkout. Its dedicated Backlog-board tab must contain exactly one board pane; general operator tabs also remain at home. Each linked-worktree workspace grouped beneath it is a **work session**, identified by a unique operator-agreed label matching `[A-Za-z0-9-]{1,15}` and containing all interaction for that Change (`CONCEPTS.md:31-39`; `cockpit/README.md:28-44`).
+
+`qq-herdr-home inspect --repo <path>` resolves the registered `main` checkout, requires exactly one matching non-linked Herdr home, verifies its repository key against Git's common directory, and finds exactly one dedicated single-pane Backlog board. `focus-board` repeats those checks, focuses that tab, and confirms focus without moving or closing any work-session pane (`bin/qq-herdr-home:38-140`). `deliver-change` uses inspection before creating or opening a labeled work session beneath the returned home, and uses board focus at terminal disposition while leaving the session intact for explicit operator retirement.
 
 `qq-herdr-pull <N|next>` identifies the focused pane, selects an agent from `herdr agent list`, moves that pane into the focused tab, and closes the old pane only after a successful move. Numeric selection is 1-based. `next` prioritizes blocked, then working, then idle agents while excluding the current pane.
 
