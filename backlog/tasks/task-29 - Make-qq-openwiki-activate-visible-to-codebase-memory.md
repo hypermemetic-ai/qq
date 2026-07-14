@@ -1,14 +1,23 @@
 ---
 id: TASK-29
 title: Make qq-openwiki-activate visible to codebase-memory
-status: In Progress
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-07-14 03:01'
-updated_date: '2026-07-14 04:26'
+updated_date: '2026-07-14 04:32'
 labels: []
 dependencies:
   - TASK-30
+modified_files:
+  - >-
+    backlog/tasks/task-29 -
+    Make-qq-openwiki-activate-visible-to-codebase-memory.md
+  - bin/install.sh
+  - bin/qq-openwiki-activate.py
+  - openwiki/operations.md
+  - tests/test-bin-resolution.sh
+  - tests/test-qq-openwiki-activate.sh
 priority: medium
 ordinal: 26000
 ---
@@ -42,3 +51,9 @@ Operator-settled decision: rename the source to bin/qq-openwiki-activate.py, pre
 <!-- SECTION:NOTES:BEGIN -->
 Implemented the history-preserving source rename and kept the installed command/desktop Exec stable. Focused Checks passed: bash tests/test-qq-openwiki-activate.sh; bash tests/test-bin-resolution.sh; Bash and Python syntax; shellcheck -x on changed shell files. A full codebase-memory-mcp CLI reindex reported 1,963 nodes and 2,525 edges; an exact query for Function nodes at bin/qq-openwiki-activate.py returned 24 functions, including activate, dispatch, main, and verify_merge.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Renamed the OpenWiki activation source to bin/qq-openwiki-activate.py without changing its contents or executable mode, while preserving the installed qq-openwiki-activate command and desktop Exec path through the installer symlink. Focused activation, installer, resolver, syntax, ShellCheck, and diff Checks passed; a full codebase-memory reindex exposed all 24 activator functions. Independent review found no material findings, and PR #74 is open, mergeable, and CLEAN with no configured GitHub checks.
+<!-- SECTION:FINAL_SUMMARY:END -->
