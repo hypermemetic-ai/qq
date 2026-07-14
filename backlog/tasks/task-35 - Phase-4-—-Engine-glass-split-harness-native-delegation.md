@@ -1,10 +1,10 @@
 ---
 id: TASK-35
 title: Phase 4 — Engine/glass split (harness-native delegation)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-14 05:10'
-updated_date: '2026-07-14 17:04'
+updated_date: '2026-07-14 21:16'
 labels: []
 dependencies:
   - TASK-34
@@ -12,6 +12,7 @@ documentation:
   - doc-38
   - doc-39
   - doc-40
+  - doc-41
 ordinal: 32000
 ---
 
@@ -25,8 +26,14 @@ Folded review-governance rules (settled 2026-07-14, doc-39 and doc-40): review b
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 code-review and research run on harness-native subagents with no herdr pane lifecycle management
-- [ ] #2 agent-messaging covers only cross-runtime coordination and operator-visible notification
-- [ ] #3 Review briefs declare the Change's threat model and out-of-scope finding classes, and reviewer instructions ride the harness injection surfaces
-- [ ] #4 The review loop enforces the convergence circuit-breaker: sustained same-class findings across rounds halt fixes and escalate a design decision to the operator
+- [x] #1 code-review and research run on harness-native subagents with no herdr pane lifecycle management
+- [x] #2 agent-messaging covers only cross-runtime coordination and operator-visible notification
+- [x] #3 Review briefs declare the Change's threat model and out-of-scope finding classes, and reviewer instructions ride the harness injection surfaces
+- [x] #4 The review loop enforces the convergence circuit-breaker: sustained same-class findings across rounds halt fixes and escalate a design decision to the operator
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Delivered doc-38 Phase 4 as four tickets on feat/engine-glass-split. AC1 verified pre-satisfied by TASK-38 (grep sweeps: zero herdr references in code-review and research skill paths). AC2: agent-messaging rewritten to cross-runtime coordination of live agents plus operator notifications; delegate lifecycle removed with a reintroduction guard in tests/test-qq-herdr-home.sh. AC3: new REVIEW.md injection surface plus AGENTS.md review-guidelines routing; briefs must declare the Change's threat model with out-of-scope classes owner-declined by default. AC4: convergence circuit-breaker (third same-class confirmed finding halts fixes, escalates a design decision) and falsification gate in the review loop. Verification: shell suite 7/7 PASS and BPMN pipeline 0 fail (accountable agent's fresh runs on head); independent fresh codex review of 092beee..c19ad17 under the new injection surfaces returned no findings. Deferred graft candidates recorded in task notes; CONCEPTS.md glossary alignment left as compound follow-up. Done records the agreed work is complete; operator merge disposition pending.
+<!-- SECTION:NOTES:END -->

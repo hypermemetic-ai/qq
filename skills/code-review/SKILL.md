@@ -30,6 +30,10 @@ inherits the other's conclusions.
      files, and historical material marked;
    - current intent, acceptance criteria, explicit inclusions, the ownership
      boundary, and the explicit non-goals;
+   - the Change's threat model: what it defends and against which failure
+     modes, with the finding classes explicitly declared out of scope — a
+     drift-net's out-of-scope classes are owner-declined by default, not
+     reported and not fixed;
    - the repository rules and standards that apply and no tool enforces;
    - the sources already consulted and the facts each one contributed;
    - relevant local Check commands with their results;
@@ -40,6 +44,12 @@ inherits the other's conclusions.
    Give coordinates, not dumps: repository locations rather than a pasted
    diff, distilled facts rather than source excerpts. Never include the
    author's conclusions, suspected findings, or development transcript.
+
+   The owned reviewer rules ride the engine's injection surfaces —
+   `REVIEW.md` for harness-native reviews, the review-guidelines section of
+   `AGENTS.md` for codex reviewers — so the brief carries the Change-specific
+   facts and does not restate them. Where the brief declares scope, the brief
+   wins.
 
 ## Delegate the judgment
 
@@ -93,12 +103,15 @@ inherits the other's conclusions.
 
 ## Verify and close
 
-8. Verify every returned finding against the Repository and reproduce it when
-   practical; a reviewer's conclusion is not yet evidence. Deduplicate, rank
-   by impact, and report only confirmed findings — and say so plainly when
-   none remain. When confirmed findings cluster around one responsibility or
-   protocol, revisit the model with the operator instead of feeding a patch
-   queue. Stop at review unless the operator asks for fixes.
+8. Verify every returned finding against the Repository; a reviewer's
+   conclusion is not yet evidence. A finding that claims a failure is
+   confirmed only by a constructed failing scenario — a concrete input,
+   state, or sequence observed to go wrong — and is discarded without one; an
+   intent finding is confirmed against the agreed scope and the diff.
+   Deduplicate, rank by impact, and report only confirmed findings — and say
+   so plainly when none remain. When confirmed findings cluster around one
+   responsibility or protocol, revisit the model with the operator instead of
+   feeding a patch queue. Stop at review unless the operator asks for fixes.
 9. A confirmed finding is evidence, not authorization to grow the Change. Fix
    it only when the Change introduced it, it reproduces in a supported state,
    it sits inside the agreed intent and inclusions, and the remedy is the
@@ -106,6 +119,14 @@ inherits the other's conclusions.
    an in-scope fix, rerun the affected Checks and review the exact delta from
    the last reviewed tree. If a remedy would materially widen the Change,
    stop and align with the operator.
+
+   Track the class of every confirmed finding across rounds. A new confirmed
+   finding of a class already fixed in two earlier rounds trips the
+   convergence circuit-breaker: sustained same-class findings measure a
+   design property of the chosen layer, not implementation sloppiness, and
+   every fix buys only the adjacent finding. Halt the fix loop at the last
+   green state and escalate a design decision to the operator — which layer
+   should own the violated invariant — instead of feeding a patch queue.
 10. Handle an explicit context gap through step 6. A reviewer error, a nonzero
     exit, or a missing or empty report file is not a review: rerun the
     unchanged brief as a fresh step 4 invocation. Never narrow scope or soften

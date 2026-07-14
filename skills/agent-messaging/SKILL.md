@@ -1,32 +1,21 @@
 ---
 name: agent-messaging
-description: Coordinates directly with other live agents through herdr, including finding, starting, messaging, waiting for, and cleaning up temporary delegates. Use when work needs another agent's state, output, or attention.
+description: Coordinates live agents across runtimes through herdr messaging and raises operator-visible notifications. Use when work needs another live agent's state, output, or attention, or when the operator must notice an event outside any transcript.
 ---
 
 # Message agents through herdr
+
+herdr carries what the harness does not: coordination between live agents
+across runtimes, and notifications the operator sees outside any transcript.
+Delegated work itself runs on harness- or vendor-native runners with their own
+access control; this skill does not start, own, or retire agents.
+
+## Coordinate live agents
 
 herdr names every agent session and exposes it to the others. `herdr agent
 list` shows who is live, `herdr agent get <name>` inspects one, `herdr agent
 read <name>` reads its pane, and `herdr agent wait <name> --status idle` blocks
 until its current turn finishes.
-
-## Temporary delegates
-
-When another Skill calls for a temporary delegate, resolve the owning pane's
-live workspace and tab ids and start the delegate with:
-
-```sh
-herdr agent start <name> --workspace <id> --tab <owning-tab-id> --cwd <path> --split right --no-focus -- <argv...>
-```
-
-Use a unique name. Keep the complete brief in an OS temporary file and make the
-runtime prompt in `<argv...>` a short pointer to it. Confirm the returned pane
-shares the owning workspace and tab, is a right split, did not take focus, and
-reports a new agent session before sending work. Read its progress or final result with
-`herdr agent read <name>` after `herdr agent wait <name> --status idle`; retain
-the pane through any required follow-up. The owner then closes it with `herdr
-pane close <pane-id>` and verifies that it no longer resolves. Report cleanup
-failure, and never close the accountable or an operator-created pane.
 
 Message text is literal: escape sequences such as `\n` render as characters,
 not formatting, so send prompts as clean single-line text. Use `herdr agent
@@ -49,3 +38,15 @@ guessing a destination.
 
 No correlation IDs or acknowledgement protocol exists. Coordinate when it
 helps; skip the ceremony when it does not.
+
+## Notify the operator
+
+For an event the operator must notice without watching a transcript — a pull
+request ready for disposition, a blocked gate — raise a desktop notification:
+
+```sh
+herdr notification show "<title>" --body "<body>" --sound <sound>
+```
+
+Keep the title short, put the actionable value such as a URL in the body, and
+reserve a sound for events that ask the operator to act.
