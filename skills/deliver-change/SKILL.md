@@ -10,23 +10,36 @@ delegated agents bounded assignments; do not hand them this lifecycle.
 
 1. Bind the Change to the agreed outcome and current Repository state. Follow
    Backlog's task-execution instructions for Task operations, and confirm that
-   the branch or worktree isolates this Change from unrelated work. When a new
-   checkout is needed, resolve the Repository root and an explicitly agreed,
-   freshly fetched base, then run
-   `herdr worktree create --cwd <root> --branch <branch> --base <base> --no-focus --json`;
-   never omit `--base` and inherit an incidental `HEAD`. When the checkout
-   already exists, attach it with
-   `herdr worktree open --cwd <root> --path <absolute-path> --no-focus --json`.
-   Retain the response's workspace id and checkout path. Immediately run
+   the branch or worktree isolates this Change from unrelated work. Resolve the
+   Repository root and run `qq-herdr-home inspect --repo <root>` first. Require
+   its sole persistent project home to be the primary `main` checkout with one
+   dedicated Backlog-board tab; retain `.home_workspace_id` and the complete
+   response. Agree `<change-label>` with the operator as a recognizable UI
+   handle matching `[A-Za-z0-9-]{1,15}`, unique among work sessions under this
+   home. It is independent of branch and Task cardinality; a Task id may
+   be chosen when it genuinely identifies the Change, but is never inferred as
+   a one-to-one mapping. Before creating or opening, inspect the home's sibling
+   work sessions and reject a duplicate label for any other checkout. When a
+   new checkout is needed, resolve an explicitly agreed, freshly fetched base,
+   then run `herdr worktree create --workspace <home-workspace-id> --branch
+   <branch> --base <base> --label "<change-label>" --no-focus --json`; never
+   omit `--base` and inherit an incidental `HEAD`. When the checkout already
+   exists, attach it with `herdr worktree open --workspace <home-workspace-id>
+   --path <absolute-path> --label "<change-label>" --no-focus --json`. Require
+   the returned workspace to be a linked worktree for the same Repository with
+   `.label` equal to `<change-label>`, and retain its workspace id and checkout
+   path. Immediately run
    `qq-herdr-pull --workspace <workspace-id>` from the accountable agent pane;
    it safely no-ops when that pane is already there and otherwise refuses any
    target except the workspace's sole idle shell placeholder. Stop before
    Repository mutation if adoption fails. Moving a live terminal does not
    change the agent process's working directory, so run every subsequent tool
    in `<checkout-path>` (or use `git -C <checkout-path>`) and verify that path's
-   top level before editing. Treat the returned workspace and checkout as the
-   Change's home. Return to alignment before acting on any new consequential
-   decision.
+   top level before editing. Treat the returned workspace as the Change's work
+   session: the current accountable conversation and every Change-specific tab,
+   pane, and delegated agent remain there. The project home stays on `main` with
+   its board and general-purpose tabs. Return to alignment before acting on any
+   new consequential decision.
 2. Implement and verify coherent units. When a decision needs durable,
    multi-source evidence, delegate that question through `research` and retain
    the judgment. Keep the Task aligned through the Backlog CLI and run the
@@ -106,19 +119,14 @@ delegated agents bounded assignments; do not hand them this lifecycle.
    complete on any failed final check. A refused or failed synchronization is
    remaining work: retain the Change checkout and resume after the blocking
    primary-checkout state is resolved.
-12. After a terminal disposition leaves no further work in this Change, remove
-   an ephemeral checkout only when its worktree is clean. If the accountable
-   pane still occupies that workspace, require it to be the workspace's only
-   pane, then leave a disposable keeper behind with `herdr pane split
-   <current-pane> --direction right --cwd <change-checkout> --no-focus`; verify
-   the returned pane is an idle shell in the Change workspace. Move the
-   accountable pane into a new tab of the validated primary workspace with
-   `herdr pane move <current-pane> --new-tab --workspace
-   <primary-workspace-id> --focus`; require `.result.move_result.changed` to be
-   true, the returned pane to belong to the primary workspace, and the Change
-   workspace to remain open around the keeper. Anchor later tools in the
-   primary checkout before continuing. Then run
-   `herdr worktree remove --workspace <change-workspace-id> --json`; never force
-   removal by default or remove the workspace containing the reporting agent.
-   Checkout removal does not own branch deletion, and explicitly dedicated
-   long-lived worktrees remain in place until their owner retires them.
+12. After a terminal disposition leaves no further work in this Change, leave
+   its accountable pane, other panes and tabs, worktree workspace, and checkout
+   intact for inspection. Capture the calling terminal's live pane, tab, and
+   workspace ids, then run `qq-herdr-home focus-board --repo <root>`. Require
+   the returned home and board ids to equal the initial inspection, require
+   `.focused` to be true, and re-resolve the calling terminal to prove its three
+   work-session ids did not change. Do not move the accountable pane into the
+   project home, close a work pane, or invoke `herdr worktree remove`. The
+   operator explicitly retires a completed work session and its checkout later;
+   focus returns to the synchronized home board without erasing the Change's
+   visible context.

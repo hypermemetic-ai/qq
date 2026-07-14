@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+# Resolve a Repository's persistent main-checkout Herdr home and its dedicated
+# Backlog-board tab. Inspection is read-only; focus-board changes only focus.
+set -euo pipefail
+
+usage() {
+  printf 'usage: qq-herdr-home <inspect|focus-board> --repo <repository-path>\n' >&2
+  exit 1
+}
+
+die() {
+  printf 'qq-herdr-home: %s\n' "$*" >&2
+  exit 1
+}
+
+[ "$#" -eq 3 ] || usage
+action="$1"
+[ "$2" = "--repo" ] || usage
+repo_arg="$3"
+case "$action" in
+  inspect | focus-board) ;;
+  *) usage ;;
+esac
+
+if [ -n "${HERDR_BIN_PATH:-}" ] && [ -x "${HERDR_BIN_PATH}" ]; then
+  HERDR="${HERDR_BIN_PATH}"
+elif command -v herdr >/dev/null 2>&1; then
+  HERDR="herdr"
+elif [ -x /home/linuxbrew/.linuxbrew/bin/herdr ]; then
+  HERDR="/home/linuxbrew/.linuxbrew/bin/herdr"
+else
+  die "herdr not found"
+fi
+
+command -v git >/dev/null 2>&1 || die "git not found"
+command -v jq >/dev/null 2>&1 || die "jq not found"
+
+repo_root="$(git -C "$repo_arg" rev-parse --show-toplevel 2>/dev/null)" \
+  || die "not a Git checkout: $repo_arg"
+worktrees="$(git -C "$repo_root" worktree list --porcelain 2>/dev/null)" \
+  || die "cannot list Git worktrees for $repo_root"
+
+main_paths=()
+mapfile -t main_paths < <(
+  awk '
+    /^worktree / { path = substr($0, 10); next }
+    /^branch refs\/heads\/main$/ { print path }
+  ' <<<"$worktrees"
+)
+[ "${#main_paths[@]}" -eq 1 ] \
+  || die "expected exactly one refs/heads/main checkout (found ${#main_paths[@]})"
+
+main_checkout="$(cd "${main_paths[0]}" 2>/dev/null && pwd -P)" \
+  || die "main checkout is unavailable: ${main_paths[0]}"
+head_ref="$(git -C "$main_checkout" symbolic-ref -q HEAD 2>/dev/null)" \
+  || die "main checkout has detached HEAD: $main_checkout"
+[ "$head_ref" = "refs/heads/main" ] \
+  || die "primary checkout is not on refs/heads/main: $main_checkout"
+
+common_dir="$(git -C "$main_checkout" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+  || die "cannot resolve Git common directory"
+common_dir="$(readlink -f "$common_dir" 2>/dev/null)" \
+  || die "cannot canonicalize Git common directory: $common_dir"
+
+workspaces="$({ "$HERDR" workspace list 2>/dev/null || true; })"
+jq -e '.result.workspaces | type == "array"' <<<"$workspaces" >/dev/null 2>&1 \
+  || die "cannot inspect Herdr workspaces"
+
+homes=()
+mapfile -t homes < <(
+  jq -r --arg checkout "$main_checkout" '
+    .result.workspaces[]
+    | select(
+        .worktree != null
+        and .worktree.checkout_path == $checkout
+        and .worktree.is_linked_worktree == false
+      )
+    | [.workspace_id, .worktree.repo_key] | @tsv
+  ' <<<"$workspaces"
+)
+[ "${#homes[@]}" -eq 1 ] \
+  || die "expected exactly one persistent Herdr home for $main_checkout (found ${#homes[@]})"
+
+IFS=$'\t' read -r home_workspace home_repo_key <<<"${homes[0]}"
+if [ -z "$home_workspace" ] || [ -z "$home_repo_key" ]; then
+  die "home workspace metadata is incomplete"
+fi
+canonical_repo_key="$(readlink -f "$home_repo_key" 2>/dev/null)" \
+  || die "cannot canonicalize Herdr repo key: $home_repo_key"
+[ "$canonical_repo_key" = "$common_dir" ] \
+  || die "home workspace repo key does not match Git common directory"
+
+panes="$({ "$HERDR" pane list --workspace "$home_workspace" 2>/dev/null || true; })"
+jq -e '.result.panes | type == "array"' <<<"$panes" >/dev/null 2>&1 \
+  || die "cannot inspect home workspace panes"
+
+board_panes=()
+while IFS=$'\t' read -r pane_id tab_id; do
+  if [ -z "$pane_id" ] || [ -z "$tab_id" ]; then
+    die "home workspace contains incomplete pane metadata"
+  fi
+  process_info="$({ "$HERDR" pane process-info --pane "$pane_id" 2>/dev/null || true; })"
+  jq -e '.result.process_info.foreground_processes | type == "array"' \
+    <<<"$process_info" >/dev/null 2>&1 \
+    || die "cannot inspect home pane process: $pane_id"
+  if jq -e '
+    (.result.process_info.foreground_processes // [])
+    | any(.[]?;
+        (.argv? | type == "array")
+        and ((.argv | length) >= 2)
+        and (.argv[-1] == "board")
+        and any(.argv[]; ((tostring | split("/") | last) == "backlog"))
+      )
+  ' <<<"$process_info" >/dev/null; then
+    board_panes+=("$pane_id"$'\t'"$tab_id")
+  fi
+done < <(jq -r '.result.panes[] | [.pane_id, .tab_id] | @tsv' <<<"$panes")
+
+[ "${#board_panes[@]}" -eq 1 ] \
+  || die "expected exactly one Backlog-board pane in home workspace $home_workspace (found ${#board_panes[@]})"
+IFS=$'\t' read -r board_pane board_tab <<<"${board_panes[0]}"
+
+board_tab_panes="$(jq -r --arg tab "$board_tab" \
+  '[.result.panes[] | select(.tab_id == $tab)] | length' <<<"$panes")"
+[ "$board_tab_panes" -eq 1 ] \
+  || die "Backlog board tab $board_tab must contain exactly one pane (found $board_tab_panes)"
+
+focused=false
+if [ "$action" = "focus-board" ]; then
+  "$HERDR" tab focus "$board_tab" >/dev/null 2>&1 \
+    || die "could not focus Backlog board tab $board_tab"
+  tab_info="$({ "$HERDR" tab get "$board_tab" 2>/dev/null || true; })"
+  jq -e --arg tab "$board_tab" --arg workspace "$home_workspace" '
+    .result.tab.tab_id == $tab
+    and .result.tab.workspace_id == $workspace
+    and .result.tab.focused == true
+  ' <<<"$tab_info" >/dev/null 2>&1 \
+    || die "Backlog board focus was not confirmed"
+  focused=true
+fi
+
+jq -cn \
+  --arg action "$action" \
+  --arg repo_root "$repo_root" \
+  --arg main_checkout "$main_checkout" \
+  --arg home_workspace_id "$home_workspace" \
+  --arg board_tab_id "$board_tab" \
+  --arg board_pane_id "$board_pane" \
+  --argjson focused "$focused" \
+  '{
+    action: $action,
+    repo_root: $repo_root,
+    main_checkout: $main_checkout,
+    home_workspace_id: $home_workspace_id,
+    board_tab_id: $board_tab_id,
+    board_pane_id: $board_pane_id,
+    focused: $focused
+  }'

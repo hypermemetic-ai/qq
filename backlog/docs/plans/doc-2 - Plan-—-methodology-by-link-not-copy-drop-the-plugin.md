@@ -3,7 +3,7 @@ id: doc-2
 title: 'Plan — methodology by link, not copy (drop the plugin)'
 type: specification
 created_date: '2026-07-10 20:56'
-updated_date: '2026-07-10 21:07'
+updated_date: '2026-07-13 23:40'
 tags:
   - plan
   - historical
@@ -46,7 +46,7 @@ it. No auto-push in this build — Codex edits the working tree only.
 
 ### 1. New file `qq-methodology.md` (the shared, project-agnostic core)
 Extract the methodology out of the current `AGENTS.md` into this new file, worded so
-it is true for **any** qq-linked repo (no "qq is surlej's…", no "this project:
+it is true for **any** qq-linked repo (no "qq is qqp-dev's…", no "this project:
 blast-radius", no repo-specific paths in prose). Include, adapted from current
 `AGENTS.md`:
 - A one-line header: `# The qq methodology` + a sentence: "The shared operating core
@@ -76,7 +76,7 @@ blast-radius", no repo-specific paths in prose). Include, adapted from current
 ### 2. Rewrite `AGENTS.md` (qq's own) → thin header + import of the core
 Replace the whole file with:
 - `# qq — agent operating rules`
-- The current intro paragraph ("qq is surlej's bespoke agentic-dev command
+- The current intro paragraph ("qq is qqp-dev's bespoke agentic-dev command
   center…") — keep.
 - A short **This repo** note: qq is the source of truth for the methodology — the
   shared core is `qq-methodology.md` (imported below) and every linked repo symlinks

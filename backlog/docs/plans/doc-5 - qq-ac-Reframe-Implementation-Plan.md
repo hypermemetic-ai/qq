@@ -3,7 +3,7 @@ id: doc-5
 title: qq-ac Reframe Implementation Plan
 type: specification
 created_date: '2026-07-10 20:56'
-updated_date: '2026-07-10 21:02'
+updated_date: '2026-07-13 23:40'
 tags:
   - plan
   - historical
@@ -19,7 +19,7 @@ tags:
 
 > **For the implementer (Codex):** This repo's `AGENTS.md` binds you as the behavioral floor. Implement Phase 1 task-by-task on a branch; do **not** touch the on-disk directory name, the git remote, or GitHub — those are Phase 4, run by the conductor (Claude) after landing. Steps use checkbox (`- [ ]`) syntax.
 
-**Goal:** Turn this repo from "hypercore — a distributable engineering methodology" into **qq-ac — surlej's bespoke agentic-dev command center**: rename every identifier, add a **Cockpit** layer as the sixth layer, vendor the cockpit's tuned configs (yazi · broot · glow · mdcat · herdr + shell glue) into the repo as the *live source of truth* via symlinks, and drop all "distribution for others" framing.
+**Goal:** Turn this repo from "hypercore — a distributable engineering methodology" into **qq-ac — qqp-dev's bespoke agentic-dev command center**: rename every identifier, add a **Cockpit** layer as the sixth layer, vendor the cockpit's tuned configs (yazi · broot · glow · mdcat · herdr + shell glue) into the repo as the *live source of truth* via symlinks, and drop all "distribution for others" framing.
 
 **Architecture:** Three concentric changes land in sequence. (1) **In-repo transform** — text/identity rename + a new `cockpit/` directory holding the vendored, renamed configs + a rewritten activation script that symlinks them into `~/.config`. (2) **Land** the in-repo change through the no-mistakes gate while paths are still stable. (3) **Flip** — rename the GitHub repo and the on-disk directory last, because renaming a live session's cwd breaks the session and herdr.
 
@@ -200,9 +200,9 @@ git add -A && git commit -m "qq-ac: qqac-activate symlinks the cockpit into ~/.c
 
 **Interfaces — Produces:** the `/qq-ac:` skill namespace.
 
-- [ ] **Step 1: Rewrite `plugin.json`.** `"name": "hypercore"`→`"qq-ac"`; description → `"surlej's bespoke agentic-dev command center: skills, rules, knowledge, sessions, and a tuned terminal cockpit."`; `keywords` drop `"hypercore"`, add `"qq-ac"`, keep the rest.
+- [ ] **Step 1: Rewrite `plugin.json`.** `"name": "hypercore"`→`"qq-ac"`; description → `"qqp-dev's bespoke agentic-dev command center: skills, rules, knowledge, sessions, and a tuned terminal cockpit."`; `keywords` drop `"hypercore"`, add `"qq-ac"`, keep the rest.
 
-- [ ] **Step 2: Rewrite `marketplace.json`.** Top-level `"name": "hypercore"`→`"qq-ac"`; description → `"surlej's personal qq-ac plugin."`; the plugin entry `"name": "hypercore"`→`"qq-ac"` and its description → `"Curated skills + operating rules, plus knowledge, session, and cockpit layers."`. Keep `"source": "./"`.
+- [ ] **Step 2: Rewrite `marketplace.json`.** Top-level `"name": "hypercore"`→`"qq-ac"`; description → `"qqp-dev's personal qq-ac plugin."`; the plugin entry `"name": "hypercore"`→`"qq-ac"` and its description → `"Curated skills + operating rules, plus knowledge, session, and cockpit layers."`. Keep `"source": "./"`.
 
 - [ ] **Step 3: Verify JSON is valid.**
 ```bash
@@ -224,7 +224,7 @@ git add .claude-plugin && git commit -m "qq-ac: rename plugin + marketplace (nam
 **Interfaces — Consumes:** the naming map, the cockpit tokens (Task 1). **Produces:** the reframed identity.
 
 - [ ] **Step 1: `AGENTS.md` — rebrand + add the Cockpit layer.**
-  - Title/opening: `hypercore`→`qq-ac`; reframe the one-liner to "qq-ac is surlej's bespoke agentic-dev command center — capability I reach for, tuned to one operator: me."
+  - Title/opening: `hypercore`→`qq-ac`; reframe the one-liner to "qq-ac is qqp-dev's bespoke agentic-dev command center — capability I reach for, tuned to one operator: me."
   - "The five layers"→"The six layers"; add:
     > - **Cockpit** — `cockpit/`: the human-driven terminal surface and its tuned configs — **herdr** (multiplexer; tokyo-night; `prefix+f`→`qqy`, `prefix+shift+f`→`qqbr`), **yazi** (file pane; `.md` opens in-pane via mdcat/glow, preview pane dropped), **broot** (tree nav via `qqbr`), **glow**/**mdcat** (pane-width markdown rendering; `glow/tuned.json` theme). Symlinked from `~/.config` so the repo is the live source of truth. Installed by `bin/qqac-activate.sh`.
   - Sweep remaining `hypercore`/`hc-wip`→`qq-ac`/`qq-wip` (skill-index row "authoring or editing a hypercore skill"→"a qq-ac skill", etc.).

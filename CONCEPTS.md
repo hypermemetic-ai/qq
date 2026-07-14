@@ -28,6 +28,16 @@ research, an idea, a reusable lesson, or shared vocabulary.
 **GitHub Flow** — The delivery path from branch through pull request and final
 Checks to operator merge and automatic branch deletion.
 
+**project home** — A Repository's persistent Herdr workspace bound to its sole
+primary `main` checkout. Its dedicated Backlog-board tab and operator-created
+general tabs remain at this level; Change work does not.
+
+**work session** — A linked-worktree Herdr workspace natively grouped beneath
+its Repository's project home. Its unique **change label** is an operator-agreed
+recognizer matching `[A-Za-z0-9-]{1,15}`, independent of branch or Task
+cardinality. One work session owns one worktree and all tabs, panes, and agents
+working on its Change until the operator explicitly retires it.
+
 **green** — A unit of work whose applicable Checks pass with evidence that they
 observed the intended subject.
 
