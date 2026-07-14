@@ -104,34 +104,23 @@ support.
 Its credentials stay under `~/.openwiki/`, uncommitted.
 
 OpenWiki is a local single-writer derived surface owned by a separate maintainer
-Actor, not by source-change agents. An advance of `main` is the maintainer's
-input. The `openwiki-maintainer` Skill owns observation, activation, independent
-verification, and delivery from its dedicated worktree; OpenWiki's internal
-generator owns narrative and diagram authorship. `qq-openwiki` supplies the
-diagram-authoring instruction plus deterministic branch, freshness,
-process-lock, and root-instruction restoration guards.
+Actor, not by source-change agents. Refresh is explicitly assigned on demand or
+by an optional schedule; source Changes do not trigger or perform it. The
+`openwiki-maintainer` Skill owns generation, independent verification, and
+delivery from its dedicated worktree; OpenWiki's internal generator owns
+narrative and diagram authorship. `qq-openwiki` supplies the diagram-authoring
+instruction plus deterministic branch, freshness, process-lock, and
+root-instruction restoration guards.
 
-### Merge-triggered maintenance
+### On-demand or scheduled maintenance
 
-The operator merges Changes from GitHub in Zen. Install Tampermonkey once, then
-install qq's generic [OpenWiki merge userscript](https://raw.githubusercontent.com/hypermemetic-ai/qq/main/browser/openwiki-merge-activator.user.js).
-Run `bash bin/install.sh` to register the local `qq-openwiki://` protocol handler;
-Zen may ask once for permission to open that local application.
-
-On any GitHub pull-request page, the userscript reacts only to the final merge
-confirmation and sends the canonical PR URL to the local handler. The handler
-finds the matching checkout beneath `QQ_PROJECT_ROOTS` (a colon-separated list,
-defaulting to `~/projects`), matches its GitHub origin, and requires its root
-`AGENTS.md` symlink to resolve to qq's canonical `AGENTS.md`. It then independently
-uses the authenticated `gh` session to require a completed merge into `main` by
-that operator. It ignores `openwiki/update` merges, records each dispatched merge
-commit once per Repository under the user's state directory, and launches or
-wakes that Repository's dedicated maintainer Codex session in the worktree's
-root pane through Herdr.
-
-This activation path has no polling, daemon, local server, Repository registry,
-custom browser extension, or self-hosted runner. Each linked Repository needs its
-own long-lived `openwiki/update` worktree before activation.
+Keep one long-lived `openwiki/update` worktree per linked Repository. For an
+assigned refresh, fetch `origin`, reset that worktree to the fresh `origin/main`,
+and run `qq-openwiki --update` (`--init` only for first setup). Verify every
+process diagram bundle with `qq-openwiki-bpmn --check`, review the complete
+generated diff through `code-review`, and open an ordinary documentation-only
+pull request. The operator reviews and merges it. Running `bash bin/install.sh`
+also prunes legacy merge-activation artifacts that qq owns.
 
 Temporary debt (2026-07-10): upstream code mode unconditionally writes a
 scheduled GitHub Actions workflow and scheduled-workflow agent guidance.
