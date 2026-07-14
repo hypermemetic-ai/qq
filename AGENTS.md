@@ -45,6 +45,13 @@ conflict.
 Changes land through GitHub Flow after their Checks pass and the operator
 merges.
 
+## Review guidelines
+
+When reviewing a Change, read `REVIEW.md` at the Repository root fully before
+inspecting the diff and apply its reviewer rules. The review brief supplies
+the Change's intent, boundary, and threat model; where the brief declares
+scope, the brief wins.
+
 <!-- codebase-memory-mcp:start -->
 # Codebase Knowledge Graph (codebase-memory-mcp)
 

@@ -30,6 +30,10 @@ inherits the other's conclusions.
      files, and historical material marked;
    - current intent, acceptance criteria, explicit inclusions, the ownership
      boundary, and the explicit non-goals;
+   - the Change's threat model: what it defends and against which failure
+     modes, with the finding classes explicitly declared out of scope — a
+     drift-net's out-of-scope classes are owner-declined by default, not
+     reported and not fixed;
    - the repository rules and standards that apply and no tool enforces;
    - the sources already consulted and the facts each one contributed;
    - relevant local Check commands with their results;
@@ -40,6 +44,12 @@ inherits the other's conclusions.
    Give coordinates, not dumps: repository locations rather than a pasted
    diff, distilled facts rather than source excerpts. Never include the
    author's conclusions, suspected findings, or development transcript.
+
+   The owned reviewer rules ride the engine's injection surfaces —
+   `REVIEW.md` for harness-native reviews, the review-guidelines section of
+   `AGENTS.md` for codex reviewers — so the brief carries the Change-specific
+   facts and does not restate them. Where the brief declares scope, the brief
+   wins.
 
 ## Delegate the judgment
 
