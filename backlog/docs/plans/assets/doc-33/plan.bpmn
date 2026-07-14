@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:qq="http://qq.local/schema/evidence" id="grilling_owner_boundary_definitions" targetNamespace="http://qq.local/schema/bpmn">
+  <bpmn:process id="grilling_owner_boundary" name="Restrict grilling to the operator-facing owning Actor" isExecutable="false">
+    <bpmn:startEvent id="start" name="Actor boundary approved">
+      <bpmn:documentation>Begin from the operator-approved outcome and prescribed verification sequence without reopening alignment. Evidence: backlog/tasks/task-24 - Restrict-grilling-to-the-operator-facing-owning-Actor.md:39-39,44-47,53-53</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="backlog/tasks/task-24 - Restrict-grilling-to-the-operator-facing-owning-Actor.md" lines="39-39,44-47,53-53" />
+      </bpmn:extensionElements>
+      <bpmn:outgoing>f1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="capture_transcript_red" name="Capture live maintainer RED">
+      <bpmn:documentation>Preserve the live event-triggered maintainer transcript that reopened alignment for its bounded assignment. Evidence: backlog/tasks/task-24 - Restrict-grilling-to-the-operator-facing-owning-Actor.md:39-39,59-59</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="backlog/tasks/task-24 - Restrict-grilling-to-the-operator-facing-owning-Actor.md" lines="39-39,59-59" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f1</bpmn:incoming>
+      <bpmn:outgoing>f2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="add_regression_check" name="Add Actor-boundary regression Check">
+      <bpmn:documentation>Add a focused mechanical Check that requires both the owner-only trigger and the bounded-assignment return path. Evidence: backlog/tasks/task-24 - Restrict-grilling-to-the-operator-facing-owning-Actor.md:46-46,53-53</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="backlog/tasks/task-24 - Restrict-grilling-to-the-operator-facing-owning-Actor.md" lines="46-46,53-53" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f2</bpmn:incoming>
+      <bpmn:outgoing>f3</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="run_prechange_check" name="Run Check against pre-change Skill">
+      <bpmn:documentation>Execute the focused regression Check before editing the grilling Skill. Evidence: CONCEPTS.md:57-59</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="CONCEPTS.md" lines="57-59" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f3</bpmn:incoming>
+      <bpmn:outgoing>f4</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="red_established" name="Regression Check RED?">
+      <bpmn:documentation>Proceed only when the Check fails on the live Actor-boundary defect. Evidence: backlog/tasks/task-24 - Restrict-grilling-to-the-operator-facing-owning-Actor.md:39-39,46-46,59-59</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="backlog/tasks/task-24 - Restrict-grilling-to-the-operator-facing-owning-Actor.md" lines="39-39,46-46,59-59" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f4</bpmn:incoming>
+      <bpmn:outgoing>f5</bpmn:outgoing>
+      <bpmn:outgoing>f6</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="red_missing" name="No reproducible regression">
+      <bpmn:documentation>Stop if the focused Check does not fail against the pre-change Skill. Evidence: CONCEPTS.md:57-59</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="CONCEPTS.md" lines="57-59" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f6</bpmn:incoming>
+      <bpmn:errorEventDefinition />
+    </bpmn:endEvent>
+    <bpmn:serviceTask id="update_grilling_skill" name="Encode the owner-only grilling boundary">
+      <bpmn:documentation>Apply the smallest skill-centered correction: only the operator-facing owning agent invokes grilling, while bounded non-owning Actors return new decisions or scope gaps to their owner. Evidence: backlog/tasks/task-24 - Restrict-grilling-to-the-operator-facing-owning-Actor.md:39-39,44-45,53-53</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="backlog/tasks/task-24 - Restrict-grilling-to-the-operator-facing-owning-Actor.md" lines="39-39,44-45,53-53" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f5</bpmn:incoming>
+      <bpmn:outgoing>f7</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="verification_entry" name="Enter verification">
+      <bpmn:documentation>Join initial implementation and in-scope repair paths before rerunning the complete affected verification sequence. Evidence: AGENTS.md:18-24</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="AGENTS.md" lines="18-24" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f7</bpmn:incoming>
+      <bpmn:incoming>f15</bpmn:incoming>
+      <bpmn:outgoing>f8</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="validate_skill" name="Run Skill Creator validation">
+      <bpmn:documentation>Validate the edited grilling Skill with the Skill Creator validator. Evidence: backlog/tasks/task-24 - Restrict-grilling-to-the-operator-facing-owning-Actor.md:53-53</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="backlog/tasks/task-24 - Restrict-grilling-to-the-operator-facing-owning-Actor.md" lines="53-53" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f8</bpmn:incoming>
+      <bpmn:outgoing>f9</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="run_repository_checks" name="Run affected and full Checks">
+      <bpmn:documentation>Run the focused regression, affected Skill checks, full Repository shell harnesses, BPMN pipeline tests, and diff hygiene. Evidence: backlog/tasks/task-24 - Restrict-grilling-to-the-operator-facing-owning-Actor.md:46-46,53-53</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="backlog/tasks/task-24 - Restrict-grilling-to-the-operator-facing-owning-Actor.md" lines="46-46,53-53" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f9</bpmn:incoming>
+      <bpmn:outgoing>f10</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="run_delegate_forward_test" name="Forward-test a bounded delegate">
+      <bpmn:documentation>Use a fresh delegate context to verify that a bounded assignment is treated as aligned and does not trigger grilling. Evidence: backlog/tasks/task-24 - Restrict-grilling-to-the-operator-facing-owning-Actor.md:45-47,61-61</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="backlog/tasks/task-24 - Restrict-grilling-to-the-operator-facing-owning-Actor.md" lines="45-47,61-61" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f10</bpmn:incoming>
+      <bpmn:outgoing>f11</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="run_owner_forward_test" name="Forward-test an operator-facing owner">
+      <bpmn:documentation>Use a fresh owner-facing context to verify that genuinely new consequential work still triggers grilling. Evidence: backlog/tasks/task-24 - Restrict-grilling-to-the-operator-facing-owning-Actor.md:44-44,47-47,61-61</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="backlog/tasks/task-24 - Restrict-grilling-to-the-operator-facing-owning-Actor.md" lines="44-44,47-47,61-61" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f11</bpmn:incoming>
+      <bpmn:outgoing>f12</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="verification_green" name="Checks and forward-tests green?">
+      <bpmn:documentation>Repair only confirmed in-scope boundary defects and repeat the affected verification sequence. Evidence: skills/code-review/SKILL.md:87-93</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/code-review/SKILL.md" lines="87-93" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f12</bpmn:incoming>
+      <bpmn:outgoing>f13</bpmn:outgoing>
+      <bpmn:outgoing>f14</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="repair_boundary" name="Repair an in-scope boundary defect">
+      <bpmn:documentation>Apply only the smallest causal correction supported by a failed Check or forward-test. Evidence: AGENTS.md:18-24</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="AGENTS.md" lines="18-24" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f14</bpmn:incoming>
+      <bpmn:outgoing>f15</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:userTask id="operator_uat" name="Accept the Actor-boundary wording">
+      <bpmn:documentation>The operator confirms the observable behavior: owner-facing agents align new work; bounded non-owning agents execute or return new decisions and scope gaps. Evidence: skills/uat-signoff/SKILL.md:12-25</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/uat-signoff/SKILL.md" lines="12-25" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f13</bpmn:incoming>
+      <bpmn:outgoing>f16</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:exclusiveGateway id="uat_accepted" name="Operator accepts behavior?">
+      <bpmn:documentation>Withhold acceptance when the operator observes a boundary mismatch. Evidence: skills/uat-signoff/SKILL.md:18-25</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/uat-signoff/SKILL.md" lines="18-25" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f16</bpmn:incoming>
+      <bpmn:outgoing>f17</bpmn:outgoing>
+      <bpmn:outgoing>f18</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="uat_gap" name="Return for boundary correction">
+      <bpmn:documentation>Stop the green handoff when UAT exposes an unresolved Actor-boundary gap. Evidence: skills/uat-signoff/SKILL.md:20-25</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/uat-signoff/SKILL.md" lines="20-25" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f18</bpmn:incoming>
+      <bpmn:errorEventDefinition />
+    </bpmn:endEvent>
+    <bpmn:callActivity id="complete_delivery" name="Complete qq Change delivery" calledElement="qq_change_delivery">
+      <bpmn:documentation>Invoke the inherited independent review, one-PR publication, final Checks, Task finalization, and operator handoff procedure. Evidence: skills/deliver-change/SKILL.md:43-58</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/deliver-change/SKILL.md" lines="43-58" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f17</bpmn:incoming>
+      <bpmn:outgoing>f19</bpmn:outgoing>
+    </bpmn:callActivity>
+    <bpmn:endEvent id="green_pr_ready" name="Green PR ready">
+      <bpmn:documentation>End at the reviewed, accepted, green pull-request handoff boundary. Evidence: skills/deliver-change/SKILL.md:47-58,67-80</bpmn:documentation>
+      <bpmn:extensionElements>
+        <qq:evidence file="skills/deliver-change/SKILL.md" lines="47-58,67-80" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>f19</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="capture_transcript_red" />
+    <bpmn:sequenceFlow id="f2" sourceRef="capture_transcript_red" targetRef="add_regression_check" />
+    <bpmn:sequenceFlow id="f3" sourceRef="add_regression_check" targetRef="run_prechange_check" />
+    <bpmn:sequenceFlow id="f4" sourceRef="run_prechange_check" targetRef="red_established" />
+    <bpmn:sequenceFlow id="f5" name="yes" sourceRef="red_established" targetRef="update_grilling_skill" />
+    <bpmn:sequenceFlow id="f6" name="no" sourceRef="red_established" targetRef="red_missing" />
+    <bpmn:sequenceFlow id="f7" sourceRef="update_grilling_skill" targetRef="verification_entry" />
+    <bpmn:sequenceFlow id="f8" sourceRef="verification_entry" targetRef="validate_skill" />
+    <bpmn:sequenceFlow id="f9" sourceRef="validate_skill" targetRef="run_repository_checks" />
+    <bpmn:sequenceFlow id="f10" sourceRef="run_repository_checks" targetRef="run_delegate_forward_test" />
+    <bpmn:sequenceFlow id="f11" sourceRef="run_delegate_forward_test" targetRef="run_owner_forward_test" />
+    <bpmn:sequenceFlow id="f12" sourceRef="run_owner_forward_test" targetRef="verification_green" />
+    <bpmn:sequenceFlow id="f13" name="green" sourceRef="verification_green" targetRef="operator_uat" />
+    <bpmn:sequenceFlow id="f14" name="failed" sourceRef="verification_green" targetRef="repair_boundary" />
+    <bpmn:sequenceFlow id="f15" sourceRef="repair_boundary" targetRef="verification_entry" />
+    <bpmn:sequenceFlow id="f16" sourceRef="operator_uat" targetRef="uat_accepted" />
+    <bpmn:sequenceFlow id="f17" name="yes" sourceRef="uat_accepted" targetRef="complete_delivery" />
+    <bpmn:sequenceFlow id="f18" name="no" sourceRef="uat_accepted" targetRef="uat_gap" />
+    <bpmn:sequenceFlow id="f19" sourceRef="complete_delivery" targetRef="green_pr_ready" />
+  </bpmn:process>
+</bpmn:definitions>

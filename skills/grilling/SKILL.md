@@ -1,9 +1,16 @@
 ---
 name: grilling
-description: Default alignment interview before every new work item the operator proposes or requests—including investigation, review, planning, implementation, fixes, refactors, cleanup, deletion, configuration, documentation, and external actions. Invoke automatically before doing the work even when the request seems clear. Skip only when the operator explicitly opts out, or the action is entirely obvious and mechanical, has effectively no impact, and admits no meaningful choice. Do not invoke again merely to continue work already aligned and approved.
+description: Operator-facing alignment interview used only by the accountable owning agent before every genuinely new work item the operator proposes or requests—including investigation, review, planning, implementation, fixes, refactors, cleanup, deletion, configuration, documentation, and external actions. Invoke automatically in that owner role even when the request seems clear. Never invoke from a spawned, delegated, review, research, maintainer, or event-triggered agent; those Actors treat bounded assignments as aligned and return new consequential decisions or scope gaps to their assigning or owning Actor. Skip only when the operator explicitly opts out, or the action is entirely obvious and mechanical, has effectively no impact, and admits no meaningful choice. Do not invoke again merely to continue work already aligned and approved.
 ---
 
 # Grilling
+
+Only the operator-facing agent accountable for owning the work item may invoke
+this Skill. A spawned, delegated, review, research, maintainer, or event-triggered
+agent must not invoke it for a bounded assignment. Treat the bounded assignment
+as aligned and execute within its boundary. If it exposes a new consequential
+decision or scope gap, stop and return it to the assigning or owning Actor rather
+than asking the operator or expanding the assignment.
 
 Before acting, inspect the codebase and available resources for relevant facts. Build
 the decision tree, then resolve its dependencies one branch at a time until the
@@ -25,4 +32,5 @@ operator approves the plan visually.
 Do not enact the work until the operator confirms shared understanding. Treat
 approval or an instruction to proceed as authorization to carry out the aligned
 work without reopening settled decisions. If a new decision emerges during the
-work or the work crosses the ownership boundary, stop and resume alignment.
+work or the work crosses the ownership boundary, stop. The operator-facing owner
+stops and resumes alignment. A non-owning Actor follows the return path above.
