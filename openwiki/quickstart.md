@@ -22,7 +22,7 @@ Use these capitalized terms consistently. The canonical definitions and behavior
 
 Start from the assignment and context already supplied, and read [`CONCEPTS.md`](../CONCEPTS.md) before working. Resolve only missing context through the surfaces relevant to the question: a Backlog Task or document for durable intent and decisions, this wiki for the landed system, codebase-memory for relational code questions, and source plus fresh Checks for verification. Backlog records are read and changed through its CLI; source and fresh Checks outrank derived knowledge.
 
-For a genuinely new work item, the default-on `grilling` Skill owns alignment unless the operator opts out or the action is impact-free and mechanical. Do not restart it merely to continue already aligned work. Invoke other Skills only when their triggers and the agent's role match the assignment; each Skill owns its procedure and exceptions.
+For a genuinely new work item, the default-on `grilling` Skill belongs only to the operator-facing accountable owner, unless the operator opts out or the action is impact-free and mechanical. Spawned, delegated, review, research, maintainer, and event-triggered Actors instead treat bounded assignments as aligned; they execute within scope and return new consequential decisions or scope gaps to their assigning or owning Actor. Do not restart grilling merely to continue already aligned work. Invoke other Skills only when their triggers and the agent's role match the assignment; each Skill owns its procedure and exceptions.
 
 The shared operating floor is in [`AGENTS.md`](../AGENTS.md); it does not mandate blanket Backlog, OpenWiki, source, or Skill searches for every assignment.
 
