@@ -66,10 +66,10 @@ for script in qq-herdr-home qq-herdr-pull qq-openwiki qq-openwiki-bpmn; do
 done
 
 old_names='HERDR_BIN_''PATH|(^|[^A-Z0-9_])OPENWIKI_''BIN|QQ_OPENWIKI_NODE_''BIN'
-if rg -n "$old_names" "$ROOT/bin" "$ROOT/tests" "$ROOT/cockpit" "$ROOT/README.md"; then
+if grep -rnE "$old_names" "$ROOT/bin" "$ROOT/tests" "$ROOT/cockpit" "$ROOT/README.md"; then
   fail 'retired binary override name remains in an active source, test, or operator surface'
 fi
-assert_equal 1 "$(rg -l '/home/linuxbrew/\.linuxbrew/bin|/opt/homebrew/bin' "$ROOT/bin" | wc -l)" \
+assert_equal 1 "$(grep -rlE '/home/linuxbrew/\.linuxbrew/bin|/opt/homebrew/bin' "$ROOT/bin" | wc -l)" \
   'Homebrew fallback paths are duplicated outside the shared resolver'
 
 printf 'test-bin-resolution: pass\n'

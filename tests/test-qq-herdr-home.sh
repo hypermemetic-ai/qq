@@ -155,7 +155,7 @@ export FAKE_FOCUS_UNCONFIRMED=1
 expect_failure 'Backlog board focus was not confirmed' focus-board --repo "$repo"
 
 grep -Fq "qq-herdr-home\" \"\$HOME/.local/bin/qq-herdr-home\"" "$ROOT/bin/install.sh"
-rg -U -q -- '--workspace\s+<home-workspace-id>' "$ROOT/skills/deliver-change/SKILL.md"
+tr '\n\t' '  ' <"$ROOT/skills/deliver-change/SKILL.md" | grep -qE -- '--workspace +<home-workspace-id>'
 test "$(grep -o -- '--label "<change-label>"' "$ROOT/skills/deliver-change/SKILL.md" | wc -l)" -eq 2
 grep -Fq '[A-Za-z0-9-]{1,15}' "$ROOT/CONCEPTS.md"
 grep -Fq '[A-Za-z0-9-]{1,15}' "$ROOT/cockpit/README.md"
