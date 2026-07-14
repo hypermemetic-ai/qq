@@ -51,6 +51,12 @@ send, read, and wait operations, used whenever coordination helps.
 **silent failure** — A command that succeeds or produces plausible output while
 answering a different question from the one intended.
 
+**drift-net** — A deliberately approximate guard that intercepts a well-meaning
+Actor's accidental violation of a mandate. It carries a declared threat model
+whose out-of-scope finding classes are declined rather than fixed; it is not a
+security boundary, and the invariant's exact enforcement lives at the resource
+that owns it.
+
 **refuse, don't sanitise** — Reject unsafe or malformed input instead of
 rewriting it into a different value and proceeding as though it were valid.
 
