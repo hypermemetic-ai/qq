@@ -146,7 +146,7 @@ link_one "$QQ/bin/qq-herdr-home" "$HOME/.local/bin/qq-herdr-home" "command/qq-he
 link_one "$QQ/bin/qq-herdr-pull" "$HOME/.local/bin/qq-herdr-pull" "command/qq-herdr-pull"
 link_one "$QQ/bin/qq-openwiki" "$HOME/.local/bin/qq-openwiki" "command/qq-openwiki"
 link_one "$QQ/bin/qq-openwiki-bpmn" "$HOME/.local/bin/qq-openwiki-bpmn" "command/qq-openwiki-bpmn"
-link_one "$QQ/bin/qq-openwiki-activate" "$HOME/.local/bin/qq-openwiki-activate" "command/qq-openwiki-activate"
+link_one "$QQ/bin/qq-openwiki-activate.py" "$HOME/.local/bin/qq-openwiki-activate" "command/qq-openwiki-activate"
 link_one "$QQ/browser/openwiki-merge-activator.user.js" "$QQ_DATA_HOME/qq/openwiki-merge-activator.user.js" "browser/openwiki-merge-activator.user.js"
 
 install_openwiki_activation_handler

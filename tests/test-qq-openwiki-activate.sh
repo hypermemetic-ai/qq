@@ -6,7 +6,7 @@ TEST_NAME="test-qq-openwiki-activate"
 # shellcheck source=tests/helpers.sh
 source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd "$TESTS_DIR/.." && pwd -P)"
-ACTIVATOR="$ROOT/bin/qq-openwiki-activate"
+ACTIVATOR="$ROOT/bin/qq-openwiki-activate.py"
 USERSCRIPT="$ROOT/browser/openwiki-merge-activator.user.js"
 INSTALLER="$ROOT/bin/install.sh"
 REAL_GIT="$(command -v git)"
@@ -362,6 +362,10 @@ assert_contains "$(<"$desktop")" 'MimeType=x-scheme-handler/qq-openwiki;'
 [ -L "$INSTALL_DATA/qq/openwiki-merge-activator.user.js" ] || fail "userscript link missing"
 [ -L "$INSTALL_HOME/.local/bin/qq-herdr-home" ] || fail "Herdr home command link missing"
 [ -L "$INSTALL_HOME/.local/bin/qq-openwiki-bpmn" ] || fail "OpenWiki BPMN command link missing"
+[ -L "$INSTALL_HOME/.local/bin/qq-openwiki-activate" ] || fail "OpenWiki activation command link missing"
+assert_equal "$ROOT/bin/qq-openwiki-activate.py" \
+  "$(readlink "$INSTALL_HOME/.local/bin/qq-openwiki-activate")" \
+  'OpenWiki activation command link has wrong source target'
 [ ! -L "$INSTALL_HOME/.claude/skills/removed-skill" ] || fail "removed qq Claude skill link was not pruned"
 [ "$(<"$INSTALL_HOME/.claude/skills/external-directory/sentinel")" = untouched ] || fail "unmanaged Claude skill directory changed"
 [ "$(readlink "$INSTALL_HOME/.claude/skills/external-link")" = "$EXTERNAL_SKILL" ] || fail "unmanaged Claude skill link changed"

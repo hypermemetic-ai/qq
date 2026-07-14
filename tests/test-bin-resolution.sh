@@ -64,7 +64,7 @@ for script in qq-herdr-home qq-herdr-pull qq-openwiki qq-openwiki-bpmn; do
   assert_file_contains "$ROOT/bin/$script" 'lib/qq-bin.sh' \
     "$script does not source the shared resolver"
 done
-assert_file_contains "$ROOT/bin/qq-openwiki-activate" 'lib" / "qq-bin.sh"' \
+assert_file_contains "$ROOT/bin/qq-openwiki-activate.py" 'lib" / "qq-bin.sh"' \
   'Python activator does not invoke the shared resolver'
 
 old_names='HERDR_BIN_''PATH|(^|[^A-Z0-9_])OPENWIKI_''BIN|QQ_OPENWIKI_NODE_''BIN'
