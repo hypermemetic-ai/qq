@@ -1,0 +1,79 @@
+{
+  "start": {
+    "status": "done",
+    "evidence": "TASK-24 records the operator-approved Actor boundary and prescribed execution sequence."
+  },
+  "capture_transcript_red": {
+    "status": "done",
+    "evidence": "TASK-24 description and notes record live maintainer session 019f5e0f-9a35-7b71-9203-03457d271bb2 reopening alignment for its bounded event assignment."
+  },
+  "add_regression_check": {
+    "status": "done",
+    "evidence": "tests/test-grilling.sh is the executable Actor-boundary regression Check."
+  },
+  "run_prechange_check": {
+    "status": "done",
+    "evidence": "TASK-24 notes record an unchanged-Skill gate followed by tests/test-grilling.sh exit 1 with the missing owner-only trigger boundary."
+  },
+  "red_established": {
+    "status": "done",
+    "evidence": "Both the live maintainer transcript and the focused pre-change Check reproduced the defect; the yes branch was taken."
+  },
+  "red_missing": {
+    "status": "skipped",
+    "note": "The regression reproduced in both required RED surfaces, so the no-reproduction error branch was not taken."
+  },
+  "update_grilling_skill": {
+    "status": "done",
+    "evidence": "skills/grilling/SKILL.md limits invocation to the operator-facing owning agent and defines the bounded non-owning return path."
+  },
+  "verification_entry": {
+    "status": "done",
+    "evidence": "The implementation and reviewed plan-evidence repair both entered focused verification."
+  },
+  "validate_skill": {
+    "status": "done",
+    "evidence": "Skill Creator quick_validate.py reported Skill is valid for skills/grilling."
+  },
+  "run_repository_checks": {
+    "status": "done",
+    "evidence": "All 8 shell harnesses and all 18 BPMN pipeline tests passed; ShellCheck, plan lint, lossless evidence round trip, and git diff --check passed."
+  },
+  "run_delegate_forward_test": {
+    "status": "done",
+    "evidence": "Fresh read-only delegate session 019f5e2e-0608-7972-9a15-91bae05cb753 executed its bounded assignment without reopening alignment and changed no files."
+  },
+  "run_owner_forward_test": {
+    "status": "done",
+    "evidence": "Fresh read-only owner session 019f5e2e-0656-7e43-a381-5f44a9fe363a invoked grilling for genuinely new work and ended with one recommended alignment question."
+  },
+  "verification_green": {
+    "status": "done",
+    "evidence": "Affected and full Checks plus both forward-tests were green; the green branch was taken."
+  },
+  "repair_boundary": {
+    "status": "skipped",
+    "note": "No Skill-boundary Check or forward-test failed. The later independent-review correction repaired plan evidence metadata inside the inherited delivery activity, not this gateway branch."
+  },
+  "operator_uat": {
+    "status": "done",
+    "evidence": "The operator reviewed the updated grilling Skill and explicitly replied accepted."
+  },
+  "uat_accepted": {
+    "status": "done",
+    "evidence": "Operator acceptance selected the yes branch."
+  },
+  "uat_gap": {
+    "status": "skipped",
+    "note": "Operator UAT reported no mismatch, so the correction error branch was not taken."
+  },
+  "complete_delivery": {
+    "status": "done",
+    "evidence": "Independent review closed with no material findings after exact-delta re-review; commit 966debe was pushed and PR #65 is open, mergeable, CLEAN, and has no configured GitHub Checks.",
+    "note": "Conformance recording and TASK-24 finalization are closeout metadata outside BPMN flow nodes and follow this report in the same PR."
+  },
+  "green_pr_ready": {
+    "status": "done",
+    "evidence": "GitHub PR #65 provides the reviewed green one-PR handoff surface for this Change."
+  }
+}

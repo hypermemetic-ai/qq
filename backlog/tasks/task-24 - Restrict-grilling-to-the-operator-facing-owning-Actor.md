@@ -1,11 +1,11 @@
 ---
 id: TASK-24
 title: Restrict grilling to the operator-facing owning Actor
-status: In Progress
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-07-14 01:05'
-updated_date: '2026-07-14 01:28'
+updated_date: '2026-07-14 01:31'
 labels:
   - grilling-owner
   - skill
@@ -63,7 +63,15 @@ Fresh forward-tests passed in the owning Herdr work session. Bounded delegate se
 Independent read-only review session 019f5e33-7c31-75d2-9cdd-fc9413ea6111 found one P2: Task-backed BPMN evidence coordinates had drifted after structured metadata expansion. The finding was reproduced, the complete eventual file inventory was stabilized, all nine coordinates were refreshed, BPMN was regenerated with zero lint findings and lossless evidence round trip, affected Checks passed, and exact-delta re-review returned No material findings. The revised PNG remained byte-identical and was surfaced persistently.
 
 Operator UAT accepted on 2026-07-13. The operator reviewed the updated grilling Skill and explicitly replied accepted to the owner-only invocation, bounded-assignment execution, and assigning-or-owning-Actor return path.
+
+Same-PR BPMN conformance: 19/19 flow nodes accounted, 0 unaccounted, 0 diverged, 0 unknown, strict PASS. Initial PR #65 state at commit 966debe: OPEN, MERGEABLE, CLEAN, no configured GitHub Checks.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Restricted grilling to the operator-facing accountable owner and made bounded non-owning Actors execute within scope or return new consequential decisions and scope gaps to their assigning or owning Actor. Added a focused regression Check and evidence-stamped plan. Verified live and mechanical RED, Skill Creator validation, all 8 shell and 18 BPMN tests, two fresh forward-tests, independent review with exact-delta closure, operator UAT acceptance, and strict 19/19 BPMN conformance in PR #65.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
