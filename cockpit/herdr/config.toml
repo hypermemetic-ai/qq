@@ -23,15 +23,23 @@ focus_pane_down = "prefix+k"
 navigate_pane_up = "j"
 navigate_pane_down = "k"
 
+# File navigation opens as a session-modal popup (herdr 0.7.4) so the tiled
+# layout never reflows; quitting the browser leaves a popup shell, exit closes.
 [[keys.command]]
 key = "prefix+f"
-type = "pane"
+type = "popup"
 command = "bash -ic 'qqy; exec bash -i'"
+description = "yazi at the repo root"
+width = "80%"
+height = "80%"
 
 [[keys.command]]
 key = "prefix+shift+f"
-type = "pane"
+type = "popup"
 command = "bash -ic 'qqbr; exec bash -i'"
+description = "broot at the repo root"
+width = "80%"
+height = "80%"
 
 # Snap to the current space's orchestrator agent (claude, else the first
 # agent in sidebar order); press again there to bounce back to where you
@@ -99,3 +107,23 @@ command = "qq-herdr-pull 9"
 
 [ui]
 agent_panel_sort = "spaces"
+
+# Delegate status surface, ambient tier (doc-43 round 2). The $stage token
+# row renders stage-boundary one-liners reported with
+# `herdr workspace report-metadata` (Space rows) and
+# `herdr pane report-metadata` (Agent rows). Unreported tokens collapse, so
+# these rows cost nothing outside an active batch. Rows above $stage are
+# herdr's defaults, restated because an explicit layout replaces them.
+[ui.sidebar.spaces]
+rows = [
+  ["state_icon", "workspace"],
+  ["branch", "git_status"],
+  ["$stage"],
+]
+
+[ui.sidebar.agents]
+rows = [
+  ["state_icon", "workspace", "tab"],
+  ["agent"],
+  ["$stage"],
+]

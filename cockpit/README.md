@@ -12,18 +12,25 @@ the live config path edits the same file.
 - `glow/glow.yml` — fixed-width, no-pager Glow defaults for pane rendering.
 - `glow/tuned.json` — the hand-tuned Markdown theme used by Glow.
 - `herdr/config.toml` — tokyo-night, onboarding suppressed, priority-sorted
-  agent sidebar, and cockpit pane bindings: `prefix+f` runs `qqy`,
+  agent sidebar, sidebar `$stage` token rows for the delegate status surface
+  (doc-43), and cockpit popup bindings: `prefix+f` runs `qqy`,
   `prefix+shift+f` runs `qqbr`.
 - `shell/file-navigation.bash` — `QQ_HOME`, generic `y()`/`br()` wrappers,
   repo-focused `qqroot`/`qqy`/`qqbr`, and `qfiles`/`qtree` aliases.
 
 ## Flow
-Herdr `prefix+f` spawns a pane running `qqy`; `qqy` opens yazi at the repo root;
-Enter descends into a folder or renders a `.md` file in-pane via mdcat or Glow.
-`prefix+shift+f` opens broot at the same root through `qqbr`. `prefix+F<N>`
-pulls the Nth priority-sorted agent into the focused pane; `prefix+0` pulls the
-agent that most needs attention. Those operator bindings use
-`qq-herdr-pull <N|next>`.
+Herdr `prefix+f` opens a session-modal popup running `qqy`; `qqy` opens yazi at
+the repo root; Enter descends into a folder or renders a `.md` file through
+mdcat or Glow. `prefix+shift+f` opens broot at the same root through `qqbr`.
+Quitting the browser leaves a shell in the popup; exiting it restores the
+untouched tiled layout. `prefix+F<N>` pulls the Nth priority-sorted agent into
+the focused pane; `prefix+0` pulls the agent that most needs attention. Those
+operator bindings use `qq-herdr-pull <N|next>`.
+
+The sidebar carries the delegate status surface's ambient tier: a `$stage` row
+on Space and Agent entries renders stage-boundary one-liners reported through
+`herdr workspace report-metadata` and `herdr pane report-metadata`
+(design: doc-43). The rows collapse when no stage is reported.
 
 Each Repository has one persistent project home bound to its primary `main`
 checkout. A dedicated single-pane `backlog board` tab and any operator-created
