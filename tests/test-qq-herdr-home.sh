@@ -160,8 +160,29 @@ test "$(grep -o -- '--label "<change-label>"' "$ROOT/skills/deliver-change/SKILL
 grep -Fq '[A-Za-z0-9-]{1,15}' "$ROOT/CONCEPTS.md"
 grep -Fq '[A-Za-z0-9-]{1,15}' "$ROOT/cockpit/README.md"
 grep -Fq '[A-Za-z0-9-]{1,15}' "$ROOT/skills/deliver-change/SKILL.md"
-grep -Fq 'unique among work sessions under' "$ROOT/skills/deliver-change/SKILL.md"
+tr '\n\t' '  ' <"$ROOT/CONCEPTS.md" | \
+  grep -Fq 'agent-chosen, operator-renameable'
+grep -Fq 'agent-chosen, operator-renameable' "$ROOT/skills/deliver-change/SKILL.md"
+tr '\n\t' '  ' <"$ROOT/skills/deliver-change/SKILL.md" | \
+  grep -qE 'unique among work +sessions under'
 grep -Fq ".label\` equal to \`<change-label>" "$ROOT/skills/deliver-change/SKILL.md"
+grep -Fq 'existing Change checkout by default, including harness-created worktrees' \
+  "$ROOT/skills/deliver-change/SKILL.md"
+grep -Fq 'use creation as the fallback' "$ROOT/skills/deliver-change/SKILL.md"
+grep -Fq 'verify that its result confirms it was' "$ROOT/skills/deliver-change/SKILL.md"
+grep -Fq 'command fails or reports notifications disabled' \
+  "$ROOT/skills/deliver-change/SKILL.md"
+grep -Fq 'browser-only fallback' "$ROOT/skills/deliver-change/SKILL.md"
+tr '\n\t' '  ' <"$ROOT/skills/deliver-change/SKILL.md" | \
+  grep -qE 'harness-native +background disposition watch'
+grep -Fq 'single-notification' "$ROOT/skills/deliver-change/SKILL.md"
+grep -Fq 'GitHub CLI' "$ROOT/skills/deliver-change/SKILL.md"
+grep -Fq 'state every 5' "$ROOT/skills/deliver-change/SKILL.md"
+grep -Fq 'either `MERGED` or `CLOSED`' "$ROOT/skills/deliver-change/SKILL.md"
+grep -Fq 'follow-on dispatch' "$ROOT/skills/deliver-change/SKILL.md"
+if grep -Fq 'observability pane' "$ROOT/skills/delegate-batch/SKILL.md"; then
+  fail 'delegate-batch must not reintroduce the observability pane (operator UAT rejected it; the status surface owns delegate visibility)'
+fi
 grep -Fq 'qq-herdr-home focus-board --repo <root>' "$ROOT/skills/deliver-change/SKILL.md"
 if grep -Fq -- 'herdr agent start' "$ROOT/skills/agent-messaging/SKILL.md"; then
   fail "agent-messaging reintroduced delegate lifecycle machinery"

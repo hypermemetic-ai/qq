@@ -14,21 +14,22 @@ delegated agents bounded assignments; do not hand them this lifecycle.
    Repository root and run `qq-herdr-home inspect --repo <root>` first. Require
    its sole persistent project home to be the primary `main` checkout with one
    dedicated Backlog-board tab; retain `.home_workspace_id` and the complete
-   response. Agree `<change-label>` with the operator as a recognizable UI
-   handle matching `[A-Za-z0-9-]{1,15}`, unique among work sessions under this
-   home. It is independent of branch and Task cardinality; a Task id may
-   be chosen when it genuinely identifies the Change, but is never inferred as
-   a one-to-one mapping. Before creating or opening, inspect the home's sibling
-   work sessions and reject a duplicate label for any other checkout. When a
-   new checkout is needed, resolve an explicitly agreed, freshly fetched base,
-   then run `herdr worktree create --workspace <home-workspace-id> --branch
-   <branch> --base <base> --label "<change-label>" --no-focus --json`; never
-   omit `--base` and inherit an incidental `HEAD`. When the checkout already
-   exists, attach it with `herdr worktree open --workspace <home-workspace-id>
-   --path <absolute-path> --label "<change-label>" --no-focus --json`. Require
-   the returned workspace to be a linked worktree for the same Repository with
-   `.label` equal to `<change-label>`, and retain its workspace id and checkout
-   path. Immediately run
+   response. Select an agent-chosen, operator-renameable `<change-label>` as a
+   recognizable UI handle matching `[A-Za-z0-9-]{1,15}`, unique among work
+   sessions under this home. Labels are independent of branch and Task
+   cardinality; use a Task id only when it genuinely identifies the Change,
+   never from an inferred one-to-one mapping. Inspect the home's sibling work
+   sessions and reject a duplicate label for any other checkout. Attach an
+   existing Change checkout by default, including harness-created worktrees,
+   with `herdr worktree open --workspace <home-workspace-id> --path
+   <absolute-path> --label "<change-label>" --no-focus --json`. Only when no
+   checkout exists, use creation as the fallback: resolve an explicitly agreed,
+   freshly fetched base and run `herdr worktree create --workspace
+   <home-workspace-id> --branch <branch> --base <base> --label "<change-label>"
+   --no-focus --json`; never omit `--base` and inherit an incidental `HEAD`.
+   Require the returned workspace to be a linked worktree for the same
+   Repository with `.label` equal to `<change-label>`, and retain its workspace
+   id and checkout path. Immediately run
    `qq-herdr-pull --workspace <workspace-id>` from the accountable agent pane;
    it safely no-ops when that pane is already there and otherwise refuses any
    target except the workspace's sole idle shell placeholder. Stop before
@@ -78,13 +79,21 @@ delegated agents bounded assignments; do not hand them this lifecycle.
    and `uat-signoff` when operator confirmation is required. Dispatch, a printed
    URL, or momentary appearance is not visibility. If persistent visibility is
    not confirmed, retry once through a durable opener, report the URL, and stop.
-9. Never merge the pull request. After browser visibility is established, send
-   the operator a handoff notification with `herdr notification show "Pull
-   request ready" --body "$url" --sound request` (or the runtime's equivalent),
-   report the URL, and stop. Proceed to post-merge steps only when the
-   operator's merge is observed on a later resume or message.
-10. On that later resume or message, reinspect the pull request with step 7's
-   fields. Proceed only after verifying its merged state and that
+9. Never merge the pull request. After browser visibility is established, run
+   `herdr notification show "Pull request ready" --body "$url" --sound request`
+   (or the runtime's equivalent) and verify that its result confirms it was
+   shown. If the command fails or reports notifications disabled or not shown,
+   plainly report the browser-only fallback and do not claim a notification was
+   sent. Report the URL either way. After reporting it, arm a harness-native
+   background disposition watch using no owned machinery: a single-notification
+   `until` loop that uses the GitHub CLI to poll the pull request state every 5
+   seconds, exits on either `MERGED` or `CLOSED`, and emits exactly one
+   completion notification to wake the agent for these post-merge steps and any
+   follow-on dispatch. Cover both terminal states; silence is not success. The
+   watch replaces waiting for an operator message. Then stop.
+10. On a disposition-watch wake, later resume, or operator message, reinspect
+   the pull request with step 7's fields. Proceed only after verifying its
+   merged state and that
    `.mergeCommit.oid` is reachable from freshly fetched `origin/main` using
    `git merge-base --is-ancestor <merge-commit> origin/main`. Do not alter the
    completed Task or open a Task-finalization Change. If the operator closes or
