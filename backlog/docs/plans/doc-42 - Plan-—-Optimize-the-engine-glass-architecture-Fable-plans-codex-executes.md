@@ -3,7 +3,7 @@ id: doc-42
 title: 'Plan — Optimize the engine-glass architecture: Fable plans, codex executes'
 type: specification
 created_date: '2026-07-14 22:45'
-updated_date: '2026-07-15 00:28'
+updated_date: '2026-07-15 00:31'
 ---
 # Plan — Optimize the engine/glass architecture: Fable plans, codex executes
 
@@ -98,4 +98,4 @@ either order after it.
 
 ## Amendments
 
-- 2026-07-14 — Operator-approved addition to TASK-40: headless delegates get optional cockpit visibility via a throwaway observability pane in the Change's work session running tail -f --pid=<delegate-pid> on the delegate's output stream, so the pane self-retires when the delegate exits — glass over the process artifact, no pane-lifecycle ownership. Verified live: herdr retires a pane whose process has exited. Decided while watching a headless reviewer run without a panel.
+- 2026-07-14 — Operator-approved addition to TASK-40: headless delegates get optional cockpit visibility via a throwaway observability pane opened as a no-focus right split of the accountable pane (accountable keeps roughly 70% width), running tail -f --pid=<delegate-pid> on the delegate's output stream so the pane self-retires when the delegate exits — glass over the process artifact, no pane-lifecycle ownership. Self-retirement verified live; right-split placement corrected by operator UAT after a down-split squeezed the accountable pane (house convention per task-23).
