@@ -3,7 +3,7 @@ id: doc-43
 title: Design — The delegate status surface
 type: specification
 created_date: '2026-07-15 02:51'
-updated_date: '2026-07-15 16:36'
+updated_date: '2026-07-15 23:16'
 tags:
   - design
   - delegation
@@ -33,6 +33,10 @@ after a live demonstration and a four-candidate walkthrough):
 All load-bearing claims were verified by live probes and a staged live
 demonstration on 2026-07-15 against herdr (protocol 16) and Codex CLI
 0.144.4; see Evidence.
+
+Amended 2026-07-15 (round 2, herdr 0.7.4): the ambient tier, the popup
+accessor, and the AC #4 posture disposition are re-settled in the Amendments
+section at the end; sections not named there stand as written.
 
 ## The design in one paragraph
 
@@ -317,3 +321,143 @@ sidebar report/release calls, the idempotent pane-open, the stderr capture,
 and the amended `codex exec` line — is a small bounded implementation
 ticket, created on operator approval. This document is the design authority
 for that ticket.
+
+## Amendments
+
+### 2026-07-15 — Round 2: herdr 0.7.4 (TASK-42 reopened)
+
+herdr 0.7.4 was released the same afternoon this design settled (its release
+and this document's final update carry the same timestamp), shipping three
+primitives the original round could not consider: configurable sidebar row
+layouts with custom `$name` metadata tokens on Space and Agent entries,
+`herdr workspace report-metadata` / extended `herdr pane report-metadata`
+CLI reporting with `--ttl-ms`/`--seq`/`--clear-token` semantics, and
+session-modal popup panes for custom keybindings. The operator reopened
+TASK-42 the same evening with one added question (the session-posture
+disposition, AC #4). This amendment re-settles the affected sections against
+0.7.4, verified by fresh live probes; everything not named here stands as
+written.
+
+**Ambient tier v2 — metadata tokens carry the stage text.** The stage
+one-liner now renders through custom `$stage` token rows added to the
+sidebar layouts in `cockpit/herdr/config.toml` (landed with this round;
+config is now part of the surface, which round 1 did not require). At each
+stage boundary the reporter fires
+`herdr workspace report-metadata <work-session-id> --source qq-dispatch
+--token stage="<one-liner>" --seq <epoch-seconds> --ttl-ms 86400000` for the Change work
+session's Space row. This supersedes the sidebar `custom_status` string as
+the stage-text channel because tokens fix round 1's two acknowledged gaps
+and its display squeeze:
+
+- **No pane dependency.** Workspace tokens attach to the workspace itself,
+  so the "placeholder pane consumed or missing" degradation row disappears
+  for stage text (it still applies to per-delegate presence, below).
+- **Migrated single-Change mode is covered.** Live-agent detection outranks
+  `report-agent` identity claims but does not touch metadata tokens
+  (probe-verified on a live claude pane): the migrated accountable session
+  reports the same `$stage` token onto its own pane's Agent row and its work
+  session's Space row. Round 1's "sidebar reporting is skipped" ruling for
+  migrated mode is withdrawn; the status pane is no longer the sole carrier.
+- **Own row, less truncation.** The stage renders on its own configured row
+  instead of inside the agent-name line, relieving the truncation observed
+  in shots 1 and 3. One-liners stay terse: values are capped at 80
+  characters and normalized by herdr.
+
+`herdr pane report-agent` is retained exactly as designed, but scoped to
+what tokens cannot do: per-delegate presence in the sidebar (one entry per
+delegate under its work-session label, board-driven mode only) and semantic
+state color — the `blocked` red agent entry and workspace dot
+(screenshot-verified in round 1) remain the attention escalation. Tokens
+carry values only, never styling, so the color channel stays on
+`report-agent`. The boundary call pattern is unchanged in shape: the same
+paired fire-and-forget calls, with the workspace token call added.
+
+**Token write contract.** Each work session's `$stage` token has exactly
+one writer: the session that owns its batch — the dispatcher in
+board-driven mode, the migrated accountable session for its own Change.
+When one work session hosts several live delegates (migrated-mode
+helpers), the single token carries a batch-rollup one-liner in which a
+`blocked` or `failed` state outranks every other stage; a later routine
+update never overwrites a standing attention state. At the batch's
+terminal disposition the owner removes the workspace and pane tokens with
+`--clear-token stage`; `--ttl-ms` is the backstop for an owner that died,
+never the normal removal path. `--seq` values derive from a monotonic
+per-call value — epoch seconds at call time — never a restarting counter:
+herdr ignores lower sequences from a `--source` for the pane or workspace
+lifetime, so a redispatched or recovered owner reusing `qq-dispatch` with
+a reset counter would be silently ignored.
+
+**Primary surface unchanged; popup accessor added.** The operator-chosen
+status pane (right split, `watch -n 2 cat`, idempotent open, ~70% width
+retained by the accountable pane) stands as the primary surface. 0.7.4
+popups add an on-demand accessor, not a replacement: a `type = "popup"`
+keybinding rendering the same status file(s) over the tiled layout, for the
+moments the pane was retired or a persistent split is unwanted. It ships
+with the wiring ticket, which owns the status-file path scheme the binding
+reads.
+
+**AC #2 re-verified — the app-server disposition is unchanged by 0.7.4.**
+None of the three revisit triggers fired, and the tokens make the
+event-supply role weaker still: stage text needs no event stream at all,
+only the dispatcher-owned boundaries. Not adopted for hosting, steering, or
+event supply; the deferred lane and its triggers stand.
+
+**AC #3 — contract untouched.** Round 2 adds synchronous fire-and-forget
+CLI calls at boundaries where the reporter is already awake, bounded by
+`--ttl-ms` self-expiry. No watcher, no polling, no delegate command-line
+delta beyond round 1's sanctioned `--json` and redirections. Envelope
+files, the single-notification wake, and sandbox enforcement are
+byte-for-byte unchanged.
+
+**AC #4 — session-posture disposition: keep both postures; collapse is
+trigger-gated.** The reopened task asks whether dispatch-only (every Change
+a batch of one, the accountable session a permanent fixture of the project
+home) should retire deliver-change step-1 migration. Disposition: **keep
+both postures now.** Reasons:
+
+- The task's own enabling condition for a near-free collapse — mid-turn
+  steering of headless delegates — is precisely what this design declined
+  to adopt (`turn/steer` sits in the deferred app-server lane; no settled
+  workflow needs it). Collapsing now would route every small operator
+  iteration through a delegation boundary and add work-order ceremony with
+  no floor defined for trivial edits.
+- 0.7.4 removed the visibility argument for collapsing: with workspace and
+  pane tokens, migrated mode now has first-class ambient status (the round-1
+  gap that made it second-class is closed above). The alt+o home gap itself
+  remains — `qq-herdr-snap` resolves within the focused space and exits in
+  an agentless project home — but its cost falls: the home's Space panel
+  now shows the migrated Change's `$stage` row, so state is visible from
+  the home even though one-key snap-to-agent is not available there
+  (`prefix+alt+N` and `prefix+0` still reach the migrated pane).
+- The accepted cost is unchanged step-12 behavior: the accountable pane
+  stays in the retired work session until the operator retires it.
+
+The collapse trigger is deliberately the same as the app-server lane's:
+when a settled workflow needs mid-turn steering (trigger 1) or delegates
+must outlive their dispatching session (trigger 2), the adapter Change that
+follows should also re-decide the posture, with dispatch-only as the
+presumptive outcome and the deliver-change step-1/step-12 redesign in its
+scope.
+
+**Round 2 evidence (live probes, 2026-07-15, herdr 0.7.4, protocol 16).**
+`herdr workspace report-metadata` on a scratch workspace stored
+`stage="review round 2"` with `--ttl-ms`, and `--clear-token` degraded the
+workspace's token map to null; `herdr pane report-metadata` stored a batch
+rollup token on a live claude pane without disturbing agent detection
+(tokens surface as `.tokens` in `pane get`, workspace tokens as
+`.metadata`/token map in `workspace get`); the amended sidebar config
+passes `herdr config check` on 0.7.4 (differential-tested against a
+deliberately broken copy). Documented caps fit the design: 80-character
+values, TTL ceiling 24 h, at most 32 distinct `--source` values per pane or
+workspace lifetime (a single `qq-dispatch` source stays far under it),
+`--seq` staleness protection per source. Operational note: after a Homebrew
+upgrade replaces the running server's deleted binary path, live handoff
+needs `herdr server live-handoff --import-exe <new-binary>`.
+
+**Wiring-ticket deltas.** The follow-up implementation ticket gains: the
+workspace `$stage` token calls at each boundary (with `--seq` and
+`--ttl-ms`), the pane `$stage` token in migrated mode, the popup accessor
+keybinding over the status files, and unchanged round-1 scope (status-file
+writes, `report-agent`/`release-agent` presence and color calls, idempotent
+pane open, stderr capture, amended `codex exec` line). The sidebar config
+rows land with TASK-42 round 2 itself and are inert until reported.
