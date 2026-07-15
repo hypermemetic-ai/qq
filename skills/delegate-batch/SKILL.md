@@ -37,8 +37,9 @@ the transcript. The runtime prompt is only the fixed pointer below.
 
 ## Select the work shape
 
-- Same files or one shared invariant: work sequentially in one session and
-  worktree.
+- Same files or one shared invariant: coupled work is one ticket. Merge or
+  rescope tickets that would write the same files before dispatching anything,
+  then work the resulting ticket sequentially in its own session and worktree.
 - Independent read-only work: fan out through native read-only workers.
 - Independent writing tickets with disjoint ownership: fan out into separate
   branches, worktrees, and work sessions.
