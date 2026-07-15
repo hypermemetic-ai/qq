@@ -3,7 +3,7 @@ id: doc-42
 title: 'Plan — Optimize the engine-glass architecture: Fable plans, codex executes'
 type: specification
 created_date: '2026-07-14 22:45'
-updated_date: '2026-07-14 22:46'
+updated_date: '2026-07-15 00:21'
 ---
 # Plan — Optimize the engine/glass architecture: Fable plans, codex executes
 
@@ -95,3 +95,7 @@ delivery. TASK-41's wiki refresh lands as a maintainer docs pull request.
 
 TASK-39 first; TASK-40 and TASK-41 depend on its vocabulary and may land in
 either order after it.
+
+## Amendments
+
+- 2026-07-14 — Operator-approved addition to TASK-40: headless delegates get optional cockpit visibility via a throwaway observability pane (tail -f on the delegate's output stream) in the Change's work session — glass over the process artifact, no pane-lifecycle ownership. Decided live while watching a headless reviewer run without a panel.
