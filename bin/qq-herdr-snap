@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# qq-herdr-snap — snap to the current space's orchestrator agent pane.
+#
+# Bound as a detached custom key (alt+o). First press jumps to the snap
+# target: the claude agent in the focused workspace, falling back to the
+# first agent in sidebar order (delegate-only spaces have no claude).
+# Pressing it again while already there bounces back to the pane you came
+# from, so one key flips orchestrator<->elsewhere. The target is derived
+# from the focused workspace, so the bounce pair is always within one
+# space; state is keyed per workspace.
+#
+# Distinct from qq-herdr-home, which resolves a repo's persistent home
+# workspace and Backlog-board tab for delivery automation.
+#
+# This only ever runs from a keybinding or an operator shell, so failures
+# are best-effort notifications and the command exits successfully.
+#
+#   qq-herdr-snap            snap to orchestrator / bounce back
+#   QQ_HERDR_SNAP_DRY=1 ...  print resolved panes and stop before focusing
+set -euo pipefail
+
+self="$(readlink -f -- "${BASH_SOURCE[0]}")"
+# shellcheck source=bin/lib/qq-bin.sh
+source "$(dirname "$self")/lib/qq-bin.sh"
+if ! qq_resolve_bin herdr; then
+  printf 'qq-herdr-snap: %s\n' "$QQ_BIN_ERROR" >&2
+  exit 0
+fi
+HERDR="$QQ_BIN_RESULT"
+
+note() { "$HERDR" notification show "qq-snap" --body "$1" >/dev/null 2>&1 || true; }
+die() {
+  note "$1"
+  exit 0
+}
+
+command -v jq >/dev/null 2>&1 || die "jq not found — required by qq-herdr-snap"
+
+# Detached keybindings receive the pane where the key was pressed. Fall back
+# to the calling terminal's pane when invoked manually.
+current="${HERDR_PANE_ID:-}"
+if [ -z "$current" ]; then
+  current="$({ "$HERDR" pane current --current 2>/dev/null || true; } \
+    | jq -r '.result.pane.pane_id // empty' 2>/dev/null)" || true
+fi
+[ -n "$current" ] || die "cannot resolve focused pane"
+
+current_info="$({ "$HERDR" pane get "$current" 2>/dev/null || true; })"
+workspace="$(jq -r '.result.pane.workspace_id // empty' <<<"$current_info" 2>/dev/null)" || true
+[ -n "$workspace" ] || die "cannot resolve workspace of pane '$current'"
+
+agents="$({ "$HERDR" agent list 2>/dev/null || true; })"
+if ! target="$(jq -r --arg ws "$workspace" '
+  [.result.agents[] | select(.workspace_id == $ws)]
+  | (map(select(.agent == "claude")) + .)
+  | .[0].pane_id // empty' <<<"$agents" 2>/dev/null)"; then
+  # A failed parse can still emit a target from a valid prefix; discard it.
+  die "cannot parse agent list"
+fi
+[ -n "$target" ] || die "no agent session in this space"
+
+state_file="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/qq-herdr-snap.$workspace.prev"
+
+if [ -n "${QQ_HERDR_SNAP_DRY:-}" ]; then
+  prev="$(head -n1 -- "$state_file" 2>/dev/null || true)"
+  printf 'current=%s workspace=%s target=%s prev=%s\n' \
+    "$current" "$workspace" "$target" "${prev:-none}"
+  exit 0
+fi
+
+if [ "$current" != "$target" ]; then
+  printf '%s\n' "$current" 2>/dev/null >"$state_file" || die "cannot record origin pane in '$state_file'"
+  "$HERDR" agent focus "$target" >/dev/null 2>&1 || die "cannot focus orchestrator pane '$target'"
+  exit 0
+fi
+
+# Already on the orchestrator: bounce back to the stored pane, if it still exists.
+prev="$(head -n1 -- "$state_file" 2>/dev/null || true)"
+if [ -z "$prev" ] || [ "$prev" = "$current" ]; then
+  die "already on the orchestrator"
+fi
+prev_info="$({ "$HERDR" pane get "$prev" 2>/dev/null || true; })"
+prev_tab="$(jq -r '.result.pane.tab_id // empty' <<<"$prev_info" 2>/dev/null)" || true
+[ -n "$prev_tab" ] || die "previous pane is gone"
+prev_agent="$(jq -r '.result.pane.agent // empty' <<<"$prev_info" 2>/dev/null)" || true
+if [ -n "$prev_agent" ]; then
+  "$HERDR" agent focus "$prev" >/dev/null 2>&1 || die "cannot focus previous pane '$prev'"
+else
+  # agent focus cannot target non-agent panes; tab focus restores the tab's
+  # own remembered pane focus instead.
+  "$HERDR" tab focus "$prev_tab" >/dev/null 2>&1 || die "cannot focus previous tab '$prev_tab'"
+fi

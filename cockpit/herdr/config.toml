@@ -7,6 +7,22 @@ auto_switch = false
 switch_workspace = "prefix+1..9"
 focus_agent = "prefix+alt+1..9"
 
+# Direct (no-prefix) navigation. Direct bindings are intercepted by herdr,
+# so pane apps never see these keys.
+previous_workspace = "alt+up"
+next_workspace = "alt+down"
+previous_tab = "alt+left"
+next_tab = "alt+right"
+# alt+o is bound below as a keys.command: qq-herdr-snap snaps to the current
+# space's orchestrator agent; pressing it again there bounces back.
+
+# Inverted j/k (operator preference): j = up, k = down — both for pane
+# focus and inside navigate mode. h/l unchanged.
+focus_pane_up = "prefix+j"
+focus_pane_down = "prefix+k"
+navigate_pane_up = "j"
+navigate_pane_down = "k"
+
 [[keys.command]]
 key = "prefix+f"
 type = "pane"
@@ -16,6 +32,14 @@ command = "bash -ic 'qqy; exec bash -i'"
 key = "prefix+shift+f"
 type = "pane"
 command = "bash -ic 'qqbr; exec bash -i'"
+
+# Snap to the current space's orchestrator agent (claude, else the first
+# agent in sidebar order); press again there to bounce back to where you
+# came from.
+[[keys.command]]
+key = "alt+o"
+type = "shell"
+command = "qq-herdr-snap"
 
 # Pull an agent into the focused pane, replacing it (the mirror of
 # focus_agent = prefix+alt+N, which jumps you *to* agent N). prefix+F<N> moves
