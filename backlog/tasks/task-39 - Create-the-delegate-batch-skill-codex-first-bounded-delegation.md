@@ -4,6 +4,7 @@ title: Create the delegate-batch skill (codex-first bounded delegation)
 status: To Do
 assignee: []
 created_date: '2026-07-14 22:46'
+updated_date: '2026-07-15 00:12'
 labels: []
 dependencies: []
 documentation:
@@ -25,3 +26,9 @@ Per doc-42: a stateless skill owning batch delegation on the engine/glass archit
 - [ ] #3 A real ticket batch executes end-to-end through a codex delegate under the skill and returns a conforming completion envelope; the live Check is recorded in task notes
 - [ ] #4 Repository suites pass
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented skills/delegate-batch/SKILL.md with both entry points, complete OS-temporary work orders, the fixed codex-first runner, work-shape and isolation rules, the 3-5 writing-ticket bound, the completion envelope, steering limits, and unchanged gates. Installer linkage needed no source change: bin/install.sh dynamically discovers skills, prunes removed managed links, and syncs both Codex and Claude. Live delegated run: TASK-39 Change 1 executed from a complete temporary work order in its dedicated feat/delegate-batch worktree. Checks: all seven tests/test-*.sh passed; the BPMN suite reached its existing conformance CLI test but the managed sandbox denied that test's nested Node spawnSync with EPERM, while the same strict CLI invocation run directly produced the expected report and exit 1. Rerun the BPMN suite outside the managed sandbox.
+<!-- SECTION:NOTES:END -->
