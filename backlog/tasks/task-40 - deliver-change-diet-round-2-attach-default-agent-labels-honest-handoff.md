@@ -4,7 +4,7 @@ title: 'deliver-change diet round 2 (attach-default, agent labels, honest handof
 status: In Progress
 assignee: []
 created_date: '2026-07-14 22:47'
-updated_date: '2026-07-15 00:48'
+updated_date: '2026-07-15 00:53'
 labels: []
 dependencies:
   - TASK-39
@@ -25,9 +25,10 @@ Per doc-42: slim the delivery choreography that survived Phase 4, using the TASK
 - [ ] #2 Change labels are agent-chosen and operator-renameable, and the CONCEPTS.md work-session definition matches
 - [ ] #3 The handoff step verifies the notification result and, when notifications are disabled, plainly reports the browser-only fallback instead of claiming a notification was sent
 - [ ] #4 Repository suites pass
-- [ ] #5 Dispatching a headless delegate offers cockpit visibility through a throwaway observability pane opened as a no-focus right split of the accountable pane (accountable keeps roughly 70% width), running tail -f --pid=<delegate-pid> on the delegate's stream so the pane self-retires when the delegate exits; pure glass over the process artifact, no pane-lifecycle ownership
-- [ ] #6 After the handoff, the accountable agent arms a harness-native background disposition watch on the open pull request — a single-notification until-loop covering both merged and closed states — so the disposition wakes it for post-merge synchronization and follow-on dispatch without the operator typing a confirmation; deliver-change documents this in the handoff step
+- [ ] #5 After the handoff, the accountable agent arms a harness-native background disposition watch on the open pull request — a single-notification until-loop covering both merged and closed states — so the disposition wakes it for post-merge synchronization and follow-on dispatch without the operator typing a confirmation; deliver-change documents this in the handoff step
 <!-- AC:END -->
+
+
 
 ## Implementation Notes
 

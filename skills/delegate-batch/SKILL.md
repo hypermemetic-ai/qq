@@ -78,14 +78,6 @@ place ticket content or other free text on the command line, where shell
 quoting can execute it before the sandbox exists. Keep both the work order and
 completion envelope in the OS temporary directory.
 
-For optional cockpit visibility, open a throwaway observability pane as a
-no-focus right split of the accountable pane, leaving the accountable pane
-roughly 70% of the width, and run
-`tail -f --pid=<delegate-pid> <delegate-output-stream>` there. This is pure glass
-over the process artifact, not another execution path. The tail exits when the
-delegate exits, so the pane self-retires; the accountable session assumes no
-pane-lifecycle ownership.
-
 Use a Claude subagent instead only when the assignment needs harness-native
 tools or judgment beyond the plan's bounds. This is the operator-settled split:
 Fable composes plans, briefs, and verdicts; codex executes within them.

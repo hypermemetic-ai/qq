@@ -86,8 +86,8 @@ delegated agents bounded assignments; do not hand them this lifecycle.
    plainly report the browser-only fallback and do not claim a notification was
    sent. Report the URL either way. After reporting it, arm a harness-native
    background disposition watch using no owned machinery: a single-notification
-   `until` loop that uses the GitHub CLI to poll the pull request state every 30
-   seconds or slower, exits on either `MERGED` or `CLOSED`, and emits exactly one
+   `until` loop that uses the GitHub CLI to poll the pull request state every 5
+   seconds, exits on either `MERGED` or `CLOSED`, and emits exactly one
    completion notification to wake the agent for these post-merge steps and any
    follow-on dispatch. Cover both terminal states; silence is not success. The
    watch replaces waiting for an operator message. Then stop.

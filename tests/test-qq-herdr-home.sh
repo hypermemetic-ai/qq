@@ -177,14 +177,12 @@ tr '\n\t' '  ' <"$ROOT/skills/deliver-change/SKILL.md" | \
   grep -qE 'harness-native +background disposition watch'
 grep -Fq 'single-notification' "$ROOT/skills/deliver-change/SKILL.md"
 grep -Fq 'GitHub CLI' "$ROOT/skills/deliver-change/SKILL.md"
-grep -Fq 'state every 30' "$ROOT/skills/deliver-change/SKILL.md"
+grep -Fq 'state every 5' "$ROOT/skills/deliver-change/SKILL.md"
 grep -Fq 'either `MERGED` or `CLOSED`' "$ROOT/skills/deliver-change/SKILL.md"
 grep -Fq 'follow-on dispatch' "$ROOT/skills/deliver-change/SKILL.md"
-grep -Fq 'tail -f --pid=<delegate-pid> <delegate-output-stream>' \
-  "$ROOT/skills/delegate-batch/SKILL.md"
-grep -Fq 'no-focus right split' "$ROOT/skills/delegate-batch/SKILL.md"
-grep -Fq 'roughly 70% of the width' "$ROOT/skills/delegate-batch/SKILL.md"
-grep -Fq 'pane-lifecycle ownership' "$ROOT/skills/delegate-batch/SKILL.md"
+if grep -Fq 'observability pane' "$ROOT/skills/delegate-batch/SKILL.md"; then
+  fail 'delegate-batch must not reintroduce the observability pane (operator UAT rejected it; the status surface owns delegate visibility)'
+fi
 grep -Fq 'qq-herdr-home focus-board --repo <root>' "$ROOT/skills/deliver-change/SKILL.md"
 if grep -Fq -- 'herdr agent start' "$ROOT/skills/agent-messaging/SKILL.md"; then
   fail "agent-messaging reintroduced delegate lifecycle machinery"
