@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@claude'
 created_date: '2026-07-16 02:46'
-updated_date: '2026-07-16 02:52'
+updated_date: '2026-07-16 03:07'
 labels: []
 dependencies: []
 ordinal: 43000
@@ -26,5 +26,5 @@ Operator UAT on PR #95's popup conversion found two gaps: quitting yazi left a p
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Root cause probed live: herdr 0.7.4 popups draw the frame at configured size but never set the popup PTY winsize (stty size stayed 24x80 across t0/t1/t2 while the frame rendered near 80%). Fix: both file-navigation popups pinned to 120x32 cells with a matching stty cols 118 rows 30 preamble so PTY, content, and frame agree, and the trailing interactive shell dropped so quitting yazi/broot closes the popup. Reviewer probe confirmed 30x118 and clean bash exit; mechanical AC verification, live popup re-check at operator sign-off. Percent sizing returns when upstream sets the winsize; upstream issue drafted pending operator approval to post.
+Two corrective rounds. Round 1 shipped close-on-quit plus a 120x32 fixed frame with stty 118x30 — broken live: the frame exceeded the tiled panel area and clamped while the PTY claimed 118 columns, smearing every redraw. Root cause of the sizing error: an unverified terminal-width assumption. Round 2 measured the layout via herdr api snapshot (tiled area 104x33 at x=29, terminal ~133 cols) and the operator tuned the final size live on a temporary binding before shipping: 74x29 frame, stty 72x27, verified rendering, quit-to-close, and centering by hand. The underlying herdr 0.7.4 bug (popup PTY winsize never set, stays 24x80) is probed and documented; an upstream issue draft is parked pending operator approval. Percent sizing returns when upstream fixes the winsize.
 <!-- SECTION:FINAL_SUMMARY:END -->

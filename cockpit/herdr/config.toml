@@ -29,23 +29,25 @@ navigate_pane_down = "k"
 # matching stty preamble works around herdr 0.7.4 never setting the popup
 # PTY winsize: the frame draws at the configured size while the PTY stays
 # at 24x80 (probed 2026-07-15; no fix on upstream master). The stty values
-# are the frame minus its border; keep the pairs in sync. Percent sizing
-# can return when upstream fixes the winsize.
+# are the frame minus its border; keep the pairs in sync. 74x29 was tuned
+# live by the operator against the measured 104x33 tiled area (frames wider
+# than the tiled panel clamp and smear). Percent sizing can return when
+# upstream fixes the winsize.
 [[keys.command]]
 key = "prefix+f"
 type = "popup"
-command = "bash -ic 'stty cols 118 rows 30 2>/dev/null; qqy'"
+command = "bash -ic 'stty cols 72 rows 27 2>/dev/null; qqy'"
 description = "yazi at the repo root"
-width = 120
-height = 32
+width = 74
+height = 29
 
 [[keys.command]]
 key = "prefix+shift+f"
 type = "popup"
-command = "bash -ic 'stty cols 118 rows 30 2>/dev/null; qqbr'"
+command = "bash -ic 'stty cols 72 rows 27 2>/dev/null; qqbr'"
 description = "broot at the repo root"
-width = 120
-height = 32
+width = 74
+height = 29
 
 # Snap to the current space's orchestrator agent (claude, else the first
 # agent in sidebar order); press again there to bounce back to where you
