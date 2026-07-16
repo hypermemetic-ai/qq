@@ -3,6 +3,35 @@
 set -euo pipefail
 
 QQ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+
+usage() {
+  cat <<'EOF'
+Usage: bin/install.sh [-h|--help]
+
+Link qq's live skills, cockpit configs, and commands from this checkout.
+
+Options:
+  -h, --help  Show this help and exit.
+EOF
+}
+
+show_help=0
+for argument in "$@"; do
+  case "$argument" in
+    -h | --help) show_help=1 ;;
+    *)
+      printf 'qq install: unsupported argument: %s\n\n' "$argument" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [ "$show_help" -eq 1 ]; then
+  usage
+  exit 0
+fi
+
 QQ_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 
 die() {
