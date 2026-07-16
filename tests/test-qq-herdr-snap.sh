@@ -18,6 +18,9 @@ set -euo pipefail
 printf '%s\n' "$*" >>"$FAKE_LOG"
 
 case "${1:-} ${2:-}" in
+  "workspace list")
+    printf '%s\n' "${FAKE_WORKSPACES_JSON:-$FAKE_WORKSPACES_DEFAULT}"
+    ;;
   "pane current")
     printf '{"result":{"pane":{"pane_id":"%s"}}}\n' "${FAKE_CURRENT_PANE:-ws:p1}"
     ;;
@@ -60,12 +63,14 @@ export FAKE_LOG="$log"
 export XDG_RUNTIME_DIR="$tmp"
 # Sidebar order: codex first, claude second in "ws"; one agent elsewhere.
 export FAKE_AGENTS_DEFAULT='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":"ws","agent":"codex"},{"pane_id":"ws:p2","workspace_id":"ws","agent":"claude"},{"pane_id":"other:p1","workspace_id":"other","agent":"claude"}]}}'
+export FAKE_WORKSPACES_DEFAULT='{"result":{"workspaces":[{"workspace_id":"ws","worktree":null},{"workspace_id":"other","worktree":null}]}}'
 state_file="$tmp/qq-herdr-snap.ws.prev"
+home_state_file="$tmp/qq-herdr-snap.home.prev"
 
 reset_fake() {
   : >"$log"
-  rm -f "$state_file"
-  unset FAKE_AGENTS_JSON FAKE_CURRENT_PANE FAKE_FOCUS_FAIL
+  rm -f "$state_file" "$home_state_file"
+  unset FAKE_AGENTS_JSON FAKE_CURRENT_PANE FAKE_FOCUS_FAIL FAKE_WORKSPACES_JSON
   unset FAKE_PREV_AGENT_JSON FAKE_PREV_GONE FAKE_PREV_PANE FAKE_WORKSPACE
 }
 
@@ -81,6 +86,21 @@ reset_fake
 HERDR_PANE_ID=ws:p1 "$SNAP"
 grep -q '^agent focus ws:p2$' "$log"
 assert_equal 'ws:p1' "$(cat "$state_file")" "state file should record the origin pane"
+
+# Without a local claude agent, snap to this repo's non-linked home claude,
+# then bounce back across workspaces using state keyed by the home target.
+reset_fake
+export FAKE_AGENTS_JSON='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":"ws","agent":"codex"},{"pane_id":"sibling:p2","workspace_id":"sibling","agent":"claude"},{"pane_id":"other:p2","workspace_id":"other","agent":"claude"},{"pane_id":"home:p2","workspace_id":"home","agent":"claude"}]}}'
+export FAKE_WORKSPACES_JSON='{"result":{"workspaces":[{"workspace_id":"ws","worktree":{"checkout_path":"/repo-work","is_linked_worktree":true,"repo_root":"/repo"}},{"workspace_id":"sibling","worktree":{"checkout_path":"/repo-sibling","is_linked_worktree":true,"repo_root":"/repo"}},{"workspace_id":"other","worktree":{"checkout_path":"/other","is_linked_worktree":false,"repo_root":"/other"}},{"workspace_id":"home","worktree":{"checkout_path":"/repo","is_linked_worktree":false,"repo_root":"/repo"}}]}}'
+HERDR_PANE_ID=ws:p1 "$SNAP"
+assert_file_contains "$log" 'agent focus home:p2'
+assert_equal 'ws:p1' "$(cat "$home_state_file")" "home state should record the origin pane"
+[ ! -e "$state_file" ] || fail "cross-space snap wrote state under the origin workspace"
+
+: >"$log"
+export FAKE_WORKSPACE=home FAKE_PREV_PANE=ws:p1 FAKE_PREV_AGENT_JSON='"codex"'
+HERDR_PANE_ID=home:p2 "$SNAP"
+assert_file_contains "$log" 'agent focus ws:p1'
 
 # Without a claude agent, falls back to sidebar order.
 reset_fake

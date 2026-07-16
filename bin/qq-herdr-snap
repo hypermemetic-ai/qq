@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# qq-herdr-snap — snap to the current space's orchestrator agent pane.
+# qq-herdr-snap — snap to the preferred orchestrator agent pane.
 #
 # Bound as a detached custom key (alt+o). First press jumps to the snap
-# target: the claude agent in the focused workspace, falling back to the
-# first agent in sidebar order (delegate-only spaces have no claude).
+# target: the claude agent in the focused workspace, then the repo project
+# home's claude agent, then the first focused-workspace agent in sidebar
+# order (delegate-only spaces have no local claude).
 # Pressing it again while already there bounces back to the pane you came
-# from, so one key flips orchestrator<->elsewhere. The target is derived
-# from the focused workspace, so the bounce pair is always within one
-# space; state is keyed per workspace.
+# from, so one key flips orchestrator<->elsewhere. State is keyed by the
+# target workspace so bounce-back also works after a cross-space snap.
 #
-# Distinct from qq-herdr-home, which resolves a repo's persistent home
-# workspace and Backlog-board tab for delivery automation.
+# Distinct from qq-herdr-home, which also requires a running Backlog-board
+# pane; snap resolves the project home directly from workspace metadata.
 #
 # This only ever runs from a keybinding or an operator shell, so failures
 # are best-effort notifications and the command exits successfully.
@@ -50,18 +50,61 @@ workspace="$(jq -r '.result.pane.workspace_id // empty' <<<"$current_info" 2>/de
 [ -n "$workspace" ] || die "cannot resolve workspace of pane '$current'"
 
 agents="$({ "$HERDR" agent list 2>/dev/null || true; })"
-if ! target_info="$(jq -r --arg ws "$workspace" '
-  [.result.agents[] | select(.workspace_id == $ws)]
-  | (map(select(.agent == "claude")) + .)
-  | [(.[0].agent == "claude"), .[0].pane_id // ""]
-  | @tsv' <<<"$agents" 2>/dev/null)"; then
-  # A failed parse can still emit a target from a valid prefix; discard it.
+if ! jq -e '.result.agents | type == "array"' <<<"$agents" >/dev/null 2>&1; then
   die "cannot parse agent list"
 fi
-IFS=$'\t' read -r target_is_orchestrator target <<<"$target_info"
-[ -n "$target" ] || die "no agent session in this space"
 
-state_file="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/qq-herdr-snap.$workspace.prev"
+home_workspace=""
+if ! has_local_orchestrator="$(jq -r --arg ws "$workspace" '
+  any(.result.agents[]; .workspace_id == $ws and .agent == "claude")
+' <<<"$agents" 2>/dev/null)"; then
+  die "cannot parse agent list"
+fi
+if [ "$has_local_orchestrator" != true ]; then
+  workspaces="$({ "$HERDR" workspace list 2>/dev/null || true; })"
+  if ! jq -e '.result.workspaces | type == "array"' \
+    <<<"$workspaces" >/dev/null 2>&1; then
+    die "cannot parse workspace list"
+  fi
+  if ! home_workspace="$(jq -r --arg ws "$workspace" '
+    [
+      .result.workspaces as $workspaces
+      | $workspaces[]
+      | select(.workspace_id == $ws and .worktree != null)
+      | .worktree.repo_root as $repo_root
+      | select($repo_root != null and $repo_root != "")
+      | $workspaces[]
+      | select(
+          .worktree != null
+          and .worktree.is_linked_worktree == false
+          and .worktree.repo_root == $repo_root
+        )
+      | .workspace_id
+    ][0] // empty
+  ' <<<"$workspaces" 2>/dev/null)"; then
+    die "cannot parse workspace list"
+  fi
+fi
+
+if ! target_info="$(jq -r --arg ws "$workspace" --arg home "$home_workspace" '
+  [.result.agents[] | select(.workspace_id == $ws)] as $focused
+  | (
+      ($focused | map(select(.agent == "claude")) | .[0])
+      // ([.result.agents[]
+           | select($home != "" and .workspace_id == $home and .agent == "claude")][0])
+      // $focused[0]
+      // {}
+    )
+  | [(.agent == "claude"), (.pane_id // ""), (.workspace_id // "")]
+  | @tsv
+' <<<"$agents" 2>/dev/null)"; then
+  die "cannot parse agent list"
+fi
+IFS=$'\t' read -r target_is_orchestrator target target_workspace <<<"$target_info"
+[ -n "$target" ] || die "no agent session in this space"
+[ -n "$target_workspace" ] || die "cannot resolve workspace of snap target '$target'"
+
+state_file="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/qq-herdr-snap.$target_workspace.prev"
 
 if [ -n "${QQ_HERDR_SNAP_DRY:-}" ]; then
   prev="$(head -n1 -- "$state_file" 2>/dev/null || true)"
