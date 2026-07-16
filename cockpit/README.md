@@ -49,7 +49,8 @@ conversation into the work session before Repository mutation. That mode fails
 loudly unless the target contains exactly one idle shell placeholder.
 
 At terminal Change disposition, the accountable and operator-created work panes
-stay intact for inspection and explicit operator retirement. `qq-herdr-home
-focus-board --repo <root>` validates the persistent home and its unique dedicated
-Backlog-board tab, then focuses that tab without moving or closing the work
-session.
+stay intact for inspection and explicit operator retirement, and operator focus
+is left untouched. `qq-herdr-home focus-board --repo <root>` is an
+operator-invocable validator, not part of the disposition flow: it validates
+the persistent home and its unique dedicated Backlog-board tab, then focuses
+that tab without moving or closing the work session.

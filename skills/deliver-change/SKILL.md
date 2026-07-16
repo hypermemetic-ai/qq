@@ -41,7 +41,14 @@ delegated agents bounded assignments; do not hand them this lifecycle.
    pane, and delegated agent remain there. The project home stays on `main` with
    its board and general-purpose tabs. Return to alignment before acting on any
    new consequential decision.
-2. Implement and verify coherent units. When a decision needs durable,
+2. Implement and verify coherent units, with execution codex-first: within
+   plan bounds, compose one work-order brief for this Change's bounded
+   implementation and dispatch it per delegate-batch's "Dispatch codex-first"
+   section, pointing the runner at this Change's checkout, then verify the
+   completion envelope against the tree before treating any claim as evidence.
+   Use a Claude subagent instead only when the assignment needs harness-native
+   tools or judgment beyond the plan's bounds; composing plans, briefs, and
+   verdicts stays with the accountable session. When a decision needs durable,
    multi-source evidence, delegate that question through `research` and retain
    the judgment. Keep the Task aligned through the Backlog CLI and run the
    local Checks that observe the changed behavior.
@@ -113,12 +120,9 @@ delegated agents bounded assignments; do not hand them this lifecycle.
    synchronization can be resumed safely.
 12. After a terminal disposition leaves no further work in this Change, leave
    its accountable pane, operator-created panes and tabs, worktree workspace,
-   and checkout intact for inspection. Capture the calling terminal's live pane,
-   tab, and workspace ids, then run `qq-herdr-home focus-board --repo <root>`.
-   Require the returned home and board ids to equal the initial inspection,
-   require
-   `.focused` to be true, and re-resolve the calling terminal to prove its three
-   work-session ids did not change. Do not move the accountable pane into the
-   project home, close a retained work pane, or invoke `herdr worktree remove`.
-   The operator explicitly retires a completed work session and its checkout;
-   focus returns to the synchronized home board without erasing its context.
+   and checkout intact for inspection, and leave operator focus untouched: do
+   not focus, move, or close any tab or pane, do not run `qq-herdr-home
+   focus-board`, and do not invoke `herdr worktree remove`. The disposition
+   watch's completion notification is the only end-of-Change signal; changing
+   operator focus is never part of ending a Change. The operator explicitly
+   retires a completed work session and its checkout.
