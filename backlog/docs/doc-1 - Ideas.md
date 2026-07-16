@@ -3,7 +3,7 @@ id: doc-1
 title: Ideas
 type: other
 created_date: '2026-07-10 20:56'
-updated_date: '2026-07-16 04:43'
+updated_date: '2026-07-16 04:44'
 tags:
   - ideas
 ---
@@ -24,3 +24,7 @@ delegations sometimes hang invisibly.
 ## 2026-07-15 23:43
 
 backlog board is always stale. if cause isn't obvious, test adversarially.
+
+## 2026-07-15 23:44
+
+bug: already on the orchestrator when not orchestrator
