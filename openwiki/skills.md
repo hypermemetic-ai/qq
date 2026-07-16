@@ -1,6 +1,6 @@
 # Skill catalog
 
-qq currently retains twelve stateless Skills. A Skill is invoked when its description/trigger matches the work; it is guidance, not persistent workflow state.
+qq currently retains eleven stateless Skills. A Skill is invoked when its description/trigger matches the work; it is guidance, not persistent workflow state.
 
 | Skill | Trigger and responsibility | Important boundary |
 |---|---|---|
@@ -11,7 +11,6 @@ qq currently retains twelve stateless Skills. A Skill is invoked when its descri
 | `compound` | Capture a verified, non-obvious, reusable lesson. | Do not create ceremony for routine outcomes or unverified speculation. |
 | `idea` | Append an explicitly triggered idea verbatim to the single Backlog `Ideas` document. | Discover and mutate it through Backlog commands; no interpretation, research, commit, staging, or push. |
 | `agent-messaging` | Coordinate already-live agents across runtimes and raise operator-visible notifications. | It does not start, own, or retire agents; resolve live identities after pane movement. |
-| `bpmn-plans` | Produce an evidence-stamped BPMN plan when the operator requests a diagram; retain task-specific flow and collapse inherited delivery into one call activity ending at `Green PR ready`. | Planning artifacts do not authorize implementation; only the final verified version is presented, once, and OpenWiki publication adds stricter evidence and determinism checks. |
 | `delegate-batch` | Dispatch an aligned bounded ticket batch through Codex-first isolated work sessions. | The accountable session retains judgment and delivery; coupled writes are one ticket, writing concurrency is capped at 3–5, and integration is serialized. |
 | `deliver-change` | Accountable one-PR delivery from an aligned assignment through Task finalization, operator notification and disposition watch, main synchronization, and preserved work-session handoff. | Only the operator-facing accountable agent owns this lifecycle; delegated agents do not; it never merges, and the operator explicitly retires the completed work session later. |
 | `openwiki-maintainer` | Dedicated ownership of explicitly assigned on-demand or scheduled OpenWiki refreshes. | The maintainer reviews generator output, opens an ordinary docs-only pull request, and never self-merges or publishes directly to `main`. |
@@ -19,7 +18,7 @@ qq currently retains twelve stateless Skills. A Skill is invoked when its descri
 
 ## How Skills compose
 
-For the operator-facing accountable owner, `grilling` runs at the alignment boundary. Other Skills can compose around the work: `research` or `diagnosing-bugs` may establish evidence; operator-requested `bpmn-plans` can make an approved plan inspectable; `delegate-batch` may fan out bounded implementation while judgment, integration, review, acceptance, and delivery stay accountable and serialized; `deliver-change` keeps delivery accountability with the operator-facing agent; `agent-messaging` coordinates already-live agents and notifications; `uat-signoff` may validate subjective behavior; `code-review` independently reviews the completed Change; and `compound` captures a durable lesson only after verification. OpenWiki procedure remains confined to its explicitly assigned Skill.
+For the operator-facing accountable owner, `grilling` runs at the alignment boundary. Other Skills can compose around the work: `research` or `diagnosing-bugs` may establish evidence; `delegate-batch` may fan out bounded implementation while judgment, integration, review, acceptance, and delivery stay accountable and serialized; `deliver-change` keeps delivery accountability with the operator-facing agent; `agent-messaging` coordinates already-live agents and notifications; `uat-signoff` may validate subjective behavior; `code-review` independently reviews the completed Change; and `compound` captures a durable lesson only after verification. OpenWiki procedure remains confined to its explicitly assigned Skill.
 
 There is no global skill phase machine. Follow each Skill’s current `SKILL.md` and the shared operating floor in root `AGENTS.md`.
 
@@ -44,7 +43,6 @@ The installer auto-discovers immediate `skills/*` directories containing `SKILL.
 - `skills/compound/SKILL.md`
 - `skills/idea/SKILL.md`
 - `skills/agent-messaging/SKILL.md`
-- `skills/bpmn-plans/SKILL.md`
 - `skills/delegate-batch/SKILL.md`
 - `skills/deliver-change/SKILL.md`
 - `skills/openwiki-maintainer/SKILL.md`

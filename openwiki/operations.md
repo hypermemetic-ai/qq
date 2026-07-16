@@ -8,11 +8,11 @@ From the Repository root:
 bash bin/install.sh
 ```
 
-The installer resolves the checkout from its own location, installs the locked BPMN pipeline dependencies, and live-links:
+The installer resolves the checkout from its own location and live-links:
 
 - each `skills/*` directory containing `SKILL.md` to both `~/.codex/skills/` and `~/.claude/skills/`;
 - yazi, Glow, Herdr, and shell cockpit files to `~/.config/`;
-- `qq-herdr-home`, `qq-herdr-pull`, `qq-openwiki`, and `qq-openwiki-bpmn` to `~/.local/bin/`.
+- `qq-herdr-home`, `qq-herdr-pull`, and `qq-openwiki` to `~/.local/bin/`.
 
 The installer prunes dead links into this checkout and refuses to replace unmanaged paths. It also removes obsolete qq-owned `qq-openwiki://` MIME associations, the managed desktop entry, and the dead merge-userscript link without deleting unrelated user configuration; invalid `XDG_CONFIG_HOME` values fail safely (`bin/install.sh:18-24`, `43-65`, `93-224`; `tests/test-install-cleanup.sh`). It does not manage repository instruction files; linked Repositories point their own root `AGENTS.md` symlink to qq's canonical `AGENTS.md`.
 
@@ -46,15 +46,15 @@ QQ_HERDR_PULL_DRY=1 HERDR_PANE_ID=<pane-id> qq-herdr-pull next
 
 ## Assigned OpenWiki maintenance
 
-OpenWiki refresh is explicit rather than merge-triggered. An on-demand or scheduled assignment starts the dedicated maintainer in the long-lived `openwiki/update` worktree. The maintainer fetches and resets to fresh `origin/main`, runs `qq-openwiki --update`, checks every retained BPMN bundle and the documentation diff, obtains fresh-context review, then opens or refreshes an ordinary docs-only pull request. The operator reviews and merges it; the maintainer never self-merges, publishes directly to `main`, or uses activation markers or retry protocols (`skills/openwiki-maintainer/SKILL.md:8-35`; `README.md:106-123`).
+OpenWiki refresh is explicit rather than merge-triggered. An on-demand or scheduled assignment starts the dedicated maintainer in the long-lived `openwiki/update` worktree. The maintainer fetches and resets to fresh `origin/main`, runs `qq-openwiki --update`, checks the documentation diff, obtains fresh-context review, then opens or refreshes an ordinary docs-only pull request. The operator reviews and merges it; the maintainer never self-merges, publishes directly to `main`, or uses activation markers or retry protocols (`skills/openwiki-maintainer/SKILL.md:8-35`; `README.md:106-123`).
 
 ## Knowledge maintenance
 
-OpenWiki and codebase-memory are installed separately. `bash bin/install.sh` links qq's guarded wrappers into `~/.local/bin`; these live links target whichever checkout ran that installer, not necessarily the primary checkout. Commands invoked elsewhere still execute from that target and may materialize ignored dependencies there. Diagnose surprises by resolving the actual symlink target and writer; in canonical delivery, report a failed or contested primary-checkout gate and stop unless the operator authorizes remediation (`bin/install.sh:234-237`; `skills/deliver-change/SKILL.md:101-113`; `backlog/docs/solutions/doc-37 - Installed-commands-act-on-the-primary-checkout-and-race-post-merge-syncs.md:17-44`). The README describes the upstream runtime setup.
+OpenWiki and codebase-memory are installed separately. `bash bin/install.sh` links qq's guarded wrappers into `~/.local/bin`; these live links target whichever checkout ran that installer, not necessarily the primary checkout. Commands invoked elsewhere still execute from that target. Diagnose surprises by resolving the actual symlink target and writer; in canonical delivery, report a failed or contested primary-checkout gate and stop unless the operator authorizes remediation (`bin/install.sh:234-237`; `skills/deliver-change/SKILL.md:101-113`; `backlog/docs/solutions/doc-37 - Installed-commands-act-on-the-primary-checkout-and-race-post-merge-syncs.md:17-44`). The README describes the upstream runtime setup.
 
-`qq-openwiki` first validates its command mode, provider, OpenWiki runtime, BPMN publisher, Node executable, and required external tools. After resolving and locking the Repository, it recovers any stale instruction-file snapshot before entering the mode-specific branch, cleanliness, staged-boundary, and `origin/main` gates. A caller from another worktree can therefore restore the recorded originating worktree and then fail its own branch gate. Before shadowing root `AGENTS.md` and `CLAUDE.md`, the wrapper stores them and the originating worktree root under `${XDG_STATE_HOME:-$HOME/.local/state}/qq/openwiki/<repository-key>`. Normal cleanup restores them; recovery refuses malformed, symlinked, unavailable, changed-worktree, or foreign-Repository state rather than restoring ambiguously. `--update` ultimately requires a clean dedicated branch exactly equal to `origin/main`; `--correct` requires a fully staged baseline confined to `openwiki/` (`bin/qq-openwiki:14-61`, `87-126`, `131-235`; `tests/test-qq-openwiki.sh:231-270`, `285-307`).
+`qq-openwiki` first validates its command mode, provider, OpenWiki runtime, and required external tools. After resolving and locking the Repository, it recovers any stale instruction-file snapshot before entering the mode-specific branch, cleanliness, staged-boundary, and `origin/main` gates. A caller from another worktree can therefore restore the recorded originating worktree and then fail its own branch gate. Before shadowing root `AGENTS.md` and `CLAUDE.md`, the wrapper stores them and the originating worktree root under `${XDG_STATE_HOME:-$HOME/.local/state}/qq/openwiki/<repository-key>`. Normal cleanup restores them; recovery refuses malformed, symlinked, unavailable, changed-worktree, or foreign-Repository state rather than restoring ambiguously. `--update` ultimately requires a clean dedicated branch exactly equal to `origin/main`; `--correct` requires a fully staged baseline confined to `openwiki/` (`bin/qq-openwiki:14-61`, `87-126`, `131-235`; `tests/test-qq-openwiki.sh:231-270`, `285-307`).
 
-The generator may add evidence-backed process specs under `openwiki/processes/`. `qq-openwiki-bpmn` publishes only the semantic BPMN and attributed PNG after path/evidence validation, lint/layout, evidence round-trip, and deterministic repeat generation; `--check` verifies retained artifacts without replacing them. Ordinary source agents only consume the wiki, and the `openwiki-maintainer` Skill is the sole maintenance procedure.
+Ordinary source agents only consume the wiki, and the `openwiki-maintainer` Skill is the sole maintenance procedure.
 
 For codebase-memory 0.9+:
 

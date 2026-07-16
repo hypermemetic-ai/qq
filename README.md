@@ -54,10 +54,9 @@ bash bin/install.sh
 ```
 
 The installer live-links Skills into Codex and Claude Code, links the cockpit
-configuration and retained commands, and installs the locked dependencies for
-qq's BPMN publisher. It prunes links to qq Skills and commands that no longer
-exist and refuses to replace paths it does not manage. Run it again after adding
-or removing a Skill.
+configuration and retained commands, and prunes links to qq Skills and commands
+that no longer exist. It refuses to replace paths it does not manage. Run it
+again after adding or removing a Skill.
 
 The installer does not manage repository instructions. A linked Repository can
 point its root `AGENTS.md` symlink directly to qq's `AGENTS.md`, keeping one
@@ -76,23 +75,12 @@ qq-openwiki --init
 qq-openwiki --update
 ```
 
-During that same OpenWiki model run, the internal generator decides which
-source-backed processes materially benefit from BPMN; there is no diagram
-quota. For each useful process it authors a JSON model under
-`openwiki/processes/`, invokes qq's guarded deterministic publisher, and embeds
-the generated PNG in the relevant narrative page.
-`qq-openwiki-bpmn --check openwiki/processes/<id>.json` independently verifies
-a retained model and its published semantic BPMN and PNG.
-
 In a restricted fresh-agent or service environment, set `QQ_OPENWIKI_BIN` to the
 OpenWiki executable's absolute path. The wrapper validates and invokes that
 path directly; when it is unset, the shared resolver checks `PATH` and known
 Homebrew locations. It does not use a login shell for executable discovery.
-When Node is also absent from those locations and is not beside that OpenWiki
-executable, set `QQ_NODE_BIN` to Node's absolute path; the wrapper carries the
-validated runtime into OpenWiki's diagram-publishing commands. The same
-`QQ_<TOOL>_BIN` convention applies to Herdr, GitHub CLI, Git, and Codex where
-qq resolves those tools.
+The same `QQ_<TOOL>_BIN` convention applies to Herdr, GitHub CLI, Git, and Codex
+where qq resolves those tools.
 
 Temporary debt (2026-07-10): ChatGPT OAuth merged in OpenWiki PR #151 after the
 0.1.0 npm release. The operator machine is therefore built from upstream commit
@@ -108,19 +96,18 @@ Actor, not by source-change agents. Refresh is explicitly assigned on demand or
 by an optional schedule; source Changes do not trigger or perform it. The
 `openwiki-maintainer` Skill owns generation, independent verification, and
 delivery from its dedicated worktree; OpenWiki's internal generator owns
-narrative and diagram authorship. `qq-openwiki` supplies the diagram-authoring
-instruction plus deterministic branch, freshness, process-lock, and
-root-instruction restoration guards.
+wiki authorship. `qq-openwiki` supplies deterministic branch, freshness,
+process-lock, and root-instruction restoration guards.
 
 ### On-demand or scheduled maintenance
 
 Keep one long-lived `openwiki/update` worktree per linked Repository. For an
 assigned refresh, fetch `origin`, reset that worktree to the fresh `origin/main`,
-and run `qq-openwiki --update` (`--init` only for first setup). Verify every
-process diagram bundle with `qq-openwiki-bpmn --check`, review the complete
-generated diff through `code-review`, and open an ordinary documentation-only
-pull request. The operator reviews and merges it. Running `bash bin/install.sh`
-also prunes legacy merge-activation artifacts that qq owns.
+and run `qq-openwiki --update` (`--init` only for first setup). Review the
+complete generated diff through `code-review`, and open an ordinary
+documentation-only pull request. The operator reviews and merges it. Running
+`bash bin/install.sh` also prunes legacy merge-activation artifacts that qq
+owns.
 
 Temporary debt (2026-07-10): upstream code mode unconditionally writes a
 scheduled GitHub Actions workflow and scheduled-workflow agent guidance.

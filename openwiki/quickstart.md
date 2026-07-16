@@ -30,7 +30,7 @@ The shared operating floor is in [`AGENTS.md`](../AGENTS.md); it does not mandat
 
 - [Architecture and knowledge model](architecture.md) — system boundaries, ownership, repository surfaces, and extension points.
 - [Workflows](workflows.md) — orientation, Task-to-Change delivery, review, research, diagnosis, UAT, and knowledge capture.
-- [Skill catalog](skills.md) — triggers, responsibilities, and change guidance for the twelve current Skills.
+- [Skill catalog](skills.md) — triggers, responsibilities, and change guidance for the eleven current Skills.
 - [Operations](operations.md) — installation, cockpit, Herdr workspace movement, and knowledge maintenance.
 - [Verification](verification.md) — required checks, review sequence, coverage gaps, and risk-focused validation.
 
@@ -43,7 +43,7 @@ The shared operating floor is in [`AGENTS.md`](../AGENTS.md); it does not mandat
 - the root-level Backlog `Ideas` document — verbatim idea capture.
 - Backlog `plans`, `research`, and `solutions` document categories — historical designs, cited evidence, and reusable lessons.
 - `cockpit/` — source-controlled human terminal configuration.
-- `bin/` — installer, guarded OpenWiki and diagram commands, the Claude drift-net, and Herdr pane movement.
+- `bin/` — installer, the guarded OpenWiki command, the Claude drift-net, and Herdr pane movement.
 
 ## Authority and historical context
 

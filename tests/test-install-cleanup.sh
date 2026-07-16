@@ -15,15 +15,11 @@ fake_bin="$tmp/bin"
 install_log="$tmp/install.log"
 mkdir -p "$fake_bin"
 
-cat >"$fake_bin/npm" <<'EOF'
-#!/usr/bin/env bash
-printf 'npm %s\n' "$*" >>"$INSTALL_LOG"
-EOF
 cat >"$fake_bin/update-desktop-database" <<'EOF'
 #!/usr/bin/env bash
 printf 'update-desktop-database %s\n' "$*" >>"$INSTALL_LOG"
 EOF
-chmod +x "$fake_bin/npm" "$fake_bin/update-desktop-database"
+chmod +x "$fake_bin/update-desktop-database"
 export INSTALL_LOG="$install_log"
 
 write_managed_desktop() {
