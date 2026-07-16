@@ -49,6 +49,16 @@ description = "broot at the repo root"
 width = 74
 height = 29
 
+# Delegate status surface on-demand accessor (doc-43 round 2). Concatenate a
+# static snapshot through less so q closes the session-modal popup.
+[[keys.command]]
+key = "prefix+d"
+type = "popup"
+command = "bash -ic 'stty cols 72 rows 27 2>/dev/null; if common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then repo_root=$(dirname \"$common_dir\"); status_dir=\"${TMPDIR:-/tmp}/qq-delegates${repo_root}\"; shopt -s nullglob; files=(\"$status_dir\"/*.status); else files=(); fi; if ((${#files[@]})); then for status_file in \"${files[@]}\"; do printf \"=== %s ===\\n\" \"${status_file##*/}\"; cat -- \"$status_file\"; printf \"\\n\"; done | LESS= less; else printf \"no active delegate batches\\npress any key to close\\n\"; read -r -n 1; fi'"
+description = "delegate batch status for this repo"
+width = 74
+height = 29
+
 # Snap to the current space's orchestrator agent (claude, else the first
 # agent in sidebar order); press again there to bounce back to where you
 # came from.

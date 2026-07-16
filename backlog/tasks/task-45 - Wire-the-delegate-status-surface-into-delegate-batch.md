@@ -1,10 +1,10 @@
 ---
 id: TASK-45
 title: Wire the delegate status surface into delegate-batch
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-07-15 23:16'
-updated_date: '2026-07-15 23:35'
+updated_date: '2026-07-16 03:33'
 labels: []
 dependencies: []
 ordinal: 42000

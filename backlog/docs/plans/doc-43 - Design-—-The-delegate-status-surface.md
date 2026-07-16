@@ -3,7 +3,7 @@ id: doc-43
 title: Design — The delegate status surface
 type: specification
 created_date: '2026-07-15 02:51'
-updated_date: '2026-07-15 23:16'
+updated_date: '2026-07-16 04:17'
 tags:
   - design
   - delegation
@@ -461,3 +461,33 @@ keybinding over the status files, and unchanged round-1 scope (status-file
 writes, `report-agent`/`release-agent` presence and color calls, idempotent
 pane open, stderr capture, amended `codex exec` line). The sidebar config
 rows land with TASK-42 round 2 itself and are inert until reported.
+
+### 2026-07-16 — Round 3: operator live UAT (TASK-45)
+
+Live UAT re-settles the rendering surface and supersedes the affected round-1
+and round-2 text:
+
+1. Ticket work sessions under the qq space stay, including their workspace
+   `$stage` rows and per-delegate `report-agent` presence and state color. A
+   structurally required placeholder root pane hosts no delegate output or
+   status content.
+2. Pane-hosted chrome is withdrawn everywhere in ticket spaces.
+3. The proposed home side pane would have existed only to show detail the tags
+   cannot; the persistent duplicate-table design is rejected.
+4. Final disposition drops the home side pane entirely. No persistent pane is
+   owned. The `prefix+d` popup over the status file is the sole owned renderer,
+   and sidebar tags are the sole ambient surface.
+
+**Detail file.** The status file is no longer a mirror table. It carries one
+block per delegate containing the stage-boundary timestamp and since-when,
+runtime and steering handle, events and stderr artifact paths, an untruncated
+blocked or failed reason, a one-line envelope-verification Checks result once
+verified, and the PR number/URL plus final Checks state once open. Stage words
+appear only as context for those details; tags carry the at-a-glance state.
+
+**Live findings.** A source's `--seq` must strictly increase: use
+`max(epoch seconds, last-used + 1)` for every report, release, and clear call.
+Herdr silently ignored a clear that reused the preceding report's second.
+`codex exec resume` derives its sandbox writable root from the calling shell's
+cwd, not the session's recorded cwd. Resume only with cwd inside the Change
+checkout; otherwise dispatch a fresh `codex exec -C <checkout>`.

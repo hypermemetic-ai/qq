@@ -66,21 +66,152 @@ codex exec \
   --sandbox workspace-write \
   --skip-git-repo-check \
   -C <ticket-worktree-root> \
+  --json \
   -o <envelope-path> \
   "Read <work-order-path> fully and perform the assignment it specifies.
 You are the delegated implementer; the work order is your complete
 orientation. Do not invoke skills or delegate. Your final message is the
-completion envelope the work order requires."
+completion envelope the work order requires." \
+  > <events-path> 2> <stderr-path>
 ```
 
 Substitute only the bracketed paths; keep all other prompt text exact. Never
 place ticket content or other free text on the command line, where shell
 quoting can execute it before the sandbox exists. Keep both the work order and
-completion envelope in the OS temporary directory.
+completion envelope in the OS temporary directory. Put each delegate's events
+and stderr files there beside them.
 
 Use a Claude subagent instead only when the assignment needs harness-native
 tools or judgment beyond the plan's bounds. This is the operator-settled split:
 Fable composes plans, briefs, and verdicts; codex executes within them.
+
+## Report the batch on the status surface
+
+Follow doc-43 as amended 2026-07-16 round 3. Treat every visibility action as
+best-effort glass; it never gates dispatch, the envelope contract, or the
+single completion wake.
+
+Keep one status file per Repository per orchestrator work session, using the
+project-home dispatcher workspace in board-driven mode. From any path in a
+primary or linked checkout, derive it exactly as follows:
+
+```sh
+repo_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+status_dir="${TMPDIR:-/tmp}/qq-delegates${repo_root}"
+status_file="${status_dir}/<dispatcher-workspace-id>.status"
+```
+
+This preserves the absolute main-checkout path below `qq-delegates`: linked
+worktrees resolve to the same Repository directory, and two different
+Repositories never map to the same directory. Create `status_dir` before the
+first rewrite. At every dispatcher-owned boundary, write the complete next
+detail document to a uniquely named temporary file in that directory, then
+atomically rename it over `status_file`. Continue with the other surface calls
+if the write fails.
+
+Write one block per delegate carrying only detail the sidebar tags cannot:
+the ticket id and short label; the current stage as context with the boundary
+timestamp in `since <timestamp>` form; runtime and steering handle; events and
+stderr artifact paths; the full untruncated reason when blocked or failed; a
+one-line envelope-verification summary with Checks and pass/fail once verified;
+and the PR number, URL, and final Checks state once open. Mark a handle or
+runtime-inapplicable artifact as unavailable instead of inventing it. Do not
+reproduce the ambient surface as a glyph table or stage summary. Remove a
+delegate's block at terminal disposition.
+
+Keep `$stage` values terse and use the settled boundary vocabulary: `queued`,
+`dispatched`, `working [round/step]`, `envelope received`, `envelope verified`,
+`review round N`, `PR #N open`, `BLOCKED: <short>`, and `FAILED: <short>`.
+Shorten only the tag's blocked or failed reason; preserve the full reason in
+the detail block.
+
+The existing `prefix+d` popup renders the Repository's detail files as a static
+snapshot. It is the only owned renderer and exists to carry what the Space and
+Agent `$stage` tags cannot; create no persistent rendering surface.
+
+After each rewrite attempt, invoke the applicable herdr calls synchronously as
+fire-and-forget reporting. Track the last sequence used by each source and
+choose `max(epoch seconds at call time, last-used + 1)` afresh for every call.
+The result must be strictly increasing even when several calls occur in one
+second; never reuse a sequence or substitute a restarting counter. Report the
+stage token on the ticket work session in both modes:
+
+```sh
+herdr workspace report-metadata <ticket-work-session-id> \
+  --source qq-dispatch --token stage="<one-liner>" \
+  --seq <next-seq> --ttl-ms 86400000
+```
+
+In board-driven mode, report each delegate on that work session's placeholder
+root pane from dispatch until terminal disposition:
+
+```sh
+herdr pane report-agent <placeholder-pane-id> \
+  --source qq-dispatch --agent <label> --state working|blocked|idle \
+  --message "<one-liner>" --seq <next-seq>
+```
+
+Use `working` only while the delegate process is alive, `blocked` for a
+consequential-decision stop or failure awaiting disposition, and `idle` after
+a normal exit while envelope, review, and PR work continues. In migrated
+single-Change mode, report the same stage rollup on the accountable pane as
+well as its own work session:
+
+```sh
+herdr pane report-metadata <own-pane-id> \
+  --source qq-dispatch --token stage="<batch-rollup-one-liner>" \
+  --seq <next-seq> --ttl-ms 86400000
+```
+
+When one work session hosts several delegates, make its single `stage` token a
+batch rollup: blocked or failed outranks every routine stage, and a routine
+update never overwrites a standing attention state. At the batch's terminal
+disposition, clear the workspace token and, in migrated mode, the accountable
+pane token; release each board-driven presence:
+
+```sh
+herdr workspace report-metadata <ticket-work-session-id> \
+  --source qq-dispatch --clear-token stage --seq <next-seq>
+herdr pane report-metadata <own-pane-id> \
+  --source qq-dispatch --clear-token stage --seq <next-seq>
+herdr pane release-agent <placeholder-pane-id> \
+  --source qq-dispatch --agent <label> --seq <next-seq>
+```
+
+Calculate a distinct `next-seq` for each command above. TTL is only the
+dead-owner backstop. If any report or release fails, log that channel once and
+continue.
+
+At the next natural boundary after dispatch, inspect the events file
+opportunistically for `thread.started`. Never read it at dispatch time and
+never wait or poll. Until the event appears, leave the stage context at
+`dispatched` and mark steering unavailable; retain the stderr file to diagnose
+a delegate that dies before its envelope. At the completion wake, reconcile a
+missing envelope to `FAILED: died before envelope`.
+
+Run `codex exec resume <thread-id>` only from a shell whose current working
+directory is inside that delegate's Change checkout: resume derives its
+sandbox writable root from the calling shell's cwd, not the session's recorded
+cwd. Otherwise dispatch a fresh `codex exec -C <checkout>` for the rework.
+
+On blocked or failed, run `herdr notification show "<ticket> needs attention"
+--body "<short actionable reason>" --sound request`. Verify that the result
+says it was shown; if the command fails or reports notifications disabled or
+not shown, plainly report the transcript/status-surface fallback and continue.
+
+Degrade without changing the automation contract: if herdr is down, keep
+dispatching and writing the detail file; if the file write fails, keep the
+sidebar current and carry the stage and details in the transcript. If a
+placeholder is missing, skip that presence report while retaining the
+workspace token and detail file. An absent, empty, or unflushed events file
+leaves the stage context at `dispatched` until another boundary; record the gap
+during envelope verification. A silent delegate death is corrected by the
+completion wake. After a dead dispatcher, reconcile from durable Tasks,
+envelopes, and worktrees, never from this glass.
+
+Feed Claude-subagent delegates into the same surface. Render the runtime as
+`claude`, move to `working` on the harness task-start acknowledgement, and use
+the subagent id through `SendMessage` as the steering handle.
 
 ## Verify the envelope and retain the gates
 
@@ -90,11 +221,11 @@ contest, open questions, unresolved risks, and the branch and worktree that
 contain the work. Verify every claim against the tree; an envelope claim is not
 yet evidence.
 
-The owner may steer a live delegate by resuming its Codex session or messaging
-its Claude subagent, but never hands over the lifecycle. Delegates do not run
-alignment interviews, reviews, or delivery. If a ticket encounters a new
-consequential decision, its delegate records the decision in the envelope and
-stops that ticket.
+The owner may steer a live delegate by resuming its Codex session under the
+Change-checkout cwd rule above or messaging its Claude subagent, but never
+hands over the lifecycle. Delegates do not run alignment interviews, reviews,
+or delivery. If a ticket encounters a new consequential decision, its delegate
+records the decision in the envelope and stops that ticket.
 
 The five gates remain unchanged: intent alignment, plan approval, review
 verdict, acceptance, and merge. Each ticket's Change still passes code-review
