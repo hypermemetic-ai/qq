@@ -7,9 +7,9 @@ updated_date: '2026-07-14 21:16'
 tags:
   - research
 ---
-# TASK-35 — Engine/glass split research findings
+# T-35 — Engine/glass split research findings
 
-Owning task: [TASK-35](</home/qqp/projects/qq/backlog/tasks/task-35 - Phase-4-—-Engine-glass-split-harness-native-delegation.md>)  
+Owning task: [T-35](</home/qqp/projects/qq/backlog/tasks/task-35 - Phase-4-—-Engine-glass-split-harness-native-delegation.md>)  
 Overall confidence: **HIGH** for Claude Code and Codex capabilities; **MEDIUM** for the market-wide interoperability conclusion.
 
 As of July 14, 2026, the research supports [doc-38’s](</home/qqp/projects/qq/backlog/docs/plans/doc-38 - Plan-—-Own-the-gates-qq-kernel-convergence.md>) proposed split. Claude Code and Codex now provide substantial native execution engines: delegation, concurrency, sandboxing, persistence, and vendor-specific operator surfaces. Claude’s new Agent view comes closest to also supplying local session glass; Codex supplies a richer programmatic control plane through app-server. Neither exposes all native teams, subagents, and live sessions through a common cross-vendor protocol. qq should therefore rent each harness’s engine, use its supported observation/control interface, and retain herdr as a thin cross-runtime glass, messaging, and notification layer—not rebuild vendor orchestration.
@@ -154,7 +154,7 @@ Confidence in these recommendations is **MEDIUM-HIGH**: vendor guidance and mult
 
 - The negative cross-vendor conclusion is necessarily non-exhaustive. Representative open-source cockpits and the relevant standards were reviewed, but private products may exist.
 
-- There is no controlled benchmark establishing one universally optimal sequential/fanout strategy. TASK-35 should validate the proposed bounded-concurrency model through fresh Checks on qq’s actual ticket mix.
+- There is no controlled benchmark establishing one universally optimal sequential/fanout strategy. T-35 should validate the proposed bounded-concurrency model through fresh Checks on qq’s actual ticket mix.
 
 ## Sources
 

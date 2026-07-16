@@ -11,7 +11,7 @@ tags:
 ---
 # Essential context delivery architecture for qq
 
-_Owning Task: TASK-2 · Research date: 2026-07-11 · Overall confidence: **HIGH** on the architecture and **MEDIUM** on runtime-specific behavior surviving upgrades._
+_Owning Task: T-2 · Research date: 2026-07-11 · Overall confidence: **HIGH** on the architecture and **MEDIUM** on runtime-specific behavior surviving upgrades._
 
 This report settles the logical architecture for delivering essential context. It does **not** choose which methodology rules survive, their wording, exact token budgets, or implementation details.
 
@@ -104,7 +104,7 @@ The exact answers for individual qq rules are the later methodology decisions.
 - a compact question-to-source and work-type-to-Skill routing map;
 - the minimum success/validation contract needed to know when work is complete.
 
-It should state each rule once and point outward. It should not reproduce Backlog procedures, Skill bodies, tool manuals, OpenWiki content, examples, or runtime setup. The current post-TASK-1 `AGENTS.md` is 8,858 bytes and 204 lines; this report deliberately does not decide which lines remain.
+It should state each rule once and point outward. It should not reproduce Backlog procedures, Skill bodies, tool manuals, OpenWiki content, examples, or runtime setup. The current post-T-1 `AGENTS.md` is 8,858 bytes and 204 lines; this report deliberately does not decide which lines remain.
 
 ### 2. Portable capability layer
 

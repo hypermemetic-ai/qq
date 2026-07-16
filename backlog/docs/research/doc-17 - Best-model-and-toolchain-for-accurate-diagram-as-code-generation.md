@@ -9,7 +9,7 @@ tags:
 ---
 # Best model and toolchain for accurate diagram-as-code generation
 
-**Owning task:** TASK-6 — Build diagram-generation skill: model + toolchain selection
+**Owning task:** T-6 — Build diagram-generation skill: model + toolchain selection
 **Date:** 2026-07-12 · **Overall confidence:** MEDIUM-HIGH
 **What this settles:** (1) which model the future diagram skill should use to generate diagram code from file sources and conversation context; (2) whether an external provider API call beats in-session Claude; (3) which diagram language/renderer toolchain to standardize on. Method: one background researcher over primary docs, arXiv benchmarks, Context7, and credible community evals; owning agent spot-checked the load-bearing citations (R2ABench claims verified against the paper; Excalidraw claim partially verified — see Findings 13/23; Anthropic pricing verified against the current Claude API reference).
 

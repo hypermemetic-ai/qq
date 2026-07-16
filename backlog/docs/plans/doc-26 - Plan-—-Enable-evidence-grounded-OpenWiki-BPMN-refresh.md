@@ -7,13 +7,13 @@ updated_date: '2026-07-13 02:46'
 ---
 # Plan — Enable evidence-grounded OpenWiki BPMN refresh
 
-**Owning Task:** TASK-6 — Living architecture model + rendered diagrams in OpenWiki
+**Owning Task:** T-6 — Living architecture model + rendered diagrams in OpenWiki
 
 ## Intent
 
-Deliver the first of two Changes for TASK-6: make sequence-flow evidence a backward-compatible capability of the shared BPMN pipeline, and define the dedicated OpenWiki maintainer's deterministic diagram-refresh procedure.
+Deliver the first of two Changes for T-6: make sequence-flow evidence a backward-compatible capability of the shared BPMN pipeline, and define the dedicated OpenWiki maintainer's deterministic diagram-refresh procedure.
 
-![TASK-6 source enablement plan](assets/doc-26/plan.png)
+![T-6 source enablement plan](assets/doc-26/plan.png)
 
 ## Ownership boundary
 

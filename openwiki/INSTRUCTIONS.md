@@ -29,7 +29,7 @@ The operator reads it second; agents read it first.
 ## Diagrams
 
 None. The wiki is prose-only: the BPMN toolchain and its authoring extension
-were removed from the Repository (TASK-55), and no diagram generation is part
+were removed from the Repository (T-55), and no diagram generation is part
 of a run. Do not generate, embed, or reference rendered diagrams. If diagrams
 return, this brief will say so explicitly.
 

@@ -8,7 +8,7 @@ updated_date: '2026-07-15 00:53'
 # Plan — Optimize the engine/glass architecture: Fable plans, codex executes
 
 Approved by the operator on 2026-07-14 after alignment in the accountable
-session, on the evidence of the TASK-35 delivery (a one-session ticket batch
+session, on the evidence of the T-35 delivery (a one-session ticket batch
 run entirely on harness primitives) and the doc-41 vendor research.
 
 ## Intent
@@ -60,18 +60,18 @@ unchanged.
 
 ## Changes
 
-1. **TASK-39 — delegate-batch skill.** Work-order brief composition,
+1. **T-39 — delegate-batch skill.** Work-order brief composition,
    codex-first runtime selection, completion envelope, one worktree per
    writing ticket, concurrency bound 3–5, sequential-vs-fanout per doc-41's
    work-shape table, both entry points, dispatcher posture.
-2. **TASK-40 — deliver-change diet round 2.** Attach-existing-checkout
+2. **T-40 — deliver-change diet round 2.** Attach-existing-checkout
    documented as the default when a checkout exists (harness worktrees adopt
-   cleanly; evidence in the TASK-35 delivery); agent-chosen,
+   cleanly; evidence in the T-35 delivery); agent-chosen,
    operator-renameable change labels with the CONCEPTS.md work-session
    definition updated to match; the handoff verifies the notification result
    and plainly reports the browser-only fallback when notifications are
    disabled.
-3. **TASK-41 — housekeeping sweep.** CONCEPTS.md gains "work order" and
+3. **T-41 — housekeeping sweep.** CONCEPTS.md gains "work order" and
    "completion envelope" and its "agent messaging" entry reflects the
    narrowed skill; an assigned openwiki refresh purges the deleted
    activation-chain description from `openwiki/operations.md`.
@@ -79,24 +79,24 @@ unchanged.
 ## Non-goals
 
 Review-loop changes and grafts (including the benchmark); herdr product or
-adapter work; TASK-37 machine identity; changes to the five gates; owned
+adapter work; T-37 machine identity; changes to the five gates; owned
 orchestration runtime code; schedulers or dependency DAGs; scheduled or
 headless dispatch entry.
 
 ## Evidence of success
 
-Each Change lands as its own green one-PR delivery. TASK-39 additionally
+Each Change lands as its own green one-PR delivery. T-39 additionally
 proves itself live: a real ticket batch executed end-to-end through a codex
 delegate under the skill, returning a conforming completion envelope,
-recorded in task notes. TASK-40 proves an honest handoff signal on a real
-delivery. TASK-41's wiki refresh lands as a maintainer docs pull request.
+recorded in task notes. T-40 proves an honest handoff signal on a real
+delivery. T-41's wiki refresh lands as a maintainer docs pull request.
 
 ## Sequencing
 
-TASK-39 first; TASK-40 and TASK-41 depend on its vocabulary and may land in
+T-39 first; T-40 and T-41 depend on its vocabulary and may land in
 either order after it.
 
 ## Amendments
 
-- 2026-07-14 — Operator-approved addition to TASK-40: headless delegates get optional cockpit visibility via a throwaway observability pane opened as a no-focus right split of the accountable pane (accountable keeps roughly 70% width), running tail -f --pid=<delegate-pid> on the delegate's output stream so the pane self-retires when the delegate exits — glass over the process artifact, no pane-lifecycle ownership. Self-retirement verified live; right-split placement corrected by operator UAT after a down-split squeezed the accountable pane (house convention per task-23).
-- 2026-07-15 — Observability pane withdrawn by operator UAT: both raw-tail and pane-hosted codex exec rendering judged too noisy against a real panel. Headless delegates stay hidden; delegate visibility moves to a designed status surface owned by TASK-42 (full design round in a fresh session, app-server adapter as candidate substrate for events and steering). The disposition-watch poll interval was tightened from 30 to 5 seconds by operator decision. TASK-40's pane acceptance criterion was removed; its remaining criteria stand.
+- 2026-07-14 — Operator-approved addition to T-40: headless delegates get optional cockpit visibility via a throwaway observability pane opened as a no-focus right split of the accountable pane (accountable keeps roughly 70% width), running tail -f --pid=<delegate-pid> on the delegate's output stream so the pane self-retires when the delegate exits — glass over the process artifact, no pane-lifecycle ownership. Self-retirement verified live; right-split placement corrected by operator UAT after a down-split squeezed the accountable pane (house convention per T-23).
+- 2026-07-15 — Observability pane withdrawn by operator UAT: both raw-tail and pane-hosted codex exec rendering judged too noisy against a real panel. Headless delegates stay hidden; delegate visibility moves to a designed status surface owned by T-42 (full design round in a fresh session, app-server adapter as candidate substrate for events and steering). The disposition-watch poll interval was tightened from 30 to 5 seconds by operator decision. T-40's pane acceptance criterion was removed; its remaining criteria stand.

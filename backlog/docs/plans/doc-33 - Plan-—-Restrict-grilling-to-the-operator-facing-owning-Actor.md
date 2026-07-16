@@ -34,10 +34,10 @@ Plan: /home/qqp/.herdr/worktrees/qq/fix-grilling-owner-boundary/backlog/docs/pla
 
 | ID | Name | Type | Status | Evidence / note |
 | --- | --- | --- | --- | --- |
-| start | Actor boundary approved | StartEvent | done | Evidence: TASK-24 records the operator-approved Actor boundary and prescribed execution sequence. |
-| capture_transcript_red | Capture live maintainer RED | ServiceTask | done | Evidence: TASK-24 description and notes record live maintainer session 019f5e0f-9a35-7b71-9203-03457d271bb2 reopening alignment for its bounded event assignment. |
+| start | Actor boundary approved | StartEvent | done | Evidence: T-24 records the operator-approved Actor boundary and prescribed execution sequence. |
+| capture_transcript_red | Capture live maintainer RED | ServiceTask | done | Evidence: T-24 description and notes record live maintainer session 019f5e0f-9a35-7b71-9203-03457d271bb2 reopening alignment for its bounded event assignment. |
 | add_regression_check | Add Actor-boundary regression Check | ServiceTask | done | Evidence: tests/test-grilling.sh is the executable Actor-boundary regression Check. |
-| run_prechange_check | Run Check against pre-change Skill | ServiceTask | done | Evidence: TASK-24 notes record an unchanged-Skill gate followed by tests/test-grilling.sh exit 1 with the missing owner-only trigger boundary. |
+| run_prechange_check | Run Check against pre-change Skill | ServiceTask | done | Evidence: T-24 notes record an unchanged-Skill gate followed by tests/test-grilling.sh exit 1 with the missing owner-only trigger boundary. |
 | red_established | Regression Check RED? | ExclusiveGateway | done | Evidence: Both the live maintainer transcript and the focused pre-change Check reproduced the defect; the yes branch was taken. |
 | red_missing | No reproducible regression | EndEvent | skipped | Note: The regression reproduced in both required RED surfaces, so the no-reproduction error branch was not taken. |
 | update_grilling_skill | Encode the owner-only grilling boundary | ServiceTask | done | Evidence: skills/grilling/SKILL.md limits invocation to the operator-facing owning agent and defines the bounded non-owning return path. |
@@ -51,7 +51,7 @@ Plan: /home/qqp/.herdr/worktrees/qq/fix-grilling-owner-boundary/backlog/docs/pla
 | operator_uat | Accept the Actor-boundary wording | UserTask | done | Evidence: The operator reviewed the updated grilling Skill and explicitly replied accepted. |
 | uat_accepted | Operator accepts behavior? | ExclusiveGateway | done | Evidence: Operator acceptance selected the yes branch. |
 | uat_gap | Return for boundary correction | EndEvent | skipped | Note: Operator UAT reported no mismatch, so the correction error branch was not taken. |
-| complete_delivery | Complete qq Change delivery | CallActivity | done | Evidence: Independent review closed with no material findings after exact-delta re-review; commit 966debe was pushed and PR #65 is open, mergeable, CLEAN, and has no configured GitHub Checks.<br>Note: Conformance recording and TASK-24 finalization are closeout metadata outside BPMN flow nodes and follow this report in the same PR. |
+| complete_delivery | Complete qq Change delivery | CallActivity | done | Evidence: Independent review closed with no material findings after exact-delta re-review; commit 966debe was pushed and PR #65 is open, mergeable, CLEAN, and has no configured GitHub Checks.<br>Note: Conformance recording and T-24 finalization are closeout metadata outside BPMN flow nodes and follow this report in the same PR. |
 | green_pr_ready | Green PR ready | EndEvent | done | Evidence: GitHub PR #65 provides the reviewed green one-PR handoff surface for this Change. |
 
 ## Unaccounted elements

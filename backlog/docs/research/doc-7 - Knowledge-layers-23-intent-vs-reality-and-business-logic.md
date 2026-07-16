@@ -292,14 +292,14 @@ codebase) · intent + work status = Backlog.md · durable descriptive docs =
 OpenWiki · opportunistic/episodic docs = compound · enforcement = the gate at
 landing.
 
-## Addendum 3 (07-08, TASK-7) - OpenWiki engine decision
+## Addendum 3 (07-08, T-7) - OpenWiki engine decision
 
 > **Superseded 2026-07-10.** The operator adopted upstream OpenWiki's local
 > ChatGPT OAuth provider after PR #151 merged. See
 > Backlog document `doc-9` for the dated evidence and
 > its current supersession note.
 
-TASK-7 kept the Layer B decision and narrowed the execution engine. Durable
+T-7 kept the Layer B decision and narrowed the execution engine. Durable
 descriptive docs still target `openwiki/` and still refresh inside the gate
 transaction, but the follow-up implementation should not depend on the upstream
 OpenWiki CLI plus an API key. The adopted path is a bespoke
@@ -307,4 +307,4 @@ OpenWiki CLI plus an API key. The adopted path is a bespoke
 discipline, preserves the `openwiki/.last-update.json` gitHead protocol, and
 keeps the existing self-guarding refresh behavior. The current
 `bin/qq-openwiki-refresh` remains the CLI/API-key-guarded stopgap until that
-follow-up lands; see Backlog document `doc-9`; the historical TASK-7 record was erased during the minimum-entity refactor.
+follow-up lands; see Backlog document `doc-9`; the historical T-7 record was erased during the minimum-entity refactor.

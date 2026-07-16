@@ -28,7 +28,7 @@ When reevaluating, measure the local pipeline and the larger operator-visible lo
 
 ## Verification
 
-Measured on 2026-07-12 with Node.js 22.22.3 using the real TASK-8 plan spec and five independent process runs:
+Measured on 2026-07-12 with Node.js 22.22.3 using the real T-8 plan spec and five independent process runs:
 
 - build median: 0.21 seconds; observed range 0.19–0.25 seconds
 - render median: 1.42 seconds; observed range 1.31–1.78 seconds

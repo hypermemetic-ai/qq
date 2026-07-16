@@ -102,7 +102,7 @@ deletions safe.
   (CONCEPTS.md; lesson in doc-39): it intercepts a well-meaning Actor's
   accidental mandate violation and is not a security boundary. Exact
   enforcement of "only the operator merges" moved to the resource layer
-  (TASK-36): a GitHub ruleset on `main` requires a pull request with green
+  (T-36): a GitHub ruleset on `main` requires a pull request with green
   `bpmn-tests` and `shell-tests` for every actor, admins included, and
   rejects direct pushes, force pushes, and deletion. Agent-credential
   separation (a dedicated machine account) was deferred by operator

@@ -3,11 +3,11 @@ id: doc-48
 title: 'Conventions — board hygiene, Task vocabulary, board deep links'
 type: guide
 created_date: '2026-07-16 17:08'
-updated_date: '2026-07-16 17:22'
+updated_date: '2026-07-16 23:30'
 ---
 # Conventions — board hygiene, Task vocabulary, board deep links
 
-Settled under TASK-46 (operator-directed toolchain adoption, 2026-07-15;
+Settled under T-46 (operator-directed toolchain adoption, 2026-07-15;
 recorded by the accountable session 2026-07-16). Each convention is cheap to
 reverse; contest by editing this doc through a reviewed Change.
 
@@ -19,8 +19,27 @@ before its finalization commit (cheap, catches cross-worktree ID collisions
 at the moment they can be repaired without history rewrites). The Done-sweep
 chore itself: run doctor, then `backlog task complete` every Done Task on the
 active board. Concurrent Task minting across sessions remains unsafe between
-audits — mint serially in one checkout (the TASK-46 observation stands; do
+audits — mint serially in one checkout (the T-46 observation stands; do
 not generalize the one observed skip into a guarantee).
+
+## Task id scheme: T-n
+
+Adopted 2026-07-16 under T-65 (operator-directed one-time rename from the
+original TASK-n scheme). Task ids use the prefix `t`: files are `t-n`, ids
+render as `T-n`. The backlog CLI refuses `config set taskPrefix` after init
+by design; the migration edited `task_prefix` in `backlog/config.yml`
+directly and renamed every task file and id in the same Change (verified:
+list, view, create, and doctor all resolve the migrated ids).
+
+Boundary rules, settled here so nobody re-derives them:
+
+- Pre-cutover git history, PR titles, and branch names keep the TASK-n /
+  task-n spellings permanently — grep both spellings when doing archaeology
+  across the cutover.
+- Lowercase `task-n` strings in Task records that name other projects' tasks
+  (deciq, deciq-logic), historical branch or worktree names, or quoted
+  evidence paths were deliberately left unchanged: they are verbatim
+  identifiers of things outside this repo's id scheme, not vocabulary.
 
 ## Task vocabulary: types and priorities
 
@@ -29,14 +48,14 @@ not generalize the one observed skip into a guarantee).
   documented in docs/plans and owned by ordinary Tasks. New Tasks set a type.
 - Priorities: adopt High/Medium/Low for batch triage (dispatch order and
   operator attention), leaving no-priority as valid for convention/meta
-  Tasks. First live use: the 2026-07-16 board-driven batch (TASK-56…61).
+  Tasks. First live use: the 2026-07-16 board-driven batch (T-56…61).
 
 ## Board deep links
 
 The browser board serves /tasks/:id on the configured port (6420). Delegate
 status-surface detail blocks carry a ticket line with that URL per delegate
 (adopted live in the 2026-07-16 batch). Honest caveat recorded from the
-TASK-59 diagnosis: no long-lived board server runs by default, so the links
+T-59 diagnosis: no long-lived board server runs by default, so the links
 resolve only while the operator has `backlog browser` up; the terminal
 `backlog board` TUI has no deep-link surface. The link is a convenience
 pointer, not a liveness claim.

@@ -46,7 +46,7 @@ Preservation-only relocation; never clean blindly (refuse, don't sanitise):
 
 ## Verification
 
-PR #69 (TASK-27, pipeline relocation) on 2026-07-14: the primary checkout's
+PR #69 (T-27, pipeline relocation) on 2026-07-14: the primary checkout's
 post-merge sync gate failed on 79M of stranded node_modules plus 1.9M of
 generated output at the old path. After the preservation moves and non-forcing
 rmdir, all final gates passed and main synchronized to the merge commit.

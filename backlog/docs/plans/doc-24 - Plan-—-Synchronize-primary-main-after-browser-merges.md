@@ -47,7 +47,7 @@ Plan: `backlog/docs/plans/assets/doc-24/plan.bpmn`
 
 | ID | Name | Type | Status | Evidence / note |
 | --- | --- | --- | --- | --- |
-| scope_approved | Safe post-merge synchronization approved | StartEvent | done | Evidence: TASK-14 implementation notes record operator approval of the rendered doc-24 plan before implementation |
+| scope_approved | Safe post-merge synchronization approved | StartEvent | done | Evidence: T-14 implementation notes record operator approval of the rendered doc-24 plan before implementation |
 | update_skill | Update deliver-change lifecycle | ServiceTask | done | Evidence: Commit b126268 and merged PR #45 update deliver-change and its OpenAI interface metadata |
 | verification_entry | Enter verification | ExclusiveGateway | done | Evidence: Verification was entered initially and re-entered after forward-test and independent-review corrections |
 | validate_skill | Validate Skill structure | ServiceTask | done | Evidence: skill-creator quick_validate reported Skill is valid; openai.yaml parsed successfully; diff hygiene passed |
@@ -55,7 +55,7 @@ Plan: `backlog/docs/plans/assets/doc-24/plan.bpmn`
 | review_change | Run fresh-context review | ServiceTask | done | Evidence: Independent read-only review found pull/ref races and stale evidence stamps; exact final corrective and staged deltas had no material findings |
 | review_decision | Change green? | ExclusiveGateway | done | Evidence: The findings branch was taken, then the green branch after immutable-target and evidence corrections |
 | fix_findings | Fix in-scope findings | ServiceTask | done | Evidence: The protocol gained exclusive-use refusal, immutable target capture/validation/integration, final ancestry checks, and corrected doc-24 evidence references |
-| finalize_task | Finalize TASK-14 | ServiceTask | done | Evidence: TASK-14 is Done with all four acceptance criteria checked, final notes, modified-file records, and final summary in commit b126268 |
+| finalize_task | Finalize T-14 | ServiceTask | done | Evidence: T-14 is Done with all four acceptance criteria checked, final notes, modified-file records, and final summary in commit b126268 |
 | publish_change | Commit, push, and open PR | ServiceTask | done | Evidence: Reviewed commit b126268 was pushed and published as PR #45 with merge state CLEAN and no configured status checks |
 | operator_review | Operator reviews PR | UserTask | done | Evidence: PR #45 remained visible in Zen Browser and the operator merged it at 2026-07-13T00:13:16Z |
 | disposition_entry | Enter disposition check | ExclusiveGateway | done | Evidence: PR #45 entered operator disposition after persistent browser visibility was verified |
@@ -70,7 +70,7 @@ Plan: `backlog/docs/plans/assets/doc-24/plan.bpmn`
 | sha_match | SHAs match? | ExclusiveGateway | done | Evidence: Local main HEAD, captured fetched target, PR #45 merge commit, and GitHub main all resolved to c1b498b52b187982aa7d62db742b76c442285034 |
 | report_mismatch | Verification failed | EndEvent | skipped | Note: All final branch, cleanliness, SHA, and merge-ancestry checks passed |
 | record_conformance | Record plan conformance | ServiceTask | done | Evidence: backlog/docs/plans/assets/doc-24/completions.json accounts for execution and conformance.md is generated from the landed plan |
-| board_current | Primary main and board current | EndEvent | done | Evidence: The standing Herdr Backlog pane refreshed to Done (9) and visibly listed TASK-14 after primary main synchronized |
+| board_current | Primary main and board current | EndEvent | done | Evidence: The standing Herdr Backlog pane refreshed to Done (9) and visibly listed T-14 after primary main synchronized |
 
 ## Unaccounted elements
 

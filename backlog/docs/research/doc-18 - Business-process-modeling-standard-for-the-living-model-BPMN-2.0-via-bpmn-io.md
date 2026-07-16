@@ -9,7 +9,7 @@ tags:
 ---
 # Business-process modeling standard for the living model: BPMN 2.0 via bpmn-io
 
-**Owning task:** TASK-6 — Living architecture model + rendered diagrams in OpenWiki
+**Owning task:** T-6 — Living architecture model + rendered diagrams in OpenWiki
 **Date:** 2026-07-12 · **Overall confidence:** MEDIUM-HIGH (toolchain facts HIGH; visual-quality fitness untestable from documents — gated on smoke test)
 **What this settles:** which business-process modeling standard + toolchain completes the living-model pipeline alongside Structurizr/C4, per the operator's requirement of a "proper" solution before committing. Also surfaces a **correction to the architecture leg**: `structurizr-cli export -format d2` is broken on current CLI releases (exporter removed 2025-09-30); the docs page listing d2 is stale. Method: one background researcher over OMG specs, bpmn-io repos/issues, Context7, and tool sources; owning agent spot-checked both load-bearing claims at the source (bpmn-auto-layout README limitations verbatim; `D2_FORMAT` commented out in structurizr-cli master `ExportCommand.java`).
 
@@ -52,7 +52,7 @@ tags:
 
 ### Architecture-leg correction (composability alert)
 
-16. (HIGH — spot-checked by owning agent) **`structurizr-cli export -format d2` is broken on current releases.** Commit 2025-09-30: "Temporarily remove D2 exporter — it has clashing dependencies"; on master, `D2_FORMAT` and its EXPORTERS registration are commented out in `ExportCommand.java` (verified directly); official structurizr-export has no d2 package. Last release with d2: **v2025.05.28**. The docs page still listing d2 (https://docs.structurizr.com/cli/export) is stale — the earlier TASK-6 verification relied on it and is hereby corrected. Repair options:
+16. (HIGH — spot-checked by owning agent) **`structurizr-cli export -format d2` is broken on current releases.** Commit 2025-09-30: "Temporarily remove D2 exporter — it has clashing dependencies"; on master, `D2_FORMAT` and its EXPORTERS registration are commented out in `ExportCommand.java` (verified directly); official structurizr-export has no d2 package. Last release with d2: **v2025.05.28**. The docs page still listing d2 (https://docs.structurizr.com/cli/export) is stale — the earlier T-6 verification relied on it and is hereby corrected. Repair options:
     - (a) **Pin structurizr-cli v2025.05.28** (keeps d2; foregoes newer CLI fixes);
     - (b) **`export -format fqcn` + third-party jar** io.github.goto1134:structurizr-d2-exporter 1.6.0 (Mar 2025; cannot export dynamic views — irrelevant, we don't use them);
     - (c) **Switch the C4 leg to PlantUML export** (actively supported, light/dark variants) — unifies architecture + process rendering on one PlantUML JAR if the PlantUML fallback also wins the process leg, at some cost in visual polish vs d2.
@@ -78,7 +78,7 @@ c. Test lanes and expanded-sub-process behavior (both undocumented/contradicted)
 d. Confirm `documentation`/`extensionElements` survive `layoutProcess` round-trip.
 e. Confirm watermark placement is acceptable (license requires keeping it).
 f. In parallel, settle the C4 leg: render one C4 view via pinned-CLI d2, fqcn+goto1134 jar, and PlantUML export; compare.
-Pass → commit TASK-6 design as BPMN + Structurizr. Fail on visuals → PlantUML activity fallback (and consider option (c) to unify renderers).
+Pass → commit T-6 design as BPMN + Structurizr. Fail on visuals → PlantUML activity fallback (and consider option (c) to unify renderers).
 
 ## Sources (all opened 2026-07-12)
 
