@@ -60,9 +60,10 @@ Within plan bounds, default execution to Codex's non-interactive runner in a
 workspace-write sandbox confined to the ticket's worktree:
 
 ```sh
-codex exec \
+timeout -k 10 3600 codex exec \
   -c 'skills.include_instructions=false' \
   -c 'skills.bundled.enabled=false' \
+  -c 'mcp_servers={}' \
   --sandbox workspace-write \
   --skip-git-repo-check \
   -C <ticket-worktree-root> \
@@ -77,9 +78,20 @@ completion envelope the work order requires." \
 
 Substitute only the bracketed paths; keep all other prompt text exact. Never
 place ticket content or other free text on the command line, where shell
-quoting can execute it before the sandbox exists. Keep both the work order and
-completion envelope in the OS temporary directory. Put each delegate's events
-and stderr files there beside them.
+quoting can execute it before the sandbox exists.
+
+The `timeout -k 10 3600` wrapper contains the startup wedge (doc-45): a
+`codex exec` that parks before its first byte would otherwise never exit,
+and process exit is the only completion wake. Plain `timeout` signals its
+own process group and reaps the full codex process tree (probe-verified,
+2026-07-16); never wrap it in `setsid`, which detaches the group and leaks
+the tree. Tune the bound to the ticket, not below real work time.
+`mcp_servers={}` spawns delegates MCP-less, removing the per-spawn network
+fetch that dominates wedge probability; a ticket that genuinely needs an MCP
+server omits that override deliberately and says so in its work order.
+
+Keep both the work order and completion envelope in the OS temporary
+directory. Put each delegate's events and stderr files there beside them.
 
 Use a Claude subagent instead only when the assignment needs harness-native
 tools or judgment beyond the plan's bounds. This is the operator-settled split:
@@ -139,7 +151,7 @@ stage token on the ticket work session in both modes:
 ```sh
 herdr workspace report-metadata <ticket-work-session-id> \
   --source qq-dispatch --token stage="<one-liner>" \
-  --seq <next-seq> --ttl-ms 86400000
+  --seq <next-seq> --ttl-ms 7200000
 ```
 
 In board-driven mode, report each delegate on that work session's placeholder
@@ -160,7 +172,7 @@ well as its own work session:
 ```sh
 herdr pane report-metadata <own-pane-id> \
   --source qq-dispatch --token stage="<batch-rollup-one-liner>" \
-  --seq <next-seq> --ttl-ms 86400000
+  --seq <next-seq> --ttl-ms 7200000
 ```
 
 When one work session hosts several delegates, make its single `stage` token a
@@ -179,15 +191,23 @@ herdr pane release-agent <placeholder-pane-id> \
 ```
 
 Calculate a distinct `next-seq` for each command above. TTL is only the
-dead-owner backstop. If any report or release fails, log that channel once and
-continue.
+dead-owner backstop; keep it near twice the dispatch bound (7200000 for the
+default 3600-second bound) so an orphaned claim outlives a wedged delegate's
+containment, not the workday. If any report or release fails, log that
+channel once and continue.
 
-At the next natural boundary after dispatch, inspect the events file
-opportunistically for `thread.started`. Never read it at dispatch time and
-never wait or poll. Until the event appears, leave the stage context at
-`dispatched` and mark steering unavailable; retain the stderr file to diagnose
+At every dispatcher-owned boundary after dispatch, sweep each non-terminal
+delegate's events file — one head-read apiece — for `thread.started`, and
+publish `working` with the steering handle as soon as it appears. Never read
+an events file at dispatch time and never wait or poll between boundaries.
+Until the event appears, leave the stage context at `dispatched` and mark
+steering unavailable; when a delegate's events file still carries no
+`thread.started` ten minutes after dispatch, set `BLOCKED: no thread after
+10m` and raise the attention notification — a startup wedge is
+indistinguishable from this on the glass. Retain the stderr file to diagnose
 a delegate that dies before its envelope. At the completion wake, reconcile a
-missing envelope to `FAILED: died before envelope`.
+missing envelope to `FAILED: died before envelope` and a 124 exit status to
+`FAILED: startup/turn wedge (timeout)`.
 
 Run `codex exec resume <thread-id>` only from a shell whose current working
 directory is inside that delegate's Change checkout: resume derives its

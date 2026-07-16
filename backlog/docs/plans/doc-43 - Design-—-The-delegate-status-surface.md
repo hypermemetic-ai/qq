@@ -3,7 +3,7 @@ id: doc-43
 title: Design — The delegate status surface
 type: specification
 created_date: '2026-07-15 02:51'
-updated_date: '2026-07-16 04:17'
+updated_date: '2026-07-16 18:59'
 tags:
   - design
   - delegation
@@ -491,3 +491,35 @@ Herdr silently ignored a clear that reused the preceding report's second.
 `codex exec resume` derives its sandbox writable root from the calling shell's
 cwd, not the session's recorded cwd. Resume only with cwd inside the Change
 checkout; otherwise dispatch a fresh `codex exec -C <checkout>`.
+
+### 2026-07-16 — Round 4: startup-wedge containment and the boundary sweep (TASK-63)
+
+The TASK-58 diagnosis (doc-45) found the wake contract's blind spot: a
+`codex exec` that wedges before its first byte never exits, so the single
+completion wake never fires and the glass shows `dispatched` forever. This
+round amends the feeds accordingly; sections not named here stand as written.
+
+1. **Dispatch containment.** The sanctioned command shape gains
+   `timeout -k 10 <bound>` (default bound 3600 s) and the MCP-less override
+   `-c 'mcp_servers={}'`. Kill-path probe (2026-07-16): plain `timeout -k`
+   signals its own process group and reaps the full three-process codex tree
+   (exit 124, no survivors); `setsid` detaches the group and leaks it —
+   never combine them. The wrapper alters when the parent gives up, not what
+   the delegate may do; sandbox flags, the envelope file, and
+   process-exit-as-wake are unchanged.
+2. **Wake vocabulary.** The completion wake reconciles exit 124 to
+   `FAILED: startup/turn wedge (timeout)` alongside the existing
+   `FAILED: died before envelope`.
+3. **Boundary sweep supersedes the single-file opportunistic read.** At
+   every dispatcher-owned boundary the reporter head-reads every
+   non-terminal delegate's events file for `thread.started`, publishing
+   `working` and the steering handle as soon as they exist (round 1 read
+   only the boundary delegate's own file, so `working` often never rendered
+   — observed live on 2026-07-16). No polling is introduced: reads happen
+   only at boundaries the dispatcher already occupies. An events file still
+   empty ten minutes after dispatch escalates `BLOCKED: no thread after 10m`
+   with the attention notification — this is what makes a startup wedge
+   visible before its timeout.
+4. **TTL alignment.** Sidebar `--ttl-ms` drops from 86400000 to 7200000,
+   about twice the default dispatch bound: the backstop should outlive a
+   contained wedge, not the workday.
