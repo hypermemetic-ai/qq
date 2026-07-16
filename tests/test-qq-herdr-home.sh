@@ -183,7 +183,13 @@ grep -Fq 'follow-on dispatch' "$ROOT/skills/deliver-change/SKILL.md"
 if grep -Fq 'observability pane' "$ROOT/skills/delegate-batch/SKILL.md"; then
   fail 'delegate-batch must not reintroduce the observability pane (operator UAT rejected it; the status surface owns delegate visibility)'
 fi
-grep -Fq 'qq-herdr-home focus-board --repo <root>' "$ROOT/skills/deliver-change/SKILL.md"
+tr '\n\t' '  ' <"$ROOT/skills/deliver-change/SKILL.md" | \
+  grep -qE 'do not run `qq-herdr-home +focus-board`'
+grep -Fq 'leave operator focus untouched' "$ROOT/skills/deliver-change/SKILL.md"
+if tr '\n\t' '  ' <"$ROOT/skills/deliver-change/SKILL.md" | \
+  grep -qE 'qq-herdr-home +focus-board +--repo'; then
+  fail 'deliver-change reintroduced the disposition-time focus-board invocation (focus-board is operator-invocable only)'
+fi
 if grep -Fq -- 'herdr agent start' "$ROOT/skills/agent-messaging/SKILL.md"; then
   fail "agent-messaging reintroduced delegate lifecycle machinery"
 fi
