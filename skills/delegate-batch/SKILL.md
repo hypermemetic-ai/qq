@@ -99,7 +99,7 @@ Fable composes plans, briefs, and verdicts; codex executes within them.
 
 ## Report the batch on the status surface
 
-Follow doc-43 as amended 2026-07-16 round 3. Treat every visibility action as
+Follow doc-43 as amended 2026-07-16 round 4. Treat every visibility action as
 best-effort glass; it never gates dispatch, the envelope contract, or the
 single completion wake.
 

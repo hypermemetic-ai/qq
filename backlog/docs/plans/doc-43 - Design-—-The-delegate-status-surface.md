@@ -3,7 +3,7 @@ id: doc-43
 title: Design — The delegate status surface
 type: specification
 created_date: '2026-07-15 02:51'
-updated_date: '2026-07-16 18:59'
+updated_date: '2026-07-16 19:06'
 tags:
   - design
   - delegation
@@ -506,7 +506,14 @@ round amends the feeds accordingly; sections not named here stand as written.
    (exit 124, no survivors); `setsid` detaches the group and leaks it —
    never combine them. The wrapper alters when the parent gives up, not what
    the delegate may do; sandbox flags, the envelope file, and
-   process-exit-as-wake are unchanged.
+   process-exit-as-wake are unchanged. This supersedes, by name, the
+   round-1 "Automation-contract preservation" sentence "The only
+   command-line delta is `--json` plus output redirections, which grant the
+   delegate nothing" and round 2's AC #3 restatement "no delegate
+   command-line delta beyond round 1's sanctioned `--json` and
+   redirections": the sanctioned deltas are now the `timeout -k` wrapper,
+   `-c 'mcp_servers={}'`, `--json`, and the output redirections — none of
+   which grant the delegate anything.
 2. **Wake vocabulary.** The completion wake reconciles exit 124 to
    `FAILED: startup/turn wedge (timeout)` alongside the existing
    `FAILED: died before envelope`.
