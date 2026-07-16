@@ -105,7 +105,7 @@ qq's worktree model.
   authored via `writing-skills`) will route agents to it for relational/impact
   queries only. `auto_index=true`, `auto_watch=true` (black-box freshness;
   index is derived, out-of-repo, 0.2 s to rebuild). **Operationalization
-  follow-up (07-08):** TASK-18 records that adoption did not leave the qq main
+  follow-up (07-08):** T-18 records that adoption did not leave the qq main
   tree indexed, while throwaway gate worktrees were being indexed; it owns the
   main-tree query smoke, gate-worktree exclusion/accept decision, multi-worktree
   verification, and disconnect diagnosis.

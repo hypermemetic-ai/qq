@@ -16,7 +16,7 @@ through its own input path:
 
 Exact enforcement lives at the resource that owns each invariant: a GitHub
 ruleset on main requires a pull request with green checks for every actor
-and rejects direct pushes (TASK-36), and the backlog CLI owns managed
+and rejects direct pushes (T-36), and the backlog CLI owns managed
 markdown. This guard's role is fast local feedback inside the agent loop.
 
 Declared threat model: agent-typed tool calls in ordinary idiom — ordinary

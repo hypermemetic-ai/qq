@@ -18,7 +18,7 @@ model**. Mechanics smoke-tested 07-08 (scratch workspace): `herdr agent start â€
 `herdr agent send cx-<branch>` + `herdr pane send-keys <pane> Enter` delivers
 prompts after a brief read/settle before Enter; `herdr agent wait
 cx-<branch> --status idle` unblocks when Codex surfaces `done` at turn end;
-herdr captures the codex session id. This doc is slice 0 of the gated TASK-8
+herdr captures the codex session id. This doc is slice 0 of the gated T-8
 slicing pilot; the later slices land as their own gated runs, serially._
 
 ## Goal
@@ -55,7 +55,7 @@ label** on both the tab and its panes:
 - worker panes are named `cx-<branch>` with branches named `task-<id>-<slug>`,
   so every pane in the group carries the task id in its name.
 
-Consumers (TASK-11's lifecycle view) **join on `task-<id>`**, not on tab
+Consumers (T-11's lifecycle view) **join on `task-<id>`**, not on tab
 containment â€” the relation then survives a pane being moved to another tab.
 Containment is the fast path; the label is the source of truth.
 

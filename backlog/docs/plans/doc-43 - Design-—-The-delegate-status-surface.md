@@ -10,7 +10,7 @@ tags:
 ---
 # Design — The delegate status surface
 
-Owning task: [TASK-42](</home/qqp/projects/qq/backlog/tasks/task-42 - Design-the-delegate-status-surface.md>)
+Owning task: [T-42](</home/qqp/projects/qq/backlog/tasks/task-42 - Design-the-delegate-status-surface.md>)
 Warm-start inputs: doc-41 (vendor research), doc-42 (engine/glass plan and its
 2026-07-15 amendment withdrawing the observability pane).
 
@@ -103,7 +103,7 @@ terminal disposition. The sidebar never claims a dead process is working.
 ## Where it lives
 
 **Primary — the orchestrator status pane.** A persistent right split of the
-dispatcher's pane (house geometry per task-23: right split, accountable pane
+dispatcher's pane (house geometry per T-23: right split, accountable pane
 keeps roughly 70%), running:
 
 ```
@@ -142,7 +142,7 @@ probe-verified), so sidebar reporting is skipped and the status pane alone
 carries visibility. Sidebar reporting never creates a pane.
 
 **Escalation.** On `blocked` or `failed`, the dispatcher additionally runs
-`herdr notification show` under TASK-40's honesty rule: verify the result
+`herdr notification show` under T-40's honesty rule: verify the result
 and plainly report the fallback when notifications are disabled (as they are
 in the current environment). The state always renders in the table; the
 sidebar and workspace-dot escalation exist in board-driven mode only — in
@@ -314,7 +314,7 @@ when any of these becomes true:
   glass said `dispatched` (basis of the stderr-capture requirement and the
   wake-reconciliation rule).
 
-## Follow-up (not part of TASK-42)
+## Follow-up (not part of T-42)
 
 Wiring this into the delegate-batch skill — the status file writes, the
 sidebar report/release calls, the idempotent pane-open, the stderr capture,
@@ -324,7 +324,7 @@ for that ticket.
 
 ## Amendments
 
-### 2026-07-15 — Round 2: herdr 0.7.4 (TASK-42 reopened)
+### 2026-07-15 — Round 2: herdr 0.7.4 (T-42 reopened)
 
 herdr 0.7.4 was released the same afternoon this design settled (its release
 and this document's final update carry the same timestamp), shipping three
@@ -333,7 +333,7 @@ layouts with custom `$name` metadata tokens on Space and Agent entries,
 `herdr workspace report-metadata` / extended `herdr pane report-metadata`
 CLI reporting with `--ttl-ms`/`--seq`/`--clear-token` semantics, and
 session-modal popup panes for custom keybindings. The operator reopened
-TASK-42 the same evening with one added question (the session-posture
+T-42 the same evening with one added question (the session-posture
 disposition, AC #4). This amendment re-settles the affected sections against
 0.7.4, verified by fresh live probes; everything not named here stands as
 written.
@@ -460,9 +460,9 @@ workspace `$stage` token calls at each boundary (with `--seq` and
 keybinding over the status files, and unchanged round-1 scope (status-file
 writes, `report-agent`/`release-agent` presence and color calls, idempotent
 pane open, stderr capture, amended `codex exec` line). The sidebar config
-rows land with TASK-42 round 2 itself and are inert until reported.
+rows land with T-42 round 2 itself and are inert until reported.
 
-### 2026-07-16 — Round 3: operator live UAT (TASK-45)
+### 2026-07-16 — Round 3: operator live UAT (T-45)
 
 Live UAT re-settles the rendering surface and supersedes the affected round-1
 and round-2 text:
@@ -492,9 +492,9 @@ Herdr silently ignored a clear that reused the preceding report's second.
 cwd, not the session's recorded cwd. Resume only with cwd inside the Change
 checkout; otherwise dispatch a fresh `codex exec -C <checkout>`.
 
-### 2026-07-16 — Round 4: startup-wedge containment and the boundary sweep (TASK-63)
+### 2026-07-16 — Round 4: startup-wedge containment and the boundary sweep (T-63)
 
-The TASK-58 diagnosis (doc-45) found the wake contract's blind spot: a
+The T-58 diagnosis (doc-45) found the wake contract's blind spot: a
 `codex exec` that wedges before its first byte never exits, so the single
 completion wake never fires and the glass shows `dispatched` forever. This
 round amends the feeds accordingly; sections not named here stand as written.

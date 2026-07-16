@@ -9,7 +9,7 @@ tags:
 ---
 # Fowler smells in code review
 
-- **Owning task:** TASK-32 — Collapse qq to the minimum entity set
+- **Owning task:** T-32 — Collapse qq to the minimum entity set
 - **Overall confidence:** MEDIUM
 - **Settles:** Fowler-style prompting has evidence as a reviewer recall aid, but
   the evidence does not justify qq's fixed twelve-smell inventory with one-step

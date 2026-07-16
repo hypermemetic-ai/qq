@@ -5,7 +5,7 @@ type: other
 created_date: '2026-07-13 05:19'
 updated_date: '2026-07-13 14:55'
 ---
-TASK-6 plan for teaching the OpenWiki internal generator to select and author helpful BPMN alongside Markdown. The dedicated outer maintainer remains the invoker, verifier, and delivery Actor; it is not the diagram author.
+T-6 plan for teaching the OpenWiki internal generator to select and author helpful BPMN alongside Markdown. The dedicated outer maintainer remains the invoker, verifier, and delivery Actor; it is not the diagram author.
 
 ![Plan — Teach OpenWiki generation to author helpful BPMN](assets/doc-29/plan.png)
 
@@ -32,7 +32,7 @@ Plan: `backlog/docs/plans/assets/doc-29/plan.bpmn`
 
 | ID | Name | Type | Status | Evidence / note |
 | --- | --- | --- | --- | --- |
-| intent_recovered | Internal-generator intent recovered | StartEvent | done | Evidence: TASK-6 corrected implementation plan, notes, and comment #3 |
+| intent_recovered | Internal-generator intent recovered | StartEvent | done | Evidence: T-6 corrected implementation plan, notes, and comment #3 |
 | confirm_extension_seam | Confirm internal-agent extension seam | ServiceTask | done | Evidence: Installed OpenWiki commands/prompt/backend inspection and bin/qq-openwiki prompt-forwarding test |
 | build_wiki_publish_command | Build reliable wiki publish command | ServiceTask | done | Evidence: bin/qq-openwiki-bpmn and skills/bpmn-plans/pipeline/lib/wiki.mjs |
 | inject_generator_guidance | Teach generator when and how to diagram | ServiceTask | done | Evidence: bin/qq-openwiki: internal-generator authoring instruction and preserved caller-argument tests |
@@ -42,10 +42,10 @@ Plan: `backlog/docs/plans/assets/doc-29/plan.bpmn`
 | checks_green | Automated checks green? | ExclusiveGateway | done | Evidence: All local Checks green before real generation and publication |
 | fix_check_failures | Fix in-scope check failures | ServiceTask | done | Evidence: Restricted-PATH Node failure reproduced; exact inline runtime command added and wrapper tests rerun |
 | run_internal_agent_smoke | Run real internal OpenWiki smoke test | ServiceTask | done | Evidence: Real OpenWiki init in disposable fulfillment repo; outcome recorded in PR #56 body |
-| assess_generated_wiki | Judge generated diagram usefulness | UserTask | done | Evidence: TASK-6 comment #4 records operator acceptance of the final 975x450 diagram |
+| assess_generated_wiki | Judge generated diagram usefulness | UserTask | done | Evidence: T-6 comment #4 records operator acceptance of the final 975x450 diagram |
 | diagram_helpful | Helpful BPMN generated? | ExclusiveGateway | done | Evidence: Internal model simplified its first panoramic render; final clickable diagram passed operator UAT |
 | tune_generation_capability | Tune tool or generator guidance | ServiceTask | done | Evidence: Compactness/click-through guidance and inline Node runtime were added after real smoke evidence |
-| fresh_context_review | Run fresh-context review | UserTask | done | Evidence: Fresh read-only TASK-6 Change review completed before commit |
+| fresh_context_review | Run fresh-context review | UserTask | done | Evidence: Fresh read-only T-6 Change review completed before commit |
 | confirmed_findings | Confirmed findings? | ExclusiveGateway | done | Evidence: Reviewer evidence-traceability finding reproduced against validateWikiSpec |
 | fix_review_findings | Fix confirmed review findings | ServiceTask | done | Evidence: Repository-confined source/range validation added; same reviewer found no material exact-delta findings |
 | open_source_pr | Open one source PR | ServiceTask | done | Evidence: https://github.com/hypermemetic-ai/qq/pull/56 |

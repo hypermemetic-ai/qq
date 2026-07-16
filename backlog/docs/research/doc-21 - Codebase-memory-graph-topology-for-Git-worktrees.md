@@ -9,7 +9,7 @@ tags:
 ---
 # Codebase-memory graph topology for Git worktrees
 
-**Owning Task:** TASK-12
+**Owning Task:** T-12
 **Overall confidence:** HIGH
 **Settles:** On codebase-memory-mcp 0.9.0, keep linked worktrees as distinct physical project databases. The intended end state is one logical Repository graph made from a canonical base plus branch/worktree overlays, not one branch-unaware mutable snapshot.
 

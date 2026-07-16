@@ -10,7 +10,7 @@ tags:
 ---
 # Design — Retire merged Changes at source
 
-Owning Task: TASK-49. This decision amends `deliver-change` step 12.
+Owning Task: T-49. This decision amends `deliver-change` step 12.
 
 ## Decision
 
@@ -20,9 +20,9 @@ This is the moment of maximal knowledge: the Actor has just proved both the merg
 
 A scheduled or board-driven sweep is rejected. It would add standing machinery and its own failure surface, act far from the context that knows the Change state, and recreate the operator-attention problem it is meant to remove.
 
-## TASK-48 reconciliation
+## T-48 reconciliation
 
-TASK-48 remains authoritative for non-merged terminal dispositions: leave the accountable pane, work session, checkout, and branch intact, with the disposition-watch completion notification as the only end-of-Change signal. TASK-49 supersedes its leave-intact rule only for a verified merged disposition and absorbs its no-focus rule as a hard constraint. The `qq-herdr-home focus-board` closing move is absent from both retirement and rail-trip fallback, and ending a Change never changes operator focus.
+T-48 remains authoritative for non-merged terminal dispositions: leave the accountable pane, work session, checkout, and branch intact, with the disposition-watch completion notification as the only end-of-Change signal. T-49 supersedes its leave-intact rule only for a verified merged disposition and absorbs its no-focus rule as a hard constraint. The `qq-herdr-home focus-board` closing move is absent from both retirement and rail-trip fallback, and ending a Change never changes operator focus.
 
 Moving the accountable pane owned by the executing session home with `herdr pane move ... --no-focus` is the sole deliberate exception to the no-pane-move rule. It applies only in migrated posture, moves no operator-created pane, and does not focus the destination; board-driven dispatch skips it.
 
@@ -44,4 +44,4 @@ doc-43 AC #4 still keeps both migrated and board-driven postures, and its mid-tu
 
 ## Live evidence
 
-TASK-49 AC #2 is dispatcher-owned. Its required live observation completes on the first real merged Change after this amendment lands; it is deliberately not performed by this implementation Change.
+T-49 AC #2 is dispatcher-owned. Its required live observation completes on the first real merged Change after this amendment lands; it is deliberately not performed by this implementation Change.

@@ -9,7 +9,7 @@ tags:
 ---
 # Plan — Align operator identity and Herdr work-session topology
 
-TASK-23 aligns the active qqp-dev identity and makes Herdr's native hierarchy explicit: one persistent main-checkout project home with a dedicated Backlog-board tab, plus one grouped worktree session per Change using a short, unique operator-agreed label. The current accountable conversation moves into its work session; reviewers and researchers split right there. At terminal disposition the session remains intact while focus returns to the synchronized home board.
+T-23 aligns the active qqp-dev identity and makes Herdr's native hierarchy explicit: one persistent main-checkout project home with a dedicated Backlog-board tab, plus one grouped worktree session per Change using a short, unique operator-agreed label. The current accountable conversation moves into its work session; reviewers and researchers split right there. At terminal disposition the session remains intact while focus returns to the synchronized home board.
 
 ![Rendered BPMN plan](assets/doc-32/plan.png)
 
@@ -34,7 +34,7 @@ Plan: /home/qqp/.herdr/worktrees/qq/fix-delegates-split-right/backlog/docs/plans
 
 | ID | Name | Type | Status | Evidence / note |
 | --- | --- | --- | --- | --- |
-| start | Alignment complete | StartEvent | done | Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md<br>Note: TASK-23 records the aligned identity, home, work-session, delegate, and completion-focus outcome. |
+| start | Alignment complete | StartEvent | done | Evidence: backlog/tasks/task-23 - Align-operator-identity-and-Herdr-work-session-topology.md<br>Note: T-23 records the aligned identity, home, work-session, delegate, and completion-focus outcome. |
 | approve_plan | Approve identity and work-session plan | UserTask | done | Evidence: backlog/docs/plans/doc-32 - Plan-—-Align-operator-identity-and-Herdr-work-session-topology.md<br>Note: The operator approved the rendered plan before implementation; later UAT naming refinements were incorporated into the same semantic plan. |
 | plan_approved | Plan approved? | ExclusiveGateway | done | Evidence: backlog/docs/plans/assets/doc-32/plan.png |
 | plan_rejected | Return to alignment | EndEvent | skipped | Note: The operator approved the plan. |
@@ -57,7 +57,7 @@ Plan: /home/qqp/.herdr/worktrees/qq/fix-delegates-split-right/backlog/docs/plans
 | topology_failed | Live topology check failed | EndEvent | skipped | Note: No final live topology check failed or disturbed an unrelated session. |
 | operator_uat | Accept home and work-session behavior | UserTask | done | Evidence: operator confirmation in the owning conversation on 2026-07-14<br>Note: The operator visually accepted the final home-level board and the fully visible herdr-homes and rejoin-collapse child labels. |
 | uat_accepted | Operator accepts behavior? | ExclusiveGateway | done | Evidence: operator final response: yes |
-| uat_rejected | Return for experience correction | EndEvent | done | Evidence: TASK-23 comments 1 and 2<br>Note: Earlier UAT exposed branch-derived and overlong labels; the experience was corrected in the same Change and UAT was repeated to final acceptance. |
+| uat_rejected | Return for experience correction | EndEvent | done | Evidence: T-23 comments 1 and 2<br>Note: Earlier UAT exposed branch-derived and overlong labels; the experience was corrected in the same Change and UAT was repeated to final acceptance. |
 | complete_delivery | Complete qq Change delivery | CallActivity | done | Evidence: https://github.com/hypermemetic-ai/qq/pull/63<br>Note: Independent review, local Checks, UAT, the implementation commit, push, and initial PR inspection are complete; this conformance record and Task finalization are the prescribed final same-PR commit. |
 | green_pr_ready | Green PR ready | EndEvent | done | Evidence: PR #63: OPEN, MERGEABLE, mergeStateStatus CLEAN, empty applicable statusCheckRollup |
 

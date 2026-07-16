@@ -28,7 +28,7 @@ in-text._
 
 ## Question
 
-TASK-7: the gate's `commands.format` step is wired to `bin/qq-openwiki-refresh`,
+T-7: the gate's `commands.format` step is wired to `bin/qq-openwiki-refresh`,
 which today expects the OpenWiki CLI plus an API key in `~/.openwiki/.env` — but the
 operator constraint (2026-07-08) is **sub-only, no API keys**: ChatGPT sub driving
 Codex CLI, Claude sub driving Claude Code, out-of-pocket API spend rejected. Five
@@ -230,7 +230,7 @@ Verified from no-mistakes v1.34.0 source (cloned at tag) and docs:
 
 ## Implementation re-plan (for the follow-up task)
 
-The engine decision converts TASK-7's implementation half into:
+The engine decision converts T-7's implementation half into:
 
 1. Vendor OpenWiki's init/update prompt discipline (MIT — preserve the copyright
    and permission notice alongside the copied prompt material, attribution in
@@ -268,7 +268,7 @@ The engine decision converts TASK-7's implementation half into:
    preflight from OpenWiki CLI/API-key setup to Codex CLI + ChatGPT-login setup;
    remember `commands.*` goes live only after merge to main (default-branch trust
    rule).
-5. Roll-out note for TASK-9 (linked repos): the same script works per-repo since
+5. Roll-out note for T-9 (linked repos): the same script works per-repo since
    codex auth is machine-global.
 
 Watch-fors recorded: OpenAI could tighten the CI/CD-auth-on-sub language (it is

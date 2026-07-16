@@ -45,7 +45,7 @@ threshold, redesign beats patching.
 
 ## Verification
 
-TASK-32 / PR #79 delivery history: review rounds four through ten, every
+T-32 / PR #79 delivery history: review rounds four through ten, every
 bypass confirmed by controlled bash execution before fixing and every fix
 re-verified by a fresh delta review, ending in SHIP with no surviving
 findings. A cited field survey (2026-07-14, three delegated investigations)

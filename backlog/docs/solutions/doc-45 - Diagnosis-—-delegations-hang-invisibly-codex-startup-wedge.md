@@ -7,7 +7,7 @@ updated_date: '2026-07-16 17:22'
 ---
 # Diagnosis — delegations sometimes hang invisibly
 
-Owning Task: TASK-58. Diagnostician: fresh read-only claude delegate,
+Owning Task: T-58. Diagnostician: fresh read-only claude delegate,
 2026-07-16. All observations read-only; evidence paths verified.
 
 ## Mode A — codex exec pre-session startup wedge (CONFIRMED; the reported hang)
@@ -26,7 +26,7 @@ pkilled them ("the three independent reviews had silently wedged overnight");
 zero-byte background outputs at the wedge start times; NO session rollout for
 any wedged run while interleaved dispatches minutes apart created rollouts and
 finished normally (per-invocation lottery); two more instances the same
-evening; and qq's own TASK-42 demo delegate — recorded in doc-43's Evidence as
+evening; and qq's own T-42 demo delegate — recorded in doc-43's Evidence as
 "died silently at spawn" — had not died and was alive 11 h later. ≥6 instances
 in the ~28 h before the operator's idea; zero since `timeout 3600` wrappers
 were used in relaunches.
@@ -36,15 +36,15 @@ were used in relaunches.
 The dispatcher reads thread.started only at that delegate's own completion
 wake, so `working` never renders and the steering handle publishes only after
 exit. Events-file buffering is REFUTED as the driver (content flushes within
-seconds; task-54's thread.started landed ~4 s after spawn while its row stayed
+seconds; T-54's thread.started landed ~4 s after spawn while its row stayed
 `dispatched` through several rewrites). A Mode-A wedge is therefore
 indistinguishable from a healthy slow delegate.
 
 ## Mode C — the report predates the surface (CONFIRMED as the report's era)
 
-TASK-45 wired the surface 23:18 Jul 15; the idea was filed 23:24, six minutes
+T-45 wired the surface 23:18 Jul 15; the idea was filed 23:24, six minutes
 later, hours after the operator learned of the overnight wedges. Residual gap
-after TASK-45 = Modes A+B.
+after T-45 = Modes A+B.
 
 ## Mode D — sandbox blocks shared git metadata in linked worktrees (CONFIRMED, fail-fast)
 
