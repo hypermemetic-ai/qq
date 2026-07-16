@@ -1,11 +1,14 @@
 ---
 id: TASK-49
 title: Retire merged work sessions and checkouts without operator attention
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-07-16 03:18'
+updated_date: '2026-07-16 03:39'
 labels: []
 dependencies: []
+documentation:
+  - doc-44
 ordinal: 44000
 ---
 

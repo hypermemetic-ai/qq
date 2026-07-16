@@ -118,11 +118,71 @@ delegated agents bounded assignments; do not hand them this lifecycle.
    observed state and stop; never create, switch, stash, clean, reset, or
    otherwise repair the checkout. Retain the Change checkout until the failed
    synchronization can be resumed safely.
-12. After a terminal disposition leaves no further work in this Change, leave
-   its accountable pane, operator-created panes and tabs, worktree workspace,
-   and checkout intact for inspection, and leave operator focus untouched: do
-   not focus, move, or close any tab or pane, do not run `qq-herdr-home
-   focus-board`, and do not invoke `herdr worktree remove`. The disposition
-   watch's completion notification is the only end-of-Change signal; changing
-   operator focus is never part of ending a Change. The operator explicitly
-   retires a completed work session and its checkout.
+12. After a terminal disposition leaves no further work in this Change,
+   leave operator focus untouched. The disposition watch's completion
+   notification is the only end-of-Change
+   signal; changing operator focus is never part of ending a Change. Retire the
+   Change at source only after steps 10–11 have verified a merged disposition
+   and synchronized the primary `main` checkout. For any other terminal
+   disposition, report it and leave the accountable pane, every other pane and
+   tab, the work session, checkout, and branch intact for inspection. Do not
+   focus, move, or close any tab or pane, do not run `qq-herdr-home
+   focus-board`, and do not invoke `herdr worktree remove` or `git worktree
+   remove`; the operator explicitly retires that work session and checkout.
+
+   Before retiring a verified merged Change, check these rails in order against
+   observable evidence:
+   1. Run `git worktree list --porcelain` for this Repository. Require the
+      Change checkout to be a registered linked worktree, and require its
+      canonical path identity to differ from the step-11 `<main-checkout>`.
+   2. Require `git -C <checkout> status --porcelain
+      --untracked-files=all` to be empty.
+   3. Freshly fetch `origin/main`, resolve the Change's `<branch>` and branch
+      tip, and require `git merge-base --is-ancestor <branch-tip>
+      origin/main` to succeed. Require the checkout's `HEAD` to be attached
+      to that same `<branch>`: `git -C <checkout> symbolic-ref -q HEAD` must
+      return `refs/heads/<branch>`; a detached or re-switched checkout trips
+      the rail, because mergedness was proven for the branch, not for what
+      the checkout now holds. Delete the branch later only with `git branch
+      -d`, never `-D`, so Git independently re-enforces mergedness.
+   4. If a Herdr work session exists for the Change, scope `herdr api snapshot`
+      and `herdr pane list --workspace <work-session-id>` to it. Require no live
+      agent there other than this executing session in migrated posture; in
+      board-driven dispatch, where the dispatcher pane is already in the
+      project home, require no live agent there at all. Require the snapshot's
+      focused workspace to differ from `<work-session-id>`: retiring a work
+      session the operator is looking at would move operator focus, which
+      ending a Change never does.
+   5. For an existing work session, require exactly one tab and a pane census
+      containing only what this Change created: the root placeholder pane
+      and/or the accountable pane. Treat every
+      unexplained pane or tab as operator-created and trip the rail; never close
+      operator-created panes or tabs. If no work session exists, rails 4–5 have
+      no subject; instead require evidence that this executing session owns the
+      Change's delegate lifecycle, its completion wake has fired, and no other
+      Actor was given the checkout.
+
+   If any rail trips or its evidence cannot be resolved, report the observed
+   state and do nothing else. Leave any work session, all panes and tabs, the
+   checkout, and the branch intact. Do not focus, move, or close any tab or
+   pane, do not run `qq-herdr-home focus-board`, and do not invoke `herdr
+   worktree remove` or `git worktree remove`.
+
+   Only with every rail green, retire in this order:
+   a. In migrated posture, if this executing session's own accountable pane is
+      inside the work session, first run `herdr pane move <own-pane-id> --tab
+      <home-board-or-general-tab-id> --split right --no-focus`. Resolve the
+      destination tab from the step-1 `qq-herdr-home inspect` result retained
+      for this Change, then re-resolve the calling terminal's live pane, tab,
+      and workspace ids and require them to prove the move into the project
+      home without changing operator focus. This is the sole deliberate
+      exception to the no-pane-move ending rule: it moves only the executing
+      session's own pane and uses `--no-focus`. In board-driven dispatch the
+      pane is already home; when the work session is absent there is no pane to
+      move from it; skip this move in either case.
+   b. If the work session exists, run `herdr worktree remove --workspace
+      <work-session-id>` without `--force`. If it is absent, run `git worktree
+      remove <checkout-path>` without `--force`. If either command refuses,
+      report the observed state and stop; never retry with force.
+   c. Run `git -C <main-checkout> branch -d <branch>`; never use `-D`.
+      Do not perform a closing focus move.
