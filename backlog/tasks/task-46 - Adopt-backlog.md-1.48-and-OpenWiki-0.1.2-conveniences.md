@@ -4,7 +4,7 @@ title: Adopt backlog.md 1.48 and OpenWiki 0.1.2 conveniences
 status: To Do
 assignee: []
 created_date: '2026-07-15 23:24'
-updated_date: '2026-07-15 23:36'
+updated_date: '2026-07-16 03:07'
 labels: []
 dependencies: []
 ordinal: 43000
@@ -26,5 +26,5 @@ Observation recorded during the upgrade (mechanism not inspected): backlog task 
 - [ ] #2 Task-type vocabulary is settled: keep or trim the 1.48 defaults (bug, feature, enhancement, task, chore, docs, spike), decide whether a design type is added for design rounds, and record whether new Tasks set a type
 - [ ] #3 A priorities disposition is recorded: adopt High/Medium/Low for batch triage or explicitly leave unused
 - [ ] #4 Board deep links (/tasks/:id on the browser board, port 6420) are recorded as an input to the delegate status surface implementation so status lines or sidebar metadata can carry ticket URLs
-- [ ] #5 The next OpenWiki maintainer run conforms to the brief: pages updated in place under openwiki/, no new pages without documented cause, and openwiki/INSTRUCTIONS.md left unmodified by the run; any nonconformity is treated as a brief defect and the brief is adjusted
+- [ ] #5 The next OpenWiki maintainer run conforms to the brief: authored content stays under openwiki/, landed-main-only scope is respected, and openwiki/INSTRUCTIONS.md is left unmodified by the run; any nonconformity is treated as a brief defect and an amendment is proposed by pull request
 <!-- AC:END -->
