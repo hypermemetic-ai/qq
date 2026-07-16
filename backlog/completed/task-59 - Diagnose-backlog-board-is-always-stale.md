@@ -4,7 +4,7 @@ title: 'Diagnose: backlog board is always stale'
 status: Done
 assignee: []
 created_date: '2026-07-16 16:43'
-updated_date: '2026-07-16 17:09'
+updated_date: '2026-07-16 17:22'
 labels: []
 dependencies: []
 priority: medium
@@ -29,11 +29,11 @@ Diagnose why the Backlog board (browser board on port 6420 and/or backlog board 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Diagnosis doc: doc-46. Structural cause CONFIRMED: no checkout a board can read ever contains the present (untracked mints are invisible to cross-branch scan; in-flight task files ride Change worktrees; merge-to-pull lag up to ~11 h). Instance cause CONFIRMED: the board running at complaint time was another project's (deciq), 12+ h old, cross-branch view frozen at load. Version cause REFUTED (1.48 live-reload shipped; inotify watches live). Zero-write operator check and three bounded fix options (incl. a convention decision on where in-flight task status lives — tensions with the task-files-ride-the-Change precedent) recorded for operator disposition.
+Diagnosis doc: doc-46. Structural cause CONFIRMED with reproducible observations: no checkout a board can read ever contains the present (untracked mints are invisible to cross-branch scan; in-flight Task files ride Change worktrees; merge-to-pull lag up to ~11 h). Instance finding: the board running at complaint time was another project's (deciq), 12+ h old; its cross-branch view being frozen at load is tagged plausible→likely in doc-46, not confirmed. Version cause REFUTED for live file-watching (1.48 ships the back-274 fix; inotify watches observed) — but whether the TUI actually repaints on watcher events could not be verified read-only and remains OPEN, with a zero-write operator check recorded in doc-46 (does the running qq board show TASK-56..61?). If that check fails, a repaint defect is an additional confirmed cause. Three bounded fix options (incl. a convention decision on where in-flight Task-file status lives — tensions with the Task-files-ride-the-Change precedent) recorded for operator disposition.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Staleness demonstrated as structural, not a bug: boards render the last merged-and-pulled past by construction. Cause evidence and bounded fixes in doc-46; convention decision left to the operator.
+Structural staleness demonstrated: boards render the last merged-and-pulled past by construction. One residual remains open pending the zero-write operator repaint check in doc-46; cause evidence and bounded fixes recorded there; convention decision left to the operator.
 <!-- SECTION:FINAL_SUMMARY:END -->

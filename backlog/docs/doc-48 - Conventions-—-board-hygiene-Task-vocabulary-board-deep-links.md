@@ -3,7 +3,7 @@ id: doc-48
 title: 'Conventions — board hygiene, Task vocabulary, board deep links'
 type: guide
 created_date: '2026-07-16 17:08'
-updated_date: '2026-07-16 17:08'
+updated_date: '2026-07-16 17:22'
 ---
 # Conventions — board hygiene, Task vocabulary, board deep links
 
@@ -17,7 +17,7 @@ reverse; contest by editing this doc through a reviewed Change.
 of every Done-sweep chore, and additionally inside any board-touching Change
 before its finalization commit (cheap, catches cross-worktree ID collisions
 at the moment they can be repaired without history rewrites). The Done-sweep
-chore itself: run doctor, then `backlog task complete` every Done task on the
+chore itself: run doctor, then `backlog task complete` every Done Task on the
 active board. Concurrent Task minting across sessions remains unsafe between
 audits — mint serially in one checkout (the TASK-46 observation stands; do
 not generalize the one observed skip into a guarantee).
@@ -26,10 +26,10 @@ not generalize the one observed skip into a guarantee).
 
 - Types: keep the backlog.md 1.48 defaults (bug, feature, enhancement, task,
   chore, docs, spike) unchanged; no design type for now — design rounds are
-  documented in docs/plans and owned by ordinary tasks. New Tasks set a type.
+  documented in docs/plans and owned by ordinary Tasks. New Tasks set a type.
 - Priorities: adopt High/Medium/Low for batch triage (dispatch order and
-  operator attention), leaving no-priority as valid for conventions/meta
-  tasks. First live use: the 2026-07-16 board-driven batch (TASK-56…61).
+  operator attention), leaving no-priority as valid for convention/meta
+  Tasks. First live use: the 2026-07-16 board-driven batch (TASK-56…61).
 
 ## Board deep links
 

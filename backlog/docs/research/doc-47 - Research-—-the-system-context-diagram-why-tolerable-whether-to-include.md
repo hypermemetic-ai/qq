@@ -3,11 +3,11 @@ id: doc-47
 title: 'Research — the system context diagram: why tolerable, whether to include'
 type: other
 created_date: '2026-07-16 17:08'
-updated_date: '2026-07-16 17:08'
+updated_date: '2026-07-16 17:22'
 ---
 # Research — Why the system context diagram was the only tolerable one, and whether it earns a place
 
-Owning task: TASK-60. Researcher: fresh read-only claude delegate, 2026-07-16.
+Owning Task: TASK-60. Researcher: fresh read-only claude delegate, 2026-07-16.
 Confidence tags per the researcher; owner spot-verified the load-bearing paths.
 
 ## What diagrams existed (evidence)
@@ -77,12 +77,13 @@ architecture.md already carry the orientation value in text.
 - Never (on current evidence): generated/rendered diagram pipelines — every
   one built here died within days (plan BPMN, wiki BPMN, C4 toolchain).
 
-## Side finding (defect, actioned separately)
+## Side finding (defect, corrected)
 
-`openwiki/INSTRUCTIONS.md` "Diagrams" section still directs OpenWiki runs to
-the BPMN authoring extension TASK-55 deleted — the only live BPMN reference
-remaining. Amendment proposed by pull request per the operator-brief
-convention.
+At research time, `openwiki/INSTRUCTIONS.md`'s "Diagrams" section still
+directed OpenWiki runs to the BPMN authoring extension TASK-55 had deleted —
+the last live BPMN reference in the Repository. The amendment (a prose-only
+Diagrams rule) lands in the same board-keeping Change that records this
+document, proposed by pull request per the operator-brief convention.
 
 Parked render evidence: nine SVGs under the session scratchpad (imgs/),
 including 08_System_context_C4PlantUML_.svg, for operator re-judging.

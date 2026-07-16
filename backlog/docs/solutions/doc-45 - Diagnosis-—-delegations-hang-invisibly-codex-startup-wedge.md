@@ -3,11 +3,11 @@ id: doc-45
 title: Diagnosis — delegations hang invisibly (codex startup wedge)
 type: other
 created_date: '2026-07-16 17:08'
-updated_date: '2026-07-16 17:08'
+updated_date: '2026-07-16 17:22'
 ---
 # Diagnosis — delegations sometimes hang invisibly
 
-Owning task: TASK-58. Diagnostician: fresh read-only claude delegate,
+Owning Task: TASK-58. Diagnostician: fresh read-only claude delegate,
 2026-07-16. All observations read-only; evidence paths verified.
 
 ## Mode A — codex exec pre-session startup wedge (CONFIRMED; the reported hang)
@@ -67,7 +67,10 @@ per-invocation lottery; "invisibly" = no exit → no wake → no glass.
 
 1. Mode A containment: `timeout -k 10 <bound>` wrapping the dispatch command
    in skills/delegate-batch/SKILL.md, with exit 124 reconciled to
-   `FAILED: startup/turn wedge (timeout)`. Proven by the 11:11 relaunches.
+   `FAILED: startup/turn wedge (timeout)`. The pattern is demonstrated by the
+   2026-07-15 11:11 relaunches (all completed under a timeout wrapper), but
+   whether timeout/-k reliably kills the full three-process group of a truly
+   wedged run is untested — settle open question 3 below before adopting.
 2. Mode A probability: disable MCP servers for delegates in the dispatch
    config; pin context7 instead of @latest in ~/.codex/config.toml.
 3. Mode B: at every dispatcher-owned boundary, sweep ALL non-terminal

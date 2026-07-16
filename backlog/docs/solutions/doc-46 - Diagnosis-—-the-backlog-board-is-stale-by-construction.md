@@ -3,11 +3,11 @@ id: doc-46
 title: Diagnosis — the backlog board is stale by construction
 type: other
 created_date: '2026-07-16 17:08'
-updated_date: '2026-07-16 17:08'
+updated_date: '2026-07-16 17:22'
 ---
 # Diagnosis — "backlog board is always stale"
 
-Owning task: TASK-59. Diagnostician: fresh read-only claude delegate,
+Owning Task: TASK-59. Diagnostician: fresh read-only claude delegate,
 2026-07-16. All observations read-only.
 
 ## Surface identification
@@ -23,10 +23,10 @@ came two minutes after the deciq board started.
 1. **CONFIRMED — structural, the "always": no checkout a board can read ever
    contains the present.** A board reads its own checkout's backlog/ files
    plus a load-time git cross-branch scan. Demonstrated in three layers:
-   (a) newly minted tasks exist only as untracked files in the primary
+   (a) newly minted Tasks exist only as untracked files in the primary
    checkout — untracked files are invisible to git-based cross-branch
    discovery; (b) in-flight status truth rides exactly one working tree
-   (task files move into Change worktrees and are invisible elsewhere);
+   (Task files move into Change worktrees and are invisible elsewhere);
    (c) merge-to-pull lag — deciq went ~10.8 h between pulls (23:30 → 10:18);
    task-14's sync covers only merges with a live session. With many
    worktrees perpetually in flight, every board glance shows the last
@@ -50,12 +50,12 @@ confirmed cause.
 1. Convention paragraph (AGENTS.md or cockpit doc): boards show only the
    checkout they run in; run one board per project, in the primary checkout,
    treat as disposable, restart after merges/pulls.
-2. Convention decision on where in-flight task-file status lives. Options in
-   tension: (a) diagnostician's proposal — task-file status edits happen in
-   the primary checkout at dispatch/completion, worktrees never edit task
+2. Convention decision on where in-flight Task-file status lives. Options in
+   tension: (a) diagnostician's proposal — Task-file status edits happen in
+   the primary checkout at dispatch/completion, worktrees never edit Task
    files (primary board + inotify then shows live truth; but Task birth and
    Done flips no longer ride their Change's PR); (b) current precedent
-   (task-45, and this batch) — task files ride their Change worktree and PR,
+   (task-45, and this batch) — Task files ride their Change worktree and PR,
    accepting board staleness for in-flight work. Owner recommendation:
    decide (a) vs (b) explicitly; a middle path is birth+status in primary
    with finalization mirrored at merge, but it doubles write sites.
