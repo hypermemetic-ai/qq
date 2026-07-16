@@ -88,6 +88,14 @@ export FAKE_AGENTS_JSON='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":
 output="$(HERDR_PANE_ID=ws:p1 QQ_HERDR_SNAP_DRY=1 "$SNAP")"
 assert_equal 'current=ws:p1 workspace=ws target=ws:p9 prev=none' "$output"
 
+# A reported agent presence on the focused shell pane is not an orchestrator.
+reset_fake
+export FAKE_AGENTS_JSON='{"result":{"agents":[{"terminal_id":"term:1","agent_status":"working","workspace_id":"ws","tab_id":"ws:t1","pane_id":"ws:p1","focused":true,"revision":1,"agent":"codex","screen_detection_skipped":true}]}}'
+HERDR_PANE_ID=ws:p1 "$SNAP"
+assert_file_contains "$log" 'notification show qq-snap --body no other agent session in this space'
+assert_file_not_matches "$log" 'already on the orchestrator'
+assert_file_not_matches "$log" '^agent focus '
+
 # No agent in the focused workspace: best-effort notification, no focus.
 reset_fake
 export FAKE_AGENTS_JSON='{"result":{"agents":[{"pane_id":"other:p1","workspace_id":"other","agent":"claude"}]}}'

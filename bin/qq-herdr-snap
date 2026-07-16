@@ -50,13 +50,15 @@ workspace="$(jq -r '.result.pane.workspace_id // empty' <<<"$current_info" 2>/de
 [ -n "$workspace" ] || die "cannot resolve workspace of pane '$current'"
 
 agents="$({ "$HERDR" agent list 2>/dev/null || true; })"
-if ! target="$(jq -r --arg ws "$workspace" '
+if ! target_info="$(jq -r --arg ws "$workspace" '
   [.result.agents[] | select(.workspace_id == $ws)]
   | (map(select(.agent == "claude")) + .)
-  | .[0].pane_id // empty' <<<"$agents" 2>/dev/null)"; then
+  | [(.[0].agent == "claude"), .[0].pane_id // ""]
+  | @tsv' <<<"$agents" 2>/dev/null)"; then
   # A failed parse can still emit a target from a valid prefix; discard it.
   die "cannot parse agent list"
 fi
+IFS=$'\t' read -r target_is_orchestrator target <<<"$target_info"
 [ -n "$target" ] || die "no agent session in this space"
 
 state_file="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/qq-herdr-snap.$workspace.prev"
@@ -74,10 +76,13 @@ if [ "$current" != "$target" ]; then
   exit 0
 fi
 
-# Already on the orchestrator: bounce back to the stored pane, if it still exists.
+# Already on the snap target: bounce back to the stored pane, if it still exists.
 prev="$(head -n1 -- "$state_file" 2>/dev/null || true)"
 if [ -z "$prev" ] || [ "$prev" = "$current" ]; then
-  die "already on the orchestrator"
+  if [ "$target_is_orchestrator" = true ]; then
+    die "already on the orchestrator"
+  fi
+  die "no other agent session in this space"
 fi
 prev_info="$({ "$HERDR" pane get "$prev" 2>/dev/null || true; })"
 prev_tab="$(jq -r '.result.pane.tab_id // empty' <<<"$prev_info" 2>/dev/null)" || true
