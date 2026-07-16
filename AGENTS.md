@@ -30,10 +30,11 @@ Read `CONCEPTS.md` before working and use its vocabulary.
 Start with the assignment and context already provided. Resolve only what is
 missing, using the surfaces present in the Repository:
 
-- Tasks record durable intent and work status.
-- Backlog documents and decisions preserve evidence, lessons, and settled choices.
-- `openwiki/` describes the landed system.
-- codebase-memory answers structural questions such as architecture,
+- Where present, Tasks record durable intent and work status.
+- Where present, Backlog documents and decisions preserve evidence, lessons,
+  and settled choices.
+- Where present, `openwiki/` describes the landed system.
+- Where present, codebase-memory answers structural questions such as architecture,
   dependencies, call paths, or impact.
 
 Use source files and fresh Checks to verify material conclusions. When a
@@ -47,10 +48,14 @@ merges.
 
 ## Review guidelines
 
-When reviewing a Change, read `REVIEW.md` at the Repository root fully before
-inspecting the diff and apply its reviewer rules. The review brief supplies
-the Change's intent, boundary, and threat model; where the brief declares
-scope, the brief wins.
+When reviewing a Change in a Repository with a root `REVIEW.md`, read it fully
+before inspecting the diff and apply its reviewer rules. The review brief
+supplies the Change's intent, boundary, and threat model; where the brief
+declares scope, the brief wins.
+
+The tool-managed sections below describe optional per-Repository surfaces.
+Each applies only where its named surface exists in the Repository being
+worked on.
 
 <!-- codebase-memory-mcp:start -->
 # Codebase Knowledge Graph (codebase-memory-mcp)
