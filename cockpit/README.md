@@ -24,11 +24,12 @@ the repo root; Enter descends into a folder or renders a `.md` file through
 mdcat or Glow. `prefix+shift+f` opens broot at the same root through `qqbr`.
 Quitting the browser closes the popup and restores the untouched tiled
 layout; yazi's `!` opens a shell in place when one is wanted. The popups use
-a fixed 120x32 cell size with a matching `stty` preamble because herdr 0.7.4
-draws the popup frame at the configured size but never sets the popup PTY
-winsize. `prefix+F<N>` pulls the Nth priority-sorted agent into
-the focused pane; `prefix+0` pulls the agent that most needs attention. Those
-operator bindings use `qq-herdr-pull <N|next>`.
+a fixed 74x29 cell size (operator-tuned) with a matching `stty` preamble
+because herdr 0.7.4 draws the popup frame at the configured size but never
+sets the popup PTY winsize, and frames wider than the tiled panel clamp.
+`prefix+F<N>` pulls the Nth priority-sorted agent into the focused pane;
+`prefix+0` pulls the agent that most needs attention. Those operator
+bindings use `qq-herdr-pull <N|next>`.
 
 The sidebar carries the delegate status surface's ambient tier: a `$stage` row
 on Space and Agent entries renders stage-boundary one-liners reported through
