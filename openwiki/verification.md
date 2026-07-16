@@ -2,7 +2,7 @@
 
 ## Repository-wide baseline
 
-This repository has no single conventional application test suite; its shell utilities and BPMN pipeline have focused behavioral harnesses. Verification remains behavior-specific. Root instructions require evidence-backed execution; the triggered Skills add these working checks:
+This repository has no single conventional application test suite; its shell utilities have focused behavioral harnesses. Verification remains behavior-specific. Root instructions require evidence-backed execution; the triggered Skills add these working checks:
 
 1. Validate each changed Skill with Codex’s `skill-creator` validator.
 2. Run Checks relevant to the changed files and behavior.
@@ -21,11 +21,10 @@ A green Check must demonstrate that it observed the intended subject. A successf
 | Shell and Python commands under `bin/` | `bash -n` for shell syntax; Python syntax/import checks where applicable; isolated behavioral tests with temporary HOME/repository and mocked dependencies; `bash tests/test-bin-resolution.sh` for shared external-tool lookup | User-config mutation, quoting, symlink ownership, fail-open paths, race behavior, and divergence from the `QQ_<TOOL>_BIN` → `PATH` → package-manager fallback contract |
 | `bin/qq-herdr-home` | `bash tests/test-qq-herdr-home.sh` | Exactly one primary `main` checkout and persistent home; matching Git common directory; unique single-pane Backlog board; focus confirmation without moving or closing work-session panes |
 | `bin/qq-herdr-pull` | `bash tests/test-qq-herdr-pull.sh`; exercise `QQ_HERDR_PULL_DRY` before live layout testing | Operator-mode best effort versus agent-mode failure; live pane identity; sole idle placeholder; confirmed move before close |
-| `bin/install.sh` | `bash tests/test-install-cleanup.sh`; temporary HOME/data/config directories; repeat install, stale managed link pruning, unmanaged destination refusal, locked BPMN install | Surgical removal of qq-owned MIME/desktop/userscript artifacts, preservation of unrelated configuration, invalid `XDG_CONFIG_HOME`, accidental overwrite, partial installation |
+| `bin/install.sh` | `bash tests/test-install-cleanup.sh`; temporary HOME/data/config directories; repeat install, stale managed link pruning, unmanaged destination refusal | Surgical removal of qq-owned MIME/desktop/userscript artifacts, preservation of unrelated configuration, invalid `XDG_CONFIG_HOME`, accidental overwrite, partial installation |
 | `cockpit/` | Parse with owning tools where available; exercise key bindings in Herdr/yazi; verify linked paths | Machine-specific absolute paths and missing external binaries |
-| `bin/qq-openwiki` | `bash tests/test-qq-openwiki.sh`; `git diff --check` | Verify command-mode, provider, runtime, publisher, Node, and external-tool preflight occurs before stale recovery; recovery then precedes mode-specific branch/cleanliness gates and safely targets the recorded worktree even when invoked from a sibling. Exercise malformed, symlinked, unavailable, changed-worktree, and foreign-Repository snapshots; also watch for stale-base acceptance, dirty/staged-boundary errors, concurrent writers, retained generated workflow/guidance, and altered authored instruction text |
+| `bin/qq-openwiki` | `bash tests/test-qq-openwiki.sh`; `git diff --check` | Verify command-mode, provider, and external-tool preflight occurs before stale recovery; recovery then precedes mode-specific branch/cleanliness gates and safely targets the recorded worktree even when invoked from a sibling. Exercise malformed, symlinked, unavailable, changed-worktree, and foreign-Repository snapshots; also watch for stale-base acceptance, dirty/staged-boundary errors, concurrent writers, retained generated workflow/guidance, and altered authored instruction text |
 | Claude drift-net (`bin/qq-claude-guard`, `.claude/settings.json`) | `bash tests/test-qq-claude-guard.sh` | Recognizable `gh pr merge` parsing, direct edit-tool writes to managed Backlog Markdown, plan-asset exemptions, fail-local behavior, hook wiring, and declared coverage gaps; do not mistake it for a security boundary |
-| OpenWiki BPMN | `bash tests/test-qq-openwiki-bpmn.sh`; `npm test --prefix tools/bpmn-pipeline`; run `qq-openwiki-bpmn --check` for every retained spec | Wrong process boundary, escaped or stale evidence, unsupported edges, non-deterministic output, stale artifacts, unreadable or unhelpful images; after a tracked directory move, only checkouts that had ignored artifacts at the old path can strand them when they advance. Resolve the installed-command symlink target and writer; a surprising primary-checkout gate is report-and-stop unless remediation is operator-authorized |
 | `openwiki/` | Verify links and source references; search for retired concepts; compare key claims to current source and diff | Source Changes editing generated pages, duplicated or stale documentation |
 
 Do not run `bin/install.sh` against a real user HOME merely to test it; isolate user-level mutation.
@@ -38,8 +37,8 @@ A discovered pre-existing defect or broader opportunity does not automatically b
 
 ## Current coverage gaps
 
-- `.github/workflows/ci.yml` runs the Node 22 BPMN pipeline tests and every `tests/test-*.sh` script on pull requests and pushes to `main`; CI sets `QQ_BPMN_SKIP_RENDER=1`, so it does not establish raster readability (`.github/workflows/ci.yml:1-42`).
-- Focused harnesses cover OpenWiki generation, BPMN publication, installer retirement cleanup, the Claude drift-net, Herdr home/board validation, and work-session adoption, but they do not replace live GitHub metadata and branch-protection checks, graphical browser behavior, Herdr behavior, or visual inspection of rendered diagrams. Raster rendering assertions are also skipped when Chrome is unavailable or `QQ_BPMN_SKIP_RENDER=1`.
+- `.github/workflows/ci.yml` runs every `tests/test-*.sh` script on pull requests and pushes to `main` (`.github/workflows/ci.yml:1-23`).
+- Focused harnesses cover OpenWiki generation, installer retirement cleanup, the Claude drift-net, Herdr home/board validation, and work-session adoption, but they do not replace live GitHub metadata and branch-protection checks, graphical browser behavior, or Herdr behavior.
 - Installer behavior has a wide user-level blast radius despite careful refusal logic.
 - Historical Backlog documents include obsolete gate/orchestration architecture and can mislead search-driven agents.
 

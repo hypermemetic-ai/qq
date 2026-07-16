@@ -208,15 +208,6 @@ prune_removed_openwiki_links() {
   fi
 }
 
-install_bpmn_pipeline() {
-  local pipeline="$QQ/tools/bpmn-pipeline"
-
-  command -v npm >/dev/null 2>&1 || die "npm is required for the bundled BPMN pipeline"
-  npm ci --prefix "$pipeline" --no-audit --no-fund
-  printf 'installed: locked BPMN pipeline dependencies\n'
-}
-
-install_bpmn_pipeline
 sync_skills "$HOME/.codex/skills"
 sync_skills "$HOME/.claude/skills"
 cleanup_openwiki_activation_handler
@@ -235,6 +226,4 @@ link_one "$QQ/bin/qq-herdr-home" "$HOME/.local/bin/qq-herdr-home" "command/qq-he
 link_one "$QQ/bin/qq-herdr-pull" "$HOME/.local/bin/qq-herdr-pull" "command/qq-herdr-pull"
 link_one "$QQ/bin/qq-herdr-snap" "$HOME/.local/bin/qq-herdr-snap" "command/qq-herdr-snap"
 link_one "$QQ/bin/qq-openwiki" "$HOME/.local/bin/qq-openwiki" "command/qq-openwiki"
-link_one "$QQ/bin/qq-openwiki-bpmn" "$HOME/.local/bin/qq-openwiki-bpmn" "command/qq-openwiki-bpmn"
-
 printf 'qq install: links complete\n'

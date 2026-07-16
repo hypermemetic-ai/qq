@@ -18,10 +18,7 @@ assignment; a merge or observed `main` advance is not a trigger.
 2. Run `qq-openwiki --update`. Use `qq-openwiki --init` only for explicit first
    setup. Read the complete generator output and require a documentation-only
    diff.
-3. Inventory every `openwiki/processes/*.json` spec and its matching BPMN and
-   image artifacts. Run `qq-openwiki-bpmn --check <spec>` for every bundle and
-   require all checks to pass.
-4. Run applicable documentation Checks and `git diff --check`, then invoke
+3. Run applicable documentation Checks and `git diff --check`, then invoke
    `code-review` on the complete generated diff. Verify each finding and resolve
    only in-scope defects; rerun affected Checks and review any correction delta.
 
