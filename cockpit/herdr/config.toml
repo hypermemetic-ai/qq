@@ -132,6 +132,7 @@ agent_panel_sort = "spaces"
 # `herdr pane report-metadata` (Agent rows). Unreported tokens collapse, so
 # these rows cost nothing outside an active batch. Rows above $stage are
 # herdr's defaults, restated because an explicit layout replaces them.
+show_agent_labels_on_pane_borders = false
 [ui.sidebar.spaces]
 rows = [
   ["state_icon", "workspace"],
@@ -145,3 +146,9 @@ rows = [
   ["agent"],
   ["$stage"],
 ]
+
+[ui.toast]
+delivery = "herdr"
+
+[experimental]
+switch_ascii_input_source_in_prefix = false
