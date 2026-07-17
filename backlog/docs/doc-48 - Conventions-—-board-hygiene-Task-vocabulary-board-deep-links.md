@@ -3,7 +3,7 @@ id: doc-48
 title: 'Conventions — board hygiene, Task vocabulary, board deep links'
 type: guide
 created_date: '2026-07-16 17:08'
-updated_date: '2026-07-17 01:28'
+updated_date: '2026-07-17 01:33'
 ---
 # Conventions — board hygiene, Task vocabulary, board deep links
 
@@ -74,4 +74,4 @@ Consequences: delegate worktrees never edit anything under `backlog/`; pull
 collisions are prevented by construction (the primary copy is gone before
 its merge returns); a finalizing Task briefly leaves the board between the
 move and merge-plus-pull. Until the backlog.md release that ships the
-BACK-547 repaint fix, restart boards after sweeps (t-66).
+BACK-547 repaint fix, restart boards after sweeps (T-66).

@@ -3,7 +3,7 @@ id: doc-46
 title: Diagnosis — the backlog board is stale by construction
 type: other
 created_date: '2026-07-16 17:08'
-updated_date: '2026-07-17 01:28'
+updated_date: '2026-07-17 01:33'
 ---
 # Diagnosis — "backlog board is always stale"
 
@@ -71,7 +71,7 @@ so Done records still ride their code pull request. The
 primary-checkout-only option was declined for its recurring merge-time
 reconcile discipline and decoupled provenance.
 
-The open repaint question was settled the same day under t-66: the TUI
+The open repaint question was settled the same day under T-66: the TUI
 consumes removal-class inotify events without evicting from its
 upsert-only store, so boards go permanently stale after sweeps —
 deterministic, reproduced under strace in a hermetic PTY harness. The
