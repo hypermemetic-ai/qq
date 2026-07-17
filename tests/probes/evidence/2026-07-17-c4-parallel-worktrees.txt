@@ -1,0 +1,13 @@
+probe: C4 parallel writers get separate worktrees
+captured_utc: 2026-07-17T18:29:18Z
+source_checkout: /home/qqp/.herdr/worktrees/qq/chore-t-80-baseline-probes
+isolated_probe_repository: /tmp/qq-c4-probe.uVu6ds/repository
+writer_a_worktree: /tmp/qq-c4-probe.uVu6ds/writer-a
+writer_a_git_dir: /tmp/qq-c4-probe.uVu6ds/repository/.git/worktrees/writer-a
+writer_a_marker: writer-a
+writer_b_worktree: /tmp/qq-c4-probe.uVu6ds/writer-b
+writer_b_git_dir: /tmp/qq-c4-probe.uVu6ds/repository/.git/worktrees/writer-b
+writer_b_marker: writer-b
+shared_repository_git_dir: /tmp/qq-c4-probe.uVu6ds/repository/.git
+cleanup: PASS — both temporary worktrees removed
+result: PASS — simultaneous writers remained isolated in distinct linked worktrees

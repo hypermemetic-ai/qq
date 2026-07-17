@@ -1,0 +1,14 @@
+probe: C6 delivery-critical local Checks pass with Herdr absent
+captured_utc: 2026-07-17T18:29:23Z
+excluded_path_directories: /home/linuxbrew/.linuxbrew/bin,/home/linuxbrew/.linuxbrew/bin,/home/linuxbrew/.linuxbrew/bin,/home/linuxbrew/.linuxbrew/bin
+masked_path: /home/linuxbrew/.linuxbrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/home/qqp/.local/bin:/home/qqp/bin:/home/qqp/.codex/tmp/arg0/codex-arg0MzSjb8:/home/linuxbrew/.linuxbrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/home/qqp/projects/qq/bin:/home/qqp/.local/bin:/home/qqp/.bun/bin:/home/qqp/.opencode/bin:/home/linuxbrew/.linuxbrew/sbin:/home/qqp/.local/bin:/home/qqp/.bun/bin:/home/qqp/.opencode/bin:/home/linuxbrew/.linuxbrew/sbin:/home/qqp/.deno/bin:/home/qqp/.cargo/bin:/home/qqp/.local/bin:/home/qqp/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
+herdr_resolution: absent
+check: for t in tests/test-*.sh; do bash "$t" || exit 1; done
+test-bin-resolution: pass
+test-file-navigation: pass
+test-qq-claude-guard: pass
+test-qq-herdr-home: pass
+test-qq-herdr-pull: pass
+test-qq-herdr-snap: pass
+test-qq-openwiki: pass
+result: PASS — the complete shell Check suite passed while Herdr was absent

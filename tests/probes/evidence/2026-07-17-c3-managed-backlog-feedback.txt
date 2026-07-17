@@ -1,0 +1,8 @@
+probe: C3 structured edits to managed Backlog markdown get local feedback
+captured_utc: 2026-07-17T18:29:13Z
+guard: /home/qqp/.herdr/worktrees/qq/chore-t-80-baseline-probes/bin/qq-claude-guard
+synthetic_event: PreToolUse Edit targeting /home/qqp/.herdr/worktrees/qq/chore-t-80-baseline-probes/backlog/tasks/t-80-probe.md
+exit_status: 2
+stdout: <empty>
+stderr: qq-claude-guard: managed Backlog markdown must be edited through the backlog CLI
+result: PASS — the black-box hook denied the structured edit with local feedback
