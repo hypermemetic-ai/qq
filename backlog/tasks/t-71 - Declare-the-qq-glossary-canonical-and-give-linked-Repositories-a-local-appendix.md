@@ -3,10 +3,10 @@ id: T-71
 title: >-
   Declare the qq glossary canonical and give linked Repositories a local
   appendix
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-17 02:32'
-updated_date: '2026-07-17 02:32'
+updated_date: '2026-07-17 02:40'
 labels: []
 dependencies: []
 priority: medium
@@ -22,9 +22,9 @@ Operator direction 2026-07-16: the qq glossary is canonical; linked projects nee
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 CONCEPTS.md's preamble states the glossary is the canonical shared language for qq and every linked Repository, and defines the CONCEPTS.local.md appendix rule (append project vocabulary; never redefine canonical terms)
-- [ ] #2 AGENTS.md's Context section instructs: read CONCEPTS.md and, where present, CONCEPTS.local.md as the Repository's appended vocabulary
-- [ ] #3 All tests/test-*.sh pass (several assert exact strings in CONCEPTS.md and AGENTS.md-adjacent files)
+- [x] #1 CONCEPTS.md's preamble states the glossary is the canonical shared language for qq and every linked Repository, and defines the CONCEPTS.local.md appendix rule (append project vocabulary; never redefine canonical terms)
+- [x] #2 AGENTS.md's Context section instructs: read CONCEPTS.md and, where present, CONCEPTS.local.md as the Repository's appended vocabulary
+- [x] #3 All tests/test-*.sh pass (several assert exact strings in CONCEPTS.md and AGENTS.md-adjacent files)
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -35,3 +35,15 @@ Operator direction 2026-07-16: the qq glossary is canonical; linked projects nee
 3. Checks: all tests/test-*.sh; grep the exact strings tests assert in CONCEPTS.md remain.
 4. code-review; commit; PR.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Verification: 7/7 tests/test-*.sh pass in the worktree (includes the new test-file-navigation.sh from T-68 and the exact-string CONCEPTS.md assertions); grep sentinel '[A-Za-z0-9-]{1,15}' intact; diff touches only AGENTS.md and CONCEPTS.md preamble — no term definitions. Fresh codex review returned no findings. Coordinated via agent messaging with the T-70 session: PR #120 edits non-adjacent CONCEPTS.md body hunks (project home / work session), AGENTS.md untouched there; whoever lands second reconciles, auto-merge expected. Delivered as PR #121.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+CONCEPTS.md preamble now declares the glossary the canonical shared language for qq and every linked Repository with the CONCEPTS.local.md appendix rule (append, never redefine); AGENTS.md points agents at the appendix where present. Verified with the full test suite (7/7), exact-string assertion checks, and a no-findings fresh review. Delivered as PR #121.
+<!-- SECTION:FINAL_SUMMARY:END -->
