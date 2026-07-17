@@ -3,7 +3,7 @@ id: doc-46
 title: Diagnosis — the backlog board is stale by construction
 type: other
 created_date: '2026-07-16 17:08'
-updated_date: '2026-07-16 17:22'
+updated_date: '2026-07-17 01:33'
 ---
 # Diagnosis — "backlog board is always stale"
 
@@ -62,3 +62,18 @@ confirmed cause.
 3. Residual (only if it bites): a guarded `git pull --ff-only` timer for
    clean primary mains when merges land with no live session (extends
    T-14; touches cockpit/herdr config).
+## Disposition (2026-07-16)
+
+The operator adopted the **hybrid convention** (recorded in doc-48): Task
+records are born and status-flipped in the primary checkout — the board
+shows live in-flight truth — and move into their Change at finalization,
+so Done records still ride their code pull request. The
+primary-checkout-only option was declined for its recurring merge-time
+reconcile discipline and decoupled provenance.
+
+The open repaint question was settled the same day under T-66: the TUI
+consumes removal-class inotify events without evicting from its
+upsert-only store, so boards go permanently stale after sweeps —
+deterministic, reproduced under strace in a hermetic PTY harness. The
+upstream fix (BACK-547, PR #788) is merged but unreleased as of v1.48.0;
+interim rule: restart boards after sweeps.

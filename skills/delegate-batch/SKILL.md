@@ -27,7 +27,9 @@ include:
 - the ticket and its acceptance criteria, plus any batch context it needs;
 - exact orientation paths and reconciliation facts the owner already verified;
 - hard constraints, including local-only work, no push, no pull request, and
-  Backlog CLI-only edits to managed Backlog markdown;
+  no edits under `backlog/` at all — under the hybrid Task-truth convention
+  (doc-48) the record lives in the primary checkout until the owner's
+  finalization move, and managed Backlog markdown is CLI-edited only;
 - the per-ticket commit protocol;
 - the exact Checks to run; and
 - the required completion envelope.

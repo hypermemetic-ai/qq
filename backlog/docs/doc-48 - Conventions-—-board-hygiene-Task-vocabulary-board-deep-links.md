@@ -3,7 +3,7 @@ id: doc-48
 title: 'Conventions — board hygiene, Task vocabulary, board deep links'
 type: guide
 created_date: '2026-07-16 17:08'
-updated_date: '2026-07-16 23:30'
+updated_date: '2026-07-17 01:33'
 ---
 # Conventions — board hygiene, Task vocabulary, board deep links
 
@@ -59,3 +59,19 @@ T-59 diagnosis: no long-lived board server runs by default, so the links
 resolve only while the operator has `backlog browser` up; the terminal
 `backlog board` TUI has no deep-link surface. The link is a convenience
 pointer, not a liveness claim.
+## Task truth: the hybrid convention
+
+Settled by the operator 2026-07-16, closing the open decision in doc-46. A
+Task record is born and kept current in the primary `main` checkout's
+working tree: mint, status flips, and in-flight notes happen there through
+the Backlog CLI, so the board renders live truth for the work that is
+actually moving. At finalization the owning Actor moves the record file
+into the Change's checkout with a single `mv`, then records Done, the final
+summary, and AC checks there; the record lands in the same pull request as
+its code.
+
+Consequences: delegate worktrees never edit anything under `backlog/`; pull
+collisions are prevented by construction (the primary copy is gone before
+its merge returns); a finalizing Task briefly leaves the board between the
+move and merge-plus-pull. Until the backlog.md release that ships the
+BACK-547 repaint fix, restart boards after sweeps (T-66).

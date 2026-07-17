@@ -50,18 +50,22 @@ delegated agents bounded assignments; do not hand them this lifecycle.
    tools or judgment beyond the plan's bounds; composing plans, briefs, and
    verdicts stays with the accountable session. When a decision needs durable,
    multi-source evidence, delegate that question through `research` and retain
-   the judgment. Keep the Task aligned through the Backlog CLI and run the
-   local Checks that observe the changed behavior.
+   the judgment. Keep the Task aligned through the Backlog CLI in the primary
+   `main` checkout, where the record lives until finalization under the
+   hybrid Task-truth convention (doc-48) so the board renders in-flight
+   truth, and run the local Checks that observe the changed behavior.
 3. After implementation and local verification, run `code-review` for every
    non-trivial Change before committing or publishing it. Verify its findings,
    resolve only confirmed in-scope issues, and rerun affected Checks.
 4. Commit only green units, push each green commit, and open a pull request
    that carries the Task intent and Check evidence. Pass the Repository's final
    GitHub Checks.
-5. Before the final merge handoff, follow Backlog's task-finalization
-   instructions inside this Change: verify the acceptance criteria, record the
-   final summary, mark the Task Done, and push that finalization through the
-   same pull request. Rerun Checks affected by the final commit. Done records
+5. Before the final merge handoff, first move the Task record from the
+   primary checkout's working tree into this Change's checkout — the hybrid
+   convention's single move (doc-48) — then follow Backlog's
+   task-finalization instructions inside this Change: verify the acceptance
+   criteria, record the final summary, mark the Task Done, and push that
+   finalization through the same pull request. Rerun Checks affected by the final commit. Done records
    that the agreed Task work is complete; it does not claim that the operator
    accepted or landed its Change.
 6. If a Check or operator feedback shows that an existing acceptance criterion
