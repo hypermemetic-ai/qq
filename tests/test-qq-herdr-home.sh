@@ -264,4 +264,35 @@ tr '\n\t' '  ' <"$ROOT/skills/research/SKILL.md" | \
   grep -qE 'deliberately keeps +its MCP servers'
 grep -Fq 'including 124' "$ROOT/skills/code-review/SKILL.md"
 
+tr '\n\t' '  ' <"$ROOT/skills/grilling/SKILL.md" | \
+  grep -qE 'Dispositions +do +not +transfer'
+tr '\n\t' '  ' <"$ROOT/skills/grilling/SKILL.md" | \
+  grep -qE 'Authorization +is +not +alignment'
+tr '\n\t' '  ' <"$ROOT/skills/grilling/SKILL.md" | \
+  grep -qE 'Default +to +the +alignment +brief'
+tr '\n\t' '  ' <"$ROOT/skills/grilling/SKILL.md" | \
+  grep -qE 'answerable +from +the +briefing'
+if grep -qE 'entirely obvious and mechanical' "$ROOT/skills/grilling/SKILL.md"; then
+  fail 'grilling reintroduced the self-certified skip clause (alignment gate, T-76)'
+fi
+tr '\n\t' '  ' <"$ROOT/skills/deliver-change/SKILL.md" | \
+  grep -qE 'decision +ledger'
+tr '\n\t' '  ' <"$ROOT/skills/deliver-change/SKILL.md" | \
+  grep -qE 'uncited +decision +is +open'
+tr '\n\t' '  ' <"$ROOT/CONCEPTS.md" | \
+  grep -qE '\*\*decision ledger\*\* —'
+tr '\n\t' '  ' <"$ROOT/CONCEPTS.md" | \
+  grep -qE '\*\*alignment brief\*\* —'
+ls "$ROOT"/backlog/decisions/decision-2*.md >/dev/null
+tr '\n\t' '  ' <"$ROOT/skills/grilling/SKILL.md" | \
+  grep -qE 'never +in +the +primary +checkout'
+tr '\n\t' '  ' <"$ROOT/skills/grilling/SKILL.md" | \
+  grep -qE 'opt-out +is +itself +a +disposition'
+tr '\n\t' '  ' <"$ROOT/skills/grilling/SKILL.md" | \
+  grep -qE 'switches +to +the +record +id +before +Task +finalization'
+tr '\n\t' '  ' <"$ROOT/skills/deliver-change/SKILL.md" | \
+  grep -qE 'opt-out +recorded +verbatim'
+tr '\n\t' '  ' <"$ROOT/CONCEPTS.md" | \
+  grep -qE 'opt-out +recorded +verbatim'
+
 printf 'test-qq-herdr-home: pass\n'

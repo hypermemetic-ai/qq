@@ -32,6 +32,22 @@ research, an idea, a reusable lesson, or shared vocabulary.
 through the Backlog CLI. When associating documents with a Task, `--doc`
 replaces the complete list; it does not append to it.
 
+**decision ledger** — The block in an owning Task's Description listing every
+consequential decision its Change embeds, each citing the disposition that
+settled it — a Backlog decision record, an approved Task, an
+asked-and-answered alignment exchange, or an explicit operator opt-out
+recorded verbatim — or the explicit entry `none`. An
+uncited decision is open; deliver-change refuses to bind a Change without a
+ledger. Dispositions do not transfer: each covers exactly the decision it
+settled, on the surface it settled it for.
+
+**alignment brief** — The default operator-alignment step for a genuinely new
+work item: a plain-language statement of the intended work and every embedded
+consequential decision with its citation or a recommendation, closed by one
+approval question. All context that bears on each decision precedes the
+options; a full grilling interview follows only when a decision is genuinely
+open.
+
 **GitHub Flow** — The delivery path from branch through pull request and final
 Checks to operator merge and automatic branch deletion.
 

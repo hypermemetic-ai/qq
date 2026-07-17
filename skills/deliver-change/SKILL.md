@@ -8,7 +8,17 @@ description: Owns one-PR GitHub Flow delivery for every authorized Repository mo
 Retain responsibility for scope, decisions, evidence, and delivery state. Give
 delegated agents bounded assignments; do not hand them this lifecycle.
 
-1. Bind the Change to the agreed outcome and current Repository state. Follow
+1. Bind the Change to the agreed outcome and current Repository state. Before
+   binding, require the owning Task record's Description to carry a decision
+   ledger: every consequential decision this Change embeds, each citing what
+   settled it — a Backlog decision record, an approved Task, an
+   asked-and-answered alignment brief or interview, or an explicit
+   operator opt-out recorded verbatim — or the explicit entry
+   `none`. Dispositions do not transfer across surfaces or Changes; an
+   uncited decision is open, and any open entry returns the work to
+   alignment (grilling) before any Repository mutation. Record a
+   disposition whose reach extends beyond this Change as a Backlog decision
+   record and cite its id. Follow
    Backlog's task-execution instructions for Task operations, and confirm that
    the branch or worktree isolates this Change from unrelated work. Resolve the
    Repository root and run `qq-herdr-home inspect --repo <root>` first. Require
