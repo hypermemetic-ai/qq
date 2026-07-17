@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Resolve a Repository's persistent main-checkout Herdr home and its dedicated
-# Backlog-board tab. Inspection is read-only; focus-board changes only focus.
+# Resolve a Repository's persistent main-checkout Herdr home. Inspection is
+# read-only; focus-board finds and focuses its dedicated Backlog-board tab.
 set -euo pipefail
 
 usage() {
@@ -87,43 +87,43 @@ canonical_repo_key="$(readlink -f "$home_repo_key" 2>/dev/null)" \
 [ "$canonical_repo_key" = "$common_dir" ] \
   || die "home workspace repo key does not match Git common directory"
 
-panes="$({ "$HERDR" pane list --workspace "$home_workspace" 2>/dev/null || true; })"
-jq -e '.result.panes | type == "array"' <<<"$panes" >/dev/null 2>&1 \
-  || die "cannot inspect home workspace panes"
-
-board_panes=()
-while IFS=$'\t' read -r pane_id tab_id; do
-  if [ -z "$pane_id" ] || [ -z "$tab_id" ]; then
-    die "home workspace contains incomplete pane metadata"
-  fi
-  process_info="$({ "$HERDR" pane process-info --pane "$pane_id" 2>/dev/null || true; })"
-  jq -e '.result.process_info.foreground_processes | type == "array"' \
-    <<<"$process_info" >/dev/null 2>&1 \
-    || die "cannot inspect home pane process: $pane_id"
-  if jq -e '
-    (.result.process_info.foreground_processes // [])
-    | any(.[]?;
-        (.argv? | type == "array")
-        and ((.argv | length) >= 2)
-        and (.argv[-1] == "board")
-        and any(.argv[]; ((tostring | split("/") | last) == "backlog"))
-      )
-  ' <<<"$process_info" >/dev/null; then
-    board_panes+=("$pane_id"$'\t'"$tab_id")
-  fi
-done < <(jq -r '.result.panes[] | [.pane_id, .tab_id] | @tsv' <<<"$panes")
-
-[ "${#board_panes[@]}" -eq 1 ] \
-  || die "expected exactly one Backlog-board pane in home workspace $home_workspace (found ${#board_panes[@]})"
-IFS=$'\t' read -r board_pane board_tab <<<"${board_panes[0]}"
-
-board_tab_panes="$(jq -r --arg tab "$board_tab" \
-  '[.result.panes[] | select(.tab_id == $tab)] | length' <<<"$panes")"
-[ "$board_tab_panes" -eq 1 ] \
-  || die "Backlog board tab $board_tab must contain exactly one pane (found $board_tab_panes)"
-
 focused=false
 if [ "$action" = "focus-board" ]; then
+  panes="$({ "$HERDR" pane list --workspace "$home_workspace" 2>/dev/null || true; })"
+  jq -e '.result.panes | type == "array"' <<<"$panes" >/dev/null 2>&1 \
+    || die "cannot inspect home workspace panes"
+
+  board_panes=()
+  while IFS=$'\t' read -r pane_id tab_id; do
+    if [ -z "$pane_id" ] || [ -z "$tab_id" ]; then
+      die "home workspace contains incomplete pane metadata"
+    fi
+    process_info="$({ "$HERDR" pane process-info --pane "$pane_id" 2>/dev/null || true; })"
+    jq -e '.result.process_info.foreground_processes | type == "array"' \
+      <<<"$process_info" >/dev/null 2>&1 \
+      || die "cannot inspect home pane process: $pane_id"
+    if jq -e '
+      (.result.process_info.foreground_processes // [])
+      | any(.[]?;
+          (.argv? | type == "array")
+          and ((.argv | length) >= 2)
+          and (.argv[-1] == "board")
+          and any(.argv[]; ((tostring | split("/") | last) == "backlog"))
+        )
+    ' <<<"$process_info" >/dev/null; then
+      board_panes+=("$pane_id"$'\t'"$tab_id")
+    fi
+  done < <(jq -r '.result.panes[] | [.pane_id, .tab_id] | @tsv' <<<"$panes")
+
+  [ "${#board_panes[@]}" -eq 1 ] \
+    || die "expected exactly one Backlog-board pane in home workspace $home_workspace (found ${#board_panes[@]})"
+  IFS=$'\t' read -r board_pane board_tab <<<"${board_panes[0]}"
+
+  board_tab_panes="$(jq -r --arg tab "$board_tab" \
+    '[.result.panes[] | select(.tab_id == $tab)] | length' <<<"$panes")"
+  [ "$board_tab_panes" -eq 1 ] \
+    || die "Backlog board tab $board_tab must contain exactly one pane (found $board_tab_panes)"
+
   "$HERDR" tab focus "$board_tab" >/dev/null 2>&1 \
     || die "could not focus Backlog board tab $board_tab"
   tab_info="$({ "$HERDR" tab get "$board_tab" 2>/dev/null || true; })"
@@ -141,15 +141,17 @@ jq -cn \
   --arg repo_root "$repo_root" \
   --arg main_checkout "$main_checkout" \
   --arg home_workspace_id "$home_workspace" \
-  --arg board_tab_id "$board_tab" \
-  --arg board_pane_id "$board_pane" \
+  --arg board_tab_id "${board_tab-}" \
+  --arg board_pane_id "${board_pane-}" \
   --argjson focused "$focused" \
   '{
     action: $action,
     repo_root: $repo_root,
     main_checkout: $main_checkout,
     home_workspace_id: $home_workspace_id,
-    board_tab_id: $board_tab_id,
-    board_pane_id: $board_pane_id,
     focused: $focused
-  }'
+  }
+  + if $action == "focus-board" then {
+      board_tab_id: $board_tab_id,
+      board_pane_id: $board_pane_id
+    } else {} end'

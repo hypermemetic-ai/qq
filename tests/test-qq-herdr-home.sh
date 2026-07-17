@@ -105,21 +105,29 @@ expect_failure() {
 reset_fake
 result="$("$HOME_CMD" inspect --repo "$repo")"
 jq -e --arg checkout "$main_checkout" '
-  .action == "inspect"
+  (keys == ["action", "focused", "home_workspace_id", "main_checkout", "repo_root"])
+  and .action == "inspect"
+  and .repo_root == $checkout
+  and .main_checkout == $checkout
+  and .home_workspace_id == "wHome"
+  and .focused == false
+' <<<"$result" >/dev/null
+if grep -Eq '^(pane list|pane process-info|tab focus|tab get) ' "$log"; then
+  fail "inspect performed board discovery or changed focus"
+fi
+
+reset_fake
+result="$("$HOME_CMD" focus-board --repo "$repo")"
+jq -e --arg checkout "$main_checkout" '
+  (keys == ["action", "board_pane_id", "board_tab_id", "focused", "home_workspace_id", "main_checkout", "repo_root"])
+  and .action == "focus-board"
   and .repo_root == $checkout
   and .main_checkout == $checkout
   and .home_workspace_id == "wHome"
   and .board_tab_id == "wHome:tBoard"
   and .board_pane_id == "wHome:pBoard"
-  and .focused == false
+  and .focused == true
 ' <<<"$result" >/dev/null
-if grep -q '^tab focus ' "$log"; then
-  fail "inspect changed focus"
-fi
-
-reset_fake
-result="$("$HOME_CMD" focus-board --repo "$repo")"
-jq -e '.action == "focus-board" and .focused == true' <<<"$result" >/dev/null
 grep -Fxq 'tab focus wHome:tBoard' "$log"
 grep -Fxq 'tab get wHome:tBoard' "$log"
 if grep -Eq '^(pane move|pane close|worktree remove) ' "$log"; then
@@ -136,15 +144,15 @@ expect_failure 'expected exactly one persistent Herdr home' inspect --repo "$rep
 
 reset_fake
 export FAKE_NO_BOARD=1
-expect_failure 'expected exactly one Backlog-board pane' inspect --repo "$repo"
+expect_failure 'expected exactly one Backlog-board pane' focus-board --repo "$repo"
 
 reset_fake
 export FAKE_MULTI_BOARD=1
-expect_failure 'expected exactly one Backlog-board pane' inspect --repo "$repo"
+expect_failure 'expected exactly one Backlog-board pane' focus-board --repo "$repo"
 
 reset_fake
 export FAKE_SPLIT_BOARD=1
-expect_failure 'must contain exactly one pane' inspect --repo "$repo"
+expect_failure 'must contain exactly one pane' focus-board --repo "$repo"
 
 reset_fake
 export FAKE_FOCUS_FAIL=1
