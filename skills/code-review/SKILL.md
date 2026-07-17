@@ -58,7 +58,7 @@ inherits the other's conclusions.
    machinery. Keep the brief and report under the OS temporary directory:
 
    ```sh
-   codex exec \
+   timeout -k 10 3600 codex exec \
      -c 'skills.include_instructions=false' \
      -c 'skills.bundled.enabled=false' \
      --sandbox read-only \
@@ -82,6 +82,19 @@ inherits the other's conclusions.
    reruns. Run the command as an ordinary process in the Change's work
    session, wait for it to exit, then read the report file; process exit
    retires the reviewer.
+
+   The `timeout -k 10 3600` wrapper contains the startup wedge (doc-45): a
+   `codex exec` that parks before its first byte would otherwise never exit,
+   and process exit is the only signal the owning session waits on. Plain
+   `timeout` signals its own process group and reaps the full codex process
+   tree (probe-verified, 2026-07-16); never wrap it in `setsid`, which
+   detaches the group and leaks the tree. Tune the bound to the review,
+   never below real review time. Unlike wedge-hardened implementer
+   dispatches, the reviewer deliberately keeps its MCP servers — the
+   knowledge surfaces they provide serve review quality (operator
+   disposition, 2026-07-16) — and the timeout bounds the spawn risk their
+   startup adds. Exit status 124 is a reaped wedge, not a review — step 10
+   applies.
 5. The reviewer tests the Change's responsibilities against the brief, then
    inspects the exact diff, the surrounding callers and tests, and the
    failure paths it suspects. A correctly implemented but unapproved
@@ -128,6 +141,7 @@ inherits the other's conclusions.
    green state and escalate a design decision to the operator — which layer
    should own the violated invariant — instead of feeding a patch queue.
 10. Handle an explicit context gap through step 6. A reviewer error, a nonzero
-    exit, or a missing or empty report file is not a review: rerun the
-    unchanged brief as a fresh step 4 invocation. Never narrow scope or soften
-    intent to obtain a pass; repeated reviewer failure is a blocker.
+    exit — including 124, the timeout wrapper reaping a wedged reviewer — or a
+    missing or empty report file is not a review: rerun the unchanged brief as
+    a fresh step 4 invocation. Never narrow scope or soften intent to obtain a
+    pass; repeated reviewer failure is a blocker.

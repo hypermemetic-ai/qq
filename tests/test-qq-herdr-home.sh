@@ -245,4 +245,23 @@ grep -Fq -- "-c 'skills.include_instructions=false'" "$ROOT/skills/research/SKIL
 grep -Fq -- "-c 'skills.bundled.enabled=false'" "$ROOT/skills/research/SKILL.md"
 grep -Fq -- '--sandbox read-only' "$ROOT/skills/research/SKILL.md"
 
+if grep -qE '^[[:space:]]*codex[[:space:]]+exec[[:space:]]+\\' "$ROOT/skills/code-review/SKILL.md" \
+  "$ROOT/skills/research/SKILL.md" "$ROOT/skills/delegate-batch/SKILL.md"; then
+  fail 'a skill reintroduced an unwrapped codex exec dispatch command (startup wedge containment, doc-45/T-63/T-75)'
+fi
+tr '\n\t' '  ' <"$ROOT/skills/code-review/SKILL.md" | \
+  grep -qF 'timeout -k 10 3600 codex exec'
+tr '\n\t' '  ' <"$ROOT/skills/research/SKILL.md" | \
+  grep -qF 'timeout -k 10 3600 codex exec'
+tr '\n\t' '  ' <"$ROOT/skills/delegate-batch/SKILL.md" | \
+  grep -qF 'timeout -k 10 3600 codex exec'
+grep -Fq 'deliberately keeps its MCP servers' "$ROOT/skills/code-review/SKILL.md"
+if grep -q 'mcp_servers' "$ROOT/skills/code-review/SKILL.md" \
+  "$ROOT/skills/research/SKILL.md"; then
+  fail 'a reviewer or researcher dispatch mentions mcp_servers in any spelling (operator kept their MCP, T-75)'
+fi
+tr '\n\t' '  ' <"$ROOT/skills/research/SKILL.md" | \
+  grep -qE 'deliberately keeps +its MCP servers'
+grep -Fq 'including 124' "$ROOT/skills/code-review/SKILL.md"
+
 printf 'test-qq-herdr-home: pass\n'

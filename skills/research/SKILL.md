@@ -12,7 +12,7 @@ fresh read-only researcher through Codex's non-interactive runner, adopting
 its native access control instead of any owned delegate machinery:
 
 ```sh
-codex exec \
+timeout -k 10 3600 codex exec \
   -c 'skills.include_instructions=false' \
   -c 'skills.bundled.enabled=false' \
   --sandbox read-only \
@@ -33,6 +33,17 @@ read-only sandbox, and writes its final findings to `<findings-path>`
 itself; process exit retires it. The owning agent spot-checks load-bearing
 citations, decides what the findings mean, and writes the Repository
 artifacts.
+
+The `timeout -k 10 3600` wrapper contains the startup wedge (doc-45): a
+`codex exec` that parks before its first byte would otherwise never exit,
+and process exit is the only signal the owning session waits on. Plain
+`timeout` reaps the full codex process tree; never wrap it in `setsid`,
+which detaches the group and leaks the tree. Tune the bound to the
+question, never below real research time; exit status 124 is a reaped
+wedge, not findings — relaunch the unchanged brief fresh. Unlike
+wedge-hardened implementer dispatches, the researcher deliberately keeps
+its MCP servers: Context7 is core to this method, and the timeout now
+bounds the residual spawn risk.
 
 ## Method
 
