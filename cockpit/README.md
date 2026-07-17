@@ -1,8 +1,9 @@
 # Cockpit
 
 `cockpit/` is the source of truth for the human-driven terminal surface.
-`bin/install.sh` symlinks each file into `~/.config`, so editing here or through
-the live config path edits the same file.
+Day-0 bootstrap (see the README's Install section) symlinks each config file
+into `~/.config`, so editing here or through the live config path edits the
+same file; the shell surface is sourced straight from this checkout.
 
 ## Files
 - `yazi/yazi.toml` — pane-first file navigation; markdown opens in-pane through

@@ -36,8 +36,9 @@ wiring needed to expose it.
 - herdr provides persistent `main` project homes, short-labeled grouped
   worktree sessions, named agents, and direct agent-to-agent messaging.
 - `cockpit/` contains the operator's terminal configuration.
-- `bin/` installs the live qq surfaces, runs guarded local OpenWiki updates, and
-  validates Herdr project-home focus and pane movement.
+- `bin/` holds the qq commands — mounted on `PATH` by the cockpit shell
+  surface — for guarded local OpenWiki updates and Herdr project-home focus
+  and pane movement.
 
 ## Delivery
 
@@ -47,18 +48,48 @@ operator merges.
 
 ## Install qq
 
-From the qq Repository root, run:
+Installation is by construction: every runtime surface mounts this checkout
+directly, so day-to-day changes — adding, editing, or removing a Skill or a
+command — are live everywhere with no install step. A machine is bootstrapped
+once.
+
+Mount the Skill set for Claude Code and Codex:
 
 ```bash
-bash bin/install.sh
+mkdir -p ~/.claude ~/.codex
+ln -sT "$HOME/projects/qq/skills" "$HOME/.claude/skills"
+ln -sT "$HOME/projects/qq/skills" "$HOME/.codex/skills"
 ```
 
-The installer live-links Skills into Codex and Claude Code, links the cockpit
-configuration and retained commands, and prunes links to qq Skills and commands
-that no longer exist. It refuses to replace paths it does not manage. Run it
-again after adding or removing a Skill.
+On a machine migrating off the retired installer, remove the old per-skill
+link directories first (after checking they hold nothing but links into this
+checkout): `rm -r ~/.claude/skills ~/.codex/skills`. `ln -sT` fails loudly
+rather than nesting a link inside a directory that still exists.
 
-The installer does not manage repository instructions. A linked Repository can
+Source the shell surface from `.bashrc`; it prepends `bin/` to `PATH` and
+provides the cockpit navigation helpers:
+
+```bash
+. "$HOME/projects/qq/cockpit/shell/file-navigation.bash"
+```
+
+Link the cockpit configurations whose tools read fixed `~/.config` paths:
+
+```bash
+mkdir -p ~/.config/yazi/plugins/smart-enter.yazi ~/.config/glow ~/.config/herdr
+ln -s "$HOME/projects/qq/cockpit/yazi/yazi.toml" ~/.config/yazi/yazi.toml
+ln -s "$HOME/projects/qq/cockpit/yazi/keymap.toml" ~/.config/yazi/keymap.toml
+ln -s "$HOME/projects/qq/cockpit/yazi/plugins/smart-enter.yazi/main.lua" ~/.config/yazi/plugins/smart-enter.yazi/main.lua
+ln -s "$HOME/projects/qq/cockpit/glow/glow.yml" ~/.config/glow/glow.yml
+ln -s "$HOME/projects/qq/cockpit/glow/tuned.json" ~/.config/glow/tuned.json
+ln -s "$HOME/projects/qq/cockpit/herdr/config.toml" ~/.config/herdr/config.toml
+```
+
+These file links are day-0 bootstrap, not a sync surface: content is live
+through each link, and the set changes only when a new cockpit tool is
+adopted. Nothing needs re-running when Skills or commands change.
+
+Bootstrap does not manage repository instructions. A linked Repository can
 point its root `AGENTS.md` symlink directly to qq's `AGENTS.md`, keeping one
 source of truth without adding global guidance to unrelated Repositories.
 
@@ -105,9 +136,7 @@ Keep one long-lived `openwiki/update` worktree per linked Repository. For an
 assigned refresh, fetch `origin`, reset that worktree to the fresh `origin/main`,
 and run `qq-openwiki --update` (`--init` only for first setup). Review the
 complete generated diff through `code-review`, and open an ordinary
-documentation-only pull request. The operator reviews and merges it. Running
-`bash bin/install.sh` also prunes legacy merge-activation artifacts that qq
-owns.
+documentation-only pull request. The operator reviews and merges it.
 
 Temporary debt (2026-07-10): upstream code mode unconditionally writes a
 scheduled GitHub Actions workflow and scheduled-workflow agent guidance.
