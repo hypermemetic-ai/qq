@@ -255,6 +255,8 @@ tr '\n\t' '  ' <"$ROOT/skills/research/SKILL.md" | \
   grep -qF 'timeout -k 10 3600 codex exec'
 tr '\n\t' '  ' <"$ROOT/skills/delegate-batch/SKILL.md" | \
   grep -qF 'timeout -k 10 3600 codex exec'
+tr '\n\t' '  ' <"$ROOT/skills/delegate-batch/SKILL.md" | \
+  grep -qE 'timeout -k 10 3600 codex +exec +resume'
 grep -Fq 'deliberately keeps its MCP servers' "$ROOT/skills/code-review/SKILL.md"
 if grep -q 'mcp_servers' "$ROOT/skills/code-review/SKILL.md" \
   "$ROOT/skills/research/SKILL.md"; then

@@ -200,10 +200,13 @@ a delegate that dies before its envelope. At the completion wake, reconcile a
 missing envelope to `FAILED: died before envelope` and a 124 exit status to
 `FAILED: startup/turn wedge (timeout)`.
 
-Run `codex exec resume <thread-id>` only from a shell whose current working
-directory is inside that delegate's Change checkout: resume derives its
-sandbox writable root from the calling shell's cwd, not the session's recorded
-cwd. Otherwise dispatch a fresh `codex exec -C <checkout>` for the rework.
+Run resume dispatches under the same containment as fresh ones —
+`timeout -k 10 3600 codex exec resume <thread-id>`, with the MCP-less
+override and events, envelope, and stderr files of the original dispatch —
+and only from a shell whose current working directory is inside that
+delegate's Change checkout: resume derives its sandbox writable root from
+the calling shell's cwd, not the session's recorded cwd. Otherwise
+dispatch a fresh `codex exec -C <checkout>` for the rework.
 
 On blocked or failed, run `herdr notification show "<ticket> needs attention"
 --body "<short actionable reason>" --sound request`. Verify that the result
