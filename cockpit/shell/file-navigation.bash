@@ -2,6 +2,27 @@
 
 : "${QQ_HOME:=$HOME/projects/qq}"
 
+# qq commands live in the checkout; PATH mounts them ahead of any stale
+# copies so membership changes need no install step. Rebuild PATH keeping
+# every other entry (empty ones included) in order: presence alone may sit
+# behind a shadowing directory.
+function qq_mount_bin() {
+    # Positional scratch only: $1 unscanned PATH (colon-terminated), $2 kept
+    # entries. Named locals could collide with readonly caller variables.
+    set -- "$PATH:" ""
+    while [ -n "$1" ]; do
+        if [ "${1%%:*}" = "$QQ_HOME/bin" ]; then
+            set -- "${1#*:}" "$2"
+        else
+            set -- "${1#*:}" "$2:${1%%:*}"
+        fi
+    done
+    PATH="$QQ_HOME/bin$2"
+}
+qq_mount_bin
+unset -f qq_mount_bin
+export PATH
+
 function y() {
     local tmp cwd
 
