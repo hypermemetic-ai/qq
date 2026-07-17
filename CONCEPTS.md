@@ -1,8 +1,11 @@
 # Concepts
 
-Read this glossary before every work item. These definitions are qq's shared
-language; use them consistently in reasoning, conversation, code, Tasks, and
-documentation. `compound` keeps the glossary aligned as vocabulary changes.
+Read this glossary before every work item. These definitions are the
+canonical shared language for qq and every linked Repository; use them
+consistently in reasoning, conversation, code, Tasks, and documentation. A
+linked Repository appends its own vocabulary in a root `CONCEPTS.local.md`
+and never redefines a canonical term. `compound` keeps the glossary aligned
+as vocabulary changes.
 
 **Actor** — The operator or a replaceable agent participating in the work. The
 operator owns intent and judgment; agents investigate, recommend, execute, and
