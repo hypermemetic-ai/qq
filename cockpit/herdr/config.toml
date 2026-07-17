@@ -37,7 +37,7 @@ navigate_pane_down = "k"
 key = "prefix+f"
 type = "popup"
 command = "bash -ic 'stty cols 72 rows 27 2>/dev/null; qqy'"
-description = "yazi at the repo root"
+description = "yazi at the focused space's project folder"
 width = 74
 height = 29
 
@@ -45,7 +45,7 @@ height = 29
 key = "prefix+shift+f"
 type = "popup"
 command = "bash -ic 'stty cols 72 rows 27 2>/dev/null; qqbr'"
-description = "broot at the repo root"
+description = "broot at the focused space's project folder"
 width = 74
 height = 29
 

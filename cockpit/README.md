@@ -16,12 +16,15 @@ the live config path edits the same file.
   (doc-43), and cockpit popup bindings: `prefix+f` runs `qqy`,
   `prefix+shift+f` runs `qqbr`.
 - `shell/file-navigation.bash` — `QQ_HOME`, generic `y()`/`br()` wrappers,
-  repo-focused `qqroot`/`qqy`/`qqbr`, and `qfiles`/`qtree` aliases.
+  `qqroot` targeting `QQ_HOME`, space-aware `qqy`/`qqbr`, and `qfiles`/`qtree`
+  aliases.
 
 ## Flow
 Herdr `prefix+f` opens a session-modal popup running `qqy`; `qqy` opens yazi at
-the repo root; Enter descends into a folder or renders a `.md` file through
-mdcat or Glow. `prefix+shift+f` opens broot at the same root through `qqbr`.
+the focused space's project folder — the focused Herdr workspace's worktree
+checkout. Enter descends into a folder or renders a `.md` file through mdcat or
+Glow. `prefix+shift+f` opens broot there through `qqbr`. Both fall back to
+`QQ_HOME` when the focused space has no worktree or Herdr is unavailable.
 Quitting the browser closes the popup and restores the untouched tiled
 layout; yazi's `!` opens a shell in place when one is wanted. The popups use
 a fixed 74x29 cell size (operator-tuned) with a matching `stty` preamble
