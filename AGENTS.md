@@ -25,7 +25,9 @@ when fresh Checks demonstrate the intended outcome.
 
 ## Context
 
-Read `CONCEPTS.md` before working and use its vocabulary.
+Read `CONCEPTS.md` before working and use its vocabulary. Where present,
+`CONCEPTS.local.md` appends the Repository's own vocabulary to that
+glossary.
 
 Start with the assignment and context already provided. Resolve only what is
 missing, using the surfaces present in the Repository:
