@@ -9,7 +9,6 @@ QQ_OPENWIKI="$(cd "$TESTS_DIR/.." && pwd -P)/bin/qq-openwiki"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 export XDG_RUNTIME_DIR="$tmp/runtime"
-export XDG_STATE_HOME="$tmp/state"
 
 fake_bin="$tmp/bin"
 repo="$tmp/repo"
@@ -55,10 +54,6 @@ for name in ("AGENTS.md", "CLAUDE.md"):
         content = f"{content.rstrip()}\n\n{generated}\n" if content.strip() else f"{generated}\n"
     path.write_text(content)
 PY
-if [ -n "${FAKE_KILL_PARENT:-}" ]; then
-  kill -KILL "$PPID"
-  exit 0
-fi
 printf 'updated\n' >>openwiki/quickstart.md
 if [ -n "${FAKE_FAIL:-}" ]; then
   exit "$FAKE_FAIL"
@@ -70,6 +65,7 @@ git -C "$repo" init -q -b main
 git -C "$repo" config user.email test@example.com
 git -C "$repo" config user.name Test
 printf '# Instructions\n\nKeep this text.\n' >"$repo/AGENTS.md"
+printf '# Repository\n' >"$repo/README.md"
 cp "$repo/AGENTS.md" "$tmp/agents-original"
 mkdir -p "$repo/openwiki"
 printf '# Quickstart\n' >"$repo/openwiki/quickstart.md"
@@ -101,6 +97,26 @@ test "$(cat "$tmp/provider")" = 'openai-chatgpt'
 
 git -C "$repo" restore openwiki/quickstart.md
 test -z "$(git -C "$repo" status --porcelain)"
+
+git -C "$repo" switch -qc wrong-branch
+rm -f "$FAKE_LOG" "$FAKE_PROVIDER_LOG"
+if (cd "$repo" && "$QQ_OPENWIKI" --update >"$tmp/branch.out" 2>"$tmp/branch.err"); then
+  fail 'update outside the dedicated branch unexpectedly succeeded'
+fi
+grep -q 'updates require the dedicated openwiki/update branch' "$tmp/branch.err"
+git -C "$repo" switch -q openwiki/update
+
+expected_main="$(git -C "$repo" rev-parse HEAD)"
+tree="$(git -C "$repo" rev-parse 'HEAD^{tree}')"
+advanced_main="$(git -C "$repo" commit-tree "$tree" -p "$expected_main" -m 'advanced main')"
+git -C "$repo" update-ref refs/remotes/origin/main "$advanced_main"
+if (cd "$repo" && "$QQ_OPENWIKI" --update >"$tmp/fresh.out" 2>"$tmp/fresh.err"); then
+  fail 'update from a stale base unexpectedly succeeded'
+fi
+grep -q 'openwiki/update must equal current origin/main' "$tmp/fresh.err"
+git -C "$repo" update-ref refs/remotes/origin/main "$expected_main"
+test ! -e "$FAKE_LOG"
+test ! -e "$FAKE_PROVIDER_LOG"
 
 rm -f "$FAKE_LOG" "$FAKE_PROVIDER_LOG"
 if (
@@ -136,9 +152,34 @@ git -C "$repo" restore --staged .
 git -C "$repo" restore --worktree .
 test -z "$(git -C "$repo" status --porcelain)"
 
-printf 'out-of-scope change\n' >>"$repo/AGENTS.md"
-git -C "$repo" add AGENTS.md
+printf 'stale setup\n' >>"$repo/AGENTS.md"
 rm -f "$FAKE_LOG" "$FAKE_PROVIDER_LOG"
+if (cd "$repo" && "$QQ_OPENWIKI" --update >"$tmp/deviation.out" 2>"$tmp/deviation.err"); then
+  fail 'update from a deviated setup unexpectedly succeeded'
+fi
+grep -q 'OpenWiki setup deviates from HEAD' "$tmp/deviation.err"
+git -C "$repo" restore AGENTS.md
+
+cp "$repo/.git/info/exclude" "$tmp/info-exclude.original"
+printf 'CLAUDE.md\n' >>"$repo/.git/info/exclude"
+printf '# Ignored Claude instructions\n\nKeep this content.\n' >"$repo/CLAUDE.md"
+cp "$repo/CLAUDE.md" "$tmp/ignored-CLAUDE.expected"
+rm -f "$FAKE_LOG" "$FAKE_PROVIDER_LOG"
+if (
+  cd "$repo"
+  "$QQ_OPENWIKI" --update >"$tmp/ignored.out" 2>"$tmp/ignored.err"
+); then
+  fail 'update with ignored setup unexpectedly succeeded'
+fi
+grep -q 'OpenWiki setup deviates from HEAD' "$tmp/ignored.err"
+cmp "$tmp/ignored-CLAUDE.expected" "$repo/CLAUDE.md"
+test ! -e "$FAKE_LOG"
+test ! -e "$FAKE_PROVIDER_LOG"
+rm "$repo/CLAUDE.md"
+cp "$tmp/info-exclude.original" "$repo/.git/info/exclude"
+
+printf 'out-of-scope change\n' >>"$repo/README.md"
+git -C "$repo" add README.md
 if (
   cd "$repo"
   "$QQ_OPENWIKI" --correct >"$tmp/correct-scope.out" 2>"$tmp/correct-scope.err"
@@ -148,7 +189,7 @@ fi
 grep -q 'correction snapshot is outside openwiki/' "$tmp/correct-scope.err"
 test ! -e "$FAKE_LOG"
 test ! -e "$FAKE_PROVIDER_LOG"
-git -C "$repo" restore --staged --worktree AGENTS.md
+git -C "$repo" restore --staged --worktree README.md
 
 printf 'reviewed generated result\n' >>"$repo/openwiki/quickstart.md"
 git -C "$repo" add -A
@@ -206,60 +247,6 @@ test ! -e "$repo/.github/workflows/openwiki-update.yml"
 git -C "$repo" restore openwiki/quickstart.md
 test -z "$(git -C "$repo" status --porcelain)"
 
-sibling="$tmp/sibling"
-git -C "$repo" worktree add -q -b sibling "$sibling" HEAD
-snapshot_key="$(printf '%s' "$repo/.git" | sha256sum | cut -d' ' -f1)"
-snapshot_dir="$XDG_STATE_HOME/qq/openwiki/$snapshot_key"
-set +e
-(
-  cd "$repo"
-  FAKE_KILL_PARENT=1 "$QQ_OPENWIKI" --update \
-    >"$tmp/crash.out" 2>"$tmp/crash.err"
-) 2>"$tmp/crash-shell.err"
-crash_status=$?
-set -e
-test "$crash_status" -eq 137
-test -d "$snapshot_dir"
-IFS= read -r -d '' snapshot_root <"$snapshot_dir/worktree-root"
-test "$snapshot_root" = "$repo"
-test -L "$snapshot_dir/AGENTS.md"
-test "$(readlink "$snapshot_dir/AGENTS.md")" = "$shared_agents"
-cmp "$tmp/CLAUDE.expected" "$snapshot_dir/CLAUDE.md"
-test ! -L "$repo/AGENTS.md"
-test -e "$repo/.github/workflows/openwiki-update.yml"
-
-set +e
-(
-  cd "$sibling"
-  "$QQ_OPENWIKI" --update \
-    >"$tmp/sibling-recovery.out" 2>"$tmp/sibling-recovery.err"
-)
-sibling_status=$?
-set -e
-test "$sibling_status" -eq 1
-grep -q 'updates require the dedicated openwiki/update branch' \
-  "$tmp/sibling-recovery.err"
-test ! -e "$snapshot_dir"
-test -L "$repo/AGENTS.md"
-test "$(readlink "$repo/AGENTS.md")" = "$shared_agents"
-cmp "$tmp/shared-AGENTS.expected" "$shared_agents"
-cmp "$tmp/CLAUDE.expected" "$repo/CLAUDE.md"
-test ! -e "$repo/.github/workflows/openwiki-update.yml"
-test -z "$(git -C "$repo" status --porcelain)"
-test -z "$(git -C "$sibling" status --porcelain)"
-
-(
-  cd "$repo"
-  "$QQ_OPENWIKI" --update
-)
-test -L "$repo/AGENTS.md"
-test "$(readlink "$repo/AGENTS.md")" = "$shared_agents"
-cmp "$tmp/shared-AGENTS.expected" "$shared_agents"
-cmp "$tmp/CLAUDE.expected" "$repo/CLAUDE.md"
-test ! -e "$repo/.github/workflows/openwiki-update.yml"
-git -C "$repo" restore openwiki/quickstart.md
-test -z "$(git -C "$repo" status --porcelain)"
-
 rm -f "$FAKE_LOG" "$FAKE_PROVIDER_LOG"
 if (
   cd "$repo"
@@ -270,6 +257,21 @@ if (
 fi
 grep -q 'OPENWIKI_PROVIDER must be openai-chatgpt (local ChatGPT OAuth only)' \
   "$tmp/provider-conflict.err"
+test ! -e "$FAKE_LOG"
+test ! -e "$FAKE_PROVIDER_LOG"
+
+init_repo="$tmp/init-repo"
+git -C "$tmp" init -q -b main "$(basename "$init_repo")"
+git -C "$init_repo" config user.email test@example.com
+git -C "$init_repo" config user.name Test
+printf '# Instructions\n' >"$init_repo/AGENTS.md"
+git -C "$init_repo" add AGENTS.md
+git -C "$init_repo" commit -qm initial
+printf 'untracked\n' >"$init_repo/local.txt"
+if (cd "$init_repo" && "$QQ_OPENWIKI" --init >"$tmp/init.out" 2>"$tmp/init.err"); then
+  fail 'init in a dirty worktree unexpectedly succeeded'
+fi
+grep -q 'init worktree must be clean' "$tmp/init.err"
 test ! -e "$FAKE_LOG"
 test ! -e "$FAKE_PROVIDER_LOG"
 
