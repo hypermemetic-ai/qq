@@ -256,7 +256,9 @@ retire_change() {
       --arg workspace "$workspace" --arg branch "$branch" \
       --argjson branch_exists "$branch_exists" --arg repo_root "$repo_root" \
       '{workspace:$workspace, workspace_state:"absent", branch:$branch, branch_exists:$branch_exists, repo_root:$repo_root}')"
-    if [ "$branch_exists" = false ] && { [ -z "$checkout_arg" ] || [ ! -e "$checkout_arg" ]; }; then
+    if [ "$branch_exists" = false ] \
+      && { [ -z "$checkout_arg" ] \
+        || { [ ! -e "$checkout_arg" ] && [ ! -L "$checkout_arg" ]; }; }; then
       qq_engine_done 'work session and local branch are already absent; retirement is complete' "$state"
     fi
     if [ "$branch_exists" = false ]; then
@@ -268,7 +270,8 @@ retire_change() {
       /^worktree / { path = substr($0, 10); next }
       $0 == "branch " branch { print path }
     ' <<<"$worktrees")"
-    if { [ -z "$checkout_arg" ] || [ ! -e "$checkout_arg" ]; } \
+    if { [ -z "$checkout_arg" ] \
+      || { [ ! -e "$checkout_arg" ] && [ ! -L "$checkout_arg" ]; }; } \
       && [ -z "$branch_checkout" ]; then
       if ! "$git_bin" -C "$repo_root" fetch origin main >/dev/null 2>&1; then
         qq_engine_error \

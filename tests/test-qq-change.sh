@@ -295,6 +295,23 @@ if git -C "$main_checkout" show-ref --verify --quiet refs/heads/branch-only; the
   fail 'branch-only idempotent retirement left the merged branch'
 fi
 
+# A dangling symlink is still an unexplained checkout path, not evidence that
+# branch-only recovery may delete the remaining merged branch.
+dangling_checkout="$tmp/dangling-checkout"
+ln -s "$tmp/missing-checkout-target" "$dangling_checkout"
+git -C "$main_checkout" branch dangling-feature HEAD
+run_change 2 retire dangling-ws --repo "$main_checkout" \
+  --branch dangling-feature --checkout "$dangling_checkout"
+jq -e '
+  .status == "refused"
+  and (.message | contains("local branch remains"))
+' "$tmp/result.json" >/dev/null
+[ -L "$dangling_checkout" ] || fail 'dangling-checkout refusal removed the symlink'
+if ! git -C "$main_checkout" show-ref --verify --quiet \
+  refs/heads/dangling-feature; then
+  fail 'dangling-checkout refusal deleted the merged branch'
+fi
+
 # The same recovery applies when the interrupted invocation supplied the
 # checkout path but removed that checkout before branch deletion.
 interrupted_checkout="$tmp/interrupted-change"
