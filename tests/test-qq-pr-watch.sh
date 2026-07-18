@@ -15,6 +15,15 @@ cat >"$fake_gh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >>"$FAKE_GH_LOG"
+after_options=false
+for argument in "$@"; do
+  if [ "$after_options" = true ] && [[ "$argument" == --repo=* ]]; then
+    exit 64
+  fi
+  if [ "$argument" = -- ]; then
+    after_options=true
+  fi
+done
 if [ "${FAKE_GH_BAD:-}" = 1 ]; then
   printf 'not-json\n'
 else
@@ -66,6 +75,16 @@ jq -e '
   and (.message | contains("no completion notification"))
 ' "$tmp/result.json" >/dev/null
 assert_equal 1 "$(wc -l <"$FAKE_GH_LOG")" 'inspect polled more than once'
+
+# A flag-shaped selector reaches gh after its end-of-options terminator and is
+# rejected as a selector rather than changing gh's Repository identity.
+export FAKE_PR_STATE=MERGED
+run_watch 1 --repo=owner/other --dry-run
+jq -e '
+  .status == "error"
+  and (.message | contains("inspection failed"))
+' "$tmp/result.json" >/dev/null
+assert_file_contains "$FAKE_GH_LOG" '-- --repo=owner/other'
 
 # Exit 1: an unreadable provider response is an engine error.
 export FAKE_GH_BAD=1

@@ -50,7 +50,7 @@ gh_bin="$QQ_BIN_RESULT"
 
 read_pr() {
   local response
-  if ! response="$("$gh_bin" pr view "$pr" --json state,url 2>/dev/null)"; then
+  if ! response="$("$gh_bin" pr view --json state,url -- "$pr" 2>/dev/null)"; then
     qq_engine_error \
       'GitHub pull-request inspection failed; no terminal notification was emitted.'
   fi
