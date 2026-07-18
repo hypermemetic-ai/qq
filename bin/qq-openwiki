@@ -67,7 +67,7 @@ exec 9>"$lock_root/$lock_key.lock"
 flock -n 9 || die "another OpenWiki writer is active for this Repository"
 
 workflow=".github/workflows/openwiki-update.yml"
-setup_deviation="$(git status --porcelain --untracked-files=all -- \
+setup_deviation="$(git status --porcelain --untracked-files=all --ignored -- \
   AGENTS.md CLAUDE.md "$workflow")"
 [ -z "$setup_deviation" ] \
   || die "OpenWiki setup deviates from HEAD; restore it before retrying"

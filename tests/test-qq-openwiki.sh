@@ -160,6 +160,24 @@ fi
 grep -q 'OpenWiki setup deviates from HEAD' "$tmp/deviation.err"
 git -C "$repo" restore AGENTS.md
 
+cp "$repo/.git/info/exclude" "$tmp/info-exclude.original"
+printf 'CLAUDE.md\n' >>"$repo/.git/info/exclude"
+printf '# Ignored Claude instructions\n\nKeep this content.\n' >"$repo/CLAUDE.md"
+cp "$repo/CLAUDE.md" "$tmp/ignored-CLAUDE.expected"
+rm -f "$FAKE_LOG" "$FAKE_PROVIDER_LOG"
+if (
+  cd "$repo"
+  "$QQ_OPENWIKI" --update >"$tmp/ignored.out" 2>"$tmp/ignored.err"
+); then
+  fail 'update with ignored setup unexpectedly succeeded'
+fi
+grep -q 'OpenWiki setup deviates from HEAD' "$tmp/ignored.err"
+cmp "$tmp/ignored-CLAUDE.expected" "$repo/CLAUDE.md"
+test ! -e "$FAKE_LOG"
+test ! -e "$FAKE_PROVIDER_LOG"
+rm "$repo/CLAUDE.md"
+cp "$tmp/info-exclude.original" "$repo/.git/info/exclude"
+
 printf 'out-of-scope change\n' >>"$repo/README.md"
 git -C "$repo" add README.md
 if (
