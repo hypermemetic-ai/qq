@@ -123,8 +123,8 @@ land_change() {
     qq_engine_error "$QQ_BIN_ERROR"
   fi
   gh_bin="$QQ_BIN_RESULT"
-  if ! response="$(cd "$repo_root" && "$gh_bin" pr view "$pr" \
-    --json state,mergedAt,mergeCommit,url 2>/dev/null)"; then
+  if ! response="$(cd "$repo_root" && "$gh_bin" pr view \
+    --json state,mergedAt,mergeCommit,url -- "$pr" 2>/dev/null)"; then
     qq_engine_error 'GitHub pull-request inspection failed.'
   fi
   if ! pr_state="$("$QQ_ENGINE_JQ" -er '.state | select(type == "string" and length > 0)' \
@@ -200,13 +200,13 @@ land_change() {
     }')"
   if [ "$mode" = inspect ] || [ "$dry_run" = true ]; then
     qq_engine_done \
-      'land rails passed; the primary main checkout was not pulled' "$state"
+      'land rails passed; the primary main checkout was not synchronized' "$state"
   fi
 
-  if ! "$git_bin" -C "$main_checkout" pull --ff-only origin main \
+  if ! "$git_bin" -C "$main_checkout" merge --ff-only origin/main \
     >/dev/null 2>&1; then
     qq_engine_refuse \
-      'The fast-forward-only pull refused. Leave the primary and Change checkouts exactly as observed; never switch, stash, clean, reset, or otherwise repair them in this transition.' \
+      'The fast-forward-only synchronization refused. Leave the primary and Change checkouts exactly as observed; never switch, stash, clean, reset, or otherwise repair them in this transition.' \
       "$state"
   fi
   if ! "$git_bin" -C "$main_checkout" merge-base --is-ancestor \
@@ -268,7 +268,8 @@ retire_change() {
       /^worktree / { path = substr($0, 10); next }
       $0 == "branch " branch { print path }
     ' <<<"$worktrees")"
-    if [ -z "$checkout_arg" ] && [ -z "$branch_checkout" ]; then
+    if { [ -z "$checkout_arg" ] || [ ! -e "$checkout_arg" ]; } \
+      && [ -z "$branch_checkout" ]; then
       if ! "$git_bin" -C "$repo_root" fetch origin main >/dev/null 2>&1; then
         qq_engine_error \
           'Could not freshly fetch origin/main. Branch-only retirement made no changes; restore remote access and retry.'

@@ -32,18 +32,68 @@ fake_gh="$tmp/gh"
 cat >"$fake_gh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+after_options=false
+repo_option=false
+for argument in "$@"; do
+  if [ "$after_options" = true ] && [[ "$argument" == --repo=* ]]; then
+    exit 64
+  fi
+  if [[ "$argument" == --repo=* ]]; then
+    repo_option=true
+  fi
+  if [ "$argument" = -- ]; then
+    after_options=true
+  fi
+done
 if [ "${FAKE_GH_BAD:-}" = 1 ]; then
   printf 'not-json\n'
   exit 0
 fi
+state="${FAKE_PR_STATE:-MERGED}"
+if [ "$repo_option" = true ]; then
+  state=OPEN
+fi
 jq -cn \
-  --arg state "${FAKE_PR_STATE:-MERGED}" \
+  --arg state "$state" \
   --arg oid "${FAKE_MERGE_OID:-}" \
   '{state:$state,mergedAt:(if $state == "MERGED" then "2026-07-18T00:00:00Z" else null end),mergeCommit:(if $state == "MERGED" then {oid:$oid} else null end),url:"https://example.test/pr/83"}'
 SH
 chmod +x "$fake_gh"
 export QQ_GH_BIN="$fake_gh"
 export FAKE_MERGE_OID="$merge_oid"
+
+real_git="$(command -v git)"
+fake_git="$tmp/git"
+cat >"$fake_git" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"$FAKE_GIT_LOG"
+command_name=""
+for argument in "$@"; do
+  case "$argument" in
+    fetch | pull | merge)
+      command_name="$argument"
+      break
+      ;;
+  esac
+done
+case "$command_name" in
+  fetch)
+    [ "${FAKE_GIT_FETCH_FAIL:-}" != 1 ] || exit 74
+    ;;
+  pull)
+    exit 75
+    ;;
+  merge)
+    [ "${FAKE_GIT_MERGE_FAIL:-}" != 1 ] || exit 76
+    ;;
+esac
+exec "$REAL_GIT_BIN" "$@"
+SH
+chmod +x "$fake_git"
+export QQ_GIT_BIN="$fake_git"
+export REAL_GIT_BIN="$real_git"
+export FAKE_GIT_LOG="$tmp/git.log"
 
 fake_herdr="$tmp/herdr"
 cat >"$fake_herdr" <<'SH'
@@ -111,11 +161,39 @@ jq -e '
 assert_not_contains "$(git -C "$main_checkout" rev-parse HEAD)" "$merge_oid" \
   'OPEN refusal synchronized main'
 
+# A flag-shaped selector reaches gh only after its end-of-options terminator;
+# gh rejects it as a selector instead of reinterpreting Repository identity.
+export FAKE_PR_STATE=MERGED
+run_change 1 land --repo=owner/other --repo "$change_checkout"
+jq -e '
+  .status == "error"
+  and (.message | contains("pull-request inspection failed"))
+' "$tmp/result.json" >/dev/null
+
 # Exit 1: unreadable GitHub data is an error.
 export FAKE_GH_BAD=1
 run_change 1 land 83 --repo "$change_checkout"
 jq -e '.status == "error"' "$tmp/result.json" >/dev/null
 unset FAKE_GH_BAD
+
+# Transport failure belongs only to the fresh fetch and is an engine error.
+export FAKE_GIT_FETCH_FAIL=1
+run_change 1 land 83 --repo "$change_checkout"
+jq -e '
+  .status == "error"
+  and (.message | contains("freshly fetch"))
+' "$tmp/result.json" >/dev/null
+unset FAKE_GIT_FETCH_FAIL
+
+# Once origin/main is fetched, a local fast-forward refusal is a rail refusal
+# and does not invoke a second transport operation.
+export FAKE_GIT_MERGE_FAIL=1
+run_change 2 land 83 --repo "$change_checkout"
+jq -e '
+  .status == "refused"
+  and (.message | contains("fast-forward-only"))
+' "$tmp/result.json" >/dev/null
+unset FAKE_GIT_MERGE_FAIL
 
 # Exit 0: verify merge ancestry, then fast-forward only the sole main checkout.
 export FAKE_PR_STATE=MERGED
@@ -131,6 +209,8 @@ jq -e '
 assert_equal "$merge_oid" "$(git -C "$main_checkout" rev-parse HEAD)" \
   'land did not synchronize main to the merge commit'
 [ -f "$managed_task" ] || fail 'land clobbered the allowed in-flight Task record'
+assert_file_not_matches "$FAKE_GIT_LOG" '(^|[[:space:]])pull([[:space:]]|$)' \
+  'land performed a second fetch through git pull'
 
 # Land is idempotent when main already contains the verified merge.
 run_change 0 land 83 --repo "$main_checkout"
@@ -213,6 +293,20 @@ git -C "$main_checkout" branch branch-only HEAD
 run_change 0 retire interrupted-ws --repo "$main_checkout" --branch branch-only
 if git -C "$main_checkout" show-ref --verify --quiet refs/heads/branch-only; then
   fail 'branch-only idempotent retirement left the merged branch'
+fi
+
+# The same recovery applies when the interrupted invocation supplied the
+# checkout path but removed that checkout before branch deletion.
+interrupted_checkout="$tmp/interrupted-change"
+git -C "$main_checkout" worktree add -qb interrupted-feature \
+  "$interrupted_checkout" main
+git -C "$main_checkout" worktree remove "$interrupted_checkout"
+run_change 0 retire interrupted-checkout-ws --repo "$main_checkout" \
+  --branch interrupted-feature --checkout "$interrupted_checkout" \
+  --workspace-absent-owned
+if git -C "$main_checkout" show-ref --verify --quiet \
+  refs/heads/interrupted-feature; then
+  fail 'checkout-qualified idempotent retirement left the merged branch'
 fi
 
 if grep -Eq -- '(^| )(--force|-D)( |$)' "$FAKE_HERDR_LOG"; then
