@@ -1,0 +1,390 @@
+#!/usr/bin/env bash
+# Reconcile Task statuses from Git/PR truth and render a fresh board on a loop.
+# shellcheck disable=SC1091,SC2016
+set -euo pipefail
+
+export LC_ALL=C
+
+self="$(readlink -f -- "${BASH_SOURCE[0]}")"
+# shellcheck source=bin/lib/qq-bin.sh
+source "$(dirname "$self")/lib/qq-bin.sh"
+# shellcheck source=bin/lib/qq-engine.sh
+source "$(dirname "$self")/lib/qq-engine.sh"
+
+qq_engine_init qq-board board
+
+usage() {
+  cat <<'EOF'
+usage: qq-board [inspect] reconcile [--repo <path>] [--dry-run]
+       qq-board watch [--repo <path>] [--interval <seconds>]
+
+reconcile derives backlog/tasks Task statuses from matching Git branches,
+worktrees, origin refs, and (when available) GitHub pull requests. inspect and
+--dry-run report the same changes without writing Task records.
+
+The Herdr board pane command is:
+  qq-board watch --interval 3
+
+watch quietly reconciles before each clean backlog board render.
+EOF
+}
+
+mode=apply
+if [ "${1:-}" = inspect ]; then
+  mode=inspect
+  shift
+fi
+
+case "${1:-}" in
+  -h | --help | help)
+    usage
+    exit 0
+    ;;
+  reconcile | watch)
+    verb="$1"
+    shift
+    ;;
+  *)
+    qq_engine_error \
+      'usage: qq-board [inspect] reconcile [--repo <path>] [--dry-run] | qq-board watch [--repo <path>] [--interval <seconds>]'
+    ;;
+esac
+
+repo=.
+interval=3
+dry_run=false
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --repo)
+      [ "$#" -ge 2 ] || qq_engine_error '--repo requires a path'
+      repo="$2"
+      shift 2
+      ;;
+    --interval)
+      [ "$#" -ge 2 ] || qq_engine_error '--interval requires seconds'
+      interval="$2"
+      shift 2
+      ;;
+    --dry-run)
+      dry_run=true
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *) qq_engine_error "unknown qq-board argument: $1" ;;
+  esac
+done
+
+qq_engine_set_action "$mode:$verb"
+
+if [ "$verb" = reconcile ]; then
+  [ "$interval" = 3 ] \
+    || qq_engine_error '--interval applies only to watch'
+else
+  [ "$mode" = apply ] || qq_engine_error 'inspect applies only to reconcile'
+  [ "$dry_run" = false ] || qq_engine_error '--dry-run applies only to reconcile'
+  [[ "$interval" =~ ^[1-9][0-9]*$ ]] \
+    || qq_engine_error '--interval must be a positive integer number of seconds'
+fi
+
+if ! qq_resolve_bin git; then
+  qq_engine_error "$QQ_BIN_ERROR"
+fi
+git_bin="$QQ_BIN_RESULT"
+repo_root="$({ "$git_bin" -C "$repo" rev-parse --show-toplevel 2>/dev/null || true; })"
+[ -n "$repo_root" ] || qq_engine_error "not a Git checkout: $repo"
+repo_root="$(cd "$repo_root" && pwd -P)" \
+  || qq_engine_error "cannot canonicalize Repository root: $repo_root"
+
+if [ "$verb" = watch ]; then
+  if ! qq_resolve_bin watch; then
+    qq_engine_error "$QQ_BIN_ERROR"
+  fi
+  watch_bin="$QQ_BIN_RESULT"
+  if ! qq_resolve_bin backlog; then
+    qq_engine_error "$QQ_BIN_ERROR"
+  fi
+  backlog_bin="$QQ_BIN_RESULT"
+  if ! qq_resolve_bin bash; then
+    qq_engine_error "$QQ_BIN_ERROR"
+  fi
+  bash_bin="$QQ_BIN_RESULT"
+
+  exec "$watch_bin" --no-title --interval "$interval" --exec \
+    "$bash_bin" -c '
+      "$1" reconcile --repo "$2" >/dev/null 2>&1 || true
+      cd "$2" || exit 1
+      exec "$3" board
+    ' qq-board-watch "$self" "$repo_root" "$backlog_bin"
+fi
+
+tasks_dir="$repo_root/backlog/tasks"
+[ -d "$tasks_dir" ] \
+  || qq_engine_error "Task records directory is missing: $tasks_dir"
+
+if ! worktrees="$({ "$git_bin" -C "$repo_root" worktree list --porcelain 2>/dev/null; })"; then
+  qq_engine_error "cannot list Git worktrees for: $repo_root"
+fi
+if ! refs="$({
+  "$git_bin" -C "$repo_root" for-each-ref --format='%(refname)' \
+    refs/heads refs/remotes/origin 2>/dev/null
+})"; then
+  qq_engine_error "cannot list Git branches for: $repo_root"
+fi
+
+declare -A branch_seen=()
+declare -A branches_by_task=()
+
+record_branch_ref() {
+  local ref="$1"
+  local branch task_number
+
+  case "$ref" in
+    refs/heads/*) branch="${ref#refs/heads/}" ;;
+    refs/remotes/origin/*) branch="${ref#refs/remotes/origin/}" ;;
+    *) return 0 ;;
+  esac
+  if [[ ! "$branch" =~ ^[^/]+/t-([0-9]+)-[^/]+$ ]]; then
+    return 0
+  fi
+  if [ -n "${branch_seen[$branch]+present}" ]; then
+    return 0
+  fi
+
+  branch_seen["$branch"]=true
+  task_number="${BASH_REMATCH[1]}"
+  if [ -n "${branches_by_task[$task_number]+present}" ]; then
+    branches_by_task["$task_number"]+=$'\n'"$branch"
+  else
+    branches_by_task["$task_number"]="$branch"
+  fi
+}
+
+while IFS= read -r line; do
+  case "$line" in
+    'branch refs/heads/'*) record_branch_ref "${line#branch }" ;;
+  esac
+done <<<"$worktrees"
+while IFS= read -r ref; do
+  [ -n "$ref" ] && record_branch_ref "$ref"
+done <<<"$refs"
+
+pr_state_available=false
+notes='[]'
+declare -A merged_branch=()
+if qq_resolve_bin gh; then
+  gh_bin="$QQ_BIN_RESULT"
+  if pr_response="$({
+    cd "$repo_root" \
+      && "$gh_bin" pr list --state all --limit 1000 \
+        --json headRefName,state,mergedAt 2>/dev/null
+  })" \
+    && "$QQ_ENGINE_JQ" -e '
+      type == "array"
+      and all(.[];
+        (.headRefName | type == "string")
+        and (.state | type == "string")
+        and ((.mergedAt == null) or (.mergedAt | type == "string"))
+      )
+    ' <<<"$pr_response" >/dev/null 2>&1; then
+    pr_state_available=true
+    while IFS= read -r branch; do
+      if [ -n "${branch_seen[$branch]+present}" ]; then
+        merged_branch["$branch"]=true
+      fi
+    done < <(
+      "$QQ_ENGINE_JQ" -r '.[]
+        | select(.state == "MERGED" or .mergedAt != null)
+        | .headRefName' <<<"$pr_response"
+    )
+  else
+    notes="$("$QQ_ENGINE_JQ" -cn \
+      '["PR state unavailable: gh pr list failed or returned unreadable data"]')"
+  fi
+else
+  gh_error="$QQ_BIN_ERROR"
+  notes="$("$QQ_ENGINE_JQ" -cn --arg error "$gh_error" \
+    '["PR state unavailable: " + $error]')"
+fi
+
+read_task_metadata() {
+  local path="$1"
+
+  awk '
+    function scalar(line, key, value, quote) {
+      sub("^" key ":[[:space:]]*", "", line)
+      sub("[[:space:]]+$", "", line)
+      value = line
+      quote = substr(value, 1, 1)
+      if ((quote == "\"" || quote == "\047") &&
+          substr(value, length(value), 1) == quote) {
+        value = substr(value, 2, length(value) - 2)
+      }
+      return value
+    }
+    NR == 1 && $0 == "---" { frontmatter = 1; next }
+    frontmatter && $0 == "---" { closed = 1; exit }
+    frontmatter && /^id:[[:space:]]*/ { id = scalar($0, "id") }
+    frontmatter && /^status:[[:space:]]*/ { status = scalar($0, "status") }
+    END {
+      if (!frontmatter || !closed || id == "" || status == "") {
+        exit 65
+      }
+      printf "%s\t%s\n", id, status
+    }
+  ' "$path"
+}
+
+task_files=()
+shopt -s nullglob
+for task_file in "$tasks_dir"/t-[0-9]*.md; do
+  task_name="${task_file##*/}"
+  task_stem="${task_name%.md}"
+  if [[ "$task_stem" =~ ^t-([0-9]+)([[:space:]]|-) ]]; then
+    task_files+=("$task_file")
+  fi
+done
+shopt -u nullglob
+
+declare -A task_seen=()
+task_ids=()
+stored_statuses=()
+derived_statuses=()
+changed_values=()
+task_branches_json=()
+changed_count=0
+
+for task_file in "${task_files[@]}"; do
+  task_name="${task_file##*/}"
+  task_stem="${task_name%.md}"
+  [[ "$task_stem" =~ ^t-([0-9]+)([[:space:]]|-) ]]
+  task_number="${BASH_REMATCH[1]}"
+  if ! metadata="$(read_task_metadata "$task_file")"; then
+    state="$("$QQ_ENGINE_JQ" -cn --arg task_file "$task_file" \
+      '{task_file:$task_file}')"
+    qq_engine_error 'Task record has unreadable id or status frontmatter.' "$state"
+  fi
+  IFS=$'\t' read -r task_id stored_status <<<"$metadata"
+  if [ "$task_id" != "T-$task_number" ]; then
+    state="$("$QQ_ENGINE_JQ" -cn --arg task_file "$task_file" \
+      --arg expected_id "T-$task_number" --arg stored_id "$task_id" \
+      '{task_file:$task_file, expected_id:$expected_id, stored_id:$stored_id}')"
+    qq_engine_error 'Task filename and frontmatter id disagree.' "$state"
+  fi
+  if [ -n "${task_seen[$task_id]+present}" ]; then
+    state="$("$QQ_ENGINE_JQ" -cn --arg task_id "$task_id" \
+      '{task_id:$task_id}')"
+    qq_engine_error 'Duplicate active Task record id.' "$state"
+  fi
+  task_seen["$task_id"]=true
+  case "$stored_status" in
+    'To Do' | 'In Progress' | Done) ;;
+    *)
+      state="$("$QQ_ENGINE_JQ" -cn --arg task_id "$task_id" \
+        --arg stored_status "$stored_status" \
+        '{task_id:$task_id, stored_status:$stored_status}')"
+      qq_engine_error 'Task record has an unsupported stored status.' "$state"
+      ;;
+  esac
+
+  branches="${branches_by_task[$task_number]-}"
+  branches_json="$(printf '%s\n' "$branches" \
+    | "$QQ_ENGINE_JQ" -Rsc 'split("\n") | map(select(length > 0)) | unique | sort')"
+  derived_status='To Do'
+  if [ "$stored_status" = Done ]; then
+    derived_status=Done
+  elif [ -n "$branches" ]; then
+    derived_status='In Progress'
+    while IFS= read -r branch; do
+      if [ -n "${merged_branch[$branch]+present}" ]; then
+        derived_status=Done
+        break
+      fi
+    done <<<"$branches"
+  fi
+
+  changed=false
+  if [ "$derived_status" != "$stored_status" ]; then
+    changed=true
+    changed_count=$((changed_count + 1))
+  fi
+  task_ids+=("$task_id")
+  stored_statuses+=("$stored_status")
+  derived_statuses+=("$derived_status")
+  changed_values+=("$changed")
+  task_branches_json+=("$branches_json")
+done
+
+effective_dry_run=false
+if [ "$mode" = inspect ] || [ "$dry_run" = true ]; then
+  effective_dry_run=true
+fi
+
+if [ "$effective_dry_run" = false ] && [ "$changed_count" -gt 0 ]; then
+  if ! qq_resolve_bin backlog; then
+    qq_engine_error "$QQ_BIN_ERROR"
+  fi
+  backlog_bin="$QQ_BIN_RESULT"
+  for index in "${!task_ids[@]}"; do
+    [ "${changed_values[$index]}" = true ] || continue
+    if ! { cd "$repo_root" && "$backlog_bin" task edit \
+      --status "${derived_statuses[$index]}" "${task_ids[$index]}" --plain \
+      >/dev/null 2>&1; }; then
+      state="$("$QQ_ENGINE_JQ" -cn --arg task_id "${task_ids[$index]}" \
+        --arg derived_status "${derived_statuses[$index]}" \
+        '{task_id:$task_id, derived_status:$derived_status}')"
+      qq_engine_error 'Backlog failed to update a derived Task status.' "$state"
+    fi
+  done
+fi
+
+tasks='[]'
+for index in "${!task_ids[@]}"; do
+  written=false
+  if [ "${changed_values[$index]}" = true ] \
+    && [ "$effective_dry_run" = false ]; then
+    written=true
+  fi
+  task="$("$QQ_ENGINE_JQ" -cn \
+    --arg id "${task_ids[$index]}" \
+    --arg stored_status "${stored_statuses[$index]}" \
+    --arg derived_status "${derived_statuses[$index]}" \
+    --argjson changed "${changed_values[$index]}" \
+    --argjson written "$written" \
+    --argjson branches "${task_branches_json[$index]}" \
+    '{
+      id:$id,
+      stored_status:$stored_status,
+      derived_status:$derived_status,
+      changed:$changed,
+      written:$written,
+      branches:$branches
+    }')"
+  tasks="$("$QQ_ENGINE_JQ" -cn --argjson tasks "$tasks" \
+    --argjson task "$task" '$tasks + [$task]')"
+done
+
+state="$("$QQ_ENGINE_JQ" -cn \
+  --arg repo_root "$repo_root" \
+  --argjson dry_run "$effective_dry_run" \
+  --argjson pr_state_available "$pr_state_available" \
+  --argjson notes "$notes" \
+  --argjson task_count "${#task_ids[@]}" \
+  --argjson changed_count "$changed_count" \
+  --argjson tasks "$tasks" \
+  '{
+    repo_root:$repo_root,
+    dry_run:$dry_run,
+    pr_state_available:$pr_state_available,
+    notes:$notes,
+    task_count:$task_count,
+    changed_count:$changed_count,
+    tasks:$tasks
+  }')"
+
+if [ "$effective_dry_run" = true ]; then
+  qq_engine_done 'derived board status; Task records were not changed' "$state"
+fi
+qq_engine_done 'reconciled Task records with Git and pull-request truth' "$state"
