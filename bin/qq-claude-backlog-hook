@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Fast local feedback for structured edits to Backlog-owned paths. This hook
+# deliberately never inspects Bash command text; merge policy is expressed in
+# Claude Code permissions and exact enforcement remains at GitHub.
+
+readonly REASON='qq-claude-backlog-hook: managed Backlog markdown must be edited through the backlog CLI'
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
+BACKLOG="$(realpath -m -- "$ROOT/backlog")"
+
+payload="$(cat)" || exit 0
+if ! jq -e 'type == "object" and (.tool_input | type == "object")' \
+  >/dev/null 2>&1 <<<"$payload"; then
+  exit 0
+fi
+
+tool_name="$(jq -r '.tool_name // empty' <<<"$payload")"
+case "$tool_name" in
+  Bash | Edit | Write | MultiEdit | NotebookEdit) ;;
+  *) exit 0 ;;
+esac
+
+cwd="$(jq -r '.cwd // empty | select(type == "string")' <<<"$payload")"
+if [[ "$cwd" != /* ]]; then
+  cwd="$ROOT"
+fi
+
+while IFS= read -r -d '' raw_path; do
+  if [[ "$raw_path" == /* ]]; then
+    target="$raw_path"
+  else
+    target="$cwd/$raw_path"
+  fi
+  resolved="$(realpath -m -- "$target")" || continue
+  case "$resolved" in
+    "$BACKLOG" | "$BACKLOG"/*)
+      printf '%s\n' "$REASON" >&2
+      exit 2
+      ;;
+  esac
+done < <(
+  jq -j '
+    .tool_input
+    | (.file_path?, .notebook_path?, .path?)
+    | select(type == "string" and length > 0)
+    | ., "\u0000"
+  ' <<<"$payload"
+)
+
+exit 0

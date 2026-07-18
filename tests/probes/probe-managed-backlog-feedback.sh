@@ -10,14 +10,14 @@ mkdir -p "$EVIDENCE_DIR"
 run_probe() (
   set -euo pipefail
 
-  local guard="$ROOT/bin/qq-claude-guard"
+  local hook="$ROOT/bin/qq-claude-backlog-hook"
   local target="$ROOT/backlog/tasks/t-80-probe.md"
   local tmp payload status stderr_lines
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/qq-c3-probe.XXXXXX")"
   trap 'rm -rf "$tmp"' EXIT
 
-  if [ ! -x "$guard" ]; then
-    printf 'CRITICAL: guard is not executable: %s\n' "$guard"
+  if [ ! -x "$hook" ]; then
+    printf 'CRITICAL: hook is not executable: %s\n' "$hook"
     exit 1
   fi
 
@@ -33,11 +33,11 @@ print(json.dumps({
 
   printf 'probe: C3 structured edits to managed Backlog markdown get local feedback\n'
   printf 'captured_utc: %s\n' "$(date -u +%FT%TZ)"
-  printf 'guard: %s\n' "$guard"
+  printf 'hook: %s\n' "$hook"
   printf 'synthetic_event: PreToolUse Edit targeting %s\n' "$target"
 
   status=0
-  printf '%s\n' "$payload" | "$guard" >"$tmp/stdout" 2>"$tmp/stderr" || status=$?
+  printf '%s\n' "$payload" | "$hook" >"$tmp/stdout" 2>"$tmp/stderr" || status=$?
 
   printf 'exit_status: %s\n' "$status"
   if [ -s "$tmp/stdout" ]; then
@@ -65,7 +65,7 @@ print(json.dumps({
     exit 1
   fi
   if ! grep -Fxq \
-    'qq-claude-guard: managed Backlog markdown must be edited through the backlog CLI' \
+    'qq-claude-backlog-hook: managed Backlog markdown must be edited through the backlog CLI' \
     "$tmp/stderr"; then
     printf 'CRITICAL: denial did not carry the managed-Backlog feedback\n'
     exit 1

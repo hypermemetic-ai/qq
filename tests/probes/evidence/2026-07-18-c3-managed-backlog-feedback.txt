@@ -1,0 +1,8 @@
+probe: C3 structured edits to managed Backlog markdown get local feedback
+captured_utc: 2026-07-18T01:17:16Z
+hook: /home/qqp/.herdr/worktrees/qq/refactor-t-82-vendor-native-perms/bin/qq-claude-backlog-hook
+synthetic_event: PreToolUse Edit targeting /home/qqp/.herdr/worktrees/qq/refactor-t-82-vendor-native-perms/backlog/tasks/t-80-probe.md
+exit_status: 2
+stdout: <empty>
+stderr: qq-claude-backlog-hook: managed Backlog markdown must be edited through the backlog CLI
+result: PASS — the black-box hook denied the structured edit with local feedback
