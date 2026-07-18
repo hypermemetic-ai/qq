@@ -119,6 +119,9 @@ unset FAKE_GH_BAD
 
 # Exit 0: verify merge ancestry, then fast-forward only the sole main checkout.
 export FAKE_PR_STATE=MERGED
+mkdir -p "$main_checkout/backlog/tasks"
+managed_task="$main_checkout/backlog/tasks/t-83 - engine-—-task.md"
+printf 'in-flight task\n' >"$managed_task"
 run_change 0 land 83 --repo "$change_checkout"
 jq -e '
   .status == "done"
@@ -127,13 +130,15 @@ jq -e '
 ' --arg oid "$merge_oid" "$tmp/result.json" >/dev/null
 assert_equal "$merge_oid" "$(git -C "$main_checkout" rev-parse HEAD)" \
   'land did not synchronize main to the merge commit'
+[ -f "$managed_task" ] || fail 'land clobbered the allowed in-flight Task record'
 
 # Land is idempotent when main already contains the verified merge.
 run_change 0 land 83 --repo "$main_checkout"
 
 # Retirement refuses while any live delegate remains and changes nothing.
 export FAKE_LIVE_AGENT=1
-run_change 2 retire change-ws --repo "$main_checkout" --branch feature
+run_change 2 retire change-ws --repo "$main_checkout" --branch feature \
+  --placeholder-pane change-ws:p1
 jq -e '
   .status == "refused"
   and .state.live_agent_count == 1
@@ -143,12 +148,24 @@ git -C "$main_checkout" show-ref --verify --quiet refs/heads/feature \
   || fail 'live-agent refusal deleted the branch'
 unset FAKE_LIVE_AGENT
 
+# A one-pane census is insufficient unless that pane is the retained root
+# placeholder identified when the Change work session was created.
+run_change 2 retire change-ws --repo "$main_checkout" --branch feature \
+  --placeholder-pane change-ws:operator-pane
+jq -e '
+  .status == "refused"
+  and (.message | contains("operator-created"))
+' "$tmp/result.json" >/dev/null
+[ -d "$change_checkout" ] || fail 'placeholder mismatch removed the checkout'
+
 # Inspect mirrors every retirement rail without removing anything.
-run_change 0 inspect retire change-ws --repo "$main_checkout" --branch feature
+run_change 0 inspect retire change-ws --repo "$main_checkout" --branch feature \
+  --placeholder-pane change-ws:p1
 [ -d "$change_checkout" ] || fail 'retire inspect removed the checkout'
 
 # Green retirement uses unforced Herdr removal followed by branch -d.
-run_change 0 retire change-ws --repo "$main_checkout" --branch feature
+run_change 0 retire change-ws --repo "$main_checkout" --branch feature \
+  --placeholder-pane change-ws:p1
 [ ! -e "$change_checkout" ] || fail 'retire left the Change checkout'
 if git -C "$main_checkout" show-ref --verify --quiet refs/heads/feature; then
   fail 'retire left the local Change branch'
@@ -187,6 +204,15 @@ run_change 0 retire missing-ws --repo "$main_checkout" \
 [ ! -e "$absent_checkout" ] || fail 'absent-session retirement left the checkout'
 if git -C "$main_checkout" show-ref --verify --quiet refs/heads/absent-feature; then
   fail 'absent-session retirement left the branch'
+fi
+
+# A process interruption after checkout removal can be resumed without any
+# remembered phase: the remaining merged branch is re-derived and deleted
+# through branch -d only.
+git -C "$main_checkout" branch branch-only HEAD
+run_change 0 retire interrupted-ws --repo "$main_checkout" --branch branch-only
+if git -C "$main_checkout" show-ref --verify --quiet refs/heads/branch-only; then
+  fail 'branch-only idempotent retirement left the merged branch'
 fi
 
 if grep -Eq -- '(^| )(--force|-D)( |$)' "$FAKE_HERDR_LOG"; then

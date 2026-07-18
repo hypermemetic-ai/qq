@@ -20,7 +20,7 @@ verb="${1:-}"
 case "$verb" in
   land | retire) ;;
   *) qq_engine_error \
-    'usage: qq-change [inspect] land <pull-request> [--repo <path>] [--dry-run] | qq-change [inspect] retire <work-session-id> --repo <path> --branch <branch> [--checkout <path> --workspace-absent-owned] [--dry-run]' ;;
+    'usage: qq-change [inspect] land <pull-request> [--repo <path>] [--dry-run] | qq-change [inspect] retire <work-session-id> --repo <path> --branch <branch> [--placeholder-pane <id>] [--checkout <path> --workspace-absent-owned] [--dry-run]' ;;
 esac
 shift
 subject="${1:-}"
@@ -30,6 +30,7 @@ shift
 repo=.
 branch=""
 checkout_arg=""
+placeholder_pane=""
 workspace_absent_owned=false
 dry_run=false
 while [ "$#" -gt 0 ]; do
@@ -47,6 +48,11 @@ while [ "$#" -gt 0 ]; do
     --checkout)
       [ "$#" -ge 2 ] || qq_engine_error '--checkout requires a path'
       checkout_arg="$2"
+      shift 2
+      ;;
+    --placeholder-pane)
+      [ "$#" -ge 2 ] || qq_engine_error '--placeholder-pane requires a pane id'
+      placeholder_pane="$2"
       shift 2
       ;;
     --workspace-absent-owned)
@@ -103,12 +109,14 @@ fi
 
 land_change() {
   local pr="$subject"
-  local response pr_state pr_url merge_oid state main_status
-  local unsafe_main_line status_line
+  local response pr_state pr_url merge_oid state
+  local main_status_file status_record status_code status_path unsafe_main_line
 
   [ -z "$branch" ] || qq_engine_error '--branch applies only to retire'
   [ -z "$checkout_arg" ] \
     || qq_engine_error '--checkout applies only to retire'
+  [ -z "$placeholder_pane" ] \
+    || qq_engine_error '--placeholder-pane applies only to retire'
   [ "$workspace_absent_owned" = false ] \
     || qq_engine_error '--workspace-absent-owned applies only to retire'
   if ! qq_resolve_bin gh; then
@@ -150,26 +158,28 @@ land_change() {
       "$state"
   fi
 
-  if ! main_status="$("$git_bin" -C "$main_checkout" status \
-    --porcelain --untracked-files=all 2>/dev/null)"; then
+  main_status_file="$(mktemp "${TMPDIR:-/tmp}/qq-change-status.XXXXXX")" \
+    || qq_engine_error 'Could not allocate temporary space for main-checkout inspection.'
+  if ! "$git_bin" -C "$main_checkout" status --porcelain=v1 -z \
+    --untracked-files=all >"$main_status_file" 2>/dev/null; then
+    rm -f -- "$main_status_file"
     qq_engine_refuse \
       'The primary main checkout status could not be inspected. Leave every checkout untouched until its current state is observable.'
   fi
   unsafe_main_line=""
-  if [ -n "$main_status" ]; then
-    while IFS= read -r status_line; do
-      case "$status_line" in
-        '?? backlog/tasks/'*) ;;
-        *)
-          unsafe_main_line="$status_line"
-          break
-          ;;
-      esac
-    done <<<"$main_status"
-  fi
+  while IFS= read -r -d '' status_record; do
+    status_code="${status_record:0:2}"
+    status_path="${status_record:3}"
+    if [ "$status_code" = '??' ] && [[ "$status_path" = backlog/tasks/* ]]; then
+      continue
+    fi
+    unsafe_main_line="$status_code $status_path"
+    break
+  done <"$main_status_file"
+  rm -f -- "$main_status_file"
   if [ -n "$unsafe_main_line" ]; then
     state="$("$QQ_ENGINE_JQ" -cn --arg main_checkout "$main_checkout" \
-      --arg current_status "$main_status" \
+      --arg current_status "$unsafe_main_line" \
       '{main_checkout:$main_checkout, current_status:$current_status}')"
     qq_engine_refuse \
       'The primary main checkout has a tracked change or an untracked path outside backlog/tasks. Do not stash, clean, reset, or repair it; establish an uncontested eligible checkout and retry.' \
@@ -212,7 +222,8 @@ retire_change() {
   local workspace="$subject"
   local workspace_list workspace_count workspace_json checkout linked
   local checkout_canonical checkout_ref checkout_branch branch_tip stated_checkout
-  local agents panes snapshot focused_workspace state branch_exists
+  local branch_checkout
+  local agents panes snapshot focused_workspace state branch_exists sole_pane
   local workspace_exists=true
 
   [ -n "$branch" ] || qq_engine_error 'retire requires --branch <branch>'
@@ -253,7 +264,46 @@ retire_change() {
         'The work session and branch are absent, but the stated checkout still exists. Preserve that unexplained path and resolve its ownership; retirement never treats a leftover checkout as complete.' \
         "$state"
     fi
+    branch_checkout="$(awk -v branch="refs/heads/$branch" '
+      /^worktree / { path = substr($0, 10); next }
+      $0 == "branch " branch { print path }
+    ' <<<"$worktrees")"
+    if [ -z "$checkout_arg" ] && [ -z "$branch_checkout" ]; then
+      if ! "$git_bin" -C "$repo_root" fetch origin main >/dev/null 2>&1; then
+        qq_engine_error \
+          'Could not freshly fetch origin/main. Branch-only retirement made no changes; restore remote access and retry.'
+      fi
+      branch_tip="$({ "$git_bin" -C "$repo_root" rev-parse \
+        "refs/heads/$branch" 2>/dev/null || true; })"
+      if [ -z "$branch_tip" ] || ! "$git_bin" -C "$repo_root" merge-base \
+        --is-ancestor "$branch_tip" origin/main >/dev/null 2>&1; then
+        state="$("$QQ_ENGINE_JQ" -cn --arg workspace "$workspace" \
+          --arg branch "$branch" --arg branch_tip "$branch_tip" \
+          '{workspace:$workspace, workspace_state:"absent", checkout_state:"absent", branch:$branch, branch_tip:$branch_tip, merged_into_origin_main:false}')"
+        qq_engine_refuse \
+          'The work session and checkout are absent, but the remaining branch is not proven merged into freshly fetched origin/main. Preserve it for inspection.' \
+          "$state"
+      fi
+      state="$("$QQ_ENGINE_JQ" -cn --arg workspace "$workspace" \
+        --arg branch "$branch" --arg branch_tip "$branch_tip" \
+        '{workspace:$workspace, workspace_state:"absent", checkout_state:"absent", branch:$branch, branch_tip:$branch_tip, merged_into_origin_main:true}')"
+      if [ "$mode" = inspect ] || [ "$dry_run" = true ]; then
+        qq_engine_done \
+          'branch-only retirement rails passed; the merged local branch was not deleted' "$state"
+      fi
+      if ! "$git_bin" -C "$main_checkout" branch -d -- "$branch" \
+        >/dev/null 2>&1; then
+        qq_engine_refuse \
+          'The work session and checkout are absent, but git branch -d refused the merged local branch. Never retry with -D; preserve and report the observed branch state.' \
+          "$state"
+      fi
+      qq_engine_done \
+        'completed an interrupted retirement by deleting the verified merged branch with git branch -d' "$state"
+    fi
     if [ -z "$checkout_arg" ] || [ "$workspace_absent_owned" != true ]; then
+      state="$("$QQ_ENGINE_JQ" -cn --argjson base "$state" \
+        --arg branch_checkout "$branch_checkout" \
+        '$base + {registered_checkout:$branch_checkout}')"
       qq_engine_refuse \
         'The work session is absent but the local branch remains. Supply its exact checkout path only when this executing session owns the Change delegate lifecycle, its completion wake fired, and no other Actor received the checkout; otherwise preserve it for inspection.' \
         "$state"
@@ -269,6 +319,8 @@ retire_change() {
   fi
 
   if [ "$workspace_exists" = true ]; then
+    [ -n "$placeholder_pane" ] \
+      || qq_engine_error 'retire requires --placeholder-pane for an existing work session'
     workspace_json="$("$QQ_ENGINE_JQ" -c --arg workspace "$workspace" \
       '.result.workspaces[] | select(.workspace_id == $workspace)' <<<"$workspace_list")"
     checkout="$("$QQ_ENGINE_JQ" -r '.worktree.checkout_path // ""' <<<"$workspace_json")"
@@ -398,6 +450,15 @@ retire_change() {
         '{workspace:$workspace, pane_count:$pane_count, tab_count:$tab_count}')"
       qq_engine_refuse \
         'The work session does not contain exactly one tab and its sole root placeholder pane. Treat every unexplained pane or tab as operator-created; never close it or force retirement.' \
+        "$state"
+    fi
+    sole_pane="$("$QQ_ENGINE_JQ" -r '.result.panes[0].pane_id // ""' <<<"$panes")"
+    if [ "$sole_pane" != "$placeholder_pane" ]; then
+      state="$("$QQ_ENGINE_JQ" -cn --arg workspace "$workspace" \
+        --arg expected_placeholder "$placeholder_pane" --arg observed_pane "$sole_pane" \
+        '{workspace:$workspace, expected_placeholder:$expected_placeholder, observed_pane:$observed_pane}')"
+      qq_engine_refuse \
+        "The work session's sole pane is not the Change-created root placeholder. Treat it as operator-created and preserve the entire work session, checkout, and branch." \
         "$state"
     fi
 
