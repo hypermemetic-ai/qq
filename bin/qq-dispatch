@@ -19,7 +19,7 @@ fi
 
 role="${1:-}"
 [ -n "$role" ] || qq_engine_error \
-  'usage: qq-dispatch [inspect] <implementer|reviewer|researcher> --root <path> --brief <path> --output <path> [--events <path>] [--stderr <path>] [--timeout <seconds>] [--dry-run]'
+  'usage: qq-dispatch [inspect] <implementer|reviewer|researcher> --root <path> --brief <path> --output <path> [--events <path>] [--stderr <path>] [--timeout <seconds>] [--mcp] [--dry-run]'
 shift
 
 case "$role" in
@@ -33,6 +33,7 @@ output=""
 events=""
 stderr_file=""
 timeout_seconds=3600
+mcp_opt_in=false
 dry_run=false
 
 while [ "$#" -gt 0 ]; do
@@ -67,6 +68,10 @@ while [ "$#" -gt 0 ]; do
       timeout_seconds="$2"
       shift 2
       ;;
+    --mcp)
+      mcp_opt_in=true
+      shift
+      ;;
     --dry-run)
       dry_run=true
       shift
@@ -76,6 +81,10 @@ while [ "$#" -gt 0 ]; do
 done
 
 qq_engine_set_action "$mode:$role"
+
+if [ "$mcp_opt_in" = true ] && [ "$role" != implementer ]; then
+  qq_engine_error '--mcp applies only to the implementer role'
+fi
 
 [ -n "$root" ] || qq_engine_error '--root is required'
 [ -n "$brief" ] || qq_engine_error '--brief is required'
@@ -165,14 +174,20 @@ completion envelope the work order requires."
     codex_args=(
       exec
       --profile "$profile_name"
-      -c 'mcp_servers={}'
+    )
+    if [ "$mcp_opt_in" = true ]; then
+      mcp_mode=on
+    else
+      codex_args+=(-c 'mcp_servers={}')
+      mcp_mode=off
+    fi
+    codex_args+=(
       --skip-git-repo-check
       -C "$root"
       --json
       -o "$output"
       "$prompt"
     )
-    mcp_mode=off
     ;;
   reviewer)
     prompt="Read $brief fully and perform the review it specifies. You are
@@ -232,6 +247,11 @@ if [ "$mode" = inspect ] || [ "$dry_run" = true ]; then
   qq_engine_done 'dispatch preconditions passed; Codex was not started' "$state"
 fi
 
+if ! rm -f -- "$output" 2>/dev/null; then
+  qq_engine_error \
+    'Could not remove the pre-existing completion artifact; Codex was not started.' \
+    "$state"
+fi
 set +e
 "$timeout_bin" -k 10 "$timeout_seconds" \
   "$codex_bin" "${codex_args[@]}" >"$events" 2>"$stderr_file"

@@ -41,6 +41,9 @@ case "${FAKE_CODEX_MODE:-done}" in
     printf 'completed artifact\n' >"$output"
     printf 'codex event\n'
     ;;
+  empty)
+    printf 'codex event without artifact\n'
+    ;;
   error)
     printf 'provider failed\n' >&2
     exit 9
@@ -97,6 +100,23 @@ assert b"skills.include_instructions=false" not in args
 PY
 assert_file_contains "$tmp/events" 'codex event'
 
+# An implementer can opt into the profile's MCP configuration by omitting the
+# default MCP-off override, and the selected mode is observable in state.
+run_engine 0 implementer \
+  --root "$ROOT" --brief "$brief" --output "$tmp/mcp-envelope" --mcp
+jq -e '
+  .status == "done"
+  and .state.role == "implementer"
+  and .state.mcp == "on"
+' "$tmp/result.json" >/dev/null
+python3 - "$FAKE_CODEX_LOG" <<'PY'
+from pathlib import Path
+import sys
+
+args = Path(sys.argv[1]).read_bytes().split(b"\0")
+assert b"mcp_servers={}" not in args
+PY
+
 # Inspect mirrors the same mounted-profile preconditions without spawning.
 : >"$FAKE_CODEX_LOG"
 run_engine 0 inspect implementer \
@@ -131,6 +151,19 @@ jq -e '
 run_engine 1 unknown \
   --root "$ROOT" --brief "$brief" --output "$tmp/unknown"
 jq -e '.status == "error"' "$tmp/result.json" >/dev/null
+
+# A successful Codex exit cannot reuse a nonempty artifact from an earlier
+# attempt: dispatch removes it before launch and retains the empty-artifact error.
+stale_output="$tmp/stale-envelope"
+printf 'stale completion\n' >"$stale_output"
+export FAKE_CODEX_MODE=empty
+run_engine 1 implementer \
+  --root "$ROOT" --brief "$brief" --output "$stale_output"
+jq -e '
+  .status == "error"
+  and (.message | contains("without a completion artifact"))
+' "$tmp/result.json" >/dev/null
+[ ! -e "$stale_output" ] || fail 'dispatch retained the stale completion artifact'
 
 # Timeout containment returns engine error 1 (never raw 124) and reaps the
 # fake Codex process tree, including its long-running child.
