@@ -4,7 +4,7 @@ title: Remove doc-54 from main via revert PR
 status: Done
 assignee: []
 created_date: '2026-07-19 15:30'
-updated_date: '2026-07-19 15:32'
+updated_date: '2026-07-19 15:34'
 labels:
   - docs
 dependencies: []
@@ -25,7 +25,7 @@ Decision ledger:
 <!-- AC:BEGIN -->
 - [x] #1 One PR removes 'backlog/docs/research/doc-54 - Factory.ai-—-offering-LangChain-connection-and-capability-map-vs-qq.md' from main's tree via a new commit
 - [x] #2 No other file is modified
-- [ ] #3 PR Checks are green
+- [x] #3 PR Checks are green
 <!-- AC:END -->
 
 ## Final Summary
