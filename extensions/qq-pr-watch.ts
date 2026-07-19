@@ -11,6 +11,19 @@ const INTERVAL_ERROR =
 const TERMINAL_STATES = new Set(["MERGED", "CLOSED"]);
 const KNOWN_STATES = new Set(["OPEN", ...TERMINAL_STATES]);
 
+function terminalMessage(pr, reading) {
+  const urlSuffix = reading.url === "" ? "" : ` — ${reading.url}`;
+  return `pull request ${pr} reached terminal state ${reading.prState}${urlSuffix}`;
+}
+
+function watchFailureMessage(pr, message) {
+  return `pull request ${pr} watch failed: ${message}`;
+}
+
+function inspectFailureMessage(pr, message) {
+  return `pull request ${pr} inspection failed: ${message}`;
+}
+
 function result(message, details) {
   return {
     content: [{ type: "text", text: message }],
@@ -22,6 +35,7 @@ export default function register(pi, deps = {}) {
   const setTimer = deps.setTimer ?? ((callback, delay) => setTimeout(callback, delay));
   const clearTimer = deps.clearTimer ?? ((timer) => clearTimeout(timer));
   const watches = new Map();
+  let sessionAlive = true;
 
   function details(status, pr, reading, notificationCount) {
     return {
@@ -88,8 +102,8 @@ export default function register(pi, deps = {}) {
       clearTimer(watch.timer);
       watch.timer = null;
     }
-    if (watches.get(watch.pr) === watch) {
-      watches.delete(watch.pr);
+    if (watches.get(watch.key) === watch) {
+      watches.delete(watch.key);
     }
     return true;
   }
@@ -136,17 +150,18 @@ export default function register(pi, deps = {}) {
       return { kind: "stopped" };
     }
     if (!reading.ok) {
+      const message = watchFailureMessage(watch.pr, reading.message);
       const wakeDetails = details("error", watch.pr, reading, 1);
       retire(watch);
-      sendWake(reading.message, wakeDetails);
-      return { kind: "error", message: reading.message, details: wakeDetails };
+      sendWake(message, wakeDetails);
+      return { kind: "error", message, details: wakeDetails };
     }
     if (reading.prState === "OPEN") {
       schedule(watch);
       return { kind: "open", reading };
     }
 
-    const message = `pull request reached terminal state ${reading.prState}`;
+    const message = terminalMessage(watch.pr, reading);
     const wakeDetails = details("done", watch.pr, reading, 1);
     retire(watch);
     sendWake(message, wakeDetails);
@@ -187,8 +202,12 @@ export default function register(pi, deps = {}) {
     async execute(_toolCallId, params, signal) {
       const interval = params.interval ?? 30;
       if (!Number.isInteger(interval) || interval < 30 || interval > 60) {
+        const message =
+          params.action === "inspect"
+            ? inspectFailureMessage(params.pr, INTERVAL_ERROR)
+            : watchFailureMessage(params.pr, INTERVAL_ERROR);
         return result(
-          INTERVAL_ERROR,
+          message,
           details("error", params.pr, undefined, 0),
         );
       }
@@ -197,59 +216,73 @@ export default function register(pi, deps = {}) {
         const reading = await readPullRequest(params.pr, signal);
         if (!reading.ok) {
           return result(
-            reading.message,
+            inspectFailureMessage(params.pr, reading.message),
             details("error", params.pr, reading, 0),
           );
         }
         if (reading.prState === "OPEN") {
           return result(
-            "The pull request is still OPEN; no completion notification was emitted. Leave the watch armed or retry after disposition.",
+            `pull request ${params.pr} is still OPEN; no completion notification was emitted. Leave the watch armed or retry after disposition.`,
             details("refused", params.pr, reading, 0),
           );
         }
         return result(
-          `pull request is already ${reading.prState}; inspection emitted no completion notification`,
+          `pull request ${params.pr} is already ${reading.prState}; inspection emitted no completion notification`,
           details("done", params.pr, reading, 0),
         );
       }
 
-      if (watches.has(params.pr)) {
+      const reading = await readPullRequest(params.pr, signal);
+      if (!sessionAlive) {
         return result(
-          "A watch is already active for this exact pull request; no new watch was armed.",
-          details("error", params.pr, undefined, 0),
+          `pull request ${params.pr} watch was not armed because the session shut down.`,
+          details("refused", params.pr, undefined, 0),
+        );
+      }
+      if (!reading.ok) {
+        const message = watchFailureMessage(params.pr, reading.message);
+        const wakeDetails = details("error", params.pr, reading, 1);
+        sendWake(message, wakeDetails);
+        return result(message, wakeDetails);
+      }
+
+      const key = reading.url === "" ? params.pr : reading.url;
+      if (watches.has(key)) {
+        return result(
+          `A watch is already active for pull request ${params.pr}; no new watch was armed.`,
+          details("refused", params.pr, undefined, 0),
         );
       }
 
+      if (reading.prState !== "OPEN") {
+        const message = terminalMessage(params.pr, reading);
+        const wakeDetails = details("done", params.pr, reading, 1);
+        sendWake(message, wakeDetails);
+        return result(message, wakeDetails);
+      }
+
       const watch = {
+        key,
         pr: params.pr,
         interval,
         timer: null,
         alive: true,
         polling: false,
       };
-      watches.set(watch.pr, watch);
-      const outcome = await poll(watch, signal);
-
-      if (outcome.kind === "open") {
-        return result(
-          `pull-request watch armed for ${watch.pr}`,
-          {
-            ...details("done", watch.pr, outcome.reading, 0),
-            interval_seconds: interval,
-          },
-        );
-      }
-      if (outcome.kind === "terminal" || outcome.kind === "error") {
-        return result(outcome.message, outcome.details);
-      }
+      watches.set(watch.key, watch);
+      schedule(watch);
       return result(
-        "The session shut down before the pull-request watch was armed.",
-        details("refused", watch.pr, undefined, 0),
+        `pull-request watch armed for ${watch.pr}`,
+        {
+          ...details("done", watch.pr, reading, 0),
+          interval_seconds: interval,
+        },
       );
     },
   });
 
   pi.on("session_shutdown", () => {
+    sessionAlive = false;
     for (const watch of watches.values()) {
       watch.alive = false;
       if (watch.timer !== null) {

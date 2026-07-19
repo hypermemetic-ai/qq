@@ -166,12 +166,15 @@ function assertGhCall(call, pr) {
   );
 }
 
-function assertDoneWake(harness, state, pr = "17") {
+function assertDoneWake(harness, state, pr = "17", url = PR_URL) {
   assert.equal(harness.messages.length, 1, "terminal state did not wake exactly once");
   const wake = harness.messages[0];
   assert.equal(wake.message.customType, "qq-pr-watch");
   assert.equal(wake.message.display, true);
-  assert.match(wake.message.content, new RegExp(state));
+  assert.equal(
+    wake.message.content,
+    `pull request ${pr} reached terminal state ${state}${url === "" ? "" : ` — ${url}`}`,
+  );
   assert.deepEqual(wake.options, {
     triggerTurn: true,
     deliverAs: "followUp",
@@ -180,7 +183,7 @@ function assertDoneWake(harness, state, pr = "17") {
     status: "done",
     pull_request: pr,
     pr_state: state,
-    url: PR_URL,
+    url,
     notification_count: 1,
   });
 }
@@ -234,11 +237,15 @@ async function testErrorVisibility() {
     const watchResult = await execute(h, { action: "watch", pr: "17" });
     assert.equal(watchResult.details.status, "error");
     assert.match(watchResult.details.message, messagePattern);
+    assert.match(watchResult.content[0].text, /^pull request 17 watch failed: /);
+    assert.match(watchResult.content[0].text, messagePattern);
     assert.equal(h.timers.liveCount(), 0, "failed watch left a timer armed");
     assert.equal(h.messages.length, 1, "failed watch did not emit exactly one wake");
     assert.equal(h.messages[0].message.details.status, "error");
     assert.equal(h.messages[0].message.details.notification_count, 1);
     assert.match(h.messages[0].message.details.message, messagePattern);
+    assert.equal(h.messages[0].message.content, watchResult.content[0].text);
+    assert.match(h.messages[0].message.content, /^pull request 17 watch failed: /);
     assert.deepEqual(h.messages[0].options, {
       triggerTurn: true,
       deliverAs: "followUp",
@@ -268,23 +275,26 @@ async function testShutdownCleanup() {
   inFlight.shutdown();
   inFlight.shutdown();
   deferred.resolve(response("MERGED", "https://example.test/pulls/18"));
-  await pending;
+  const stopped = await pending;
+  assert.match(stopped.content[0].text, /pull request 18 watch was not armed/);
   assert.equal(inFlight.timers.liveCount(), 0);
   assert.equal(inFlight.messages.length, 0, "in-flight poll woke after shutdown");
 }
 
 async function testAlreadyTerminalAndRearm() {
   const h = createHarness([response("MERGED"), response("CLOSED")]);
-  await execute(h, { action: "watch", pr: "17" });
+  const mergedResult = await execute(h, { action: "watch", pr: "17" });
   assert.equal(h.execCalls.length, 1, "already-terminal arm polled more than once");
   assertDoneWake(h, "MERGED");
+  assert.equal(mergedResult.content[0].text, h.messages[0].message.content);
   assert.equal(h.timers.liveCount(), 0);
 
-  await execute(h, { action: "watch", pr: "17" });
+  const closedResult = await execute(h, { action: "watch", pr: "17" });
   assert.equal(h.execCalls.length, 2, "spent watch could not be re-armed");
   assert.equal(h.messages.length, 2, "fresh re-arm did not emit its own wake");
   assert.equal(h.messages[1].message.details.pr_state, "CLOSED");
   assert.equal(h.messages[1].message.details.notification_count, 1);
+  assert.equal(closedResult.content[0].text, h.messages[1].message.content);
 }
 
 async function testIntervals() {
@@ -317,6 +327,7 @@ async function testIntervals() {
     const refused = await execute(h, { action: "watch", pr: "17", interval });
     assert.equal(refused.details.status, "error");
     assert.match(refused.details.message, /integer from 30 through 60/);
+    assert.match(refused.content[0].text, /^pull request 17 watch failed: /);
     assert.equal(h.execCalls.length, 0, "invalid interval reached gh");
     assert.equal(h.timers.liveCount(), 0, "invalid interval armed a timer");
     assert.equal(h.messages.length, 0, "invalid interval emitted a wake");
@@ -324,26 +335,49 @@ async function testIntervals() {
 }
 
 async function testDuplicateAndDistinctWatches() {
-  const duplicate = createHarness([response("OPEN"), response("MERGED")]);
+  const duplicate = createHarness([
+    response("OPEN"),
+    response("CLOSED"),
+    response("MERGED"),
+  ]);
   await execute(duplicate, { action: "watch", pr: "17" });
   const refused = await execute(duplicate, { action: "watch", pr: "17" });
-  assert.equal(refused.details.status, "error");
-  assert.equal(duplicate.execCalls.length, 1, "duplicate arm inspected gh");
+  assert.equal(refused.details.status, "refused");
+  assert.equal(
+    refused.content[0].text,
+    "A watch is already active for pull request 17; no new watch was armed.",
+  );
+  assert.equal(duplicate.execCalls.length, 2, "duplicate arm did not inspect gh exactly once");
   assert.equal(duplicate.timers.liveCount(), 1, "duplicate arm changed the original watch");
+  assert.equal(
+    duplicate.messages.length,
+    0,
+    "terminal reading from a duplicate arm emitted a wake",
+  );
   await duplicate.timers.advance(30_000);
+  assert.equal(duplicate.execCalls.length, 3);
   assertDoneWake(duplicate, "MERGED");
 
+  const aUrl = "https://example.test/pulls/a";
+  const bUrl = "https://example.test/pulls/b";
   const distinct = createHarness([
-    response("OPEN"),
-    response("OPEN"),
-    response("MERGED", "https://example.test/pulls/a"),
-    response("CLOSED", "https://example.test/pulls/b"),
+    response("OPEN", aUrl),
+    response("OPEN", bUrl),
+    response("MERGED", aUrl),
+    response("CLOSED", bUrl),
   ]);
   await execute(distinct, { action: "watch", pr: "a" });
   await execute(distinct, { action: "watch", pr: "b" });
   assert.equal(distinct.timers.liveCount(), 2);
   await distinct.timers.advance(30_000);
   assert.equal(distinct.messages.length, 2, "distinct watches did not each wake once");
+  assert.deepEqual(
+    distinct.messages.map(({ message }) => message.content),
+    [
+      `pull request a reached terminal state MERGED — ${aUrl}`,
+      `pull request b reached terminal state CLOSED — ${bUrl}`,
+    ],
+  );
   assert.deepEqual(
     distinct.messages.map(({ message }) => [
       message.details.pull_request,
@@ -355,6 +389,36 @@ async function testDuplicateAndDistinctWatches() {
       ["b", "CLOSED", 1],
     ],
   );
+}
+
+async function testCanonicalDedupeBothDirections() {
+  for (const [first, second] of [
+    ["17", PR_URL],
+    [PR_URL, "17"],
+  ]) {
+    const h = createHarness([
+      response("OPEN", PR_URL),
+      response("OPEN", PR_URL),
+      response("MERGED", PR_URL),
+    ]);
+    await execute(h, { action: "watch", pr: first });
+    const refused = await execute(h, { action: "watch", pr: second });
+
+    assert.equal(refused.details.status, "refused");
+    assert.equal(refused.details.pull_request, second);
+    assert.equal(
+      refused.content[0].text,
+      `A watch is already active for pull request ${second}; no new watch was armed.`,
+    );
+    assert.equal(h.execCalls.length, 2, "canonical duplicate did not perform one arm read");
+    assert.equal(h.timers.liveCount(), 1, "canonical duplicate changed the original watch");
+    assert.equal(h.messages.length, 0, "canonical duplicate emitted a wake");
+
+    await h.timers.advance(30_000);
+    assert.equal(h.execCalls.length, 3);
+    assert.equal(h.timers.liveCount(), 0, "canonical watch remained live after terminal state");
+    assertDoneWake(h, "MERGED", first, PR_URL);
+  }
 }
 
 async function testFlagShapedSelector() {
@@ -372,7 +436,8 @@ async function testInspect() {
   const openResult = await execute(open, { action: "inspect", pr: "17" });
   assert.equal(openResult.details.status, "refused");
   assert.equal(openResult.details.notification_count, 0);
-  assert.match(openResult.details.message, /still OPEN; no completion notification/);
+  assert.match(openResult.details.message, /pull request 17 is still OPEN; no completion notification/);
+  assert.match(openResult.content[0].text, /pull request 17 is still OPEN/);
   assert.equal(open.execCalls.length, 1);
   assert.equal(open.timers.liveCount(), 0);
   assert.equal(open.messages.length, 0);
@@ -382,7 +447,11 @@ async function testInspect() {
   assert.equal(mergedResult.details.status, "done");
   assert.equal(mergedResult.details.pr_state, "MERGED");
   assert.equal(mergedResult.details.notification_count, 0);
-  assert.match(mergedResult.details.message, /inspection emitted no completion notification/);
+  assert.match(
+    mergedResult.details.message,
+    /pull request 17 is already MERGED; inspection emitted no completion notification/,
+  );
+  assert.match(mergedResult.content[0].text, /pull request 17 is already MERGED/);
   assert.equal(merged.execCalls.length, 1);
   assert.equal(merged.timers.liveCount(), 0);
   assert.equal(merged.messages.length, 0);
@@ -392,6 +461,7 @@ async function testInspect() {
   assert.equal(failedResult.details.status, "error");
   assert.equal(failedResult.details.notification_count, 0);
   assert.match(failedResult.details.message, /inspection failed/);
+  assert.match(failedResult.content[0].text, /^pull request 17 inspection failed: /);
   assert.equal(failed.execCalls.length, 1);
   assert.equal(failed.timers.liveCount(), 0);
   assert.equal(failed.messages.length, 0);
@@ -404,6 +474,7 @@ await testShutdownCleanup();
 await testAlreadyTerminalAndRearm();
 await testIntervals();
 await testDuplicateAndDistinctWatches();
+await testCanonicalDedupeBothDirections();
 await testFlagShapedSelector();
 await testInspect();
 
