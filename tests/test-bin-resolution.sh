@@ -62,7 +62,7 @@ fi
 
 for script in \
   qq-change qq-dispatch qq-herdr-home qq-herdr-pull qq-openwiki \
-  qq-pr-watch qq-status; do
+  qq-status; do
   assert_file_contains "$ROOT/bin/$script" 'lib/qq-bin.sh' \
     "$script does not source the shared resolver"
 done
