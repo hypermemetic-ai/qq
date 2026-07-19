@@ -76,19 +76,13 @@ When the runtime exposes native MCP tools, use these names:
 4. `query_graph` — run Cypher queries for complex patterns
 5. `get_architecture` — high-level project summary
 
-Pi has no MCP server. Invoke the same tools through the exact CLI shape:
+Pi has no MCP server. Run `codebase-memory-mcp cli list_projects`, then use the
+`name` whose `root_path` matches the checkout:
 
-`codebase-memory-mcp cli <tool> '<json>'`
+- `codebase-memory-mcp cli search_graph --project <name> --name-pattern '.*OrderHandler.*'`
+- `codebase-memory-mcp cli trace_path --project <name> --function-name OrderHandler --direction inbound`
 
-Keep JSON as one shell argument. Examples:
-
-- Native MCP: `search_graph(name_pattern=".*OrderHandler.*")`
-- Pi CLI: `codebase-memory-mcp cli search_graph '{"name_pattern":".*OrderHandler.*"}'`
-- Native MCP: `trace_path(function_name="OrderHandler", direction="inbound")`
-- Pi CLI: `codebase-memory-mcp cli trace_path '{"function_name":"OrderHandler","direction":"inbound"}'`
-
-Choose the available runtime route; the tool intent and JSON fields are
-identical.
+Choose the available route; tool intent is identical.
 <!-- codebase-memory-mcp:end -->
 
 <!-- OPENWIKI:START -->
