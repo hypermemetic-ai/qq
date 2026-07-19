@@ -102,6 +102,38 @@ done
 [ -d "$root" ] || qq_engine_error "dispatch root is not a directory: $root"
 root="$(cd "$root" && pwd -P)" \
   || qq_engine_error "cannot canonicalize dispatch root: $root"
+writable_roots=()
+if [ "$role" = implementer ]; then
+  if ! qq_resolve_bin git; then
+    qq_engine_error "$QQ_BIN_ERROR"
+  fi
+  git_bin="$QQ_BIN_RESULT"
+  git_common_dir=""
+  git_dir=""
+  git_common_dir_found=false
+  git_dir_found=false
+  if git_common_dir="$(
+    unset "${!GIT_@}"
+    "$git_bin" -C "$root" rev-parse \
+      --path-format=absolute --git-common-dir 2>/dev/null
+  )"; then
+    git_common_dir_found=true
+  fi
+  if git_dir="$(
+    unset "${!GIT_@}"
+    "$git_bin" -C "$root" rev-parse \
+      --path-format=absolute --git-dir 2>/dev/null
+  )"; then
+    git_dir_found=true
+  fi
+  if [ "$git_common_dir_found" = true ] && [ -n "$git_common_dir" ]; then
+    writable_roots+=("$git_common_dir")
+    if [ "$git_dir_found" = true ] && [ -n "$git_dir" ] \
+      && [ "$git_dir" != "$git_common_dir" ]; then
+      writable_roots+=("$git_dir")
+    fi
+  fi
+fi
 if [ ! -f "$brief" ] || [ ! -r "$brief" ]; then
   qq_engine_error "brief is not a readable file: $brief"
 fi
@@ -188,6 +220,9 @@ completion envelope the work order requires."
       -o "$output"
       "$prompt"
     )
+    for writable_root in "${writable_roots[@]}"; do
+      codex_args+=(--add-dir "$writable_root")
+    done
     ;;
   reviewer)
     prompt="Read $brief fully and perform the review it specifies. You are
@@ -219,6 +254,9 @@ skills or delegate. Your final message is the findings report."
     ;;
 esac
 
+writable_roots_json="$(
+  "$QQ_ENGINE_JQ" -cn --args '$ARGS.positional' "${writable_roots[@]}"
+)"
 state="$("$QQ_ENGINE_JQ" -cn \
   --arg role "$role" \
   --arg root "$root" \
@@ -230,6 +268,7 @@ state="$("$QQ_ENGINE_JQ" -cn \
   --arg profile "$profile_name" \
   --arg profile_source "$profile_source" \
   --arg mcp "$mcp_mode" \
+  --argjson writable_roots "$writable_roots_json" \
   '{
     role:$role,
     root:$root,
@@ -240,7 +279,8 @@ state="$("$QQ_ENGINE_JQ" -cn \
     timeout_seconds:$timeout,
     profile:$profile,
     profile_source:$profile_source,
-    mcp:$mcp
+    mcp:$mcp,
+    writable_roots:$writable_roots
   }')"
 
 if [ "$mode" = inspect ] || [ "$dry_run" = true ]; then
