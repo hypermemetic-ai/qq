@@ -6,6 +6,8 @@ into `~/.config`, so editing here or through the live config path edits the
 same file; the shell surface is sourced straight from this checkout.
 
 ## Files
+- `pi/qq-backlog-guard.ts` — Pi's path-only managed-Backlog drift-net for
+  built-in `write` and `edit` calls.
 - `yazi/yazi.toml` — pane-first file navigation; markdown opens in-pane through
   mdcat by default, with tuned Glow as the alternate opener.
 - `yazi/keymap.toml` — `Enter` enters folders or opens files, `!` opens a shell
@@ -33,7 +35,18 @@ because herdr 0.7.4 draws the popup frame at the configured size but never
 sets the popup PTY winsize, and frames wider than the tiled panel clamp.
 `prefix+F<N>` pulls the Nth priority-sorted agent into the focused pane;
 `prefix+0` pulls the agent that most needs attention. Those operator
-bindings use `qq-herdr-pull <N|next>`.
+bindings use `qq-herdr-pull <N|next>`. `alt+o` snaps first to Pi in the
+Repository project home, then that home's Claude fallback. With no home
+runtime it tries focused-workspace Pi, focused-workspace Claude, and finally
+the first focused-workspace agent in sidebar order. Pressing it again at the
+target bounces back.
+
+Load `pi/qq-backlog-guard.ts` from Pi's global settings with its absolute
+checkout path. On each built-in `write` or `edit`, it discovers the current
+Git checkout from Pi's working directory and blocks normalized targets inside
+that checkout's `backlog/`, returning the Backlog-CLI guidance. It deliberately
+allows reads and Bash, including Backlog CLI commands; it is a path-only
+drift-net, not a security boundary or shell policy.
 
 The sidebar carries the delegate status surface's ambient tier: a `$stage` row
 on Space and Agent entries renders stage-boundary one-liners reported through

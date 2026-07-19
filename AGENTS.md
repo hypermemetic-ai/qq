@@ -62,13 +62,13 @@ worked on.
 <!-- codebase-memory-mcp:start -->
 # Codebase Knowledge Graph (codebase-memory-mcp)
 
-This project uses codebase-memory-mcp to maintain a knowledge graph of the
-codebase. It is one of several discovery tools: use the graph for structural
-questions such as callers and impact, and text search for literals or unknown
-shapes. Choose whichever answers the question fastest, then verify material
-conclusions in source.
+codebase-memory-mcp maintains a graph. Use the graph for structural questions:
+callers, dependencies, and impact; use text search for literals, non-code files,
+or unknown shapes. Verify conclusions in source.
 
-## Tool inventory
+## Runtime routes
+
+When the runtime exposes native MCP tools, use these names:
 
 1. `search_graph` — find functions, classes, routes, variables by pattern
 2. `trace_path` — trace who calls a function or what it calls
@@ -76,17 +76,13 @@ conclusions in source.
 4. `query_graph` — run Cypher queries for complex patterns
 5. `get_architecture` — high-level project summary
 
-## When text search fits
+Pi has no MCP server. Run `codebase-memory-mcp cli list_projects`, then use the
+`name` whose `root_path` matches the checkout:
 
-- Searching for string literals, error messages, config values
-- Searching non-code files (Dockerfiles, shell scripts, configs)
-- Exploring an unknown shape before choosing a structural query
+- `codebase-memory-mcp cli search_graph --project <name> --name-pattern '.*OrderHandler.*'`
+- `codebase-memory-mcp cli trace_path --project <name> --function-name OrderHandler --direction inbound`
 
-## Examples
-
-- Find a handler: `search_graph(name_pattern=".*OrderHandler.*")`
-- Who calls it: `trace_path(function_name="OrderHandler", direction="inbound")`
-- Read source: `get_code_snippet(qualified_name="pkg/orders.OrderHandler")`
+Choose the available route; tool intent is identical.
 <!-- codebase-memory-mcp:end -->
 
 <!-- OPENWIKI:START -->
