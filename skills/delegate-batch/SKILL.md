@@ -149,10 +149,11 @@ channel once and continue.
 
 At every dispatcher-owned boundary after dispatch, sweep each non-terminal
 delegate's events file — one head-read apiece — for `thread.started`, and
-publish `working` with the steering handle as soon as it appears. Never read
+publish `working` as soon as it appears; the thread id it reveals is the
+delegate's steering handle. Never read
 an events file at dispatch time and never wait or poll between boundaries.
-Until the event appears, leave the stage context at `dispatched` and mark
-steering unavailable; when a delegate's events file still carries no
+Until the event appears, leave the stage context at `dispatched`; when a
+delegate's events file still carries no
 `thread.started` ten minutes after dispatch, set `BLOCKED: no thread after
 10m` and raise the attention notification — a startup wedge is
 indistinguishable from this on the glass. Retain the stderr file to diagnose
@@ -181,8 +182,8 @@ another boundary; record the gap during envelope verification. A silent
 delegate death is corrected by the completion wake. After a dead dispatcher,
 reconcile from durable Tasks, envelopes, and worktrees, never from this glass.
 
-Feed Claude-subagent delegates into the same surface. Render the runtime as
-`claude`, move to `working` on the harness task-start acknowledgement, and use
+Feed Claude-subagent delegates into the same surface. Move to
+`working` on the harness task-start acknowledgement, and use
 the subagent id through `SendMessage` as the steering handle.
 
 ## Verify the envelope and retain the gates
