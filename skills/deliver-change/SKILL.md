@@ -8,6 +8,10 @@ description: Owns one-PR GitHub Flow delivery for every authorized Repository mo
 Retain responsibility for scope, decisions, evidence, and delivery state. Give
 delegated agents bounded assignments; do not hand them this lifecycle.
 
+`slopchop` is the operator's local diff-review surface; GitHub's web UI is for Checks and merge.
+
+`rpiv-todo` is session scratch; durable intent lives in Backlog Tasks.
+
 1. Bind the Change to the agreed outcome and current Repository state. Before
    binding, require the owning Task record's Description to carry a decision
    ledger: every consequential decision this Change embeds, each citing what

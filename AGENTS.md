@@ -66,6 +66,8 @@ codebase-memory-mcp maintains a graph. Use the graph for structural questions:
 callers, dependencies, and impact; use text search for literals, non-code files,
 or unknown shapes. Verify conclusions in source.
 
+In Pi, additive `fffind`, `ffgrep`, and `fff-multi-grep` tools are available alongside built-in `find`/`grep`; monitor `agent chooses built-ins over fff` in session logs.
+
 ## Runtime routes
 
 When the runtime exposes native MCP tools, use these names:
