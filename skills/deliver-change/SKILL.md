@@ -105,13 +105,15 @@ delegated agents bounded assignments; do not hand them this lifecycle.
    (or the runtime's equivalent) and verify that its result confirms it was
    shown. If the command fails or reports notifications disabled or not shown,
    plainly report the browser-only fallback and do not claim a notification was
-   sent. Report the URL either way. After reporting it, arm a harness-native
-   background disposition watch using no owned machinery: a single-notification
-   `until` loop that uses the GitHub CLI to poll the pull request state every 5
-   seconds, exits on either `MERGED` or `CLOSED`, and emits exactly one
-   completion notification to wake the agent for these post-merge steps and any
-   follow-on dispatch. Cover both terminal states; silence is not success. The
-   watch replaces waiting for an operator message. Then stop.
+   sent. Report the URL either way. After reporting it, the accountable session
+   arms the Repository-owned `bin/qq-pr-watch <number-or-URL>` as the
+   harness-native background disposition watch for that pull request. The
+   command owns its polling loop, its tested exactly-once completion-wake and
+   `inspect` semantics, and its 30–60-second interval policy (30 seconds by
+   default; pass `--interval <30-60>` only within that range). It covers both
+   `MERGED` and `CLOSED`; silence is not success. Its completion wake resumes
+   the agent for these post-merge steps and any follow-on dispatch. The watch
+   replaces waiting for an operator message. Then stop.
 10. On a disposition-watch wake, later resume, or operator message, reinspect
    the pull request with step 7's fields. Proceed only after verifying its
    merged state and that
