@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+umask 077
+
+fail() {
+  local exit_code="$1"
+  shift
+  printf '[qq-pilot] fail-closed: %s\n' "$*" >&2
+  exit "$exit_code"
+}
+
+path_is_within() {
+  local candidate="$1"
+  local parent="$2"
+  [[ "$candidate" == "$parent" || "$candidate" == "$parent"/* ]]
+}
+
+wrapper_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+pilot_root="$(cd -- "$wrapper_dir/.." && pwd -P)"
+worktree="$(cd -- "$pilot_root/.." && pwd -P)"
+
+if ! repository_root="$(git -C "$worktree" rev-parse --show-toplevel 2>/dev/null)"; then
+  fail 64 "wrapper is not installed in a Git worktree"
+fi
+repository_root="$(realpath -e -- "$repository_root")"
+[[ "$repository_root" == "$worktree" ]] || fail 64 "wrapper path does not resolve beneath its assigned worktree"
+
+if ! invocation_root="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null)"; then
+  fail 65 "child cwd is not inside the assigned worktree"
+fi
+invocation_root="$(realpath -e -- "$invocation_root")"
+[[ "$invocation_root" == "$worktree" ]] || fail 65 "child cwd belongs to an unrelated worktree"
+
+role="${PI_SUBAGENT_CHILD_AGENT:-}"
+case "$role" in
+  reviewer|researcher|implementer) ;;
+  "") fail 66 "PI_SUBAGENT_CHILD_AGENT is required" ;;
+  *) fail 66 "unsupported child role '$role'" ;;
+esac
+
+if ! git_common_dir="$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+  fail 67 "cannot discover the Git common directory"
+fi
+if ! git_worktree_dir="$(git -C "$worktree" rev-parse --path-format=absolute --git-dir 2>/dev/null)"; then
+  fail 67 "cannot discover the worktree Git directory"
+fi
+git_common_dir="$(realpath -e -- "$git_common_dir")"
+git_worktree_dir="$(realpath -e -- "$git_worktree_dir")"
+
+runtime_root_input="${QQ_PILOT_RUNTIME_ROOT:-${TMPDIR:-/tmp}/qq-t94-pilot-runtime}"
+[[ "$runtime_root_input" == /* ]] || fail 68 "QQ_PILOT_RUNTIME_ROOT must be absolute"
+mkdir -p -- "$runtime_root_input"
+runtime_root="$(realpath -e -- "$runtime_root_input")"
+system_tmp="$(realpath -e -- /tmp)"
+path_is_within "$runtime_root" "$system_tmp" || fail 68 "runtime root must stay beneath /tmp"
+[[ "$runtime_root" != "$system_tmp" ]] || fail 68 "runtime root may not be all of /tmp"
+
+structured_output_capture=""
+if [[ -n "${PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE:-}" ]]; then
+  capture_input="$PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE"
+  [[ "$capture_input" == /* ]] || fail 68 "structured-output capture path must be absolute"
+  [[ ! -L "$capture_input" ]] || fail 68 "structured-output capture path may not be a symlink"
+  capture_parent_input="$(dirname -- "$capture_input")"
+  [[ -d "$capture_parent_input" ]] || fail 68 "structured-output capture directory is unavailable"
+  capture_parent="$(realpath -e -- "$capture_parent_input")"
+  capture_leaf="$(basename -- "$capture_input")"
+  [[ -n "$capture_leaf" && "$capture_leaf" != "." && "$capture_leaf" != ".." ]] \
+    || fail 68 "structured-output capture filename is invalid"
+  structured_output_capture="$capture_parent/$capture_leaf"
+  path_is_within "$structured_output_capture" "$runtime_root" \
+    || fail 68 "structured-output capture path must stay beneath the runtime root"
+fi
+
+run_token="${PI_SUBAGENT_RUN_ID:-manual}"
+run_token="${run_token//[^A-Za-z0-9._-]/_}"
+run_token="${run_token:0:80}"
+[[ -n "$run_token" ]] || run_token="manual"
+child_index="${PI_SUBAGENT_CHILD_INDEX:-0}"
+[[ "$child_index" =~ ^[0-9]+$ ]] || fail 68 "PI_SUBAGENT_CHILD_INDEX must be a non-negative integer"
+run_dir="$runtime_root/runs/$run_token/${role}-${child_index}-$$"
+mkdir -p -- "$run_dir/tmp" "$run_dir/pi-config" "$run_dir/sessions"
+
+if [[ -n "${QQ_PILOT_LANDSTRIP_BINARY:-}" ]]; then
+  landstrip_binary="$QQ_PILOT_LANDSTRIP_BINARY"
+else
+  platform="$(node -p 'process.platform')"
+  architecture="$(node -p 'process.arch')"
+  landstrip_binary="$worktree/.pi/npm/node_modules/@landstrip/landstrip-${platform}-${architecture}/bin/landstrip"
+fi
+[[ "$landstrip_binary" == /* ]] || fail 69 "Landstrip binary path must be absolute"
+[[ -f "$landstrip_binary" && -x "$landstrip_binary" ]] || fail 69 "Landstrip is unavailable at the configured path"
+landstrip_binary="$(realpath -e -- "$landstrip_binary")"
+if ! landstrip_version="$($landstrip_binary --version 2>&1)"; then
+  fail 69 "Landstrip version probe failed: $landstrip_version"
+fi
+
+if [[ -n "${QQ_PILOT_PI_BINARY:-}" ]]; then
+  pi_binary="$QQ_PILOT_PI_BINARY"
+else
+  pi_binary="$(command -v pi || true)"
+fi
+[[ -n "$pi_binary" && "$pi_binary" == /* ]] || fail 70 "Pi binary must resolve to an absolute path"
+[[ -f "$pi_binary" && -x "$pi_binary" ]] || fail 70 "Pi is unavailable at the configured path"
+pi_binary="$(realpath -e -- "$pi_binary")"
+[[ "$pi_binary" != "$(realpath -e -- "${BASH_SOURCE[0]}")" ]] || fail 70 "Pi target cannot recurse into the wrapper"
+
+timeout_spec="${QQ_PILOT_TIMEOUT:-30m}"
+[[ "$timeout_spec" =~ ^(0\.[0-9]+|[1-9][0-9]*(\.[0-9]+)?)([smhd])?$ ]] || fail 71 "invalid QQ_PILOT_TIMEOUT '$timeout_spec'"
+timeout_binary="$(command -v timeout || true)"
+[[ -n "$timeout_binary" && -x "$timeout_binary" ]] || fail 71 "GNU timeout is unavailable"
+python_binary="$(command -v python3 || true)"
+[[ -n "$python_binary" && "$python_binary" == /* && -x "$python_binary" ]] \
+  || fail 71 "Python 3 is unavailable for process-tree supervision"
+tree_supervisor="$wrapper_dir/process-tree-supervisor.py"
+[[ -f "$tree_supervisor" && -x "$tree_supervisor" ]] || fail 71 "process-tree supervisor is unavailable"
+
+policy_path="$run_dir/landstrip-policy.json"
+event_log="$runtime_root/wrapper-events.jsonl"
+metadata="$($wrapper_dir/render-policy.mjs \
+  --roles "$pilot_root/policies/roles.json" \
+  --role "$role" \
+  --run-id "$run_token" \
+  --worktree "$worktree" \
+  --git-common-dir "$git_common_dir" \
+  --git-worktree-dir "$git_worktree_dir" \
+  --runtime-root "$runtime_root" \
+  --structured-output-capture "$structured_output_capture" \
+  --policy "$policy_path" \
+  --event-log "$event_log" \
+  --timeout "$timeout_spec" \
+  --landstrip-version "$landstrip_version")" || fail 72 "policy rendering failed"
+IFS=$'\t' read -r policy_identity access_scope <<< "$metadata"
+[[ -n "$policy_identity" && -n "$access_scope" ]] || fail 72 "policy renderer returned incomplete metadata"
+
+export QQ_PILOT_WORKTREE="$worktree"
+export QQ_PILOT_GIT_COMMON_DIR="$git_common_dir"
+export QQ_PILOT_GIT_WORKTREE_DIR="$git_worktree_dir"
+export QQ_PILOT_RUN_DIR="$run_dir"
+export QQ_PILOT_POLICY_IDENTITY="$policy_identity"
+export QQ_PILOT_POLICY_SCOPE="$access_scope"
+export QQ_PILOT_WRAPPER_EVENT_LOG="$event_log"
+export TMPDIR="$run_dir/tmp"
+export PI_CODING_AGENT_DIR="$run_dir/pi-config"
+export PI_CODING_AGENT_SESSION_DIR="$run_dir/sessions"
+export PI_OFFLINE=1
+
+printf '[qq-pilot] role=%s policy=%s scope=%s boundary=landstrip landstrip=%s timeout=%s\n' \
+  "$role" "$policy_identity" "$access_scope" "$landstrip_version" "$timeout_spec" >&2
+
+exec "$timeout_binary" -k 10 --signal=TERM "$timeout_spec" \
+  "$python_binary" "$tree_supervisor" -- \
+  "$landstrip_binary" -p "$policy_path" \
+  "$pi_binary" --approve --offline "$@"

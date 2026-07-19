@@ -1,0 +1,117 @@
+check: 3. No implicit skill/project-context/extension leakage
+verdict: PASS
+boundary: Real pi-subagents discovery is run first without and then with the two documented launch variables. Only the discovered pilot reviewer is launched through the wrapper; its child record verifies the resulting argument/environment boundary. Bundled-default behavior is retained as a separate observed leak, not mistaken for pilot isolation.
+observations:
+{
+  "bundledDefaultWithoutManifestEnvironment": {
+    "reviewerFound": true,
+    "reviewerSource": "builtin",
+    "reviewerFile": "<WORKTREE>/.pi/npm/node_modules/pi-subagents/agents/reviewer.md",
+    "reviewerInheritsProjectContext": true,
+    "reviewerInheritsSkills": false,
+    "reviewerTools": [
+      "read",
+      "grep",
+      "find",
+      "ls",
+      "bash",
+      "edit",
+      "write",
+      "intercom"
+    ],
+    "implementerFound": false,
+    "stagedRuntimeDefaultsProjectContextToInherited": true,
+    "leakObserved": true
+  },
+  "documentedDiscovery": {
+    "environment": {
+      "PI_SUBAGENT_PI_BINARY": "<WORKTREE>/pilot/bin/pi-landstrip-wrapper",
+      "PI_SUBAGENT_EXTRA_AGENT_DIRS": "<WORKTREE>/pilot/manifests/agents"
+    },
+    "launchDocumentationComplete": true,
+    "manifestsResolved": true,
+    "agents": [
+      {
+        "name": "reviewer",
+        "source": "user",
+        "filePath": "<WORKTREE>/pilot/manifests/agents/reviewer.md",
+        "inheritProjectContext": false,
+        "inheritSkills": false,
+        "defaultContext": "fresh",
+        "extensions": []
+      },
+      {
+        "name": "researcher",
+        "source": "user",
+        "filePath": "<WORKTREE>/pilot/manifests/agents/researcher.md",
+        "inheritProjectContext": false,
+        "inheritSkills": false,
+        "defaultContext": "fresh",
+        "extensions": []
+      },
+      {
+        "name": "implementer",
+        "source": "user",
+        "filePath": "<WORKTREE>/pilot/manifests/agents/implementer.md",
+        "inheritProjectContext": false,
+        "inheritSkills": false,
+        "defaultContext": "fresh",
+        "extensions": []
+      }
+    ]
+  },
+  "isolatedDiscoveredLaunch": {
+    "exitCode": 0,
+    "argv": [
+      "--approve",
+      "--offline",
+      "--mode",
+      "json",
+      "-p",
+      "--no-session",
+      "--tools",
+      "read,grep,find,ls,bash",
+      "--no-extensions",
+      "--extension",
+      "<WORKTREE>/.pi/npm/node_modules/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
+      "--no-skills",
+      "--system-prompt",
+      "<RUNTIME_ROOT>/tmp/pi-subagent-xX87HZ/reviewer.md",
+      "Task: Deterministic pilot scenario: launch-record"
+    ],
+    "extensions": [
+      "<WORKTREE>/.pi/npm/node_modules/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts"
+    ],
+    "inheritProjectContext": "0",
+    "inheritSkills": "0",
+    "stagedPromptRuntimeStripHooksPresent": true
+  },
+  "explicitAllowLaunch": {
+    "exitCode": 0,
+    "argv": [
+      "--approve",
+      "--offline",
+      "--mode",
+      "json",
+      "-p",
+      "--no-session",
+      "--tools",
+      "read,grep,find,ls,bash",
+      "--no-extensions",
+      "--extension",
+      "<WORKTREE>/.pi/npm/node_modules/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
+      "--extension",
+      "<WORKTREE>/pilot/probes/allowed-extension.ts",
+      "--system-prompt",
+      "<RUNTIME_ROOT>/tmp/pi-subagent-7VR7tt/reviewer.md",
+      "Task: Deterministic pilot scenario: launch-record"
+    ],
+    "extensions": [
+      "<WORKTREE>/.pi/npm/node_modules/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
+      "<WORKTREE>/pilot/probes/allowed-extension.ts"
+    ],
+    "inheritProjectContext": "1",
+    "inheritSkills": "1",
+    "explicitFlagsRetainedForRuntime": true
+  }
+}

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "--version" ]]; then
+  printf 'landstrip 0.17.30 (unsupported-platform probe)\n'
+  exit 0
+fi
+
+printf '%s\n' '{"kind":"internal","code":"PLATFORM_UNSUPPORTED","message":"pilot-simulated unsupported kernel"}' >&2
+exit 1

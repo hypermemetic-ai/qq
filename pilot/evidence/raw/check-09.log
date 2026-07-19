@@ -1,0 +1,31 @@
+check: 9. Landstrip absence/unsupported fail closed
+verdict: PASS
+boundary: The absence path is the wrapper's executable preflight. The unsupported path uses a deterministic launcher with Landstrip's documented PLATFORM_UNSUPPORTED terminal record and proves the wrapper never falls back to Pi; the installed native binary is separately smoke-tested on this supported kernel.
+unresolved-risk: The host kernel is supported, so the actual native PLATFORM_UNSUPPORTED branch cannot be observed here; its wrapper propagation is simulated with the package's documented terminal shape.
+observations:
+{
+  "absent": {
+    "exitCode": 69,
+    "error": "[qq-pilot] fail-closed: Landstrip is unavailable at the configured path",
+    "finalOutput": ""
+  },
+  "unsupported": {
+    "exitCode": 1,
+    "error": "[qq-pilot] role=reviewer policy=qq-pilot-reviewer-read-only-v1 scope=read-only boundary=landstrip landstrip=landstrip 0.17.30 (unsupported-platform probe) timeout=30s\n{\"kind\":\"internal\",\"code\":\"PLATFORM_UNSUPPORTED\",\"message\":\"pilot-simulated unsupported kernel\"}",
+    "finalOutput": ""
+  },
+  "missingRole": {
+    "status": 66,
+    "stderr": "[qq-pilot] fail-closed: PI_SUBAGENT_CHILD_AGENT is required\n"
+  },
+  "unknownRole": {
+    "status": 66,
+    "stderr": "[qq-pilot] fail-closed: unsupported child role 'administrator'\n"
+  },
+  "supportedKernelRealPi": {
+    "status": 0,
+    "stdout": "",
+    "stderr": "[qq-pilot] role=reviewer policy=qq-pilot-reviewer-read-only-v1 scope=read-only boundary=landstrip landstrip=landstrip 0.17.30 timeout=10s\n"
+  },
+  "installedPiPackageVersion": "0.80.10"
+}

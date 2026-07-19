@@ -1,0 +1,288 @@
+check: 7. Auditable foreground/background artifacts
+verdict: PASS
+boundary: Pi-subagents owns foreground and async lifecycle artifacts; the wrapper event log independently binds each runId to the role-selected Landstrip policy identity. Child stderr supplies policy diagnostics without Herdr machinery.
+observations:
+{
+  "foreground": {
+    "runId": "check-07-foreground-22",
+    "exitCode": 0,
+    "finalOutput": "pilot child complete",
+    "files": [
+      "<RUNTIME_ROOT>/foreground-artifacts/check-07-foreground-22/check-07-foreground-22_reviewer_input.md",
+      "<RUNTIME_ROOT>/foreground-artifacts/check-07-foreground-22/check-07-foreground-22_reviewer_output.md",
+      "<RUNTIME_ROOT>/foreground-artifacts/check-07-foreground-22/check-07-foreground-22_reviewer.jsonl",
+      "<RUNTIME_ROOT>/foreground-artifacts/check-07-foreground-22/check-07-foreground-22_reviewer_transcript.jsonl",
+      "<RUNTIME_ROOT>/foreground-artifacts/check-07-foreground-22/check-07-foreground-22_reviewer_meta.json"
+    ],
+    "metadata": {
+      "runId": "check-07-foreground-22",
+      "agent": "reviewer",
+      "task": "Deterministic pilot scenario: final",
+      "exitCode": 0,
+      "usage": {
+        "input": 1,
+        "output": 1,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "cost": 0,
+        "turns": 1
+      },
+      "modelAttempts": [
+        {
+          "model": "default",
+          "success": true,
+          "exitCode": 0,
+          "usage": {
+            "input": 1,
+            "output": 1,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "cost": 0,
+            "turns": 1
+          }
+        }
+      ],
+      "durationMs": 375,
+      "toolCount": 0,
+      "acceptance": {
+        "status": "not-required",
+        "explicit": true,
+        "effectiveAcceptance": {
+          "level": "none",
+          "explicit": true,
+          "inferredReason": [
+            "declared read-only acceptance role"
+          ],
+          "criteria": [
+            {
+              "id": "criterion-1",
+              "must": "Return concrete findings with file paths and severity when applicable",
+              "evidence": [],
+              "severity": "required"
+            }
+          ],
+          "evidence": [],
+          "verify": [],
+          "stopRules": [],
+          "reason": "deterministic transport and boundary probe"
+        },
+        "inferredReason": [
+          "declared read-only acceptance role"
+        ],
+        "criteria": [
+          {
+            "id": "criterion-1",
+            "must": "Return concrete findings with file paths and severity when applicable",
+            "evidence": [],
+            "severity": "required"
+          }
+        ],
+        "runtimeChecks": [],
+        "verifyRuns": []
+      },
+      "transcriptPath": "<RUNTIME_ROOT>/foreground-artifacts/check-07-foreground-22/check-07-foreground-22_reviewer_transcript.jsonl",
+      "timestamp": "<TIMESTAMP>"
+    },
+    "policyDiagnosticPresent": true
+  },
+  "background": {
+    "runId": "check-07-background-23",
+    "start": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Async: reviewer [check-07-background-23]\n\nThe async run is detached. Do not run sleep timers or polling loops just to wait for it.\nThis is a non-interactive run: Pi auto-drains current-session background work at agent_end so detached children are not abandoned; call subagent_wait() when this turn must receive the run's results before it ends, otherwise let the headless auto-drain finish the work.\nUse subagent({ action: \"status\", id: \"...\" }) when you need a one-shot status/result or to inspect a blocked/stale run. To block until completion, use subagent_wait() — do not poll in a loop."
+        }
+      ],
+      "details": {
+        "mode": "single",
+        "runId": "check-07-background-23",
+        "results": [],
+        "asyncId": "check-07-background-23",
+        "asyncDir": "<RUNTIME_ROOT>/tmp/pi-subagents-uid-1000/async-subagent-runs/check-07-background-23"
+      }
+    },
+    "status": {
+      "lifecycleArtifactVersion": 2,
+      "runId": "check-07-background-23",
+      "sessionId": "pilot-parent-session",
+      "mode": "single",
+      "state": "complete",
+      "steering": {
+        "requested": 0,
+        "scheduled": 0,
+        "pending": 0,
+        "delivered": 0,
+        "failed": 0,
+        "recovered": 0,
+        "recent": []
+      },
+      "lastActivityAt": "<TIMESTAMP>",
+      "startedAt": "<TIMESTAMP>",
+      "lastUpdate": 1784491816359,
+      "pid": "<PID>",
+      "cwd": "<WORKTREE>",
+      "currentStep": 0,
+      "chainStepCount": 1,
+      "parallelGroups": [],
+      "steps": [
+        {
+          "agent": "reviewer",
+          "status": "complete",
+          "transcriptPath": "<RUNTIME_ROOT>/async-artifacts/check-07-background-23_reviewer_transcript.jsonl",
+          "skills": [],
+          "recentTools": [],
+          "recentOutput": [
+            "pilot child complete"
+          ],
+          "startedAt": "<TIMESTAMP>",
+          "lastActivityAt": "<TIMESTAMP>",
+          "turnCount": 1,
+          "tokens": {
+            "input": 1,
+            "output": 1,
+            "total": 2
+          },
+          "endedAt": "<TIMESTAMP>",
+          "durationMs": 369,
+          "exitCode": 0,
+          "modelAttempts": [
+            {
+              "model": "default",
+              "success": true,
+              "exitCode": 0,
+              "usage": {
+                "input": 1,
+                "output": 1,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "cost": 0,
+                "turns": 1
+              }
+            }
+          ],
+          "totalCost": {
+            "inputTokens": 1,
+            "outputTokens": 1,
+            "costUsd": 0
+          },
+          "acceptance": {
+            "status": "not-required",
+            "explicit": true,
+            "effectiveAcceptance": {
+              "level": "none",
+              "explicit": true,
+              "inferredReason": [
+                "declared read-only acceptance role"
+              ],
+              "criteria": [
+                {
+                  "id": "criterion-1",
+                  "must": "Return concrete findings with file paths and severity when applicable",
+                  "evidence": [],
+                  "severity": "required"
+                }
+              ],
+              "evidence": [],
+              "verify": [],
+              "stopRules": [],
+              "reason": "deterministic background artifact probe"
+            },
+            "inferredReason": [
+              "declared read-only acceptance role"
+            ],
+            "criteria": [
+              {
+                "id": "criterion-1",
+                "must": "Return concrete findings with file paths and severity when applicable",
+                "evidence": [],
+                "severity": "required"
+              }
+            ],
+            "runtimeChecks": [],
+            "verifyRuns": []
+          }
+        }
+      ],
+      "artifactsDir": "<RUNTIME_ROOT>/async-artifacts",
+      "outputFile": "<RUNTIME_ROOT>/tmp/pi-subagents-uid-1000/async-subagent-runs/check-07-background-23/output-0.log",
+      "totalTokens": {
+        "input": 1,
+        "output": 1,
+        "total": 2
+      },
+      "turnCount": 1,
+      "outputs": {},
+      "endedAt": "<TIMESTAMP>",
+      "totalCost": {
+        "inputTokens": 1,
+        "outputTokens": 1,
+        "costUsd": 0
+      }
+    },
+    "files": [
+      "control/steer-inbox-closed.json",
+      "events.jsonl",
+      "output-0.log",
+      "recovery-descriptor.json",
+      "runner.stderr.log",
+      "runner.stdout.log",
+      "status.json",
+      "subagent-log-check-07-background-23.md"
+    ],
+    "lifecycleCompletedEvent": true,
+    "parentEvents": [
+      {
+        "name": "subagent:async-started",
+        "payload": {
+          "lifecycleArtifactVersion": 2,
+          "id": "check-07-background-23",
+          "pid": "<PID>",
+          "sessionId": "pilot-parent-session",
+          "mode": "single",
+          "agent": "reviewer",
+          "task": "Deterministic background artifact probe",
+          "goal": "Deterministic background artifact probe",
+          "cwd": "<WORKTREE>",
+          "asyncDir": "<RUNTIME_ROOT>/tmp/pi-subagents-uid-1000/async-subagent-runs/check-07-background-23"
+        }
+      }
+    ]
+  },
+  "policyEvents": [
+    {
+      "type": "qq.pilot.wrapper.launch",
+      "timestamp": "<TIMESTAMP>",
+      "pid": "<PID>",
+      "runId": "check-07-foreground-22",
+      "role": "reviewer",
+      "policyIdentity": "qq-pilot-reviewer-read-only-v1",
+      "access": "read-only",
+      "allowWrite": [],
+      "worktree": "<WORKTREE>",
+      "gitCommonDir": "<GIT_COMMON_DIR>",
+      "gitWorktreeDir": "<GIT_WORKTREE_DIR>",
+      "runtimeRoot": "<RUNTIME_ROOT>",
+      "structuredOutputCapture": null,
+      "timeout": "30s",
+      "landstripVersion": "landstrip 0.17.30"
+    },
+    {
+      "type": "qq.pilot.wrapper.launch",
+      "timestamp": "<TIMESTAMP>",
+      "pid": "<PID>",
+      "runId": "check-07-background-23",
+      "role": "reviewer",
+      "policyIdentity": "qq-pilot-reviewer-read-only-v1",
+      "access": "read-only",
+      "allowWrite": [],
+      "worktree": "<WORKTREE>",
+      "gitCommonDir": "<GIT_COMMON_DIR>",
+      "gitWorktreeDir": "<GIT_WORKTREE_DIR>",
+      "runtimeRoot": "<RUNTIME_ROOT>",
+      "structuredOutputCapture": null,
+      "timeout": "30s",
+      "landstripVersion": "landstrip 0.17.30"
+    }
+  ]
+}

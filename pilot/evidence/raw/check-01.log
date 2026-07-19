@@ -1,0 +1,163 @@
+check: 1. Reviewer/researcher read-only confinement
+verdict: INCONCLUSIVE-UNDER-SUBSTRATE
+boundary: Filesystem targets and network confinement are evaluated independently. Each writable parent control attributes its matching child denial to native Landstrip; a read-only parent control is inconclusive, while any observed child write or missing confinement observation makes the row FAIL regardless of the network result.
+unresolved-risk: The outer substrate made at least one filesystem control read-only, so the corresponding child denial cannot be attributed to Landstrip.
+observations:
+{
+  "outerBaselines": [
+    {
+      "path": "<WORKTREE>/.qq-pilot-baseline-2",
+      "ok": true
+    },
+    {
+      "path": "<GIT_COMMON_DIR>/.qq-pilot-baseline-2",
+      "ok": false,
+      "error": "EROFS: read-only file system, open '<GIT_COMMON_DIR>/.qq-pilot-baseline-2'"
+    },
+    {
+      "path": "<GIT_WORKTREE_DIR>/.qq-pilot-baseline-2",
+      "ok": false,
+      "error": "EROFS: read-only file system, open '<GIT_WORKTREE_DIR>/.qq-pilot-baseline-2'"
+    },
+    {
+      "path": "<RUNTIME_ROOT>/.qq-pilot-baseline-2",
+      "ok": true
+    },
+    {
+      "path": "<OUTSIDE_TEMP_PROBE>",
+      "ok": true
+    }
+  ],
+  "filesystemAssessment": {
+    "verdict": "INCONCLUSIVE-UNDER-SUBSTRATE",
+    "targets": [
+      {
+        "name": "repositoryWrite",
+        "verdict": "PASS",
+        "parentWritable": true,
+        "childResults": [
+          false,
+          false
+        ]
+      },
+      {
+        "name": "gitCommonWrite",
+        "verdict": "INCONCLUSIVE-UNDER-SUBSTRATE",
+        "parentWritable": false,
+        "parentError": "EROFS: read-only file system, open '<GIT_COMMON_DIR>/.qq-pilot-baseline-2'",
+        "childResults": [
+          false,
+          false
+        ]
+      },
+      {
+        "name": "gitWorktreeWrite",
+        "verdict": "INCONCLUSIVE-UNDER-SUBSTRATE",
+        "parentWritable": false,
+        "parentError": "EROFS: read-only file system, open '<GIT_WORKTREE_DIR>/.qq-pilot-baseline-2'",
+        "childResults": [
+          false,
+          false
+        ]
+      },
+      {
+        "name": "runtimeWrite",
+        "verdict": "PASS",
+        "parentWritable": true,
+        "childResults": [
+          false,
+          false
+        ]
+      },
+      {
+        "name": "escapeWrite",
+        "verdict": "PASS",
+        "parentWritable": true,
+        "childResults": [
+          false,
+          false
+        ]
+      }
+    ],
+    "childrenCompleted": true
+  },
+  "loopbackBaseline": {
+    "connected": false,
+    "error": "listen EPERM: operation not permitted 127.0.0.1"
+  },
+  "networkAssessment": "INCONCLUSIVE-UNDER-SUBSTRATE",
+  "failOpenRegressionGuard": true,
+  "reviewer": {
+    "exitCode": 0,
+    "policy": "qq-pilot-reviewer-read-only-v1",
+    "attempts": {
+      "type": "qq_pilot_report",
+      "scenario": "boundary-readonly",
+      "repositoryWrite": {
+        "ok": false,
+        "errno": 13
+      },
+      "gitCommonWrite": {
+        "ok": false,
+        "errno": 30
+      },
+      "gitWorktreeWrite": {
+        "ok": false,
+        "errno": 30
+      },
+      "runtimeWrite": {
+        "ok": false,
+        "errno": 13
+      },
+      "escapeWrite": {
+        "ok": false,
+        "errno": 13
+      },
+      "decoyWrite": {
+        "ok": false,
+        "errno": 22
+      },
+      "loopbackConnect": {
+        "ok": false,
+        "errno": 22
+      }
+    }
+  },
+  "researcher": {
+    "exitCode": 0,
+    "policy": "qq-pilot-researcher-read-only-v1",
+    "attempts": {
+      "type": "qq_pilot_report",
+      "scenario": "boundary-readonly",
+      "repositoryWrite": {
+        "ok": false,
+        "errno": 13
+      },
+      "gitCommonWrite": {
+        "ok": false,
+        "errno": 30
+      },
+      "gitWorktreeWrite": {
+        "ok": false,
+        "errno": 30
+      },
+      "runtimeWrite": {
+        "ok": false,
+        "errno": 13
+      },
+      "escapeWrite": {
+        "ok": false,
+        "errno": 13
+      },
+      "decoyWrite": {
+        "ok": false,
+        "errno": 22
+      },
+      "loopbackConnect": {
+        "ok": false,
+        "errno": 22
+      }
+    }
+  },
+  "externalEgress": "not attempted; the work order forbids network use and the outer substrate blocks egress"
+}

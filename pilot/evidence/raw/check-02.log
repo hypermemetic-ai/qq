@@ -1,0 +1,112 @@
+check: 2. Implementer workspace/Git write confinement
+verdict: FAIL
+boundary: Per-target parent controls separate outer-substrate restrictions from Landstrip. In this run the assigned worktree, runtime, and decoy are parent-writable while Git administrative controls are outer-read-only. The static child still fails on attributable allowed roots, and the real-Pi smoke separately fails executable viability.
+unresolved-risk: This is the migration blocker: implementer authority cannot be demonstrated under the assigned substrate, and the interaction must be reproduced outside outer Codex confinement or fixed upstream before adoption.
+observations:
+{
+  "outerBaselines": [
+    {
+      "path": "<WORKTREE>/.qq-pilot-implementer-baseline-2",
+      "ok": true
+    },
+    {
+      "path": "<GIT_COMMON_DIR>/.qq-pilot-implementer-baseline-2",
+      "ok": false,
+      "error": "EROFS: read-only file system, open '<GIT_COMMON_DIR>/.qq-pilot-implementer-baseline-2'"
+    },
+    {
+      "path": "<GIT_WORKTREE_DIR>/.qq-pilot-implementer-baseline-2",
+      "ok": false,
+      "error": "EROFS: read-only file system, open '<GIT_WORKTREE_DIR>/.qq-pilot-implementer-baseline-2'"
+    },
+    {
+      "path": "<RUNTIME_ROOT>/.qq-pilot-implementer-baseline-2",
+      "ok": true
+    },
+    {
+      "path": "<OUTSIDE_TEMP_PROBE>/outside-worktree",
+      "ok": true
+    }
+  ],
+  "allowedTargetAssessment": [
+    {
+      "name": "repositoryWrite",
+      "parentWritable": true,
+      "childWriteSucceeded": false,
+      "childErrno": 1
+    },
+    {
+      "name": "gitCommonWrite",
+      "parentWritable": false,
+      "parentError": "EROFS: read-only file system, open '<GIT_COMMON_DIR>/.qq-pilot-implementer-baseline-2'",
+      "childWriteSucceeded": false,
+      "childErrno": 1
+    },
+    {
+      "name": "gitWorktreeWrite",
+      "parentWritable": false,
+      "parentError": "EROFS: read-only file system, open '<GIT_WORKTREE_DIR>/.qq-pilot-implementer-baseline-2'",
+      "childWriteSucceeded": false,
+      "childErrno": 1
+    },
+    {
+      "name": "runtimeWrite",
+      "parentWritable": true,
+      "childWriteSucceeded": false,
+      "childErrno": 1
+    }
+  ],
+  "attributableAllowedFailures": [
+    "repositoryWrite",
+    "runtimeWrite"
+  ],
+  "unavailableAllowedControls": [
+    "gitCommonWrite",
+    "gitWorktreeWrite"
+  ],
+  "decoyControlAvailable": true,
+  "staticImplementerChild": {
+    "exitCode": 0,
+    "policy": "qq-pilot-implementer-workspace-write-v1",
+    "attempts": {
+      "type": "qq_pilot_report",
+      "scenario": "boundary-implementer",
+      "repositoryWrite": {
+        "ok": false,
+        "errno": 1
+      },
+      "gitCommonWrite": {
+        "ok": false,
+        "errno": 1
+      },
+      "gitWorktreeWrite": {
+        "ok": false,
+        "errno": 1
+      },
+      "runtimeWrite": {
+        "ok": false,
+        "errno": 1
+      },
+      "escapeWrite": {
+        "ok": false,
+        "errno": 22
+      },
+      "decoyWrite": {
+        "ok": false,
+        "errno": 1
+      },
+      "loopbackConnect": {
+        "ok": false,
+        "errno": 22
+      }
+    }
+  },
+  "realPiSmoke": {
+    "status": 127,
+    "signal": null,
+    "stdout": "",
+    "stderr": "[qq-pilot] role=implementer policy=qq-pilot-implementer-workspace-write-v1 scope=workspace-write boundary=landstrip landstrip=landstrip 0.17.30 timeout=10s\n/usr/bin/env: error while loading shared libraries: libc.so.6: cannot open shared object file: Operation not permitted\n",
+    "installedPiPackageVersion": "0.80.10"
+  },
+  "diagnosis": "Under the nested Codex substrate, Landstrip 0.17.30 denies its explicitly allowed worktree/runtime roots even though parent controls succeed; dynamically linked Pi also fails at libc load when allowWrite is non-empty. Git-root attribution is unavailable in this rework substrate because those parent controls return EROFS."
+}
