@@ -2,8 +2,10 @@
 set -euo pipefail
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck disable=SC2034
 TEST_NAME="test-qq-dispatch"
 # shellcheck source=tests/helpers.sh
+# shellcheck disable=SC1091
 source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd "$TESTS_DIR/.." && pwd -P)"
 DISPATCH="$ROOT/bin/qq-dispatch"
@@ -231,8 +233,8 @@ args = Path(sys.argv[1]).read_bytes().split(b"\0")
 assert b"--add-dir" not in args
 PY
 
-# The cross-filesystem vector is not portably mountable in-suite; stripping all
-# GIT_* closes it, while GIT_DIR makes this case bite portably.
+# A sibling non-Git root cannot exercise cross-filesystem discovery without a
+# mount boundary, but it keeps the explicit GIT_DIR isolation guard portable.
 : >"$FAKE_CODEX_LOG"
 (
   export GIT_DIR="$primary_repo/.git"
@@ -251,6 +253,31 @@ import sys
 args = Path(sys.argv[1]).read_bytes().split(b"\0")
 assert b"--add-dir" not in args
 PY
+
+# Capture the environment seen by both implementer Git probes. The capture
+# path is baked into the shim because a GIT_-prefixed carrier would be stripped
+# before the shim could read it.
+fake_git="$tmp/fake-git"
+fake_git_capture="$tmp/fake-git.env"
+cat >"$fake_git" <<SH
+#!/usr/bin/env bash
+env | grep -E '^GIT_' >>"$fake_git_capture" || true
+exit 128
+SH
+chmod +x "$fake_git"
+QQ_GIT_BIN="$fake_git" \
+GIT_DIR="$primary_repo/.git" \
+GIT_COMMON_DIR="$primary_common_dir" \
+GIT_WORK_TREE="$primary_repo" \
+GIT_DISCOVERY_ACROSS_FILESYSTEM=true \
+  run_engine 0 implementer \
+  --root "$non_git_root" --brief "$brief" \
+  --output "$tmp/fake-git-envelope"
+[ -e "$fake_git_capture" ] || fail 'implementer Git probes did not run'
+if grep -Eq '^GIT_' "$fake_git_capture"; then
+  fail 'implementer Git probes inherited GIT_* variables'
+fi
+jq -e '.state.writable_roots == []' "$tmp/result.json" >/dev/null
 
 # Read-only roles receive and report no writable roots, even for a worktree.
 for read_only_role in reviewer researcher; do
@@ -282,6 +309,7 @@ invalid_git="$tmp/missing-git"
 for read_only_role in reviewer researcher; do
   : >"$FAKE_CODEX_LOG"
   (
+    # shellcheck disable=SC2030
     export QQ_GIT_BIN="$invalid_git"
     run_engine 0 inspect "$read_only_role" \
       --root "$linked_worktree" --brief "$brief" \
@@ -311,6 +339,7 @@ done
 
 : >"$FAKE_CODEX_LOG"
 (
+  # shellcheck disable=SC2031
   export QQ_GIT_BIN="$invalid_git"
   run_engine 1 implementer \
     --root "$linked_worktree" --brief "$brief" \
