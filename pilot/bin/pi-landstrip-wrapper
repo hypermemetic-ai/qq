@@ -93,12 +93,18 @@ timeout_spec="${QQ_PILOT_TIMEOUT:-30m}"
 [[ "$timeout_spec" =~ ^(0\.[0-9]+|[1-9][0-9]*(\.[0-9]+)?)([smhd])?$ ]] || fail 71 "invalid QQ_PILOT_TIMEOUT '$timeout_spec'"
 timeout_binary="$(command -v timeout || true)"
 [[ -n "$timeout_binary" && -x "$timeout_binary" ]] || fail 71 "GNU timeout is unavailable"
+python_binary="$(command -v python3 || true)"
+[[ -n "$python_binary" && "$python_binary" == /* && -x "$python_binary" ]] \
+  || fail 71 "Python 3 is unavailable for process-tree supervision"
+tree_supervisor="$wrapper_dir/process-tree-supervisor.py"
+[[ -f "$tree_supervisor" && -x "$tree_supervisor" ]] || fail 71 "process-tree supervisor is unavailable"
 
 policy_path="$run_dir/landstrip-policy.json"
 event_log="$runtime_root/wrapper-events.jsonl"
 metadata="$($wrapper_dir/render-policy.mjs \
   --roles "$pilot_root/policies/roles.json" \
   --role "$role" \
+  --run-id "$run_token" \
   --worktree "$worktree" \
   --git-common-dir "$git_common_dir" \
   --git-worktree-dir "$git_worktree_dir" \
@@ -126,5 +132,6 @@ printf '[qq-pilot] role=%s policy=%s scope=%s boundary=landstrip landstrip=%s ti
   "$role" "$policy_identity" "$access_scope" "$landstrip_version" "$timeout_spec" >&2
 
 exec "$timeout_binary" -k 10 --signal=TERM "$timeout_spec" \
+  "$python_binary" "$tree_supervisor" -- \
   "$landstrip_binary" -p "$policy_path" \
   "$pi_binary" --approve --offline "$@"

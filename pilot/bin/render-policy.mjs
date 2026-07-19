@@ -47,6 +47,7 @@ function writePrivateJson(filePath, value) {
 const args = parseArgs(process.argv.slice(2));
 const rolesPath = required(args, "--roles");
 const role = required(args, "--role");
+const runId = required(args, "--run-id");
 const worktree = canonicalDirectory(required(args, "--worktree"), "worktree");
 const gitCommonDir = canonicalDirectory(required(args, "--git-common-dir"), "Git common directory");
 const gitWorktreeDir = canonicalDirectory(required(args, "--git-worktree-dir"), "worktree Git directory");
@@ -94,6 +95,7 @@ fs.appendFileSync(eventLogPath, `${JSON.stringify({
   type: "qq.pilot.wrapper.launch",
   timestamp: new Date().toISOString(),
   pid: process.ppid,
+  runId,
   role,
   policyIdentity: definition.policyIdentity,
   access: definition.access,

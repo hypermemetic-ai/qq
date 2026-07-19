@@ -9,10 +9,10 @@ Set `PI_SUBAGENT_PI_BINARY` to `pilot/bin/pi-landstrip-wrapper`. Pi-subagents su
 - reviewer/researcher: have an empty Landstrip write allowlist; Pi-subagents' parent process owns their run artifacts beneath `/tmp`;
 - implementer: additionally writes to the assigned worktree, common Git directory, and linked-worktree Git directory;
 - every role: direct network, local TCP binding, and Unix sockets are denied by Landstrip;
-- every launch: GNU `timeout -k 10` remains outside the native Landstrip process;
+- every launch: GNU `timeout -k 10` remains outermost; a Linux child-subreaper beneath it reaps the Landstrip/Pi tree, including descendants that double-fork or create a new session;
 - missing roles, unrelated working directories, missing Pi/Landstrip binaries, invalid runtime roots, and native sandbox startup failures stop before an unsandboxed Pi can run.
 
-The wrapper derives the assigned worktree from its own location and verifies the child's current directory resolves to that same worktree. Git administrative paths are discovered with `git rev-parse --path-format=absolute`; no machine path is stored in a tracked policy.
+The wrapper derives the assigned worktree from its own location and verifies the child's current directory resolves to that same worktree. Git administrative paths are discovered with `git rev-parse --path-format=absolute`; no machine path is stored in a tracked policy. The subreaper scans only the `/proc` ancestry rooted at itself and signals only that owned tree.
 
 By default, the wrapper uses the native binary from the project-staged Landstrip package and `pi` from `PATH`. `QQ_PILOT_LANDSTRIP_BINARY` and `QQ_PILOT_PI_BINARY` exist only for deterministic fail-closed probes. `QQ_PILOT_RUNTIME_ROOT` must resolve to a strict child of `/tmp`. `QQ_PILOT_TIMEOUT` accepts a positive GNU-timeout duration and defaults to `30m`.
 
