@@ -106,6 +106,7 @@ absolute path, not a `$HOME` expression.
 
 ```bash
 readlink -f "$HOME/projects/qq/cockpit/pi/qq-backlog-guard.ts"
+readlink -f "$HOME/projects/qq/extensions/qq-pr-watch.ts"
 ```
 
 ```json
@@ -114,7 +115,8 @@ readlink -f "$HOME/projects/qq/cockpit/pi/qq-backlog-guard.ts"
   "defaultModel": "k3",
   "defaultThinkingLevel": "max",
   "extensions": [
-    "/home/USER/projects/qq/cockpit/pi/qq-backlog-guard.ts"
+    "/home/USER/projects/qq/cockpit/pi/qq-backlog-guard.ts",
+    "/home/USER/projects/qq/extensions/qq-pr-watch.ts"
   ]
 }
 ```
@@ -126,6 +128,10 @@ The Repository extension gives local feedback when Pi's built-in `write` or
 Pi's current directory. It leaves reads, Bash, ordinary paths, and Backlog CLI
 commands alone. This path-only drift-net is not a security boundary and does
 not parse shell commands.
+
+The pull-request extension provides the session-scoped `qq_pr_watch` tool. It
+polls one exact pull request and sends one follow-up when it reaches `MERGED`
+or `CLOSED`, or when inspection fails.
 
 The accountable Pi session stays in the Repository project home and owns
 alignment, Task and Change judgment, work orders, verdicts, UAT, and handoff.

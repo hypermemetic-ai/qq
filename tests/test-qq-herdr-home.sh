@@ -182,10 +182,11 @@ grep -Fq 'command fails or reports notifications disabled' \
 grep -Fq 'browser-only fallback' "$ROOT/skills/deliver-change/SKILL.md"
 tr '\n\t' '  ' <"$ROOT/skills/deliver-change/SKILL.md" | \
   grep -qE 'harness-native +background disposition watch'
-grep -Fq 'bin/qq-pr-watch <number-or-URL>' "$ROOT/skills/deliver-change/SKILL.md"
+grep -Fq '`qq_pr_watch`, the Pi-extension tool' "$ROOT/skills/deliver-change/SKILL.md"
 grep -Fq 'exactly-once completion-wake' "$ROOT/skills/deliver-change/SKILL.md"
-grep -Fq '`inspect` semantics' "$ROOT/skills/deliver-change/SKILL.md"
-grep -Fq -- '--interval <30-60>' "$ROOT/skills/deliver-change/SKILL.md"
+tr '\n\t' '  ' <"$ROOT/skills/deliver-change/SKILL.md" | \
+  grep -qE '`inspect` +semantics'
+grep -Fq 'integer `interval` parameter' "$ROOT/skills/deliver-change/SKILL.md"
 tr -s '[:space:]' ' ' <"$ROOT/skills/deliver-change/SKILL.md" | \
   grep -Fq '30 seconds by default'
 grep -Fq '`MERGED` and `CLOSED`' "$ROOT/skills/deliver-change/SKILL.md"

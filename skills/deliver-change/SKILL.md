@@ -110,14 +110,14 @@ delegated agents bounded assignments; do not hand them this lifecycle.
    shown. If the command fails or reports notifications disabled or not shown,
    plainly report the browser-only fallback and do not claim a notification was
    sent. Report the URL either way. Then the accountable session arms
-   `bin/qq-pr-watch <number-or-URL>` as the
-   harness-native background disposition watch for that pull request. The
-   command owns its polling loop, its tested exactly-once completion-wake and
-   `inspect` semantics, and its 30–60-second interval policy (30 seconds by
-   default; pass `--interval <30-60>`). It covers both
-   `MERGED` and `CLOSED`; silence is not success. Its wake resumes
-   the agent for post-merge steps and follow-on dispatch. The watch
-   replaces waiting for an operator message. Then stop.
+   `qq_pr_watch`, the Pi-extension tool, Repository-mounted via README's
+   `settings.json` `extensions` array, with `action:"watch"`, pull-request
+   argument `pr`, and integer `interval` parameter 30–60 (30 seconds by
+   default) as the harness-native background disposition watch. It owns the
+   30–60-second interval policy, exactly-once completion-wake and `inspect`
+   semantics, covering both `MERGED` and `CLOSED`; silence is not success. Its
+   wake resumes the agent for post-merge steps and follow-on dispatch,
+   replacing an operator message. Then stop.
 10. On a disposition-watch wake, later resume, or operator message, reinspect
    the pull request with step 7's fields. Proceed only after verifying its
    merged state and that
