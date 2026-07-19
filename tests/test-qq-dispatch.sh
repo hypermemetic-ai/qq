@@ -231,10 +231,14 @@ args = Path(sys.argv[1]).read_bytes().split(b"\0")
 assert b"--add-dir" not in args
 PY
 
-# Inherited Git repository selection cannot turn a non-Git root into a grant.
+# The cross-filesystem vector is not portably mountable in-suite; stripping all
+# GIT_* closes it, while GIT_DIR makes this case bite portably.
 : >"$FAKE_CODEX_LOG"
 (
   export GIT_DIR="$primary_repo/.git"
+  export GIT_COMMON_DIR="$primary_common_dir"
+  export GIT_WORK_TREE="$primary_repo"
+  export GIT_DISCOVERY_ACROSS_FILESYSTEM=true
   run_engine 0 implementer \
     --root "$non_git_root" --brief "$brief" \
     --output "$tmp/non-git-env-leak-envelope"

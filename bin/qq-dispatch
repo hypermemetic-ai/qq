@@ -113,15 +113,15 @@ if [ "$role" = implementer ]; then
   git_common_dir_found=false
   git_dir_found=false
   if git_common_dir="$(
-    env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE \
-      "$git_bin" -C "$root" rev-parse \
+    unset "${!GIT_@}"
+    "$git_bin" -C "$root" rev-parse \
       --path-format=absolute --git-common-dir 2>/dev/null
   )"; then
     git_common_dir_found=true
   fi
   if git_dir="$(
-    env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE \
-      "$git_bin" -C "$root" rev-parse \
+    unset "${!GIT_@}"
+    "$git_bin" -C "$root" rev-parse \
       --path-format=absolute --git-dir 2>/dev/null
   )"; then
     git_dir_found=true
