@@ -294,9 +294,100 @@ assert_equal 'In Progress' "$(read_status "$t3_file")" \
 assert_equal Done "$(read_status "$t4_file")" \
   'gh absence downgraded stored Done'
 
+# A changed tracked record is anomalous under the current convention: report
+# its derived status but never rewrite it. An untracked change still writes.
+make_task 5 'To Do' tracked-record
+t5_file="$repo/backlog/tasks/t-5 - tracked-record.md"
+"$real_git" -C "$repo" add -- 'backlog/tasks/t-5 - tracked-record.md'
+"$real_git" -C "$repo" -c user.name=test -c user.email=test@example.com \
+  commit -qm 'track T-5 fixture'
+"$real_git" -C "$repo" branch feat/t-5-tracked
+set_status "$t1_file" 'In Progress'
+: >"$FAKE_BACKLOG_LOG"
+run_board 0 reconcile --repo "$repo"
+jq -e '
+  .state.skipped_tracked >= 1
+  and any(.state.notes[]; contains("T-5"))
+  and (
+    .state.tasks[]
+    | select(.id == "T-5")
+    | .tracked
+      and .stored_status == "To Do"
+      and .derived_status == "In Progress"
+      and .changed
+      and (.written | not)
+  )
+  and (
+    .state.tasks[]
+    | select(.id == "T-1")
+    | (.tracked | not)
+      and .derived_status == "To Do"
+      and .changed
+      and .written
+  )
+' "$tmp/result.json" >/dev/null
+assert_equal 'To Do' "$(read_status "$t5_file")" \
+  'reconcile rewrote a tracked Task record'
+assert_equal '' \
+  "$("$real_git" -C "$repo" status --porcelain -- \
+    'backlog/tasks/t-5 - tracked-record.md')" \
+  'reconcile dirtied a tracked Task record'
+assert_equal 1 "$(wc -l <"$FAKE_BACKLOG_LOG")" \
+  'reconcile did not limit writes to the untracked change'
+
+# A stalled gh probe is bounded and degrades to branch-only derivation.
+slow_gh="$tmp/slow-gh"
+cat >"$slow_gh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "${1:-} ${2:-}" = 'pr list' ] || exit 64
+sleep 5
+SH
+chmod +x "$slow_gh"
+set_status "$t3_file" 'To Do'
+export QQ_GH_BIN="$slow_gh"
+export QQ_BOARD_GH_TIMEOUT_SECONDS=1
+SECONDS=0
+run_board 0 reconcile --repo "$repo"
+elapsed=$SECONDS
+[ "$elapsed" -lt 4 ] \
+  || fail "gh timeout did not return promptly (elapsed ${elapsed}s)"
+jq -e '
+  .status == "done"
+  and .state.pr_state_available == false
+  and any(.state.notes[]; contains("PR state unavailable") and contains("timed out"))
+  and (
+    .state.tasks[]
+    | select(.id == "T-3")
+    | .branches == ["fix/t-3-merged"]
+      and .stored_status == "To Do"
+      and .derived_status == "In Progress"
+      and .changed
+      and .written
+  )
+' "$tmp/result.json" >/dev/null
+assert_equal 'In Progress' "$(read_status "$t3_file")" \
+  'gh timeout prevented branch-only reconciliation'
+unset QQ_BOARD_GH_TIMEOUT_SECONDS
+export QQ_GH_BIN="$fake_gh"
+
 help_output="$("$BOARD" --help)"
 assert_contains "$help_output" 'qq-board watch --interval 3' \
   'help omitted the Herdr pane command'
+assert_contains "$help_output" 'writes only untracked Task records' \
+  'help omitted the tracked-record write boundary'
+
+# Reconcile never accepts --interval, including its default value.
+run_board 1 reconcile --repo "$repo" --interval 3
+jq -e '
+  .status == "error"
+  and .message == "--interval applies only to watch"
+' "$tmp/result.json" >/dev/null
+run_board 1 inspect reconcile --repo "$repo" --interval 3
+jq -e '
+  .status == "error"
+  and .message == "--interval applies only to watch"
+' "$tmp/result.json" >/dev/null
 
 # The pane runner keeps reconciliation output quiet and exposes only the
 # Backlog render on each watch tick.
@@ -314,6 +405,12 @@ SH
 chmod +x "$fake_watch"
 export QQ_WATCH_BIN="$fake_watch"
 export FAKE_WATCH_LOG="$tmp/watch.log"
+: >"$FAKE_BACKLOG_LOG"
+watch_output="$("$BOARD" watch --repo "$repo" --interval 3)"
+assert_equal BOARD_RENDER "$watch_output" \
+  'watch rejected an explicit three-second interval'
+assert_file_contains "$FAKE_WATCH_LOG" '--no-title --interval 3 --exec'
+
 : >"$FAKE_BACKLOG_LOG"
 watch_output="$("$BOARD" watch --repo "$repo" --interval 7)"
 assert_equal BOARD_RENDER "$watch_output" \

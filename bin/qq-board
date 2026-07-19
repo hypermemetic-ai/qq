@@ -21,6 +21,8 @@ usage: qq-board [inspect] reconcile [--repo <path>] [--dry-run]
 reconcile derives backlog/tasks Task statuses from matching Git branches,
 worktrees, origin refs, and (when available) GitHub pull requests. inspect and
 --dry-run report the same changes without writing Task records.
+reconcile writes only untracked Task records. A tracked record is expected to
+be Done and is never rewritten, protecting the primary checkout's ff-sync.
 
 The Herdr board pane command is:
   qq-board watch --interval 3
@@ -52,6 +54,7 @@ esac
 
 repo=.
 interval=3
+interval_supplied=false
 dry_run=false
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -63,6 +66,7 @@ while [ "$#" -gt 0 ]; do
     --interval)
       [ "$#" -ge 2 ] || qq_engine_error '--interval requires seconds'
       interval="$2"
+      interval_supplied=true
       shift 2
       ;;
     --dry-run)
@@ -80,7 +84,7 @@ done
 qq_engine_set_action "$mode:$verb"
 
 if [ "$verb" = reconcile ]; then
-  [ "$interval" = 3 ] \
+  [ "$interval_supplied" = false ] \
     || qq_engine_error '--interval applies only to watch'
 else
   [ "$mode" = apply ] || qq_engine_error 'inspect applies only to reconcile'
@@ -123,6 +127,20 @@ fi
 tasks_dir="$repo_root/backlog/tasks"
 [ -d "$tasks_dir" ] \
   || qq_engine_error "Task records directory is missing: $tasks_dir"
+
+gh_timeout_seconds=10
+if [ -n "${QQ_BOARD_GH_TIMEOUT_SECONDS+x}" ]; then
+  gh_timeout_seconds="$QQ_BOARD_GH_TIMEOUT_SECONDS"
+  if [[ ! "$gh_timeout_seconds" =~ ^[0-9]+([.][0-9]+)?$ ]] \
+    || [[ "$gh_timeout_seconds" =~ ^0+([.]0+)?$ ]]; then
+    qq_engine_error \
+      'QQ_BOARD_GH_TIMEOUT_SECONDS must be a positive number of seconds'
+  fi
+fi
+if ! qq_resolve_bin timeout; then
+  qq_engine_error "$QQ_BIN_ERROR"
+fi
+timeout_bin="$QQ_BIN_RESULT"
 
 if ! worktrees="$({ "$git_bin" -C "$repo_root" worktree list --porcelain 2>/dev/null; })"; then
   qq_engine_error "cannot list Git worktrees for: $repo_root"
@@ -176,11 +194,16 @@ notes='[]'
 declare -A merged_branch=()
 if qq_resolve_bin gh; then
   gh_bin="$QQ_BIN_RESULT"
-  if pr_response="$({
+  set +e
+  pr_response="$({
     cd "$repo_root" \
-      && "$gh_bin" pr list --state all --limit 1000 \
+      && "$timeout_bin" -k 1 "$gh_timeout_seconds" \
+        "$gh_bin" pr list --state all --limit 1000 \
         --json headRefName,state,mergedAt 2>/dev/null
-  })" \
+  })"
+  pr_status=$?
+  set -e
+  if [ "$pr_status" -eq 0 ] \
     && "$QQ_ENGINE_JQ" -e '
       type == "array"
       and all(.[];
@@ -199,6 +222,9 @@ if qq_resolve_bin gh; then
         | select(.state == "MERGED" or .mergedAt != null)
         | .headRefName' <<<"$pr_response"
     )
+  elif [ "$pr_status" -eq 124 ] || [ "$pr_status" -eq 137 ]; then
+    notes="$("$QQ_ENGINE_JQ" -cn \
+      '["PR state unavailable: gh pr list timed out"]')"
   else
     notes="$("$QQ_ENGINE_JQ" -cn \
       '["PR state unavailable: gh pr list failed or returned unreadable data"]')"
@@ -253,8 +279,11 @@ task_ids=()
 stored_statuses=()
 derived_statuses=()
 changed_values=()
+tracked_values=()
 task_branches_json=()
 changed_count=0
+skipped_tracked=0
+skipped_tracked_ids=()
 
 for task_file in "${task_files[@]}"; do
   task_name="${task_file##*/}"
@@ -289,6 +318,12 @@ for task_file in "${task_files[@]}"; do
       ;;
   esac
 
+  tracked=false
+  if "$git_bin" -C "$repo_root" ls-files --error-unmatch -- "$task_file" \
+    >/dev/null 2>&1; then
+    tracked=true
+  fi
+
   branches="${branches_by_task[$task_number]-}"
   branches_json="$(printf '%s\n' "$branches" \
     | "$QQ_ENGINE_JQ" -Rsc 'split("\n") | map(select(length > 0)) | unique | sort')"
@@ -309,26 +344,48 @@ for task_file in "${task_files[@]}"; do
   if [ "$derived_status" != "$stored_status" ]; then
     changed=true
     changed_count=$((changed_count + 1))
+    if [ "$tracked" = true ]; then
+      skipped_tracked=$((skipped_tracked + 1))
+      skipped_tracked_ids+=("$task_id")
+    fi
   fi
   task_ids+=("$task_id")
   stored_statuses+=("$stored_status")
   derived_statuses+=("$derived_status")
   changed_values+=("$changed")
+  tracked_values+=("$tracked")
   task_branches_json+=("$branches_json")
 done
+
+if [ "$skipped_tracked" -gt 0 ]; then
+  skipped_tracked_ids_json="$(printf '%s\n' "${skipped_tracked_ids[@]}" \
+    | "$QQ_ENGINE_JQ" -Rsc \
+      'split("\n") | map(select(length > 0))')"
+  notes="$("$QQ_ENGINE_JQ" -cn \
+    --argjson notes "$notes" \
+    --argjson ids "$skipped_tracked_ids_json" \
+    '$notes + [
+      "Tracked Task records with derived status differences were not rewritten: "
+      + ($ids | join(", "))
+    ]')"
+fi
 
 effective_dry_run=false
 if [ "$mode" = inspect ] || [ "$dry_run" = true ]; then
   effective_dry_run=true
 fi
 
-if [ "$effective_dry_run" = false ] && [ "$changed_count" -gt 0 ]; then
+if [ "$effective_dry_run" = false ] \
+  && [ "$changed_count" -gt "$skipped_tracked" ]; then
   if ! qq_resolve_bin backlog; then
     qq_engine_error "$QQ_BIN_ERROR"
   fi
   backlog_bin="$QQ_BIN_RESULT"
   for index in "${!task_ids[@]}"; do
     [ "${changed_values[$index]}" = true ] || continue
+    # Tracked records are expected to be Done under the current convention.
+    # Never rewrite one: a dirty primary checkout blocks step-11 ff-sync.
+    [ "${tracked_values[$index]}" = false ] || continue
     if ! { cd "$repo_root" && "$backlog_bin" task edit \
       --status "${derived_statuses[$index]}" "${task_ids[$index]}" --plain \
       >/dev/null 2>&1; }; then
@@ -344,6 +401,7 @@ tasks='[]'
 for index in "${!task_ids[@]}"; do
   written=false
   if [ "${changed_values[$index]}" = true ] \
+    && [ "${tracked_values[$index]}" = false ] \
     && [ "$effective_dry_run" = false ]; then
     written=true
   fi
@@ -352,6 +410,7 @@ for index in "${!task_ids[@]}"; do
     --arg stored_status "${stored_statuses[$index]}" \
     --arg derived_status "${derived_statuses[$index]}" \
     --argjson changed "${changed_values[$index]}" \
+    --argjson tracked "${tracked_values[$index]}" \
     --argjson written "$written" \
     --argjson branches "${task_branches_json[$index]}" \
     '{
@@ -359,6 +418,7 @@ for index in "${!task_ids[@]}"; do
       stored_status:$stored_status,
       derived_status:$derived_status,
       changed:$changed,
+      tracked:$tracked,
       written:$written,
       branches:$branches
     }')"
@@ -373,6 +433,7 @@ state="$("$QQ_ENGINE_JQ" -cn \
   --argjson notes "$notes" \
   --argjson task_count "${#task_ids[@]}" \
   --argjson changed_count "$changed_count" \
+  --argjson skipped_tracked "$skipped_tracked" \
   --argjson tasks "$tasks" \
   '{
     repo_root:$repo_root,
@@ -381,6 +442,7 @@ state="$("$QQ_ENGINE_JQ" -cn \
     notes:$notes,
     task_count:$task_count,
     changed_count:$changed_count,
+    skipped_tracked:$skipped_tracked,
     tasks:$tasks
   }')"
 
