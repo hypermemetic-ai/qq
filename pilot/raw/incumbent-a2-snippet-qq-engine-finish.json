@@ -1,0 +1,42 @@
+{
+  "exit_status": 0,
+  "response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"name\":\"qq_engine_finish\",\"qualified_name\":\"home-qqp-projects-qq.bin.lib.qq-engine.qq_engine_finish\",\"label\":\"Function\",\"file_path\":\"/home/qqp/projects/qq/bin/lib/qq-engine.sh\",\"start_line\":24,\"end_line\":48,\"source\":\"qq_engine_finish() {\\n  local exit_code=\\\"$1\\\"\\n  local status=\\\"$2\\\"\\n  local message=\\\"$3\\\"\\n  local state=\\\"${4-}\\\"\\n\\n  if [ -z \\\"$state\\\" ]; then\\n    state='{}'\\n  fi\\n\\n  \\\"$QQ_ENGINE_JQ\\\" -cn \\\\\\n    --arg engine \\\"$QQ_ENGINE_NAME\\\" \\\\\\n    --arg action \\\"$QQ_ENGINE_ACTION\\\" \\\\\\n    --arg status \\\"$status\\\" \\\\\\n    --arg message \\\"$message\\\" \\\\\\n    --argjson state \\\"$state\\\" \\\\\\n    '{\\n      engine: $engine,\\n      action: $action,\\n      status: $status,\\n      message: $message,\\n      state: $state\\n    }'\\n  exit \\\"$exit_code\\\"\\n}\\n\",\"complexity\":1,\"cognitive\":1,\"loop_count\":0,\"loop_depth\":0,\"self_recursive\":false,\"param_count\":0,\"max_access_depth\":0,\"linear_scan_in_loop\":0,\"alloc_in_loop\":0,\"recursion_in_loop\":false,\"unguarded_recursion\":false,\"lines\":25,\"is_exported\":true,\"is_test\":false,\"is_entry_point\":false,\"fp\":\"0046090b0104ceda033a5eb900680ef10062f1370190aef80259974605ab1d56024e023900b9eb440554d26400294bd603236c9102878f4400dbe6cc0001285d00307b04027333fa03fee4a4000e8e4100434acc00c5894e02a5c75c051b6ac001ae3e88067eb28100dcc24402e7fe2400c7839e034d207703d1327606e3c7bc0742e541000083c400a93bb201f83bc5088af99b002240fd017104ea03eefc10006780c80683966406a8612c0059203f03aa41d7013f09a90191517402e3f22d002a954700afe3a10291417c03b98b7d028930e604a93c00018f151a0881da9703a9d06c00e4d0a4008ab4af03118aca02c1206200203b5a03d6266104aceb48\",\"sp\":\"1,0,0,0,0,0,6,27,0,1,0,0,12,0,0,0,0,0,0,2,0,2,0,25,0\",\"transitive_loop_depth\":0,\"recursive\":false,\"callers\":3,\"callees\":0}"
+      }
+    ],
+    "structuredContent": {
+      "name": "qq_engine_finish",
+      "qualified_name": "home-qqp-projects-qq.bin.lib.qq-engine.qq_engine_finish",
+      "label": "Function",
+      "file_path": "/home/qqp/projects/qq/bin/lib/qq-engine.sh",
+      "start_line": 24,
+      "end_line": 48,
+      "source": "qq_engine_finish() {\n  local exit_code=\"$1\"\n  local status=\"$2\"\n  local message=\"$3\"\n  local state=\"${4-}\"\n\n  if [ -z \"$state\" ]; then\n    state='{}'\n  fi\n\n  \"$QQ_ENGINE_JQ\" -cn \\\n    --arg engine \"$QQ_ENGINE_NAME\" \\\n    --arg action \"$QQ_ENGINE_ACTION\" \\\n    --arg status \"$status\" \\\n    --arg message \"$message\" \\\n    --argjson state \"$state\" \\\n    '{\n      engine: $engine,\n      action: $action,\n      status: $status,\n      message: $message,\n      state: $state\n    }'\n  exit \"$exit_code\"\n}\n",
+      "complexity": 1,
+      "cognitive": 1,
+      "loop_count": 0,
+      "loop_depth": 0,
+      "self_recursive": false,
+      "param_count": 0,
+      "max_access_depth": 0,
+      "linear_scan_in_loop": 0,
+      "alloc_in_loop": 0,
+      "recursion_in_loop": false,
+      "unguarded_recursion": false,
+      "lines": 25,
+      "is_exported": true,
+      "is_test": false,
+      "is_entry_point": false,
+      "fp": "0046090b0104ceda033a5eb900680ef10062f1370190aef80259974605ab1d56024e023900b9eb440554d26400294bd603236c9102878f4400dbe6cc0001285d00307b04027333fa03fee4a4000e8e4100434acc00c5894e02a5c75c051b6ac001ae3e88067eb28100dcc24402e7fe2400c7839e034d207703d1327606e3c7bc0742e541000083c400a93bb201f83bc5088af99b002240fd017104ea03eefc10006780c80683966406a8612c0059203f03aa41d7013f09a90191517402e3f22d002a954700afe3a10291417c03b98b7d028930e604a93c00018f151a0881da9703a9d06c00e4d0a4008ab4af03118aca02c1206200203b5a03d6266104aceb48",
+      "sp": "1,0,0,0,0,0,6,27,0,1,0,0,12,0,0,0,0,0,0,2,0,2,0,25,0",
+      "transitive_loop_depth": 0,
+      "recursive": false,
+      "callers": 3,
+      "callees": 0
+    },
+    "isError": false
+  }
+}

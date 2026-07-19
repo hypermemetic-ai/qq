@@ -1,0 +1,34 @@
+{
+  "exit_status": 0,
+  "response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"function\":\"qq_engine_finish\",\"direction\":\"inbound\",\"mode\":\"calls\",\"callers\":[{\"name\":\"qq_engine_done\",\"qualified_name\":\"home-qqp-projects-qq.bin.lib.qq-engine.qq_engine_done\",\"hop\":1},{\"name\":\"qq_engine_refuse\",\"qualified_name\":\"home-qqp-projects-qq.bin.lib.qq-engine.qq_engine_refuse\",\"hop\":1},{\"name\":\"qq_engine_error\",\"qualified_name\":\"home-qqp-projects-qq.bin.lib.qq-engine.qq_engine_error\",\"hop\":1}]}"
+      }
+    ],
+    "structuredContent": {
+      "function": "qq_engine_finish",
+      "direction": "inbound",
+      "mode": "calls",
+      "callers": [
+        {
+          "name": "qq_engine_done",
+          "qualified_name": "home-qqp-projects-qq.bin.lib.qq-engine.qq_engine_done",
+          "hop": 1
+        },
+        {
+          "name": "qq_engine_refuse",
+          "qualified_name": "home-qqp-projects-qq.bin.lib.qq-engine.qq_engine_refuse",
+          "hop": 1
+        },
+        {
+          "name": "qq_engine_error",
+          "qualified_name": "home-qqp-projects-qq.bin.lib.qq-engine.qq_engine_error",
+          "hop": 1
+        }
+      ]
+    },
+    "isError": false
+  }
+}

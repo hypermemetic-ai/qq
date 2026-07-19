@@ -1,0 +1,17 @@
+{
+  "exit_status": 0,
+  "response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"total\":0,\"results\":[],\"has_more\":false}"
+      }
+    ],
+    "structuredContent": {
+      "total": 0,
+      "results": [],
+      "has_more": false
+    },
+    "isError": false
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "exit_status": 0,
+  "response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"function\":\"qq_engine_error\",\"direction\":\"inbound\",\"mode\":\"calls\",\"callers\":[]}"
+      }
+    ],
+    "structuredContent": {
+      "function": "qq_engine_error",
+      "direction": "inbound",
+      "mode": "calls",
+      "callers": []
+    },
+    "isError": false
+  }
+}

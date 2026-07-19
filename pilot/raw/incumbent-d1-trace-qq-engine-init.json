@@ -1,0 +1,29 @@
+{
+  "exit_status": 0,
+  "response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"function\":\"qq_engine_init\",\"direction\":\"outbound\",\"mode\":\"calls\",\"callees\":[{\"name\":\"qq_resolve_bin\",\"qualified_name\":\"home-qqp-projects-qq.bin.lib.qq-bin.qq_resolve_bin\",\"hop\":1},{\"name\":\"command\",\"qualified_name\":\"home-qqp-projects-qq.mcp.command\",\"hop\":2}]}"
+      }
+    ],
+    "structuredContent": {
+      "function": "qq_engine_init",
+      "direction": "outbound",
+      "mode": "calls",
+      "callees": [
+        {
+          "name": "qq_resolve_bin",
+          "qualified_name": "home-qqp-projects-qq.bin.lib.qq-bin.qq_resolve_bin",
+          "hop": 1
+        },
+        {
+          "name": "command",
+          "qualified_name": "home-qqp-projects-qq.mcp.command",
+          "hop": 2
+        }
+      ]
+    },
+    "isError": false
+  }
+}

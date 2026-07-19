@@ -1,0 +1,122 @@
+{
+  "exit_status": 0,
+  "response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"project\":\"home-qqp-projects-qq\",\"path\":\"bin\",\"root_total_nodes\":2125,\"root_total_edges\":2282,\"scoped_total_nodes\":14,\"scoped_total_edges\":18,\"total_nodes\":14,\"total_edges\":18,\"node_labels\":[{\"label\":\"Function\",\"count\":8},{\"label\":\"File\",\"count\":2},{\"label\":\"Folder\",\"count\":2},{\"label\":\"Module\",\"count\":2}],\"edge_types\":[{\"type\":\"DEFINES\",\"count\":10},{\"type\":\"CALLS\",\"count\":6},{\"type\":\"CONTAINS_FILE\",\"count\":2}],\"languages\":[{\"language\":\"Bash\",\"file_count\":2}],\"packages\":[{\"name\":\"lib\",\"node_count\":8,\"fan_in\":0,\"fan_out\":0}],\"hotspots\":[{\"name\":\"qq_resolve_bin\",\"qualified_name\":\"home-qqp-projects-qq.bin.lib.qq-bin.qq_resolve_bin\",\"fan_in\":3},{\"name\":\"qq_engine_finish\",\"qualified_name\":\"home-qqp-projects-qq.bin.lib.qq-engine.qq_engine_finish\",\"fan_in\":3},{\"name\":\"qq_bin_main\",\"qualified_name\":\"home-qqp-projects-qq.bin.lib.qq-bin.qq_bin_main\",\"fan_in\":1}],\"clusters\":[{\"id\":2,\"label\":\"bin\",\"members\":4,\"cohesion\":1.0,\"top_nodes\":[\"qq_engine_finish\",\"qq_engine_done\",\"qq_engine_refuse\",\"qq_engine_error\"],\"packages\":[\"bin\"],\"edge_types\":[\"CALLS\"]},{\"id\":0,\"label\":\"bin\",\"members\":3,\"cohesion\":1.0,\"top_nodes\":[\"qq_resolve_bin\",\"qq_engine_init\",\"qq_bin_main\"],\"packages\":[\"bin\"],\"edge_types\":[\"CALLS\"]}]}"
+      }
+    ],
+    "structuredContent": {
+      "project": "home-qqp-projects-qq",
+      "path": "bin",
+      "root_total_nodes": 2125,
+      "root_total_edges": 2282,
+      "scoped_total_nodes": 14,
+      "scoped_total_edges": 18,
+      "total_nodes": 14,
+      "total_edges": 18,
+      "node_labels": [
+        {
+          "label": "Function",
+          "count": 8
+        },
+        {
+          "label": "File",
+          "count": 2
+        },
+        {
+          "label": "Folder",
+          "count": 2
+        },
+        {
+          "label": "Module",
+          "count": 2
+        }
+      ],
+      "edge_types": [
+        {
+          "type": "DEFINES",
+          "count": 10
+        },
+        {
+          "type": "CALLS",
+          "count": 6
+        },
+        {
+          "type": "CONTAINS_FILE",
+          "count": 2
+        }
+      ],
+      "languages": [
+        {
+          "language": "Bash",
+          "file_count": 2
+        }
+      ],
+      "packages": [
+        {
+          "name": "lib",
+          "node_count": 8,
+          "fan_in": 0,
+          "fan_out": 0
+        }
+      ],
+      "hotspots": [
+        {
+          "name": "qq_resolve_bin",
+          "qualified_name": "home-qqp-projects-qq.bin.lib.qq-bin.qq_resolve_bin",
+          "fan_in": 3
+        },
+        {
+          "name": "qq_engine_finish",
+          "qualified_name": "home-qqp-projects-qq.bin.lib.qq-engine.qq_engine_finish",
+          "fan_in": 3
+        },
+        {
+          "name": "qq_bin_main",
+          "qualified_name": "home-qqp-projects-qq.bin.lib.qq-bin.qq_bin_main",
+          "fan_in": 1
+        }
+      ],
+      "clusters": [
+        {
+          "id": 2,
+          "label": "bin",
+          "members": 4,
+          "cohesion": 1,
+          "top_nodes": [
+            "qq_engine_finish",
+            "qq_engine_done",
+            "qq_engine_refuse",
+            "qq_engine_error"
+          ],
+          "packages": [
+            "bin"
+          ],
+          "edge_types": [
+            "CALLS"
+          ]
+        },
+        {
+          "id": 0,
+          "label": "bin",
+          "members": 3,
+          "cohesion": 1,
+          "top_nodes": [
+            "qq_resolve_bin",
+            "qq_engine_init",
+            "qq_bin_main"
+          ],
+          "packages": [
+            "bin"
+          ],
+          "edge_types": [
+            "CALLS"
+          ]
+        }
+      ]
+    },
+    "isError": false
+  }
+}

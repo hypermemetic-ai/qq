@@ -1,0 +1,24 @@
+{
+  "exit_status": 0,
+  "response": {
+    "name": "home-qqp-projects-qq",
+    "root_path": "/home/qqp/projects/qq",
+    "git": {
+      "is_git": true,
+      "is_worktree": false,
+      "is_detached": false,
+      "root_exists": true,
+      "worktree_root": "/home/qqp/projects/qq",
+      "git_dir": ".git",
+      "git_common_dir": ".git",
+      "canonical_root": "/home/qqp/projects/qq",
+      "branch": "main",
+      "branch_slug": "main",
+      "head_sha": "03f642c7431b1f37f6fa520602a56bed78e9aa87",
+      "base_sha": "03f642c7431b1f37f6fa520602a56bed78e9aa87"
+    },
+    "nodes": 2125,
+    "edges": 2282,
+    "size_bytes": 4521984
+  }
+}

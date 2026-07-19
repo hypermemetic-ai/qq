@@ -1,0 +1,34 @@
+{
+  "exit_status": 0,
+  "response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"function\":\"qq_resolve_bin\",\"direction\":\"inbound\",\"mode\":\"calls\",\"callers\":[{\"name\":\"qq_engine_init\",\"qualified_name\":\"home-qqp-projects-qq.bin.lib.qq-engine.qq_engine_init\",\"hop\":1},{\"name\":\"qq_bin_main\",\"qualified_name\":\"home-qqp-projects-qq.bin.lib.qq-bin.qq_bin_main\",\"hop\":1},{\"name\":\"bin/lib/qq-bin.sh\",\"qualified_name\":\"home-qqp-projects-qq.bin.lib.qq-bin\",\"hop\":2}]}"
+      }
+    ],
+    "structuredContent": {
+      "function": "qq_resolve_bin",
+      "direction": "inbound",
+      "mode": "calls",
+      "callers": [
+        {
+          "name": "qq_engine_init",
+          "qualified_name": "home-qqp-projects-qq.bin.lib.qq-engine.qq_engine_init",
+          "hop": 1
+        },
+        {
+          "name": "qq_bin_main",
+          "qualified_name": "home-qqp-projects-qq.bin.lib.qq-bin.qq_bin_main",
+          "hop": 1
+        },
+        {
+          "name": "bin/lib/qq-bin.sh",
+          "qualified_name": "home-qqp-projects-qq.bin.lib.qq-bin",
+          "hop": 2
+        }
+      ]
+    },
+    "isError": false
+  }
+}

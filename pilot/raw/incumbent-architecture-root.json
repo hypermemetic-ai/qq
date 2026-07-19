@@ -1,0 +1,499 @@
+{
+  "exit_status": 0,
+  "response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"project\":\"home-qqp-projects-qq\",\"total_nodes\":2125,\"total_edges\":2282,\"node_labels\":[{\"label\":\"Section\",\"count\":1172},{\"label\":\"Variable\",\"count\":341},{\"label\":\"File\",\"count\":235},{\"label\":\"Module\",\"count\":235},{\"label\":\"Function\",\"count\":57},{\"label\":\"Folder\",\"count\":43},{\"label\":\"Class\",\"count\":23},{\"label\":\"EnvVar\",\"count\":11},{\"label\":\"Method\",\"count\":5},{\"label\":\"Branch\",\"count\":1},{\"label\":\"Decorator\",\"count\":1},{\"label\":\"Project\",\"count\":1}],\"edge_types\":[{\"type\":\"DEFINES\",\"count\":1821},{\"type\":\"CONTAINS_FILE\",\"count\":210},{\"type\":\"CALLS\",\"count\":110},{\"type\":\"IMPORTS\",\"count\":41},{\"type\":\"FILE_CHANGES_WITH\",\"count\":40},{\"type\":\"CONTAINS_FOLDER\",\"count\":38},{\"type\":\"SIMILAR_TO\",\"count\":11},{\"type\":\"SEMANTICALLY_RELATED\",\"count\":10},{\"type\":\"HAS_BRANCH\",\"count\":1}],\"languages\":[{\"language\":\"Bash\",\"file_count\":25},{\"language\":\"TOML\",\"file_count\":6},{\"language\":\"YAML\",\"file_count\":5},{\"language\":\"Lua\",\"file_count\":1},{\"language\":\"TypeScript\",\"file_count\":1}],\"packages\":[{\"name\":\"herdr\",\"node_count\":8,\"fan_in\":0,\"fan_out\":0},{\"name\":\"lib\",\"node_count\":8,\"fan_in\":0,\"fan_out\":0},{\"name\":\"ratchet\",\"node_count\":7,\"fan_in\":0,\"fan_out\":0},{\"name\":\"shell\",\"node_count\":7,\"fan_in\":0,\"fan_out\":0},{\"name\":\"probes\",\"node_count\":6,\"fan_in\":0,\"fan_out\":0},{\"name\":\"helpers\",\"node_count\":6,\"fan_in\":0,\"fan_out\":0},{\"name\":\"yazi\",\"node_count\":4,\"fan_in\":0,\"fan_out\":0},{\"name\":\"test-qq-board\",\"node_count\":4,\"fan_in\":0,\"fan_out\":0},{\"name\":\"str\",\"node_count\":3,\"fan_in\":0,\"fan_out\":0},{\"name\":\"list\",\"node_count\":3,\"fan_in\":0,\"fan_out\":0},{\"name\":\"qq-reviewer\",\"node_count\":2,\"fan_in\":0,\"fan_out\":0},{\"name\":\"qq-implementer\",\"node_count\":2,\"fan_in\":0,\"fan_out\":0},{\"name\":\"qq-researcher\",\"node_count\":2,\"fan_in\":0,\"fan_out\":0},{\"name\":\"dict\",\"node_count\":2,\"fan_in\":0,\"fan_out\":0},{\"name\":\"test-file-navigation\",\"node_count\":2,\"fan_in\":0,\"fan_out\":0}],\"hotspots\":[{\"name\":\"fail\",\"qualified_name\":\"home-qqp-projects-qq.tools.ratchet.fail\",\"fan_in\":11},{\"name\":\"qq_resolve_bin\",\"qualified_name\":\"home-qqp-projects-qq.bin.lib.qq-bin.qq_resolve_bin\",\"fan_in\":3},{\"name\":\"qq_space_dir\",\"qualified_name\":\"home-qqp-projects-qq.cockpit.shell.file-navigation.qq_space_dir\",\"fan_in\":3},{\"name\":\"qq_engine_finish\",\"qualified_name\":\"home-qqp-projects-qq.bin.lib.qq-engine.qq_engine_finish\",\"fan_in\":3},{\"name\":\"checkoutRoot\",\"qualified_name\":\"home-qqp-projects-qq.cockpit.pi.qq-backlog-guard.checkoutRoot\",\"fan_in\":1},{\"name\":\"resolvePiPath\",\"qualified_name\":\"home-qqp-projects-qq.cockpit.pi.qq-backlog-guard.resolvePiPath\",\"fan_in\":1},{\"name\":\"qq_bin_main\",\"qualified_name\":\"home-qqp-projects-qq.bin.lib.qq-bin.qq_bin_main\",\"fan_in\":1},{\"name\":\"qqbr\",\"qualified_name\":\"home-qqp-projects-qq.cockpit.shell.file-navigation.qqbr\",\"fan_in\":1},{\"name\":\"qqy\",\"qualified_name\":\"home-qqp-projects-qq.cockpit.shell.file-navigation.qqy\",\"fan_in\":1},{\"name\":\"br\",\"qualified_name\":\"home-qqp-projects-qq.cockpit.shell.file-navigation.br\",\"fan_in\":1}],\"boundaries\":[{\"from\":\"shell\",\"to\":\"herdr\",\"call_count\":3},{\"from\":\"test-qq-claude-guard\",\"to\":\"helpers\",\"call_count\":2},{\"from\":\"test-qq-herdr-pull\",\"to\":\"helpers\",\"call_count\":2},{\"from\":\"test-qq-pr-watch\",\"to\":\"helpers\",\"call_count\":1},{\"from\":\"test-qq-herdr-home\",\"to\":\"ratchet\",\"call_count\":1},{\"from\":\"test-qq-herdr-home\",\"to\":\"helpers\",\"call_count\":1},{\"from\":\"test-qq-status\",\"to\":\"helpers\",\"call_count\":1},{\"from\":\"test-ratchet\",\"to\":\"helpers\",\"call_count\":1},{\"from\":\"test-qq-change\",\"to\":\"helpers\",\"call_count\":1},{\"from\":\"test-qq-dispatch\",\"to\":\"helpers\",\"call_count\":1}],\"layers\":[{\"name\":\"helpers\",\"layer\":\"core\",\"reason\":\"high fan-in (10 in, 0 out)\"},{\"name\":\"herdr\",\"layer\":\"leaf\",\"reason\":\"only inbound calls, no outbound\"},{\"name\":\"ratchet\",\"layer\":\"leaf\",\"reason\":\"only inbound calls, no outbound\"},{\"name\":\"shell\",\"layer\":\"entry\",\"reason\":\"only outbound calls\"},{\"name\":\"test-qq-change\",\"layer\":\"entry\",\"reason\":\"only outbound calls\"},{\"name\":\"test-qq-claude-guard\",\"layer\":\"entry\",\"reason\":\"only outbound calls\"},{\"name\":\"test-qq-dispatch\",\"layer\":\"entry\",\"reason\":\"only outbound calls\"},{\"name\":\"test-qq-herdr-home\",\"layer\":\"entry\",\"reason\":\"only outbound calls\"},{\"name\":\"test-qq-herdr-pull\",\"layer\":\"entry\",\"reason\":\"only outbound calls\"},{\"name\":\"test-qq-pr-watch\",\"layer\":\"entry\",\"reason\":\"only outbound calls\"},{\"name\":\"test-qq-status\",\"layer\":\"entry\",\"reason\":\"only outbound calls\"},{\"name\":\"test-ratchet\",\"layer\":\"entry\",\"reason\":\"only outbound calls\"}],\"clusters\":[{\"id\":7,\"label\":\"tests\",\"members\":8,\"cohesion\":0.7777777777777778,\"top_nodes\":[\"assert_equal\",\"assert_result\",\"assert_contains\",\"run_engine\",\"run_status\"],\"packages\":[\"tests\"],\"edge_types\":[\"CALLS\"]},{\"id\":8,\"label\":\"tools\",\"members\":7,\"cohesion\":0.8571428571428571,\"top_nodes\":[\"fail\",\"expect_failure\",\"require_unsigned\",\"require_match_config\",\"measure_prose_words\"],\"packages\":[\"tools\",\"tests\"],\"edge_types\":[\"CALLS\"]},{\"id\":13,\"label\":\"cockpit\",\"members\":6,\"cohesion\":1.0,\"top_nodes\":[\"qq_space_dir\",\"keys.command\",\"y\",\"br\",\"qqy\"],\"packages\":[\"cockpit\"],\"edge_types\":[\"CALLS\"]},{\"id\":18,\"label\":\"tests\",\"members\":6,\"cohesion\":0.6666666666666666,\"top_nodes\":[\"fail\",\"assert_file_contains\",\"expect_agent_failure\",\"assert_not_contains\",\"assert_file_not_matches\"],\"packages\":[\"tests\"],\"edge_types\":[\"CALLS\"]},{\"id\":3,\"label\":\"bin\",\"members\":4,\"cohesion\":1.0,\"top_nodes\":[\"qq_engine_finish\",\"qq_engine_done\",\"qq_engine_refuse\",\"qq_engine_error\"],\"packages\":[\"bin\"],\"edge_types\":[\"CALLS\"]},{\"id\":1,\"label\":\"bin\",\"members\":3,\"cohesion\":1.0,\"top_nodes\":[\"qq_resolve_bin\",\"qq_engine_init\",\"qq_bin_main\"],\"packages\":[\"bin\"],\"edge_types\":[\"CALLS\"]}]}"
+      }
+    ],
+    "structuredContent": {
+      "project": "home-qqp-projects-qq",
+      "total_nodes": 2125,
+      "total_edges": 2282,
+      "node_labels": [
+        {
+          "label": "Section",
+          "count": 1172
+        },
+        {
+          "label": "Variable",
+          "count": 341
+        },
+        {
+          "label": "File",
+          "count": 235
+        },
+        {
+          "label": "Module",
+          "count": 235
+        },
+        {
+          "label": "Function",
+          "count": 57
+        },
+        {
+          "label": "Folder",
+          "count": 43
+        },
+        {
+          "label": "Class",
+          "count": 23
+        },
+        {
+          "label": "EnvVar",
+          "count": 11
+        },
+        {
+          "label": "Method",
+          "count": 5
+        },
+        {
+          "label": "Branch",
+          "count": 1
+        },
+        {
+          "label": "Decorator",
+          "count": 1
+        },
+        {
+          "label": "Project",
+          "count": 1
+        }
+      ],
+      "edge_types": [
+        {
+          "type": "DEFINES",
+          "count": 1821
+        },
+        {
+          "type": "CONTAINS_FILE",
+          "count": 210
+        },
+        {
+          "type": "CALLS",
+          "count": 110
+        },
+        {
+          "type": "IMPORTS",
+          "count": 41
+        },
+        {
+          "type": "FILE_CHANGES_WITH",
+          "count": 40
+        },
+        {
+          "type": "CONTAINS_FOLDER",
+          "count": 38
+        },
+        {
+          "type": "SIMILAR_TO",
+          "count": 11
+        },
+        {
+          "type": "SEMANTICALLY_RELATED",
+          "count": 10
+        },
+        {
+          "type": "HAS_BRANCH",
+          "count": 1
+        }
+      ],
+      "languages": [
+        {
+          "language": "Bash",
+          "file_count": 25
+        },
+        {
+          "language": "TOML",
+          "file_count": 6
+        },
+        {
+          "language": "YAML",
+          "file_count": 5
+        },
+        {
+          "language": "Lua",
+          "file_count": 1
+        },
+        {
+          "language": "TypeScript",
+          "file_count": 1
+        }
+      ],
+      "packages": [
+        {
+          "name": "herdr",
+          "node_count": 8,
+          "fan_in": 0,
+          "fan_out": 0
+        },
+        {
+          "name": "lib",
+          "node_count": 8,
+          "fan_in": 0,
+          "fan_out": 0
+        },
+        {
+          "name": "ratchet",
+          "node_count": 7,
+          "fan_in": 0,
+          "fan_out": 0
+        },
+        {
+          "name": "shell",
+          "node_count": 7,
+          "fan_in": 0,
+          "fan_out": 0
+        },
+        {
+          "name": "probes",
+          "node_count": 6,
+          "fan_in": 0,
+          "fan_out": 0
+        },
+        {
+          "name": "helpers",
+          "node_count": 6,
+          "fan_in": 0,
+          "fan_out": 0
+        },
+        {
+          "name": "yazi",
+          "node_count": 4,
+          "fan_in": 0,
+          "fan_out": 0
+        },
+        {
+          "name": "test-qq-board",
+          "node_count": 4,
+          "fan_in": 0,
+          "fan_out": 0
+        },
+        {
+          "name": "str",
+          "node_count": 3,
+          "fan_in": 0,
+          "fan_out": 0
+        },
+        {
+          "name": "list",
+          "node_count": 3,
+          "fan_in": 0,
+          "fan_out": 0
+        },
+        {
+          "name": "qq-reviewer",
+          "node_count": 2,
+          "fan_in": 0,
+          "fan_out": 0
+        },
+        {
+          "name": "qq-implementer",
+          "node_count": 2,
+          "fan_in": 0,
+          "fan_out": 0
+        },
+        {
+          "name": "qq-researcher",
+          "node_count": 2,
+          "fan_in": 0,
+          "fan_out": 0
+        },
+        {
+          "name": "dict",
+          "node_count": 2,
+          "fan_in": 0,
+          "fan_out": 0
+        },
+        {
+          "name": "test-file-navigation",
+          "node_count": 2,
+          "fan_in": 0,
+          "fan_out": 0
+        }
+      ],
+      "hotspots": [
+        {
+          "name": "fail",
+          "qualified_name": "home-qqp-projects-qq.tools.ratchet.fail",
+          "fan_in": 11
+        },
+        {
+          "name": "qq_resolve_bin",
+          "qualified_name": "home-qqp-projects-qq.bin.lib.qq-bin.qq_resolve_bin",
+          "fan_in": 3
+        },
+        {
+          "name": "qq_space_dir",
+          "qualified_name": "home-qqp-projects-qq.cockpit.shell.file-navigation.qq_space_dir",
+          "fan_in": 3
+        },
+        {
+          "name": "qq_engine_finish",
+          "qualified_name": "home-qqp-projects-qq.bin.lib.qq-engine.qq_engine_finish",
+          "fan_in": 3
+        },
+        {
+          "name": "checkoutRoot",
+          "qualified_name": "home-qqp-projects-qq.cockpit.pi.qq-backlog-guard.checkoutRoot",
+          "fan_in": 1
+        },
+        {
+          "name": "resolvePiPath",
+          "qualified_name": "home-qqp-projects-qq.cockpit.pi.qq-backlog-guard.resolvePiPath",
+          "fan_in": 1
+        },
+        {
+          "name": "qq_bin_main",
+          "qualified_name": "home-qqp-projects-qq.bin.lib.qq-bin.qq_bin_main",
+          "fan_in": 1
+        },
+        {
+          "name": "qqbr",
+          "qualified_name": "home-qqp-projects-qq.cockpit.shell.file-navigation.qqbr",
+          "fan_in": 1
+        },
+        {
+          "name": "qqy",
+          "qualified_name": "home-qqp-projects-qq.cockpit.shell.file-navigation.qqy",
+          "fan_in": 1
+        },
+        {
+          "name": "br",
+          "qualified_name": "home-qqp-projects-qq.cockpit.shell.file-navigation.br",
+          "fan_in": 1
+        }
+      ],
+      "boundaries": [
+        {
+          "from": "shell",
+          "to": "herdr",
+          "call_count": 3
+        },
+        {
+          "from": "test-qq-claude-guard",
+          "to": "helpers",
+          "call_count": 2
+        },
+        {
+          "from": "test-qq-herdr-pull",
+          "to": "helpers",
+          "call_count": 2
+        },
+        {
+          "from": "test-qq-pr-watch",
+          "to": "helpers",
+          "call_count": 1
+        },
+        {
+          "from": "test-qq-herdr-home",
+          "to": "ratchet",
+          "call_count": 1
+        },
+        {
+          "from": "test-qq-herdr-home",
+          "to": "helpers",
+          "call_count": 1
+        },
+        {
+          "from": "test-qq-status",
+          "to": "helpers",
+          "call_count": 1
+        },
+        {
+          "from": "test-ratchet",
+          "to": "helpers",
+          "call_count": 1
+        },
+        {
+          "from": "test-qq-change",
+          "to": "helpers",
+          "call_count": 1
+        },
+        {
+          "from": "test-qq-dispatch",
+          "to": "helpers",
+          "call_count": 1
+        }
+      ],
+      "layers": [
+        {
+          "name": "helpers",
+          "layer": "core",
+          "reason": "high fan-in (10 in, 0 out)"
+        },
+        {
+          "name": "herdr",
+          "layer": "leaf",
+          "reason": "only inbound calls, no outbound"
+        },
+        {
+          "name": "ratchet",
+          "layer": "leaf",
+          "reason": "only inbound calls, no outbound"
+        },
+        {
+          "name": "shell",
+          "layer": "entry",
+          "reason": "only outbound calls"
+        },
+        {
+          "name": "test-qq-change",
+          "layer": "entry",
+          "reason": "only outbound calls"
+        },
+        {
+          "name": "test-qq-claude-guard",
+          "layer": "entry",
+          "reason": "only outbound calls"
+        },
+        {
+          "name": "test-qq-dispatch",
+          "layer": "entry",
+          "reason": "only outbound calls"
+        },
+        {
+          "name": "test-qq-herdr-home",
+          "layer": "entry",
+          "reason": "only outbound calls"
+        },
+        {
+          "name": "test-qq-herdr-pull",
+          "layer": "entry",
+          "reason": "only outbound calls"
+        },
+        {
+          "name": "test-qq-pr-watch",
+          "layer": "entry",
+          "reason": "only outbound calls"
+        },
+        {
+          "name": "test-qq-status",
+          "layer": "entry",
+          "reason": "only outbound calls"
+        },
+        {
+          "name": "test-ratchet",
+          "layer": "entry",
+          "reason": "only outbound calls"
+        }
+      ],
+      "clusters": [
+        {
+          "id": 7,
+          "label": "tests",
+          "members": 8,
+          "cohesion": 0.7777777777777778,
+          "top_nodes": [
+            "assert_equal",
+            "assert_result",
+            "assert_contains",
+            "run_engine",
+            "run_status"
+          ],
+          "packages": [
+            "tests"
+          ],
+          "edge_types": [
+            "CALLS"
+          ]
+        },
+        {
+          "id": 8,
+          "label": "tools",
+          "members": 7,
+          "cohesion": 0.8571428571428571,
+          "top_nodes": [
+            "fail",
+            "expect_failure",
+            "require_unsigned",
+            "require_match_config",
+            "measure_prose_words"
+          ],
+          "packages": [
+            "tools",
+            "tests"
+          ],
+          "edge_types": [
+            "CALLS"
+          ]
+        },
+        {
+          "id": 13,
+          "label": "cockpit",
+          "members": 6,
+          "cohesion": 1,
+          "top_nodes": [
+            "qq_space_dir",
+            "keys.command",
+            "y",
+            "br",
+            "qqy"
+          ],
+          "packages": [
+            "cockpit"
+          ],
+          "edge_types": [
+            "CALLS"
+          ]
+        },
+        {
+          "id": 18,
+          "label": "tests",
+          "members": 6,
+          "cohesion": 0.6666666666666666,
+          "top_nodes": [
+            "fail",
+            "assert_file_contains",
+            "expect_agent_failure",
+            "assert_not_contains",
+            "assert_file_not_matches"
+          ],
+          "packages": [
+            "tests"
+          ],
+          "edge_types": [
+            "CALLS"
+          ]
+        },
+        {
+          "id": 3,
+          "label": "bin",
+          "members": 4,
+          "cohesion": 1,
+          "top_nodes": [
+            "qq_engine_finish",
+            "qq_engine_done",
+            "qq_engine_refuse",
+            "qq_engine_error"
+          ],
+          "packages": [
+            "bin"
+          ],
+          "edge_types": [
+            "CALLS"
+          ]
+        },
+        {
+          "id": 1,
+          "label": "bin",
+          "members": 3,
+          "cohesion": 1,
+          "top_nodes": [
+            "qq_resolve_bin",
+            "qq_engine_init",
+            "qq_bin_main"
+          ],
+          "packages": [
+            "bin"
+          ],
+          "edge_types": [
+            "CALLS"
+          ]
+        }
+      ]
+    },
+    "isError": false
+  }
+}

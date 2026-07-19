@@ -1,0 +1,18 @@
+{
+  "exit_status": 0,
+  "response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"total\":0,\"results\":[],\"has_more\":false,\"hint\":\"No nodes match this pattern. Check spelling or try a broader regex.\"}"
+      }
+    ],
+    "structuredContent": {
+      "total": 0,
+      "results": [],
+      "has_more": false,
+      "hint": "No nodes match this pattern. Check spelling or try a broader regex."
+    },
+    "isError": false
+  }
+}

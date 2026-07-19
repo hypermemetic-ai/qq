@@ -1,0 +1,15 @@
+{
+  "exit_status": 0,
+  "response": {
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Error analyzing PR impact: No embedding-capable provider found. Please authenticate with OpenCode using one of: ollama, github-copilot, openai, google."
+        }
+      ]
+    },
+    "jsonrpc": "2.0",
+    "id": 2
+  }
+}

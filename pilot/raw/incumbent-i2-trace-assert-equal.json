@@ -1,0 +1,115 @@
+{
+  "exit_status": 0,
+  "response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"function\":\"assert_equal\",\"direction\":\"inbound\",\"mode\":\"calls\",\"callers\":[{\"name\":\"run_watch\",\"qualified_name\":\"home-qqp-projects-qq.tests.test-qq-pr-watch.run_watch\",\"hop\":1,\"is_test\":true},{\"name\":\"tests/test-qq-pr-watch.sh\",\"qualified_name\":\"home-qqp-projects-qq.tests.test-qq-pr-watch\",\"hop\":1,\"is_test\":true},{\"name\":\"assert_result\",\"qualified_name\":\"home-qqp-projects-qq.tests.test-qq-claude-guard.assert_result\",\"hop\":1,\"is_test\":true},{\"name\":\"tests/test-file-navigation.sh\",\"qualified_name\":\"home-qqp-projects-qq.tests.test-file-navigation\",\"hop\":1,\"is_test\":true},{\"name\":\"run_status\",\"qualified_name\":\"home-qqp-projects-qq.tests.test-qq-status.run_status\",\"hop\":1,\"is_test\":true},{\"name\":\"tests/test-qq-status.sh\",\"qualified_name\":\"home-qqp-projects-qq.tests.test-qq-status\",\"hop\":1,\"is_test\":true},{\"name\":\"tests/test-ratchet.sh\",\"qualified_name\":\"home-qqp-projects-qq.tests.test-ratchet\",\"hop\":1,\"is_test\":true},{\"name\":\"tests/test-bin-resolution.sh\",\"qualified_name\":\"home-qqp-projects-qq.tests.test-bin-resolution\",\"hop\":1,\"is_test\":true},{\"name\":\"run_change\",\"qualified_name\":\"home-qqp-projects-qq.tests.test-qq-change.run_change\",\"hop\":1,\"is_test\":true},{\"name\":\"tests/test-qq-change.sh\",\"qualified_name\":\"home-qqp-projects-qq.tests.test-qq-change\",\"hop\":1,\"is_test\":true},{\"name\":\"tests/test-qq-dispatch.sh\",\"qualified_name\":\"home-qqp-projects-qq.tests.test-qq-dispatch\",\"hop\":1,\"is_test\":true},{\"name\":\"run_engine\",\"qualified_name\":\"home-qqp-projects-qq.tests.test-qq-dispatch.run_engine\",\"hop\":1,\"is_test\":true},{\"name\":\"tests/test-qq-herdr-snap.sh\",\"qualified_name\":\"home-qqp-projects-qq.tests.test-qq-herdr-snap\",\"hop\":1,\"is_test\":true},{\"name\":\"run_board\",\"qualified_name\":\"home-qqp-projects-qq.tests.test-qq-board.run_board\",\"hop\":1,\"is_test\":true},{\"name\":\"tests/test-qq-board.sh\",\"qualified_name\":\"home-qqp-projects-qq.tests.test-qq-board\",\"hop\":1,\"is_test\":true},{\"name\":\"tests/test-qq-claude-guard.sh\",\"qualified_name\":\"home-qqp-projects-qq.tests.test-qq-claude-guard\",\"hop\":2,\"is_test\":true}]}"
+      }
+    ],
+    "structuredContent": {
+      "function": "assert_equal",
+      "direction": "inbound",
+      "mode": "calls",
+      "callers": [
+        {
+          "name": "run_watch",
+          "qualified_name": "home-qqp-projects-qq.tests.test-qq-pr-watch.run_watch",
+          "hop": 1,
+          "is_test": true
+        },
+        {
+          "name": "tests/test-qq-pr-watch.sh",
+          "qualified_name": "home-qqp-projects-qq.tests.test-qq-pr-watch",
+          "hop": 1,
+          "is_test": true
+        },
+        {
+          "name": "assert_result",
+          "qualified_name": "home-qqp-projects-qq.tests.test-qq-claude-guard.assert_result",
+          "hop": 1,
+          "is_test": true
+        },
+        {
+          "name": "tests/test-file-navigation.sh",
+          "qualified_name": "home-qqp-projects-qq.tests.test-file-navigation",
+          "hop": 1,
+          "is_test": true
+        },
+        {
+          "name": "run_status",
+          "qualified_name": "home-qqp-projects-qq.tests.test-qq-status.run_status",
+          "hop": 1,
+          "is_test": true
+        },
+        {
+          "name": "tests/test-qq-status.sh",
+          "qualified_name": "home-qqp-projects-qq.tests.test-qq-status",
+          "hop": 1,
+          "is_test": true
+        },
+        {
+          "name": "tests/test-ratchet.sh",
+          "qualified_name": "home-qqp-projects-qq.tests.test-ratchet",
+          "hop": 1,
+          "is_test": true
+        },
+        {
+          "name": "tests/test-bin-resolution.sh",
+          "qualified_name": "home-qqp-projects-qq.tests.test-bin-resolution",
+          "hop": 1,
+          "is_test": true
+        },
+        {
+          "name": "run_change",
+          "qualified_name": "home-qqp-projects-qq.tests.test-qq-change.run_change",
+          "hop": 1,
+          "is_test": true
+        },
+        {
+          "name": "tests/test-qq-change.sh",
+          "qualified_name": "home-qqp-projects-qq.tests.test-qq-change",
+          "hop": 1,
+          "is_test": true
+        },
+        {
+          "name": "tests/test-qq-dispatch.sh",
+          "qualified_name": "home-qqp-projects-qq.tests.test-qq-dispatch",
+          "hop": 1,
+          "is_test": true
+        },
+        {
+          "name": "run_engine",
+          "qualified_name": "home-qqp-projects-qq.tests.test-qq-dispatch.run_engine",
+          "hop": 1,
+          "is_test": true
+        },
+        {
+          "name": "tests/test-qq-herdr-snap.sh",
+          "qualified_name": "home-qqp-projects-qq.tests.test-qq-herdr-snap",
+          "hop": 1,
+          "is_test": true
+        },
+        {
+          "name": "run_board",
+          "qualified_name": "home-qqp-projects-qq.tests.test-qq-board.run_board",
+          "hop": 1,
+          "is_test": true
+        },
+        {
+          "name": "tests/test-qq-board.sh",
+          "qualified_name": "home-qqp-projects-qq.tests.test-qq-board",
+          "hop": 1,
+          "is_test": true
+        },
+        {
+          "name": "tests/test-qq-claude-guard.sh",
+          "qualified_name": "home-qqp-projects-qq.tests.test-qq-claude-guard",
+          "hop": 2,
+          "is_test": true
+        }
+      ]
+    },
+    "isError": false
+  }
+}

@@ -1,0 +1,451 @@
+{
+  "exit_status": 0,
+  "response": {
+    "result": {
+      "tools": [
+        {
+          "name": "codebase_search",
+          "description": "Search codebase by MEANING, not keywords. Returns full code content. For just finding WHERE code is (saves ~90% tokens), use codebase_peek instead.",
+          "inputSchema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "description": "Natural language description of what code you're looking for. Describe behavior, not syntax."
+              },
+              "limit": {
+                "default": 5,
+                "description": "Maximum number of results to return",
+                "type": "number"
+              },
+              "fileType": {
+                "description": "Filter by file extension (e.g., 'ts', 'py', 'rs')",
+                "type": "string"
+              },
+              "directory": {
+                "description": "Filter by directory path (e.g., 'src/utils', 'lib')",
+                "type": "string"
+              },
+              "chunkType": {
+                "description": "Filter by code chunk type",
+                "type": "string",
+                "enum": [
+                  "function",
+                  "class",
+                  "method",
+                  "interface",
+                  "type",
+                  "enum",
+                  "struct",
+                  "impl",
+                  "trait",
+                  "module",
+                  "other"
+                ]
+              },
+              "contextLines": {
+                "description": "Number of extra lines to include before/after each match (default: 0)",
+                "type": "number"
+              },
+              "blameAuthor": {
+                "description": "Filter by git blame author name or email",
+                "type": "string"
+              },
+              "blameSha": {
+                "description": "Filter by git blame commit SHA or prefix",
+                "type": "string"
+              },
+              "blameSince": {
+                "description": "Filter to chunks last changed on or after this date",
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ]
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "codebase_peek",
+          "description": "Quick lookup of code locations by meaning. Returns only metadata (file, line, name, type) WITHOUT code content. Saves ~90% tokens vs codebase_search.",
+          "inputSchema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "description": "Natural language description of what code you're looking for."
+              },
+              "limit": {
+                "default": 10,
+                "description": "Maximum number of results to return",
+                "type": "number"
+              },
+              "fileType": {
+                "description": "Filter by file extension (e.g., 'ts', 'py', 'rs')",
+                "type": "string"
+              },
+              "directory": {
+                "description": "Filter by directory path (e.g., 'src/utils', 'lib')",
+                "type": "string"
+              },
+              "chunkType": {
+                "description": "Filter by code chunk type",
+                "type": "string",
+                "enum": [
+                  "function",
+                  "class",
+                  "method",
+                  "interface",
+                  "type",
+                  "enum",
+                  "struct",
+                  "impl",
+                  "trait",
+                  "module",
+                  "other"
+                ]
+              },
+              "blameAuthor": {
+                "description": "Filter by git blame author name or email",
+                "type": "string"
+              },
+              "blameSha": {
+                "description": "Filter by git blame commit SHA or prefix",
+                "type": "string"
+              },
+              "blameSince": {
+                "description": "Filter to chunks last changed on or after this date",
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ]
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "index_codebase",
+          "description": "Index the codebase for semantic search. Creates vector embeddings of code chunks. Incremental - only re-indexes changed files. Run before first codebase_search.",
+          "inputSchema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {
+              "force": {
+                "default": false,
+                "description": "Force reindex even if already indexed",
+                "type": "boolean"
+              },
+              "estimateOnly": {
+                "default": false,
+                "description": "Only show cost estimate without indexing",
+                "type": "boolean"
+              },
+              "verbose": {
+                "default": false,
+                "description": "Show detailed info about skipped files and parsing failures",
+                "type": "boolean"
+              }
+            }
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "index_status",
+          "description": "Check the status of the codebase index. Shows whether the codebase is indexed, how many chunks are stored, and the embedding provider being used.",
+          "inputSchema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {}
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "index_health_check",
+          "description": "Check index health and remove stale entries from deleted files. Run this to clean up the index after files have been deleted.",
+          "inputSchema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {}
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "index_metrics",
+          "description": "Get metrics and performance statistics for the codebase index. Requires debug.enabled=true and debug.metrics=true in config.",
+          "inputSchema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {}
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "index_logs",
+          "description": "Get recent debug logs from the codebase indexer. Requires debug.enabled=true in config.",
+          "inputSchema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {
+              "limit": {
+                "default": 20,
+                "description": "Maximum number of log entries to return",
+                "type": "number"
+              },
+              "category": {
+                "description": "Filter by log category",
+                "type": "string",
+                "enum": [
+                  "search",
+                  "embedding",
+                  "cache",
+                  "gc",
+                  "branch",
+                  "general"
+                ]
+              },
+              "level": {
+                "description": "Filter by minimum log level",
+                "type": "string",
+                "enum": [
+                  "error",
+                  "warn",
+                  "info",
+                  "debug"
+                ]
+              }
+            }
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "find_similar",
+          "description": "Find code similar to a given snippet. Use for duplicate detection, pattern discovery, or refactoring prep.",
+          "inputSchema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "The code snippet to find similar code for"
+              },
+              "limit": {
+                "default": 10,
+                "description": "Maximum number of results to return",
+                "type": "number"
+              },
+              "fileType": {
+                "description": "Filter by file extension (e.g., 'ts', 'py', 'rs')",
+                "type": "string"
+              },
+              "directory": {
+                "description": "Filter by directory path (e.g., 'src/utils', 'lib')",
+                "type": "string"
+              },
+              "chunkType": {
+                "description": "Filter by code chunk type",
+                "type": "string",
+                "enum": [
+                  "function",
+                  "class",
+                  "method",
+                  "interface",
+                  "type",
+                  "enum",
+                  "struct",
+                  "impl",
+                  "trait",
+                  "module",
+                  "other"
+                ]
+              },
+              "excludeFile": {
+                "description": "Exclude results from this file path",
+                "type": "string"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "implementation_lookup",
+          "description": "Jump to symbol definition. Find WHERE something is defined. Returns the authoritative source location(s). Prefers real implementation files over tests, docs, examples, and fixtures.",
+          "inputSchema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "description": "Symbol name or natural language description (e.g., 'validateToken', 'where is the payment handler defined')"
+              },
+              "limit": {
+                "default": 5,
+                "description": "Maximum number of results",
+                "type": "number"
+              },
+              "fileType": {
+                "description": "Filter by file extension (e.g., 'ts', 'py')",
+                "type": "string"
+              },
+              "directory": {
+                "description": "Filter by directory path (e.g., 'src/utils')",
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ]
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "call_graph",
+          "description": "Query the call graph to find callers or callees of a function/method. Use to understand code flow and dependencies. Supports relationship types: Call, MethodCall, Constructor, Import, Inherits, Implements.",
+          "inputSchema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Function or method name to query"
+              },
+              "direction": {
+                "default": "callers",
+                "description": "Direction: 'callers' finds who calls this function, 'callees' finds what this function calls",
+                "type": "string",
+                "enum": [
+                  "callers",
+                  "callees"
+                ]
+              },
+              "symbolId": {
+                "description": "Symbol ID (required for 'callees' direction)",
+                "type": "string"
+              },
+              "relationshipType": {
+                "description": "Filter by relationship type. Omit to show all.",
+                "type": "string",
+                "enum": [
+                  "Call",
+                  "MethodCall",
+                  "Constructor",
+                  "Import",
+                  "Inherits",
+                  "Implements"
+                ]
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "call_graph_path",
+          "description": "Find the shortest connection path between two symbols in the call graph. Returns the chain of calls connecting them.",
+          "inputSchema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string",
+                "description": "Source function/method name (starting point)"
+              },
+              "to": {
+                "type": "string",
+                "description": "Target function/method name (destination)"
+              },
+              "maxDepth": {
+                "default": 10,
+                "description": "Maximum traversal depth (default: 10)",
+                "type": "number"
+              }
+            },
+            "required": [
+              "from",
+              "to"
+            ]
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        },
+        {
+          "name": "pr_impact",
+          "description": "Analyze the impact of a pull request or branch by examining changed files, affected symbols, transitive callers, communities touched, hub nodes, and risk level. Use to understand blast radius before merging.",
+          "inputSchema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {
+              "pr": {
+                "description": "Pull request number to analyze",
+                "type": "number"
+              },
+              "branch": {
+                "description": "Branch name to analyze (defaults to current branch)",
+                "type": "string"
+              },
+              "maxDepth": {
+                "default": 5,
+                "description": "Maximum traversal depth for transitive callers (default: 5)",
+                "type": "number"
+              },
+              "hubThreshold": {
+                "default": 10,
+                "description": "Minimum caller count to flag a symbol as a hub node (default: 10)",
+                "type": "number"
+              },
+              "checkConflicts": {
+                "default": false,
+                "description": "Check for conflicting open PRs touching the same communities (default: false)",
+                "type": "boolean"
+              },
+              "direction": {
+                "default": "both",
+                "description": "Call-graph traversal direction: 'callers' for upstream, 'callees' for downstream, 'both' for union (default: both)",
+                "type": "string",
+                "enum": [
+                  "callers",
+                  "callees",
+                  "both"
+                ]
+              }
+            }
+          },
+          "execution": {
+            "taskSupport": "forbidden"
+          }
+        }
+      ]
+    },
+    "jsonrpc": "2.0",
+    "id": 2
+  }
+}

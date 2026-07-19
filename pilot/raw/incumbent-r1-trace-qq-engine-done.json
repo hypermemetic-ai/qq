@@ -1,0 +1,24 @@
+{
+  "exit_status": 0,
+  "response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"function\":\"qq_engine_done\",\"direction\":\"outbound\",\"mode\":\"calls\",\"callees\":[{\"name\":\"qq_engine_finish\",\"qualified_name\":\"home-qqp-projects-qq.bin.lib.qq-engine.qq_engine_finish\",\"hop\":1}]}"
+      }
+    ],
+    "structuredContent": {
+      "function": "qq_engine_done",
+      "direction": "outbound",
+      "mode": "calls",
+      "callees": [
+        {
+          "name": "qq_engine_finish",
+          "qualified_name": "home-qqp-projects-qq.bin.lib.qq-engine.qq_engine_finish",
+          "hop": 1
+        }
+      ]
+    },
+    "isError": false
+  }
+}

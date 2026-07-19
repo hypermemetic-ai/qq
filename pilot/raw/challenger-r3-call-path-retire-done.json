@@ -1,0 +1,16 @@
+{
+  "exit_status": 1,
+  "response": {
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "No embedding-capable provider found. Please authenticate with OpenCode using one of: ollama, github-copilot, openai, google."
+        }
+      ],
+      "isError": true
+    },
+    "jsonrpc": "2.0",
+    "id": 2
+  }
+}

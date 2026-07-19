@@ -39,6 +39,10 @@ confirms the observed extensionless-entrypoint gap.
 
 ## Exact invocation forms
 
+Full response bodies and process exit statuses are attached under `pilot/raw/`
+and mapped to corpus IDs and invocations in
+[`pilot/raw/README.md`](raw/README.md).
+
 The committed harness speaks newline-delimited JSON-RPC to the package's MCP
 CLI from the current working directory:
 

@@ -1,0 +1,52 @@
+{
+  "exit_status": 0,
+  "response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"total\":1,\"results\":[{\"name\":\"qq_resolve_bin\",\"qualified_name\":\"home-qqp-projects-qq.bin.lib.qq-bin.qq_resolve_bin\",\"label\":\"Function\",\"file_path\":\"bin/lib/qq-bin.sh\",\"in_degree\":3,\"out_degree\":1,\"connected_names\":[\"qq_engine_init\",\"qq_bin_main\",\"tests/test-bin-resolution.sh\",\"command\"],\"complexity\":9,\"cognitive\":20,\"loop_count\":1,\"loop_depth\":1,\"self_recursive\":false,\"param_count\":0,\"max_access_depth\":1,\"linear_scan_in_loop\":0,\"alloc_in_loop\":0,\"recursion_in_loop\":false,\"unguarded_recursion\":false,\"lines\":61,\"is_exported\":true,\"is_test\":false,\"is_entry_point\":false,\"docstring\":\"# tool name to receive a NUL-delimited path and PATH-prepend record.\",\"fp\":\"0046090b014b3f2d0022d5aa011969fe0062f13701849e3e01369b210001333a00e2353d0011dc9300567a46005e35d6008fe7d1010250d90004096d0001285d00307b0400e866770019874c000e8e4100434acc00c5894e0100fca3008ea558011839680019ea83004de02d009ebd980078488f0093fb1d00f9b4510192ae43023847d400672cde0088d7b3000757db00ad6f32010a7157017104ea02f6ae630056c2f600c91df800d66bf600452ae100465861001a65ee00ed60080088daa5008fdaf302834450002cdf1300b8c9c60004abf7015376dc001d32e2007059a2018d0d7a0054ed2a006184270009f8cd00bd5d6b00203b5a00100cc9010f9a90\",\"sp\":\"7,1,0,0,0,0,15,58,3,12,0,0,36,5,0,0,0,0,0,4,1,23,5,61,5\",\"transitive_loop_depth\":1,\"recursive\":false}],\"has_more\":false}"
+      }
+    ],
+    "structuredContent": {
+      "total": 1,
+      "results": [
+        {
+          "name": "qq_resolve_bin",
+          "qualified_name": "home-qqp-projects-qq.bin.lib.qq-bin.qq_resolve_bin",
+          "label": "Function",
+          "file_path": "bin/lib/qq-bin.sh",
+          "in_degree": 3,
+          "out_degree": 1,
+          "connected_names": [
+            "qq_engine_init",
+            "qq_bin_main",
+            "tests/test-bin-resolution.sh",
+            "command"
+          ],
+          "complexity": 9,
+          "cognitive": 20,
+          "loop_count": 1,
+          "loop_depth": 1,
+          "self_recursive": false,
+          "param_count": 0,
+          "max_access_depth": 1,
+          "linear_scan_in_loop": 0,
+          "alloc_in_loop": 0,
+          "recursion_in_loop": false,
+          "unguarded_recursion": false,
+          "lines": 61,
+          "is_exported": true,
+          "is_test": false,
+          "is_entry_point": false,
+          "docstring": "# tool name to receive a NUL-delimited path and PATH-prepend record.",
+          "fp": "0046090b014b3f2d0022d5aa011969fe0062f13701849e3e01369b210001333a00e2353d0011dc9300567a46005e35d6008fe7d1010250d90004096d0001285d00307b0400e866770019874c000e8e4100434acc00c5894e0100fca3008ea558011839680019ea83004de02d009ebd980078488f0093fb1d00f9b4510192ae43023847d400672cde0088d7b3000757db00ad6f32010a7157017104ea02f6ae630056c2f600c91df800d66bf600452ae100465861001a65ee00ed60080088daa5008fdaf302834450002cdf1300b8c9c60004abf7015376dc001d32e2007059a2018d0d7a0054ed2a006184270009f8cd00bd5d6b00203b5a00100cc9010f9a90",
+          "sp": "7,1,0,0,0,0,15,58,3,12,0,0,36,5,0,0,0,0,0,4,1,23,5,61,5",
+          "transitive_loop_depth": 1,
+          "recursive": false
+        }
+      ],
+      "has_more": false
+    },
+    "isError": false
+  }
+}
