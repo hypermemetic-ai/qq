@@ -54,28 +54,26 @@ if ! jq -e '.result.agents | type == "array"' <<<"$agents" >/dev/null 2>&1; then
   die "cannot parse agent list"
 fi
 
+home_workspace=""
 workspaces="$({ "$HERDR" workspace list 2>/dev/null || true; })"
-if ! jq -e '.result.workspaces | type == "array"' \
+if jq -e '.result.workspaces | type == "array"' \
   <<<"$workspaces" >/dev/null 2>&1; then
-  die "cannot parse workspace list"
-fi
-if ! home_workspace="$(jq -r --arg ws "$workspace" '
-  [
-    .result.workspaces as $workspaces
-    | $workspaces[]
-    | select(.workspace_id == $ws and .worktree != null)
-    | .worktree.repo_root as $repo_root
-    | select($repo_root != null and $repo_root != "")
-    | $workspaces[]
-    | select(
-        .worktree != null
-        and .worktree.is_linked_worktree == false
-        and .worktree.repo_root == $repo_root
-      )
-    | .workspace_id
-  ][0] // empty
-' <<<"$workspaces" 2>/dev/null)"; then
-  die "cannot parse workspace list"
+  home_workspace="$(jq -r --arg ws "$workspace" '
+    [
+      .result.workspaces as $workspaces
+      | $workspaces[]
+      | select(.workspace_id == $ws and .worktree != null)
+      | .worktree.repo_root as $repo_root
+      | select($repo_root != null and $repo_root != "")
+      | $workspaces[]
+      | select(
+          .worktree != null
+          and .worktree.is_linked_worktree == false
+          and .worktree.repo_root == $repo_root
+        )
+      | .workspace_id
+    ][0] // empty
+  ' <<<"$workspaces" 2>/dev/null || true)"
 fi
 
 if ! target_info="$(jq -r --arg ws "$workspace" --arg home "$home_workspace" '

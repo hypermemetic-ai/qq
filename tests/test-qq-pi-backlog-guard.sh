@@ -27,7 +27,7 @@ mkdir -p "$worktree/src/deep"
 module="$TMP/qq-backlog-guard.mjs"
 cp -- "$EXTENSION" "$module"
 
-node --input-type=module - "$module" "$worktree" <<'JS'
+HOME="$TMP" node --input-type=module - "$module" "$worktree" <<'JS'
 import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
@@ -69,6 +69,18 @@ assertBlocked(
 assertBlocked(
   call("edit", { path: "../../backlog/tasks/t-91.md" }, join(worktree, "src/deep")),
   "nested-cwd path under linked-worktree backlog was allowed",
+);
+assertBlocked(
+  call("write", { path: "@backlog/tasks/t-91.md", content: "no" }),
+  "Pi @-prefixed path under backlog was allowed",
+);
+assertBlocked(
+  call("edit", { path: pathToFileURL(join(worktree, "backlog/docs/note.md")).href }),
+  "Pi file URL under backlog was allowed",
+);
+assertBlocked(
+  call("write", { path: "~/linked/backlog/tasks/t-91.md", content: "no" }),
+  "Pi tilde path under backlog was allowed",
 );
 
 assertAllowed(

@@ -124,6 +124,13 @@ export FAKE_WORKSPACES_JSON='{"result":{"workspaces":[{"workspace_id":"ws","work
 output="$(HERDR_PANE_ID=ws:p1 QQ_HERDR_SNAP_DRY=1 "$SNAP")"
 assert_equal 'current=ws:p1 workspace=ws target=ws:p2 prev=none' "$output"
 
+# Failed home metadata still falls back to a valid focused-workspace runtime.
+reset_fake
+export FAKE_AGENTS_JSON='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":"ws","agent":"codex"},{"pane_id":"ws:p2","workspace_id":"ws","agent":"claude"}]}}'
+export FAKE_WORKSPACES_JSON='not-json'
+HERDR_PANE_ID=ws:p1 "$SNAP"
+assert_file_contains "$log" 'agent focus ws:p2'
+
 # Without pi or Claude, falls back to focused-workspace sidebar order.
 reset_fake
 export FAKE_AGENTS_JSON='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":"ws","agent":"codex"},{"pane_id":"ws:p3","workspace_id":"ws","agent":"codex"}]}}'
