@@ -19,16 +19,16 @@ A green Check must demonstrate that it observed the intended subject. A successf
 | `skills/*/SKILL.md` | Skill validator; inspect trigger/procedure coherence; scenario-test changed instructions; `git diff --check` | Ambiguous triggers, duplicated methodology, hidden state, scope expansion, restored ceremony |
 | `AGENTS.md` / `CONCEPTS.md` | Cross-check terms and ordering across README, Skills, and linked-repository instructions; render/read Markdown; `git diff --check` | Conflicting authority, changed business rules, stale references to retired systems |
 | Shell and Python commands under `bin/` | `bash -n` for shell syntax; Python syntax/import checks where applicable; isolated behavioral tests with temporary HOME/repository and mocked dependencies; `bash tests/test-bin-resolution.sh` for shared external-tool lookup | User-config mutation, quoting, symlink ownership, fail-open paths, race behavior, and divergence from the `QQ_<TOOL>_BIN` → `PATH` → package-manager fallback contract |
-| `bin/qq-herdr-home` | `bash tests/test-qq-herdr-home.sh` | Exactly one primary `main` checkout and persistent home; matching Git common directory; unique single-pane Backlog board; focus confirmation without moving or closing work-session panes |
+| `bin/qq-herdr-home` | `bash tests/test-qq-herdr-home.sh` | `inspect` validates the sole primary `main` checkout, persistent home, and matching Git common directory; only `focus-board` requires the unique single-pane board and confirms focus without moving or closing work-session panes |
 | `bin/qq-herdr-pull` | `bash tests/test-qq-herdr-pull.sh`; exercise `QQ_HERDR_PULL_DRY` before live layout testing | Operator-mode best effort versus agent-mode failure; live pane identity; sole idle placeholder; confirmed move before close |
-| `bin/qq-herdr-snap` | `bash tests/test-qq-herdr-snap.sh`; exercise `QQ_HERDR_SNAP_DRY` before live focus testing | Local Claude preference, same-Repository project-home fallback, sidebar-order fallback, target-workspace-keyed bounce state, non-agent origins, stale panes, best-effort failure |
-| `bin/install.sh` | `bash tests/test-install-cleanup.sh`; `bash tests/test-install-flags.sh`; temporary HOME/data/config directories; repeat install, stale managed link pruning, unmanaged destination refusal | Help and unsupported arguments must cause no mutation; surgical removal of qq-owned MIME/desktop/userscript artifacts, preservation of unrelated configuration, invalid XDG homes, accidental overwrite, partial installation |
+| `bin/qq-herdr-snap` | `bash tests/test-qq-herdr-snap.sh`; exercise `QQ_HERDR_SNAP_DRY` before live focus testing | Project-home Pi then Claude preference; focused-session Pi, Claude, then sidebar-order fallback; target-workspace-keyed bounce state, non-agent origins, stale panes, best-effort failure |
+| Runtime mounts and profiles | Verify Skill-root links, fixed cockpit links, and Codex profile symlinks resolve into the intended checkout; `bash tests/test-bin-resolution.sh`; `bash tests/test-qq-dispatch.sh` | Per-member mirroring, stale profile targets, ambiguous `QQ_HOME`, accidental copies, and dispatch under the wrong sandbox/MCP policy |
 | `cockpit/` | Parse with owning tools where available; exercise key bindings and popup close/size behavior in Herdr/yazi; verify linked paths | Machine-specific absolute paths, missing external binaries, Herdr popup frame/PTY size mismatch, and stage glass mistaken for durable workflow state |
-| `bin/qq-openwiki` | `bash tests/test-qq-openwiki.sh`; `git diff --check` | Verify command-mode, provider, and external-tool preflight occurs before stale recovery; recovery then precedes mode-specific branch/cleanliness gates and safely targets the recorded worktree even when invoked from a sibling. Exercise malformed, symlinked, unavailable, changed-worktree, and foreign-Repository snapshots; also watch for stale-base acceptance, dirty/staged-boundary errors, concurrent writers, retained generated workflow/guidance, and altered authored instruction text |
-| Claude drift-net (`bin/qq-claude-guard`, `.claude/settings.json`) | `bash tests/test-qq-claude-guard.sh` | Recognizable `gh pr merge` parsing, direct edit-tool writes to managed Backlog Markdown, plan-asset exemptions, fail-local behavior, hook wiring, and declared coverage gaps; do not mistake it for a security boundary |
+| `bin/qq-openwiki` | `bash tests/test-qq-openwiki.sh`; `git diff --check` | Git-backed baseline restoration outside `openwiki/**`; rejection of tracked, untracked, or ignored setup deviation; instruction-symlink shadowing; stale-base, dirty/staged-boundary, concurrent-writer, retained-workflow, and altered-authored-guidance failures |
+| Runtime drift-nets (`.claude/settings.json`, `bin/qq-claude-backlog-hook`, `cockpit/pi/qq-backlog-guard.ts`) | `bash tests/test-qq-claude-guard.sh`; `bash tests/test-qq-pi-backlog-guard.sh` | Claude native merge denies versus structured Backlog write-hook scope; Pi path normalization and built-in `write`/`edit` scope; Bash and reads remain outside the hooks; do not mistake either drift-net for a security boundary |
+| Stateless engines (`qq-board`, `qq-change`, `qq-dispatch`, `qq-pr-watch`, `qq-status`) | Run the matching `tests/test-qq-*.sh` harnesses; exercise `inspect`/`--dry-run` where supported | Shared JSON result/exit contract (`done=0`, `error=1`, `refused=2`), fail-closed rails, atomic files, stale artifacts, timeout handling, selector validation, and unintended mutation during inspection |
+| Ratchet baselines | `bash tests/test-ratchet.sh`; run `tools/ratchet.sh` through the normal shell-test suite | NUL-safe exact counting of mandatory prose, `codex exec`, runtime-specific Skill flags, and shell-parser idioms; improvements lower the committed baseline, while increases require an operator-approved baseline change |
 | `openwiki/` | Verify links and source references; search for retired concepts; compare key claims to current source and diff | Source Changes editing generated pages, duplicated or stale documentation |
-
-Do not run `bin/install.sh` against a real user HOME merely to test it; isolate user-level mutation.
 
 ## Review sequence
 
@@ -36,11 +36,13 @@ Prepare the reviewer with the repository/branch coordinates, owning Task and acc
 
 A discovered pre-existing defect or broader opportunity does not automatically belong in the current Change. Report it or create separate intent rather than broadening the fix silently.
 
-## Current coverage gaps
+## Capability probes and current gaps
 
-- `.github/workflows/ci.yml` runs every `tests/test-*.sh` script on pull requests and pushes to `main` (`.github/workflows/ci.yml:1-23`).
-- Focused harnesses cover OpenWiki generation, installer retirement cleanup, the Claude drift-net, Herdr home/board validation, and work-session adoption, but they do not replace live GitHub metadata and branch-protection checks, graphical browser behavior, or Herdr behavior.
-- Installer behavior has a wide user-level blast radius despite careful refusal logic.
-- Historical Backlog documents include obsolete gate/orchestration architecture and can mislead search-driven agents.
+The on-demand C1–C6 probes under `tests/probes/` preserve dated evidence for protected-main merge/push rejection, managed-Backlog feedback, parallel-worktree isolation, usable PR handoff, and operation without live Herdr. They are intentionally outside CI's non-recursive `tests/test-*.sh` glob; read [`tests/probes/README.md`](../tests/probes/README.md) before running them because some require network access or mutate temporary remote/local state.
+
+- `.github/workflows/ci.yml` runs every top-level `tests/test-*.sh` script on pull requests and pushes to `main`, including engine and ratchet harnesses.
+- Focused harnesses cover OpenWiki generation, mounted dispatch profiles, the Change/board/status/watch engines, Pi and Claude drift-nets, and Herdr adapters, but they do not replace live GitHub/branch-protection probes, graphical browser behavior, or real Herdr interaction.
+- Machine bootstrap still changes user-level links and runtime configuration; verify it deliberately rather than treating shell harnesses as proof of a live installation.
+- Historical Backlog documents include obsolete gate/orchestration architecture and can mislead search-driven Actors.
 
 These are constraints to account for, not authorization to add a broad framework. Add the smallest Check that directly observes the behavior being changed.

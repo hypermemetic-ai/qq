@@ -22,7 +22,7 @@ Use these capitalized terms consistently. The canonical definitions and behavior
 
 Start from the assignment and context already supplied, and read [`CONCEPTS.md`](../CONCEPTS.md) before working. Resolve only missing context through the surfaces relevant to the question: a Backlog Task or document for durable intent and decisions, this wiki for the landed system, codebase-memory for relational code questions, and source plus fresh Checks for verification. Backlog records are read and changed through its CLI; source and fresh Checks outrank derived knowledge.
 
-For a genuinely new work item, the default-on `grilling` Skill belongs only to the operator-facing accountable owner, unless the operator opts out or the action is impact-free and mechanical. Spawned, delegated, review, research, maintainer, and event-triggered Actors instead treat bounded assignments as aligned; they execute within scope and return new consequential decisions or scope gaps to their assigning or owning Actor. Do not restart grilling merely to continue already aligned work. Invoke other Skills only when their triggers and the agent's role match the assignment; each Skill owns its procedure and exceptions.
+For a genuinely new work item, the default `grilling` alignment brief belongs only to the operator-facing accountable owner, unless the operator explicitly opts out. Every Change must bind its consequential decisions to cited dispositions in the owning Task's decision ledger before Repository mutation; a genuinely open decision escalates to the full interview. Spawned, delegated, review, research, maintainer, and event-triggered Actors instead treat bounded assignments as aligned; they execute within scope and return new consequential decisions or scope gaps to their assigning or owning Actor. Do not restart grilling merely to continue already aligned work. Invoke other Skills only when their triggers and the Actor's role match the assignment; each Skill owns its procedure and exceptions.
 
 The shared operating floor is in [`AGENTS.md`](../AGENTS.md); it does not mandate blanket Backlog, OpenWiki, source, or Skill searches for every assignment.
 
@@ -30,7 +30,7 @@ The shared operating floor is in [`AGENTS.md`](../AGENTS.md); it does not mandat
 
 - [Architecture and knowledge model](architecture.md) — system boundaries, ownership, repository surfaces, and extension points.
 - [Workflows](workflows.md) — orientation, Task-to-Change delivery, review, research, diagnosis, UAT, and knowledge capture.
-- [Skill catalog](skills.md) — triggers, responsibilities, and change guidance for the eleven current Skills.
+- [Skill catalog](skills.md) — triggers, responsibilities, and change guidance for the thirteen current Skills.
 - [Operations](operations.md) — installation, cockpit, Herdr workspace movement, and knowledge maintenance.
 - [Verification](verification.md) — required checks, review sequence, coverage gaps, and risk-focused validation.
 
@@ -43,7 +43,7 @@ The shared operating floor is in [`AGENTS.md`](../AGENTS.md); it does not mandat
 - the root-level Backlog `Ideas` document — verbatim idea capture.
 - Backlog `plans`, `research`, and `solutions` document categories — historical designs, cited evidence, and reusable lessons.
 - `cockpit/` — source-controlled human terminal configuration.
-- `bin/` — installer, the guarded OpenWiki command, the Claude drift-net, and Herdr pane movement.
+- `bin/` — stateless Change, dispatch, status, board, OpenWiki, and Herdr adapters mounted on `PATH` by the cockpit shell surface.
 
 ## Authority and historical context
 

@@ -19,7 +19,7 @@ This boundary is the result of an explicit simplification. Recent history remove
 
 ### Policy and vocabulary
 
-[`AGENTS.md`](../AGENTS.md) defines the shared operating floor: stay within the agreement, expose material uncertainty, keep scope surgical, use evidence, and preserve the operator's authority. It says to start from supplied assignment context and use available knowledge surfaces only to resolve what is missing; triggered Skills own their detailed procedures and actor boundaries. Linked Repositories may expose the same instructions through a root-level `AGENTS.md` symlink. [`CONCEPTS.md`](../CONCEPTS.md) keeps terms stable across conversation, Tasks, source, and documentation.
+[`AGENTS.md`](../AGENTS.md) defines the shared operating floor: stay within the agreement, expose material uncertainty, keep scope surgical, use evidence, and preserve the operator's authority. It says to start from supplied assignment context and use available knowledge surfaces only to resolve what is missing; triggered Skills own their detailed procedures and Actor boundaries. Linked Repositories may expose the same instructions through a root-level `AGENTS.md` symlink. [`CONCEPTS.md`](../CONCEPTS.md) is the canonical vocabulary across qq and linked Repositories; Repository-specific terms may be appended in a root `CONCEPTS.local.md` but must not redefine shared terms.
 
 ### Stateless capabilities
 
@@ -44,7 +44,9 @@ OpenWiki and codebase-memory are upstream tools, not vendored qq subsystems. Der
 
 ### Operator layer
 
-`cockpit/` stores the human terminal surface for Herdr, yazi, broot, Glow, and shell navigation. `bin/install.sh` live-links cockpit files, Skills, and retained commands into user configuration and removes obsolete qq-owned OpenWiki protocol/userscript plumbing. Each Repository has one persistent Herdr **project home** bound to its sole primary `main` checkout; linked-worktree **work sessions** grouped beneath it contain Change-specific interaction. Review and research use fresh non-interactive Codex processes with OS read-only access; process exit retires them, while `agent-messaging` is limited to already-live cross-runtime coordination and operator notifications (`skills/code-review/SKILL.md:54-84`; `skills/research/SKILL.md:8-35`; `skills/agent-messaging/SKILL.md:8-18`). After a verified merged disposition and primary-`main` synchronization, `deliver-change` retires the Change work session, linked checkout, and branch at source only when strict cleanliness, ancestry, ownership, pane, and focus rails all pass; a tripped rail or any other terminal disposition preserves them for operator inspection (`skills/deliver-change/SKILL.md:121-188`). `bin/qq-herdr-home` validates the home boundary and its dedicated single-pane Backlog-board tab, `bin/qq-herdr-pull` supports operator pane pulling and fail-fast work-session adoption, and `bin/qq-herdr-snap` gives the operator a best-effort orchestrator/bounce navigation shortcut (`bin/qq-herdr-home:38-140`; `bin/qq-herdr-pull:69-112`; `bin/qq-herdr-snap`). Herdr organizes live interaction; Git worktrees remain the source of checkout identity and state.
+`cockpit/` stores the human terminal surface for Herdr, yazi, broot, Glow, Pi, and shell navigation. Installation is by construction: runtimes mount the `skills/` root, Codex profiles resolve through fixed symlinks, and sourcing `cockpit/shell/file-navigation.bash` puts this checkout's `bin/` on `PATH`; fixed-path cockpit files are linked once at machine bootstrap (`README.md:49-167`). Each Repository has one persistent Herdr **project home** bound to its sole primary `main` checkout. Its accountable Pi session stays there to own alignment, Task and Change judgment, work orders, verdicts, UAT, and handoff; bounded implementation, fresh review, and research run Codex-first through `qq-dispatch` in linked-worktree **work sessions**. Claude remains a rollback runtime (`README.md:56-135`; `CONCEPTS.md:54-66`).
+
+The retained commands are narrow stateless adapters rather than a workflow service. `qq-change` lands and retires Changes through observable Git, GitHub, and Herdr rails; `qq-dispatch` applies role profiles, timeout and artifact contracts; `qq-status` publishes best-effort delegate glass; `qq-pr-watch` emits one terminal disposition wake; and `qq-board` reconciles untracked Task records from branch/worktree/PR evidence before rendering the board (`bin/qq-change`; `bin/qq-dispatch`; `bin/qq-status`; `bin/qq-pr-watch`; `bin/qq-board`). `qq-herdr-home inspect` validates only Repository/main/home identity, while `focus-board` additionally requires and focuses the unique single-pane board tab. `qq-herdr-pull` remains an operator pane-movement tool; the accountable session is never adopted into a work session. `qq-herdr-snap` provides best-effort orchestrator/bounce navigation. Herdr organizes live interaction; Git worktrees remain the source of checkout identity and state.
 
 ## Data and state boundaries
 
@@ -54,7 +56,7 @@ qq has no application database or internal service API. Durable state is intenti
 - Backlog owns Task, authored-document, and decision records.
 - Herdr workspaces and named sessions hold live terminal placement, not Repository truth.
 - Agent runtime configuration and credentials live outside the Repository.
-- Temporary OpenWiki instruction-file snapshots are durable external state under `${XDG_STATE_HOME:-$HOME/.local/state}/qq/openwiki/`, keyed by Git common directory so a later invocation can safely restore the recorded originating worktree after interruption (`bin/qq-openwiki:64-101`, `108-189`, `214-253`).
+- `qq-openwiki` uses the invocation's Git `HEAD` as its setup baseline. A per-common-directory runtime lock prevents concurrent writers; setup paths must match `HEAD`, including ignored files, and cleanup restores everything outside `openwiki/**` from that baseline (`bin/qq-openwiki:37-107`).
 - OpenWiki credentials stay under `~/.openwiki/` and must never be committed.
 - codebase-memory’s graph is external and derived; indexing may need refresh after material branch or uncommitted changes.
 
@@ -62,13 +64,13 @@ qq has no application database or internal service API. Durable state is intenti
 
 ### Add or change a Skill
 
-Create or edit `skills/<name>/SKILL.md`, keep it stateless and trigger-driven, validate it with Codex’s `skill-creator` validator, then rerun `bash bin/install.sh`. The installer discovers Skill directories automatically and synchronizes qq-owned links for both Codex and Claude Code, pruning dead links in each runtime (`bin/install.sh:80-102`, `240-241`).
+Create or edit `skills/<name>/SKILL.md`, keep it stateless and trigger-driven, and validate it with Codex's `skill-creator` validator. Because Pi, Claude, and Codex mount the `skills/` root, additions, edits, and removals are live without a synchronization step (`README.md:51-80`; `CONCEPTS.md:107-114`).
 
 ### Add a command or cockpit surface
 
-Commands and cockpit files are explicitly linked in `bin/install.sh`; adding a file alone does not install it. Update `cockpit/README.md` when changing the human interaction surface. Preserve the installer’s refusal rule: it must not overwrite paths it does not manage. The installer also performs surgical retirement cleanup for qq-owned MIME, desktop-entry, and userscript artifacts while preserving unrelated user configuration (`bin/install.sh:59-78`, `122-257`; `tests/test-install-cleanup.sh`).
+Commands under `bin/` become live through the shell surface's `$QQ_HOME/bin` `PATH` entry. Fixed-path cockpit configuration is a day-0 link set: update the bootstrap instructions and `cockpit/README.md` only when adopting a new tool or path, not for ordinary content changes (`README.md:142-163`).
 
-Claude Code loads `.claude/settings.json`, which invokes `bin/qq-claude-guard` as a narrow `PreToolUse` drift-net. It blocks recognizable `gh pr merge` shell invocations and direct edit-tool writes to Backlog-managed Markdown, but explicitly does not claim to be a security boundary or cover shell-mediated Backlog writes. Treat it as an accidental-violation adapter with declared limits, not authoritative resource-layer enforcement (`bin/qq-claude-guard:4-31`, `808-929`; `CONCEPTS.md:59-63`).
+Claude's `.claude/settings.json` uses native deny patterns for `gh pr merge` and invokes `bin/qq-claude-backlog-hook` only for structured write tools targeting this checkout's `backlog/`; it deliberately does not parse Bash. Pi's `cockpit/pi/qq-backlog-guard.ts` likewise intercepts only built-in `write` and `edit` targets after path normalization. Both are local-feedback drift-nets with declared limits, not security boundaries (`.claude/settings.json`; `bin/qq-claude-backlog-hook`; `cockpit/pi/qq-backlog-guard.ts`; `CONCEPTS.md:94-98`).
 
 ### Add knowledge
 
@@ -81,12 +83,12 @@ present-system description belongs in this wiki.
 
 ### Support another runtime
 
-Keep content runtime-neutral and expose it through each runtime’s native instruction and skill discovery. The installer currently wires Skills into Codex (`~/.codex/skills`) and Claude Code (`~/.claude/skills`); any additional runtime needs equivalent native wiring rather than a new qq-owned compatibility engine (`bin/install.sh:80-102`, `240-241`).
+Keep content runtime-neutral and expose it through each runtime's native instruction and Skill discovery. Pi, Claude, and Codex each mount the same `skills/` root; a new runtime needs equivalent native root mounting rather than per-Skill mirroring or a qq-owned compatibility engine. Role-specific execution controls belong in mounted runtime profiles and narrow dispatch adapters, not duplicated Skill trees.
 
 ## Change hazards
 
 - Historical plans can look operational but describe deleted machinery; check current source before following them.
-- Installing changes user-level configuration and hooks; test ownership/refusal behavior carefully.
+- Machine bootstrap changes user-level links and runtime configuration; test path identity, mounted-profile refusal, and runtime-specific drift-net behavior carefully.
 - Knowledge updates can drift from source. Ordinary source agents consume
   OpenWiki but do not maintain it; the narrowly triggered
   `openwiki-maintainer` Skill is the sole procedural authority.
