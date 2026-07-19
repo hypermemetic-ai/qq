@@ -2,9 +2,9 @@
 # qq-herdr-snap — snap to the preferred orchestrator agent pane.
 #
 # Bound as a detached custom key (alt+o). First press jumps to the snap
-# target: the claude agent in the focused workspace, then the repo project
-# home's claude agent, then the first focused-workspace agent in sidebar
-# order (delegate-only spaces have no local claude).
+# target: the Repository project home's pi agent, that home's claude fallback,
+# the focused workspace's pi or claude agent when no home runtime exists, then
+# the first focused-workspace agent in sidebar order.
 # Pressing it again while already there bounces back to the pane you came
 # from, so one key flips orchestrator<->elsewhere. State is keyed by the
 # target workspace so bounce-back also works after a cross-space snap.
@@ -54,48 +54,44 @@ if ! jq -e '.result.agents | type == "array"' <<<"$agents" >/dev/null 2>&1; then
   die "cannot parse agent list"
 fi
 
-home_workspace=""
-if ! has_local_orchestrator="$(jq -r --arg ws "$workspace" '
-  any(.result.agents[]; .workspace_id == $ws and .agent == "claude")
-' <<<"$agents" 2>/dev/null)"; then
-  die "cannot parse agent list"
+workspaces="$({ "$HERDR" workspace list 2>/dev/null || true; })"
+if ! jq -e '.result.workspaces | type == "array"' \
+  <<<"$workspaces" >/dev/null 2>&1; then
+  die "cannot parse workspace list"
 fi
-if [ "$has_local_orchestrator" != true ]; then
-  workspaces="$({ "$HERDR" workspace list 2>/dev/null || true; })"
-  if ! jq -e '.result.workspaces | type == "array"' \
-    <<<"$workspaces" >/dev/null 2>&1; then
-    die "cannot parse workspace list"
-  fi
-  if ! home_workspace="$(jq -r --arg ws "$workspace" '
-    [
-      .result.workspaces as $workspaces
-      | $workspaces[]
-      | select(.workspace_id == $ws and .worktree != null)
-      | .worktree.repo_root as $repo_root
-      | select($repo_root != null and $repo_root != "")
-      | $workspaces[]
-      | select(
-          .worktree != null
-          and .worktree.is_linked_worktree == false
-          and .worktree.repo_root == $repo_root
-        )
-      | .workspace_id
-    ][0] // empty
-  ' <<<"$workspaces" 2>/dev/null)"; then
-    die "cannot parse workspace list"
-  fi
+if ! home_workspace="$(jq -r --arg ws "$workspace" '
+  [
+    .result.workspaces as $workspaces
+    | $workspaces[]
+    | select(.workspace_id == $ws and .worktree != null)
+    | .worktree.repo_root as $repo_root
+    | select($repo_root != null and $repo_root != "")
+    | $workspaces[]
+    | select(
+        .worktree != null
+        and .worktree.is_linked_worktree == false
+        and .worktree.repo_root == $repo_root
+      )
+    | .workspace_id
+  ][0] // empty
+' <<<"$workspaces" 2>/dev/null)"; then
+  die "cannot parse workspace list"
 fi
 
 if ! target_info="$(jq -r --arg ws "$workspace" --arg home "$home_workspace" '
   [.result.agents[] | select(.workspace_id == $ws)] as $focused
   | (
-      ($focused | map(select(.agent == "claude")) | .[0])
+      ([.result.agents[]
+        | select($home != "" and .workspace_id == $home and .agent == "pi")][0])
       // ([.result.agents[]
            | select($home != "" and .workspace_id == $home and .agent == "claude")][0])
+      // ($focused | map(select(.agent == "pi")) | .[0])
+      // ($focused | map(select(.agent == "claude")) | .[0])
       // $focused[0]
       // {}
     )
-  | [(.agent == "claude"), (.pane_id // ""), (.workspace_id // "")]
+  | [((.agent == "pi") or (.agent == "claude")),
+     (.pane_id // ""), (.workspace_id // "")]
   | @tsv
 ' <<<"$agents" 2>/dev/null)"; then
   die "cannot parse agent list"

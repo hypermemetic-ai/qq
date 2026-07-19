@@ -13,8 +13,8 @@ previous_workspace = "alt+up"
 next_workspace = "alt+down"
 previous_tab = "alt+left"
 next_tab = "alt+right"
-# alt+o is bound below as a keys.command: qq-herdr-snap snaps to the current
-# space's orchestrator agent; pressing it again there bounces back.
+# alt+o is bound below as a keys.command: qq-herdr-snap prefers the Repository
+# project-home pi orchestrator; pressing it again there bounces back.
 
 # Inverted j/k (operator preference): j = up, k = down — both for pane
 # focus and inside navigate mode. h/l unchanged.
@@ -59,9 +59,9 @@ description = "delegate batch status for this repo"
 width = 74
 height = 29
 
-# Snap to the current space's orchestrator agent (claude, else the first
-# agent in sidebar order); press again there to bounce back to where you
-# came from.
+# Snap to Repository project-home pi, its claude fallback, then focused-space
+# pi, claude, or the first agent in sidebar order; press again there to bounce
+# back to where you came from.
 [[keys.command]]
 key = "alt+o"
 type = "shell"

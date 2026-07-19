@@ -53,6 +53,24 @@ directly, so day-to-day changes — adding, editing, or removing a Skill or a
 command — are live everywhere with no install step. A machine is bootstrapped
 once.
 
+Pi 0.80.10 or newer is the accountable runtime in each Repository's project
+home. Install current Pi and Herdr's native Pi integration, then verify the Pi
+version is at least 0.80.10:
+
+```bash
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent@latest
+pi --version
+herdr integration install pi
+```
+
+Mount the qq Skill root directly into Pi. This is one root mount, so Skill
+membership stays live by construction:
+
+```bash
+mkdir -p ~/.pi/agent
+ln -sT "$HOME/projects/qq/skills" "$HOME/.pi/agent/skills"
+```
+
 Mount the Skill set for Claude Code and Codex:
 
 ```bash
@@ -73,6 +91,48 @@ ln -s "$HOME/projects/qq/codex-profiles/qq-researcher.config.toml" "$HOME/.codex
 changes stay live without a copy step. The profiles carry sandbox and Skill
 settings; implementer dispatch adds the MCP-off override, while reviewer and
 researcher dispatches retain the user's configured MCP servers.
+
+Start Pi and use `/login` to select Kimi For Coding and store the single
+dedicated private `pi-qq` credential. Pi writes it to
+`~/.pi/agent/auth.json`; never commit or report its values, and keep it private:
+
+```bash
+chmod 600 ~/.pi/agent/auth.json
+```
+
+Merge these defaults into `~/.pi/agent/settings.json`. Replace the example
+extension path with the output of this command; the JSON value must be an
+absolute path, not a `$HOME` expression.
+
+```bash
+readlink -f "$HOME/projects/qq/cockpit/pi/qq-backlog-guard.ts"
+```
+
+```json
+{
+  "defaultProvider": "kimi-coding",
+  "defaultModel": "k3",
+  "defaultThinkingLevel": "max",
+  "extensions": [
+    "/home/USER/projects/qq/cockpit/pi/qq-backlog-guard.ts"
+  ]
+}
+```
+
+These defaults select the native `kimi-coding/k3` route with max thinking.
+
+The Repository extension gives local feedback when Pi's built-in `write` or
+`edit` targets the normalized `backlog/` path of the checkout containing
+Pi's current directory. It leaves reads, Bash, ordinary paths, and Backlog CLI
+commands alone. This path-only drift-net is not a security boundary and does
+not parse shell commands.
+
+The accountable Pi session stays in the Repository project home and owns
+alignment, Task and Change judgment, work orders, verdicts, UAT, and handoff.
+Bounded implementation, fresh review, and research remain Codex-first through
+`qq-dispatch`; do not add a Pi MCP server or Pi subagent package. Keep Claude
+Code installed and configured, including its Skill mount and Herdr integration,
+as rollback until Pi parity and operator UAT pass.
 
 On a machine migrating off the retired installer, remove the old per-skill
 link directories first (after checking they hold nothing but links into this

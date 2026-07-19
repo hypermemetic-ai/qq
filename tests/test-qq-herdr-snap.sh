@@ -61,9 +61,9 @@ chmod +x "$fake"
 export QQ_HERDR_BIN="$fake"
 export FAKE_LOG="$log"
 export XDG_RUNTIME_DIR="$tmp"
-# Sidebar order: codex first, claude second in "ws"; one agent elsewhere.
-export FAKE_AGENTS_DEFAULT='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":"ws","agent":"codex"},{"pane_id":"ws:p2","workspace_id":"ws","agent":"claude"},{"pane_id":"other:p1","workspace_id":"other","agent":"claude"}]}}'
-export FAKE_WORKSPACES_DEFAULT='{"result":{"workspaces":[{"workspace_id":"ws","worktree":null},{"workspace_id":"other","worktree":null}]}}'
+# Sidebar order: codex first, claude second, pi third in the project home.
+export FAKE_AGENTS_DEFAULT='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":"ws","agent":"codex"},{"pane_id":"ws:p2","workspace_id":"ws","agent":"claude"},{"pane_id":"ws:p3","workspace_id":"ws","agent":"pi"},{"pane_id":"other:p1","workspace_id":"other","agent":"claude"}]}}'
+export FAKE_WORKSPACES_DEFAULT='{"result":{"workspaces":[{"workspace_id":"ws","worktree":{"checkout_path":"/repo","is_linked_worktree":false,"repo_root":"/repo"}},{"workspace_id":"other","worktree":null}]}}'
 state_file="$tmp/qq-herdr-snap.ws.prev"
 home_state_file="$tmp/qq-herdr-snap.home.prev"
 
@@ -77,32 +77,54 @@ reset_fake() {
 # Dry run resolves target without focusing anything.
 reset_fake
 output="$(HERDR_PANE_ID=ws:p1 QQ_HERDR_SNAP_DRY=1 "$SNAP")"
-assert_equal 'current=ws:p1 workspace=ws target=ws:p2 prev=none' "$output"
+assert_equal 'current=ws:p1 workspace=ws target=ws:p3 prev=none' "$output"
 assert_file_not_matches "$log" '^agent focus '
 assert_file_not_matches "$log" '^tab focus '
 
-# Snap: prefers the claude agent in the focused workspace, stores the origin.
+# Snap: prefers project-home pi over Claude and sidebar order, stores the origin.
 reset_fake
 HERDR_PANE_ID=ws:p1 "$SNAP"
-grep -q '^agent focus ws:p2$' "$log"
+grep -q '^agent focus ws:p3$' "$log"
 assert_equal 'ws:p1' "$(cat "$state_file")" "state file should record the origin pane"
 
-# Without a local claude agent, snap to this repo's non-linked home claude,
-# then bounce back across workspaces using state keyed by the home target.
+# From linked work, prefer this Repository's project-home pi even when a local
+# pi and the home Claude appear earlier; bounce back using home-keyed state.
 reset_fake
-export FAKE_AGENTS_JSON='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":"ws","agent":"codex"},{"pane_id":"sibling:p2","workspace_id":"sibling","agent":"claude"},{"pane_id":"other:p2","workspace_id":"other","agent":"claude"},{"pane_id":"home:p2","workspace_id":"home","agent":"claude"}]}}'
+export FAKE_AGENTS_JSON='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":"ws","agent":"codex"},{"pane_id":"ws:p3","workspace_id":"ws","agent":"pi"},{"pane_id":"home:p2","workspace_id":"home","agent":"claude"},{"pane_id":"home:p3","workspace_id":"home","agent":"pi"},{"pane_id":"other:p2","workspace_id":"other","agent":"claude"}]}}'
 export FAKE_WORKSPACES_JSON='{"result":{"workspaces":[{"workspace_id":"ws","worktree":{"checkout_path":"/repo-work","is_linked_worktree":true,"repo_root":"/repo"}},{"workspace_id":"sibling","worktree":{"checkout_path":"/repo-sibling","is_linked_worktree":true,"repo_root":"/repo"}},{"workspace_id":"other","worktree":{"checkout_path":"/other","is_linked_worktree":false,"repo_root":"/other"}},{"workspace_id":"home","worktree":{"checkout_path":"/repo","is_linked_worktree":false,"repo_root":"/repo"}}]}}'
 HERDR_PANE_ID=ws:p1 "$SNAP"
-assert_file_contains "$log" 'agent focus home:p2'
+assert_file_contains "$log" 'agent focus home:p3'
 assert_equal 'ws:p1' "$(cat "$home_state_file")" "home state should record the origin pane"
 [ ! -e "$state_file" ] || fail "cross-space snap wrote state under the origin workspace"
 
 : >"$log"
 export FAKE_WORKSPACE=home FAKE_PREV_PANE=ws:p1 FAKE_PREV_AGENT_JSON='"codex"'
-HERDR_PANE_ID=home:p2 "$SNAP"
+HERDR_PANE_ID=home:p3 "$SNAP"
 assert_file_contains "$log" 'agent focus ws:p1'
 
-# Without a claude agent, falls back to sidebar order.
+# Project-home Claude is the fallback when that home has no pi, even if the
+# focused linked workspace has a pi.
+reset_fake
+export FAKE_AGENTS_JSON='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":"ws","agent":"codex"},{"pane_id":"ws:p3","workspace_id":"ws","agent":"pi"},{"pane_id":"home:p2","workspace_id":"home","agent":"claude"}]}}'
+export FAKE_WORKSPACES_JSON='{"result":{"workspaces":[{"workspace_id":"ws","worktree":{"checkout_path":"/repo-work","is_linked_worktree":true,"repo_root":"/repo"}},{"workspace_id":"home","worktree":{"checkout_path":"/repo","is_linked_worktree":false,"repo_root":"/repo"}}]}}'
+output="$(HERDR_PANE_ID=ws:p1 QQ_HERDR_SNAP_DRY=1 "$SNAP")"
+assert_equal 'current=ws:p1 workspace=ws target=home:p2 prev=none' "$output"
+
+# With no pi or Claude in the Repository home, prefer focused-workspace pi.
+reset_fake
+export FAKE_AGENTS_JSON='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":"ws","agent":"codex"},{"pane_id":"ws:p2","workspace_id":"ws","agent":"claude"},{"pane_id":"ws:p3","workspace_id":"ws","agent":"pi"},{"pane_id":"home:p9","workspace_id":"home","agent":"codex"}]}}'
+export FAKE_WORKSPACES_JSON='{"result":{"workspaces":[{"workspace_id":"ws","worktree":{"checkout_path":"/repo-work","is_linked_worktree":true,"repo_root":"/repo"}},{"workspace_id":"home","worktree":{"checkout_path":"/repo","is_linked_worktree":false,"repo_root":"/repo"}}]}}'
+output="$(HERDR_PANE_ID=ws:p1 QQ_HERDR_SNAP_DRY=1 "$SNAP")"
+assert_equal 'current=ws:p1 workspace=ws target=ws:p3 prev=none' "$output"
+
+# With no home runtime or focused pi, prefer focused-workspace Claude.
+reset_fake
+export FAKE_AGENTS_JSON='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":"ws","agent":"codex"},{"pane_id":"ws:p2","workspace_id":"ws","agent":"claude"},{"pane_id":"home:p9","workspace_id":"home","agent":"codex"}]}}'
+export FAKE_WORKSPACES_JSON='{"result":{"workspaces":[{"workspace_id":"ws","worktree":{"checkout_path":"/repo-work","is_linked_worktree":true,"repo_root":"/repo"}},{"workspace_id":"home","worktree":{"checkout_path":"/repo","is_linked_worktree":false,"repo_root":"/repo"}}]}}'
+output="$(HERDR_PANE_ID=ws:p1 QQ_HERDR_SNAP_DRY=1 "$SNAP")"
+assert_equal 'current=ws:p1 workspace=ws target=ws:p2 prev=none' "$output"
+
+# Without pi or Claude, falls back to focused-workspace sidebar order.
 reset_fake
 export FAKE_AGENTS_JSON='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":"ws","agent":"codex"},{"pane_id":"ws:p3","workspace_id":"ws","agent":"codex"}]}}'
 output="$(HERDR_PANE_ID=ws:p1 QQ_HERDR_SNAP_DRY=1 "$SNAP")"
@@ -142,14 +164,14 @@ assert_file_not_matches "$log" '^agent focus '
 reset_fake
 printf 'ws:p1\n' >"$state_file"
 export FAKE_PREV_PANE=ws:p1 FAKE_PREV_AGENT_JSON='"claude"'
-HERDR_PANE_ID=ws:p2 "$SNAP"
+HERDR_PANE_ID=ws:p3 "$SNAP"
 grep -q '^agent focus ws:p1$' "$log"
 
 # Bounce to a non-agent pane goes through tab focus.
 reset_fake
 printf 'ws:p1\n' >"$state_file"
 export FAKE_PREV_PANE=ws:p1 FAKE_PREV_AGENT_JSON=null
-HERDR_PANE_ID=ws:p2 "$SNAP"
+HERDR_PANE_ID=ws:p3 "$SNAP"
 grep -q '^tab focus prev:t1$' "$log"
 assert_file_not_matches "$log" '^agent focus '
 
@@ -157,14 +179,14 @@ assert_file_not_matches "$log" '^agent focus '
 reset_fake
 printf 'ws:p1\n' >"$state_file"
 export FAKE_PREV_PANE=ws:p1 FAKE_PREV_GONE=1
-HERDR_PANE_ID=ws:p2 "$SNAP"
+HERDR_PANE_ID=ws:p3 "$SNAP"
 grep -q '^notification show qq-snap --body previous pane is gone$' "$log"
 assert_file_not_matches "$log" '^agent focus '
 assert_file_not_matches "$log" '^tab focus '
 
 # Already on the orchestrator with no stored origin: notification only.
 reset_fake
-HERDR_PANE_ID=ws:p2 "$SNAP"
+HERDR_PANE_ID=ws:p3 "$SNAP"
 grep -q '^notification show qq-snap --body already on the orchestrator$' "$log"
 assert_file_not_matches "$log" '^agent focus '
 
@@ -173,6 +195,6 @@ reset_fake
 export FAKE_CURRENT_PANE=ws:p1
 env -u HERDR_PANE_ID "$SNAP"
 grep -q '^pane current --current$' "$log"
-grep -q '^agent focus ws:p2$' "$log"
+grep -q '^agent focus ws:p3$' "$log"
 
 printf 'test-qq-herdr-snap: pass\n'
