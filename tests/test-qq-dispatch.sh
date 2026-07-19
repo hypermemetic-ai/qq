@@ -231,6 +231,23 @@ args = Path(sys.argv[1]).read_bytes().split(b"\0")
 assert b"--add-dir" not in args
 PY
 
+# Inherited Git repository selection cannot turn a non-Git root into a grant.
+: >"$FAKE_CODEX_LOG"
+(
+  export GIT_DIR="$primary_repo/.git"
+  run_engine 0 implementer \
+    --root "$non_git_root" --brief "$brief" \
+    --output "$tmp/non-git-env-leak-envelope"
+)
+jq -e '.state.writable_roots == []' "$tmp/result.json" >/dev/null
+python3 - "$FAKE_CODEX_LOG" <<'PY'
+from pathlib import Path
+import sys
+
+args = Path(sys.argv[1]).read_bytes().split(b"\0")
+assert b"--add-dir" not in args
+PY
+
 # Read-only roles receive and report no writable roots, even for a worktree.
 for read_only_role in reviewer researcher; do
   : >"$FAKE_CODEX_LOG"
@@ -254,6 +271,52 @@ args = Path(sys.argv[1]).read_bytes().split(b"\0")
 assert b"--add-dir" not in args
 PY
 done
+
+# Read-only roles do not resolve Git, while implementer dispatch still requires
+# it. Each invalid override is scoped so it cannot leak into later assertions.
+invalid_git="$tmp/missing-git"
+for read_only_role in reviewer researcher; do
+  : >"$FAKE_CODEX_LOG"
+  (
+    export QQ_GIT_BIN="$invalid_git"
+    run_engine 0 inspect "$read_only_role" \
+      --root "$linked_worktree" --brief "$brief" \
+      --output "$tmp/$read_only_role-no-git-inspect-output"
+    [ ! -s "$FAKE_CODEX_LOG" ] \
+      || fail "$read_only_role no-Git inspect started Codex"
+    jq -e \
+      --arg role "$read_only_role" \
+      '.state.role == $role and .state.writable_roots == []' \
+      "$tmp/result.json" >/dev/null
+    run_engine 0 "$read_only_role" \
+      --root "$linked_worktree" --brief "$brief" \
+      --output "$tmp/$read_only_role-no-git-output"
+    jq -e \
+      --arg role "$read_only_role" \
+      '.state.role == $role and .state.writable_roots == []' \
+      "$tmp/result.json" >/dev/null
+  )
+  python3 - "$FAKE_CODEX_LOG" <<'PY'
+from pathlib import Path
+import sys
+
+args = Path(sys.argv[1]).read_bytes().split(b"\0")
+assert b"--add-dir" not in args
+PY
+done
+
+: >"$FAKE_CODEX_LOG"
+(
+  export QQ_GIT_BIN="$invalid_git"
+  run_engine 1 implementer \
+    --root "$linked_worktree" --brief "$brief" \
+    --output "$tmp/implementer-no-git-output"
+)
+jq -e '
+  .status == "error"
+  and (.message | contains("QQ_GIT_BIN must be an absolute executable file"))
+' "$tmp/result.json" >/dev/null
+[ ! -s "$FAKE_CODEX_LOG" ] || fail 'no-Git implementer started Codex'
 
 # Reviewer and researcher keep MCP on by omitting the override.
 run_engine 0 reviewer \

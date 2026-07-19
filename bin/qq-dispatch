@@ -102,32 +102,36 @@ done
 [ -d "$root" ] || qq_engine_error "dispatch root is not a directory: $root"
 root="$(cd "$root" && pwd -P)" \
   || qq_engine_error "cannot canonicalize dispatch root: $root"
-if ! qq_resolve_bin git; then
-  qq_engine_error "$QQ_BIN_ERROR"
-fi
-git_bin="$QQ_BIN_RESULT"
 writable_roots=()
-git_common_dir=""
-git_dir=""
-git_common_dir_found=false
-git_dir_found=false
-if git_common_dir="$(
-  "$git_bin" -C "$root" rev-parse \
-    --path-format=absolute --git-common-dir 2>/dev/null
-)"; then
-  git_common_dir_found=true
-fi
-if git_dir="$(
-  "$git_bin" -C "$root" rev-parse \
-    --path-format=absolute --git-dir 2>/dev/null
-)"; then
-  git_dir_found=true
-fi
-if [ "$git_common_dir_found" = true ] && [ -n "$git_common_dir" ]; then
-  writable_roots+=("$git_common_dir")
-  if [ "$git_dir_found" = true ] && [ -n "$git_dir" ] \
-    && [ "$git_dir" != "$git_common_dir" ]; then
-    writable_roots+=("$git_dir")
+if [ "$role" = implementer ]; then
+  if ! qq_resolve_bin git; then
+    qq_engine_error "$QQ_BIN_ERROR"
+  fi
+  git_bin="$QQ_BIN_RESULT"
+  git_common_dir=""
+  git_dir=""
+  git_common_dir_found=false
+  git_dir_found=false
+  if git_common_dir="$(
+    env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE \
+      "$git_bin" -C "$root" rev-parse \
+      --path-format=absolute --git-common-dir 2>/dev/null
+  )"; then
+    git_common_dir_found=true
+  fi
+  if git_dir="$(
+    env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE \
+      "$git_bin" -C "$root" rev-parse \
+      --path-format=absolute --git-dir 2>/dev/null
+  )"; then
+    git_dir_found=true
+  fi
+  if [ "$git_common_dir_found" = true ] && [ -n "$git_common_dir" ]; then
+    writable_roots+=("$git_common_dir")
+    if [ "$git_dir_found" = true ] && [ -n "$git_dir" ] \
+      && [ "$git_dir" != "$git_common_dir" ]; then
+      writable_roots+=("$git_dir")
+    fi
   fi
 fi
 if [ ! -f "$brief" ] || [ ! -r "$brief" ]; then
@@ -250,9 +254,6 @@ skills or delegate. Your final message is the findings report."
     ;;
 esac
 
-if [ "$role" != implementer ]; then
-  writable_roots=()
-fi
 writable_roots_json="$(
   "$QQ_ENGINE_JQ" -cn --args '$ARGS.positional' "${writable_roots[@]}"
 )"
