@@ -1,0 +1,102 @@
+check: 1. Reviewer/researcher read-only confinement
+verdict: INCONCLUSIVE-UNDER-SUBSTRATE
+boundary: Every filesystem target first succeeded from the pilot parent inside Codex's allowed worktree/Git/tmp boundary and was then denied after crossing native Landstrip. Codex rejected the loopback listener itself, so the network subcase cannot be attributed.
+unresolved-risk: Codex also blocked the loopback control, so the network denial could not be attributed.
+observations:
+{
+  "outerBaselines": [
+    {
+      "path": "<WORKTREE>/.qq-pilot-baseline-2",
+      "ok": true
+    },
+    {
+      "path": "<GIT_COMMON_DIR>/.qq-pilot-baseline-2",
+      "ok": true
+    },
+    {
+      "path": "<GIT_WORKTREE_DIR>/.qq-pilot-baseline-2",
+      "ok": true
+    },
+    {
+      "path": "<OUTSIDE_TEMP_PROBE>",
+      "ok": true
+    }
+  ],
+  "loopbackBaseline": {
+    "connected": false,
+    "error": "listen EPERM: operation not permitted 127.0.0.1"
+  },
+  "reviewer": {
+    "exitCode": 0,
+    "policy": "qq-pilot-reviewer-read-only-v1",
+    "attempts": {
+      "type": "qq_pilot_report",
+      "scenario": "boundary-readonly",
+      "repositoryWrite": {
+        "ok": false,
+        "errno": 13
+      },
+      "gitCommonWrite": {
+        "ok": false,
+        "errno": 13
+      },
+      "gitWorktreeWrite": {
+        "ok": false,
+        "errno": 13
+      },
+      "runtimeWrite": {
+        "ok": false,
+        "errno": 13
+      },
+      "escapeWrite": {
+        "ok": false,
+        "errno": 13
+      },
+      "decoyWrite": {
+        "ok": false,
+        "errno": 22
+      },
+      "loopbackConnect": {
+        "ok": false,
+        "errno": 22
+      }
+    }
+  },
+  "researcher": {
+    "exitCode": 0,
+    "policy": "qq-pilot-researcher-read-only-v1",
+    "attempts": {
+      "type": "qq_pilot_report",
+      "scenario": "boundary-readonly",
+      "repositoryWrite": {
+        "ok": false,
+        "errno": 13
+      },
+      "gitCommonWrite": {
+        "ok": false,
+        "errno": 13
+      },
+      "gitWorktreeWrite": {
+        "ok": false,
+        "errno": 13
+      },
+      "runtimeWrite": {
+        "ok": false,
+        "errno": 13
+      },
+      "escapeWrite": {
+        "ok": false,
+        "errno": 13
+      },
+      "decoyWrite": {
+        "ok": false,
+        "errno": 22
+      },
+      "loopbackConnect": {
+        "ok": false,
+        "errno": 22
+      }
+    }
+  },
+  "externalEgress": "not attempted; the work order forbids network use and the outer substrate blocks egress"
+}

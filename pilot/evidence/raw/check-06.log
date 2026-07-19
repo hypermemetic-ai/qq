@@ -1,0 +1,192 @@
+check: 6. SIGINT/SIGTERM/pane-close signal cleanup
+verdict: PASS
+boundary: Signals target only each check's dedicated timeout leader. SIGHUP is the Herdr-pane-closure signal-path simulation; no live Herdr pane or unrelated PID is touched.
+observations:
+[
+  {
+    "signal": "SIGINT",
+    "runId": "check-06-sigint-12",
+    "exited": true,
+    "exitCode": 130,
+    "exitSignal": null,
+    "exitElapsedMs": 796,
+    "terminated": true,
+    "survivorsBeforeCleanup": [],
+    "stderr": "[qq-pilot] role=reviewer policy=qq-pilot-reviewer-read-only-v1 scope=read-only boundary=landstrip landstrip=landstrip 0.17.30 timeout=30s\n",
+    "observed": [
+      {
+        "name": "pi",
+        "pidObserved": true,
+        "commandClass": "pi",
+        "terminatedBeforeCleanup": true,
+        "terminated": true
+      },
+      {
+        "name": "tool",
+        "pidObserved": true,
+        "commandClass": "tool",
+        "terminatedBeforeCleanup": true,
+        "terminated": true
+      },
+      {
+        "name": "mcp",
+        "pidObserved": true,
+        "commandClass": "mcp",
+        "terminatedBeforeCleanup": true,
+        "terminated": true
+      },
+      {
+        "name": "orphan",
+        "pidObserved": true,
+        "commandClass": "orphan",
+        "terminatedBeforeCleanup": true,
+        "terminated": true
+      },
+      {
+        "name": "landstrip",
+        "pidObserved": true,
+        "commandClass": "landstrip",
+        "terminatedBeforeCleanup": true,
+        "terminated": true
+      },
+      {
+        "name": "tree-supervisor",
+        "pidObserved": true,
+        "commandClass": "tree-supervisor",
+        "terminatedBeforeCleanup": true,
+        "terminated": true
+      },
+      {
+        "name": "timeout",
+        "pidObserved": true,
+        "commandClass": "timeout",
+        "terminatedBeforeCleanup": true,
+        "terminated": true
+      }
+    ]
+  },
+  {
+    "signal": "SIGTERM",
+    "runId": "check-06-sigterm-13",
+    "exited": true,
+    "exitCode": 143,
+    "exitSignal": null,
+    "exitElapsedMs": 804,
+    "terminated": true,
+    "survivorsBeforeCleanup": [],
+    "stderr": "[qq-pilot] role=reviewer policy=qq-pilot-reviewer-read-only-v1 scope=read-only boundary=landstrip landstrip=landstrip 0.17.30 timeout=30s\n",
+    "observed": [
+      {
+        "name": "pi",
+        "pidObserved": true,
+        "commandClass": "pi",
+        "terminatedBeforeCleanup": true,
+        "terminated": true
+      },
+      {
+        "name": "tool",
+        "pidObserved": true,
+        "commandClass": "tool",
+        "terminatedBeforeCleanup": true,
+        "terminated": true
+      },
+      {
+        "name": "mcp",
+        "pidObserved": true,
+        "commandClass": "mcp",
+        "terminatedBeforeCleanup": true,
+        "terminated": true
+      },
+      {
+        "name": "orphan",
+        "pidObserved": true,
+        "commandClass": "orphan",
+        "terminatedBeforeCleanup": true,
+        "terminated": true
+      },
+      {
+        "name": "landstrip",
+        "pidObserved": true,
+        "commandClass": "landstrip",
+        "terminatedBeforeCleanup": true,
+        "terminated": true
+      },
+      {
+        "name": "tree-supervisor",
+        "pidObserved": true,
+        "commandClass": "tree-supervisor",
+        "terminatedBeforeCleanup": true,
+        "terminated": true
+      },
+      {
+        "name": "timeout",
+        "pidObserved": true,
+        "commandClass": "timeout",
+        "terminatedBeforeCleanup": true,
+        "terminated": true
+      }
+    ]
+  },
+  {
+    "signal": "SIGHUP",
+    "runId": "check-06-sighup-14",
+    "exited": true,
+    "exitCode": 129,
+    "exitSignal": null,
+    "exitElapsedMs": 813,
+    "terminated": true,
+    "survivorsBeforeCleanup": [],
+    "stderr": "[qq-pilot] role=reviewer policy=qq-pilot-reviewer-read-only-v1 scope=read-only boundary=landstrip landstrip=landstrip 0.17.30 timeout=30s\n",
+    "observed": [
+      {
+        "name": "pi",
+        "pidObserved": true,
+        "commandClass": "pi",
+        "terminatedBeforeCleanup": true,
+        "terminated": true
+      },
+      {
+        "name": "tool",
+        "pidObserved": true,
+        "commandClass": "tool",
+        "terminatedBeforeCleanup": true,
+        "terminated": true
+      },
+      {
+        "name": "mcp",
+        "pidObserved": true,
+        "commandClass": "mcp",
+        "terminatedBeforeCleanup": true,
+        "terminated": true
+      },
+      {
+        "name": "orphan",
+        "pidObserved": true,
+        "commandClass": "orphan",
+        "terminatedBeforeCleanup": true,
+        "terminated": true
+      },
+      {
+        "name": "landstrip",
+        "pidObserved": true,
+        "commandClass": "landstrip",
+        "terminatedBeforeCleanup": true,
+        "terminated": true
+      },
+      {
+        "name": "tree-supervisor",
+        "pidObserved": true,
+        "commandClass": "tree-supervisor",
+        "terminatedBeforeCleanup": true,
+        "terminated": true
+      },
+      {
+        "name": "timeout",
+        "pidObserved": true,
+        "commandClass": "timeout",
+        "terminatedBeforeCleanup": true,
+        "terminated": true
+      }
+    ]
+  }
+]

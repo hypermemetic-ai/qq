@@ -1,0 +1,46 @@
+check: 4. Strict Completion Envelope rejection
+verdict: PASS
+boundary: The staged pi-subagents parent validator owns this boundary. The deterministic child is launched directly so Landstrip's nested allowWrite defect cannot turn every structured-output case into the same filesystem failure.
+observations:
+{
+  "schema": "<WORKTREE>/pilot/manifests/completion-envelope.schema.json",
+  "outcomes": [
+    {
+      "scenario": "schema-valid",
+      "exitCode": 0,
+      "structuredOutput": {
+        "status": "complete",
+        "summary": "done",
+        "checks": [
+          {
+            "name": "probe",
+            "result": "pass"
+          }
+        ],
+        "filesChanged": [],
+        "openQuestions": [],
+        "unresolvedRisks": []
+      }
+    },
+    {
+      "scenario": "schema-invalid-json",
+      "exitCode": 1,
+      "error": "Failed to read structured output: Unexpected token 'o', \"not-json\" is not valid JSON"
+    },
+    {
+      "scenario": "schema-missing",
+      "exitCode": 1,
+      "error": "Missing structured_output call; this step has outputSchema and must finish by calling structured_output."
+    },
+    {
+      "scenario": "schema-empty-object",
+      "exitCode": 1,
+      "error": "Structured output validation failed: root: must have required properties status, summary, checks, filesChanged, openQuestions, unresolvedRisks"
+    },
+    {
+      "scenario": "schema-empty-fields",
+      "exitCode": 1,
+      "error": "Structured output validation failed: summary: must not have fewer than 1 characters; checks: must not have fewer than 1 items"
+    }
+  ]
+}
