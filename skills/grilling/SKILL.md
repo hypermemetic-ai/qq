@@ -1,6 +1,6 @@
 ---
 name: grilling
-description: Supplies the governance delta for the operator-facing accountable owner aligning genuinely new work: role gating, disposition and decision-ledger discipline, decision-record minting, and scope-change realignment. The all-terminal plan loop owns questions, review, approval, and the enactment gate. Non-owning Actors treat bounded assignments as aligned and return new decisions or scope gaps to their assigner.
+description: "Supplies the governance delta for the operator-facing accountable owner aligning genuinely new work: role gating, disposition and decision-ledger discipline, decision-record minting, and scope-change realignment. The all-terminal plan loop owns questions, review, approval, and the enactment gate. Non-owning Actors treat bounded assignments as aligned and return new decisions or scope gaps to their assigner."
 ---
 
 # Alignment governance
