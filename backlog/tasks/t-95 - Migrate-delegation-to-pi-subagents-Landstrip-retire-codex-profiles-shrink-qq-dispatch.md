@@ -3,10 +3,10 @@ id: T-95
 title: >-
   Migrate delegation to pi-subagents + Landstrip; retire codex-profiles, shrink
   qq-dispatch
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-07-19 16:41'
-updated_date: '2026-07-20 18:00'
+updated_date: '2026-07-20 18:41'
 labels: []
 dependencies:
   - T-94
@@ -20,16 +20,16 @@ ordinal: 27000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-PARKED 2026-07-19 (operator-visible): T-94 returned HOLD (operator-accepted); this migration stays parked pending reproduction outside codex confinement or a Landstrip fix plus a full 9-check rerun. Do not dispatch while parked.
+UNPARKED 2026-07-20: T-120 reran the full 9-check matrix outside codex confinement — all nine PASS, ADOPT verdict (PR #160); pilot/evidence/findings.md recommends removing the park note. Model-identity verification stays open as this ticket's own acceptance criterion (the rerun used a deterministic mock child and never exercised model selection).
 
-After the T-94 pilot returns adopt: move role definitions into pi-subagents agent manifests plus Landstrip policies; retire codex-profiles/; shrink bin/qq-dispatch to the thin adapter doc-56 names (role-to-policy selection, worktree/git-dir discovery, fail-closed sandbox start, process-group timeout and descendant cleanup, artifact compatibility); rewrite delegate-batch/code-review/research dispatch mechanics on pi-subagents strict schemas while preserving their judgment content (work orders, completion envelope semantics, fresh-context requirements, owner verification). Remove the herdr stage machinery rather than bridging it: delete qq-status's herdr report/notify paths; pi-subagents native artifacts/widgets are the delegate-visibility story.
+Move role definitions into pi-subagents agent manifests plus Landstrip policies; retire codex-profiles/; shrink bin/qq-dispatch to the thin adapter doc-56 names (role-to-policy selection, worktree/git-dir discovery, fail-closed sandbox start, process-group timeout and descendant cleanup, artifact compatibility); rewrite delegate-batch/code-review/research dispatch mechanics on pi-subagents strict schemas while preserving their judgment content (work orders, completion envelope semantics, fresh-context requirements, owner verification). Remove the herdr stage machinery rather than bridging it: delete qq-status's herdr report/notify paths; pi-subagents native artifacts/widgets are the delegate-visibility story.
 
 Decision ledger:
 - Migration target and named residuals: doc-56 (verified findings), ticketed per operator instruction in the T-93 follow-up session.
 - Profile symlink verification may disappear only when replacement policy loading is equally fail-closed: doc-56.
 - Herdr stage machinery removed, not bridged — no qq-status business-stage bridge rides the migration; accepted loss of out-of-transcript blocked-delegate notification: operator decision, asked-and-answered alignment exchange, 2026-07-19 alignment session ('kill the herdr machinery. I'm confident.'). Cockpit, topology scripts, and messaging out of scope.
 - 2026-07-19: decision-3 broadened — the detail-file protocol is deleted too (T-116, delete-now); the earlier 'detail-file protocol stays as the ambient record' line is superseded and removed above. Delegate visibility until this migration: transcripts + pi-intercom.
-- 2026-07-19: parked by T-94's operator-accepted HOLD; unblock conditions in the park note above.
+- 2026-07-20: unparked — T-120 (ADOPT, PR #160) met the park note's release condition: full 9-check rerun outside codex confinement, all PASS (pilot/evidence/findings.md).
 - 2026-07-19 (operator, project-home session): delegates stay on GPT-5.6 under the migration — pi-hosted, not codex — and do NOT inherit the project-home kimi-coding/k3 default (README settings). Recorded consequences: (1) every role manifest must pin the model explicitly — the T-94 pilot manifests set no model field, so children would silently resolve k3; (2) Pi child processes need an OpenAI-route credential — Pi private auth today holds only the pi-qq Kimi credential (T-91), while GPT-5.6 delegates currently authenticate through codex's ChatGPT login; (3) model identity must be verified by a fresh check in the unblocked T-94 rerun and carried into this ticket's acceptance criteria — the pilot's mock child never exercised model selection.
 <!-- SECTION:DESCRIPTION:END -->
 
