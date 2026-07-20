@@ -85,6 +85,9 @@ shift 2
 if [ -n "${FAKE_POLICY_SNAPSHOT:-}" ]; then
   cp "$policy" "$FAKE_POLICY_SNAPSHOT"
 fi
+jq -e '.filesystem.allowWrite | index("/dev/null") != null' \
+  "$policy" >/dev/null \
+  || { printf 'sandbox policy does not grant /dev/null\n' >&2; exit 77; }
 exec "$@"
 SH
 chmod +x "$fake_landstrip"
@@ -100,6 +103,7 @@ if [ -n "${FAKE_EXPECT_AUTH_SOURCE:-}" ]; then
   [ -r "$PI_CODING_AGENT_DIR/auth.json" ]
   cmp -s -- "$FAKE_EXPECT_AUTH_SOURCE" "$PI_CODING_AGENT_DIR/auth.json"
 fi
+sh -c 'git status >/dev/null'
 printf 'pi-live-event role=%s\n' "${PI_SUBAGENT_CHILD_AGENT:-missing}"
 
 case "${FAKE_PI_MODE:-done}" in
@@ -242,7 +246,7 @@ PY
          allowedDomains: ["api.openai.com", "auth.openai.com", "chatgpt.com"],
          deniedDomains: []
        }
-       and .filesystem.allowWrite == [$run, $temp]
+       and .filesystem.allowWrite == [$run, "/dev/null", $temp]
        and (.filesystem.allowWrite | index($runtime)) == null
        and .filesystem.denyWrite == [$auth]
       ' \
@@ -282,7 +286,7 @@ cmp -s -- "$auth_source" "$staged_auth" \
 assert_equal 600 "$(stat -c '%a' "$staged_auth")" \
   'staged auth mode is not 600'
 jq -e --arg run "$auth_run_dir" --arg auth "$staged_auth" --arg temp "$pi_subagent_temp_prefix" '
-  .filesystem.allowWrite == [$run, $temp]
+  .filesystem.allowWrite == [$run, "/dev/null", $temp]
   and .filesystem.denyWrite == [$auth]
 ' "$tmp/auth-policy.json" >/dev/null
 for auth_output in \
@@ -316,6 +320,7 @@ jq -e \
   --arg temp "$default_tmp/pi-subagent-*" '
     (.filesystem.allowWrite | index($run) != null)
     and (.filesystem.allowWrite | index($runtime) == null)
+    and (.filesystem.allowWrite | index("/dev/null") != null)
     and (.filesystem.allowWrite | index($temp) != null)
   ' \
   "$tmp/default-runtime-policy.json" >/dev/null
@@ -401,7 +406,7 @@ jq -e \
   --arg run "$linked_capture_run_dir" \
   --arg capture "$fixture_capture_path" \
   --arg temp "$pi_subagent_temp_prefix" \
-  '.filesystem.allowWrite == [$run, $capture, $temp]' \
+  '.filesystem.allowWrite == [$run, $capture, "/dev/null", $temp]' \
   "$tmp/linked-capture-policy.json" >/dev/null
 
 # Exercise the production shape: the canonical adapter and its policy sources
@@ -457,7 +462,7 @@ jq -e \
   --arg run "$canonical_capture_run_dir" \
   --arg capture "$canonical_capture_path" \
   --arg temp "$pi_subagent_temp_prefix" \
-  '.filesystem.allowWrite == [$run, $capture, $temp]' \
+  '.filesystem.allowWrite == [$run, $capture, "/dev/null", $temp]' \
   "$tmp/canonical-capture-policy.json" >/dev/null
 
 jq -s -e '
@@ -487,7 +492,7 @@ jq -e \
   --arg run "$capture_run_dir" \
   --arg capture "$capture_path" \
   --arg temp "$pi_subagent_temp_prefix" \
-  '.filesystem.allowWrite == [$run, $capture, $temp]' \
+  '.filesystem.allowWrite == [$run, $capture, "/dev/null", $temp]' \
   "$tmp/capture-policy.json" >/dev/null
 jq -s -e \
   --arg run "$capture_run_dir" \
@@ -499,7 +504,7 @@ jq -s -e \
   and $events[0].role == "reviewer"
   and $events[0].policyIdentity == "qq-reviewer-read-only-v1"
   and $events[0].access == "read-only"
-  and $events[0].allowWrite == [$run, $capture, $temp]
+  and $events[0].allowWrite == [$run, $capture, "/dev/null", $temp]
   and $events[0].structuredOutputCapture == $capture
   and $events[0].timeout == "2s"
   and $events[0].landstripVersion == "landstrip 0.17.30"
