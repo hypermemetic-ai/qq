@@ -8,7 +8,7 @@ description: Owns one-PR GitHub Flow delivery for every authorized Repository mo
 Retain responsibility for scope, decisions, evidence, and delivery state. Give
 delegated agents bounded assignments; do not hand them this lifecycle.
 
-`slopchop` is the operator's local diff-review surface; GitHub's web UI is for Checks and merge.
+`pi-hunk` is the operator's local diff-review checkpoint (`/hunk review`, submit to send notes, empty submit approves); GitHub's web UI is for Checks and merge.
 
 `rpiv-todo` is session scratch; durable intent lives in Backlog Tasks.
 
