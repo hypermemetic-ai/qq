@@ -402,7 +402,19 @@ aggregate_tree() {
   done
 }
 
+board_temp=
 reads_tmp=
+
+cleanup_materialization() {
+  case "$board_temp" in
+    "$board_parent"/.*) rm -rf -- "$board_temp" ;;
+  esac
+  if [ -n "$reads_tmp" ]; then
+    rm -f -- "$reads_tmp"
+    reads_tmp=
+  fi
+}
+trap cleanup_materialization EXIT
 
 read_changed_paths() {
   local change_kind="$1" offset="$2" changed_record changed_rel
@@ -412,7 +424,9 @@ read_changed_paths() {
   # distinguishable from an empty result; a failed read degrades loudly
   # (every record participates) instead of hiding Task truth.
   if [ -z "$reads_tmp" ]; then
-    reads_tmp="$(mktemp)" \
+    mkdir -p -- "$board_parent" \
+      || qq_engine_error "Could not create scratch-board parent: $board_parent"
+    reads_tmp="$(mktemp "$board_parent/.${repo_key}.reads.XXXXXX")" \
       || qq_engine_error 'Could not allocate the participation-read buffer.'
   fi
   : >"$reads_tmp"
@@ -432,7 +446,11 @@ for worktree_path in "${worktree_paths[@]}"; do
   [ "$worktree_path" = "$repo_root" ] && continue
   changed_paths=()
   participate_all=false
-  merge_base="$("$git_bin" -C "$worktree_path" merge-base HEAD refs/heads/main 2>/dev/null || true)"
+  # A failed merge-base read discards stdout: partial output is never
+  # trusted as a merge-base.
+  if ! merge_base="$("$git_bin" -C "$worktree_path" merge-base HEAD refs/heads/main 2>/dev/null)"; then
+    merge_base=
+  fi
   if [ -n "$merge_base" ]; then
     read_changed_paths committed 0 "$git_bin" -C "$worktree_path" diff --name-only -z \
       "$merge_base" HEAD -- backlog/tasks/
@@ -530,17 +548,6 @@ if [ "$mode" = inspect ] || [ "$dry_run" = true ]; then
 fi
 
 board_temp=
-
-cleanup_materialization() {
-  case "$board_temp" in
-    "$board_parent"/.*) rm -rf -- "$board_temp" ;;
-  esac
-  if [ -n "$reads_tmp" ]; then
-    rm -f -- "$reads_tmp"
-    reads_tmp=
-  fi
-}
-trap cleanup_materialization EXIT
 
 materialize_board() {
   local index task_id destination rewrite
