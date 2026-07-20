@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -52,7 +52,7 @@ const ctx = {
     },
   },
 };
-const call = (toolName, input, context = ctx) =>
+const call = async (toolName, input, context = ctx) =>
   handler({ toolName, input }, context);
 const assertAllowed = (result, message) =>
   assert.equal(result, undefined, message);
@@ -66,22 +66,22 @@ const assertBlocked = (result, message) => {
 };
 
 assertAllowed(
-  call("write", { path: "README.md" }),
+  await call("write", { path: "README.md" }),
   "idle phase blocked an ordinary write",
 );
 await command.handler("", ctx);
 assert.deepEqual(statuses.at(-1), ["plan-loop", "⏸ plan-loop"]);
 
 assertAllowed(
-  call("write", { path: ".pi/plans/plan.md" }),
+  await call("write", { path: ".pi/plans/plan.md" }),
   "planning blocked a relative plan write",
 );
 assertAllowed(
-  call("edit", { path: join(repo, ".pi/plans/plan.md") }),
+  await call("edit", { path: join(repo, ".pi/plans/plan.md") }),
   "planning blocked an absolute plan edit",
 );
 assertAllowed(
-  call(
+  await call(
     "write",
     { path: "../../.pi/plans/nested.md" },
     { ...ctx, cwd: join(repo, "src/deep") },
@@ -89,59 +89,100 @@ assertAllowed(
   "planning blocked a nested-cwd plan write",
 );
 assertAllowed(
-  call("write", { path: "@.pi/plans/agent-path.md" }),
+  await call("write", { path: "@.pi/plans/agent-path.md" }),
   "planning blocked a Pi @-prefixed plan write",
 );
 assertAllowed(
-  call("edit", { path: ".pi/plans/plan\u00a0one.md" }),
+  await call("edit", { path: ".pi/plans/plan one.md" }),
   "planning did not normalize a unicode-space plan path",
 );
+assertAllowed(
+  await call("write", { path: ".pi/plans/newdir/plan.md" }),
+  "planning blocked a plan write into a not-yet-existing plans subdir",
+);
 assertWriteBlocked(
-  call("write", { path: "README.md" }),
+  await call("write", { path: "README.md" }),
   "planning allowed an ordinary write",
 );
 assertWriteBlocked(
-  call("edit", { path: "backlog/tasks/t-118.md" }),
+  await call("edit", { path: "backlog/tasks/t-118.md" }),
   "planning allowed an edit outside .pi/plans",
 );
 assertWriteBlocked(
-  call("write", {}),
+  await call("write", {}),
   "planning allowed a write without a path",
 );
 
+// Review round 1, finding 2: a symlink inside .pi/plans must not escape the
+// gate — containment is decided on realpaths, not lexical prefixes. Both
+// branches are covered independently: a LIVE link (target exists, realpath
+// resolves, containment fails) and a DANGLING link (target absent, lstat
+// succeeds but realpath cannot resolve, refuse outright).
+await mkdir(join(repo, "backlog"), { recursive: true });
+await symlink(join(repo, "backlog"), join(repo, ".pi/plans/escape"));
+assertWriteBlocked(
+  await call("write", { path: ".pi/plans/escape/task.md" }),
+  "planning allowed a write through a live .pi/plans symlink escaping the root",
+);
+await symlink(
+  join(repo, "no-such-target"),
+  join(repo, ".pi/plans/dangling"),
+);
+assertWriteBlocked(
+  await call("write", { path: ".pi/plans/dangling/task.md" }),
+  "planning allowed a write through a dangling .pi/plans symlink",
+);
+
+// Convergence circuit-breaker (rounds 1–3): NO bash at all during planning —
+// every command is blocked, including formerly allowlisted read-only ones.
 for (const commandText of [
   "git status",
-  "ls | grep x",
-]) {
-  assertAllowed(
-    call("bash", { command: commandText }),
-    `planning blocked allowlisted bash: ${commandText}`,
-  );
-}
-for (const commandText of [
+  "cat README.md | head -5",
+  "git log --oneline",
+  "jq . package.json",
   "git commit -m x",
   "rm -f x",
   "echo hi > /tmp/x",
   "npm test",
   "ls && git status",
   "echo hi & pwd",
+  "sort -o /tmp/x README.md",
+  "git branch new-plan",
+  "git branch -D main",
+  "find . -delete",
+  "date -s 2026-01-01",
+  "uniq README.md /tmp/x.md",
+  "git diff --output=/tmp/x",
+  "git diff",
+  "file -C /tmp/magic",
+  "git log --output=/tmp/x",
+  "printf -v PATH /tmp; git log",
+  "ls",
+  "rg foo",
 ]) {
   assertBlocked(
-    call("bash", { command: commandText }),
-    `planning allowed non-allowlisted bash: ${commandText}`,
+    await call("bash", { command: commandText }),
+    `planning allowed bash: ${commandText}`,
   );
 }
 
-assertAllowed(call("read", { path: "README.md" }), "planning blocked read");
-assertAllowed(call("rg", { pattern: "x" }), "planning blocked allowlisted tool");
+assertAllowed(await call("read", { path: "README.md" }), "planning blocked read");
 assertAllowed(
-  call("ask_user_question", {}),
+  await call("fffind", { pattern: "x" }),
+  "planning blocked the fff search tool",
+);
+assertAllowed(
+  await call("ask_user_question", {}),
   "planning blocked ask_user_question",
 );
-assertAllowed(call("plan_loop_submit", {}), "planning blocked its submit tool");
-assertAllowed(call("hunk_review", {}), "planning blocked a hunk-prefixed tool");
+assertAllowed(await call("plan_loop_submit", {}), "planning blocked its submit tool");
+assertAllowed(await call("hunk_review", {}), "planning blocked a hunk-prefixed tool");
 assertBlocked(
-  call("browser_open", {}),
+  await call("rg", { pattern: "x" }),
+  "planning allowed a removed-allowlist tool",
+);
+assertBlocked(
+  await call("browser_open", {}),
   "planning allowed a non-allowlisted extension tool",
 );
 
@@ -152,7 +193,7 @@ for (const [toolName, input] of [
   ["browser_open", {}],
 ]) {
   assertAllowed(
-    gateToolCall({ toolName, input }, ctx, "executing"),
+    await gateToolCall({ toolName, input }, ctx, "executing"),
     `executing phase blocked ${toolName}`,
   );
 }
@@ -160,7 +201,7 @@ for (const [toolName, input] of [
 await command.handler("", ctx);
 assert.deepEqual(statuses.at(-1), ["plan-loop", undefined]);
 assertAllowed(
-  call("bash", { command: "npm test" }),
+  await call("bash", { command: "npm test" }),
   "idle phase blocked non-allowlisted bash",
 );
 

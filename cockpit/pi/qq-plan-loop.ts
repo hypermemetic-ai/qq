@@ -2,6 +2,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import {
   copyFile,
+  lstat,
   mkdir,
   readdir,
   realpath,
@@ -18,55 +19,18 @@ const execFileAsync = promisify(execFile);
 const PLANNING_WRITE_REASON =
   "plan-loop: planning phase — writes limited to .pi/plans/";
 const PLANNING_BASH_REASON =
-  "plan-loop: planning phase — bash command is not allowlisted";
-const ALLOWED_BASH_WORDS = new Set([
-  "grep",
-  "find",
-  "ls",
-  "cat",
-  "head",
-  "tail",
-  "wc",
-  "sort",
-  "uniq",
-  "jq",
-  "file",
-  "stat",
-  "echo",
-  "printf",
-  "pwd",
-  "date",
-  "git-status",
-  "git-diff",
-  "git-log",
-  "git-show",
-  "git-branch",
-  "git-rev-parse",
-  "git-ls-files",
-  "rg",
-  "fdfind",
-]);
-const ALLOWED_GIT_SUBCOMMANDS = new Set([
-  "status",
-  "diff",
-  "log",
-  "show",
-  "branch",
-  "rev-parse",
-  "ls-files",
-]);
-const FORBIDDEN_SEGMENT_WORDS = new Set([
-  "eval",
-  "xargs",
-  "sh",
-  "bash",
-  "sudo",
-]);
+  "plan-loop: planning phase — bash is disabled; use read, grep, find, ls, or fff tools";
+// Review convergence circuit-breaker (rounds 1–3): argument-level vetting of
+// an allowlist kept producing new writers (sort -o, git branch, find -delete,
+// date -s, uniq OUTPUT, git diff/log/show --output, file -C, git status index
+// refresh, printf -v). The invariant moved to a stronger layer: NO bash at
+// all during planning. Exploration uses pi's builtin read-only tools and the
+// fff search tools, so there is no command surface left to vet.
 const BASE_ALLOWED_TOOLS = new Set(["read", "bash", "grep", "find", "ls"]);
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 const ROUND_FILE = /^round-(\d+)\.md$/;
 const COMMAND_TIMEOUT_MS = 5_000;
-const POLL_INTERVAL_MS = 2_000;
+const POLL_INTERVAL_MS = 1_000;
 const POLL_TIMEOUT_MS = 30 * 60 * 1_000;
 
 function resolvePiPath(cwd, rawPath) {
@@ -104,39 +68,47 @@ function isWithin(root, target) {
   return target === root || target.startsWith(`${root}${sep}`);
 }
 
-export function isAllowedBashCommand(command) {
-  if (typeof command !== "string" || command.trim() === "") {
-    return false;
+// Review round 1 (finding 2): lexical `resolve` is not containment. A symlink
+// inside .pi/plans could escape the gate, so containment is decided on
+// realpaths — the plans root's realpath against the realpath of the target's
+// nearest existing ancestor (the target file itself may not exist yet).
+async function nearestExistingRealpath(target) {
+  let cursor = target;
+  const tail = [];
+  for (;;) {
+    try {
+      const real = await realpath(cursor);
+      let rebuilt = real;
+      for (let i = tail.length - 1; i >= 0; i -= 1) {
+        rebuilt = join(rebuilt, tail[i]);
+      }
+      return rebuilt;
+    } catch {
+      // realpath fails both for simply-absent components (walk up) and for
+      // dangling symlinks (a symlink whose target does not exist). lstat
+      // distinguishes them: a component that exists as a link but cannot be
+      // resolved is refused outright — containment is undecidable there.
+      let componentExists = false;
+      try {
+        await lstat(cursor);
+        componentExists = true;
+      } catch {
+        componentExists = false;
+      }
+      if (componentExists) {
+        throw new Error("plan-loop: plan path contains an unresolvable link");
+      }
+      const parent = parse(cursor).dir;
+      if (parent === cursor) {
+        throw new Error("plan-loop: could not resolve plan path target");
+      }
+      tail.push(parse(cursor).base);
+      cursor = parent;
+    }
   }
-
-  if (
-    command.includes(">") ||
-    command.includes("<(") ||
-    command.includes("$(") ||
-    command.includes("`") ||
-    command.includes("&")
-  ) {
-    return false;
-  }
-
-  const segments = command.split(/\|\||&&|[|;\r\n]/);
-  return segments.every((segment) => {
-    const words = segment.trim().split(/\s+/);
-    const firstWord = words[0];
-    if (firstWord === undefined || firstWord === "") {
-      return false;
-    }
-    if (FORBIDDEN_SEGMENT_WORDS.has(firstWord)) {
-      return false;
-    }
-    if (firstWord === "git") {
-      return ALLOWED_GIT_SUBCOMMANDS.has(words[1]);
-    }
-    return ALLOWED_BASH_WORDS.has(firstWord);
-  });
 }
 
-export function gateToolCall(event, ctx, phase) {
+export async function gateToolCall(event, ctx, phase) {
   if (phase !== "planning") {
     return undefined;
   }
@@ -150,28 +122,29 @@ export function gateToolCall(event, ctx, phase) {
 
     try {
       const plansRoot = resolve(root, ".pi/plans");
+      const realPlans = await realpath(plansRoot);
       const target = resolvePiPath(ctx.cwd, rawPath);
-      if (isWithin(plansRoot, target)) {
+      const realTarget = await nearestExistingRealpath(target);
+      if (isWithin(realPlans, realTarget)) {
         return undefined;
       }
     } catch {
-      // Invalid paths are refused rather than rewritten to another target.
+      // Unresolvable or symlink-escaping paths are refused, never rewritten.
     }
     return { block: true, reason: PLANNING_WRITE_REASON };
   }
 
   if (event.toolName === "bash") {
-    if (isAllowedBashCommand(event.input?.command)) {
-      return undefined;
-    }
     return { block: true, reason: PLANNING_BASH_REASON };
   }
 
   if (
     BASE_ALLOWED_TOOLS.has(event.toolName) ||
-    ALLOWED_BASH_WORDS.has(event.toolName) ||
     event.toolName === "ask_user_question" ||
     event.toolName === "plan_loop_submit" ||
+    event.toolName === "fffind" ||
+    event.toolName === "ffgrep" ||
+    event.toolName === "fff-multi-grep" ||
     event.toolName?.startsWith("hunk")
   ) {
     return undefined;
@@ -504,6 +477,7 @@ async function pollForReview(root, previousPath, snapshotPath, signal) {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   let sessionId;
   let lastComments = "";
+  let lastCommentsAt;
 
   while (Date.now() < deadline) {
     let sessions;
@@ -538,13 +512,36 @@ async function pollForReview(root, previousPath, snapshotPath, signal) {
     } else {
       record = findSessionById(sessions, sessionId);
       if (record === undefined) {
-        return { comments: lastComments, timedOut: false };
+        // The operator quit hunk. Review round 1 (finding 3): a note added in
+        // the final poll window could be missed, so attempt one last read
+        // before settling for the previous snapshot. The final-read catch
+        // must not swallow cancellation. Residual: hunk keeps comments only
+        // in the live daemon, so a final-note loss remains possible until
+        // hunk grows an export-on-quit; the decision text tells the operator
+        // how to re-state a missing note. capturedAt always carries the TRUE
+        // time of the comments being returned, never the return time.
+        try {
+          const finalComments = await readComments(root, sessionId, signal);
+          lastComments = finalComments;
+          lastCommentsAt = new Date().toISOString();
+        } catch (error) {
+          if (signal?.aborted) {
+            throw error;
+          }
+          // session is gone; keep the previous snapshot and its true timestamp
+        }
+        return {
+          comments: lastComments,
+          timedOut: false,
+          capturedAt: lastCommentsAt,
+        };
       }
     }
 
     if (sessionId !== undefined && record !== undefined) {
       try {
         lastComments = await readComments(root, sessionId, signal);
+        lastCommentsAt = new Date().toISOString();
       } catch (error) {
         if (signal?.aborted) {
           throw error;
@@ -588,6 +585,12 @@ export default function (pi) {
     handler: async (_args, ctx) => {
       if (phase === "idle") {
         roundState = { planPath: undefined, round: 0 };
+        // The write gate refuses while the plans root is unresolvable, so the
+        // plans home must exist (and be realpath-able) before planning starts.
+        const root = checkoutRoot(ctx.cwd);
+        if (root !== undefined) {
+          await mkdir(resolve(root, ".pi/plans"), { recursive: true });
+        }
         setPhase("planning", ctx);
       } else {
         roundState = { planPath: undefined, round: 0 };
@@ -706,9 +709,12 @@ export default function (pi) {
         return toolResult({
           round: roundState.round,
           comments: review.comments,
+          commentsCapturedAt: review.capturedAt,
           decision:
             "Changes requested. Apply the review comments verbatim, revise the plan, " +
-            "then call plan_loop_submit again.",
+            "then call plan_loop_submit again. Comments were captured when the review " +
+            "session closed; if the operator added a note in the final moment before " +
+            "exiting hunk, it may be missing — they can re-state it in chat.",
         });
       }
 
