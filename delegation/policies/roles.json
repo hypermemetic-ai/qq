@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "landstripVersion": "0.17.30",
+  "landstripVersion": "0.17.31",
   "roles": {
     "reviewer": {
       "access": "read-only",

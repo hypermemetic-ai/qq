@@ -124,7 +124,6 @@ path_is_within "$runtime_root" "$system_tmp" \
   || fail 68 "runtime root must stay beneath /tmp"
 [[ "$runtime_root" != "$system_tmp" ]] \
   || fail 68 "runtime root may not be all of /tmp"
-pi_subagent_temp_prefix="${launcher_tmp%/}/pi-subagent-*"
 
 structured_output_capture=""
 if [[ -n "${PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE:-}" ]]; then
@@ -133,6 +132,9 @@ if [[ -n "${PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE:-}" ]]; then
     || fail 68 "structured-output capture path must be absolute"
   [[ ! -L "$capture_input" ]] \
     || fail 68 "structured-output capture path may not be a symlink"
+  if [[ -e "$capture_input" && ! -f "$capture_input" ]]; then
+    fail 68 "structured-output capture path must be a regular file when it exists"
+  fi
   capture_parent_input="$(dirname -- "$capture_input")"
   [[ -d "$capture_parent_input" ]] \
     || fail 68 "structured-output capture directory is unavailable"
@@ -188,11 +190,13 @@ if [[ -n "${QQ_LANDSTRIP_BIN:-}" ]]; then
   fi
   landstrip_binary="$QQ_BIN_RESULT"
 else
+  [[ -n "${HOME:-}" ]] \
+    || fail 69 "HOME is required to resolve Landstrip from the operator Pi npm tree"
   if ! platform="$("$node_binary" -p 'process.platform' 2>/dev/null)" \
     || ! architecture="$("$node_binary" -p 'process.arch' 2>/dev/null)"; then
     fail 69 "cannot determine the Landstrip platform package"
   fi
-  landstrip_binary="$adapter_worktree/.pi/npm/node_modules/@landstrip/landstrip-${platform}-${architecture}/bin/landstrip"
+  landstrip_binary="${HOME%/}/.pi/agent/npm/node_modules/@landstrip/landstrip-${platform}-${architecture}/bin/landstrip"
 fi
 [[ "$landstrip_binary" == /* ]] \
   || fail 69 "Landstrip binary path must be absolute"
@@ -238,7 +242,7 @@ if ! metadata="$("$node_binary" "$policy_renderer" \
   --git-worktree-dir "$git_worktree_dir" \
   --runtime-root "$runtime_root" \
   --pi-auth "$pi_auth_path" \
-  --pi-subagent-temp-prefix "$pi_subagent_temp_prefix" \
+  --pi-subagent-temp-dir "$launcher_tmp" \
   --structured-output-capture "$structured_output_capture" \
   --policy "$policy_path" \
   --event-log "$event_log" \

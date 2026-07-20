@@ -15,10 +15,10 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 test_home="$tmp/home"
 parent_tmp="$tmp/parent-tmp"
-mkdir -p "$test_home" "$parent_tmp"
+pi_subagent_own_temp="$parent_tmp/pi-subagent-THIS"
+mkdir -p "$test_home" "$pi_subagent_own_temp"
 export HOME="$test_home"
 export TMPDIR="$parent_tmp"
-pi_subagent_temp_prefix="$parent_tmp/pi-subagent-*"
 
 for expected in \
   "$DISPATCH" \
@@ -46,6 +46,7 @@ for role in implementer reviewer researcher; do
 done
 jq -e '
   .schemaVersion == 1
+  and .landstripVersion == "0.17.31"
   and .roles.reviewer == {
     access: "read-only",
     policyIdentity: "qq-reviewer-read-only-v1"
@@ -74,7 +75,7 @@ cat >"$fake_landstrip" <<'SH'
 set -euo pipefail
 
 if [ "${1:-}" = --version ]; then
-  printf 'landstrip 0.17.30\n'
+  printf 'landstrip %s\n' "${FAKE_LANDSTRIP_VERSION:-0.17.31}"
   exit 0
 fi
 
@@ -88,6 +89,19 @@ fi
 jq -e '.filesystem.allowWrite | index("/dev/null") != null' \
   "$policy" >/dev/null \
   || { printf 'sandbox policy does not grant /dev/null\n' >&2; exit 77; }
+# decision-8 accepts open egress under Landstrip 0.17.31; policies must not
+# imply domain enforcement by emitting fields the native binary ignores.
+jq -e '
+  .network == {
+    allowNetwork: true,
+    allowLocalBinding: false,
+    allowAllUnixSockets: false,
+    allowUnixSockets: []
+  }
+  and (.network | has("allowedDomains") | not)
+  and (.network | has("deniedDomains") | not)
+' "$policy" >/dev/null \
+  || { printf 'sandbox policy misstates the accepted network posture\n' >&2; exit 77; }
 exec "$@"
 SH
 chmod +x "$fake_landstrip"
@@ -213,16 +227,16 @@ PY
       --arg run "$role_run_dir" \
       --arg runtime "$runtime_root" \
       --arg auth "$pi_config_dir/auth.json" \
-      --arg temp "$pi_subagent_temp_prefix" '
+      --arg temp "$pi_subagent_own_temp" '
         .enabled == true
         and .network == {
           allowNetwork: true,
           allowLocalBinding: false,
           allowAllUnixSockets: false,
-          allowUnixSockets: [],
-          allowedDomains: ["api.openai.com", "auth.openai.com", "chatgpt.com"],
-          deniedDomains: []
+          allowUnixSockets: []
         }
+        and (.network | has("allowedDomains") | not)
+        and (.network | has("deniedDomains") | not)
         and (.filesystem.allowWrite | sort) == (
           [$run, $worktree, $common, $worktree_git, "/dev/null", $temp]
           | unique
@@ -236,16 +250,16 @@ PY
       --arg run "$role_run_dir" \
       --arg runtime "$runtime_root" \
       --arg auth "$pi_config_dir/auth.json" \
-      --arg temp "$pi_subagent_temp_prefix" \
+      --arg temp "$pi_subagent_own_temp" \
       '.enabled == true
        and .network == {
          allowNetwork: true,
          allowLocalBinding: false,
          allowAllUnixSockets: false,
-         allowUnixSockets: [],
-         allowedDomains: ["api.openai.com", "auth.openai.com", "chatgpt.com"],
-         deniedDomains: []
+         allowUnixSockets: []
        }
+       and (.network | has("allowedDomains") | not)
+       and (.network | has("deniedDomains") | not)
        and .filesystem.allowWrite == [$run, "/dev/null", $temp]
        and (.filesystem.allowWrite | index($runtime)) == null
        and .filesystem.denyWrite == [$auth]
@@ -253,6 +267,19 @@ PY
       "$policy_snapshot" >/dev/null
   fi
 done
+
+# Pi-subagents creates this run's temp directories before spawn. A later run's
+# directory, created after these policies were rendered, must not be covered by
+# an earlier policy (there is deliberately no shared pi-subagent-* grant).
+pi_subagent_later_temp="$parent_tmp/pi-subagent-OTHER"
+mkdir "$pi_subagent_later_temp"
+for role in reviewer researcher implementer; do
+  jq -e --arg later "$pi_subagent_later_temp" '
+    (.filesystem.allowWrite | index($later)) == null
+    and all(.filesystem.allowWrite[]; endswith("/pi-subagent-*") | not)
+  ' "${role_policy_snapshots[$role]}" >/dev/null
+done
+rmdir "$pi_subagent_later_temp"
 
 for role in reviewer researcher implementer; do
   for sibling_role in reviewer researcher implementer; do
@@ -285,7 +312,7 @@ cmp -s -- "$auth_source" "$staged_auth" \
   || fail 'staged auth does not match the launcher auth'
 assert_equal 600 "$(stat -c '%a' "$staged_auth")" \
   'staged auth mode is not 600'
-jq -e --arg run "$auth_run_dir" --arg auth "$staged_auth" --arg temp "$pi_subagent_temp_prefix" '
+jq -e --arg run "$auth_run_dir" --arg auth "$staged_auth" --arg temp "$pi_subagent_own_temp" '
   .filesystem.allowWrite == [$run, "/dev/null", $temp]
   and .filesystem.denyWrite == [$auth]
 ' "$tmp/auth-policy.json" >/dev/null
@@ -317,13 +344,28 @@ default_run_dir="$(dirname -- "$default_config_dir")"
 jq -e \
   --arg run "$default_run_dir" \
   --arg runtime "$default_runtime" \
-  --arg temp "$default_tmp/pi-subagent-*" '
+  --arg temp_prefix "$default_tmp/pi-subagent-" '
     (.filesystem.allowWrite | index($run) != null)
     and (.filesystem.allowWrite | index($runtime) == null)
     and (.filesystem.allowWrite | index("/dev/null") != null)
-    and (.filesystem.allowWrite | index($temp) != null)
+    and all(.filesystem.allowWrite[]; startswith($temp_prefix) | not)
   ' \
   "$tmp/default-runtime-policy.json" >/dev/null
+
+platform="$(node -p 'process.platform')"
+architecture="$(node -p 'process.arch')"
+operator_landstrip="$HOME/.pi/agent/npm/node_modules/@landstrip/landstrip-${platform}-${architecture}/bin/landstrip"
+mkdir -p "$(dirname -- "$operator_landstrip")"
+cp "$fake_landstrip" "$operator_landstrip"
+(
+  cd "$ROOT"
+  env -u QQ_LANDSTRIP_BIN \
+    PI_SUBAGENT_CHILD_AGENT=reviewer \
+    PI_SUBAGENT_RUN_ID=operator-npm-resolution-smoke \
+    FAKE_POLICY_SNAPSHOT="$tmp/operator-npm-policy.json" \
+    "$DISPATCH" --json
+) >"$tmp/operator-npm.stdout" 2>"$tmp/operator-npm.stderr"
+assert_file_contains "$tmp/operator-npm.stdout" 'pi-live-event role=reviewer'
 
 # Exercise distinct common/per-worktree Git metadata even when the checkout
 # running this suite is a primary checkout, as it is in ordinary CI clones.
@@ -379,7 +421,7 @@ jq -e \
   --arg worktree_git "$fixture_git_dir" \
   --arg run "$linked_run_dir" \
   --arg runtime "$fixture_runtime" \
-  --arg temp "$pi_subagent_temp_prefix" '
+  --arg temp "$pi_subagent_own_temp" '
     .filesystem.allowWrite == [
       $run, $worktree, $common, $worktree_git, "/dev/null", $temp
     ]
@@ -405,7 +447,7 @@ linked_capture_run_dir="$(dirname -- "$linked_capture_config_dir")"
 jq -e \
   --arg run "$linked_capture_run_dir" \
   --arg capture "$fixture_capture_path" \
-  --arg temp "$pi_subagent_temp_prefix" \
+  --arg temp "$pi_subagent_own_temp" \
   '.filesystem.allowWrite == [$run, $capture, "/dev/null", $temp]' \
   "$tmp/linked-capture-policy.json" >/dev/null
 
@@ -437,7 +479,7 @@ jq -e \
   --arg worktree_git "$fixture_git_dir" \
   --arg run "$canonical_run_dir" \
   --arg runtime "$canonical_runtime" \
-  --arg temp "$pi_subagent_temp_prefix" '
+  --arg temp "$pi_subagent_own_temp" '
     .filesystem.allowWrite == [
       $run, $worktree, $common, $worktree_git, "/dev/null", $temp
     ]
@@ -461,14 +503,19 @@ canonical_capture_run_dir="$(dirname -- "$canonical_capture_config_dir")"
 jq -e \
   --arg run "$canonical_capture_run_dir" \
   --arg capture "$canonical_capture_path" \
-  --arg temp "$pi_subagent_temp_prefix" \
+  --arg temp "$pi_subagent_own_temp" \
   '.filesystem.allowWrite == [$run, $capture, "/dev/null", $temp]' \
   "$tmp/canonical-capture-policy.json" >/dev/null
 
 jq -s -e '
-  length == 3
-  and all(.[]; .type == "qq.dispatch.adapter.launch")
-  and (map(.policyIdentity) | sort) == ([
+  map(select(
+    .runId == "reviewer-smoke"
+    or .runId == "researcher-smoke"
+    or .runId == "implementer-smoke"
+  )) as $role_events
+  | ($role_events | length) == 3
+  and all($role_events[]; .type == "qq.dispatch.adapter.launch")
+  and ($role_events | map(.policyIdentity) | sort) == ([
     "qq-reviewer-read-only-v1",
     "qq-researcher-read-only-v1",
     "qq-implementer-workspace-write-v1"
@@ -478,6 +525,7 @@ jq -s -e '
 capture_dir="$runtime_root/capture"
 capture_path="$capture_dir/envelope.json"
 mkdir -p "$capture_dir"
+printf '%s\n' '{"existing":"parent-owned"}' >"$capture_path"
 (
   cd "$ROOT"
   PI_SUBAGENT_CHILD_AGENT=reviewer \
@@ -491,13 +539,13 @@ capture_run_dir="$(dirname -- "$capture_config_dir")"
 jq -e \
   --arg run "$capture_run_dir" \
   --arg capture "$capture_path" \
-  --arg temp "$pi_subagent_temp_prefix" \
+  --arg temp "$pi_subagent_own_temp" \
   '.filesystem.allowWrite == [$run, $capture, "/dev/null", $temp]' \
   "$tmp/capture-policy.json" >/dev/null
 jq -s -e \
   --arg run "$capture_run_dir" \
   --arg capture "$capture_path" \
-  --arg temp "$pi_subagent_temp_prefix" '
+  --arg temp "$pi_subagent_own_temp" '
   map(select(.runId == "capture-smoke")) as $events
   | ($events | length) == 1
   and $events[0].type == "qq.dispatch.adapter.launch"
@@ -507,7 +555,7 @@ jq -s -e \
   and $events[0].allowWrite == [$run, $capture, "/dev/null", $temp]
   and $events[0].structuredOutputCapture == $capture
   and $events[0].timeout == "2s"
-  and $events[0].landstripVersion == "landstrip 0.17.30"
+  and $events[0].landstripVersion == "landstrip 0.17.31"
 ' "$runtime_root/wrapper-events.jsonl" >/dev/null
 
 run_failure() {
@@ -527,6 +575,7 @@ run_failure() {
 run_capture_refusal() {
   local label="$1"
   local capture="$2"
+  local expected_message="$3"
   : >"$FAKE_PI_ARGS"
   set +e
   (
@@ -540,20 +589,64 @@ run_capture_refusal() {
   local status=$?
   set -e
   assert_equal 68 "$status" "$label did not exit 68"
-  assert_file_contains "$tmp/$label.stderr" \
-    'structured-output capture path must stay beneath the runtime root or assigned worktree'
+  assert_file_contains "$tmp/$label.stderr" "$expected_message"
   [ ! -s "$FAKE_PI_ARGS" ] || fail "$label launched Pi"
 }
 
 home_capture_dir="$tmp/home/capture"
 mkdir -p "$home_capture_dir"
 run_capture_refusal home-capture-refusal \
-  "$home_capture_dir/envelope.json"
+  "$home_capture_dir/envelope.json" \
+  'structured-output capture path must stay beneath the runtime root or assigned worktree'
 
 escape_capture_dir="$tmp/escaped-capture"
 mkdir -p "$escape_capture_dir"
 run_capture_refusal capture-dotdot-refusal \
-  "$capture_dir/../../escaped-capture/envelope.json"
+  "$capture_dir/../../escaped-capture/envelope.json" \
+  'structured-output capture path must stay beneath the runtime root or assigned worktree'
+
+capture_directory_target="$runtime_root/capture-directory-target"
+mkdir "$capture_directory_target"
+run_capture_refusal capture-directory-refusal \
+  "$capture_directory_target" \
+  'structured-output capture path must be a regular file when it exists'
+
+capture_fifo_target="$runtime_root/capture-fifo-target"
+mkfifo "$capture_fifo_target"
+run_capture_refusal capture-fifo-refusal \
+  "$capture_fifo_target" \
+  'structured-output capture path must be a regular file when it exists'
+
+renderer_refusal_run="$runtime_root/runs/renderer-capture-refusal"
+mkdir -p "$renderer_refusal_run/pi-config"
+run_renderer_capture_refusal() {
+  local label="$1"
+  local capture="$2"
+  set +e
+  "$RENDERER" \
+    --roles "$ROOT/delegation/policies/roles.json" \
+    --role reviewer \
+    --run-id "$label" \
+    --worktree "$ROOT" \
+    --git-common-dir "$git_common_dir" \
+    --git-worktree-dir "$git_worktree_dir" \
+    --runtime-root "$runtime_root" \
+    --pi-auth "$renderer_refusal_run/pi-config/auth.json" \
+    --pi-subagent-temp-dir "$parent_tmp" \
+    --structured-output-capture "$capture" \
+    --policy "$renderer_refusal_run/$label-policy.json" \
+    --event-log "$renderer_refusal_run/events.jsonl" \
+    --timeout 2s \
+    --landstrip-version 'landstrip 0.17.31' \
+    >"$tmp/$label-renderer.stdout" 2>"$tmp/$label-renderer.stderr"
+  local status=$?
+  set -e
+  [ "$status" -ne 0 ] || fail "$label renderer refusal unexpectedly succeeded"
+  assert_file_contains "$tmp/$label-renderer.stderr" \
+    'structured-output capture path must be a regular file when it exists'
+}
+run_renderer_capture_refusal capture-directory "$capture_directory_target"
+run_renderer_capture_refusal capture-fifo "$capture_fifo_target"
 
 run_failure missing-role "$ROOT" \
   env -u PI_SUBAGENT_CHILD_AGENT "$DISPATCH" --json
@@ -610,6 +703,16 @@ run_failure missing-landstrip "$ROOT" \
 assert_file_contains "$tmp/missing-landstrip.stderr" \
   'QQ_LANDSTRIP_BIN must be an absolute executable file'
 [ ! -s "$FAKE_PI_ARGS" ] || fail 'missing Landstrip launched Pi'
+
+: >"$FAKE_PI_ARGS"
+run_failure mismatched-landstrip-version "$ROOT" \
+  env \
+    FAKE_LANDSTRIP_VERSION=0.17.30 \
+    PI_SUBAGENT_CHILD_AGENT=reviewer \
+    "$DISPATCH" --json
+assert_file_contains "$tmp/mismatched-landstrip-version.stderr" \
+  "Landstrip version mismatch: expected 'landstrip 0.17.31', got 'landstrip 0.17.30'"
+[ ! -s "$FAKE_PI_ARGS" ] || fail 'mismatched Landstrip version launched Pi'
 
 policy_fixture="$tmp/policy-fixture"
 mkdir -p "$policy_fixture/bin/lib"
