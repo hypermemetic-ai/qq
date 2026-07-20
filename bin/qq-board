@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Reconcile Task statuses from Git/PR truth and render a fresh board on a loop.
+# Aggregate Task truth into a derived scratch tree and render its board.
 # shellcheck disable=SC1091,SC2016
 set -euo pipefail
 
@@ -18,16 +18,15 @@ usage() {
 usage: qq-board [inspect] reconcile [--repo <path>] [--dry-run]
        qq-board watch [--repo <path>] [--interval <seconds>]
 
-reconcile derives backlog/tasks Task statuses from matching Git branches,
-worktrees, origin refs, and (when available) GitHub pull requests. inspect and
---dry-run report the same changes without writing Task records.
-reconcile writes only untracked Task records. A tracked record is expected to
-be Done and is never rewritten, protecting the primary checkout's ff-sync.
+reconcile aggregates backlog/tasks records from primary and linked worktrees,
+derives their statuses from branches and pull requests, and atomically publishes
+a scratch board tree outside every checkout. inspect and --dry-run report the
+same result without changing the scratch tree. Source records are never written.
 
 The Herdr board pane command is:
   qq-board watch --interval 3
 
-watch quietly reconciles before each clean backlog board render.
+watch rematerializes the scratch tree before each vendor board render.
 EOF
 }
 
@@ -97,10 +96,92 @@ if ! qq_resolve_bin git; then
   qq_engine_error "$QQ_BIN_ERROR"
 fi
 git_bin="$QQ_BIN_RESULT"
-repo_root="$({ "$git_bin" -C "$repo" rev-parse --show-toplevel 2>/dev/null || true; })"
-[ -n "$repo_root" ] || qq_engine_error "not a Git checkout: $repo"
-repo_root="$(cd "$repo_root" && pwd -P)" \
-  || qq_engine_error "cannot canonicalize Repository root: $repo_root"
+checkout_root="$({ "$git_bin" -C "$repo" rev-parse --show-toplevel 2>/dev/null || true; })"
+[ -n "$checkout_root" ] || qq_engine_error "not a Git checkout: $repo"
+checkout_root="$(cd "$checkout_root" && pwd -P)" \
+  || qq_engine_error "cannot canonicalize Repository root: $checkout_root"
+
+if ! worktrees="$({
+  "$git_bin" -C "$checkout_root" worktree list --porcelain 2>/dev/null
+})"; then
+  qq_engine_error "cannot list Git worktrees for: $checkout_root"
+fi
+[ -n "$worktrees" ] \
+  || qq_engine_error "Git returned an empty worktree list for: $checkout_root"
+
+listed_worktrees=()
+main_paths=()
+current_worktree=
+while IFS= read -r line; do
+  case "$line" in
+    'worktree '*)
+      current_worktree="${line#worktree }"
+      listed_worktrees+=("$current_worktree")
+      ;;
+    'branch refs/heads/main')
+      [ -n "$current_worktree" ] && main_paths+=("$current_worktree")
+      ;;
+  esac
+done <<<"$worktrees"
+
+if [ "${#main_paths[@]}" -ne 1 ]; then
+  state="$("$QQ_ENGINE_JQ" -cn --arg checkout_root "$checkout_root" \
+    --argjson count "${#main_paths[@]}" \
+    '{checkout_root:$checkout_root, primary_main_count:$count}')"
+  qq_engine_error \
+    'Expected exactly one primary checkout attached to refs/heads/main.' "$state"
+fi
+repo_root="$(cd "${main_paths[0]}" 2>/dev/null && pwd -P)" \
+  || qq_engine_error 'The primary main checkout is unavailable.'
+
+worktree_paths=()
+for listed_worktree in "${listed_worktrees[@]}"; do
+  canonical_worktree="$(cd "$listed_worktree" 2>/dev/null && pwd -P)" \
+    || qq_engine_error "A listed Git worktree is unavailable: $listed_worktree"
+  worktree_paths+=("$canonical_worktree")
+done
+
+primary_tasks_dir="$repo_root/backlog/tasks"
+primary_config="$repo_root/backlog/config.yml"
+[ -d "$primary_tasks_dir" ] \
+  || qq_engine_error "Task records directory is missing: $primary_tasks_dir"
+[ -f "$primary_config" ] \
+  || qq_engine_error "Backlog config is missing: $primary_config"
+
+if ! qq_resolve_bin sha256sum; then
+  qq_engine_error "$QQ_BIN_ERROR"
+fi
+sha256sum_bin="$QQ_BIN_RESULT"
+repo_key="$(printf '%s' "$repo_root" | "$sha256sum_bin" | awk '{print $1}')"
+[[ "$repo_key" =~ ^[0-9a-f]{64}$ ]] \
+  || qq_engine_error 'Could not derive the Repository scratch-board key.'
+
+if [ -n "${XDG_CACHE_HOME:-}" ]; then
+  cache_home="$XDG_CACHE_HOME"
+elif [ -n "${HOME:-}" ]; then
+  cache_home="$HOME/.cache"
+else
+  qq_engine_error 'HOME or XDG_CACHE_HOME is required for the scratch board.'
+fi
+case "$cache_home" in
+  /*) ;;
+  *) qq_engine_error 'The scratch-board cache root must be an absolute path.' ;;
+esac
+cache_home="$(readlink -m -- "$cache_home")" \
+  || qq_engine_error "cannot canonicalize scratch-board cache root: $cache_home"
+board_parent="$cache_home/qq/board"
+scratch_root="$board_parent/$repo_key"
+for worktree_path in "${worktree_paths[@]}"; do
+  case "$scratch_root" in
+    "$worktree_path" | "$worktree_path"/*)
+      state="$("$QQ_ENGINE_JQ" -cn --arg scratch_root "$scratch_root" \
+        --arg worktree "$worktree_path" \
+        '{scratch_root:$scratch_root, worktree:$worktree}')"
+      qq_engine_error \
+        'The scratch board must be outside every Repository checkout.' "$state"
+      ;;
+  esac
+done
 
 if [ "$verb" = watch ]; then
   if ! qq_resolve_bin watch; then
@@ -118,15 +199,11 @@ if [ "$verb" = watch ]; then
 
   exec "$watch_bin" --no-title --interval "$interval" --exec \
     "$bash_bin" -c '
-      "$1" reconcile --repo "$2" >/dev/null 2>&1 || true
-      cd "$2" || exit 1
-      exec "$3" board
-    ' qq-board-watch "$self" "$repo_root" "$backlog_bin"
+      "$1" reconcile --repo "$2" >/dev/null 2>&1 || exit $?
+      cd "$3" || exit 1
+      exec "$4" board
+    ' qq-board-watch "$self" "$repo_root" "$scratch_root" "$backlog_bin"
 fi
-
-tasks_dir="$repo_root/backlog/tasks"
-[ -d "$tasks_dir" ] \
-  || qq_engine_error "Task records directory is missing: $tasks_dir"
 
 gh_timeout_seconds=10
 if [ -n "${QQ_BOARD_GH_TIMEOUT_SECONDS+x}" ]; then
@@ -142,9 +219,6 @@ if ! qq_resolve_bin timeout; then
 fi
 timeout_bin="$QQ_BIN_RESULT"
 
-if ! worktrees="$({ "$git_bin" -C "$repo_root" worktree list --porcelain 2>/dev/null; })"; then
-  qq_engine_error "cannot list Git worktrees for: $repo_root"
-fi
 if ! refs="$({
   "$git_bin" -C "$repo_root" for-each-ref --format='%(refname)' \
     refs/heads refs/remotes/origin 2>/dev/null
@@ -189,8 +263,138 @@ while IFS= read -r ref; do
   [ -n "$ref" ] && record_branch_ref "$ref"
 done <<<"$refs"
 
-pr_state_available=false
+read_task_metadata() {
+  local path="$1"
+
+  awk '
+    function scalar(line, key, value, quote) {
+      sub("^" key ":[[:space:]]*", "", line)
+      sub("[[:space:]]+$", "", line)
+      value = line
+      quote = substr(value, 1, 1)
+      if ((quote == "\"" || quote == "\047") &&
+          substr(value, length(value), 1) == quote) {
+        value = substr(value, 2, length(value) - 2)
+      }
+      return value
+    }
+    NR == 1 && $0 == "---" { frontmatter = 1; next }
+    frontmatter && $0 == "---" { closed = 1; exit }
+    frontmatter && /^id:[[:space:]]*/ { id = scalar($0, "id") }
+    frontmatter && /^status:[[:space:]]*/ { status = scalar($0, "status") }
+    END {
+      if (!frontmatter || !closed || id == "" || status == "") {
+        exit 65
+      }
+      printf "%s\t%s\n", id, status
+    }
+  ' "$path"
+}
+
 notes='[]'
+collisions='[]'
+collision_count=0
+
+append_note() {
+  local note="$1"
+  notes="$("$QQ_ENGINE_JQ" -cn --argjson notes "$notes" --arg note "$note" \
+    '$notes + [$note]')"
+}
+
+declare -A task_seen=()
+declare -A task_path_by_id=()
+declare -A task_name_by_id=()
+declare -A task_number_by_id=()
+declare -A task_status_by_id=()
+declare -A task_source_by_id=()
+declare -A task_source_kind_by_id=()
+task_ids=()
+
+aggregate_tree() {
+  local tree="$1"
+  local source_kind="$2"
+  local tasks_dir="$tree/backlog/tasks"
+  local task_file task_name task_stem task_number metadata task_id stored_status
+  local previous_source collision note
+  local -a tree_task_files=()
+  local -A tree_task_seen=()
+
+  [ -d "$tasks_dir" ] || return 0
+  shopt -s nullglob
+  tree_task_files=("$tasks_dir"/*.md)
+  shopt -u nullglob
+
+  for task_file in "${tree_task_files[@]}"; do
+    task_name="${task_file##*/}"
+    task_stem="${task_name%.md}"
+    if [[ ! "$task_stem" =~ ^t-([0-9]+)([[:space:]]|-|$) ]]; then
+      state="$("$QQ_ENGINE_JQ" -cn --arg task_file "$task_file" \
+        '{task_file:$task_file}')"
+      qq_engine_error 'Task filename does not expose a numeric Task id.' "$state"
+    fi
+    task_number="${BASH_REMATCH[1]}"
+    if ! metadata="$(read_task_metadata "$task_file")"; then
+      state="$("$QQ_ENGINE_JQ" -cn --arg task_file "$task_file" \
+        '{task_file:$task_file}')"
+      qq_engine_error \
+        'Task record has unreadable id or status frontmatter.' "$state"
+    fi
+    IFS=$'\t' read -r task_id stored_status <<<"$metadata"
+    if [ "$task_id" != "T-$task_number" ]; then
+      state="$("$QQ_ENGINE_JQ" -cn --arg task_file "$task_file" \
+        --arg expected_id "T-$task_number" --arg stored_id "$task_id" \
+        '{task_file:$task_file, expected_id:$expected_id, stored_id:$stored_id}')"
+      qq_engine_error 'Task filename and frontmatter id disagree.' "$state"
+    fi
+    case "$stored_status" in
+      'To Do' | 'In Progress' | Done) ;;
+      *)
+        state="$("$QQ_ENGINE_JQ" -cn --arg task_id "$task_id" \
+          --arg stored_status "$stored_status" \
+          '{task_id:$task_id, stored_status:$stored_status}')"
+        qq_engine_error 'Task record has an unsupported stored status.' "$state"
+        ;;
+    esac
+    if [ -n "${tree_task_seen[$task_id]+present}" ]; then
+      state="$("$QQ_ENGINE_JQ" -cn --arg task_id "$task_id" \
+        --arg worktree "$tree" '{task_id:$task_id, worktree:$worktree}')"
+      qq_engine_error 'Duplicate Task record id within one worktree.' "$state"
+    fi
+    tree_task_seen["$task_id"]=true
+
+    if [ -z "${task_seen[$task_id]+present}" ]; then
+      task_seen["$task_id"]=true
+      task_ids+=("$task_id")
+    elif [ "$source_kind" = linked ] \
+      && [ "${task_source_kind_by_id[$task_id]}" = linked ]; then
+      previous_source="${task_source_by_id[$task_id]}"
+      note="Cross-worktree Task id collision for $task_id: $previous_source -> $tree; the later worktree copy was selected."
+      append_note "$note"
+      collision="$("$QQ_ENGINE_JQ" -cn --arg id "$task_id" \
+        --arg previous_source "$previous_source" \
+        --arg overriding_source "$tree" \
+        '{id:$id, previous_source:$previous_source, overriding_source:$overriding_source}')"
+      collisions="$("$QQ_ENGINE_JQ" -cn --argjson collisions "$collisions" \
+        --argjson collision "$collision" '$collisions + [$collision]')"
+      collision_count=$((collision_count + 1))
+    fi
+
+    task_path_by_id["$task_id"]="$task_file"
+    task_name_by_id["$task_id"]="$task_name"
+    task_number_by_id["$task_id"]="$task_number"
+    task_status_by_id["$task_id"]="$stored_status"
+    task_source_by_id["$task_id"]="$tree"
+    task_source_kind_by_id["$task_id"]="$source_kind"
+  done
+}
+
+aggregate_tree "$repo_root" primary
+for worktree_path in "${worktree_paths[@]}"; do
+  [ "$worktree_path" = "$repo_root" ] && continue
+  aggregate_tree "$worktree_path" linked
+done
+
+pr_state_available=false
 declare -A merged_branch=()
 if qq_resolve_bin gh; then
   gh_bin="$QQ_BIN_RESULT"
@@ -223,119 +427,28 @@ if qq_resolve_bin gh; then
         | .headRefName' <<<"$pr_response"
     )
   elif [ "$pr_status" -eq 124 ] || [ "$pr_status" -eq 137 ]; then
-    notes="$("$QQ_ENGINE_JQ" -cn \
-      '["PR state unavailable: gh pr list timed out"]')"
+    append_note 'PR state unavailable: gh pr list timed out'
   else
-    notes="$("$QQ_ENGINE_JQ" -cn \
-      '["PR state unavailable: gh pr list failed or returned unreadable data"]')"
+    append_note \
+      'PR state unavailable: gh pr list failed or returned unreadable data'
   fi
 else
-  gh_error="$QQ_BIN_ERROR"
-  notes="$("$QQ_ENGINE_JQ" -cn --arg error "$gh_error" \
-    '["PR state unavailable: " + $error]')"
+  append_note "PR state unavailable: $QQ_BIN_ERROR"
 fi
 
-read_task_metadata() {
-  local path="$1"
-
-  awk '
-    function scalar(line, key, value, quote) {
-      sub("^" key ":[[:space:]]*", "", line)
-      sub("[[:space:]]+$", "", line)
-      value = line
-      quote = substr(value, 1, 1)
-      if ((quote == "\"" || quote == "\047") &&
-          substr(value, length(value), 1) == quote) {
-        value = substr(value, 2, length(value) - 2)
-      }
-      return value
-    }
-    NR == 1 && $0 == "---" { frontmatter = 1; next }
-    frontmatter && $0 == "---" { closed = 1; exit }
-    frontmatter && /^id:[[:space:]]*/ { id = scalar($0, "id") }
-    frontmatter && /^status:[[:space:]]*/ { status = scalar($0, "status") }
-    END {
-      if (!frontmatter || !closed || id == "" || status == "") {
-        exit 65
-      }
-      printf "%s\t%s\n", id, status
-    }
-  ' "$path"
-}
-
-task_files=()
-shopt -s nullglob
-for task_file in "$tasks_dir"/t-[0-9]*.md; do
-  task_name="${task_file##*/}"
-  task_stem="${task_name%.md}"
-  if [[ "$task_stem" =~ ^t-([0-9]+)([[:space:]]|-) ]]; then
-    task_files+=("$task_file")
-  fi
-done
-shopt -u nullglob
-
-declare -A task_seen=()
-task_ids=()
 stored_statuses=()
 derived_statuses=()
 changed_values=()
-tracked_values=()
 task_branches_json=()
 changed_count=0
-skipped_tracked=0
-skipped_tracked_ids=()
 
-for task_file in "${task_files[@]}"; do
-  task_name="${task_file##*/}"
-  task_stem="${task_name%.md}"
-  [[ "$task_stem" =~ ^t-([0-9]+)([[:space:]]|-) ]]
-  task_number="${BASH_REMATCH[1]}"
-  if ! metadata="$(read_task_metadata "$task_file")"; then
-    state="$("$QQ_ENGINE_JQ" -cn --arg task_file "$task_file" \
-      '{task_file:$task_file}')"
-    qq_engine_error 'Task record has unreadable id or status frontmatter.' "$state"
-  fi
-  IFS=$'\t' read -r task_id stored_status <<<"$metadata"
-  if [ "$task_id" != "T-$task_number" ]; then
-    state="$("$QQ_ENGINE_JQ" -cn --arg task_file "$task_file" \
-      --arg expected_id "T-$task_number" --arg stored_id "$task_id" \
-      '{task_file:$task_file, expected_id:$expected_id, stored_id:$stored_id}')"
-    qq_engine_error 'Task filename and frontmatter id disagree.' "$state"
-  fi
-  if [ -n "${task_seen[$task_id]+present}" ]; then
-    state="$("$QQ_ENGINE_JQ" -cn --arg task_id "$task_id" \
-      '{task_id:$task_id}')"
-    qq_engine_error 'Duplicate active Task record id.' "$state"
-  fi
-  task_seen["$task_id"]=true
-  case "$stored_status" in
-    'To Do' | 'In Progress' | Done) ;;
-    *)
-      state="$("$QQ_ENGINE_JQ" -cn --arg task_id "$task_id" \
-        --arg stored_status "$stored_status" \
-        '{task_id:$task_id, stored_status:$stored_status}')"
-      qq_engine_error 'Task record has an unsupported stored status.' "$state"
-      ;;
-  esac
-
-  set +e
-  "$git_bin" -C "$repo_root" ls-files --error-unmatch -- "$task_file" \
-    >/dev/null 2>&1
-  tracked_status=$?
-  set -e
-  case "$tracked_status" in
-    0) tracked=true ;;
-    1) tracked=false ;;
-    *)
-      state="$("$QQ_ENGINE_JQ" -cn --arg task_file "$task_file" \
-        '{task_file:$task_file}')"
-      qq_engine_error 'cannot determine whether a Task record is tracked' "$state"
-      ;;
-  esac
-
+for task_id in "${task_ids[@]}"; do
+  task_number="${task_number_by_id[$task_id]}"
+  stored_status="${task_status_by_id[$task_id]}"
   branches="${branches_by_task[$task_number]-}"
   branches_json="$(printf '%s\n' "$branches" \
-    | "$QQ_ENGINE_JQ" -Rsc 'split("\n") | map(select(length > 0)) | unique | sort')"
+    | "$QQ_ENGINE_JQ" -Rsc \
+      'split("\n") | map(select(length > 0)) | unique | sort')"
   derived_status='To Do'
   if [ "$stored_status" = Done ]; then
     derived_status=Done
@@ -353,82 +466,117 @@ for task_file in "${task_files[@]}"; do
   if [ "$derived_status" != "$stored_status" ]; then
     changed=true
     changed_count=$((changed_count + 1))
-    if [ "$tracked" = true ]; then
-      skipped_tracked=$((skipped_tracked + 1))
-      skipped_tracked_ids+=("$task_id")
-    fi
   fi
-  task_ids+=("$task_id")
   stored_statuses+=("$stored_status")
   derived_statuses+=("$derived_status")
   changed_values+=("$changed")
-  tracked_values+=("$tracked")
   task_branches_json+=("$branches_json")
 done
-
-if [ "$skipped_tracked" -gt 0 ]; then
-  skipped_tracked_ids_json="$(printf '%s\n' "${skipped_tracked_ids[@]}" \
-    | "$QQ_ENGINE_JQ" -Rsc \
-      'split("\n") | map(select(length > 0))')"
-  notes="$("$QQ_ENGINE_JQ" -cn \
-    --argjson notes "$notes" \
-    --argjson ids "$skipped_tracked_ids_json" \
-    '$notes + [
-      "Tracked Task records with derived status differences were not rewritten: "
-      + ($ids | join(", "))
-    ]')"
-fi
 
 effective_dry_run=false
 if [ "$mode" = inspect ] || [ "$dry_run" = true ]; then
   effective_dry_run=true
 fi
 
-if [ "$effective_dry_run" = false ] \
-  && [ "$changed_count" -gt "$skipped_tracked" ]; then
-  if ! qq_resolve_bin backlog; then
-    qq_engine_error "$QQ_BIN_ERROR"
-  fi
-  backlog_bin="$QQ_BIN_RESULT"
+board_temp=
+board_previous=
+
+cleanup_materialization() {
+  local path
+  for path in "$board_temp" "$board_previous"; do
+    [ -n "$path" ] || continue
+    case "$path" in
+      "$board_parent"/.*) rm -rf -- "$path" ;;
+    esac
+  done
+}
+trap cleanup_materialization EXIT
+
+materialize_board() {
+  local index task_id destination rewrite previous_holder
+
+  mkdir -p -- "$board_parent" \
+    || qq_engine_error "Could not create scratch-board parent: $board_parent"
+  board_temp="$(mktemp -d "$board_parent/.${repo_key}.tmp.XXXXXX")" \
+    || qq_engine_error 'Could not allocate a scratch-board generation.'
+  mkdir -p -- "$board_temp/backlog/tasks" \
+    || qq_engine_error 'Could not create the scratch Backlog tree.'
+  cp -- "$primary_config" "$board_temp/backlog/config.yml" \
+    || qq_engine_error 'Could not copy primary Backlog configuration.'
+
   for index in "${!task_ids[@]}"; do
-    [ "${changed_values[$index]}" = true ] || continue
-    # Tracked records are expected to be Done under the current convention.
-    # Never rewrite one: a dirty primary checkout blocks step-11 ff-sync.
-    [ "${tracked_values[$index]}" = false ] || continue
-    if ! { cd "$repo_root" && "$backlog_bin" task edit \
-      --status "${derived_statuses[$index]}" "${task_ids[$index]}" --plain \
-      >/dev/null 2>&1; }; then
-      state="$("$QQ_ENGINE_JQ" -cn --arg task_id "${task_ids[$index]}" \
-        --arg derived_status "${derived_statuses[$index]}" \
-        '{task_id:$task_id, derived_status:$derived_status}')"
-      qq_engine_error 'Backlog failed to update a derived Task status.' "$state"
+    task_id="${task_ids[$index]}"
+    destination="$board_temp/backlog/tasks/${task_name_by_id[$task_id]}"
+    cp -- "${task_path_by_id[$task_id]}" "$destination" \
+      || qq_engine_error "Could not copy aggregated Task record: $task_id"
+    if [ "${changed_values[$index]}" = true ]; then
+      rewrite="$destination.qq-board.tmp"
+      if ! awk -v replacement="${derived_statuses[$index]}" '
+        NR == 1 && $0 == "---" { frontmatter = 1 }
+        frontmatter && /^status:[[:space:]]*/ {
+          print "status: " replacement
+          next
+        }
+        frontmatter && NR > 1 && $0 == "---" { frontmatter = 0 }
+        { print }
+      ' "$destination" >"$rewrite"; then
+        qq_engine_error "Could not derive Task status in scratch: $task_id"
+      fi
+      mv -- "$rewrite" "$destination" \
+        || qq_engine_error "Could not publish derived Task status: $task_id"
     fi
   done
+
+  if [ -e "$scratch_root" ] || [ -L "$scratch_root" ]; then
+    previous_holder="$(mktemp -d \
+      "$board_parent/.${repo_key}.previous.XXXXXX")" \
+      || qq_engine_error 'Could not reserve the previous scratch generation.'
+    rmdir -- "$previous_holder" \
+      || qq_engine_error 'Could not prepare the scratch generation swap.'
+    board_previous="$previous_holder"
+    mv -- "$scratch_root" "$board_previous" \
+      || qq_engine_error 'Could not retire the previous scratch generation.'
+  fi
+  if ! mv -- "$board_temp" "$scratch_root"; then
+    if [ -n "$board_previous" ] \
+      && mv -- "$board_previous" "$scratch_root" 2>/dev/null; then
+      board_previous=
+    fi
+    qq_engine_error 'Could not atomically publish the scratch board tree.'
+  fi
+  board_temp=
+  if [ -n "$board_previous" ]; then
+    rm -rf -- "$board_previous"
+    board_previous=
+  fi
+}
+
+materialized=false
+if [ "$effective_dry_run" = false ]; then
+  materialize_board
+  materialized=true
 fi
 
 tasks='[]'
 for index in "${!task_ids[@]}"; do
-  written=false
-  if [ "${changed_values[$index]}" = true ] \
-    && [ "${tracked_values[$index]}" = false ] \
-    && [ "$effective_dry_run" = false ]; then
-    written=true
-  fi
+  task_id="${task_ids[$index]}"
   task="$("$QQ_ENGINE_JQ" -cn \
-    --arg id "${task_ids[$index]}" \
+    --arg id "$task_id" \
+    --arg filename "${task_name_by_id[$task_id]}" \
+    --arg source_worktree "${task_source_by_id[$task_id]}" \
     --arg stored_status "${stored_statuses[$index]}" \
     --arg derived_status "${derived_statuses[$index]}" \
     --argjson changed "${changed_values[$index]}" \
-    --argjson tracked "${tracked_values[$index]}" \
-    --argjson written "$written" \
+    --argjson materialized "$materialized" \
     --argjson branches "${task_branches_json[$index]}" \
     '{
       id:$id,
+      filename:$filename,
+      source_worktree:$source_worktree,
       stored_status:$stored_status,
       derived_status:$derived_status,
       changed:$changed,
-      tracked:$tracked,
-      written:$written,
+      materialized:$materialized,
       branches:$branches
     }')"
   tasks="$("$QQ_ENGINE_JQ" -cn --argjson tasks "$tasks" \
@@ -437,25 +585,36 @@ done
 
 state="$("$QQ_ENGINE_JQ" -cn \
   --arg repo_root "$repo_root" \
+  --arg scratch_root "$scratch_root" \
+  --arg config_source "$primary_config" \
   --argjson dry_run "$effective_dry_run" \
+  --argjson materialized "$materialized" \
   --argjson pr_state_available "$pr_state_available" \
   --argjson notes "$notes" \
+  --argjson worktree_count "${#worktree_paths[@]}" \
   --argjson task_count "${#task_ids[@]}" \
   --argjson changed_count "$changed_count" \
-  --argjson skipped_tracked "$skipped_tracked" \
+  --argjson collision_count "$collision_count" \
+  --argjson collisions "$collisions" \
   --argjson tasks "$tasks" \
   '{
     repo_root:$repo_root,
+    scratch_root:$scratch_root,
+    config_source:$config_source,
     dry_run:$dry_run,
+    materialized:$materialized,
     pr_state_available:$pr_state_available,
     notes:$notes,
+    worktree_count:$worktree_count,
     task_count:$task_count,
     changed_count:$changed_count,
-    skipped_tracked:$skipped_tracked,
+    collision_count:$collision_count,
+    collisions:$collisions,
     tasks:$tasks
   }')"
 
 if [ "$effective_dry_run" = true ]; then
-  qq_engine_done 'derived board status; Task records were not changed' "$state"
+  qq_engine_done 'derived the aggregated board; the scratch tree was not changed' \
+    "$state"
 fi
-qq_engine_done 'reconciled Task records with Git and pull-request truth' "$state"
+qq_engine_done 'materialized the aggregated scratch board' "$state"
