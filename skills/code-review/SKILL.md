@@ -25,17 +25,18 @@ the Change and code without inheriting the author's conclusions.
 4. Require inherited paths/manifest; fail closed:
    `PI_SUBAGENT_PI_BINARY=<change-worktree>/bin/qq-dispatch`,
    `PI_SUBAGENT_EXTRA_AGENT_DIRS=<change-worktree>/delegation/manifests/agents`,
-   and `delegation/manifests/agents/reviewer.md`. Call:
+   and `delegation/manifests/agents/reviewer.md`.
 
    ```ts
-   subagent({agent:"reviewer",task:"Read-and-perform:<absolute-brief-path>",cwd:"<absolute-change-worktree>",context:"fresh",async:true,timeoutMs:900000,structuredOutputSchemaPath:"<absolute-change-worktree>/delegation/manifests/completion-envelope.schema.json"})
+   const completionEnvelopeSchema=JSON.parse(readFileSync("<absolute-change-worktree>/delegation/manifests/completion-envelope.schema.json","utf8"))
+   subagent({chain:[{agent:"reviewer",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema}],cwd:"<absolute-change-worktree>",context:"fresh",async:true,timeoutMs:900000})
    ```
 
    Paths absolute; brief temporary. Pi-subagents owns lifecycle/artifacts;
    adapter containment. Keep id/`details.asyncDir`; inspect once, never poll:
    run/fleet status, `status.json`, `events.jsonl`,
-   `output-<index>.log`, and `subagent-log-<run-id>.md`. Validated `summary`
-   carries verdict/findings. State that the brief completes
+   `output-<index>.log`, and `subagent-log-<run-id>.md`. `summary`: validated
+   verdict/findings. State that the brief completes
    orientation: no broad intent search or full-suite rerun.
 5. The reviewer tests responsibilities against the brief, exact diff, callers,
    tests, and suspected failure paths. Review moves and deletions by invariant.

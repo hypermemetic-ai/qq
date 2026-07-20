@@ -7,13 +7,14 @@ description: Delegates decision-grade investigation to a fresh read-only researc
 
 Delegate the reading; retain the judgment. Write the exact question, decision,
 constraints, method, and relevant Repository paths into a brief under the OS
-temporary directory. Require these inherited paths and named manifest; fail
+temporary directory. Require inherited paths and named manifest; fail
 closed: `PI_SUBAGENT_PI_BINARY=<working-root>/bin/qq-dispatch`,
 `PI_SUBAGENT_EXTRA_AGENT_DIRS=<working-root>/delegation/manifests/agents`, and
-`delegation/manifests/agents/researcher.md`. Call:
+`delegation/manifests/agents/researcher.md`.
 
 ```ts
-subagent({agent:"researcher",task:"Read-and-perform:<absolute-brief-path>",cwd:"<absolute-working-root>",context:"fresh",async:true,timeoutMs:900000,structuredOutputSchemaPath:"<absolute-working-root>/delegation/manifests/completion-envelope.schema.json"})
+const completionEnvelopeSchema=JSON.parse(readFileSync("<absolute-working-root>/delegation/manifests/completion-envelope.schema.json","utf8"))
+subagent({chain:[{agent:"researcher",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema}],cwd:"<absolute-working-root>",context:"fresh",async:true,timeoutMs:900000})
 ```
 
 Paths absolute; task is only the brief pointer. Pi-subagents owns

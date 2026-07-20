@@ -34,10 +34,11 @@ PI_SUBAGENT_EXTRA_AGENT_DIRS=<worktree>/delegation/manifests/agents
 delegation/manifests/agents/implementer.md
 ```
 
-Fail closed unless `implementer` resolves to its manifest above, then call:
+Fail closed unless `implementer` resolves to its manifest above.
 
 ```ts
-subagent({agent:"implementer",task:"Read-and-perform:<absolute-brief-path>",cwd:"<absolute-worktree>",context:"fresh",async:true,timeoutMs:1800000,structuredOutputSchemaPath:"<absolute-worktree>/delegation/manifests/completion-envelope.schema.json"})
+const completionEnvelopeSchema=JSON.parse(readFileSync("<absolute-worktree>/delegation/manifests/completion-envelope.schema.json","utf8"))
+subagent({chain:[{agent:"implementer",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema}],cwd:"<absolute-worktree>",context:"fresh",async:true,timeoutMs:1800000})
 ```
 
 Use only absolute paths; the task points to the temporary work order and `cwd`
