@@ -152,13 +152,15 @@ provides the cockpit navigation helpers:
 . "$HOME/projects/qq/cockpit/shell/file-navigation.bash"
 ```
 
+`qqcd` moves the shell to the focused Herdr worktree, falling back to
+`QQ_HOME`; `qqcd <pattern>` selects another directory beneath `HOME` through
+`fzf`. File browsing lives inside Pi through `@tmustier/pi-files-widget`.
+Outside Pi, the system's `xdg-open` associations own MIME opening.
+
 Link the cockpit configurations whose tools read fixed `~/.config` paths:
 
 ```bash
-mkdir -p ~/.config/yazi/plugins/smart-enter.yazi ~/.config/glow ~/.config/herdr
-ln -s "$HOME/projects/qq/cockpit/yazi/yazi.toml" ~/.config/yazi/yazi.toml
-ln -s "$HOME/projects/qq/cockpit/yazi/keymap.toml" ~/.config/yazi/keymap.toml
-ln -s "$HOME/projects/qq/cockpit/yazi/plugins/smart-enter.yazi/main.lua" ~/.config/yazi/plugins/smart-enter.yazi/main.lua
+mkdir -p ~/.config/glow ~/.config/herdr
 ln -s "$HOME/projects/qq/cockpit/glow/glow.yml" ~/.config/glow/glow.yml
 ln -s "$HOME/projects/qq/cockpit/glow/tuned.json" ~/.config/glow/tuned.json
 ln -s "$HOME/projects/qq/cockpit/herdr/config.toml" ~/.config/herdr/config.toml

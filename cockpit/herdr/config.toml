@@ -23,32 +23,6 @@ focus_pane_down = "prefix+k"
 navigate_pane_up = "j"
 navigate_pane_down = "k"
 
-# File navigation opens as a session-modal popup (herdr 0.7.4) so the tiled
-# layout never reflows; quitting the browser closes the popup (yazi's `!`
-# still opens a shell in place when one is wanted). Fixed cell size with a
-# matching stty preamble works around herdr 0.7.4 never setting the popup
-# PTY winsize: the frame draws at the configured size while the PTY stays
-# at 24x80 (probed 2026-07-15; no fix on upstream master). The stty values
-# are the frame minus its border; keep the pairs in sync. 74x29 was tuned
-# live by the operator against the measured 104x33 tiled area (frames wider
-# than the tiled panel clamp and smear). Percent sizing can return when
-# upstream fixes the winsize.
-[[keys.command]]
-key = "prefix+f"
-type = "popup"
-command = "bash -ic 'stty cols 72 rows 27 2>/dev/null; qqy'"
-description = "yazi at the focused space's project folder"
-width = 74
-height = 29
-
-[[keys.command]]
-key = "prefix+shift+f"
-type = "popup"
-command = "bash -ic 'stty cols 72 rows 27 2>/dev/null; qqbr'"
-description = "broot at the focused space's project folder"
-width = 74
-height = 29
-
 # Snap to Repository project-home pi, its claude fallback, then focused-space
 # pi, claude, or the first agent in sidebar order; press again there to bounce
 # back to where you came from.
