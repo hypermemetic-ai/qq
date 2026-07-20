@@ -15,11 +15,12 @@ qq engines unconditionally: they own containment, degradation, and rails.
    say `none`. Dispositions do not transfer. An uncited decision returns to
    alignment. Mint and cite a decision record when its reach exceeds this
    Change. Confirm branch and worktree isolation.
-2. Resolve the Repository root and call `qq-herdr-home inspect --repo <root>`.
-   Best-effort attach its existing Change checkout, or create a work session
-   from the agreed base when none exists. Retain the work session's workspace
-   ID and root placeholder pane ID. Cockpit attachment never blocks. Dispatch
-   from the project home; run Change commands in its checkout.
+2. Call `qq-herdr-home inspect --repo <root>`. Best-effort attach the Change
+   checkout or create a work session from the agreed base. The Task record
+   lives in this checkout: new work is born here through Backlog's CLI; edit
+   legacy tracked records only on this branch, never primary `main`. Retain
+   workspace and root-placeholder IDs. Dispatch from project home; work in
+   checkout. Cockpit attachment never blocks.
 3. Implement through one complete work order and `delegate-batch`; verify the
    completion envelope against the tree. Use `research` for decision-grade
    evidence and retain judgment. Run Checks observing the changed behavior.
@@ -32,9 +33,9 @@ qq engines unconditionally: they own containment, degradation, and rails.
    Checks, review each fix delta, then present the diff through `pi-hunk`.
 5. Commit and push only green units. Open one pull request carrying Task intent
    and Check evidence; pass final GitHub Checks.
-6. Before handoff, move the Task record from primary `main` into the Change
-   checkout. There, verify acceptance criteria, summarize, mark it Done through
-   Backlog's CLI, push the finalization, and rerun affected Checks.
+6. In the Task record's checkout, verify acceptance criteria, summarize, mark
+   Done through Backlog's CLI, push the finalization, and rerun affected Checks
+   before handoff.
 7. An unmet criterion reactivates the same Task and Change. If the Change is
    unavailable, align its branch disposition without replacing the Task. A
    later intent change is new work and requires approval.
