@@ -65,6 +65,18 @@ pi --version
 herdr integration install pi
 ```
 
+Install the two delegation packages into Pi's operator-owned npm tree:
+
+```bash
+pi install npm:pi-subagents
+pi install npm:pi-landstrip
+```
+
+`pi-landstrip` installs the platform Landstrip binary beneath
+`~/.pi/agent/npm`. `qq-dispatch` resolves that operator Pi copy by default, or
+the absolute `QQ_LANDSTRIP_BIN` override when one is set. It does not resolve a
+Repository-local `.pi/npm` copy.
+
 Mount the qq Skill root directly into Pi. This is one root mount, so Skill
 membership stays live by construction:
 
@@ -83,8 +95,8 @@ ln -sT "$HOME/projects/qq/skills" "$HOME/.codex/skills"
 
 Set qq's production adapter and role manifests once in the environment that
 launches the accountable Pi session (cockpit/Herdr session configuration or
-shell rc). Both paths must be absolute and point into the Repository's primary
-`main` checkout:
+shell rc). These are one-time environment settings. Both paths must be absolute
+and point into the Repository's primary `main` checkout:
 
 ```bash
 export PI_SUBAGENT_PI_BINARY="$HOME/projects/qq/bin/qq-dispatch"
@@ -112,11 +124,14 @@ role, while its `cwd` selects the assigned worktree. The canonical adapter
 serves any worktree from that Repository, refuses unrelated repositories,
 renders that worktree's Landstrip grants, and starts the real Pi child under
 bounded descendant cleanup. The three role manifests pin delegates to
-`openai/gpt-5.6-sol` independently of the accountable session's default model.
+`openai-codex/gpt-5.6-sol` independently of the accountable session's default
+model.
 
-Start Pi and use `/login` to select Kimi For Coding and store the single
-dedicated private `pi-qq` credential. Pi writes it to
-`~/.pi/agent/auth.json`; never commit or report its values, and keep it private:
+Start Pi and use `/login` to configure both providers: select Kimi For Coding
+for the accountable session's dedicated `pi-qq` credential, then select
+`openai-codex` and complete its OAuth login for delegates. Pi writes the
+credentials to `~/.pi/agent/auth.json`; never commit or report their values,
+and keep the file private:
 
 ```bash
 chmod 600 ~/.pi/agent/auth.json
