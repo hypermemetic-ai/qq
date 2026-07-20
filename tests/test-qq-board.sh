@@ -14,6 +14,7 @@ real_git="$(command -v git)"
 repo="$tmp/repo"
 a_worktree="$tmp/a-worktree"
 z_worktree="$tmp/z-worktree"
+i_worktree="$tmp/i-worktree"
 "$real_git" init -q -b main "$repo"
 mkdir -p "$repo/backlog/tasks"
 cat >"$repo/backlog/config.yml" <<'YAML'
@@ -26,9 +27,8 @@ YAML
 "$real_git" -C "$repo" -c user.name=test -c user.email=test@example.com \
   commit -qm initial
 
-# Branch the linked worktrees before primary receives records. Their task
-# directories therefore contain only records born or deliberately overlaid
-# in that Change checkout.
+# Branch two linked worktrees before primary receives records so their task
+# directories contain only records born or deliberately overlaid there.
 "$real_git" -C "$repo" worktree add -qb feat/t-1-born "$a_worktree" main
 "$real_git" -C "$repo" worktree add -qb fix/t-5-other "$z_worktree" main
 
@@ -69,6 +69,11 @@ make_task "$repo" 4 Done durable-done 'marker: primary T-4'
 "$real_git" -C "$repo" -c user.name=test -c user.email=test@example.com \
   commit -qm 'primary records'
 
+# Branch a third worktree after primary's records: its byte-identical
+# inherited copies must never overlay primary or a divergent in-flight edit,
+# and never count as collisions.
+"$real_git" -C "$repo" worktree add -qb feat/t-9-inherited "$i_worktree" main
+
 make_task "$a_worktree" 1 'To Do' worktree-copy 'marker: worktree T-1 overlay'
 make_task "$a_worktree" 3 'In Progress' born-here 'marker: born only in worktree'
 make_task "$a_worktree" 5 'To Do' collision-a 'marker: earlier linked copy'
@@ -80,7 +85,7 @@ make_task "$z_worktree" 5 'To Do' collision-z 'marker: later linked copy wins'
 source_digest() {
   local root
   {
-    for root in "$repo" "$a_worktree" "$z_worktree"; do
+    for root in "$repo" "$a_worktree" "$z_worktree" "$i_worktree"; do
       find "$root/backlog/tasks" -maxdepth 1 -type f -name '*.md' \
         -print0 2>/dev/null | sort -z | xargs -0 -r sha256sum
     done
@@ -120,7 +125,8 @@ jq -cn '[
     state:"MERGED",
     mergedAt:"2026-07-18T00:00:00Z"
   },
-  {headRefName:"fix/t-5-other",state:"OPEN",mergedAt:null}
+  {headRefName:"fix/t-5-other",state:"OPEN",mergedAt:null},
+  {headRefName:"feat/t-9-inherited",state:"OPEN",mergedAt:null}
 ]'
 SH
 chmod +x "$fake_gh"
@@ -158,8 +164,9 @@ run_board() {
 }
 
 # The one-shot read model contains primary records plus records born in a
-# linked worktree. A linked copy overlays primary by Task id; a collision
-# between linked worktrees is both warned and resolved in list order.
+# linked worktree. Only content-divergent copies overlay: an inherited
+# byte-identical copy is skipped silently, a divergent linked copy overlays
+# primary without warning, and only two divergent linked copies collide.
 run_board 0 reconcile --repo "$repo"
 jq -e --arg repo "$repo" --arg a "$a_worktree" --arg z "$z_worktree" '
   .engine == "qq-board"
@@ -169,7 +176,7 @@ jq -e --arg repo "$repo" --arg a "$a_worktree" --arg z "$z_worktree" '
   and .state.materialized == true
   and .state.dry_run == false
   and .state.pr_state_available == true
-  and .state.worktree_count == 3
+  and .state.worktree_count == 4
   and .state.task_count == 5
   and .state.changed_count == 4
   and .state.collision_count == 1
@@ -178,7 +185,7 @@ jq -e --arg repo "$repo" --arg a "$a_worktree" --arg z "$z_worktree" '
     previous_source:$a,
     overriding_source:$z
   }]
-  and any(.state.notes[]; contains("Cross-worktree Task id collision for T-5"))
+  and any(.state.notes[]; contains("Divergent cross-worktree Task copies for T-5"))
   and (
     .state.tasks[]
     | select(.id == "T-1")
@@ -218,6 +225,14 @@ case "$scratch_root" in
   "$XDG_CACHE_HOME"/qq/board/*) ;;
   *) fail "scratch tree escaped XDG cache: $scratch_root" ;;
 esac
+[ -L "$scratch_root" ] || fail 'scratch root is not a publishable symlink'
+generation_one="$(readlink "$scratch_root")"
+case "$generation_one" in
+  "$XDG_CACHE_HOME"/qq/board/.*) ;;
+  *) fail "generation escaped the scratch parent: $generation_one" ;;
+esac
+[ -d "$generation_one/backlog/tasks" ] \
+  || fail 'symlink does not resolve to a complete generation'
 [ -d "$scratch_root/backlog/tasks" ] || fail 'reconcile omitted scratch tasks'
 cmp "$repo/backlog/config.yml" "$scratch_root/backlog/config.yml" \
   || fail 'scratch config differs from primary config'
@@ -283,11 +298,16 @@ jq -e --arg scratch "$scratch_root" '
 [ -f "$scratch_root/report-only-sentinel" ] \
   || fail 'inspect replaced the scratch generation'
 
-# A later apply wholly replaces the cache and uses the same Repository key
-# when invoked from a linked worktree.
+# A later apply publishes a fresh generation atomically, reaps the previous
+# one, and uses the same Repository key when invoked from a linked worktree.
 run_board 0 reconcile --repo "$a_worktree"
 assert_equal "$scratch_root" "$(jq -r '.state.scratch_root' "$tmp/result.json")" \
   'linked invocation selected a different scratch tree'
+[ -L "$scratch_root" ] || fail 'apply replaced the publish symlink'
+generation_two="$(readlink "$scratch_root")"
+[ "$generation_two" != "$generation_one" ] \
+  || fail 'apply did not publish a fresh generation'
+[ ! -e "$generation_one" ] || fail 'previous generation was not reaped'
 [ ! -e "$scratch_root/report-only-sentinel" ] \
   || fail 'wholesale rebuild retained stale cache content'
 assert_equal "$sources_before" "$(source_digest)" \
@@ -330,6 +350,17 @@ jq -e '
 # Runtime state is refused when cache configuration would place it in a
 # checkout, even for a report-only invocation.
 export XDG_CACHE_HOME="$repo/.cache"
+run_board 1 inspect reconcile --repo "$repo"
+jq -e '
+  .status == "error"
+  and (.message | contains("outside every Repository checkout"))
+' "$tmp/result.json" >/dev/null
+export XDG_CACHE_HOME="$tmp/cache"
+
+# The same refusal fires when a cache ancestor is a symlink into a checkout.
+mkdir -p "$tmp/linkcache"
+ln -s "$repo" "$tmp/linkcache/qq"
+export XDG_CACHE_HOME="$tmp/linkcache"
 run_board 1 inspect reconcile --repo "$repo"
 jq -e '
   .status == "error"
