@@ -13,6 +13,12 @@ SUPERVISOR="$ROOT/bin/lib/qq-process-tree-supervisor.py"
 RENDERER="$ROOT/bin/lib/qq-render-landstrip-policy.mjs"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
+test_home="$tmp/home"
+parent_tmp="$tmp/parent-tmp"
+mkdir -p "$test_home" "$parent_tmp"
+export HOME="$test_home"
+export TMPDIR="$parent_tmp"
+pi_subagent_temp_prefix="$parent_tmp/pi-subagent-*"
 
 for expected in \
   "$DISPATCH" \
@@ -90,6 +96,10 @@ set -euo pipefail
 
 printf '%s\0' "$@" >"$FAKE_PI_ARGS"
 env | LC_ALL=C sort >"$FAKE_PI_ENV"
+if [ -n "${FAKE_EXPECT_AUTH_SOURCE:-}" ]; then
+  [ -r "$PI_CODING_AGENT_DIR/auth.json" ]
+  cmp -s -- "$FAKE_EXPECT_AUTH_SOURCE" "$PI_CODING_AGENT_DIR/auth.json"
+fi
 printf 'pi-live-event role=%s\n' "${PI_SUBAGENT_CHILD_AGENT:-missing}"
 
 case "${FAKE_PI_MODE:-done}" in
@@ -179,13 +189,21 @@ PY
     || fail "$role did not receive its policy identity"
   grep -Fxq "QQ_DISPATCH_POLICY_SCOPE=$expected_scope" "$FAKE_PI_ENV" \
     || fail "$role did not receive its policy scope"
+  pi_config_dir="$(sed -n 's/^PI_CODING_AGENT_DIR=//p' "$FAKE_PI_ENV")"
+  role_run_dir="$(dirname -- "$pi_config_dir")"
+  [ ! -e "$pi_config_dir/auth.json" ] \
+    || fail "$role staged an absent launcher auth file"
+  grep -Fxq "TMPDIR=$role_run_dir/tmp" "$FAKE_PI_ENV" \
+    || fail "$role did not retain its run-local child TMPDIR"
 
   if [ "$role" = implementer ]; then
     jq -e \
       --arg runtime "$runtime_root" \
       --arg worktree "$ROOT" \
       --arg common "$git_common_dir" \
-      --arg worktree_git "$git_worktree_dir" '
+      --arg worktree_git "$git_worktree_dir" \
+      --arg auth "$pi_config_dir/auth.json" \
+      --arg temp "$pi_subagent_temp_prefix" '
         .enabled == true
         and .network == {
           allowNetwork: false,
@@ -196,17 +214,56 @@ PY
           deniedDomains: []
         }
         and (.filesystem.allowWrite | sort) == (
-          [$runtime, $worktree, $common, $worktree_git, "/dev/null"]
+          [$runtime, $worktree, $common, $worktree_git, "/dev/null", $temp]
           | unique
           | sort
         )
+        and .filesystem.denyWrite == [$auth]
       ' "$policy_snapshot" >/dev/null
   else
-    jq -e \
-      '.enabled == true and .filesystem.allowWrite == [] and .network.allowNetwork == false' \
+    jq -e --arg auth "$pi_config_dir/auth.json" --arg temp "$pi_subagent_temp_prefix" \
+      '.enabled == true
+       and .filesystem.allowWrite == [$temp]
+       and .filesystem.denyWrite == [$auth]
+       and .network.allowNetwork == false' \
       "$policy_snapshot" >/dev/null
   fi
 done
+
+auth_source="$HOME/.pi/agent/auth.json"
+auth_runtime="$tmp/auth-runtime"
+mkdir -p "$(dirname -- "$auth_source")" "$auth_runtime"
+printf '%s\n' '{"credential":"test-only-auth-sentinel"}' >"$auth_source"
+chmod 644 "$auth_source"
+(
+  cd "$ROOT"
+  PI_SUBAGENT_CHILD_AGENT=reviewer \
+  PI_SUBAGENT_RUN_ID=auth-staging-smoke \
+  QQ_DISPATCH_RUNTIME_ROOT="$auth_runtime" \
+  FAKE_EXPECT_AUTH_SOURCE="$auth_source" \
+  FAKE_POLICY_SNAPSHOT="$tmp/auth-policy.json" \
+    "$DISPATCH" --json
+) >"$tmp/auth.stdout" 2>"$tmp/auth.stderr"
+auth_config_dir="$(sed -n 's/^PI_CODING_AGENT_DIR=//p' "$FAKE_PI_ENV")"
+staged_auth="$auth_config_dir/auth.json"
+[ -f "$staged_auth" ] || fail 'launcher auth was not staged'
+cmp -s -- "$auth_source" "$staged_auth" \
+  || fail 'staged auth does not match the launcher auth'
+assert_equal 600 "$(stat -c '%a' "$staged_auth")" \
+  'staged auth mode is not 600'
+jq -e --arg auth "$staged_auth" --arg temp "$pi_subagent_temp_prefix" '
+  .filesystem.allowWrite == [$temp]
+  and .filesystem.denyWrite == [$auth]
+' "$tmp/auth-policy.json" >/dev/null
+for auth_output in \
+  "$tmp/auth.stdout" \
+  "$tmp/auth.stderr" \
+  "$auth_runtime/wrapper-events.jsonl"; do
+  if grep -Fq 'test-only-auth-sentinel' "$auth_output"; then
+    fail "auth content leaked through $auth_output"
+  fi
+done
+rm "$auth_source"
 
 default_tmp="$tmp/default-tmp"
 default_runtime="$default_tmp/qq-delegate-runtime"
@@ -221,8 +278,12 @@ default_runtime="$default_tmp/qq-delegate-runtime"
 ) >"$tmp/default-runtime.stdout" 2>"$tmp/default-runtime.stderr"
 assert_file_contains "$tmp/default-runtime.stdout" \
   'pi-live-event role=implementer'
-jq -e --arg runtime "$default_runtime" \
-  '.filesystem.allowWrite | index($runtime) != null' \
+jq -e \
+  --arg runtime "$default_runtime" \
+  --arg temp "$default_tmp/pi-subagent-*" '
+    (.filesystem.allowWrite | index($runtime) != null)
+    and (.filesystem.allowWrite | index($temp) != null)
+  ' \
   "$tmp/default-runtime-policy.json" >/dev/null
 
 # Exercise distinct common/per-worktree Git metadata even when the checkout
@@ -275,9 +336,10 @@ jq -e \
   --arg runtime "$fixture_runtime" \
   --arg worktree "$fixture_worktree" \
   --arg common "$fixture_common_dir" \
-  --arg worktree_git "$fixture_git_dir" '
+  --arg worktree_git "$fixture_git_dir" \
+  --arg temp "$pi_subagent_temp_prefix" '
     .filesystem.allowWrite == [
-      $runtime, $worktree, $common, $worktree_git, "/dev/null"
+      $runtime, $worktree, $common, $worktree_git, "/dev/null", $temp
     ]
   ' "$tmp/linked-policy.json" >/dev/null
 
@@ -295,8 +357,8 @@ mkdir -p "$fixture_capture_dir"
 ) >"$tmp/linked-capture.stdout" 2>"$tmp/linked-capture.stderr"
 assert_file_contains "$tmp/linked-capture.stdout" \
   'pi-live-event role=reviewer'
-jq -e --arg capture "$fixture_capture_path" \
-  '.filesystem.allowWrite == [$capture]' \
+jq -e --arg capture "$fixture_capture_path" --arg temp "$pi_subagent_temp_prefix" \
+  '.filesystem.allowWrite == [$capture, $temp]' \
   "$tmp/linked-capture-policy.json" >/dev/null
 
 # Exercise the production shape: the canonical adapter and its policy sources
@@ -323,9 +385,10 @@ jq -e \
   --arg runtime "$canonical_runtime" \
   --arg worktree "$fixture_worktree" \
   --arg common "$fixture_common_dir" \
-  --arg worktree_git "$fixture_git_dir" '
+  --arg worktree_git "$fixture_git_dir" \
+  --arg temp "$pi_subagent_temp_prefix" '
     .filesystem.allowWrite == [
-      $runtime, $worktree, $common, $worktree_git, "/dev/null"
+      $runtime, $worktree, $common, $worktree_git, "/dev/null", $temp
     ]
   ' "$tmp/canonical-policy.json" >/dev/null
 
@@ -341,8 +404,8 @@ canonical_capture_path="$fixture_capture_dir/canonical-envelope.json"
 ) >"$tmp/canonical-capture.stdout" 2>"$tmp/canonical-capture.stderr"
 assert_file_contains "$tmp/canonical-capture.stdout" \
   'pi-live-event role=reviewer'
-jq -e --arg capture "$canonical_capture_path" \
-  '.filesystem.allowWrite == [$capture]' \
+jq -e --arg capture "$canonical_capture_path" --arg temp "$pi_subagent_temp_prefix" \
+  '.filesystem.allowWrite == [$capture, $temp]' \
   "$tmp/canonical-capture-policy.json" >/dev/null
 
 jq -s -e '
@@ -366,17 +429,17 @@ mkdir -p "$capture_dir"
   FAKE_POLICY_SNAPSHOT="$tmp/capture-policy.json" \
     "$DISPATCH" --json
 ) >"$tmp/capture.stdout" 2>"$tmp/capture.stderr"
-jq -e --arg capture "$capture_path" \
-  '.filesystem.allowWrite == [$capture]' \
+jq -e --arg capture "$capture_path" --arg temp "$pi_subagent_temp_prefix" \
+  '.filesystem.allowWrite == [$capture, $temp]' \
   "$tmp/capture-policy.json" >/dev/null
-jq -s -e --arg capture "$capture_path" '
+jq -s -e --arg capture "$capture_path" --arg temp "$pi_subagent_temp_prefix" '
   map(select(.runId == "capture-smoke")) as $events
   | ($events | length) == 1
   and $events[0].type == "qq.dispatch.adapter.launch"
   and $events[0].role == "reviewer"
   and $events[0].policyIdentity == "qq-reviewer-read-only-v1"
   and $events[0].access == "read-only"
-  and $events[0].allowWrite == [$capture]
+  and $events[0].allowWrite == [$capture, $temp]
   and $events[0].structuredOutputCapture == $capture
   and $events[0].timeout == "2s"
   and $events[0].landstripVersion == "landstrip 0.17.30"

@@ -60,6 +60,21 @@ const worktree = canonicalDirectory(required(args, "--worktree"), "worktree");
 const gitCommonDir = canonicalDirectory(required(args, "--git-common-dir"), "Git common directory");
 const gitWorktreeDir = canonicalDirectory(required(args, "--git-worktree-dir"), "worktree Git directory");
 const runtimeRoot = canonicalDirectory(required(args, "--runtime-root"), "runtime root");
+const piAuthInput = required(args, "--pi-auth");
+if (!path.isAbsolute(piAuthInput)) fail("Pi auth path must be absolute");
+const piConfigDir = canonicalDirectory(path.dirname(piAuthInput), "Pi config directory");
+const piAuthPath = path.join(piConfigDir, path.basename(piAuthInput));
+if (!pathIsStrictlyWithin(piAuthPath, runtimeRoot)) fail("Pi auth path must stay beneath the runtime root");
+const piSubagentTempInput = required(args, "--pi-subagent-temp-prefix");
+if (!path.isAbsolute(piSubagentTempInput)) fail("pi-subagents temporary prefix must be absolute");
+if (path.basename(piSubagentTempInput) !== "pi-subagent-*") {
+  fail("pi-subagents temporary prefix must end in pi-subagent-*");
+}
+const piSubagentTempDir = canonicalDirectory(
+  path.dirname(piSubagentTempInput),
+  "pi-subagents temporary directory",
+);
+const piSubagentTempPrefix = path.join(piSubagentTempDir, "pi-subagent-*");
 const captureInput = args.get("--structured-output-capture") ?? "";
 let structuredOutputCapture = "";
 if (captureInput) {
@@ -101,6 +116,7 @@ if (definition.access === "workspace-write") {
 } else if (structuredOutputCapture) {
   allowWrite.push(structuredOutputCapture);
 }
+allowWrite.push(piSubagentTempPrefix);
 
 const policy = {
   enabled: true,
@@ -114,7 +130,7 @@ const policy = {
   },
   filesystem: {
     allowWrite: [...new Set(allowWrite)],
-    denyWrite: [],
+    denyWrite: [piAuthPath],
   },
 };
 writePrivateJson(policyPath, policy);

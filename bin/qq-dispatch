@@ -103,7 +103,8 @@ tree_supervisor="$bin_dir/lib/qq-process-tree-supervisor.py"
 [[ -f "$tree_supervisor" && -x "$tree_supervisor" ]] \
   || fail 71 "process-tree supervisor is unavailable"
 
-runtime_root_input="${QQ_DISPATCH_RUNTIME_ROOT:-${TMPDIR:-/tmp}/qq-delegate-runtime}"
+launcher_tmp_input="${TMPDIR:-/tmp}"
+runtime_root_input="${QQ_DISPATCH_RUNTIME_ROOT:-$launcher_tmp_input/qq-delegate-runtime}"
 [[ "$runtime_root_input" == /* ]] \
   || fail 68 "QQ_DISPATCH_RUNTIME_ROOT must be absolute"
 mkdir -p -- "$runtime_root_input" \
@@ -114,10 +115,16 @@ fi
 if ! system_tmp="$(realpath -e -- /tmp 2>/dev/null)"; then
   fail 68 "cannot resolve /tmp"
 fi
+if ! launcher_tmp="$(realpath -e -- "$launcher_tmp_input" 2>/dev/null)"; then
+  fail 68 "cannot resolve the launcher temporary directory"
+fi
+[[ -d "$launcher_tmp" ]] \
+  || fail 68 "launcher temporary path is not a directory"
 path_is_within "$runtime_root" "$system_tmp" \
   || fail 68 "runtime root must stay beneath /tmp"
 [[ "$runtime_root" != "$system_tmp" ]] \
   || fail 68 "runtime root may not be all of /tmp"
+pi_subagent_temp_prefix="${launcher_tmp%/}/pi-subagent-*"
 
 structured_output_capture=""
 if [[ -n "${PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE:-}" ]]; then
@@ -152,6 +159,23 @@ child_index="${PI_SUBAGENT_CHILD_INDEX:-0}"
 run_dir="$runtime_root/runs/$run_token/${role}-${child_index}-$$"
 mkdir -p -- "$run_dir/tmp" "$run_dir/pi-config" "$run_dir/sessions" \
   || fail 68 "cannot create the dispatch run directories"
+if ! pi_config_dir="$(realpath -e -- "$run_dir/pi-config" 2>/dev/null)"; then
+  fail 68 "cannot resolve the dispatch Pi config directory"
+fi
+path_is_within "$pi_config_dir" "$runtime_root" \
+  || fail 68 "dispatch Pi config directory must stay beneath the runtime root"
+[[ "$pi_config_dir" != "$runtime_root" ]] \
+  || fail 68 "dispatch Pi config directory may not be the runtime root"
+pi_auth_path="$pi_config_dir/auth.json"
+if [[ -n "${HOME:-}" ]]; then
+  launcher_auth_path="$HOME/.pi/agent/auth.json"
+  if [[ -f "$launcher_auth_path" ]]; then
+    cp -- "$launcher_auth_path" "$pi_auth_path" \
+      || fail 68 "cannot stage Pi authentication"
+    chmod 600 -- "$pi_auth_path" \
+      || fail 68 "cannot secure staged Pi authentication"
+  fi
+fi
 
 if ! qq_resolve_bin node; then
   fail 69 "$QQ_BIN_ERROR"
@@ -213,6 +237,8 @@ if ! metadata="$("$node_binary" "$policy_renderer" \
   --git-common-dir "$git_common_dir" \
   --git-worktree-dir "$git_worktree_dir" \
   --runtime-root "$runtime_root" \
+  --pi-auth "$pi_auth_path" \
+  --pi-subagent-temp-prefix "$pi_subagent_temp_prefix" \
   --structured-output-capture "$structured_output_capture" \
   --policy "$policy_path" \
   --event-log "$event_log" \
@@ -232,7 +258,7 @@ export QQ_DISPATCH_POLICY_IDENTITY="$policy_identity"
 export QQ_DISPATCH_POLICY_SCOPE="$access_scope"
 export QQ_DISPATCH_WRAPPER_EVENT_LOG="$event_log"
 export TMPDIR="$run_dir/tmp"
-export PI_CODING_AGENT_DIR="$run_dir/pi-config"
+export PI_CODING_AGENT_DIR="$pi_config_dir"
 export PI_CODING_AGENT_SESSION_DIR="$run_dir/sessions"
 export PI_OFFLINE=1
 
