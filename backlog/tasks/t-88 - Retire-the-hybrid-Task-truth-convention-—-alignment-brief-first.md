@@ -4,7 +4,7 @@ title: Retire the hybrid Task-truth convention — alignment brief first
 status: In Progress
 assignee: []
 created_date: '2026-07-17 17:19'
-updated_date: '2026-07-20 18:18'
+updated_date: '2026-07-20 22:20'
 labels:
   - base-batch
 dependencies:
@@ -22,6 +22,7 @@ OPEN: this Task enacts nothing until its own alignment brief is answered. Eviden
 Decision ledger:
 - OPEN — routes through a dedicated alignment brief (grilling) before any Repository mutation; recorded as open in doc-51 (2026-07-17).
 - 2026-07-20: alignment brief answered — operator APPROVED the born-in-worktree model with board-as-read-model (asked-and-answered alignment exchange, project-home session); outcome recorded as decision-6. Enactment now routes through its own reviewed Change.
+- 2026-07-20: board render disposition — no qq-owned visual element; the vendor backlog TUI remains the board surface and must be accurate and always up to date. qq-board aggregates primary + active worktrees into a derived scratch board tree (runtime cache, never tracked, source records never board-written) that the vendor TUI renders; reconcile's record-writing dies: operator direction, asked-and-answered exchange, project-home session ('we shouldn't own any visual element, backlog tui is source of truth. it just needs to be accurate and always up to date.').
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
