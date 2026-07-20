@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "landstripVersion": "0.17.30",
+  "roles": {
+    "reviewer": {
+      "access": "read-only",
+      "policyIdentity": "qq-reviewer-read-only-v1"
+    },
+    "researcher": {
+      "access": "read-only",
+      "policyIdentity": "qq-researcher-read-only-v1"
+    },
+    "implementer": {
+      "access": "workspace-write",
+      "policyIdentity": "qq-implementer-workspace-write-v1"
+    }
+  }
+}
