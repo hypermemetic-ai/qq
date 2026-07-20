@@ -47,9 +47,10 @@ printf '%s\n' "$FAKE_FZF_PICK"
 SH
 chmod +x "$tmp/bin/find"
 
-# The fake selector exits immediately without draining stdin, like a
-# streaming fzf: with a piped producer that means SIGPIPE, which under
-# ambient pipefail used to discard the valid selection silently.
+# The fake selector streams like a real fzf: it emits the pick, reads one
+# candidate line (a /dev/null candidate feed fails loudly), then exits —
+# leaving the producer to SIGPIPE, which under ambient pipefail used to
+# discard the valid selection silently.
 cat >"$tmp/bin/fzf" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -59,6 +60,10 @@ set -euo pipefail
   exit 2
 }
 printf '%s\n' "$FAKE_FZF_PICK"
+IFS= read -r _ || {
+  printf 'fzf received no candidates\n' >&2
+  exit 2
+}
 SH
 chmod +x "$tmp/bin/fzf"
 
