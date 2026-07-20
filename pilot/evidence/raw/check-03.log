@@ -1,6 +1,7 @@
 check: 3. No implicit skill/project-context/extension leakage
 verdict: PASS
 boundary: Real pi-subagents discovery is run first without and then with the two documented launch variables. Only the discovered pilot reviewer is launched through the wrapper; its child record verifies the resulting argument/environment boundary. Bundled-default behavior is retained as a separate observed leak, not mistaken for pilot isolation.
+substrate: pi-hosted qq accountable session (bash tool); no outer Codex sandbox; kernel 6.17.0-19-generic
 observations:
 {
   "bundledDefaultWithoutManifestEnvironment": {
@@ -76,7 +77,7 @@ observations:
       "<WORKTREE>/.pi/npm/node_modules/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
       "--no-skills",
       "--system-prompt",
-      "<RUNTIME_ROOT>/tmp/pi-subagent-xX87HZ/reviewer.md",
+      "<RUNTIME_ROOT>/tmp/pi-subagent-mIho3v/reviewer.md",
       "Task: Deterministic pilot scenario: launch-record"
     ],
     "extensions": [
@@ -103,7 +104,7 @@ observations:
       "--extension",
       "<WORKTREE>/pilot/probes/allowed-extension.ts",
       "--system-prompt",
-      "<RUNTIME_ROOT>/tmp/pi-subagent-7VR7tt/reviewer.md",
+      "<RUNTIME_ROOT>/tmp/pi-subagent-nHSysb/reviewer.md",
       "Task: Deterministic pilot scenario: launch-record"
     ],
     "extensions": [

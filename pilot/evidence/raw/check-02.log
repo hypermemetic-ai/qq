@@ -1,26 +1,24 @@
 check: 2. Implementer workspace/Git write confinement
-verdict: FAIL
-boundary: Per-target parent controls separate outer-substrate restrictions from Landstrip. In this run the assigned worktree, runtime, and decoy are parent-writable while Git administrative controls are outer-read-only. The static child still fails on attributable allowed roots, and the real-Pi smoke separately fails executable viability.
-unresolved-risk: This is the migration blocker: implementer authority cannot be demonstrated under the assigned substrate, and the interaction must be reproduced outside outer Codex confinement or fixed upstream before adoption.
+verdict: PASS
+boundary: Per-target parent controls separate outer-substrate restrictions from Landstrip. Any definite failure — a missing child observation, an attributable allowed-root denial, a decoy write, or a failed real-Pi smoke — is FAIL; unavailable parent controls without a definite failure are INCONCLUSIVE; otherwise PASS.
+substrate: pi-hosted qq accountable session (bash tool); no outer Codex sandbox; kernel 6.17.0-19-generic
 observations:
 {
   "outerBaselines": [
     {
-      "path": "<WORKTREE>/.qq-pilot-implementer-baseline-2",
+      "path": "<WORKTREE>/.qq-pilot-implementer-baseline-3574199",
       "ok": true
     },
     {
-      "path": "<GIT_COMMON_DIR>/.qq-pilot-implementer-baseline-2",
-      "ok": false,
-      "error": "EROFS: read-only file system, open '<GIT_COMMON_DIR>/.qq-pilot-implementer-baseline-2'"
+      "path": "<GIT_COMMON_DIR>/.qq-pilot-implementer-baseline-3574199",
+      "ok": true
     },
     {
-      "path": "<GIT_WORKTREE_DIR>/.qq-pilot-implementer-baseline-2",
-      "ok": false,
-      "error": "EROFS: read-only file system, open '<GIT_WORKTREE_DIR>/.qq-pilot-implementer-baseline-2'"
+      "path": "<GIT_WORKTREE_DIR>/.qq-pilot-implementer-baseline-3574199",
+      "ok": true
     },
     {
-      "path": "<RUNTIME_ROOT>/.qq-pilot-implementer-baseline-2",
+      "path": "<RUNTIME_ROOT>/.qq-pilot-implementer-baseline-3574199",
       "ok": true
     },
     {
@@ -32,38 +30,30 @@ observations:
     {
       "name": "repositoryWrite",
       "parentWritable": true,
-      "childWriteSucceeded": false,
-      "childErrno": 1
+      "childWrite": true,
+      "childErrno": 0
     },
     {
       "name": "gitCommonWrite",
-      "parentWritable": false,
-      "parentError": "EROFS: read-only file system, open '<GIT_COMMON_DIR>/.qq-pilot-implementer-baseline-2'",
-      "childWriteSucceeded": false,
-      "childErrno": 1
+      "parentWritable": true,
+      "childWrite": true,
+      "childErrno": 0
     },
     {
       "name": "gitWorktreeWrite",
-      "parentWritable": false,
-      "parentError": "EROFS: read-only file system, open '<GIT_WORKTREE_DIR>/.qq-pilot-implementer-baseline-2'",
-      "childWriteSucceeded": false,
-      "childErrno": 1
+      "parentWritable": true,
+      "childWrite": true,
+      "childErrno": 0
     },
     {
       "name": "runtimeWrite",
       "parentWritable": true,
-      "childWriteSucceeded": false,
-      "childErrno": 1
+      "childWrite": true,
+      "childErrno": 0
     }
   ],
-  "attributableAllowedFailures": [
-    "repositoryWrite",
-    "runtimeWrite"
-  ],
-  "unavailableAllowedControls": [
-    "gitCommonWrite",
-    "gitWorktreeWrite"
-  ],
+  "attributableAllowedFailures": [],
+  "unavailableAllowedControls": [],
   "decoyControlAvailable": true,
   "staticImplementerChild": {
     "exitCode": 0,
@@ -72,20 +62,20 @@ observations:
       "type": "qq_pilot_report",
       "scenario": "boundary-implementer",
       "repositoryWrite": {
-        "ok": false,
-        "errno": 1
+        "ok": true,
+        "errno": 0
       },
       "gitCommonWrite": {
-        "ok": false,
-        "errno": 1
+        "ok": true,
+        "errno": 0
       },
       "gitWorktreeWrite": {
-        "ok": false,
-        "errno": 1
+        "ok": true,
+        "errno": 0
       },
       "runtimeWrite": {
-        "ok": false,
-        "errno": 1
+        "ok": true,
+        "errno": 0
       },
       "escapeWrite": {
         "ok": false,
@@ -93,7 +83,7 @@ observations:
       },
       "decoyWrite": {
         "ok": false,
-        "errno": 1
+        "errno": 13
       },
       "loopbackConnect": {
         "ok": false,
@@ -102,11 +92,14 @@ observations:
     }
   },
   "realPiSmoke": {
-    "status": 127,
+    "status": 0,
     "signal": null,
-    "stdout": "",
-    "stderr": "[qq-pilot] role=implementer policy=qq-pilot-implementer-workspace-write-v1 scope=workspace-write boundary=landstrip landstrip=landstrip 0.17.30 timeout=10s\n/usr/bin/env: error while loading shared libraries: libc.so.6: cannot open shared object file: Operation not permitted\n",
+    "stdout": "0.80.10\n",
+    "stderr": "[qq-pilot] role=implementer policy=qq-pilot-implementer-workspace-write-v1 scope=workspace-write boundary=landstrip landstrip=landstrip 0.17.30 timeout=10s\n",
     "installedPiPackageVersion": "0.80.10"
   },
-  "diagnosis": "Under the nested Codex substrate, Landstrip 0.17.30 denies its explicitly allowed worktree/runtime roots even though parent controls succeed; dynamically linked Pi also fails at libc load when allowWrite is non-empty. Git-root attribution is unavailable in this rework substrate because those parent controls return EROFS."
+  "diagnosis": {
+    "definiteFailures": [],
+    "incompleteAttribution": []
+  }
 }

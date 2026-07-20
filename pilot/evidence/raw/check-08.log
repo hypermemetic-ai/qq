@@ -1,6 +1,7 @@
 check: 8. Resume cwd containment
 verdict: PASS
 boundary: Pi-subagents supplies the persisted session path; before Landstrip or Pi starts, the wrapper canonicalizes the launch cwd's Git root and requires it to equal the wrapper's assigned worktree.
+substrate: pi-hosted qq accountable session (bash tool); no outer Codex sandbox; kernel 6.17.0-19-generic
 observations:
 {
   "assignedWorktreeResume": {

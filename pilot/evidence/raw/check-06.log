@@ -1,6 +1,7 @@
 check: 6. SIGINT/SIGTERM/pane-close signal cleanup
 verdict: PASS
 boundary: Each signal case must announce and expose Pi, Landstrip, timeout, tool, MCP, and orphan descendants before cleanup can pass. Signals target only that dedicated timeout leader. SIGHUP simulates Herdr pane closure; no live Herdr pane or unrelated PID is touched.
+substrate: pi-hosted qq accountable session (bash tool); no outer Codex sandbox; kernel 6.17.0-19-generic
 observations:
 [
   {
@@ -17,7 +18,7 @@ observations:
     "exited": true,
     "exitCode": 130,
     "exitSignal": null,
-    "exitElapsedMs": 803,
+    "exitElapsedMs": 878,
     "announcementsObserved": true,
     "requiredAnnouncements": [
       "pi",
@@ -94,7 +95,7 @@ observations:
     "exited": true,
     "exitCode": 143,
     "exitSignal": null,
-    "exitElapsedMs": 802,
+    "exitElapsedMs": 877,
     "announcementsObserved": true,
     "requiredAnnouncements": [
       "pi",
@@ -171,7 +172,7 @@ observations:
     "exited": true,
     "exitCode": 129,
     "exitSignal": null,
-    "exitElapsedMs": 826,
+    "exitElapsedMs": 857,
     "announcementsObserved": true,
     "requiredAnnouncements": [
       "pi",

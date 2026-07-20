@@ -1,6 +1,7 @@
 check: 9. Landstrip absence/unsupported fail closed
 verdict: PASS
 boundary: The absence path is the wrapper's executable preflight. The unsupported path uses a deterministic launcher with Landstrip's documented PLATFORM_UNSUPPORTED terminal record and proves the wrapper never falls back to Pi; the installed native binary is separately smoke-tested on this supported kernel.
+substrate: pi-hosted qq accountable session (bash tool); no outer Codex sandbox; kernel 6.17.0-19-generic
 unresolved-risk: The host kernel is supported, so the actual native PLATFORM_UNSUPPORTED branch cannot be observed here; its wrapper propagation is simulated with the package's documented terminal shape.
 observations:
 {
@@ -24,7 +25,7 @@ observations:
   },
   "supportedKernelRealPi": {
     "status": 0,
-    "stdout": "",
+    "stdout": "0.80.10\n",
     "stderr": "[qq-pilot] role=reviewer policy=qq-pilot-reviewer-read-only-v1 scope=read-only boundary=landstrip landstrip=landstrip 0.17.30 timeout=10s\n"
   },
   "installedPiPackageVersion": "0.80.10"

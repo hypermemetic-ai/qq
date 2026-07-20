@@ -1,13 +1,14 @@
 check: 5. Outer timeout tears down the complete descendant tree
 verdict: PASS
 boundary: The wrapper's GNU timeout is outermost, the qq subreaper owns native Landstrip beneath it, and a static mock Pi creates named tool, MCP, and double-forked orphan descendants. Only that observed descendant tree is inspected or cleaned.
+substrate: pi-hosted qq accountable session (bash tool); no outer Codex sandbox; kernel 6.17.0-19-generic
 observations:
 {
   "runId": "check-05-timeout-18",
   "exited": true,
   "exitCode": 124,
   "exitSignal": null,
-  "exitElapsedMs": 1767,
+  "exitElapsedMs": 1815,
   "announcementsObserved": true,
   "requiredAnnouncements": [
     "pi",

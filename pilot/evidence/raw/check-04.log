@@ -1,7 +1,7 @@
 check: 4. Strict Completion Envelope validation and composed delivery
-verdict: FAIL
+verdict: PASS
 boundary: Parent-boundary schema validation and composed reviewer delivery are reported separately. Direct mock runs prove the staged validator's behavior; composed runs cross the wrapper with a read-only policy granting only that run's capture path. A parent PASS cannot mask a composed delivery defect.
-unresolved-risk: The parent validator passes, but a reviewer cannot reliably deliver the required envelope through the composed pi-subagents/Landstrip boundary.
+substrate: pi-hosted qq accountable session (bash tool); no outer Codex sandbox; kernel 6.17.0-19-generic
 observations:
 {
   "schema": "<WORKTREE>/pilot/manifests/completion-envelope.schema.json",
@@ -131,26 +131,46 @@ observations:
     ]
   },
   "composedReadOnlyDelivery": {
-    "verdict": "DEFECT",
+    "verdict": "PASS",
     "attemptedFix": "grant only PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE to the read-only Landstrip policy",
-    "passed": false,
-    "fullEnvelopeAccepted": false,
-    "commitsLessRejected": false,
+    "passed": true,
+    "fullEnvelopeAccepted": true,
+    "commitsLessRejected": true,
     "allInvalidRejected": true,
     "outcomes": [
       {
         "scenario": "schema-valid",
         "runId": "check-04-composed-schema-valid-12",
-        "exitCode": 1,
-        "error": "Missing structured_output call; this step has outputSchema and must finish by calling structured_output.",
-        "captureExists": false,
+        "exitCode": 0,
+        "structuredOutput": {
+          "status": "complete",
+          "summary": "done",
+          "commits": [
+            "deadbeef pilot fixture"
+          ],
+          "checks": [
+            {
+              "name": "probe",
+              "result": "pass"
+            }
+          ],
+          "filesChanged": [
+            "pilot/example"
+          ],
+          "contestableDecisions": [],
+          "openQuestions": [],
+          "unresolvedRisks": [],
+          "branch": "feat/pilot-fixture",
+          "worktree": "/assigned/worktree"
+        },
+        "captureExists": true,
         "captureAttempt": {
           "type": "qq_pilot_report",
           "scenario": "structured-output-capture",
           "attempted": true,
           "captureWrite": {
-            "ok": false,
-            "errno": 1
+            "ok": true,
+            "errno": 0
           }
         },
         "wrapperPolicyEvent": {
@@ -162,13 +182,13 @@ observations:
           "policyIdentity": "qq-pilot-reviewer-read-only-v1",
           "access": "read-only",
           "allowWrite": [
-            "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-YbZH5D/output.json"
+            "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-eRC4rI/output.json"
           ],
           "worktree": "<WORKTREE>",
           "gitCommonDir": "<GIT_COMMON_DIR>",
           "gitWorktreeDir": "<GIT_WORKTREE_DIR>",
           "runtimeRoot": "<RUNTIME_ROOT>",
-          "structuredOutputCapture": "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-YbZH5D/output.json",
+          "structuredOutputCapture": "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-eRC4rI/output.json",
           "timeout": "30s",
           "landstripVersion": "landstrip 0.17.30"
         }
@@ -177,15 +197,15 @@ observations:
         "scenario": "schema-invalid-json",
         "runId": "check-04-composed-schema-invalid-json-13",
         "exitCode": 1,
-        "error": "Missing structured_output call; this step has outputSchema and must finish by calling structured_output.",
-        "captureExists": false,
+        "error": "Failed to read structured output: Unexpected token 'o', \"not-json\" is not valid JSON",
+        "captureExists": true,
         "captureAttempt": {
           "type": "qq_pilot_report",
           "scenario": "structured-output-capture",
           "attempted": true,
           "captureWrite": {
-            "ok": false,
-            "errno": 1
+            "ok": true,
+            "errno": 0
           }
         },
         "wrapperPolicyEvent": {
@@ -197,13 +217,13 @@ observations:
           "policyIdentity": "qq-pilot-reviewer-read-only-v1",
           "access": "read-only",
           "allowWrite": [
-            "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-V3VmgV/output.json"
+            "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-BlVR2F/output.json"
           ],
           "worktree": "<WORKTREE>",
           "gitCommonDir": "<GIT_COMMON_DIR>",
           "gitWorktreeDir": "<GIT_WORKTREE_DIR>",
           "runtimeRoot": "<RUNTIME_ROOT>",
-          "structuredOutputCapture": "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-V3VmgV/output.json",
+          "structuredOutputCapture": "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-BlVR2F/output.json",
           "timeout": "30s",
           "landstripVersion": "landstrip 0.17.30"
         }
@@ -232,13 +252,13 @@ observations:
           "policyIdentity": "qq-pilot-reviewer-read-only-v1",
           "access": "read-only",
           "allowWrite": [
-            "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-tqkGer/output.json"
+            "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-hiT92f/output.json"
           ],
           "worktree": "<WORKTREE>",
           "gitCommonDir": "<GIT_COMMON_DIR>",
           "gitWorktreeDir": "<GIT_WORKTREE_DIR>",
           "runtimeRoot": "<RUNTIME_ROOT>",
-          "structuredOutputCapture": "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-tqkGer/output.json",
+          "structuredOutputCapture": "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-hiT92f/output.json",
           "timeout": "30s",
           "landstripVersion": "landstrip 0.17.30"
         }
@@ -247,15 +267,15 @@ observations:
         "scenario": "schema-missing-commits",
         "runId": "check-04-composed-schema-missing-commits-15",
         "exitCode": 1,
-        "error": "Missing structured_output call; this step has outputSchema and must finish by calling structured_output.",
-        "captureExists": false,
+        "error": "Structured output validation failed: root: must have required properties commits",
+        "captureExists": true,
         "captureAttempt": {
           "type": "qq_pilot_report",
           "scenario": "structured-output-capture",
           "attempted": true,
           "captureWrite": {
-            "ok": false,
-            "errno": 1
+            "ok": true,
+            "errno": 0
           }
         },
         "wrapperPolicyEvent": {
@@ -267,13 +287,13 @@ observations:
           "policyIdentity": "qq-pilot-reviewer-read-only-v1",
           "access": "read-only",
           "allowWrite": [
-            "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-gJRKOx/output.json"
+            "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-olIQI8/output.json"
           ],
           "worktree": "<WORKTREE>",
           "gitCommonDir": "<GIT_COMMON_DIR>",
           "gitWorktreeDir": "<GIT_WORKTREE_DIR>",
           "runtimeRoot": "<RUNTIME_ROOT>",
-          "structuredOutputCapture": "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-gJRKOx/output.json",
+          "structuredOutputCapture": "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-olIQI8/output.json",
           "timeout": "30s",
           "landstripVersion": "landstrip 0.17.30"
         }
@@ -282,15 +302,15 @@ observations:
         "scenario": "schema-empty-object",
         "runId": "check-04-composed-schema-empty-object-16",
         "exitCode": 1,
-        "error": "Missing structured_output call; this step has outputSchema and must finish by calling structured_output.",
-        "captureExists": false,
+        "error": "Structured output validation failed: root: must have required properties status, summary, commits, checks, filesChanged, contestableDecisions, openQuestions, unresolvedRisks, branch, worktree",
+        "captureExists": true,
         "captureAttempt": {
           "type": "qq_pilot_report",
           "scenario": "structured-output-capture",
           "attempted": true,
           "captureWrite": {
-            "ok": false,
-            "errno": 1
+            "ok": true,
+            "errno": 0
           }
         },
         "wrapperPolicyEvent": {
@@ -302,13 +322,13 @@ observations:
           "policyIdentity": "qq-pilot-reviewer-read-only-v1",
           "access": "read-only",
           "allowWrite": [
-            "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-mrhEb0/output.json"
+            "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-Yzu1sj/output.json"
           ],
           "worktree": "<WORKTREE>",
           "gitCommonDir": "<GIT_COMMON_DIR>",
           "gitWorktreeDir": "<GIT_WORKTREE_DIR>",
           "runtimeRoot": "<RUNTIME_ROOT>",
-          "structuredOutputCapture": "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-mrhEb0/output.json",
+          "structuredOutputCapture": "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-Yzu1sj/output.json",
           "timeout": "30s",
           "landstripVersion": "landstrip 0.17.30"
         }
@@ -317,15 +337,15 @@ observations:
         "scenario": "schema-empty-fields",
         "runId": "check-04-composed-schema-empty-fields-17",
         "exitCode": 1,
-        "error": "Missing structured_output call; this step has outputSchema and must finish by calling structured_output.",
-        "captureExists": false,
+        "error": "Structured output validation failed: summary: must not have fewer than 1 characters; checks: must not have fewer than 1 items; branch: must not have fewer than 1 characters; worktree: must not have fewer than 1 characters",
+        "captureExists": true,
         "captureAttempt": {
           "type": "qq_pilot_report",
           "scenario": "structured-output-capture",
           "attempted": true,
           "captureWrite": {
-            "ok": false,
-            "errno": 1
+            "ok": true,
+            "errno": 0
           }
         },
         "wrapperPolicyEvent": {
@@ -337,13 +357,13 @@ observations:
           "policyIdentity": "qq-pilot-reviewer-read-only-v1",
           "access": "read-only",
           "allowWrite": [
-            "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-ni2BlW/output.json"
+            "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-e90UrN/output.json"
           ],
           "worktree": "<WORKTREE>",
           "gitCommonDir": "<GIT_COMMON_DIR>",
           "gitWorktreeDir": "<GIT_WORKTREE_DIR>",
           "runtimeRoot": "<RUNTIME_ROOT>",
-          "structuredOutputCapture": "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-ni2BlW/output.json",
+          "structuredOutputCapture": "<RUNTIME_ROOT>/structured-output/pi-subagent-structured-e90UrN/output.json",
           "timeout": "30s",
           "landstripVersion": "landstrip 0.17.30"
         }

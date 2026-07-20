@@ -1,6 +1,7 @@
 check: 7. Auditable foreground/background artifacts
 verdict: PASS
 boundary: Pi-subagents owns foreground and async lifecycle artifacts; the wrapper event log independently binds each runId to the role-selected Landstrip policy identity. Child stderr supplies policy diagnostics without Herdr machinery.
+substrate: pi-hosted qq accountable session (bash tool); no outer Codex sandbox; kernel 6.17.0-19-generic
 observations:
 {
   "foreground": {
@@ -42,7 +43,7 @@ observations:
           }
         }
       ],
-      "durationMs": 375,
+      "durationMs": 404,
       "toolCount": 0,
       "acceptance": {
         "status": "not-required",
@@ -119,7 +120,7 @@ observations:
       },
       "lastActivityAt": "<TIMESTAMP>",
       "startedAt": "<TIMESTAMP>",
-      "lastUpdate": 1784491816359,
+      "lastUpdate": 1784569338448,
       "pid": "<PID>",
       "cwd": "<WORKTREE>",
       "currentStep": 0,
@@ -144,7 +145,7 @@ observations:
             "total": 2
           },
           "endedAt": "<TIMESTAMP>",
-          "durationMs": 369,
+          "durationMs": 498,
           "exitCode": 0,
           "modelAttempts": [
             {
