@@ -312,7 +312,6 @@ async function launchReview(root, round, previousPath, snapshotPath, ctx, signal
         "--label",
         `plan review round ${round}`,
         "--no-focus",
-        "--json",
       ],
       root,
       signal,
@@ -402,14 +401,32 @@ function normalizeListedPath(root, value) {
   }
 }
 
+// hunk reports compare files RELATIVE (basename when the pair shares a
+// directory), so a listed path must be resolved against every plausible
+// anchor: the checkout root, the session's own cwd, and the compared files'
+// directory — verified live: session JSON carries "path": "round-1.md",
+// "previousPath": "round-0.md" for an absolute-path launch.
 function findMatchingSession(value, root, previousPath, snapshotPath) {
   const expectedPrevious = resolve(previousPath);
   const expectedSnapshot = resolve(snapshotPath);
+  const anchors = [
+    root,
+    parse(expectedPrevious).dir,
+    parse(expectedSnapshot).dir,
+  ];
   for (const record of sessionRecords(value)) {
-    const paths = collectStrings(record).map((item) =>
-      normalizeListedPath(root, item),
-    );
-    if (paths.includes(expectedPrevious) && paths.includes(expectedSnapshot)) {
+    const recordCwd = record.cwd ?? record.path;
+    const bases = recordCwd !== undefined ? [...anchors, recordCwd] : anchors;
+    const paths = new Set();
+    for (const item of collectStrings(record)) {
+      for (const base of bases) {
+        const candidate = normalizeListedPath(base, item);
+        if (candidate !== undefined) {
+          paths.add(candidate);
+        }
+      }
+    }
+    if (paths.has(expectedPrevious) && paths.has(expectedSnapshot)) {
       return { id: directSessionId(record), record };
     }
   }
