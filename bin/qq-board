@@ -302,7 +302,6 @@ append_note() {
     '$notes + [$note]')"
 }
 
-declare -A task_seen=()
 declare -A task_path_by_id=()
 declare -A task_name_by_id=()
 declare -A task_number_by_id=()
@@ -310,7 +309,6 @@ declare -A task_status_by_id=()
 declare -A task_hash_by_id=()
 declare -A task_primary_hash_by_id=()
 declare -A task_source_by_id=()
-declare -A task_source_kind_by_id=()
 task_ids=()
 
 aggregate_tree() {
@@ -318,7 +316,7 @@ aggregate_tree() {
   local source_kind="$2"
   local tasks_dir="$tree/backlog/tasks"
   local task_file task_name task_stem task_number metadata task_id stored_status
-  local task_hash previous_source collision note
+  local task_hash
   local -a tree_task_files=()
   local -A tree_task_seen=()
 
@@ -369,29 +367,23 @@ aggregate_tree() {
     [[ "$task_hash" =~ ^[0-9a-f]{64}$ ]] \
       || qq_engine_error "Could not hash Task record: $task_file"
 
-    if [ -z "${task_seen[$task_id]+present}" ]; then
-      task_seen["$task_id"]=true
+    if [ -z "${task_hash_by_id[$task_id]+present}" ]; then
       task_ids+=("$task_id")
     else
       # Byte-identical copies never participate in overlay precedence: an
       # inherited copy masks neither the primary baseline nor a divergent
       # in-flight edit. Only content-divergent copies overlay, and only two
       # divergent non-primary copies count as a collision.
-      if [ "$task_hash" = "${task_hash_by_id[$task_id]}" ] \
-        || { [ -n "${task_primary_hash_by_id[$task_id]-}" ] \
-          && [ "$task_hash" = "${task_primary_hash_by_id[$task_id]}" ]; }; then
-        continue
-      fi
-      if [ "${task_source_kind_by_id[$task_id]}" = linked ]; then
-        previous_source="${task_source_by_id[$task_id]}"
-        note="Divergent cross-worktree Task copies for $task_id: $previous_source -> $tree; the later divergent copy was selected."
-        append_note "$note"
-        collision="$("$QQ_ENGINE_JQ" -cn --arg id "$task_id" \
-          --arg previous_source "$previous_source" \
-          --arg overriding_source "$tree" \
-          '{id:$id, previous_source:$previous_source, overriding_source:$overriding_source}')"
+      case "$task_hash" in
+        "${task_hash_by_id[$task_id]}" | "${task_primary_hash_by_id[$task_id]-}") continue ;;
+      esac
+      if [ "${task_hash_by_id[$task_id]}" != "${task_primary_hash_by_id[$task_id]-}" ]; then
+        append_note "Divergent cross-worktree Task copies for $task_id: ${task_source_by_id[$task_id]} -> $tree; the later divergent copy was selected."
         collisions="$("$QQ_ENGINE_JQ" -cn --argjson collisions "$collisions" \
-          --argjson collision "$collision" '$collisions + [$collision]')"
+          --arg id "$task_id" \
+          --arg previous_source "${task_source_by_id[$task_id]}" \
+          --arg overriding_source "$tree" \
+          '$collisions + [{id:$id, previous_source:$previous_source, overriding_source:$overriding_source}]')"
         collision_count=$((collision_count + 1))
       fi
     fi
@@ -402,7 +394,6 @@ aggregate_tree() {
     task_status_by_id["$task_id"]="$stored_status"
     task_hash_by_id["$task_id"]="$task_hash"
     task_source_by_id["$task_id"]="$tree"
-    task_source_kind_by_id["$task_id"]="$source_kind"
     if [ "$source_kind" = primary ]; then
       task_primary_hash_by_id["$task_id"]="$task_hash"
     fi
@@ -500,36 +491,30 @@ if [ "$mode" = inspect ] || [ "$dry_run" = true ]; then
 fi
 
 board_temp=
-board_previous=
 
 cleanup_materialization() {
-  local path
-  for path in "$board_temp" "$board_previous"; do
-    [ -n "$path" ] || continue
-    case "$path" in
-      "$board_parent"/.*) rm -rf -- "$path" ;;
-    esac
-  done
+  case "$board_temp" in
+    "$board_parent"/.*) rm -rf -- "$board_temp" ;;
+  esac
 }
 trap cleanup_materialization EXIT
 
 materialize_board() {
   local index task_id destination rewrite
-  local generation link_temp previous_target
+  local link_temp previous_target
 
   mkdir -p -- "$board_parent" \
     || qq_engine_error "Could not create scratch-board parent: $board_parent"
-  generation="$(mktemp -d "$board_parent/.${repo_key}.gen.XXXXXX")" \
+  board_temp="$(mktemp -d "$board_parent/.${repo_key}.gen.XXXXXX")" \
     || qq_engine_error 'Could not allocate a scratch-board generation.'
-  board_temp="$generation"
-  mkdir -p -- "$generation/backlog/tasks" \
+  mkdir -p -- "$board_temp/backlog/tasks" \
     || qq_engine_error 'Could not create the scratch Backlog tree.'
-  cp -- "$primary_config" "$generation/backlog/config.yml" \
+  cp -- "$primary_config" "$board_temp/backlog/config.yml" \
     || qq_engine_error 'Could not copy primary Backlog configuration.'
 
   for index in "${!task_ids[@]}"; do
     task_id="${task_ids[$index]}"
-    destination="$generation/backlog/tasks/${task_name_by_id[$task_id]}"
+    destination="$board_temp/backlog/tasks/${task_name_by_id[$task_id]}"
     cp -- "${task_path_by_id[$task_id]}" "$destination" \
       || qq_engine_error "Could not copy aggregated Task record: $task_id"
     if [ "${changed_values[$index]}" = true ]; then
@@ -560,7 +545,7 @@ materialize_board() {
   fi
   link_temp="$(mktemp -u "$board_parent/.${repo_key}.link.XXXXXX")" \
     || qq_engine_error 'Could not reserve the scratch-board link name.'
-  ln -s -- "$generation" "$link_temp" \
+  ln -s -- "$board_temp" "$link_temp" \
     || qq_engine_error 'Could not stage the scratch-board link.'
   previous_target="$(readlink -- "$scratch_root" 2>/dev/null || true)"
   if ! mv -T -- "$link_temp" "$scratch_root"; then
@@ -569,12 +554,12 @@ materialize_board() {
   fi
   board_temp=
   case "$previous_target" in
-    "$board_parent"/.*) board_previous="$previous_target" ;;
+    "$board_parent"/.*)
+      board_temp="$previous_target"
+      rm -rf -- "$board_temp"
+      board_temp=
+      ;;
   esac
-  if [ -n "$board_previous" ]; then
-    rm -rf -- "$board_previous"
-    board_previous=
-  fi
 }
 
 materialized=false
