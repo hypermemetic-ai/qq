@@ -30,17 +30,32 @@ SH
 chmod +x "$tmp/bin/herdr"
 ln -s "$tmp/bin/herdr" "$tmp/herdr-only-bin/herdr"
 
+cat >"$tmp/bin/find" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+[ "$1" = "$HOME" ] && [ "${2:-}" = "-type" ] || {
+  printf 'unexpected find arguments: %s\n' "$*" >&2
+  exit 2
+}
+i=0
+while [ "$i" -lt 3000 ]; do
+  printf '%s\n' "$HOME/candidate-$i"
+  i=$((i+1))
+done
+printf '%s\n' "$FAKE_FZF_PICK"
+SH
+chmod +x "$tmp/bin/find"
+
+# The fake selector exits immediately without draining stdin, like a
+# streaming fzf: with a piped producer that means SIGPIPE, which under
+# ambient pipefail used to discard the valid selection silently.
 cat >"$tmp/bin/fzf" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 
 [ "${1:-}" = "--query=$FAKE_FZF_QUERY" ] || {
   printf 'unexpected fzf arguments: %s\n' "$*" >&2
-  exit 2
-}
-input="$(command cat)"
-[[ "$input" == *"$FAKE_FZF_PICK"* ]] || {
-  printf 'fzf input omitted pick: %s\n' "$FAKE_FZF_PICK" >&2
   exit 2
 }
 printf '%s\n' "$FAKE_FZF_PICK"
@@ -101,7 +116,9 @@ if output="$(PATH="$tmp/no-tools-bin" qqcd project 2>&1)"; then
 fi
 assert_contains "$output" "qqcd requires fzf"
 
-# Pattern mode passes the query and directory candidates through fzf unchanged.
+# Pattern mode passes the query through fzf and keeps a valid selection
+# under this script's ambient pipefail with a streaming (early-exit)
+# selector — the regression the candidate-file staging prevents.
 export FAKE_FZF_QUERY=project
 export FAKE_FZF_PICK="$tmp/home/picked project"
 assert_equal "$FAKE_FZF_PICK" "$(qqcd "$FAKE_FZF_QUERY"; pwd -P)"

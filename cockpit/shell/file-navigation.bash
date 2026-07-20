@@ -33,12 +33,25 @@ function qq_space_dir() {
     printf '%s\n' "$dir"
 }
 function qqcd() {
-    local dir
+    local dir candidates status
     if [ "$#" -eq 0 ]; then
         dir="$(qq_space_dir)" || dir="$QQ_HOME"
     else
         command -v fzf >/dev/null 2>&1 || { printf 'qqcd requires fzf\n' >&2; return 1; }
-        dir="$(command find "$HOME" -type d 2>/dev/null | command fzf --query="$*")" || return
+        # Stage candidates through a file so fzf's own exit status decides.
+        # A pipe would let an early-exiting fzf SIGPIPE find, and under
+        # ambient pipefail the pipeline status would silently discard a
+        # valid selection. find may exit nonzero on unreadable subtrees
+        # after listing plenty; its best-effort candidate list is fine.
+        candidates="$(command mktemp -t 'qqcd-candidates.XXXXXX')" || return
+        command find "$HOME" -type d 2>/dev/null >"$candidates" || true
+        dir="$(command fzf --query="$*" <"$candidates")" && status=0 || status=$?
+        command rm -f -- "$candidates"
+        case "$status" in
+            0) [ -n "$dir" ] || { printf 'qqcd: empty selection\n' >&2; return 1; } ;;
+            1|130) return "$status" ;;
+            *) printf 'qqcd: fzf failed (exit %s)\n' "$status" >&2; return "$status" ;;
+        esac
     fi
     builtin cd -- "$dir"
 }
