@@ -1,324 +1,229 @@
 #!/usr/bin/env bash
-# Dispatch one bounded Codex role under the settled timeout and profile rails.
-# shellcheck disable=SC1091,SC2016
+# Run one pi-subagents child beneath its role-selected Landstrip policy.
+# shellcheck disable=SC1091
 set -euo pipefail
 
-self="$(readlink -f -- "${BASH_SOURCE[0]}")"
-# shellcheck source=bin/lib/qq-bin.sh
-source "$(dirname "$self")/lib/qq-bin.sh"
-# shellcheck source=bin/lib/qq-engine.sh
-source "$(dirname "$self")/lib/qq-engine.sh"
+umask 077
 
-qq_engine_init qq-dispatch dispatch
-
-mode=dispatch
-if [ "${1:-}" = inspect ]; then
-  mode=inspect
+fail() {
+  local exit_code="$1"
   shift
+  printf '[qq-dispatch] fail-closed: %s\n' "$*" >&2
+  exit "$exit_code"
+}
+
+path_is_within() {
+  local candidate="$1"
+  local parent="$2"
+  [[ "$candidate" == "$parent" || "$candidate" == "$parent"/* ]]
+}
+
+self="$(readlink -f -- "${BASH_SOURCE[0]}")" \
+  || fail 64 "cannot resolve the adapter path"
+bin_dir="$(cd -- "$(dirname -- "$self")" && pwd -P)" \
+  || fail 64 "cannot resolve the adapter directory"
+worktree="$(cd -- "$bin_dir/.." && pwd -P)" \
+  || fail 64 "cannot resolve the assigned worktree"
+
+# shellcheck source=bin/lib/qq-bin.sh
+source "$bin_dir/lib/qq-bin.sh"
+
+if ! qq_resolve_bin git; then
+  fail 64 "$QQ_BIN_ERROR"
 fi
+git_binary="$QQ_BIN_RESULT"
 
-role="${1:-}"
-[ -n "$role" ] || qq_engine_error \
-  'usage: qq-dispatch [inspect] <implementer|reviewer|researcher> --root <path> --brief <path> --output <path> [--events <path>] [--stderr <path>] [--timeout <seconds>] [--mcp] [--dry-run]'
-shift
+git_query() {
+  (
+    unset "${!GIT_@}"
+    "$git_binary" "$@"
+  )
+}
 
+if ! repository_root="$(git_query -C "$worktree" rev-parse --show-toplevel 2>/dev/null)"; then
+  fail 64 "adapter is not installed in a Git worktree"
+fi
+if ! repository_root="$(realpath -e -- "$repository_root" 2>/dev/null)"; then
+  fail 64 "cannot resolve the adapter's Git worktree"
+fi
+[[ "$repository_root" == "$worktree" ]] \
+  || fail 64 "adapter path does not resolve beneath its assigned worktree"
+
+invocation_cwd="$(pwd -P)" || fail 65 "cannot resolve the child cwd"
+if ! invocation_root="$(git_query -C "$invocation_cwd" rev-parse --show-toplevel 2>/dev/null)"; then
+  fail 65 "child cwd is not inside the assigned worktree"
+fi
+if ! invocation_root="$(realpath -e -- "$invocation_root" 2>/dev/null)"; then
+  fail 65 "cannot resolve the child cwd's Git worktree"
+fi
+[[ "$invocation_root" == "$worktree" ]] \
+  || fail 65 "child cwd belongs to an unrelated worktree"
+
+role="${PI_SUBAGENT_CHILD_AGENT:-}"
 case "$role" in
-  implementer | reviewer | researcher) ;;
-  *) qq_engine_error "unsupported dispatch role: $role" ;;
+  reviewer | researcher | implementer) ;;
+  "") fail 66 "PI_SUBAGENT_CHILD_AGENT is required" ;;
+  *) fail 66 "unsupported child role '$role'" ;;
 esac
 
-root=""
-brief=""
-output=""
-events=""
-stderr_file=""
-timeout_seconds=3600
-mcp_opt_in=false
-dry_run=false
-
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --root)
-      [ "$#" -ge 2 ] || qq_engine_error '--root requires a path'
-      root="$2"
-      shift 2
-      ;;
-    --brief)
-      [ "$#" -ge 2 ] || qq_engine_error '--brief requires a path'
-      brief="$2"
-      shift 2
-      ;;
-    --output)
-      [ "$#" -ge 2 ] || qq_engine_error '--output requires a path'
-      output="$2"
-      shift 2
-      ;;
-    --events)
-      [ "$#" -ge 2 ] || qq_engine_error '--events requires a path'
-      events="$2"
-      shift 2
-      ;;
-    --stderr)
-      [ "$#" -ge 2 ] || qq_engine_error '--stderr requires a path'
-      stderr_file="$2"
-      shift 2
-      ;;
-    --timeout)
-      [ "$#" -ge 2 ] || qq_engine_error '--timeout requires seconds'
-      timeout_seconds="$2"
-      shift 2
-      ;;
-    --mcp)
-      mcp_opt_in=true
-      shift
-      ;;
-    --dry-run)
-      dry_run=true
-      shift
-      ;;
-    *) qq_engine_error "unknown qq-dispatch argument: $1" ;;
-  esac
-done
-
-qq_engine_set_action "$mode:$role"
-
-if [ "$mcp_opt_in" = true ] && [ "$role" != implementer ]; then
-  qq_engine_error '--mcp applies only to the implementer role'
+if ! git_common_dir="$(git_query -C "$worktree" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+  fail 67 "cannot discover the Git common directory"
+fi
+if ! git_worktree_dir="$(git_query -C "$worktree" rev-parse --path-format=absolute --git-dir 2>/dev/null)"; then
+  fail 67 "cannot discover the worktree Git directory"
+fi
+if ! git_common_dir="$(realpath -e -- "$git_common_dir" 2>/dev/null)"; then
+  fail 67 "cannot resolve the Git common directory"
+fi
+if ! git_worktree_dir="$(realpath -e -- "$git_worktree_dir" 2>/dev/null)"; then
+  fail 67 "cannot resolve the worktree Git directory"
 fi
 
-[ -n "$root" ] || qq_engine_error '--root is required'
-[ -n "$brief" ] || qq_engine_error '--brief is required'
-[ -n "$output" ] || qq_engine_error '--output is required'
-[[ "$timeout_seconds" =~ ^[0-9]+([.][0-9]+)?$ ]] \
-  || qq_engine_error '--timeout must be a positive number of seconds'
-awk -v value="$timeout_seconds" 'BEGIN { exit !(value > 0) }' \
-  || qq_engine_error '--timeout must be greater than zero'
+roles_file="$worktree/delegation/policies/roles.json"
+policy_renderer="$bin_dir/lib/qq-render-landstrip-policy.mjs"
+tree_supervisor="$bin_dir/lib/qq-process-tree-supervisor.py"
+[[ -f "$roles_file" && -r "$roles_file" ]] \
+  || fail 72 "Landstrip role policy is unavailable"
+[[ -f "$policy_renderer" && -r "$policy_renderer" ]] \
+  || fail 72 "Landstrip policy renderer is unavailable"
+[[ -f "$tree_supervisor" && -x "$tree_supervisor" ]] \
+  || fail 71 "process-tree supervisor is unavailable"
 
-for path_name in root brief output; do
-  path_value="${!path_name}"
-  [[ "$path_value" = /* ]] \
-    || qq_engine_error "--$path_name must be an absolute path"
-done
-[ -d "$root" ] || qq_engine_error "dispatch root is not a directory: $root"
-root="$(cd "$root" && pwd -P)" \
-  || qq_engine_error "cannot canonicalize dispatch root: $root"
-writable_roots=()
-if [ "$role" = implementer ]; then
-  if ! qq_resolve_bin git; then
-    qq_engine_error "$QQ_BIN_ERROR"
-  fi
-  git_bin="$QQ_BIN_RESULT"
-  git_common_dir=""
-  git_dir=""
-  git_common_dir_found=false
-  git_dir_found=false
-  if git_common_dir="$(
-    unset "${!GIT_@}"
-    "$git_bin" -C "$root" rev-parse \
-      --path-format=absolute --git-common-dir 2>/dev/null
-  )"; then
-    git_common_dir_found=true
-  fi
-  if git_dir="$(
-    unset "${!GIT_@}"
-    "$git_bin" -C "$root" rev-parse \
-      --path-format=absolute --git-dir 2>/dev/null
-  )"; then
-    git_dir_found=true
-  fi
-  if [ "$git_common_dir_found" = true ] && [ -n "$git_common_dir" ]; then
-    writable_roots+=("$git_common_dir")
-    if [ "$git_dir_found" = true ] && [ -n "$git_dir" ] \
-      && [ "$git_dir" != "$git_common_dir" ]; then
-      writable_roots+=("$git_dir")
-    fi
-  fi
+runtime_root_input="${QQ_DISPATCH_RUNTIME_ROOT:-${TMPDIR:-/tmp}/qq-dispatch-runtime}"
+[[ "$runtime_root_input" == /* ]] \
+  || fail 68 "QQ_DISPATCH_RUNTIME_ROOT must be absolute"
+mkdir -p -- "$runtime_root_input" \
+  || fail 68 "cannot create the dispatch runtime root"
+if ! runtime_root="$(realpath -e -- "$runtime_root_input" 2>/dev/null)"; then
+  fail 68 "cannot resolve the dispatch runtime root"
 fi
-if [ ! -f "$brief" ] || [ ! -r "$brief" ]; then
-  qq_engine_error "brief is not a readable file: $brief"
+if ! system_tmp="$(realpath -e -- /tmp 2>/dev/null)"; then
+  fail 68 "cannot resolve /tmp"
+fi
+path_is_within "$runtime_root" "$system_tmp" \
+  || fail 68 "runtime root must stay beneath /tmp"
+[[ "$runtime_root" != "$system_tmp" ]] \
+  || fail 68 "runtime root may not be all of /tmp"
+
+structured_output_capture=""
+if [[ -n "${PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE:-}" ]]; then
+  capture_input="$PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE"
+  [[ "$capture_input" == /* ]] \
+    || fail 68 "structured-output capture path must be absolute"
+  [[ ! -L "$capture_input" ]] \
+    || fail 68 "structured-output capture path may not be a symlink"
+  capture_parent_input="$(dirname -- "$capture_input")"
+  [[ -d "$capture_parent_input" ]] \
+    || fail 68 "structured-output capture directory is unavailable"
+  if ! capture_parent="$(realpath -e -- "$capture_parent_input" 2>/dev/null)"; then
+    fail 68 "cannot resolve the structured-output capture directory"
+  fi
+  capture_leaf="$(basename -- "$capture_input")"
+  [[ -n "$capture_leaf" && "$capture_leaf" != "." && "$capture_leaf" != ".." ]] \
+    || fail 68 "structured-output capture filename is invalid"
+  structured_output_capture="$capture_parent/$capture_leaf"
+  path_is_within "$structured_output_capture" "$runtime_root" \
+    || fail 68 "structured-output capture path must stay beneath the runtime root"
 fi
 
-events="${events:-$output.events}"
-stderr_file="${stderr_file:-$output.stderr}"
-for artifact in "$output" "$events" "$stderr_file"; do
-  [[ "$artifact" = /* ]] \
-    || qq_engine_error "artifact paths must be absolute: $artifact"
-  [ -d "$(dirname "$artifact")" ] \
-    || qq_engine_error "artifact directory does not exist: $(dirname "$artifact")"
-done
-if [ "$output" = "$events" ] || [ "$output" = "$stderr_file" ] \
-  || [ "$events" = "$stderr_file" ]; then
-  qq_engine_error 'output, events, and stderr paths must be distinct'
+run_token="${PI_SUBAGENT_RUN_ID:-manual}"
+run_token="${run_token//[^A-Za-z0-9._-]/_}"
+run_token="${run_token:0:80}"
+[[ -n "$run_token" ]] || run_token="manual"
+child_index="${PI_SUBAGENT_CHILD_INDEX:-0}"
+[[ "$child_index" =~ ^[0-9]+$ ]] \
+  || fail 68 "PI_SUBAGENT_CHILD_INDEX must be a non-negative integer"
+run_dir="$runtime_root/runs/$run_token/${role}-${child_index}-$$"
+mkdir -p -- "$run_dir/tmp" "$run_dir/pi-config" "$run_dir/sessions" \
+  || fail 68 "cannot create the dispatch run directories"
+
+if ! qq_resolve_bin node; then
+  fail 69 "$QQ_BIN_ERROR"
 fi
+node_binary="$QQ_BIN_RESULT"
 
-repo_root="$(dirname "$(dirname "$self")")"
-profile_name="qq-$role"
-profile_source="$repo_root/codex-profiles/$profile_name.config.toml"
-[ -f "$profile_source" ] \
-  || qq_engine_error "dispatch profile source is missing: $profile_source"
-
-if [ -n "${CODEX_HOME:-}" ]; then
-  codex_home="$CODEX_HOME"
-elif [ -n "${HOME:-}" ]; then
-  codex_home="$HOME/.codex"
+if [[ -n "${QQ_LANDSTRIP_BIN:-}" ]]; then
+  if ! qq_resolve_bin landstrip; then
+    fail 69 "$QQ_BIN_ERROR"
+  fi
+  landstrip_binary="$QQ_BIN_RESULT"
 else
-  qq_engine_error 'CODEX_HOME and HOME are both unset; cannot resolve Codex profiles'
+  if ! platform="$("$node_binary" -p 'process.platform' 2>/dev/null)" \
+    || ! architecture="$("$node_binary" -p 'process.arch' 2>/dev/null)"; then
+    fail 69 "cannot determine the Landstrip platform package"
+  fi
+  landstrip_binary="$worktree/.pi/npm/node_modules/@landstrip/landstrip-${platform}-${architecture}/bin/landstrip"
 fi
-profile_link="$codex_home/$profile_name.config.toml"
-if [ ! -L "$profile_link" ]; then
-  state="$("$QQ_ENGINE_JQ" -cn \
-    --arg profile "$profile_name" \
-    --arg expected_source "$profile_source" \
-    --arg required_link "$profile_link" \
-    '{profile:$profile, expected_source:$expected_source, required_link:$required_link}')"
-  qq_engine_refuse \
-    "Codex profile $profile_name is not mounted from this checkout. Create the stated symlink and retry; do not copy or mirror the profile." \
-    "$state"
+[[ "$landstrip_binary" == /* ]] \
+  || fail 69 "Landstrip binary path must be absolute"
+[[ -f "$landstrip_binary" && -x "$landstrip_binary" ]] \
+  || fail 69 "Landstrip is unavailable at the configured path"
+if ! landstrip_binary="$(realpath -e -- "$landstrip_binary" 2>/dev/null)"; then
+  fail 69 "cannot resolve the Landstrip binary"
 fi
-resolved_profile="$(readlink -f -- "$profile_link" 2>/dev/null || true)"
-resolved_source="$(readlink -f -- "$profile_source" 2>/dev/null || true)"
-if [ -z "$resolved_profile" ] || [ "$resolved_profile" != "$resolved_source" ]; then
-  state="$("$QQ_ENGINE_JQ" -cn \
-    --arg profile "$profile_name" \
-    --arg mounted_source "$resolved_profile" \
-    --arg expected_source "$resolved_source" \
-    '{profile:$profile, mounted_source:$mounted_source, expected_source:$expected_source}')"
-  qq_engine_refuse \
-    "Codex profile $profile_name points somewhere other than this checkout. Replace the stale link with the expected mount; do not dispatch under ambiguous access controls." \
-    "$state"
+if ! landstrip_version="$("$landstrip_binary" --version 2>&1)"; then
+  fail 69 "Landstrip version probe failed: $landstrip_version"
 fi
 
-if ! qq_resolve_bin codex; then
-  qq_engine_error "$QQ_BIN_ERROR"
+if ! qq_resolve_bin pi; then
+  fail 70 "$QQ_BIN_ERROR"
 fi
-codex_bin="$QQ_BIN_RESULT"
+pi_binary="$QQ_BIN_RESULT"
+if ! pi_binary="$(realpath -e -- "$pi_binary" 2>/dev/null)"; then
+  fail 70 "cannot resolve the Pi binary"
+fi
+[[ "$pi_binary" != "$self" ]] \
+  || fail 70 "Pi target cannot recurse into the adapter"
+
+timeout_spec="${QQ_DISPATCH_TIMEOUT:-30m}"
+[[ "$timeout_spec" =~ ^(0\.[0-9]+|[1-9][0-9]*(\.[0-9]+)?)([smhd])?$ ]] \
+  || fail 71 "invalid QQ_DISPATCH_TIMEOUT '$timeout_spec'"
 if ! qq_resolve_bin timeout; then
-  qq_engine_error "$QQ_BIN_ERROR"
+  fail 71 "$QQ_BIN_ERROR"
 fi
-timeout_bin="$QQ_BIN_RESULT"
-
-case "$role" in
-  implementer)
-    prompt="Read $brief fully and perform the assignment it specifies.
-You are the delegated implementer; the work order is your complete
-orientation. Do not invoke skills or delegate. Your final message is the
-completion envelope the work order requires."
-    codex_args=(
-      exec
-      --profile "$profile_name"
-    )
-    if [ "$mcp_opt_in" = true ]; then
-      mcp_mode=on
-    else
-      codex_args+=(-c 'mcp_servers={}')
-      mcp_mode=off
-    fi
-    codex_args+=(
-      --skip-git-repo-check
-      -C "$root"
-      --json
-      -o "$output"
-      "$prompt"
-    )
-    for writable_root in "${writable_roots[@]}"; do
-      codex_args+=(--add-dir "$writable_root")
-    done
-    ;;
-  reviewer)
-    prompt="Read $brief fully and perform the review it specifies. You are
-the reviewer; the brief is your complete orientation. Do not invoke
-skills or delegate. Your final message is the review report."
-    codex_args=(
-      exec
-      --profile "$profile_name"
-      --skip-git-repo-check
-      -C "$root"
-      -o "$output"
-      "$prompt"
-    )
-    mcp_mode=on
-    ;;
-  researcher)
-    prompt="Read $brief fully and perform the research it specifies. You are
-the researcher; the brief is your complete orientation. Do not invoke
-skills or delegate. Your final message is the findings report."
-    codex_args=(
-      exec
-      --profile "$profile_name"
-      --skip-git-repo-check
-      -C "$root"
-      -o "$output"
-      "$prompt"
-    )
-    mcp_mode=on
-    ;;
-esac
-
-writable_roots_json="$(
-  "$QQ_ENGINE_JQ" -cn --args '$ARGS.positional' "${writable_roots[@]}"
-)"
-state="$("$QQ_ENGINE_JQ" -cn \
-  --arg role "$role" \
-  --arg root "$root" \
-  --arg brief "$brief" \
-  --arg output "$output" \
-  --arg events "$events" \
-  --arg stderr "$stderr_file" \
-  --arg timeout "$timeout_seconds" \
-  --arg profile "$profile_name" \
-  --arg profile_source "$profile_source" \
-  --arg mcp "$mcp_mode" \
-  --argjson writable_roots "$writable_roots_json" \
-  '{
-    role:$role,
-    root:$root,
-    brief:$brief,
-    output:$output,
-    events:$events,
-    stderr:$stderr,
-    timeout_seconds:$timeout,
-    profile:$profile,
-    profile_source:$profile_source,
-    mcp:$mcp,
-    writable_roots:$writable_roots
-  }')"
-
-if [ "$mode" = inspect ] || [ "$dry_run" = true ]; then
-  qq_engine_done 'dispatch preconditions passed; Codex was not started' "$state"
+timeout_binary="$QQ_BIN_RESULT"
+if ! qq_resolve_bin python3; then
+  fail 71 "$QQ_BIN_ERROR"
 fi
+python_binary="$QQ_BIN_RESULT"
 
-if ! rm -f -- "$output" 2>/dev/null; then
-  qq_engine_error \
-    'Could not remove the pre-existing completion artifact; Codex was not started.' \
-    "$state"
+policy_path="$run_dir/landstrip-policy.json"
+event_log="$runtime_root/wrapper-events.jsonl"
+if ! metadata="$("$node_binary" "$policy_renderer" \
+  --roles "$roles_file" \
+  --role "$role" \
+  --run-id "$run_token" \
+  --worktree "$worktree" \
+  --git-common-dir "$git_common_dir" \
+  --git-worktree-dir "$git_worktree_dir" \
+  --runtime-root "$runtime_root" \
+  --structured-output-capture "$structured_output_capture" \
+  --policy "$policy_path" \
+  --event-log "$event_log" \
+  --timeout "$timeout_spec" \
+  --landstrip-version "$landstrip_version")"; then
+  fail 72 "Landstrip policy rendering failed"
 fi
-set +e
-"$timeout_bin" -k 10 "$timeout_seconds" \
-  "$codex_bin" "${codex_args[@]}" >"$events" 2>"$stderr_file"
-codex_status=$?
-set -e
+IFS=$'\t' read -r policy_identity access_scope <<< "$metadata"
+[[ -n "$policy_identity" && -n "$access_scope" ]] \
+  || fail 72 "Landstrip policy renderer returned incomplete metadata"
 
-state="$("$QQ_ENGINE_JQ" -cn \
-  --argjson base "$state" \
-  --argjson codex_exit "$codex_status" \
-  '$base + {codex_exit:$codex_exit}')"
-case "$codex_status" in
-  0)
-    if [ ! -s "$output" ]; then
-      qq_engine_error \
-        'Codex exited successfully without a completion artifact; this is not a completed dispatch.' \
-        "$state"
-    fi
-    qq_engine_done 'dispatch completed and produced its final artifact' "$state"
-    ;;
-  124 | 137)
-    qq_engine_error \
-      'Codex exceeded the dispatch bound; timeout reaped the process tree. Treat this as a startup/turn wedge, not completed work.' \
-      "$state"
-    ;;
-  *)
-    qq_engine_error \
-      'Codex exited nonzero; inspect the stderr and events artifacts before retrying the unchanged brief.' \
-      "$state"
-    ;;
-esac
+export QQ_DISPATCH_WORKTREE="$worktree"
+export QQ_DISPATCH_GIT_COMMON_DIR="$git_common_dir"
+export QQ_DISPATCH_GIT_WORKTREE_DIR="$git_worktree_dir"
+export QQ_DISPATCH_RUN_DIR="$run_dir"
+export QQ_DISPATCH_POLICY_IDENTITY="$policy_identity"
+export QQ_DISPATCH_POLICY_SCOPE="$access_scope"
+export QQ_DISPATCH_WRAPPER_EVENT_LOG="$event_log"
+export TMPDIR="$run_dir/tmp"
+export PI_CODING_AGENT_DIR="$run_dir/pi-config"
+export PI_CODING_AGENT_SESSION_DIR="$run_dir/sessions"
+export PI_OFFLINE=1
+
+printf '[qq-dispatch] role=%s policy=%s scope=%s boundary=landstrip landstrip=%s timeout=%s\n' \
+  "$role" "$policy_identity" "$access_scope" "$landstrip_version" "$timeout_spec" >&2
+
+exec "$timeout_binary" -k 10 --signal=TERM "$timeout_spec" \
+  "$python_binary" "$tree_supervisor" -- \
+  "$landstrip_binary" -p "$policy_path" \
+  "$pi_binary" --approve --offline "$@"

@@ -2,6 +2,10 @@
 
 This pilot composes `pi-subagents@0.35.1` with native Landstrip `0.17.30` through `PI_SUBAGENT_PI_BINARY`. It is deliberately bridge-less: it does not call `qq-status`, Herdr, or any stage/presence/notification machinery. Pi-subagents' run files and the wrapper's Landstrip diagnostics are the only delegate visibility surfaces.
 
+> T-95 productionalized the pilot machinery as `bin/qq-dispatch` and the
+> top-level `delegation/` home. The launch details below are retained as
+> historical pilot evidence.
+
 ## Launch contract
 
 From the assigned worktree root, expose both the wrapper and the pilot's role manifests to the parent Pi process:

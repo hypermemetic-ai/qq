@@ -9,47 +9,91 @@ TEST_NAME="test-qq-dispatch"
 source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd "$TESTS_DIR/.." && pwd -P)"
 DISPATCH="$ROOT/bin/qq-dispatch"
+SUPERVISOR="$ROOT/bin/lib/qq-process-tree-supervisor.py"
+RENDERER="$ROOT/bin/lib/qq-render-landstrip-policy.mjs"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-brief="$tmp/brief.md"
-printf 'bounded assignment\n' >"$brief"
-codex_home="$tmp/codex-home"
-mkdir -p "$codex_home"
-for role in implementer reviewer researcher; do
-  ln -s "$ROOT/codex-profiles/qq-$role.config.toml" \
-    "$codex_home/qq-$role.config.toml"
+for expected in \
+  "$DISPATCH" \
+  "$SUPERVISOR" \
+  "$RENDERER"; do
+  [ -x "$expected" ] || fail "expected executable is missing: $expected"
 done
 
-fake_codex="$tmp/codex"
-cat >"$fake_codex" <<'SH'
+for retired in \
+  "$ROOT/codex-profiles" \
+  "$ROOT/pilot/bin" \
+  "$ROOT/pilot/checks" \
+  "$ROOT/pilot/manifests" \
+  "$ROOT/pilot/policies"; do
+  [ ! -e "$retired" ] || fail "retired delegation machinery remains: $retired"
+done
+
+for role in implementer reviewer researcher; do
+  manifest="$ROOT/delegation/manifests/agents/$role.md"
+  assert_equal 1 \
+    "$(grep -c '^model: openai/gpt-5\.6-sol$' "$manifest")" \
+    "$role does not have exactly one GPT-5.6 Sol model pin"
+  assert_file_contains "$manifest" \
+    '# Runtime model-identity verification is assigned to T-95 ticket 3.'
+done
+jq -e '
+  .schemaVersion == 1
+  and .roles.reviewer == {
+    access: "read-only",
+    policyIdentity: "qq-reviewer-read-only-v1"
+  }
+  and .roles.researcher == {
+    access: "read-only",
+    policyIdentity: "qq-researcher-read-only-v1"
+  }
+  and .roles.implementer == {
+    access: "workspace-write",
+    policyIdentity: "qq-implementer-workspace-write-v1"
+  }
+' "$ROOT/delegation/policies/roles.json" >/dev/null
+jq -e '
+  .additionalProperties == false
+  and (.required | sort) == ([
+    "status", "summary", "commits", "checks", "filesChanged",
+    "contestableDecisions", "openQuestions", "unresolvedRisks",
+    "branch", "worktree"
+  ] | sort)
+' "$ROOT/delegation/manifests/completion-envelope.schema.json" >/dev/null
+
+fake_landstrip="$tmp/landstrip"
+cat >"$fake_landstrip" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\0' "$@" >"$FAKE_CODEX_LOG"
 
-output=""
-previous=""
-for argument in "$@"; do
-  if [ "$previous" = -o ]; then
-    output="$argument"
-    break
-  fi
-  previous="$argument"
-done
+if [ "${1:-}" = --version ]; then
+  printf 'landstrip 0.17.30\n'
+  exit 0
+fi
 
-case "${FAKE_CODEX_MODE:-done}" in
-  done)
-    [ -n "$output" ] || exit 65
-    printf 'completed artifact\n' >"$output"
-    printf 'codex event\n'
-    ;;
-  empty)
-    printf 'codex event without artifact\n'
-    ;;
-  error)
-    printf 'provider failed\n' >&2
-    exit 9
-    ;;
+[ "${1:-}" = -p ] || exit 64
+[ "$#" -ge 3 ] || exit 64
+policy="$2"
+shift 2
+if [ -n "${FAKE_POLICY_SNAPSHOT:-}" ]; then
+  cp "$policy" "$FAKE_POLICY_SNAPSHOT"
+fi
+exec "$@"
+SH
+chmod +x "$fake_landstrip"
+
+fake_pi="$tmp/pi"
+cat >"$fake_pi" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf '%s\0' "$@" >"$FAKE_PI_ARGS"
+env | LC_ALL=C sort >"$FAKE_PI_ENV"
+printf 'pi-live-event role=%s\n' "${PI_SUBAGENT_CHILD_AGENT:-missing}"
+
+case "${FAKE_PI_MODE:-done}" in
+  done) ;;
   wedge)
     sleep 300 &
     child=$!
@@ -59,351 +103,304 @@ case "${FAKE_CODEX_MODE:-done}" in
   *) exit 64 ;;
 esac
 SH
-chmod +x "$fake_codex"
+chmod +x "$fake_pi"
 
-export QQ_CODEX_BIN="$fake_codex"
-export FAKE_CODEX_LOG="$tmp/codex.args"
-export CODEX_HOME="$codex_home"
+runtime_root="$tmp/runtime"
+mkdir -p "$runtime_root"
+export QQ_LANDSTRIP_BIN="$fake_landstrip"
+export QQ_PI_BIN="$fake_pi"
+export QQ_DISPATCH_RUNTIME_ROOT="$runtime_root"
+export QQ_DISPATCH_TIMEOUT=2s
+export FAKE_PI_ARGS="$tmp/pi.args"
+export FAKE_PI_ENV="$tmp/pi.env"
 
-primary_repo="$tmp/repositories/primary"
-linked_worktree="$tmp/worktrees/linked"
-non_git_root="$tmp/non-git-root"
-mkdir -p "$(dirname "$primary_repo")" "$(dirname "$linked_worktree")" \
-  "$non_git_root"
-git init -q "$primary_repo"
-git -C "$primary_repo" \
+git_common_dir="$(
+  git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir
+)"
+git_worktree_dir="$(
+  git -C "$ROOT" rev-parse --path-format=absolute --git-dir
+)"
+git_common_dir="$(realpath -e "$git_common_dir")"
+git_worktree_dir="$(realpath -e "$git_worktree_dir")"
+
+for role in reviewer researcher implementer; do
+  case "$role" in
+    reviewer)
+      expected_policy=qq-reviewer-read-only-v1
+      expected_scope=read-only
+      ;;
+    researcher)
+      expected_policy=qq-researcher-read-only-v1
+      expected_scope=read-only
+      ;;
+    implementer)
+      expected_policy=qq-implementer-workspace-write-v1
+      expected_scope=workspace-write
+      ;;
+  esac
+
+  policy_snapshot="$tmp/$role-policy.json"
+  stdout_file="$tmp/$role.stdout"
+  stderr_file="$tmp/$role.stderr"
+  (
+    cd "$ROOT"
+    PI_SUBAGENT_CHILD_AGENT="$role" \
+    PI_SUBAGENT_RUN_ID="$role-smoke" \
+    PI_SUBAGENT_CHILD_INDEX=2 \
+    FAKE_POLICY_SNAPSHOT="$policy_snapshot" \
+      "$DISPATCH" --json --model smoke/model
+  ) >"$stdout_file" 2>"$stderr_file"
+
+  assert_file_contains "$stdout_file" "pi-live-event role=$role" \
+    "$role did not retain the Pi events stream"
+  assert_file_contains "$stderr_file" \
+    "role=$role policy=$expected_policy scope=$expected_scope boundary=landstrip"
+  python3 - "$FAKE_PI_ARGS" <<'PY'
+from pathlib import Path
+import sys
+
+args = Path(sys.argv[1]).read_bytes().split(b"\0")
+assert args == [
+    b"--approve",
+    b"--offline",
+    b"--json",
+    b"--model",
+    b"smoke/model",
+    b"",
+], args
+PY
+  grep -Fxq "QQ_DISPATCH_WORKTREE=$ROOT" "$FAKE_PI_ENV" \
+    || fail "$role did not receive the assigned worktree"
+  grep -Fxq "QQ_DISPATCH_GIT_COMMON_DIR=$git_common_dir" "$FAKE_PI_ENV" \
+    || fail "$role did not receive the Git common directory"
+  grep -Fxq "QQ_DISPATCH_GIT_WORKTREE_DIR=$git_worktree_dir" "$FAKE_PI_ENV" \
+    || fail "$role did not receive the worktree Git directory"
+  grep -Fxq "QQ_DISPATCH_POLICY_IDENTITY=$expected_policy" "$FAKE_PI_ENV" \
+    || fail "$role did not receive its policy identity"
+  grep -Fxq "QQ_DISPATCH_POLICY_SCOPE=$expected_scope" "$FAKE_PI_ENV" \
+    || fail "$role did not receive its policy scope"
+
+  if [ "$role" = implementer ]; then
+    jq -e \
+      --arg runtime "$runtime_root" \
+      --arg worktree "$ROOT" \
+      --arg common "$git_common_dir" \
+      --arg worktree_git "$git_worktree_dir" '
+        .enabled == true
+        and .network == {
+          allowNetwork: false,
+          allowLocalBinding: false,
+          allowAllUnixSockets: false,
+          allowUnixSockets: [],
+          allowedDomains: [],
+          deniedDomains: []
+        }
+        and (.filesystem.allowWrite | sort) == (
+          [$runtime, $worktree, $common, $worktree_git, "/dev/null"]
+          | unique
+          | sort
+        )
+      ' "$policy_snapshot" >/dev/null
+  else
+    jq -e \
+      '.enabled == true and .filesystem.allowWrite == [] and .network.allowNetwork == false' \
+      "$policy_snapshot" >/dev/null
+  fi
+done
+
+# Exercise distinct common/per-worktree Git metadata even when the checkout
+# running this suite is a primary checkout, as it is in ordinary CI clones.
+fixture_primary="$tmp/linked-fixture-primary"
+fixture_worktree="$tmp/linked-fixture-worktree"
+git init -q "$fixture_primary"
+git -C "$fixture_primary" \
   -c user.name='qq dispatch test' \
   -c user.email='qq-dispatch@example.invalid' \
   -c commit.gpgSign=false \
   commit --allow-empty -qm 'dispatch test base'
-git -C "$primary_repo" worktree add -q -b dispatch-test-linked \
-  "$linked_worktree"
-
-linked_common_dir="$(
-  git -C "$linked_worktree" rev-parse \
-    --path-format=absolute --git-common-dir
+git -C "$fixture_primary" worktree add -q -b dispatch-linked "$fixture_worktree"
+mkdir -p \
+  "$fixture_worktree/bin/lib" \
+  "$fixture_worktree/delegation/policies"
+cp "$DISPATCH" "$fixture_worktree/bin/qq-dispatch"
+cp "$ROOT/bin/lib/qq-bin.sh" "$fixture_worktree/bin/lib/qq-bin.sh"
+cp "$RENDERER" "$fixture_worktree/bin/lib/qq-render-landstrip-policy.mjs"
+cp "$SUPERVISOR" "$fixture_worktree/bin/lib/qq-process-tree-supervisor.py"
+cp "$ROOT/delegation/policies/roles.json" \
+  "$fixture_worktree/delegation/policies/roles.json"
+fixture_common_dir="$(
+  git -C "$fixture_worktree" rev-parse --path-format=absolute --git-common-dir
 )"
-linked_git_dir="$(
-  git -C "$linked_worktree" rev-parse --path-format=absolute --git-dir
+fixture_git_dir="$(
+  git -C "$fixture_worktree" rev-parse --path-format=absolute --git-dir
 )"
-primary_common_dir="$(
-  git -C "$primary_repo" rev-parse --path-format=absolute --git-common-dir
-)"
-primary_git_dir="$(
-  git -C "$primary_repo" rev-parse --path-format=absolute --git-dir
-)"
-[ "$linked_common_dir" != "$linked_git_dir" ] \
+fixture_common_dir="$(realpath -e "$fixture_common_dir")"
+fixture_git_dir="$(realpath -e "$fixture_git_dir")"
+[ "$fixture_common_dir" != "$fixture_git_dir" ] \
   || fail 'linked-worktree fixture did not produce distinct Git directories'
-assert_equal "$primary_common_dir" "$primary_git_dir" \
-  'primary-checkout fixture produced distinct Git directories'
+fixture_runtime="$tmp/linked-runtime"
+mkdir -p "$fixture_runtime"
+(
+  cd "$fixture_worktree"
+  PI_SUBAGENT_CHILD_AGENT=implementer \
+  PI_SUBAGENT_RUN_ID=linked-smoke \
+  QQ_DISPATCH_RUNTIME_ROOT="$fixture_runtime" \
+  FAKE_POLICY_SNAPSHOT="$tmp/linked-policy.json" \
+    "$fixture_worktree/bin/qq-dispatch" --json
+) >"$tmp/linked.stdout" 2>"$tmp/linked.stderr"
+grep -Fxq "QQ_DISPATCH_GIT_COMMON_DIR=$fixture_common_dir" "$FAKE_PI_ENV" \
+  || fail 'linked adapter did not discover its common Git directory'
+grep -Fxq "QQ_DISPATCH_GIT_WORKTREE_DIR=$fixture_git_dir" "$FAKE_PI_ENV" \
+  || fail 'linked adapter did not discover its per-worktree Git directory'
+jq -e \
+  --arg runtime "$fixture_runtime" \
+  --arg worktree "$fixture_worktree" \
+  --arg common "$fixture_common_dir" \
+  --arg worktree_git "$fixture_git_dir" '
+    .filesystem.allowWrite == [
+      $runtime, $worktree, $common, $worktree_git, "/dev/null"
+    ]
+  ' "$tmp/linked-policy.json" >/dev/null
 
-run_engine() {
-  local expected_exit="$1"
-  shift
+jq -s -e '
+  length == 3
+  and all(.[]; .type == "qq.dispatch.adapter.launch")
+  and (map(.policyIdentity) | sort) == ([
+    "qq-reviewer-read-only-v1",
+    "qq-researcher-read-only-v1",
+    "qq-implementer-workspace-write-v1"
+  ] | sort)
+' "$runtime_root/wrapper-events.jsonl" >/dev/null
+
+capture_dir="$runtime_root/capture"
+capture_path="$capture_dir/envelope.json"
+mkdir -p "$capture_dir"
+(
+  cd "$ROOT"
+  PI_SUBAGENT_CHILD_AGENT=reviewer \
+  PI_SUBAGENT_RUN_ID=capture-smoke \
+  PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE="$capture_path" \
+  FAKE_POLICY_SNAPSHOT="$tmp/capture-policy.json" \
+    "$DISPATCH" --json
+) >"$tmp/capture.stdout" 2>"$tmp/capture.stderr"
+jq -e --arg capture "$capture_path" \
+  '.filesystem.allowWrite == [$capture]' \
+  "$tmp/capture-policy.json" >/dev/null
+jq -s -e --arg capture "$capture_path" '
+  map(select(.runId == "capture-smoke")) as $events
+  | ($events | length) == 1
+  and $events[0].type == "qq.dispatch.adapter.launch"
+  and $events[0].role == "reviewer"
+  and $events[0].policyIdentity == "qq-reviewer-read-only-v1"
+  and $events[0].access == "read-only"
+  and $events[0].allowWrite == [$capture]
+  and $events[0].structuredOutputCapture == $capture
+  and $events[0].timeout == "2s"
+  and $events[0].landstripVersion == "landstrip 0.17.30"
+' "$runtime_root/wrapper-events.jsonl" >/dev/null
+
+run_failure() {
+  local label="$1"
+  local cwd="$2"
+  shift 2
   set +e
-  "$DISPATCH" "$@" >"$tmp/result.json"
-  actual_exit=$?
+  (
+    cd "$cwd"
+    "$@"
+  ) >"$tmp/$label.stdout" 2>"$tmp/$label.stderr"
+  local status=$?
   set -e
-  assert_equal "$expected_exit" "$actual_exit" "unexpected qq-dispatch exit"
-  jq -e . "$tmp/result.json" >/dev/null
+  [ "$status" -ne 0 ] || fail "$label unexpectedly succeeded"
 }
 
-# Exit 0: the profile supplies sandbox/Skill settings and the engine supplies
-# only the implementer's settled MCP-off override.
-export FAKE_CODEX_MODE="done"
-run_engine 0 implementer \
-  --root "$ROOT" --brief "$brief" --output "$tmp/envelope" \
-  --events "$tmp/events" --stderr "$tmp/stderr"
-jq -e '
-  .status == "done"
-  and .state.role == "implementer"
-  and .state.profile == "qq-implementer"
-  and .state.mcp == "off"
-  and .state.codex_exit == 0
-' "$tmp/result.json" >/dev/null
-python3 - "$FAKE_CODEX_LOG" <<'PY'
-from pathlib import Path
-import sys
+run_failure missing-role "$ROOT" \
+  env -u PI_SUBAGENT_CHILD_AGENT "$DISPATCH" --json
+assert_file_contains "$tmp/missing-role.stderr" \
+  'PI_SUBAGENT_CHILD_AGENT is required'
 
-args = Path(sys.argv[1]).read_bytes().split(b"\0")
-assert b"--profile" in args
-assert args[args.index(b"--profile") + 1] == b"qq-implementer"
-assert b"mcp_servers={}" in args
-assert b"--sandbox" not in args
-assert b"skills.include_instructions=false" not in args
-PY
-assert_file_contains "$tmp/events" 'codex event'
+run_failure unsupported-role "$ROOT" \
+  env PI_SUBAGENT_CHILD_AGENT=planner "$DISPATCH" --json
+assert_file_contains "$tmp/unsupported-role.stderr" \
+  "unsupported child role 'planner'"
 
-# An implementer can opt into the profile's MCP configuration by omitting the
-# default MCP-off override, and the selected mode is observable in state.
-run_engine 0 implementer \
-  --root "$ROOT" --brief "$brief" --output "$tmp/mcp-envelope" --mcp
-jq -e '
-  .status == "done"
-  and .state.role == "implementer"
-  and .state.mcp == "on"
-' "$tmp/result.json" >/dev/null
-python3 - "$FAKE_CODEX_LOG" <<'PY'
-from pathlib import Path
-import sys
+outside="$tmp/outside"
+mkdir -p "$outside"
+run_failure unrelated-cwd "$outside" \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer "$DISPATCH" --json
+assert_file_contains "$tmp/unrelated-cwd.stderr" \
+  'child cwd is not inside the assigned worktree'
 
-args = Path(sys.argv[1]).read_bytes().split(b"\0")
-assert b"mcp_servers={}" not in args
-PY
-
-# Inspect mirrors the same mounted-profile preconditions without spawning.
-: >"$FAKE_CODEX_LOG"
-run_engine 0 inspect implementer \
-  --root "$ROOT" --brief "$brief" --output "$tmp/inspect-output"
-[ ! -s "$FAKE_CODEX_LOG" ] || fail 'dispatch inspect started Codex'
-jq -e '.status == "done" and .state.role == "implementer"' \
-  "$tmp/result.json" >/dev/null
-
-# A linked-worktree implementer receives both distinct Git metadata roots,
-# and inspect reports the same ordered pair without spawning Codex.
-: >"$FAKE_CODEX_LOG"
-run_engine 0 inspect implementer \
-  --root "$linked_worktree" --brief "$brief" \
-  --output "$tmp/linked-inspect-output"
-[ ! -s "$FAKE_CODEX_LOG" ] || fail 'linked-worktree inspect started Codex'
-jq -e \
-  --arg common_dir "$linked_common_dir" \
-  --arg git_dir "$linked_git_dir" \
-  '.state.writable_roots == [$common_dir, $git_dir]' \
-  "$tmp/result.json" >/dev/null
-run_engine 0 implementer \
-  --root "$linked_worktree" --brief "$brief" \
-  --output "$tmp/linked-envelope"
-python3 - "$FAKE_CODEX_LOG" "$linked_common_dir" "$linked_git_dir" <<'PY'
-import os
-from pathlib import Path
-import sys
-
-args = Path(sys.argv[1]).read_bytes().split(b"\0")
-add_dirs = [
-    args[index + 1]
-    for index, argument in enumerate(args[:-1])
-    if argument == b"--add-dir"
-]
-assert add_dirs == [os.fsencode(sys.argv[2]), os.fsencode(sys.argv[3])]
-PY
-
-# A primary checkout deduplicates its equal common and per-checkout Git dirs.
-: >"$FAKE_CODEX_LOG"
-run_engine 0 inspect implementer \
-  --root "$primary_repo" --brief "$brief" \
-  --output "$tmp/primary-inspect-output"
-[ ! -s "$FAKE_CODEX_LOG" ] || fail 'primary-checkout inspect started Codex'
-jq -e \
-  --arg common_dir "$primary_common_dir" \
-  '.state.writable_roots == [$common_dir]' \
-  "$tmp/result.json" >/dev/null
-run_engine 0 implementer \
-  --root "$primary_repo" --brief "$brief" \
-  --output "$tmp/primary-envelope"
-python3 - "$FAKE_CODEX_LOG" "$primary_common_dir" <<'PY'
-import os
-from pathlib import Path
-import sys
-
-args = Path(sys.argv[1]).read_bytes().split(b"\0")
-add_dirs = [
-    args[index + 1]
-    for index, argument in enumerate(args[:-1])
-    if argument == b"--add-dir"
-]
-assert add_dirs == [os.fsencode(sys.argv[2])]
-PY
-
-# A non-Git root preserves skip-git-repo-check behavior without extra grants.
-: >"$FAKE_CODEX_LOG"
-run_engine 0 inspect implementer \
-  --root "$non_git_root" --brief "$brief" \
-  --output "$tmp/non-git-inspect-output"
-[ ! -s "$FAKE_CODEX_LOG" ] || fail 'non-Git inspect started Codex'
-jq -e '.state.writable_roots == []' "$tmp/result.json" >/dev/null
-run_engine 0 implementer \
-  --root "$non_git_root" --brief "$brief" \
-  --output "$tmp/non-git-envelope"
-python3 - "$FAKE_CODEX_LOG" <<'PY'
-from pathlib import Path
-import sys
-
-args = Path(sys.argv[1]).read_bytes().split(b"\0")
-assert b"--add-dir" not in args
-PY
-
-# A sibling non-Git root cannot exercise cross-filesystem discovery without a
-# mount boundary, but it keeps the explicit GIT_DIR isolation guard portable.
-: >"$FAKE_CODEX_LOG"
-(
-  export GIT_DIR="$primary_repo/.git"
-  export GIT_COMMON_DIR="$primary_common_dir"
-  export GIT_WORK_TREE="$primary_repo"
-  export GIT_DISCOVERY_ACROSS_FILESYSTEM=true
-  run_engine 0 implementer \
-    --root "$non_git_root" --brief "$brief" \
-    --output "$tmp/non-git-env-leak-envelope"
-)
-jq -e '.state.writable_roots == []' "$tmp/result.json" >/dev/null
-python3 - "$FAKE_CODEX_LOG" <<'PY'
-from pathlib import Path
-import sys
-
-args = Path(sys.argv[1]).read_bytes().split(b"\0")
-assert b"--add-dir" not in args
-PY
-
-# Capture the environment seen by both implementer Git probes. The capture
-# path is baked into the shim because a GIT_-prefixed carrier would be stripped
-# before the shim could read it.
-fake_git="$tmp/fake-git"
-fake_git_capture="$tmp/fake-git.env"
-cat >"$fake_git" <<SH
+real_git="$(command -v git)"
+fake_git="$tmp/git"
+cat >"$fake_git" <<'SH'
 #!/usr/bin/env bash
-env | grep -E '^GIT_' >>"$fake_git_capture" || true
-exit 128
+set -euo pipefail
+case " $* " in
+  *' --git-common-dir '*) exit 1 ;;
+esac
+exec "$REAL_GIT_BIN" "$@"
 SH
 chmod +x "$fake_git"
-QQ_GIT_BIN="$fake_git" \
-GIT_DIR="$primary_repo/.git" \
-GIT_COMMON_DIR="$primary_common_dir" \
-GIT_WORK_TREE="$primary_repo" \
-GIT_DISCOVERY_ACROSS_FILESYSTEM=true \
-  run_engine 0 implementer \
-  --root "$non_git_root" --brief "$brief" \
-  --output "$tmp/fake-git-envelope"
-[ -e "$fake_git_capture" ] || fail 'implementer Git probes did not run'
-if grep -Eq '^GIT_' "$fake_git_capture"; then
-  fail 'implementer Git probes inherited GIT_* variables'
-fi
-jq -e '.state.writable_roots == []' "$tmp/result.json" >/dev/null
+run_failure undiscoverable-git "$ROOT" \
+  env \
+    REAL_GIT_BIN="$real_git" \
+    QQ_GIT_BIN="$fake_git" \
+    PI_SUBAGENT_CHILD_AGENT=implementer \
+    "$DISPATCH" --json
+assert_file_contains "$tmp/undiscoverable-git.stderr" \
+  'cannot discover the Git common directory'
 
-# Read-only roles receive and report no writable roots, even for a worktree.
-for read_only_role in reviewer researcher; do
-  : >"$FAKE_CODEX_LOG"
-  run_engine 0 inspect "$read_only_role" \
-    --root "$linked_worktree" --brief "$brief" \
-    --output "$tmp/$read_only_role-inspect-output"
-  [ ! -s "$FAKE_CODEX_LOG" ] \
-    || fail "$read_only_role worktree inspect started Codex"
-  jq -e \
-    --arg role "$read_only_role" \
-    '.state.role == $role and .state.writable_roots == []' \
-    "$tmp/result.json" >/dev/null
-  run_engine 0 "$read_only_role" \
-    --root "$linked_worktree" --brief "$brief" \
-    --output "$tmp/$read_only_role-worktree-output"
-  python3 - "$FAKE_CODEX_LOG" <<'PY'
-from pathlib import Path
-import sys
+: >"$FAKE_PI_ARGS"
+run_failure missing-landstrip "$ROOT" \
+  env \
+    QQ_LANDSTRIP_BIN="$tmp/missing-landstrip" \
+    PI_SUBAGENT_CHILD_AGENT=reviewer \
+    "$DISPATCH" --json
+assert_file_contains "$tmp/missing-landstrip.stderr" \
+  'QQ_LANDSTRIP_BIN must be an absolute executable file'
+[ ! -s "$FAKE_PI_ARGS" ] || fail 'missing Landstrip launched Pi'
 
-args = Path(sys.argv[1]).read_bytes().split(b"\0")
-assert b"--add-dir" not in args
-PY
-done
+policy_fixture="$tmp/policy-fixture"
+mkdir -p "$policy_fixture/bin/lib"
+git init -q "$policy_fixture"
+cp "$DISPATCH" "$policy_fixture/bin/qq-dispatch"
+cp "$ROOT/bin/lib/qq-bin.sh" "$policy_fixture/bin/lib/qq-bin.sh"
+cp "$RENDERER" "$policy_fixture/bin/lib/qq-render-landstrip-policy.mjs"
+cp "$SUPERVISOR" "$policy_fixture/bin/lib/qq-process-tree-supervisor.py"
 
-# Read-only roles do not resolve Git, while implementer dispatch still requires
-# it. Each invalid override is scoped so it cannot leak into later assertions.
-invalid_git="$tmp/missing-git"
-for read_only_role in reviewer researcher; do
-  : >"$FAKE_CODEX_LOG"
-  (
-    # shellcheck disable=SC2030
-    export QQ_GIT_BIN="$invalid_git"
-    run_engine 0 inspect "$read_only_role" \
-      --root "$linked_worktree" --brief "$brief" \
-      --output "$tmp/$read_only_role-no-git-inspect-output"
-    [ ! -s "$FAKE_CODEX_LOG" ] \
-      || fail "$read_only_role no-Git inspect started Codex"
-    jq -e \
-      --arg role "$read_only_role" \
-      '.state.role == $role and .state.writable_roots == []' \
-      "$tmp/result.json" >/dev/null
-    run_engine 0 "$read_only_role" \
-      --root "$linked_worktree" --brief "$brief" \
-      --output "$tmp/$read_only_role-no-git-output"
-    jq -e \
-      --arg role "$read_only_role" \
-      '.state.role == $role and .state.writable_roots == []' \
-      "$tmp/result.json" >/dev/null
-  )
-  python3 - "$FAKE_CODEX_LOG" <<'PY'
-from pathlib import Path
-import sys
+: >"$FAKE_PI_ARGS"
+run_failure missing-policy "$policy_fixture" \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer \
+  "$policy_fixture/bin/qq-dispatch" --json
+assert_file_contains "$tmp/missing-policy.stderr" \
+  'Landstrip role policy is unavailable'
+[ ! -s "$FAKE_PI_ARGS" ] || fail 'missing policy launched Pi'
 
-args = Path(sys.argv[1]).read_bytes().split(b"\0")
-assert b"--add-dir" not in args
-PY
-done
+mkdir -p "$policy_fixture/delegation/policies"
+printf '{ malformed\n' >"$policy_fixture/delegation/policies/roles.json"
+: >"$FAKE_PI_ARGS"
+run_failure malformed-policy "$policy_fixture" \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer \
+  "$policy_fixture/bin/qq-dispatch" --json
+assert_file_contains "$tmp/malformed-policy.stderr" \
+  'Landstrip policy rendering failed'
+[ ! -s "$FAKE_PI_ARGS" ] || fail 'malformed policy launched Pi'
 
-: >"$FAKE_CODEX_LOG"
+export FAKE_PI_MODE=wedge
+export FAKE_CHILD_PID="$tmp/wedged-child.pid"
+set +e
 (
-  # shellcheck disable=SC2031
-  export QQ_GIT_BIN="$invalid_git"
-  run_engine 1 implementer \
-    --root "$linked_worktree" --brief "$brief" \
-    --output "$tmp/implementer-no-git-output"
-)
-jq -e '
-  .status == "error"
-  and (.message | contains("QQ_GIT_BIN must be an absolute executable file"))
-' "$tmp/result.json" >/dev/null
-[ ! -s "$FAKE_CODEX_LOG" ] || fail 'no-Git implementer started Codex'
-
-# Reviewer and researcher keep MCP on by omitting the override.
-run_engine 0 reviewer \
-  --root "$ROOT" --brief "$brief" --output "$tmp/review"
-python3 - "$FAKE_CODEX_LOG" <<'PY'
-from pathlib import Path
-import sys
-
-args = Path(sys.argv[1]).read_bytes().split(b"\0")
-assert args[args.index(b"--profile") + 1] == b"qq-reviewer"
-assert b"mcp_servers={}" not in args
-PY
-
-# Exit 2: a missing checkout-mounted profile is a rail refusal, not an error.
-unlink "$codex_home/qq-researcher.config.toml"
-run_engine 2 researcher \
-  --root "$ROOT" --brief "$brief" --output "$tmp/research"
-jq -e '
-  .status == "refused"
-  and (.message | contains("not mounted from this checkout"))
-  and .state.profile == "qq-researcher"
-' "$tmp/result.json" >/dev/null
-
-# Exit 1: malformed input is an error.
-run_engine 1 unknown \
-  --root "$ROOT" --brief "$brief" --output "$tmp/unknown"
-jq -e '.status == "error"' "$tmp/result.json" >/dev/null
-
-# A successful Codex exit cannot reuse a nonempty artifact from an earlier
-# attempt: dispatch removes it before launch and retains the empty-artifact error.
-stale_output="$tmp/stale-envelope"
-printf 'stale completion\n' >"$stale_output"
-export FAKE_CODEX_MODE=empty
-run_engine 1 implementer \
-  --root "$ROOT" --brief "$brief" --output "$stale_output"
-jq -e '
-  .status == "error"
-  and (.message | contains("without a completion artifact"))
-' "$tmp/result.json" >/dev/null
-[ ! -e "$stale_output" ] || fail 'dispatch retained the stale completion artifact'
-
-# Timeout containment returns engine error 1 (never raw 124) and reaps the
-# fake Codex process tree, including its long-running child.
-export FAKE_CODEX_MODE=wedge
-export FAKE_CHILD_PID="$tmp/child.pid"
-run_engine 1 implementer \
-  --root "$ROOT" --brief "$brief" --output "$tmp/wedge-output" \
-  --events "$tmp/wedge-events" --stderr "$tmp/wedge-stderr" \
-  --timeout 0.2
-jq -e '
-  .status == "error"
-  and .state.codex_exit == 124
-  and (.message | contains("reaped the process tree"))
-' "$tmp/result.json" >/dev/null
+  cd "$ROOT"
+  PI_SUBAGENT_CHILD_AGENT=implementer \
+  PI_SUBAGENT_RUN_ID=timeout-smoke \
+  QQ_DISPATCH_TIMEOUT=0.2s \
+  FAKE_POLICY_SNAPSHOT="$tmp/timeout-policy.json" \
+    "$DISPATCH" --json
+) >"$tmp/timeout.stdout" 2>"$tmp/timeout.stderr"
+timeout_status=$?
+set -e
+assert_equal 124 "$timeout_status" 'adapter did not preserve GNU timeout status'
+[ -s "$FAKE_CHILD_PID" ] || fail 'timeout probe did not announce its child'
 child_pid="$(cat "$FAKE_CHILD_PID")"
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   if ! kill -0 "$child_pid" 2>/dev/null; then
@@ -412,14 +409,7 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
   sleep 0.05
 done
 if kill -0 "$child_pid" 2>/dev/null; then
-  fail "timeout leaked wedged child process $child_pid"
+  fail "process-tree supervisor leaked wedged descendant $child_pid"
 fi
-
-grep -Fq 'sandbox_mode = "workspace-write"' \
-  "$ROOT/codex-profiles/qq-implementer.config.toml"
-grep -Fq 'sandbox_mode = "read-only"' \
-  "$ROOT/codex-profiles/qq-reviewer.config.toml"
-grep -Fq 'include_instructions = false' \
-  "$ROOT/codex-profiles/qq-researcher.config.toml"
 
 printf 'test-qq-dispatch: pass\n'

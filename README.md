@@ -36,6 +36,8 @@ wiring needed to expose it.
 - herdr provides persistent `main` project homes, short-labeled grouped
   worktree sessions, named agents, and direct agent-to-agent messaging.
 - `cockpit/` contains the operator's terminal configuration.
+- `delegation/` contains the production pi-subagents role manifests,
+  Completion Envelope schema, and Landstrip role policy map.
 - `bin/` holds the qq commands — mounted on `PATH` by the cockpit shell
   surface — for guarded local OpenWiki updates and Herdr project-home focus
   and pane movement.
@@ -79,18 +81,19 @@ ln -sT "$HOME/projects/qq/skills" "$HOME/.claude/skills"
 ln -sT "$HOME/projects/qq/skills" "$HOME/.codex/skills"
 ```
 
-Mount qq's Codex execution profiles into Codex's fixed profile directory:
+Expose qq's production adapter and role manifests to pi-subagents:
 
 ```bash
-ln -s "$HOME/projects/qq/codex-profiles/qq-implementer.config.toml" "$HOME/.codex/qq-implementer.config.toml"
-ln -s "$HOME/projects/qq/codex-profiles/qq-reviewer.config.toml" "$HOME/.codex/qq-reviewer.config.toml"
-ln -s "$HOME/projects/qq/codex-profiles/qq-researcher.config.toml" "$HOME/.codex/qq-researcher.config.toml"
+export PI_SUBAGENT_PI_BINARY="$HOME/projects/qq/bin/qq-dispatch"
+export PI_SUBAGENT_EXTRA_AGENT_DIRS="$HOME/projects/qq/delegation/manifests/agents"
 ```
 
-`qq-dispatch` requires these links to resolve back to the checkout, so profile
-changes stay live without a copy step. The profiles carry sandbox and Skill
-settings; implementer dispatch adds the MCP-off override, while reviewer and
-researcher dispatches retain the user's configured MCP servers.
+Both paths are part of the launch contract. Pi-subagents supplies the child
+role and streams lifecycle events; `qq-dispatch` selects that role's Landstrip
+policy, verifies the assigned worktree and Git directories, and starts the
+real Pi child under bounded descendant cleanup. The three role manifests pin
+delegates to `openai/gpt-5.6-sol` independently of the accountable session's
+default model.
 
 Start Pi and use `/login` to select Kimi For Coding and store the single
 dedicated private `pi-qq` credential. Pi writes it to
@@ -135,10 +138,10 @@ or `CLOSED`, or when inspection fails.
 
 The accountable Pi session stays in the Repository project home and owns
 alignment, Task and Change judgment, work orders, verdicts, UAT, and handoff.
-Bounded implementation, fresh review, and research remain Codex-first through
-`qq-dispatch`; do not add a Pi MCP server or Pi subagent package. Keep Claude
-Code installed and configured, including its Skill mount and Herdr integration,
-as rollback until Pi parity and operator UAT pass.
+Bounded implementation, fresh review, and research run through pi-subagents;
+`qq-dispatch` is only its fail-closed Landstrip adapter. Keep Claude Code
+installed and configured, including its Skill mount and Herdr integration, as
+the supported fallback runtime.
 
 On a machine migrating off the retired installer, remove the old per-skill
 link directories first (after checking they hold nothing but links into this
