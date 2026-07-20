@@ -1,0 +1,1211 @@
+#!/usr/bin/env bash
+# Nominate and, after operator veto, reap stale docs and merged Git debris.
+# shellcheck disable=SC1091,SC2016,SC2094
+set -euo pipefail
+
+self="$(readlink -f -- "${BASH_SOURCE[0]}")"
+# shellcheck source=bin/lib/qq-bin.sh
+source "$(dirname "$self")/lib/qq-bin.sh"
+# shellcheck source=bin/lib/qq-engine.sh
+source "$(dirname "$self")/lib/qq-engine.sh"
+
+qq_engine_init qq-reap reap
+
+usage='usage: qq-reap [inspect] [scan] [--repo <path>] [--dry-run] | qq-reap [inspect] apply <report-file> [--repo <path>] [--dry-run]
+scan fetch boundary: git fetch --no-tags origin main refreshes FETCH_HEAD and may refresh refs/remotes/origin/main; the worktree, index, and refs/heads/ remain untouched'
+
+inspect=false
+if [ "${1:-}" = inspect ]; then
+  inspect=true
+  shift
+fi
+
+operation=scan
+source_report=""
+case "${1:-}" in
+  scan)
+    shift
+    ;;
+  apply)
+    operation=apply
+    shift
+    source_report="${1:-}"
+    if [ -z "$source_report" ] || [[ "$source_report" == --* ]]; then
+      qq_engine_error "$usage"
+    fi
+    shift
+    ;;
+  "" | --*) ;;
+  *) qq_engine_error "$usage" ;;
+esac
+
+repo=.
+dry_run=false
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --repo)
+      [ "$#" -ge 2 ] || qq_engine_error '--repo requires a path'
+      repo="$2"
+      shift 2
+      ;;
+    --dry-run)
+      dry_run=true
+      shift
+      ;;
+    *) qq_engine_error "unknown qq-reap argument: $1" ;;
+  esac
+done
+
+if [ "$inspect" = true ]; then
+  qq_engine_set_action "inspect:$operation"
+else
+  qq_engine_set_action "$operation"
+fi
+
+if ! qq_resolve_bin git; then
+  qq_engine_error "$QQ_BIN_ERROR"
+fi
+git_bin="$QQ_BIN_RESULT"
+
+if [ -n "${XDG_STATE_HOME:-}" ]; then
+  state_home="$XDG_STATE_HOME"
+elif [ -n "${HOME:-}" ]; then
+  state_home="$HOME/.local/state"
+else
+  qq_engine_error 'XDG_STATE_HOME and HOME are both unset; cannot write the qq-reap heartbeat'
+fi
+reports_dir="$state_home/qq-reap/reports"
+if ! mkdir -p -- "$reports_dir"; then
+  qq_engine_error "cannot create qq-reap reports directory: $reports_dir"
+fi
+reports_dir="$(cd "$reports_dir" && pwd -P)" \
+  || qq_engine_error "cannot canonicalize qq-reap reports directory: $reports_dir"
+
+generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  || qq_engine_error 'cannot obtain the UTC report timestamp'
+filename_timestamp="$(date -u +%Y%m%dT%H%M%S.%NZ)" \
+  || qq_engine_error 'cannot obtain the filesystem-safe UTC report timestamp'
+report_path="$reports_dir/$filename_timestamp.md"
+if [ -e "$report_path" ] || [ -L "$report_path" ]; then
+  report_path="$reports_dir/$filename_timestamp-$$.md"
+fi
+report_draft="$(mktemp "$reports_dir/.qq-reap-report.XXXXXX")" \
+  || qq_engine_error 'cannot allocate the qq-reap report draft'
+
+repo_root=""
+nomination_counts='{"docs":0,"branches":0,"worktrees":0,"total":0}'
+degraded_checks='[]'
+current_nominations='[]'
+worktree_refusals='[]'
+fresh_main_oid=""
+primary_main=""
+primary_main_count=0
+scan_rail_refused=false
+
+publish_report() {
+  if ! mv -- "$report_draft" "$report_path"; then
+    qq_engine_error 'could not publish the dated qq-reap report' \
+      "$("$QQ_ENGINE_JQ" -cn --arg report_path "$report_path" \
+        '{report_path:$report_path}')"
+  fi
+  if [ -d "$reports_dir/latest" ] && [ ! -L "$reports_dir/latest" ]; then
+    qq_engine_error 'dated qq-reap report was written, but latest is an unexpected directory' \
+      "$("$QQ_ENGINE_JQ" -cn --arg report_path "$report_path" \
+        '{report_path:$report_path}')"
+  fi
+  if ! ln -sfn -- "$(basename "$report_path")" "$reports_dir/latest"; then
+    qq_engine_error 'dated qq-reap report was written, but latest could not be refreshed' \
+      "$("$QQ_ENGINE_JQ" -cn --arg report_path "$report_path" \
+        '{report_path:$report_path}')"
+  fi
+  if [ ! -L "$reports_dir/latest" ] \
+    || [ "$(readlink "$reports_dir/latest")" != "$(basename "$report_path")" ]; then
+    qq_engine_error 'dated qq-reap report was written, but latest does not identify it' \
+      "$("$QQ_ENGINE_JQ" -cn --arg report_path "$report_path" \
+        '{report_path:$report_path}')"
+  fi
+}
+
+finish_problem() {
+  local disposition="$1"
+  local message="$2"
+  local extra_state="${3:-{}}"
+  local metadata state
+
+  metadata="$("$QQ_ENGINE_JQ" -cn \
+    --arg mode "$operation" --arg generated_at "$generated_at" \
+    --arg repository "${repo_root:-$repo}" --arg disposition "$disposition" \
+    '{format:"qq-reap-v1",mode:$mode,generated_at:$generated_at,repository:$repository,outcome:$disposition}')"
+  {
+    printf '# qq-reap %s report\n\n' "$operation"
+    printf 'qq-reap-metadata: %s\n\n' "$metadata"
+    printf '## Error\n\n'
+    "$QQ_ENGINE_JQ" -cn --arg status "$disposition" --arg message "$message" \
+      '{status:$status,message:$message}'
+  } >"$report_draft" || {
+    rm -f -- "$report_draft"
+    qq_engine_error "$message; the heartbeat report could not be written"
+  }
+  publish_report
+  state="$("$QQ_ENGINE_JQ" -cn \
+    --arg repo_root "$repo_root" --arg report_path "$report_path" \
+    --argjson nomination_counts "$nomination_counts" \
+    --argjson extra "$extra_state" \
+    '{repo_root:$repo_root,report_path:$report_path,nomination_counts:$nomination_counts} + $extra')"
+  if [ "$disposition" = refused ]; then
+    qq_engine_refuse "$message" "$state"
+  fi
+  qq_engine_error "$message" "$state"
+}
+
+append_nomination() {
+  local nomination="$1"
+  current_nominations="$("$QQ_ENGINE_JQ" -cn \
+    --argjson current "$current_nominations" --argjson nomination "$nomination" \
+    '$current + [$nomination]')"
+}
+
+shell_double_quote() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//\$/\\\$}"
+  value="${value//\`/\\\`}"
+  QUOTED_VALUE="\"$value\""
+}
+
+shell_command_arg() {
+  local value="$1"
+  if [[ "$value" =~ ^[A-Za-z0-9._/@%+=,:-]+$ ]]; then
+    QUOTED_VALUE="$value"
+  else
+    shell_double_quote "$value"
+  fi
+}
+
+looks_repo_relative() {
+  local candidate="$1"
+  case "$candidate" in
+    "" | /* | \~/* | ./* | ../* | */../* | */.. | '…/'* | '.../'* \
+      | *://* | git@* | *'<'* | *'>'* | *'|'* | *'&&'* | *';'* | *'$'* \
+      | *'*'* | *'?'* | *'['* | *$'\r'* | *$'\n'*) return 1 ;;
+  esac
+  if [[ "$candidate" == *" / "* ]]; then
+    return 1
+  fi
+  if [[ "$candidate" == */* ]]; then
+    return 0
+  fi
+  [[ "$candidate" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*\.[A-Za-z][A-Za-z0-9_-]*$ ]]
+}
+
+extract_inline_tokens() {
+  awk '
+    /^[[:space:]]*```/ { fenced = !fenced; next }
+    fenced { next }
+    {
+      text = $0
+      while (match(text, /`[^`]+`/)) {
+        print substr(text, RSTART + 1, RLENGTH - 2)
+        text = substr(text, RSTART + RLENGTH)
+      }
+    }
+  ' "$1"
+}
+
+worktrees='[]'
+record_path=""
+record_head=""
+record_branch=""
+record_bare=false
+
+append_worktree_record() {
+  local record
+  if [ -z "$record_path" ]; then
+    return 0
+  fi
+  record="$("$QQ_ENGINE_JQ" -cn \
+    --arg path "$record_path" --arg head "$record_head" \
+    --arg branch "$record_branch" --argjson bare "$record_bare" \
+    '{path:$path,head:$head,branch:$branch,bare:$bare}')"
+  worktrees="$("$QQ_ENGINE_JQ" -cn --argjson current "$worktrees" \
+    --argjson record "$record" '$current + [$record]')"
+  record_path=""
+  record_head=""
+  record_branch=""
+  record_bare=false
+}
+
+load_worktrees() {
+  local worktree_file field
+  worktree_file="$(mktemp "${TMPDIR:-/tmp}/qq-reap-worktrees.XXXXXX")" \
+    || finish_problem error 'could not allocate temporary worktree inspection space'
+  if ! "$git_bin" -C "$repo_root" worktree list --porcelain -z >"$worktree_file"; then
+    rm -f -- "$worktree_file"
+    finish_problem error "cannot list Git worktrees for: $repo_root"
+  fi
+  while IFS= read -r -d '' field; do
+    case "$field" in
+      "") append_worktree_record ;;
+      worktree\ *) record_path="${field#worktree }" ;;
+      HEAD\ *) record_head="${field#HEAD }" ;;
+      branch\ *) record_branch="${field#branch }" ;;
+      bare) record_bare=true ;;
+    esac
+  done <"$worktree_file"
+  append_worktree_record
+  rm -f -- "$worktree_file"
+  if [ "$("$QQ_ENGINE_JQ" -r 'length' <<<"$worktrees")" -eq 0 ]; then
+    finish_problem error "Git returned an empty worktree list for: $repo_root"
+  fi
+}
+
+herdr_available=false
+herdr_workspaces='[]'
+
+load_herdr() {
+  local workspace_result
+  if qq_resolve_bin herdr; then
+    herdr_available=true
+    herdr_bin="$QQ_BIN_RESULT"
+    if ! workspace_result="$("$herdr_bin" workspace list 2>/dev/null)"; then
+      finish_problem error 'could not inspect Herdr workspaces for worktree bindings'
+    fi
+    if ! "$QQ_ENGINE_JQ" -e '.result.workspaces | type == "array"' \
+      <<<"$workspace_result" >/dev/null 2>&1; then
+      finish_problem error 'Herdr returned unreadable workspace data'
+    fi
+    herdr_workspaces="$("$QQ_ENGINE_JQ" -c '.result.workspaces' \
+      <<<"$workspace_result")"
+  else
+    herdr_available=false
+    herdr_workspaces='[]'
+    degraded_checks="$("$QQ_ENGINE_JQ" -cn --arg detail "$QQ_BIN_ERROR" '[
+      "herdr unavailable: all worktree nominations and actions were refused (" + $detail + ")"
+    ]')"
+    scan_rail_refused=true
+  fi
+}
+
+append_worktree_refusal() {
+  local id="$1"
+  local reason="$2"
+  local observed_state="$3"
+  worktree_refusals="$("$QQ_ENGINE_JQ" -cn \
+    --argjson current "$worktree_refusals" --arg id "$id" \
+    --arg reason "$reason" --argjson observed_state "$observed_state" \
+    '$current + [{id:$id,reason:$reason,observed_state:$observed_state}]')"
+  scan_rail_refused=true
+}
+
+screen_bound_worktree() {
+  local path="$1"
+  local workspace_json="$2"
+  local workspace_id agent_status snapshot focused_workspace agents
+  local panes pane_count tab_count sole_pane live_agent_count
+
+  CENSUS_PASSED=false
+  CENSUS_REASON=""
+  CENSUS_PLACEHOLDER=""
+  workspace_id="$("$QQ_ENGINE_JQ" -r '.workspace_id // ""' <<<"$workspace_json")"
+  agent_status="$("$QQ_ENGINE_JQ" -r '.agent_status // ""' <<<"$workspace_json")"
+  CENSUS_STATE="$("$QQ_ENGINE_JQ" -cn \
+    --arg path "$path" --arg workspace_id "$workspace_id" \
+    --arg agent_status "$agent_status" \
+    '{path:$path,herdr_available:true,workspace_id:$workspace_id,workspace_exists:true,agent_status:$agent_status}')"
+
+  if [ -z "$workspace_id" ] || [[ "$workspace_id" == *$'\n'* || "$workspace_id" == *$'\r'* ]]; then
+    CENSUS_REASON='Herdr binding has no readable workspace id'
+    return 0
+  fi
+  if [ "$("$QQ_ENGINE_JQ" -r '.worktree.is_linked_worktree // false' \
+    <<<"$workspace_json")" != true ]; then
+    CENSUS_REASON='Herdr binding does not identify a linked worktree'
+    return 0
+  fi
+  if [ -z "$agent_status" ]; then
+    CENSUS_REASON='live-agent evidence could not be resolved'
+    return 0
+  fi
+
+  if ! snapshot="$("$herdr_bin" api snapshot 2>/dev/null)"; then
+    CENSUS_REASON='live-agent and operator-focus evidence could not be resolved'
+    return 0
+  fi
+  if ! "$QQ_ENGINE_JQ" -e '.result.agents | type == "array"' \
+    <<<"$snapshot" >/dev/null 2>&1; then
+    CENSUS_REASON='live-agent evidence could not be resolved'
+    return 0
+  fi
+  agents="$("$QQ_ENGINE_JQ" -c '.result.agents' <<<"$snapshot")"
+  live_agent_count="$("$QQ_ENGINE_JQ" -r --arg workspace "$workspace_id" \
+    '[.[] | select(.workspace_id == $workspace)] | length' <<<"$agents")"
+  CENSUS_STATE="$("$QQ_ENGINE_JQ" -cn --argjson base "$CENSUS_STATE" \
+    --argjson live_agent_count "$live_agent_count" \
+    '$base + {live_agent_count:$live_agent_count}')"
+  if [ "$live_agent_count" -ne 0 ] || [ "$agent_status" = working ]; then
+    CENSUS_REASON='the work session still has a live agent'
+    return 0
+  fi
+
+  if ! panes="$("$herdr_bin" pane list --workspace "$workspace_id" 2>/dev/null)"; then
+    CENSUS_REASON='pane and tab evidence could not be resolved'
+    return 0
+  fi
+  if ! "$QQ_ENGINE_JQ" -e '.result.panes | type == "array"' \
+    <<<"$panes" >/dev/null 2>&1; then
+    CENSUS_REASON='pane and tab evidence could not be resolved'
+    return 0
+  fi
+  pane_count="$("$QQ_ENGINE_JQ" -r '.result.panes | length' <<<"$panes")"
+  tab_count="$("$QQ_ENGINE_JQ" -r '[.result.panes[].tab_id] | unique | length' \
+    <<<"$panes")"
+  sole_pane="$("$QQ_ENGINE_JQ" -r '.result.panes[0].pane_id // ""' <<<"$panes")"
+  CENSUS_STATE="$("$QQ_ENGINE_JQ" -cn --argjson base "$CENSUS_STATE" \
+    --argjson pane_count "$pane_count" --argjson tab_count "$tab_count" \
+    --arg sole_pane "$sole_pane" \
+    '$base + {pane_count:$pane_count,tab_count:$tab_count,sole_pane:$sole_pane}')"
+  if [ "$pane_count" -ne 1 ] || [ "$tab_count" -ne 1 ]; then
+    CENSUS_REASON='the work session does not contain exactly one tab and its sole root placeholder pane'
+    return 0
+  fi
+  if [ -z "$sole_pane" ] || [[ "$sole_pane" == *$'\n'* || "$sole_pane" == *$'\r'* ]]; then
+    CENSUS_REASON='the root placeholder pane identity could not be resolved'
+    return 0
+  fi
+
+  focused_workspace="$("$QQ_ENGINE_JQ" -r '
+    .result.focused_workspace_id
+    // .result.snapshot.focused_workspace_id
+    // .result.snapshot.focused.workspace_id
+    // .result.focused.workspace_id
+    // ""
+  ' <<<"$snapshot" 2>/dev/null || true)"
+  CENSUS_STATE="$("$QQ_ENGINE_JQ" -cn --argjson base "$CENSUS_STATE" \
+    --arg focused_workspace "$focused_workspace" \
+    '$base + {focused_workspace:$focused_workspace}')"
+  if [ -z "$focused_workspace" ]; then
+    CENSUS_REASON='operator-focus evidence could not be resolved'
+    return 0
+  fi
+  if [ "$focused_workspace" = "$workspace_id" ]; then
+    CENSUS_REASON='the operator is focused on the Change work session'
+    return 0
+  fi
+
+  CENSUS_PASSED=true
+  CENSUS_PLACEHOLDER="$sole_pane"
+}
+
+derive_nominations() {
+  local docs_file branches_file doc candidate doc_path token_file dead_paths dead_count command
+  local nomination branch tip ancestry_status
+  local worktree branch_ref status workspace_matches workspace_count workspace_id removal
+  local refusal_id
+
+  current_nominations='[]'
+  nomination_counts='{"docs":0,"branches":0,"worktrees":0,"total":0}'
+  degraded_checks='[]'
+  worktree_refusals='[]'
+  scan_rail_refused=false
+  worktrees='[]'
+  record_path=""
+  record_head=""
+  record_branch=""
+  record_bare=false
+
+  if ! "$git_bin" -C "$repo_root" fetch --no-tags origin main >/dev/null 2>&1; then
+    finish_problem error 'could not freshly fetch origin/main; no nominations were applied'
+  fi
+  if ! fresh_main_oid="$("$git_bin" -C "$repo_root" rev-parse --verify \
+    'FETCH_HEAD^{commit}' 2>/dev/null)"; then
+    finish_problem error 'fresh fetch did not leave a readable FETCH_HEAD commit'
+  fi
+
+  load_worktrees
+  primary_main_count="$("$QQ_ENGINE_JQ" -r \
+    '[.[] | select(.bare == false and .branch == "refs/heads/main")] | length' \
+    <<<"$worktrees")"
+  primary_main=""
+  if [ "$primary_main_count" -eq 1 ]; then
+    primary_main="$("$QQ_ENGINE_JQ" -r \
+      '.[] | select(.bare == false and .branch == "refs/heads/main") | .path' \
+      <<<"$worktrees")"
+  elif [ "$operation" = scan ]; then
+    finish_problem refused \
+      'expected exactly one non-bare worktree attached to refs/heads/main; nothing was reaped' \
+      "$("$QQ_ENGINE_JQ" -cn --argjson main_checkout_count "$primary_main_count" \
+        '{main_checkout_count:$main_checkout_count}')"
+  fi
+
+  load_herdr
+
+  docs_file="$(mktemp "${TMPDIR:-/tmp}/qq-reap-docs.XXXXXX")" \
+    || finish_problem error 'could not allocate temporary stale-doc inspection space'
+  if ! "$git_bin" -C "$repo_root" ls-files -z -- backlog/docs >"$docs_file"; then
+    rm -f -- "$docs_file"
+    finish_problem error 'could not list tracked files under backlog/docs/'
+  fi
+  while IFS= read -r -d '' doc; do
+    if [[ "$doc" == *$'\n'* || "$doc" == *$'\r'* ]]; then
+      rm -f -- "$docs_file"
+      finish_problem error 'tracked backlog doc path is not single-line report data'
+    fi
+    doc_path="$repo_root/$doc"
+    if [ ! -f "$doc_path" ] || [ ! -r "$doc_path" ]; then
+      rm -f -- "$docs_file"
+      finish_problem error "tracked backlog doc is unreadable: $doc"
+    fi
+    token_file="$(mktemp "${TMPDIR:-/tmp}/qq-reap-tokens.XXXXXX")" \
+      || finish_problem error 'could not allocate temporary markdown inspection space'
+    if ! extract_inline_tokens "$doc_path" >"$token_file"; then
+      rm -f -- "$token_file" "$docs_file"
+      finish_problem error "could not inspect markdown tokens in: $doc"
+    fi
+    dead_paths='[]'
+    declare -A seen_dead=()
+    while IFS= read -r candidate || [ -n "$candidate" ]; do
+      looks_repo_relative "$candidate" || continue
+      if [ ! -e "$repo_root/$candidate" ] && [ ! -L "$repo_root/$candidate" ] \
+        && [ -z "${seen_dead[$candidate]+present}" ]; then
+        seen_dead["$candidate"]=1
+        dead_paths="$("$QQ_ENGINE_JQ" -cn --argjson paths "$dead_paths" \
+          --arg path "$candidate" '$paths + [$path]')"
+      fi
+    done <"$token_file"
+    rm -f -- "$token_file"
+    dead_count="$("$QQ_ENGINE_JQ" -r 'length' <<<"$dead_paths")"
+    if [ "$dead_count" -gt 0 ]; then
+      shell_double_quote "$doc"
+      command="git rm -- $QUOTED_VALUE"
+      nomination="$("$QQ_ENGINE_JQ" -cn \
+        --arg id "doc:$doc" --arg doc "$doc" --arg command "$command" \
+        --argjson dead_paths "$dead_paths" \
+        '{id:$id,kind:"doc",evidence:{doc:$doc,dead_paths:$dead_paths},command:$command}')"
+      append_nomination "$nomination"
+    fi
+    unset seen_dead
+  done <"$docs_file"
+  rm -f -- "$docs_file"
+
+  branches_file="$(mktemp "${TMPDIR:-/tmp}/qq-reap-branches.XXXXXX")" \
+    || finish_problem error 'could not allocate temporary branch inspection space'
+  if ! "$git_bin" -C "$repo_root" for-each-ref \
+    --format='%(refname) %(objectname)' refs/heads/ >"$branches_file"; then
+    rm -f -- "$branches_file"
+    finish_problem error 'could not list local branches'
+  fi
+  while IFS=' ' read -r branch_ref tip; do
+    [ -n "$branch_ref" ] || continue
+    [ "$branch_ref" != refs/heads/main ] || continue
+    if "$QQ_ENGINE_JQ" -e --arg branch "$branch_ref" \
+      '.[] | select(.branch == $branch)' <<<"$worktrees" >/dev/null; then
+      continue
+    fi
+    if "$git_bin" -C "$repo_root" merge-base --is-ancestor \
+      "$tip" "$fresh_main_oid" >/dev/null 2>&1; then
+      branch="${branch_ref#refs/heads/}"
+      shell_command_arg "$branch"
+      command="git branch -d $QUOTED_VALUE"
+      nomination="$("$QQ_ENGINE_JQ" -cn \
+        --arg id "branch:$branch_ref" --arg branch "$branch_ref" --arg tip "$tip" \
+        --arg merged_into "$fresh_main_oid" --arg command "$command" \
+        '{id:$id,kind:"branch",evidence:{branch:$branch,tip:$tip,merged_into:$merged_into},command:$command}')"
+      append_nomination "$nomination"
+    else
+      ancestry_status=$?
+      if [ "$ancestry_status" -ne 1 ]; then
+        finish_problem error "could not inspect mergedness for local branch: $branch_ref"
+      fi
+    fi
+  done <"$branches_file"
+  rm -f -- "$branches_file"
+
+  if [ "$herdr_available" != true ]; then
+    while IFS= read -r worktree; do
+      [ "$("$QQ_ENGINE_JQ" -r '.bare' <<<"$worktree")" != true ] || continue
+      branch_ref="$("$QQ_ENGINE_JQ" -r '.branch' <<<"$worktree")"
+      [[ "$branch_ref" == refs/heads/* ]] || continue
+      [ "$branch_ref" != refs/heads/main ] || continue
+      doc_path="$("$QQ_ENGINE_JQ" -r '.path' <<<"$worktree")"
+      if [[ "$doc_path" == *$'\n'* || "$doc_path" == *$'\r'* ]]; then
+        finish_problem error 'linked worktree path is not single-line report data'
+      fi
+      CENSUS_STATE="$("$QQ_ENGINE_JQ" -cn --argjson worktree "$worktree" \
+        '{herdr_available:false,git_worktree:$worktree}')"
+      append_worktree_refusal "worktree:$doc_path" \
+        'Herdr is unavailable; worktree nomination refused' "$CENSUS_STATE"
+    done < <("$QQ_ENGINE_JQ" -c '.[]' <<<"$worktrees")
+    current_nominations="$("$QQ_ENGINE_JQ" -c 'sort_by(.id)' \
+      <<<"$current_nominations")"
+    nomination_counts="$("$QQ_ENGINE_JQ" -cn --argjson nominations "$current_nominations" '
+      {
+        docs:([$nominations[] | select(.kind == "doc")] | length),
+        branches:([$nominations[] | select(.kind == "branch")] | length),
+        worktrees:0,
+        total:($nominations | length)
+      }
+    ')"
+    return 0
+  fi
+
+  while IFS= read -r worktree; do
+    if [ "$("$QQ_ENGINE_JQ" -r '.bare' <<<"$worktree")" = true ]; then
+      continue
+    fi
+    doc_path="$("$QQ_ENGINE_JQ" -r '.path' <<<"$worktree")"
+    if [[ "$doc_path" == *$'\n'* || "$doc_path" == *$'\r'* ]]; then
+      finish_problem error 'linked worktree path is not single-line report data'
+    fi
+    branch_ref="$("$QQ_ENGINE_JQ" -r '.branch' <<<"$worktree")"
+    [[ "$branch_ref" == refs/heads/* ]] || continue
+    [ "$branch_ref" != refs/heads/main ] || continue
+    if ! status="$("$git_bin" -C "$doc_path" status \
+      --porcelain --untracked-files=all 2>/dev/null)"; then
+      finish_problem error "could not inspect linked worktree status: $doc_path"
+    fi
+    [ -z "$status" ] || continue
+    if ! branch_ref="$("$git_bin" -C "$doc_path" symbolic-ref -q HEAD 2>/dev/null)"; then
+      continue
+    fi
+    [[ "$branch_ref" == refs/heads/* ]] || continue
+    branch="${branch_ref#refs/heads/}"
+    tip="$("$git_bin" -C "$repo_root" rev-parse --verify "$branch_ref^{commit}" \
+      2>/dev/null)" \
+      || finish_problem error "could not resolve linked worktree branch tip: $branch"
+    if "$git_bin" -C "$repo_root" merge-base --is-ancestor \
+      "$tip" "$fresh_main_oid" >/dev/null 2>&1; then
+      removal=git
+      workspace_id=""
+      CENSUS_PLACEHOLDER=""
+      workspace_matches="$("$QQ_ENGINE_JQ" -c --arg path "$doc_path" '
+        [.[] | select(.worktree.checkout_path == $path)]
+      ' <<<"$herdr_workspaces")"
+      workspace_count="$("$QQ_ENGINE_JQ" -r 'length' <<<"$workspace_matches")"
+      if [ "$workspace_count" -gt 1 ]; then
+        finish_problem error "multiple Herdr workspaces are bound to worktree: $doc_path"
+      fi
+      if [ "$workspace_count" -eq 1 ]; then
+        screen_bound_worktree "$doc_path" \
+          "$("$QQ_ENGINE_JQ" -c '.[0]' <<<"$workspace_matches")"
+        if [ "$CENSUS_PASSED" != true ]; then
+          refusal_id="worktree:$doc_path"
+          append_worktree_refusal "$refusal_id" "$CENSUS_REASON" "$CENSUS_STATE"
+          continue
+        fi
+        workspace_id="$("$QQ_ENGINE_JQ" -r '.workspace_id' \
+          <<<"$CENSUS_STATE")"
+        removal=herdr
+      fi
+      if [ "$removal" = herdr ]; then
+        shell_command_arg "$workspace_id"
+        command="herdr worktree remove --workspace $QUOTED_VALUE"
+      else
+        shell_double_quote "$doc_path"
+        command="git worktree remove $QUOTED_VALUE"
+      fi
+      nomination="$("$QQ_ENGINE_JQ" -cn \
+        --arg id "worktree:$doc_path" --arg path "$doc_path" \
+        --arg branch "$branch" --arg tip "$tip" --arg removal "$removal" \
+        --arg workspace_id "$workspace_id" \
+        --arg root_placeholder_pane "$CENSUS_PLACEHOLDER" \
+        --arg merged_into "$fresh_main_oid" --arg command "$command" \
+        '{id:$id,kind:"worktree",evidence:{path:$path,branch:$branch,tip:$tip,merged_into:$merged_into,clean:true,removal:$removal,workspace_id:$workspace_id,root_placeholder_pane:$root_placeholder_pane},command:$command}')"
+      append_nomination "$nomination"
+    else
+      ancestry_status=$?
+      if [ "$ancestry_status" -ne 1 ]; then
+        finish_problem error "could not inspect mergedness for linked worktree: $doc_path"
+      fi
+    fi
+  done < <("$QQ_ENGINE_JQ" -c '.[]' <<<"$worktrees")
+
+  current_nominations="$("$QQ_ENGINE_JQ" -c 'sort_by(.id)' \
+    <<<"$current_nominations")"
+  nomination_counts="$("$QQ_ENGINE_JQ" -cn --argjson nominations "$current_nominations" '
+    {
+      docs:([$nominations[] | select(.kind == "doc")] | length),
+      branches:([$nominations[] | select(.kind == "branch")] | length),
+      worktrees:([$nominations[] | select(.kind == "worktree")] | length),
+      total:($nominations | length)
+    }
+  ')"
+}
+
+if ! repo_root="$("$git_bin" -C "$repo" rev-parse --show-toplevel 2>/dev/null)"; then
+  finish_problem error "not a readable Git checkout: $repo"
+fi
+repo_root="$(cd "$repo_root" 2>/dev/null && pwd -P)" \
+  || finish_problem error "cannot canonicalize Repository root: $repo_root"
+
+write_scan_report() {
+  local original_ids metadata
+  original_ids="$("$QQ_ENGINE_JQ" -c '[.[].id]' <<<"$current_nominations")"
+  metadata="$("$QQ_ENGINE_JQ" -cn \
+    --arg generated_at "$generated_at" --arg repository "$repo_root" \
+    --arg fetched_main_oid "$fresh_main_oid" \
+    --argjson original_ids "$original_ids" \
+    --argjson counts "$nomination_counts" \
+    --argjson worktree_refusals "$worktree_refusals" \
+    --argjson degraded_checks "$degraded_checks" \
+    '{format:"qq-reap-v1",mode:"scan",generated_at:$generated_at,repository:$repository,fetched_main_oid:$fetched_main_oid,original_ids:$original_ids,counts:$counts,worktree_refusals:$worktree_refusals,degraded_checks:$degraded_checks}')"
+  {
+    printf '# qq-reap scan report\n\n'
+    printf 'qq-reap-metadata: %s\n\n' "$metadata"
+    printf '## Nominations\n\n'
+    "$QQ_ENGINE_JQ" -c '.[]' <<<"$current_nominations"
+    printf '\n## Summary\n\n'
+    printf -- '- stale docs: %s\n' \
+      "$("$QQ_ENGINE_JQ" -r '.docs' <<<"$nomination_counts")"
+    printf -- '- merged local branches: %s\n' \
+      "$("$QQ_ENGINE_JQ" -r '.branches' <<<"$nomination_counts")"
+    printf -- '- clean merged linked worktrees: %s\n' \
+      "$("$QQ_ENGINE_JQ" -r '.worktrees' <<<"$nomination_counts")"
+    printf -- '- total: %s\n' \
+      "$("$QQ_ENGINE_JQ" -r '.total' <<<"$nomination_counts")"
+    printf '\n## Fetch boundary\n\n'
+    printf -- '- fetched main commit: `%s`\n' "$fresh_main_oid"
+    printf '%s\n' '- `git fetch --no-tags origin main` refreshes `FETCH_HEAD` and may refresh `refs/remotes/origin/main`; scan otherwise leaves the worktree, index, and `refs/heads/` untouched.'
+    if [ "$("$QQ_ENGINE_JQ" -r 'length' <<<"$worktree_refusals")" -gt 0 ]; then
+      printf '\n## Safety refusals\n\n'
+      "$QQ_ENGINE_JQ" -c '.[]' <<<"$worktree_refusals"
+    fi
+    if [ "$("$QQ_ENGINE_JQ" -r 'length' <<<"$degraded_checks")" -gt 0 ]; then
+      printf '\n## Degraded checks\n\n'
+      "$QQ_ENGINE_JQ" -r '.[] | "- " + .' <<<"$degraded_checks"
+    fi
+  } >"$report_draft" || finish_problem error 'could not write the scan heartbeat report'
+  publish_report
+}
+
+if [ "$operation" = scan ]; then
+  derive_nominations
+  write_scan_report
+  state="$("$QQ_ENGINE_JQ" -cn \
+    --arg repo_root "$repo_root" --arg report_path "$report_path" \
+    --argjson nomination_counts "$nomination_counts" \
+    --argjson degraded_checks "$degraded_checks" \
+    --argjson worktree_refusals "$worktree_refusals" \
+    --arg fetched_main_oid "$fresh_main_oid" \
+    --argjson dry_run "$dry_run" --argjson inspect "$inspect" \
+    '{repo_root:$repo_root,report_path:$report_path,fetched_main_oid:$fetched_main_oid,nomination_counts:$nomination_counts,degraded_checks:$degraded_checks,worktree_refusals:$worktree_refusals,dry_run:$dry_run,inspect:$inspect}')"
+  if [ "$scan_rail_refused" = true ]; then
+    qq_engine_refuse 'fresh nominations written; one or more worktree scans were refused by Herdr safety rails' "$state"
+  fi
+  qq_engine_done 'fresh nominations written; fetch refreshed only FETCH_HEAD/remote tracking, and no worktree, index, or local branch changed' "$state"
+fi
+
+validate_nomination_id() {
+  local id="$1"
+  local value
+  case "$id" in
+    doc:*)
+      value="${id#doc:}"
+      [[ "$value" == backlog/docs/* ]] || return 1
+      case "$value" in
+        *$'\n'* | *$'\r'* | /* | ../* | */../* | */..) return 1 ;;
+      esac
+      ;;
+    branch:*)
+      value="${id#branch:}"
+      [[ "$value" == refs/heads/* ]] || return 1
+      [ "$value" != refs/heads/main ] || return 1
+      "$git_bin" check-ref-format "$value" >/dev/null 2>&1 || return 1
+      ;;
+    worktree:*)
+      value="${id#worktree:}"
+      [ -n "$value" ] && [[ "$value" = /* ]] || return 1
+      [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || return 1
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+parse_source_report() {
+  local line section=before metadata_line="" metadata_count=0
+  local nomination id kind expected_kind
+  local saw_heading=false saw_nominations=false saw_summary=false
+  local tail_lines='[]' expected_tail
+  local value short_value expected_command removal_value workspace_value branch_value
+  local placeholder_value nul_dump line_number=0 entry position last_position=-1
+
+  if [ ! -f "$source_report" ] || [ ! -r "$source_report" ]; then
+    finish_problem error "report is not a readable file: $source_report"
+  fi
+  nul_dump="$(mktemp "${TMPDIR:-/tmp}/qq-reap-report-bytes.XXXXXX")" \
+    || finish_problem error 'could not allocate temporary report-validation space'
+  if ! od -An -v -tx1 -- "$source_report" >"$nul_dump"; then
+    rm -f -- "$nul_dump"
+    finish_problem error "could not inspect report bytes: $source_report"
+  fi
+  if awk '{ for (i = 1; i <= NF; i++) if ($i == "00") found = 1 } END { exit !found }' \
+    "$nul_dump"; then
+    rm -f -- "$nul_dump"
+    finish_problem error 'malformed report: NUL byte is forbidden'
+  fi
+  rm -f -- "$nul_dump"
+  listed_nominations='[]'
+  listed_nomination_lines='[]'
+  while IFS= read -r line || [ -n "$line" ]; do
+    line_number=$((line_number + 1))
+    case "$section" in
+      before)
+        if [ "$saw_heading" = false ]; then
+          [ "$line" = '# qq-reap scan report' ] \
+            || finish_problem error 'malformed report: missing qq-reap scan heading'
+          saw_heading=true
+        elif [[ "$line" == 'qq-reap-metadata: '* ]]; then
+          metadata_count=$((metadata_count + 1))
+          metadata_line="${line#qq-reap-metadata: }"
+        elif [ "$line" = '## Nominations' ]; then
+          saw_nominations=true
+          section=nominations
+        elif [ -n "$line" ]; then
+          finish_problem error 'malformed report: unexpected content before nominations'
+        fi
+        ;;
+      nominations)
+        if [ "$line" = '## Summary' ]; then
+          saw_summary=true
+          section=after
+        elif [ -n "$line" ]; then
+          if ! nomination="$("$QQ_ENGINE_JQ" -ec '
+            select(type == "object")
+            | select((keys | sort) == ["command","evidence","id","kind"])
+            | select(.id | type == "string" and length > 0)
+            | select(.kind == "doc" or .kind == "branch" or .kind == "worktree")
+            | select(.evidence | type == "object")
+            | select(.command | type == "string" and length > 0)
+          ' <<<"$line" 2>/dev/null)"; then
+            finish_problem error 'malformed report: nomination lines must be canonical JSON objects'
+          fi
+          id="$("$QQ_ENGINE_JQ" -r '.id' <<<"$nomination")"
+          kind="$("$QQ_ENGINE_JQ" -r '.kind' <<<"$nomination")"
+          case "$id" in
+            doc:*) expected_kind=doc ;;
+            branch:*) expected_kind=branch ;;
+            worktree:*) expected_kind=worktree ;;
+            *) finish_problem error "unknown nomination id at line $line_number: $id" ;;
+          esac
+          [ "$kind" = "$expected_kind" ] \
+            || finish_problem error "malformed report: nomination kind does not match id: $id"
+          validate_nomination_id "$id" \
+            || finish_problem error "unknown nomination id at line $line_number: $id"
+          case "$kind" in
+            doc)
+              value="${id#doc:}"
+              shell_double_quote "$value"
+              expected_command="git rm -- $QUOTED_VALUE"
+              if ! "$QQ_ENGINE_JQ" -e --arg value "$value" \
+                --arg command "$expected_command" '
+                  (.evidence | keys | sort) == ["dead_paths","doc"]
+                  and .evidence.doc == $value
+                  and (.evidence.dead_paths | type == "array" and length > 0)
+                  and all(.evidence.dead_paths[]; type == "string" and length > 0)
+                  and ((.evidence.dead_paths | unique | length) == (.evidence.dead_paths | length))
+                  and .command == $command
+                ' <<<"$nomination" >/dev/null; then
+                finish_problem error "malformed report: stale-doc evidence is inconsistent: $id"
+              fi
+              ;;
+            branch)
+              value="${id#branch:}"
+              short_value="${value#refs/heads/}"
+              shell_command_arg "$short_value"
+              expected_command="git branch -d $QUOTED_VALUE"
+              if ! "$QQ_ENGINE_JQ" -e --arg value "$value" \
+                --arg command "$expected_command" '
+                  (.evidence | keys | sort) == ["branch","merged_into","tip"]
+                  and .evidence.branch == $value
+                  and (.evidence.merged_into | type == "string" and test("^[0-9a-f]{40,64}$"))
+                  and (.evidence.tip | type == "string" and test("^[0-9a-f]{40,64}$"))
+                  and .command == $command
+                ' <<<"$nomination" >/dev/null; then
+                finish_problem error "malformed report: branch evidence is inconsistent: $id"
+              fi
+              ;;
+            worktree)
+              value="${id#worktree:}"
+              removal_value="$("$QQ_ENGINE_JQ" -r '.evidence.removal // ""' \
+                <<<"$nomination")"
+              workspace_value="$("$QQ_ENGINE_JQ" -r '.evidence.workspace_id // ""' \
+                <<<"$nomination")"
+              placeholder_value="$("$QQ_ENGINE_JQ" -r \
+                '.evidence.root_placeholder_pane // ""' <<<"$nomination")"
+              branch_value="$("$QQ_ENGINE_JQ" -r '.evidence.branch // ""' \
+                <<<"$nomination")"
+              "$git_bin" check-ref-format --branch "$branch_value" >/dev/null 2>&1 \
+                || finish_problem error "malformed report: worktree branch is unreadable: $id"
+              if [ "$removal_value" = git ] && [ -z "$workspace_value" ] \
+                && [ -z "$placeholder_value" ]; then
+                shell_double_quote "$value"
+                expected_command="git worktree remove $QUOTED_VALUE"
+              elif [ "$removal_value" = herdr ] && [ -n "$workspace_value" ] \
+                && [ -n "$placeholder_value" ] \
+                && [[ "$workspace_value" != *$'\n'* && "$workspace_value" != *$'\r'* ]] \
+                && [[ "$placeholder_value" != *$'\n'* && "$placeholder_value" != *$'\r'* ]]; then
+                shell_command_arg "$workspace_value"
+                expected_command="herdr worktree remove --workspace $QUOTED_VALUE"
+              else
+                finish_problem error "malformed report: worktree removal evidence is inconsistent: $id"
+              fi
+              if ! "$QQ_ENGINE_JQ" -e --arg value "$value" \
+                --arg command "$expected_command" '
+                  (.evidence | keys | sort) == ["branch","clean","merged_into","path","removal","root_placeholder_pane","tip","workspace_id"]
+                  and .evidence.path == $value
+                  and .evidence.clean == true
+                  and (.evidence.merged_into | type == "string" and test("^[0-9a-f]{40,64}$"))
+                  and (.evidence.tip | type == "string" and test("^[0-9a-f]{40,64}$"))
+                  and .command == $command
+                ' <<<"$nomination" >/dev/null; then
+                finish_problem error "malformed report: worktree evidence is inconsistent: $id"
+              fi
+              ;;
+          esac
+          if "$QQ_ENGINE_JQ" -e --arg id "$id" \
+            '.[] | select(.id == $id)' <<<"$listed_nominations" >/dev/null; then
+            finish_problem error \
+              "malformed report: duplicate nomination id at line $line_number: $id"
+          fi
+          listed_nominations="$("$QQ_ENGINE_JQ" -cn \
+            --argjson current "$listed_nominations" --argjson nomination "$nomination" \
+            '$current + [$nomination]')"
+          listed_nomination_lines="$("$QQ_ENGINE_JQ" -cn \
+            --argjson current "$listed_nomination_lines" --arg id "$id" \
+            --argjson line "$line_number" '$current + [{id:$id,line:$line}]')"
+        fi
+        ;;
+      after)
+        tail_lines="$("$QQ_ENGINE_JQ" -cn --argjson current "$tail_lines" \
+          --arg line "$line" '$current + [$line]')"
+        ;;
+    esac
+  done <"$source_report"
+
+  if [ "$saw_heading" != true ] || [ "$saw_nominations" != true ] \
+    || [ "$saw_summary" != true ] || [ "$metadata_count" -ne 1 ]; then
+    finish_problem error 'malformed report: required report structure is incomplete'
+  fi
+  if ! source_metadata="$("$QQ_ENGINE_JQ" -ec '
+    select(type == "object")
+    | select((keys | sort) == ["counts","degraded_checks","fetched_main_oid","format","generated_at","mode","original_ids","repository","worktree_refusals"])
+    | select(.format == "qq-reap-v1" and .mode == "scan")
+    | select(.generated_at | type == "string" and length > 0)
+    | select(.repository | type == "string" and length > 0)
+    | select(.fetched_main_oid | type == "string" and test("^[0-9a-f]{40,64}$"))
+    | select(.original_ids | type == "array")
+    | select(all(.original_ids[]; type == "string" and length > 0))
+    | select((.original_ids | unique | length) == (.original_ids | length))
+    | select(.original_ids == (.original_ids | sort))
+    | select(.counts | type == "object")
+    | select((.counts | keys | sort) == ["branches","docs","total","worktrees"])
+    | select(all(.counts[]; type == "number" and floor == . and . >= 0))
+    | select(.counts.total == (.original_ids | length))
+    | select(.degraded_checks | type == "array")
+    | select(all(.degraded_checks[]; type == "string" and length > 0))
+    | select(.worktree_refusals | type == "array")
+    | select(all(.worktree_refusals[];
+        type == "object"
+        and ((keys | sort) == ["id","observed_state","reason"])
+        and (.id | type == "string" and startswith("worktree:"))
+        and (.reason | type == "string" and length > 0)
+        and (.observed_state | type == "object")))
+  ' <<<"$metadata_line" 2>/dev/null)"; then
+    finish_problem error 'malformed report: metadata is unreadable or inconsistent'
+  fi
+  if [ "$("$QQ_ENGINE_JQ" -r '.repository' <<<"$source_metadata")" != "$repo_root" ]; then
+    finish_problem error 'report Repository does not match --repo'
+  fi
+  original_ids="$("$QQ_ENGINE_JQ" -c '.original_ids' <<<"$source_metadata")"
+  while IFS= read -r -d '' id; do
+    validate_nomination_id "$id" \
+      || finish_problem error "unknown nomination id: $id"
+  done < <("$QQ_ENGINE_JQ" -j '.[] | . + "\u0000"' <<<"$original_ids")
+  expected_counts="$("$QQ_ENGINE_JQ" -cn --argjson ids "$original_ids" '
+    {
+      docs:([$ids[] | select(startswith("doc:"))] | length),
+      branches:([$ids[] | select(startswith("branch:"))] | length),
+      worktrees:([$ids[] | select(startswith("worktree:"))] | length),
+      total:($ids | length)
+    }
+  ')"
+  if ! "$QQ_ENGINE_JQ" -e --argjson expected "$expected_counts" \
+    '.counts == $expected' <<<"$source_metadata" >/dev/null; then
+    finish_problem error 'malformed report: metadata counts do not match original ids'
+  fi
+  if ! "$QQ_ENGINE_JQ" -e --arg oid \
+    "$("$QQ_ENGINE_JQ" -r '.fetched_main_oid' <<<"$source_metadata")" '
+      all(.[] | select(.kind == "branch" or .kind == "worktree");
+        .evidence.merged_into == $oid)
+    ' <<<"$listed_nominations" >/dev/null; then
+    finish_problem error 'malformed report: nomination ancestry evidence does not match fetched main'
+  fi
+  expected_tail="$("$QQ_ENGINE_JQ" -cn --argjson metadata "$source_metadata" '
+    [
+      "",
+      "- stale docs: " + ($metadata.counts.docs | tostring),
+      "- merged local branches: " + ($metadata.counts.branches | tostring),
+      "- clean merged linked worktrees: " + ($metadata.counts.worktrees | tostring),
+      "- total: " + ($metadata.counts.total | tostring),
+      "",
+      "## Fetch boundary",
+      "",
+      "- fetched main commit: `" + $metadata.fetched_main_oid + "`",
+      "- `git fetch --no-tags origin main` refreshes `FETCH_HEAD` and may refresh `refs/remotes/origin/main`; scan otherwise leaves the worktree, index, and `refs/heads/` untouched."
+    ]
+    + (if ($metadata.worktree_refusals | length) > 0 then
+        ["", "## Safety refusals", ""]
+        + [$metadata.worktree_refusals[] | tojson]
+      else [] end)
+    + (if ($metadata.degraded_checks | length) > 0 then
+        ["", "## Degraded checks", ""]
+        + [$metadata.degraded_checks[] | "- " + .]
+      else [] end)
+  ')"
+  "$QQ_ENGINE_JQ" -ne --argjson actual "$tail_lines" \
+    --argjson expected "$expected_tail" '$actual == $expected' \
+    >/dev/null 2>&1 \
+    || finish_problem error 'malformed report: summary or degraded-check data was edited'
+  while IFS= read -r entry; do
+    id="$("$QQ_ENGINE_JQ" -r '.id' <<<"$entry")"
+    line_number="$("$QQ_ENGINE_JQ" -r '.line' <<<"$entry")"
+    position="$("$QQ_ENGINE_JQ" -r --arg id "$id" \
+      'index($id) // -1' <<<"$original_ids")"
+    if [ "$position" -lt 0 ]; then
+      finish_problem error "unknown nomination id at line $line_number: $id"
+    fi
+    if [ "$position" -le "$last_position" ]; then
+      finish_problem error \
+        "malformed report: nomination order violation at line $line_number: $id"
+    fi
+    last_position="$position"
+  done < <("$QQ_ENGINE_JQ" -c '.[]' <<<"$listed_nomination_lines")
+}
+
+parse_source_report
+derive_nominations
+
+listed_ids="$("$QQ_ENGINE_JQ" -c '[.[].id]' <<<"$listed_nominations")"
+current_ids="$("$QQ_ENGINE_JQ" -c '[.[].id]' <<<"$current_nominations")"
+last_current_position=-1
+while IFS= read -r entry; do
+  id="$("$QQ_ENGINE_JQ" -r '.id' <<<"$entry")"
+  line_number="$("$QQ_ENGINE_JQ" -r '.line' <<<"$entry")"
+  current_position="$("$QQ_ENGINE_JQ" -r --arg id "$id" \
+    'index($id) // -1' <<<"$current_ids")"
+  if [ "$current_position" -ge 0 ]; then
+    if [ "$current_position" -le "$last_current_position" ]; then
+      finish_problem error \
+        "malformed report: nomination order violates fresh canonical order at line $line_number: $id"
+    fi
+    last_current_position="$current_position"
+  fi
+done < <("$QQ_ENGINE_JQ" -c '.[]' <<<"$listed_nomination_lines")
+vetoed_ids="$("$QQ_ENGINE_JQ" -cn --argjson original "$original_ids" \
+  --argjson listed "$listed_ids" '$original - $listed')"
+stale_ids="$("$QQ_ENGINE_JQ" -cn --argjson listed "$listed_ids" \
+  --argjson current "$current_ids" '$listed - $current')"
+eligible_ids="$("$QQ_ENGINE_JQ" -cn --argjson listed "$listed_ids" \
+  --argjson stale "$stale_ids" '$listed - $stale')"
+new_ids="$("$QQ_ENGINE_JQ" -cn --argjson current "$current_ids" \
+  --argjson original "$original_ids" '$current - $original')"
+
+applied='[]'
+skipped='[]'
+rail_refused=false
+stop_after_command_refusal=false
+
+append_skip() {
+  local id="$1"
+  local reason="$2"
+  skipped="$("$QQ_ENGINE_JQ" -cn --argjson current "$skipped" \
+    --arg id "$id" --arg reason "$reason" \
+    '$current + [{id:$id,reason:$reason}]')"
+}
+
+append_skip_state() {
+  local id="$1"
+  local reason="$2"
+  local observed_state="$3"
+  skipped="$("$QQ_ENGINE_JQ" -cn --argjson current "$skipped" \
+    --arg id "$id" --arg reason "$reason" \
+    --argjson observed_state "$observed_state" \
+    '$current + [{id:$id,reason:$reason,observed_state:$observed_state}]')"
+}
+
+while IFS= read -r -d '' id; do
+  append_skip "$id" vetoed
+done < <("$QQ_ENGINE_JQ" -j '.[] | . + "\u0000"' <<<"$vetoed_ids")
+while IFS= read -r -d '' id; do
+  if [[ "$id" == worktree:* ]] && [ "$herdr_available" != true ]; then
+    refusal="$("$QQ_ENGINE_JQ" -c --arg id "$id" \
+      '.[] | select(.id == $id)' <<<"$worktree_refusals")"
+    if [ -n "$refusal" ]; then
+      observed_state="$("$QQ_ENGINE_JQ" -cn \
+        --argjson state "$("$QQ_ENGINE_JQ" -c '.observed_state' <<<"$refusal")" \
+        --argjson degraded_checks "$degraded_checks" \
+        '$state + {degraded_checks:$degraded_checks}')"
+    else
+      observed_state="$("$QQ_ENGINE_JQ" -cn --arg path "${id#worktree:}" \
+        --argjson worktrees "$worktrees" --argjson degraded_checks "$degraded_checks" \
+        '{path:$path,herdr_available:false,
+          matching_git_worktrees:[$worktrees[] | select(.path == $path)],
+          degraded_checks:$degraded_checks}')"
+    fi
+    append_skip_state "$id" 'Herdr is unavailable; worktree action refused' \
+      "$observed_state"
+    rail_refused=true
+  elif refusal="$("$QQ_ENGINE_JQ" -c --arg id "$id" \
+    '.[] | select(.id == $id)' <<<"$worktree_refusals")" \
+    && [ -n "$refusal" ]; then
+    append_skip_state "$id" \
+      "$("$QQ_ENGINE_JQ" -r '.reason' <<<"$refusal")" \
+      "$("$QQ_ENGINE_JQ" -c '.observed_state' <<<"$refusal")"
+    rail_refused=true
+  else
+    append_skip "$id" 'no longer a current nomination'
+  fi
+done < <("$QQ_ENGINE_JQ" -j '.[] | . + "\u0000"' <<<"$stale_ids")
+
+while IFS= read -r -d '' id; do
+  nomination="$("$QQ_ENGINE_JQ" -c --arg id "$id" '.[] | select(.id == $id)' \
+    <<<"$current_nominations")"
+  kind="$("$QQ_ENGINE_JQ" -r '.kind' <<<"$nomination")"
+  command="$("$QQ_ENGINE_JQ" -r '.command' <<<"$nomination")"
+  if [ "$stop_after_command_refusal" = true ]; then
+    append_skip "$id" 'not attempted after an earlier safety-rail refusal'
+    continue
+  fi
+  if [ "$kind" = branch ] && [ -z "$primary_main" ]; then
+    observed_state="$("$QQ_ENGINE_JQ" -cn \
+      --argjson main_checkout_count "$primary_main_count" \
+      '{primary_main:"",main_checkout_count:$main_checkout_count}')"
+    append_skip_state "$id" \
+      'primary main checkout could not be identified; branch deletion refused' \
+      "$observed_state"
+    rail_refused=true
+    continue
+  fi
+  if [ "$kind" = worktree ]; then
+    source_nomination="$("$QQ_ENGINE_JQ" -c --arg id "$id" \
+      '.[] | select(.id == $id)' <<<"$listed_nominations")"
+    if ! "$QQ_ENGINE_JQ" -e --argjson source "$source_nomination" '
+      .evidence.path == $source.evidence.path
+      and .evidence.branch == $source.evidence.branch
+      and .evidence.tip == $source.evidence.tip
+      and .evidence.removal == $source.evidence.removal
+      and .evidence.workspace_id == $source.evidence.workspace_id
+      and .evidence.root_placeholder_pane == $source.evidence.root_placeholder_pane
+    ' <<<"$nomination" >/dev/null; then
+      observed_state="$("$QQ_ENGINE_JQ" -cn \
+        --argjson expected "$("$QQ_ENGINE_JQ" -c '.evidence' <<<"$source_nomination")" \
+        --argjson current "$("$QQ_ENGINE_JQ" -c '.evidence' <<<"$nomination")" \
+        '{herdr_available:true,expected:$expected,current:$current}')"
+      append_skip_state "$id" \
+        'worktree identity or Herdr binding changed after scan; action refused' \
+        "$observed_state"
+      rail_refused=true
+      continue
+    fi
+  fi
+  if [ "$inspect" = true ] || [ "$dry_run" = true ]; then
+    append_skip "$id" 'inspection only; nomination remains valid'
+    continue
+  fi
+  command_succeeded=false
+  case "$kind" in
+    doc)
+      doc="$("$QQ_ENGINE_JQ" -r '.evidence.doc' <<<"$nomination")"
+      if "$git_bin" -C "$repo_root" rm -- "$doc" >/dev/null 2>&1; then
+        command_succeeded=true
+      fi
+      ;;
+    branch)
+      branch_ref="$("$QQ_ENGINE_JQ" -r '.evidence.branch' <<<"$nomination")"
+      branch="${branch_ref#refs/heads/}"
+      if "$git_bin" -C "$primary_main" branch -d -- "$branch" >/dev/null 2>&1; then
+        command_succeeded=true
+      fi
+      ;;
+    worktree)
+      removal="$("$QQ_ENGINE_JQ" -r '.evidence.removal' <<<"$nomination")"
+      if [ "$removal" = herdr ]; then
+        workspace_id="$("$QQ_ENGINE_JQ" -r '.evidence.workspace_id' <<<"$nomination")"
+        if "$herdr_bin" worktree remove --workspace "$workspace_id" \
+          >/dev/null 2>&1; then
+          command_succeeded=true
+        fi
+      else
+        doc_path="$("$QQ_ENGINE_JQ" -r '.evidence.path' <<<"$nomination")"
+        if "$git_bin" -C "$repo_root" worktree remove "$doc_path" \
+          >/dev/null 2>&1; then
+          command_succeeded=true
+        fi
+      fi
+      ;;
+  esac
+  if [ "$command_succeeded" = true ]; then
+    applied="$("$QQ_ENGINE_JQ" -cn --argjson current "$applied" \
+      --arg id "$id" --arg kind "$kind" --arg command "$command" \
+      '$current + [{id:$id,kind:$kind,command:$command}]')"
+  else
+    append_skip "$id" 'current safety rail refused the command'
+    rail_refused=true
+    stop_after_command_refusal=true
+  fi
+done < <("$QQ_ENGINE_JQ" -j '.[] | . + "\u0000"' <<<"$eligible_ids")
+
+applied_count="$("$QQ_ENGINE_JQ" -r 'length' <<<"$applied")"
+skipped_count="$("$QQ_ENGINE_JQ" -r 'length' <<<"$skipped")"
+apply_metadata="$("$QQ_ENGINE_JQ" -cn \
+  --arg generated_at "$generated_at" --arg repository "$repo_root" \
+  --arg source_report "$source_report" --argjson counts "$nomination_counts" \
+  --arg fetched_main_oid "$fresh_main_oid" \
+  --argjson applied "$applied_count" --argjson skipped "$skipped_count" \
+  '{format:"qq-reap-v1",mode:"apply",generated_at:$generated_at,repository:$repository,source_report:$source_report,fetched_main_oid:$fetched_main_oid,current_counts:$counts,applied:$applied,skipped:$skipped}')"
+{
+  printf '# qq-reap apply report\n\n'
+  printf 'qq-reap-metadata: %s\n\n' "$apply_metadata"
+  printf '## Applied\n\n'
+  "$QQ_ENGINE_JQ" -c '.[]' <<<"$applied"
+  printf '\n## Skipped\n\n'
+  "$QQ_ENGINE_JQ" -c '.[]' <<<"$skipped"
+  printf '\n## New nominations not authorized by the source report\n\n'
+  "$QQ_ENGINE_JQ" -c '.[]' <<<"$new_ids"
+  if [ "$("$QQ_ENGINE_JQ" -r 'length' <<<"$degraded_checks")" -gt 0 ]; then
+    printf '\n## Degraded checks\n\n'
+    "$QQ_ENGINE_JQ" -r '.[] | "- " + .' <<<"$degraded_checks"
+  fi
+  printf '\n## Fetch boundary\n\n'
+  printf -- '- fetched main commit: `%s`\n' "$fresh_main_oid"
+  printf '%s\n' '- `git fetch --no-tags origin main` refreshed `FETCH_HEAD` and may have refreshed `refs/remotes/origin/main`; every ancestry decision used the fetched commit above.'
+  printf '\n## Summary\n\n'
+  printf -- '- applied: %s\n' "$applied_count"
+  printf -- '- skipped: %s\n' "$skipped_count"
+  printf -- '- newly nominated: %s\n\n' \
+    "$("$QQ_ENGINE_JQ" -r 'length' <<<"$new_ids")"
+  printf 'Review staged stale-doc deletions with `git diff --cached -- backlog/docs/`; then commit them with `git commit`. qq-reap never commits.\n'
+} >"$report_draft" || finish_problem error 'could not write the apply heartbeat report'
+publish_report
+
+state="$("$QQ_ENGINE_JQ" -cn \
+  --arg repo_root "$repo_root" --arg report_path "$report_path" \
+  --arg source_report "$source_report" \
+  --arg fetched_main_oid "$fresh_main_oid" --arg primary_main "$primary_main" \
+  --argjson main_checkout_count "$primary_main_count" \
+  --argjson nomination_counts "$nomination_counts" \
+  --argjson degraded_checks "$degraded_checks" \
+  --argjson skipped "$skipped" \
+  --argjson applied_count "$applied_count" --argjson skipped_count "$skipped_count" \
+  --argjson vetoed_count "$("$QQ_ENGINE_JQ" -r 'length' <<<"$vetoed_ids")" \
+  --argjson stale_count "$("$QQ_ENGINE_JQ" -r 'length' <<<"$stale_ids")" \
+  --argjson new_count "$("$QQ_ENGINE_JQ" -r 'length' <<<"$new_ids")" \
+  --argjson dry_run "$dry_run" --argjson inspect "$inspect" \
+  '{repo_root:$repo_root,report_path:$report_path,source_report:$source_report,fetched_main_oid:$fetched_main_oid,primary_main:$primary_main,main_checkout_count:$main_checkout_count,nomination_counts:$nomination_counts,degraded_checks:$degraded_checks,skipped:$skipped,applied_count:$applied_count,skipped_count:$skipped_count,vetoed_count:$vetoed_count,stale_count:$stale_count,new_count:$new_count,dry_run:$dry_run,inspect:$inspect}')"
+if [ "$rail_refused" = true ]; then
+  qq_engine_refuse 'one or more current nominations were refused by their safety rails' "$state"
+fi
+if [ "$inspect" = true ] || [ "$dry_run" = true ]; then
+  qq_engine_done 'apply inspected; no nomination command was run' "$state"
+fi
+qq_engine_done 'authorized current nominations applied; stale docs are staged and uncommitted' "$state"

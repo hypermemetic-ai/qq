@@ -209,6 +209,18 @@ delivery from its dedicated worktree; OpenWiki's internal generator owns
 wiki authorship. `qq-openwiki` supplies deterministic branch, freshness,
 process-lock, and root-instruction restoration guards.
 
+### Weekly reaping
+
+Make `qq-reap` a weekly operator habit; for example:
+
+```cron
+0 9 * * 1 cd <repo> && bin/qq-reap scan
+```
+
+Read the latest report, delete nomination lines to veto them, then run
+`qq-reap apply <report>`. Every scan and apply writes a dated report, even
+when empty; a missing report is the failure signal.
+
 ### On-demand or scheduled maintenance
 
 Keep one long-lived `openwiki/update` worktree per linked Repository. For an
