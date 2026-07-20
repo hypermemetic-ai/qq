@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-07-19 16:41'
-updated_date: '2026-07-19 22:01'
+updated_date: '2026-07-20 18:00'
 labels: []
 dependencies:
   - T-94
@@ -30,6 +30,7 @@ Decision ledger:
 - Herdr stage machinery removed, not bridged — no qq-status business-stage bridge rides the migration; accepted loss of out-of-transcript blocked-delegate notification: operator decision, asked-and-answered alignment exchange, 2026-07-19 alignment session ('kill the herdr machinery. I'm confident.'). Cockpit, topology scripts, and messaging out of scope.
 - 2026-07-19: decision-3 broadened — the detail-file protocol is deleted too (T-116, delete-now); the earlier 'detail-file protocol stays as the ambient record' line is superseded and removed above. Delegate visibility until this migration: transcripts + pi-intercom.
 - 2026-07-19: parked by T-94's operator-accepted HOLD; unblock conditions in the park note above.
+- 2026-07-19 (operator, project-home session): delegates stay on GPT-5.6 under the migration — pi-hosted, not codex — and do NOT inherit the project-home kimi-coding/k3 default (README settings). Recorded consequences: (1) every role manifest must pin the model explicitly — the T-94 pilot manifests set no model field, so children would silently resolve k3; (2) Pi child processes need an OpenAI-route credential — Pi private auth today holds only the pi-qq Kimi credential (T-91), while GPT-5.6 delegates currently authenticate through codex's ChatGPT login; (3) model identity must be verified by a fresh check in the unblocked T-94 rerun and carried into this ticket's acceptance criteria — the pilot's mock child never exercised model selection.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
