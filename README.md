@@ -65,14 +65,19 @@ pi --version
 herdr integration install pi
 ```
 
-Install the two delegation packages into Pi's operator-owned npm tree:
+Install the delegation orchestrator into Pi, and the Landstrip binary
+package directly into Pi's operator-owned npm tree. Do NOT `pi install
+npm:pi-landstrip`: registering the extension makes it wrap the accountable
+session's own Bash in a sandbox, and unversioned installs drift from the
+adapter's pinned Landstrip version (delegation/policies/roles.json).
 
 ```bash
 pi install npm:pi-subagents
-pi install npm:pi-landstrip
+npm install --prefix ~/.pi/agent/npm --legacy-peer-deps @landstrip/landstrip-linux-x64@0.17.31
 ```
 
-`pi-landstrip` installs the platform Landstrip binary beneath
+(On macOS/Windows install the matching `@landstrip/landstrip-<platform>-<arch>`
+package at the same version.) The Landstrip binary then lives beneath
 `~/.pi/agent/npm`. `qq-dispatch` resolves that operator Pi copy by default, or
 the absolute `QQ_LANDSTRIP_BIN` override when one is set. It does not resolve a
 Repository-local `.pi/npm` copy.
