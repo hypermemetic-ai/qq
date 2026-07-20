@@ -1,55 +1,60 @@
 # Review guidelines
 
-These owned rules ride the review engine's injection surfaces. A review brief
-adds Change-specific intent, ownership boundary, non-goals, threat model, and
-declared trust boundaries. Where it declares scope, the brief wins.
+A brief supplies intent, ownership/trust boundaries, non-goals, and
+threat model; its scope wins.
 
 ## Scope
 
-- Review the Change, not the Repository. Report only material failures it
-  introduced across correctness, security, reliability, intent, and standards
-  no tool enforces.
-- Honor the declared threat model. Its out-of-scope finding classes are
-  owner-declined and do not affect the verdict. Review a drift-net against its
-  threat model, never as a security boundary.
-- A correctly implemented but unapproved responsibility is an intent finding.
-- Review moves and deletions through their invariants, not unchanged bodies.
+- Review only material failures the Change introduced in correctness,
+  security, reliability, intent, or unenforced standards.
+- Honor the declared threat model: owner-declined classes do not affect the
+  verdict; review drift-nets against it, never as security boundaries.
+- Correct but unapproved responsibility is an intent finding.
+- Review moves/deletions through invariants, not unchanged bodies.
 
 ## Finding shape
 
-- Every finding states the failure and names the file, line, concrete failure
-  path, and supporting evidence. A remedy that wants a fence cites the brief's
-  declared trust boundary; an empty citation means shrink.
-- Fence-or-shrink is a lookup against declared boundaries, never origin
-  archaeology. A fence is legitimate only at a cited boundary. Prescriptions
-  are never addition-shaped: price both the guard and state-space-removal forms.
-  An interior guard surviving the mechanical same-fix-smaller test may stand,
-  labeled as interior.
-- A code smell is a heuristic, not a violation. Report only a concrete future
-  cost supported by diff or history, weigh counterevidence such as generated,
-  boundary, compatibility, or deliberate bounded-context code, and never
-  prescribe refactoring from a label.
+- Findings state failure, file, line, concrete path, and evidence. A fence cites
+  a declared trust boundary; none means shrink.
+- Classify by declared-boundary lookup, never origin archaeology. Price guard
+  and state-space-removal forms; prescriptions are not addition-shaped. An
+  interior guard stands labeled only after surviving mechanical
+  same-fix-smaller.
+- A smell is a heuristic, not a violation. Report only diff/history-supported
+  future cost after weighing generated, boundary, compatibility, or deliberate
+  bounded-context counterevidence; never prescribe from a label.
 
 ## Remedy and gates
 
-- The smallest remedy is the smallest resulting system after the Change; diff
-  size only breaks ties. A state-space-shrinking or preserving remedy inside
-  the agreed boundary is pre-authorized and appears in the completion envelope;
-  boundary changes still align.
+- Smallest remedy means smallest resulting system; diff breaks ties. In-boundary
+  state-space shrinkage or preservation is pre-authorized and reported in the
+  completion envelope; boundary changes align.
 - Always display parallel, unblended net production-LOC and decision-point
   deltas per fix commit on completion and review surfaces. Growth in either
-  spends one mechanical same-fix-smaller regeneration in the implementer's
-  loop. Checks pass and strictly smaller takes it; otherwise the original
-  stands without justification prose.
-- Block only at shape. Merge-boundary gates are only-down budgets over counts
-  such as complex functions or long files. Trend gauges, including fix-net
-  percentage and health composites, gate nothing.
-- Put obligations only where retry is cheap (the implementer's loop) or firing
-  is rare (a shape budget); provide information elsewhere. Blended gates are
-  gameable and undiagnosable; high-base-rate per-Change obligations become rote.
+  spends one mechanical implementer-loop same-fix-smaller regeneration: passing
+  Checks plus strict shrink wins; otherwise retain the original without
+  justification prose.
+- Block only at shape: merge-boundary gates are only-down count budgets, such
+  as complex functions or long files. Trend gauges, including fix-net and
+  health composites, gate nothing.
+- Place obligations only where retry is cheap or firing rare; provide
+  information elsewhere. Blended gates are gameable and undiagnosable;
+  frequent per-Change obligations become rote.
 
 ## Context gaps
 
-A hole yields a context-gap report, not improvisation: name the missing or
-contradictory fact, why the verdict depends on it, and evidence inspected. A
-context gap is neither finding nor pass.
+Context-gap reports name missing/contradictory facts, why the verdict depends,
+and evidence inspected; never improvise. They are neither finding nor pass.
+
+## Recurrence rules
+
+- A new permanent protocol names the user-visible failure it prevents and
+  retires at least as much protocol as it adds.
+- Provider command construction exists in exactly one adapter.
+- Core workflow tests pass absent Herdr and OpenWiki.
+- `deliver-change` reaches green handoff without requiring Herdr, a browser, or
+  a polling loop.
+- After the hybrid Task-truth convention retires, no Task-record relocation is
+  a lifecycle transition.
+- No universal review/UAT gate exists without an explicit risk trigger; the
+  decision ledger is exempt.

@@ -17,8 +17,9 @@ qq engines unconditionally: they own containment, degradation, and rails.
    Change. Confirm branch and worktree isolation.
 2. Resolve the Repository root and call `qq-herdr-home inspect --repo <root>`.
    Best-effort attach its existing Change checkout, or create a work session
-   from the agreed base when none exists. Cockpit attachment never blocks.
-   Dispatch from the project home; run Change commands in its checkout.
+   from the agreed base when none exists. Retain the work session's workspace
+   ID and root placeholder pane ID. Cockpit attachment never blocks. Dispatch
+   from the project home; run Change commands in its checkout.
 3. Implement through one complete work order and `delegate-batch`; verify the
    completion envelope against the tree. Use `research` for decision-grade
    evidence and retain judgment. Run Checks observing the changed behavior.
@@ -48,10 +49,13 @@ qq engines unconditionally: they own containment, degradation, and rails.
     an error. Stop and retain the Change; repeating the call is safe. A closed
     or rejected Change follows step 7 without altering the completed Task.
 11. After landing succeeds, leave focus untouched and call `qq-change retire
-    <work-session-id> --repo <checkout> --branch <branch>`. Its idempotent rails
-    own clean checkout, merged branch, ownership, topology, and focus; it never
-    forces removal. On refusal or error, report state and leave every session,
-    checkout, pane, and branch intact. Never force-delete, stash, clean, reset,
-    switch, or repair delivery state.
+    <work-session-id> --repo <checkout> --branch <branch> --placeholder-pane
+    <root-placeholder-pane-id>`; for a session-absent path whose lifecycle the
+    owner verifiably owns, omit `--placeholder-pane` and add `--checkout <path>
+    --workspace-absent-owned`. Its idempotent rails own clean checkout, merged
+    branch, ownership, topology, and focus; it never forces removal. On refusal
+    or error, report state and leave every session, checkout, pane, and branch
+    intact. Never force-delete, stash, clean, reset, switch, or repair delivery
+    state.
 12. Keep the five gates with the accountable owner: intent alignment, plan
     approval, review verdict, acceptance, and merge.
