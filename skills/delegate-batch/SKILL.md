@@ -26,15 +26,16 @@ the `subagent` task is only the work-order file pointer.
 
 ## Dispatch and status
 
-Require Pi to inherit these absolute ticket-worktree paths:
+Pi-launch env (one-time; cockpit/Herdr config/shell-rc):
 
 ```sh
-PI_SUBAGENT_PI_BINARY=<worktree>/bin/qq-dispatch
-PI_SUBAGENT_EXTRA_AGENT_DIRS=<worktree>/delegation/manifests/agents
-delegation/manifests/agents/implementer.md
+PI_SUBAGENT_PI_BINARY=<repo-primary>/bin/qq-dispatch
+PI_SUBAGENT_EXTRA_AGENT_DIRS=<repo-primary>/delegation/manifests/agents
 ```
 
-Fail closed unless `implementer` resolves to its manifest above.
+Primary-`main` qq configuration; never Change copies. `cwd` selects
+same-Repository worktrees; require
+`<repo-primary>/delegation/manifests/agents/implementer.md`.
 
 ```ts
 const completionEnvelopeSchema=JSON.parse(readFileSync("<absolute-worktree>/delegation/manifests/completion-envelope.schema.json","utf8"))

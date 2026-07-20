@@ -22,10 +22,14 @@ the Change and code without inheriting the author's conclusions.
    required file, line, failure-path, and evidence shape; and the context-gap
    condition. Give coordinates and facts, never dumps, suspected findings,
    author conclusions, or transcript. `REVIEW.md` supplies owned rules.
-4. Require inherited paths/manifest; fail closed:
-   `PI_SUBAGENT_PI_BINARY=<change-worktree>/bin/qq-dispatch`,
-   `PI_SUBAGENT_EXTRA_AGENT_DIRS=<change-worktree>/delegation/manifests/agents`,
-   and `delegation/manifests/agents/reviewer.md`.
+4. Pi-launch env (one-time; cockpit/Herdr config/shell-rc):
+
+   `PI_SUBAGENT_PI_BINARY=<repo-primary>/bin/qq-dispatch`,
+   `PI_SUBAGENT_EXTRA_AGENT_DIRS=<repo-primary>/delegation/manifests/agents`.
+
+   Primary-`main` qq configuration; never Change copies. `cwd` selects
+   same-Repository worktrees; require
+   `<repo-primary>/delegation/manifests/agents/reviewer.md`.
 
    ```ts
    const completionEnvelopeSchema=JSON.parse(readFileSync("<absolute-change-worktree>/delegation/manifests/completion-envelope.schema.json","utf8"))
@@ -33,11 +37,11 @@ the Change and code without inheriting the author's conclusions.
    ```
 
    Paths absolute; brief temporary. Pi-subagents owns lifecycle/artifacts;
-   adapter containment. Keep id/`details.asyncDir`; inspect once, never poll:
-   run/fleet status, `status.json`, `events.jsonl`,
+   adapter containment. Inspect id/`details.asyncDir` once: run/fleet status,
+   `status.json`, `events.jsonl`,
    `output-<index>.log`, and `subagent-log-<run-id>.md`. `summary`: validated
-   verdict/findings. State that the brief completes
-   orientation: no broad intent search or full-suite rerun.
+   verdict/findings. Brief completes orientation—no further broad intent
+   search/full-suite-rerun.
 5. The reviewer tests responsibilities against the brief, exact diff, callers,
    tests, and suspected failure paths. Review moves and deletions by invariant.
    A hole reports the missing or contradictory fact, why it controls the

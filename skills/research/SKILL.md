@@ -7,22 +7,26 @@ description: Delegates decision-grade investigation to a fresh read-only researc
 
 Delegate the reading; retain the judgment. Write the exact question, decision,
 constraints, method, and relevant Repository paths into a brief under the OS
-temporary directory. Require inherited paths and named manifest; fail
-closed: `PI_SUBAGENT_PI_BINARY=<working-root>/bin/qq-dispatch`,
-`PI_SUBAGENT_EXTRA_AGENT_DIRS=<working-root>/delegation/manifests/agents`, and
-`delegation/manifests/agents/researcher.md`.
+temporary directory. Pi-launch env (one-time; cockpit/Herdr config/shell-rc):
+
+`PI_SUBAGENT_PI_BINARY=<repo-primary>/bin/qq-dispatch`,
+`PI_SUBAGENT_EXTRA_AGENT_DIRS=<repo-primary>/delegation/manifests/agents`.
+
+Primary-`main` qq configuration; never Change copies. `cwd` selects
+same-Repository worktrees; require
+`<repo-primary>/delegation/manifests/agents/researcher.md`.
 
 ```ts
 const completionEnvelopeSchema=JSON.parse(readFileSync("<absolute-working-root>/delegation/manifests/completion-envelope.schema.json","utf8"))
 subagent({chain:[{agent:"researcher",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema}],cwd:"<absolute-working-root>",context:"fresh",async:true,timeoutMs:900000})
 ```
 
-Paths absolute; task is only the brief pointer. Pi-subagents owns
-lifecycle/artifacts; adapter containment. Keep id/`details.asyncDir`; inspect
-once, never poll: run/fleet status, `status.json`, `events.jsonl`,
+Paths absolute; task only the brief pointer. Pi-subagents owns
+lifecycle/artifacts; adapter containment. Inspect id/`details.asyncDir` once:
+run/fleet status, `status.json`, `events.jsonl`,
 `output-<index>.log`, and `subagent-log-<run-id>.md`. Terminal validated envelope
 `summary` carries cited, confidence-tagged findings; nonzero/missing/invalid
-fails. Relaunch an unchanged brief after a failed dispatch. The owner
+fails. Relaunch unchanged briefs after dispatch failure. Owner
 spot-checks load-bearing citations, decides what the findings mean, and writes
 the Repository artifact.
 

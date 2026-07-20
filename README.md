@@ -81,19 +81,24 @@ ln -sT "$HOME/projects/qq/skills" "$HOME/.claude/skills"
 ln -sT "$HOME/projects/qq/skills" "$HOME/.codex/skills"
 ```
 
-Expose qq's production adapter and role manifests to pi-subagents:
+Set qq's production adapter and role manifests once in the environment that
+launches the accountable Pi session (cockpit/Herdr session configuration or
+shell rc). Both paths must be absolute and point into the Repository's primary
+`main` checkout:
 
 ```bash
 export PI_SUBAGENT_PI_BINARY="$HOME/projects/qq/bin/qq-dispatch"
 export PI_SUBAGENT_EXTRA_AGENT_DIRS="$HOME/projects/qq/delegation/manifests/agents"
 ```
 
-Both paths are part of the launch contract. Pi-subagents supplies the child
-role and streams lifecycle events; `qq-dispatch` selects that role's Landstrip
-policy, verifies the assigned worktree and Git directories, and starts the
-real Pi child under bounded descendant cleanup. The three role manifests pin
-delegates to `openai/gpt-5.6-sol` independently of the accountable session's
-default model.
+The adapter and manifests are authoritative qq configuration from primary
+`main`; do not retarget these variables to a Change worktree's copies.
+Pi-subagents inherits the one-time setup for every spawn and supplies the child
+role, while its `cwd` selects the assigned worktree. The canonical adapter
+serves any worktree from that Repository, refuses unrelated repositories,
+renders that worktree's Landstrip grants, and starts the real Pi child under
+bounded descendant cleanup. The three role manifests pin delegates to
+`openai/gpt-5.6-sol` independently of the accountable session's default model.
 
 Start Pi and use `/login` to select Kimi For Coding and store the single
 dedicated private `pi-qq` credential. Pi writes it to
