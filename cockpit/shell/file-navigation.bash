@@ -1,14 +1,7 @@
 # Terminal file navigation helpers for Herdr panes and ordinary shells.
-
 : "${QQ_HOME:=$HOME/projects/qq}"
-
-# qq commands live in the checkout; PATH mounts them ahead of any stale
-# copies so membership changes need no install step. Rebuild PATH keeping
-# every other entry (empty ones included) in order: presence alone may sit
-# behind a shadowing directory.
 function qq_mount_bin() {
-    # Positional scratch only: $1 unscanned PATH (colon-terminated), $2 kept
-    # entries. Named locals could collide with readonly caller variables.
+    # Positional scratch avoids collisions with readonly caller variables.
     set -- "$PATH:" ""
     while [ -n "$1" ]; do
         if [ "${1%%:*}" = "$QQ_HOME/bin" ]; then
@@ -22,35 +15,6 @@ function qq_mount_bin() {
 qq_mount_bin
 unset -f qq_mount_bin
 export PATH
-
-function y() {
-    local tmp cwd
-
-    tmp="$(mktemp -t "yazi-cwd.XXXXXX")" || return
-    command yazi "$@" --cwd-file="$tmp"
-    IFS= read -r -d '' cwd < "$tmp" || true
-    command rm -f -- "$tmp"
-
-    if [ -n "$cwd" ] && [ "$cwd" != "$PWD" ] && [ -d "$cwd" ]; then
-        builtin cd -- "$cwd"
-    fi
-}
-
-function br() {
-    local cmd cmd_file code
-
-    cmd_file="$(mktemp)" || return
-    if command broot --outcmd "$cmd_file" "$@"; then
-        cmd="$(<"$cmd_file")"
-        command rm -f -- "$cmd_file"
-        eval "$cmd"
-    else
-        code=$?
-        command rm -f -- "$cmd_file"
-        return "$code"
-    fi
-}
-
 function qqroot() {
     if [ -d "$QQ_HOME" ]; then
         builtin cd -- "$QQ_HOME"
@@ -59,13 +23,8 @@ function qqroot() {
         return 1
     fi
 }
-
-# Print the focused Herdr space's worktree checkout path. Fail if Herdr/jq are
-# unavailable, the Herdr command fails, no focused space has a worktree, or its
-# directory is missing; callers then fall back to QQ_HOME.
 function qq_space_dir() {
     local json dir
-
     command -v herdr >/dev/null 2>&1 || return 1
     command -v jq >/dev/null 2>&1 || return 1
     json="$(command herdr workspace list 2>/dev/null)" || return 1
@@ -73,30 +32,23 @@ function qq_space_dir() {
     [ -n "$dir" ] && [ -d "$dir" ] || return 1
     printf '%s\n' "$dir"
 }
-
-function qqy() {
-    local dir
-
-    if dir="$(qq_space_dir)"; then
-        y "$dir" "$@"
-    elif [ -d "$QQ_HOME" ]; then
-        y "$QQ_HOME" "$@"
+function qqcd() {
+    local dir status
+    if [ "$#" -eq 0 ]; then
+        dir="$(qq_space_dir)" || dir="$QQ_HOME"
     else
-        y "$@"
+        command -v fzf >/dev/null 2>&1 || { printf 'qqcd requires fzf\n' >&2; return 1; }
+        # fzf's own exit status decides. find feeds it through process
+        # substitution: an early-exiting fzf may SIGPIPE find, but that
+        # status is never collected, so no pipeline status can discard a
+        # valid selection under ambient pipefail. find keeps its tolerance
+        # for unreadable subtrees.
+        dir="$(command fzf --query="$*" < <(command find "$HOME" -type d 2>/dev/null))" && status=0 || status=$?
+        case "$status" in
+            0) [ -n "$dir" ] || { printf 'qqcd: empty selection\n' >&2; return 1; } ;;
+            1|130) return "$status" ;;
+            *) printf 'qqcd: fzf failed (exit %s)\n' "$status" >&2; return "$status" ;;
+        esac
     fi
+    builtin cd -- "$dir"
 }
-
-function qqbr() {
-    local dir
-
-    if dir="$(qq_space_dir)"; then
-        br "$dir" "$@"
-    elif [ -d "$QQ_HOME" ]; then
-        br "$QQ_HOME" "$@"
-    else
-        br "$@"
-    fi
-}
-
-alias qfiles='qqy'
-alias qtree='qqbr'
