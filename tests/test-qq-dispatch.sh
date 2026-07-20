@@ -219,15 +219,17 @@ git -C "$fixture_primary" \
   -c commit.gpgSign=false \
   commit --allow-empty -qm 'dispatch test base'
 git -C "$fixture_primary" worktree add -q -b dispatch-linked "$fixture_worktree"
-mkdir -p \
-  "$fixture_worktree/bin/lib" \
-  "$fixture_worktree/delegation/policies"
-cp "$DISPATCH" "$fixture_worktree/bin/qq-dispatch"
-cp "$ROOT/bin/lib/qq-bin.sh" "$fixture_worktree/bin/lib/qq-bin.sh"
-cp "$RENDERER" "$fixture_worktree/bin/lib/qq-render-landstrip-policy.mjs"
-cp "$SUPERVISOR" "$fixture_worktree/bin/lib/qq-process-tree-supervisor.py"
-cp "$ROOT/delegation/policies/roles.json" \
-  "$fixture_worktree/delegation/policies/roles.json"
+for fixture_checkout in "$fixture_primary" "$fixture_worktree"; do
+  mkdir -p \
+    "$fixture_checkout/bin/lib" \
+    "$fixture_checkout/delegation/policies"
+  cp "$DISPATCH" "$fixture_checkout/bin/qq-dispatch"
+  cp "$ROOT/bin/lib/qq-bin.sh" "$fixture_checkout/bin/lib/qq-bin.sh"
+  cp "$RENDERER" "$fixture_checkout/bin/lib/qq-render-landstrip-policy.mjs"
+  cp "$SUPERVISOR" "$fixture_checkout/bin/lib/qq-process-tree-supervisor.py"
+  cp "$ROOT/delegation/policies/roles.json" \
+    "$fixture_checkout/delegation/policies/roles.json"
+done
 fixture_common_dir="$(
   git -C "$fixture_worktree" rev-parse --path-format=absolute --git-common-dir
 )"
@@ -261,6 +263,36 @@ jq -e \
       $runtime, $worktree, $common, $worktree_git, "/dev/null"
     ]
   ' "$tmp/linked-policy.json" >/dev/null
+
+# Exercise the production shape: the canonical adapter and its policy sources
+# remain in the primary checkout while pi-subagents starts the child in a
+# linked worktree from the same Repository.
+rm "$fixture_worktree/delegation/policies/roles.json"
+canonical_runtime="$tmp/canonical-runtime"
+mkdir -p "$canonical_runtime"
+(
+  cd "$fixture_worktree"
+  PI_SUBAGENT_CHILD_AGENT=implementer \
+  PI_SUBAGENT_RUN_ID=canonical-smoke \
+  QQ_DISPATCH_RUNTIME_ROOT="$canonical_runtime" \
+  FAKE_POLICY_SNAPSHOT="$tmp/canonical-policy.json" \
+    "$fixture_primary/bin/qq-dispatch" --json
+) >"$tmp/canonical.stdout" 2>"$tmp/canonical.stderr"
+grep -Fxq "QQ_DISPATCH_WORKTREE=$fixture_worktree" "$FAKE_PI_ENV" \
+  || fail 'canonical adapter did not select the child worktree'
+grep -Fxq "QQ_DISPATCH_GIT_COMMON_DIR=$fixture_common_dir" "$FAKE_PI_ENV" \
+  || fail 'canonical adapter did not discover the shared Git common directory'
+grep -Fxq "QQ_DISPATCH_GIT_WORKTREE_DIR=$fixture_git_dir" "$FAKE_PI_ENV" \
+  || fail 'canonical adapter did not discover the child worktree Git directory'
+jq -e \
+  --arg runtime "$canonical_runtime" \
+  --arg worktree "$fixture_worktree" \
+  --arg common "$fixture_common_dir" \
+  --arg worktree_git "$fixture_git_dir" '
+    .filesystem.allowWrite == [
+      $runtime, $worktree, $common, $worktree_git, "/dev/null"
+    ]
+  ' "$tmp/canonical-policy.json" >/dev/null
 
 jq -s -e '
   length == 3
@@ -323,12 +355,21 @@ run_failure unsupported-role "$ROOT" \
 assert_file_contains "$tmp/unsupported-role.stderr" \
   "unsupported child role 'planner'"
 
+unrelated_repository="$tmp/unrelated-repository"
+git init -q "$unrelated_repository"
+run_failure unrelated-repository "$unrelated_repository" \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer \
+  "$fixture_primary/bin/qq-dispatch" --json
+assert_file_contains "$tmp/unrelated-repository.stderr" \
+  'child cwd belongs to an unrelated repository'
+
 outside="$tmp/outside"
 mkdir -p "$outside"
-run_failure unrelated-cwd "$outside" \
-  env PI_SUBAGENT_CHILD_AGENT=reviewer "$DISPATCH" --json
-assert_file_contains "$tmp/unrelated-cwd.stderr" \
-  'child cwd is not inside the assigned worktree'
+run_failure non-git-cwd "$outside" \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer \
+  "$fixture_primary/bin/qq-dispatch" --json
+assert_file_contains "$tmp/non-git-cwd.stderr" \
+  'child cwd is not a Git worktree'
 
 real_git="$(command -v git)"
 fake_git="$tmp/git"

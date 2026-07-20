@@ -22,8 +22,8 @@ self="$(readlink -f -- "${BASH_SOURCE[0]}")" \
   || fail 64 "cannot resolve the adapter path"
 bin_dir="$(cd -- "$(dirname -- "$self")" && pwd -P)" \
   || fail 64 "cannot resolve the adapter directory"
-worktree="$(cd -- "$bin_dir/.." && pwd -P)" \
-  || fail 64 "cannot resolve the assigned worktree"
+adapter_worktree="$(cd -- "$bin_dir/.." && pwd -P)" \
+  || fail 64 "cannot resolve the adapter worktree"
 
 # shellcheck source=bin/lib/qq-bin.sh
 source "$bin_dir/lib/qq-bin.sh"
@@ -40,36 +40,34 @@ git_query() {
   )
 }
 
-if ! repository_root="$(git_query -C "$worktree" rev-parse --show-toplevel 2>/dev/null)"; then
+if ! adapter_repository_root="$(git_query -C "$adapter_worktree" rev-parse --show-toplevel 2>/dev/null)"; then
   fail 64 "adapter is not installed in a Git worktree"
 fi
-if ! repository_root="$(realpath -e -- "$repository_root" 2>/dev/null)"; then
+if ! adapter_repository_root="$(realpath -e -- "$adapter_repository_root" 2>/dev/null)"; then
   fail 64 "cannot resolve the adapter's Git worktree"
 fi
-[[ "$repository_root" == "$worktree" ]] \
+[[ "$adapter_repository_root" == "$adapter_worktree" ]] \
   || fail 64 "adapter path does not resolve beneath its assigned worktree"
+
+if ! adapter_git_common_dir="$(git_query -C "$adapter_worktree" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+  fail 67 "cannot discover the Git common directory"
+fi
+if ! adapter_git_common_dir="$(realpath -e -- "$adapter_git_common_dir" 2>/dev/null)"; then
+  fail 67 "cannot resolve the Git common directory"
+fi
 
 invocation_cwd="$(pwd -P)" || fail 65 "cannot resolve the child cwd"
 if ! invocation_root="$(git_query -C "$invocation_cwd" rev-parse --show-toplevel 2>/dev/null)"; then
-  fail 65 "child cwd is not inside the assigned worktree"
+  fail 65 "child cwd is not a Git worktree"
 fi
 if ! invocation_root="$(realpath -e -- "$invocation_root" 2>/dev/null)"; then
   fail 65 "cannot resolve the child cwd's Git worktree"
 fi
-[[ "$invocation_root" == "$worktree" ]] \
-  || fail 65 "child cwd belongs to an unrelated worktree"
 
-role="${PI_SUBAGENT_CHILD_AGENT:-}"
-case "$role" in
-  reviewer | researcher | implementer) ;;
-  "") fail 66 "PI_SUBAGENT_CHILD_AGENT is required" ;;
-  *) fail 66 "unsupported child role '$role'" ;;
-esac
-
-if ! git_common_dir="$(git_query -C "$worktree" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+if ! git_common_dir="$(git_query -C "$invocation_root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
   fail 67 "cannot discover the Git common directory"
 fi
-if ! git_worktree_dir="$(git_query -C "$worktree" rev-parse --path-format=absolute --git-dir 2>/dev/null)"; then
+if ! git_worktree_dir="$(git_query -C "$invocation_root" rev-parse --path-format=absolute --git-dir 2>/dev/null)"; then
   fail 67 "cannot discover the worktree Git directory"
 fi
 if ! git_common_dir="$(realpath -e -- "$git_common_dir" 2>/dev/null)"; then
@@ -79,7 +77,23 @@ if ! git_worktree_dir="$(realpath -e -- "$git_worktree_dir" 2>/dev/null)"; then
   fail 67 "cannot resolve the worktree Git directory"
 fi
 
-roles_file="$worktree/delegation/policies/roles.json"
+if path_is_within "$self" "$invocation_root"; then
+  [[ "$invocation_root" == "$adapter_worktree" ]] \
+    || fail 65 "adapter path resolves beneath an unrelated repository worktree"
+else
+  [[ "$git_common_dir" == "$adapter_git_common_dir" ]] \
+    || fail 65 "child cwd belongs to an unrelated repository"
+fi
+worktree="$invocation_root"
+
+role="${PI_SUBAGENT_CHILD_AGENT:-}"
+case "$role" in
+  reviewer | researcher | implementer) ;;
+  "") fail 66 "PI_SUBAGENT_CHILD_AGENT is required" ;;
+  *) fail 66 "unsupported child role '$role'" ;;
+esac
+
+roles_file="$adapter_worktree/delegation/policies/roles.json"
 policy_renderer="$bin_dir/lib/qq-render-landstrip-policy.mjs"
 tree_supervisor="$bin_dir/lib/qq-process-tree-supervisor.py"
 [[ -f "$roles_file" && -r "$roles_file" ]] \
@@ -152,7 +166,7 @@ else
     || ! architecture="$("$node_binary" -p 'process.arch' 2>/dev/null)"; then
     fail 69 "cannot determine the Landstrip platform package"
   fi
-  landstrip_binary="$worktree/.pi/npm/node_modules/@landstrip/landstrip-${platform}-${architecture}/bin/landstrip"
+  landstrip_binary="$adapter_worktree/.pi/npm/node_modules/@landstrip/landstrip-${platform}-${architecture}/bin/landstrip"
 fi
 [[ "$landstrip_binary" == /* ]] \
   || fail 69 "Landstrip binary path must be absolute"
