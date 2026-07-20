@@ -1,40 +1,60 @@
 # Review guidelines
 
-These are qq's owned reviewer rules. They ride the review engine's injection
-surface — this file for harness-native reviews, the review-guidelines section
-of `AGENTS.md` for codex reviewers — so every engine applies them without the
-brief restating them. A review brief adds the Change-specific facts: intent,
-boundary, non-goals, and threat model. Where the brief declares scope, the
-brief wins.
+A brief supplies intent, ownership/trust boundaries, non-goals, and
+threat model; its scope wins.
 
 ## Scope
 
-- Review the Change, not the repository. Report only material findings the
-  Change introduced, across correctness, security, reliability, intent, and
-  standards no tool enforces.
-- Honor the brief's declared threat model. It states what the Change defends
-  and which finding classes are out of scope; out-of-scope classes are
-  owner-declined by default. Do not report them as findings — at most note
-  the class once, with no effect on the verdict. A drift-net is reviewed
-  against its declared threat model, never against the ambition to be a
-  security boundary.
-- A correctly implemented but unapproved responsibility is a material intent
-  finding.
-- Review moves and deletions through their invariants, not line by line
-  through unchanged or historical bodies.
+- Review only material failures the Change introduced in correctness,
+  security, reliability, intent, or unenforced standards.
+- Honor the declared threat model: owner-declined classes do not affect the
+  verdict; review drift-nets against it, never as security boundaries.
+- Correct but unapproved responsibility is an intent finding.
+- Review moves/deletions through invariants, not unchanged bodies.
 
 ## Finding shape
 
-- Every finding names the file, the line, the concrete failure path, and the
-  supporting evidence.
-- Treat code smells as maintenance heuristics, never violations: report one
-  only when the diff or history shows a concrete future cost, weigh
-  counterevidence such as deliberate bounded-context duplication, generated
-  and boundary code, and compatibility constraints, and prescribe no
-  refactoring from a label alone.
+- Findings state failure, file, line, concrete path, and evidence. A fence cites
+  a declared trust boundary; none means shrink.
+- Classify by declared-boundary lookup, never origin archaeology. Price guard
+  and state-space-removal forms; prescriptions are not addition-shaped. An
+  interior guard stands labeled only after surviving mechanical
+  same-fix-smaller.
+- A smell is a heuristic, not a violation. Report only diff/history-supported
+  future cost after weighing generated, boundary, compatibility, or deliberate
+  bounded-context counterevidence; never prescribe from a label.
+
+## Remedy and gates
+
+- Smallest remedy means smallest resulting system; diff breaks ties. In-boundary
+  state-space shrinkage or preservation is pre-authorized and reported in the
+  completion envelope; boundary changes align.
+- Always display parallel, unblended net production-LOC and decision-point
+  deltas per fix commit on completion and review surfaces. Growth in either
+  spends one mechanical implementer-loop same-fix-smaller regeneration: passing
+  Checks plus strict shrink wins; otherwise retain the original without
+  justification prose.
+- Block only at shape: merge-boundary gates are only-down count budgets, such
+  as complex functions or long files. Trend gauges, including fix-net and
+  health composites, gate nothing.
+- Place obligations only where retry is cheap or firing rare; provide
+  information elsewhere. Blended gates are gameable and undiagnosable;
+  frequent per-Change obligations become rote.
 
 ## Context gaps
 
-- A brief with a hole gets a context-gap report, not improvisation: the exact
-  missing or contradictory fact, why the verdict depends on it, and the
-  evidence already inspected. A context gap is neither a finding nor a pass.
+Context-gap reports name missing/contradictory facts, why the verdict depends,
+and evidence inspected; never improvise. They are neither finding nor pass.
+
+## Recurrence rules
+
+- A new permanent protocol names the user-visible failure it prevents and
+  retires at least as much protocol as it adds.
+- Provider command construction exists in exactly one adapter.
+- Core workflow tests pass absent Herdr and OpenWiki.
+- `deliver-change` reaches green handoff without requiring Herdr, a browser, or
+  a polling loop.
+- After the hybrid Task-truth convention retires, no Task-record relocation is
+  a lifecycle transition.
+- No universal review/UAT gate exists without an explicit risk trigger; the
+  decision ledger is exempt.

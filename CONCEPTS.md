@@ -97,6 +97,17 @@ whose out-of-scope finding classes are declined rather than fixed; it is not a
 security boundary, and the invariant's exact enforcement lives at the resource
 that owns it.
 
+**smallest resulting system** — "Smallest remedy" measures the post-Change
+system, not the diff; diff size only breaks ties. Shrinking or preserving state
+space inside the agreed boundary is pre-authorized, proceeds without
+realignment, and appears in the completion envelope; boundary changes align.
+
+**fence-or-shrink** — A finding fences only at a trust boundary cited in the
+Change brief's threat model; without one, shrink the state space admitting the
+illegal state. Classify by declared-boundary lookup, never origin archaeology.
+An interior guard surviving the mechanical same-fix-smaller test stands,
+labeled.
+
 **refuse, don't sanitise** — Reject unsafe or malformed input instead of
 rewriting it into a different value and proceeding as though it were valid.
 

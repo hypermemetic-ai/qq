@@ -1,204 +1,61 @@
 ---
 name: deliver-change
-description: Owns one-PR GitHub Flow delivery for every authorized Repository modification intended to land, from an aligned assignment through Task completion, a green pull-request handoff, and verification of the operator's disposition. Use only in the operator-facing accountable agent after alignment; do not use for read-only work, explicitly local experiments, or delegated research, implementation, or review within a Change another agent owns.
+description: Owns judgment and one-PR GitHub Flow delivery for authorized Repository changes through Task completion, green handoff, verified disposition, and engine-driven retirement. Use only in the operator-facing accountable agent, never for delegated work inside another Actor's Change.
 ---
 
 # Deliver a Change
 
-Retain responsibility for scope, decisions, evidence, and delivery state. Give
-delegated agents bounded assignments; do not hand them this lifecycle.
+Retain scope, decisions, evidence, and delivery state; delegate only bounded
+work. `pi-hunk` owns local diff review; GitHub's UI owns Checks and merge. Call
+qq engines unconditionally: they own containment, degradation, and rails.
 
-`pi-hunk` is the operator's local diff-review checkpoint (`/hunk review`, submit to send notes, empty submit approves); GitHub's web UI is for Checks and merge.
-
-`rpiv-todo` is session scratch; durable intent lives in Backlog Tasks.
-
-1. Bind the Change to the agreed outcome and current Repository state. Before
-   binding, require the owning Task record's Description to carry a decision
-   ledger: every consequential decision this Change embeds, each citing what
-   settled it — a Backlog decision record, an approved Task, an
-   asked-and-answered alignment brief or interview, or an explicit
-   operator opt-out recorded verbatim — or the explicit entry
-   `none`. Dispositions do not transfer across surfaces or Changes; an
-   uncited decision is open, and any open entry returns the work to
-   alignment (grilling) before any Repository mutation. Record a
-   disposition whose reach extends beyond this Change as a Backlog decision
-   record and cite its id. Follow
-   Backlog's task-execution instructions for Task operations, and confirm that
-   the branch or worktree isolates this Change from unrelated work. Resolve the
-   Repository root and run `qq-herdr-home inspect --repo <root>` first. Require
-   its sole persistent project home to be the primary `main` checkout with one
-   dedicated Backlog-board tab; retain `.home_workspace_id` and the complete
-   response. Select an agent-chosen, operator-renameable `<change-label>` as a
-   recognizable UI handle matching `[A-Za-z0-9-]{1,15}`, unique among work
-   sessions under this home. Labels are independent of branch and Task
-   cardinality; use a Task id only when it genuinely identifies the Change,
-   never from an inferred one-to-one mapping. Inspect the home's sibling work
-   sessions and reject a duplicate label for any other checkout. Attach an
-   existing Change checkout by default, including harness-created worktrees,
-   with `herdr worktree open --workspace <home-workspace-id> --path
-   <absolute-path> --label "<change-label>" --no-focus --json`. Only when no
-   checkout exists, use creation as the fallback: resolve an explicitly agreed,
-   freshly fetched base and run `herdr worktree create --workspace
-   <home-workspace-id> --branch <branch> --base <base> --label "<change-label>"
-   --no-focus --json`; never omit `--base` and inherit an incidental `HEAD`.
-   Require the returned workspace to be a linked worktree for the same
-   Repository with `.label` equal to `<change-label>`, and retain its workspace
-   id and checkout path. Stop before Repository mutation if the work session
-   cannot be attached or created. The accountable session dispatches from the
-   project home in every mode and never moves its own pane into the work
-   session; a single Change is a batch of one. The session's working directory
-   stays in the project home, so run every subsequent tool in `<checkout-path>`
-   (or use `git -C <checkout-path>`) and verify that path's top level before
-   editing. Treat the returned workspace as the Change's work session: it owns
-   the Change's checkout, its root placeholder pane, and every delegated
-   agent. The accountable conversation and every operator-facing tab stay in
-   the project home, which remains on `main` with its board and
-   general-purpose tabs. Return to alignment before acting on any new
-   consequential decision.
-2. Implement and verify coherent units, with execution codex-first: within
-   plan bounds, compose one work-order brief for this Change's bounded
-   implementation and dispatch it per delegate-batch's "Dispatch codex-first"
-   section, pointing the runner at this Change's checkout, then verify the
-   completion envelope against the tree before treating any claim as evidence.
-   Use a Claude subagent instead only when the assignment needs harness-native
-   tools or judgment beyond the plan's bounds; composing plans, briefs, and
-   verdicts stays with the accountable session. When a decision needs durable,
-   multi-source evidence, delegate that question through `research` and retain
-   the judgment. Keep the Task aligned through the Backlog CLI in the primary
-   `main` checkout, where the record lives until finalization under the
-   hybrid Task-truth convention (doc-48) so the board renders in-flight
-   truth, and run the local Checks that observe the changed behavior.
-3. After implementation and local verification, run `code-review` for every
-   non-trivial Change before committing or publishing it. Verify its findings,
-   resolve only confirmed in-scope issues, and rerun affected Checks.
-4. Commit only green units, push each green commit, and open a pull request
-   that carries the Task intent and Check evidence. Pass the Repository's final
-   GitHub Checks.
-5. Before the final merge handoff, first move the Task record from the
-   primary checkout's working tree into this Change's checkout — the hybrid
-   convention's single move (doc-48) — then follow Backlog's
-   task-finalization instructions inside this Change: verify the acceptance
-   criteria, record the final summary, mark the Task Done, and push that
-   finalization through the same pull request. Rerun Checks affected by the final commit. Done records
-   that the agreed Task work is complete; it does not claim that the operator
-   accepted or landed its Change.
-6. If a Check or operator feedback shows that an existing acceptance criterion
-   is unmet, return the same Task to an active status and correct it in this
-   Change while its pull request remains open. If that Change is already
-   closed or unavailable, realign its branch disposition without replacing
-   the Task; the unmet criterion is not new work. If completed work is
-   declined because the operator's intent changed or grew, leave the Task Done
-   and do not absorb that new commitment: create follow-up work only with
-   approval.
-7. When the pull request is green, reviewed, and finalized, inspect it with
-   `gh pr view <number-or-URL> --json state,mergedAt,mergeCommit,mergeable,mergeStateStatus,statusCheckRollup,url`.
-   Do not guess JSON field names; correct any rejected query before handoff.
-   Confirm it is still open and unmerged with applicable Checks green, and set
-   `url` to the returned `.url` value.
-8. Open the resolved URL in the operator's graphical browser through a process
-   that survives the tool call. In a Linux tool shell that reaps ordinary
-   descendants, first confirm the graphical environment and available commands,
-   then use `setsid -f xdg-open "$url" >/dev/null 2>&1`; otherwise use the
-   runtime's durable native opener. Confirm that the PR-specific page remains
-   visible after the launching call has returned, using later window observation
-   and `uat-signoff` when operator confirmation is required. Dispatch, a printed
-   URL, or momentary appearance is not visibility. If persistent visibility is
-   not confirmed, retry once through a durable opener, report the URL, and stop.
-9. Never merge the pull request. After browser visibility is established, run
-   `herdr notification show "Pull request ready" --body "$url" --sound request`
-   (or the runtime's equivalent) and verify that its result confirms it was
-   shown. If the command fails or reports notifications disabled or not shown,
-   plainly report the browser-only fallback and do not claim a notification was
-   sent. Report the URL either way. Then the accountable session arms
-   `qq_pr_watch`, the Pi-extension tool, Repository-mounted via README's
-   `settings.json` `extensions` array, with `action:"watch"`, pull-request
-   argument `pr`, and integer `interval` parameter 30–60 (30 seconds by
-   default) as the harness-native background disposition watch. It owns the
-   30–60-second interval policy, exactly-once completion-wake and `inspect`
-   semantics, covering both `MERGED` and `CLOSED`; silence is not success. Its
-   wake resumes the agent for post-merge steps and follow-on dispatch,
-   replacing an operator message. Then stop.
-10. On a disposition-watch wake, later resume, or operator message, reinspect
-   the pull request with step 7's fields. Proceed only after verifying its
-   merged state and that
-   `.mergeCommit.oid` is reachable from freshly fetched `origin/main` using
-   `git merge-base --is-ancestor <merge-commit> origin/main`. Do not alter the
-   completed Task or open a Task-finalization Change. If the operator closes or
-   rejects it, report that disposition and apply step 6.
-11. After a merged disposition is verified, use `git worktree list --porcelain`
-   to find the local checkout registered for `refs/heads/main`. Require exactly
-   one such checkout and symbolic `HEAD` on `refs/heads/main`. Require every
-   line of `git status --porcelain --untracked-files=all` to be an untracked
-   managed Backlog markdown under `backlog/`: the hybrid Task-truth convention
-   (doc-48) keeps in-flight Task records under `backlog/tasks/`, while other
-   managed markdown—docs, decisions, and completed/archive records—lands through
-   its own finalization moves. Verify zero path overlap between the incoming
-   pull's `git diff --name-only HEAD origin/main` output and the untracked list.
-   Any tracked modification, any untracked entry outside `backlog/`, or any
-   path overlap still blocks the synchronization.
-   Establish exclusive use of that
-   checkout before mutating it—coordinate through agent messaging when another
-   Actor may hold it—and refuse synchronization while it is contested. With
-   those preconditions satisfied,
-   run `git -C <main-checkout> pull --ff-only origin main`, then verify
-   `git -C <main-checkout> merge-base --is-ancestor <merge-commit> HEAD`. If
-   discovery, a precondition, the pull, or final verification fails, report the
-   observed state and stop; never create, switch, stash, clean, reset, or
-   otherwise repair the checkout. Retain the Change checkout until the failed
-   synchronization can be resumed safely.
-12. After a terminal disposition leaves no further work in this Change,
-   leave operator focus untouched. The disposition watch's completion
-   notification is the only end-of-Change
-   signal; changing operator focus is never part of ending a Change. Retire the
-   Change at source only after steps 10–11 have verified a merged disposition
-   and synchronized the primary `main` checkout. For any other terminal
-   disposition, report it and leave every pane and
-   tab, the work session, checkout, and branch intact for inspection. Do not
-   focus, move, or close any tab or pane, do not run `qq-herdr-home
-   focus-board`, and do not invoke `herdr worktree remove` or `git worktree
-   remove`; the operator explicitly retires that work session and checkout.
-
-   Before retiring a verified merged Change, check these rails in order against
-   observable evidence:
-   1. Run `git worktree list --porcelain` for this Repository. Require the
-      Change checkout to be a registered linked worktree, and require its
-      canonical path identity to differ from the step-11 `<main-checkout>`.
-   2. Require `git -C <checkout> status --porcelain
-      --untracked-files=all` to be empty.
-   3. Freshly fetch `origin/main`, resolve the Change's `<branch>` and branch
-      tip, and require `git merge-base --is-ancestor <branch-tip>
-      origin/main` to succeed. Require the checkout's `HEAD` to be attached
-      to that same `<branch>`: `git -C <checkout> symbolic-ref -q HEAD` must
-      return `refs/heads/<branch>`; a detached or re-switched checkout trips
-      the rail, because mergedness was proven for the branch, not for what
-      the checkout now holds. Delete the branch later only with `git branch
-      -d`, never `-D`, so Git independently re-enforces mergedness.
-   4. If a Herdr work session exists for the Change, scope `herdr api snapshot`
-      and `herdr pane list --workspace <work-session-id>` to it. The
-      accountable session dispatches from the project home, so require no
-      live agent in the work session at all. Require the snapshot's
-      focused workspace to differ from `<work-session-id>`: retiring a work
-      session the operator is looking at would move operator focus, which
-      ending a Change never does.
-   5. For an existing work session, require exactly one tab and a pane census
-      containing only what this Change created: the root placeholder pane.
-      Treat every
-      unexplained pane or tab as operator-created and trip the rail; never close
-      operator-created panes or tabs. If no work session exists, rails 4–5 have
-      no subject; instead require evidence that this executing session owns the
-      Change's delegate lifecycle, its completion wake has fired, and no other
-      Actor was given the checkout.
-
-   If any rail trips or its evidence cannot be resolved, report the observed
-   state and do nothing else. Leave any work session, all panes and tabs, the
-   checkout, and the branch intact. Do not focus, move, or close any tab or
-   pane, do not run `qq-herdr-home focus-board`, and do not invoke `herdr
-   worktree remove` or `git worktree remove`.
-
-   Only with every rail green, retire in this order:
-   a. If the work session exists, run `herdr worktree remove --workspace
-      <work-session-id>` without `--force`. If it is absent, run `git worktree
-      remove <checkout-path>` without `--force`. If either command refuses,
-      report the observed state and stop; never retry with force.
-   b. Run `git -C <main-checkout> branch -d <branch>`; never use `-D`.
-      Do not perform a closing focus move.
+1. Before mutation, require the owning Task Description's **decision ledger**
+   to cite what settled every consequential decision—a Backlog decision record,
+   approved Task, asked-and-answered exchange, or verbatim operator opt-out—or
+   say `none`. Dispositions do not transfer. An uncited decision returns to
+   alignment. Mint and cite a decision record when its reach exceeds this
+   Change. Confirm branch and worktree isolation.
+2. Resolve the Repository root and call `qq-herdr-home inspect --repo <root>`.
+   Best-effort attach its existing Change checkout, or create a work session
+   from the agreed base when none exists. Retain the work session's workspace
+   ID and root placeholder pane ID. Cockpit attachment never blocks. Dispatch
+   from the project home; run Change commands in its checkout.
+3. Implement through one complete work order and `delegate-batch`; verify the
+   completion envelope against the tree. Use `research` for decision-grade
+   evidence and retain judgment. Run Checks observing the changed behavior.
+   In-boundary simplification that shrinks or preserves state space is
+   pre-authorized: proceed without realignment and show it in the envelope.
+   Boundary changes still align.
+4. Run fresh-context `code-review` after local verification for every
+   non-trivial Change. Its brief declares trust boundaries beside the threat
+   model. Verify findings, fix only confirmed in-scope failures, rerun affected
+   Checks, review each fix delta, then present the diff through `pi-hunk`.
+5. Commit and push only green units. Open one pull request carrying Task intent
+   and Check evidence; pass final GitHub Checks.
+6. Before handoff, move the Task record from primary `main` into the Change
+   checkout. There, verify acceptance criteria, summarize, mark it Done through
+   Backlog's CLI, push the finalization, and rerun affected Checks.
+7. An unmet criterion reactivates the same Task and Change. If the Change is
+   unavailable, align its branch disposition without replacing the Task. A
+   later intent change is new work and requires approval.
+8. Confirm the open pull request is reviewed, finalized, and green. Open its
+   resolved URL in the operator's browser, send a Herdr notification containing
+   it, and report it. Browser and cockpit behavior never block handoff.
+9. Never merge; the operator merges. Arm `qq_pr_watch`. Its wake is
+   non-load-bearing: after a wake, resume, or operator message, call idempotent
+   `qq-change land <pr> --repo <checkout>`.
+10. The land engine verifies merge and ancestry and safely fast-forwards the
+    sole primary `main` checkout. Exit 2 reports a rail refusal; exit 1 reports
+    an error. Stop and retain the Change; repeating the call is safe. A closed
+    or rejected Change follows step 7 without altering the completed Task.
+11. After landing succeeds, leave focus untouched and call `qq-change retire
+    <work-session-id> --repo <checkout> --branch <branch> --placeholder-pane
+    <root-placeholder-pane-id>`; for a session-absent path whose lifecycle the
+    owner verifiably owns, omit `--placeholder-pane` and add `--checkout <path>
+    --workspace-absent-owned`. Its idempotent rails own clean checkout, merged
+    branch, ownership, topology, and focus; it never forces removal. On refusal
+    or error, report state and leave every session, checkout, pane, and branch
+    intact. Never force-delete, stash, clean, reset, switch, or repair delivery
+    state.
+12. Keep the five gates with the accountable owner: intent alignment, plan
+    approval, review verdict, acceptance, and merge.
