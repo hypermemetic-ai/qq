@@ -7,20 +7,23 @@ description: Delegates decision-grade investigation to a fresh read-only researc
 
 Delegate the reading; retain the judgment. Write the exact question, decision,
 constraints, method, and relevant Repository paths into a brief under the OS
-temporary directory, then call:
+temporary directory. Require these inherited paths and named manifest; fail
+closed: `PI_SUBAGENT_PI_BINARY=<working-root>/bin/qq-dispatch`,
+`PI_SUBAGENT_EXTRA_AGENT_DIRS=<working-root>/delegation/manifests/agents`, and
+`delegation/manifests/agents/researcher.md`. Call:
 
-```sh
-qq-dispatch researcher \
-  --root <working-root> \
-  --brief <brief-path> \
-  --output <findings-path>
+```ts
+subagent({agent:"researcher",task:"Read-and-perform:<absolute-brief-path>",cwd:"<absolute-working-root>",context:"fresh",async:true,timeoutMs:900000,structuredOutputSchemaPath:"<absolute-working-root>/delegation/manifests/completion-envelope.schema.json"})
 ```
 
-Substitute only the paths; never put free text on the command line. The engine
-owns fresh-context isolation, read-only access, role configuration, containment,
-artifacts, and process retirement. Relaunch an unchanged brief after a failed
-dispatch. The owner spot-checks load-bearing citations, decides what the
-findings mean, and writes the Repository artifact.
+Paths absolute; task is only the brief pointer. Pi-subagents owns
+lifecycle/artifacts; adapter containment. Keep id/`details.asyncDir`; inspect
+once, never poll: run/fleet status, `status.json`, `events.jsonl`,
+`output-<index>.log`, and `subagent-log-<run-id>.md`. Terminal validated envelope
+`summary` carries cited, confidence-tagged findings; nonzero/missing/invalid
+fails. Relaunch an unchanged brief after a failed dispatch. The owner
+spot-checks load-bearing citations, decides what the findings mean, and writes
+the Repository artifact.
 
 ## Method
 
