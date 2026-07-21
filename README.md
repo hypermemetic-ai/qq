@@ -121,8 +121,9 @@ Do not use `pi install npm:pi-code-tool`; that would expose `code` outside the
 assigned treatment inputs. Activation is an explicit, single-use private
 record. While it exists, every idle non-command interactive or RPC input is
 assigned before treatment by the fixed T-135 pair schedule. Treatment resolves
-only the Pi-owned `pi-code-tool@0.6.1`, verifies its manifest, registers the
-restricted wrapper, and activates `code` before the current prompt is built.
+only the Pi-owned `pi-code-tool@0.6.1`, verifies its manifest and exact
+`package-lock.json` version/integrity provenance, registers the restricted
+wrapper, and activates `code` before the current prompt is built.
 Control removes `code` from both the current model tool set and its tool
 snippet. Slash commands, user shell commands, extension messages, steering,
 and queued follow-ups do not consume an index.
@@ -133,19 +134,29 @@ worktree, with mode 600. They contain prompt digests and lengths, never prompt
 text. A fail-closed session-lifetime writer claim prevents a second live Pi
 collector, while a short append lock prevents duplicate indexes; unsafe leaf
 types, symlink paths, corrupt lines, and loose record permissions are refused.
-Inspect collection progress and stop enrollment explicitly:
+Inspect collection progress, then exit the collector Pi session before sealing
+and analyzing the trial:
 
 ```bash
 bin/qq-code-trial status
+# exit the collector Pi session first
 bin/qq-code-trial deactivate
 bin/qq-code-trial analyze
 ```
 
-A crashed Pi process deliberately leaves its writer claim behind. `status`
-shows the recorded PID and claim time. After independently confirming that the
-collector is gone, run `bin/qq-code-trial unlock`; it checks that the PID is no
-longer live and refuses to unlock a running collector. Nothing silently ages
-out or reconciles this claim.
+A crashed Pi process deliberately leaves its writer claim behind, and an
+interrupted append may leave its short-lock claim. `status` shows their recorded
+PIDs and claim times. After independently confirming that every recorded
+process is gone, run `bin/qq-code-trial unlock`; it validates both private JSON
+claims, checks that each PID is no longer live, and refuses to remove any claim
+while one is live or unsafe. Ordinary appends recover a validated stale short
+lock automatically; nothing silently ages out a session writer.
+
+`deactivate` refuses while a collector writer remains, appends the final sealed
+record with the preceding ledger's SHA-256 and committed record count, and then
+removes activation. A retry completes activation removal if interruption occurs
+after sealing. `analyze` requires that sealed, inactive, writer-free, lock-free
+state; it will not report an active or unsealed prefix.
 
 `analyze` validates the complete intention-to-treat ledger, preserves
 treatment non-use and failures in their assigned arm, and reports the measures

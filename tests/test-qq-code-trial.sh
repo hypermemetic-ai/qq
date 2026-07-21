@@ -88,11 +88,18 @@ function harness() {
 		cwd: root,
 		hasUI: true,
 		model: { provider: "example-provider", id: "example-model" },
+		getSystemPrompt: () => activeTools
+			.map((name) => tools.get(name)?.promptSnippet)
+			.filter(Boolean)
+			.join("\n"),
 		sessionManager: {
 			getSessionId: () => "session-test-1",
 			getSessionFile: () => path.join(temporary, "session.jsonl"),
 		},
-		ui: { notify: (message, level) => notifications.push({ message, level }) },
+		ui: {
+			notify: (message, level) => notifications.push({ message, level }),
+			select: async () => "Deny",
+		},
 		abort: () => { aborted = true; },
 	};
 	async function emit(name, event = {}) {
@@ -148,11 +155,20 @@ fs.writeFileSync(path.join(packageRoot, "package.json"), JSON.stringify({
 	version: "0.6.1",
 	type: "module",
 }));
+fs.writeFileSync(path.join(agentDir, "npm/package-lock.json"), JSON.stringify({
+	lockfileVersion: 3,
+	packages: {
+		"node_modules/pi-code-tool": {
+			version: "0.6.1",
+			integrity: core.PACKAGE_INTEGRITY,
+		},
+	},
+}));
 fs.writeFileSync(path.join(packageRoot, "dist/pi/extension.js"), `
 export function createPythonExtension(options) {
   globalThis.__qqTrialOptions = options;
   return async function register(pi) {
-    pi.on("session_start", () => {});
+    pi.on("session_start", () => { globalThis.__qqTrialSessionStarts = (globalThis.__qqTrialSessionStarts ?? 0) + 1; });
     pi.registerTool({
       name: "code",
       label: "Code",
@@ -160,18 +176,35 @@ export function createPythonExtension(options) {
       promptSnippet: "code: run sandboxed Python; host tools are callable as functions; state persists",
       promptGuidelines: ["Use code for multi-step tool workflows."],
       parameters: { type: "object" },
-      async execute() { return { content: [], details: { status: "ok", calls: [] } }; },
+      async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+        if (ctx?.hasUI) {
+          await ctx.ui.select("Approve bash('pwd')?", [
+            "Approve",
+            "Deny",
+            "Decide later (suspends the script, resumable any time)",
+          ]);
+        }
+        return { content: [], details: { status: "error", calls: ["bash"] } };
+      },
     });
   };
 }
 `);
+const dependencyLockPath = path.join(agentDir, "npm/package-lock.json");
+const dependencyLock = JSON.parse(fs.readFileSync(dependencyLockPath, "utf8"));
+dependencyLock.packages["node_modules/pi-code-tool"].integrity = "sha512-wrong";
+fs.writeFileSync(dependencyLockPath, JSON.stringify(dependencyLock));
+assert.throws(() => core.verifyDependency({ env: process.env }), /package-lock provenance mismatch/);
+dependencyLock.packages["node_modules/pi-code-tool"].integrity = core.PACKAGE_INTEGRITY;
+fs.writeFileSync(dependencyLockPath, JSON.stringify(dependencyLock));
 
 core.activateTrial(paths, { env: process.env });
 assert.equal(fs.statSync(paths.activation).mode & 0o777, 0o600);
 assert.equal(fs.statSync(paths.ledger).mode & 0o777, 0o600);
 
 // The first schedule position is treatment. Assignment is the pre-treatment
-// ledger boundary; exposure follows only after exact package/config checks.
+// ledger boundary; exact package/config checks and exposure follow in the same
+// cancellable input hook, before Pi can start a provider request.
 assert.equal((await h.emit("input", {
 	text: secretPrompt,
 	images: [{ type: "image" }],
@@ -183,6 +216,7 @@ assert.equal(evidence.assignments.size, 1);
 assert.equal(evidence.assignments.get(1).arm, "treatment");
 assert.equal(evidence.exposures.get(1).code_active, true);
 assert(h.activeTools().includes("code"));
+assert.equal(globalThis.__qqTrialSessionStarts, 1, "late package load skipped current session restoration");
 assert.deepEqual(globalThis.__qqTrialOptions, {
 	toolName: "code",
 	root,
@@ -204,7 +238,6 @@ assert(!h.tools.get("code").description.includes("Prefer this tool"));
 assert(!h.tools.get("code").description.includes("Use code"));
 
 await h.emit("before_agent_start", h.promptEvent());
-assert(h.activeTools().includes("code"));
 await h.emit("agent_start");
 await h.emit("turn_start", { turnIndex: 0, timestamp: Date.now() });
 await h.emit("message_end", {
@@ -260,29 +293,30 @@ assert.equal((await concurrent.emit("input", {
 assert.match(concurrent.notifications[0].message, /already has a live writer/);
 assert.equal(core.readEvidence(paths).assignments.size, 2);
 
-// Extension messages, steering, follow-ups, slash commands, and shell commands
-// do not consume indexes. An idle slash input also leaves code inactive.
+// Extension messages, steering, follow-ups, and raw-leading slash commands do
+// not consume indexes. Interactive shell commands are consumed by Pi before
+// this hook; whitespace-leading ! text that reaches it is ordinary work.
 for (const event of [
 	{ text: "injected", source: "extension", streamingBehavior: undefined },
 	{ text: "steer", source: "interactive", streamingBehavior: "steer" },
 	{ text: "later", source: "interactive", streamingBehavior: "followUp" },
 	{ text: "/skill:thing", source: "interactive", streamingBehavior: undefined },
-	{ text: "  !pwd", source: "interactive", streamingBehavior: undefined },
 ]) await h.emit("input", event);
 assert.equal(core.readEvidence(paths).assignments.size, 2);
 assert(!h.activeTools().includes("code"));
 
 // Interrupted/error runs remain assigned. Streaming operator activity counts
 // against the current ITT record but does not create a new assignment.
-await h.emit("input", { text: "third input", source: "interactive", streamingBehavior: undefined });
+await h.emit("input", { text: "  !pwd", source: "interactive", streamingBehavior: undefined });
 await h.emit("before_agent_start", h.promptEvent());
 await h.emit("agent_start");
 await h.emit("turn_start", { turnIndex: 0, timestamp: Date.now() });
 await h.emit("tool_execution_start", { toolCallId: "c1", toolName: "code", args: {} });
+const codeResult = await h.tools.get("code").execute("c1", { code: "bash('pwd')" }, undefined, undefined, h.ctx);
 await h.emit("tool_result", {
 	toolCallId: "c1",
 	toolName: "code",
-	details: { status: "error", calls: ["read", "grep"] },
+	details: codeResult.details,
 	isError: false,
 });
 await h.emit("tool_execution_end", { toolCallId: "c1", toolName: "code", isError: false });
@@ -299,8 +333,10 @@ await h.emit("agent_settled");
 let third = core.readEvidence(paths).outcomes.get(3);
 assert.equal(third.status, "aborted");
 assert.equal(third.code_invocations, 1);
-assert.equal(third.code_inner_calls, 2);
+assert.equal(third.code_inner_calls, 1);
 assert.equal(third.code_failures, 1);
+assert.equal(third.approval_requests, 1);
+assert.equal(third.denials, 1);
 assert.equal(third.operator_interruptions, 1);
 assert.equal(third.queued_followups, 1);
 assert.equal(core.readEvidence(paths).assignments.size, 3);
@@ -331,17 +367,18 @@ assert(ledgerText.includes(core.digest(secretPrompt)));
 
 // Status remains usable during collection; analysis refuses incomplete data.
 assert.equal(core.trialStatus(paths).assignments, 5);
-assert.throws(() => core.analyzeTrial(paths), /incomplete trial.*no causal verdict/);
+assert.throws(() => core.analyzeTrial(paths), /not deactivated and sealed.*no causal verdict/);
+assert.throws(() => core.deactivateTrial(paths), /collector is still running/);
+await h.emit("session_shutdown", { reason: "quit" });
 core.deactivateTrial(paths);
 assert.equal(fs.existsSync(paths.activation), false);
 assert.equal(core.trialStatus(paths).active, false);
 assert.throws(() => core.allocateAssignment(paths, {}), /trial is not active/);
-await h.emit("session_shutdown", { reason: "quit" });
 assert.equal(core.trialStatus(paths).writer_present, false);
 
-// Surface validation is an input preflight: if Pi cannot activate the exact
-// assigned set, the input is handled before any agent event and the treatment
-// failure remains accounted in its assigned arm.
+// Fallible exposure runs in Pi's cancellable input hook. If Pi cannot activate
+// the exact assigned set, the failure remains accounted in its assigned arm
+// and the operator input is handled before a provider request.
 const originalStateHome = process.env.XDG_STATE_HOME;
 const preflightEnv = { ...process.env, XDG_STATE_HOME: path.join(temporary, "preflight-state") };
 process.env.XDG_STATE_HOME = preflightEnv.XDG_STATE_HOME;
@@ -362,6 +399,66 @@ assert.equal(failedPreflight.outcomes.get(1).status, "error");
 assert.equal(failedPreflight.outcomes.get(1).agent_runs, 0);
 await brokenSurface.emit("session_shutdown", { reason: "quit" });
 assert.equal(core.trialStatus(preflightPaths).writer_present, false);
+process.env.XDG_STATE_HOME = originalStateHome;
+
+// A Pi pre-agent rejection is recovered on the next eligible input without
+// consuming that new input: the failed assignment is terminalized first, then
+// the current input receives the next deterministic assignment.
+const rolloverEnv = { ...process.env, XDG_STATE_HOME: path.join(temporary, "rollover-state") };
+process.env.XDG_STATE_HOME = rolloverEnv.XDG_STATE_HOME;
+const rolloverPaths = core.statePaths({ env: rolloverEnv, repositoryRoot: root });
+const rollover = harness();
+extension.default(rollover.pi);
+core.activateTrial(rolloverPaths, { env: rolloverEnv });
+await rollover.emit("input", { text: "provider preflight will reject", source: "interactive" });
+await rollover.emit("input", { text: "next real input", source: "rpc" });
+let rolloverEvidence = core.readEvidence(rolloverPaths);
+assert.equal(rolloverEvidence.assignments.size, 2);
+assert.equal(rolloverEvidence.outcomes.get(1).status, "error");
+assert.equal(rolloverEvidence.outcomes.get(1).agent_runs, 0);
+assert.equal(rolloverEvidence.exposures.get(1).code_active, true);
+await rollover.emit("before_agent_start", rollover.promptEvent());
+await rollover.emit("agent_start");
+await rollover.emit("message_end", {
+	message: { role: "assistant", stopReason: "stop", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } },
+});
+await rollover.emit("agent_settled");
+await rollover.emit("session_shutdown", { reason: "quit" });
+
+// A transient terminal append failure retains the frozen outcome, disables the
+// treatment surface, and retries before enrolling the next eligible input.
+const retryEnv = { ...process.env, XDG_STATE_HOME: path.join(temporary, "retry-state") };
+process.env.XDG_STATE_HOME = retryEnv.XDG_STATE_HOME;
+const retryPaths = core.statePaths({ env: retryEnv, repositoryRoot: root });
+const retry = harness();
+extension.default(retry.pi);
+core.activateTrial(retryPaths, { env: retryEnv });
+await retry.emit("input", { text: "outcome append retry", source: "interactive" });
+await retry.emit("before_agent_start", retry.promptEvent());
+await retry.emit("agent_start");
+await retry.emit("message_end", {
+	message: { role: "assistant", stopReason: "stop", usage: { input: 2, output: 1, cacheRead: 0, cacheWrite: 0 } },
+});
+fs.writeFileSync(retryPaths.lock, `${JSON.stringify({
+	schema: "qq.pi-code-tool-trial-lock/v1",
+	pid: process.pid,
+	claimed_at: new Date().toISOString(),
+})}\n`, { mode: 0o600 });
+await retry.emit("agent_settled");
+assert.equal(core.readEvidence(retryPaths).outcomes.has(1), false);
+assert(!retry.activeTools().includes("code"));
+fs.unlinkSync(retryPaths.lock);
+await retry.emit("input", { text: "must still be enrolled", source: "interactive" });
+let retryEvidence = core.readEvidence(retryPaths);
+assert.equal(retryEvidence.outcomes.get(1).status, "completed");
+assert.equal(retryEvidence.assignments.size, 2);
+await retry.emit("before_agent_start", retry.promptEvent());
+await retry.emit("agent_start");
+await retry.emit("message_end", {
+	message: { role: "assistant", stopReason: "stop", usage: { input: 2, output: 1, cacheRead: 0, cacheWrite: 0 } },
+});
+await retry.emit("agent_settled");
+await retry.emit("session_shutdown", { reason: "quit" });
 process.env.XDG_STATE_HOME = originalStateHome;
 
 // Exact version enforcement occurs before activation or treatment registration.
@@ -396,8 +493,30 @@ assert.throws(() => core.readEvidence(loosePaths), /expected mode 600/);
 const lockEnv = { ...process.env, XDG_STATE_HOME: path.join(temporary, "lock-state") };
 const lockPaths = core.statePaths({ env: lockEnv, repositoryRoot: root });
 core.activateTrial(lockPaths, { env: lockEnv });
-fs.writeFileSync(lockPaths.lock, "other\n", { mode: 0o600 });
+fs.writeFileSync(lockPaths.lock, `${JSON.stringify({
+	schema: "qq.pi-code-tool-trial-lock/v1",
+	pid: process.pid,
+	claimed_at: new Date().toISOString(),
+})}\n`, { mode: 0o600 });
 assert.throws(() => core.allocateAssignment(lockPaths, {}), /writer lock is already held/);
+
+const staleLockEnv = { ...process.env, XDG_STATE_HOME: path.join(temporary, "stale-lock-state") };
+const staleLockPaths = core.statePaths({ env: staleLockEnv, repositoryRoot: root });
+core.activateTrial(staleLockPaths, { env: staleLockEnv });
+fs.writeFileSync(staleLockPaths.lock, `${JSON.stringify({
+	schema: "qq.pi-code-tool-trial-lock/v1",
+	pid: 99999999,
+	claimed_at: new Date().toISOString(),
+})}\n`, { mode: 0o600 });
+core.unlockWriter(staleLockPaths, { isProcessAlive: () => false });
+assert.equal(core.trialStatus(staleLockPaths).lock_present, false);
+
+const orphanLockEnv = { ...process.env, XDG_STATE_HOME: path.join(temporary, "orphan-lock-state") };
+const orphanLockPaths = core.statePaths({ env: orphanLockEnv, repositoryRoot: root });
+core.activateTrial(orphanLockPaths, { env: orphanLockEnv });
+fs.writeFileSync(path.join(orphanLockPaths.root, ".t135-pi-code-tool-v1.lock.crash.tmp"), "", { mode: 0o600 });
+core.deactivateTrial(orphanLockPaths);
+assert.equal(core.trialStatus(orphanLockPaths).active, false, "pre-link crash artifact blocked the canonical lock");
 
 const staleEnv = { ...process.env, XDG_STATE_HOME: path.join(temporary, "stale-writer-state") };
 const stalePaths = core.statePaths({ env: staleEnv, repositoryRoot: root });
@@ -460,28 +579,60 @@ for (let offset = 0; offset < 40; offset += 1) {
 		code_invocations: 0,
 		code_inner_calls: 0,
 		code_failures: 0,
+		approval_requests: assignment.arm === "treatment" ? 1 : 0,
+		approvals: 0,
+		denials: assignment.arm === "treatment" ? 1 : 0,
+		suspensions: 0,
 		operator_interruptions: 0,
 		queued_followups: 0,
-		usage_input: assignment.arm === "treatment" ? 85 : 100,
+		usage_input: assignment.arm === "treatment" ? 80 : 90,
 		usage_output: 1,
 		usage_cache_read: 0,
-		usage_cache_write: 0,
+		usage_cache_write: assignment.arm === "treatment" ? 5 : 10,
 		prompt_code_selected: assignment.arm === "treatment",
 		prompt_code_snippet: assignment.arm === "treatment",
 	});
 }
+assert.throws(() => core.analyzeTrial(reportPaths), /not deactivated and sealed/);
+core.deactivateTrial(reportPaths);
 const report = core.analyzeTrial(reportPaths);
 assert.deepEqual(report.first_40_arms, { control: 20, treatment: 20 });
 assert.equal(report.arms.treatment.code_uptake, 0);
 assert.equal(report.median_reduction_percent.active_wall_ms, 10);
 assert.equal(report.median_reduction_percent.uncached_input_tokens, 15);
+assert.deepEqual(report.thresholds, {
+	active_wall_ms_reduction_percent: 10,
+	uncached_input_tokens_reduction_percent: 15,
+});
+assert.equal(report.external_quality_status, "required");
+assert.equal(report.arms.treatment.approval_requests, 20);
+assert.equal(report.arms.treatment.denials, 20);
 assert.equal(report.causal_verdict, "not_computed");
 assert(report.join_required.measures.includes("distinct Changes"));
+const sealedLines = fs.readFileSync(reportPaths.ledger, "utf8").trimEnd().split("\n");
+fs.writeFileSync(reportPaths.ledger, `${sealedLines.slice(0, -1).join("\n")}\n`);
+assert.throws(() => core.analyzeTrial(reportPaths), /not deactivated and sealed/);
 
 assert.equal(h.aborted(), false, "valid prompt surfaces unexpectedly aborted a run");
 assert.deepEqual(h.notifications, []);
 console.log("node trial harness: pass");
 JS
+
+# Pi's real RPC router delivers leading-! text to the input hook as ordinary
+# model work; only the interactive shell path consumes raw-leading ! first.
+RPC_PROBE_DIR="$(mktemp -d)"
+RPC_PROBE_FILE="$RPC_PROBE_DIR/events.jsonl"
+printf '%s\n' '{"id":"routing","type":"prompt","message":"!ordinary rpc work"}' \
+  | QQ_INPUT_ROUTING_PROBE="$RPC_PROBE_FILE" \
+    PI_CODING_AGENT_DIR="$RPC_PROBE_DIR/pi-agent" \
+    XDG_STATE_HOME="$RPC_PROBE_DIR/state" \
+    timeout 10 pi --mode rpc --no-session --offline --no-extensions --no-skills \
+      --no-prompt-templates --no-context-files --approve \
+      -e "$ROOT/tests/fixtures/qq-input-routing-probe.ts" \
+      >"$RPC_PROBE_DIR/stdout" 2>"$RPC_PROBE_DIR/stderr"
+assert_file_contains "$RPC_PROBE_FILE" '"text":"!ordinary rpc work"'
+assert_file_contains "$RPC_PROBE_FILE" '"source":"rpc"'
+node -e 'require("node:fs").rmSync(process.argv[1], { recursive: true, force: true })' "$RPC_PROBE_DIR"
 
 # The narrow CLI reads the same isolated status and fails closed on analysis.
 CLI_STATE="$(mktemp -d)"
@@ -500,6 +651,15 @@ const root = path.join(process.argv[2], "npm/node_modules/pi-code-tool");
 fs.mkdirSync(path.join(root, "dist/pi"), { recursive: true });
 fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ name: "pi-code-tool", version: "0.6.1" }));
 fs.writeFileSync(path.join(root, "dist/pi/extension.js"), "export function createPythonExtension() {}\n");
+fs.writeFileSync(path.join(process.argv[2], "npm/package-lock.json"), JSON.stringify({
+  lockfileVersion: 3,
+  packages: {
+    "node_modules/pi-code-tool": {
+      version: "0.6.1",
+      integrity: "sha512-IjPo1o5+jjm2KC8IFE2NiXFGY/BCj3L9O4Fi/xqFbovJ6aUmxV7KkMX3YDqY2bBjAVt+2oqtVunJcxDhT7sg6Q=="
+    }
+  }
+}));
 JS
 XDG_STATE_HOME="$CLI_STATE" PI_CODING_AGENT_DIR="$CLI_STATE/pi-agent" "$ROOT/bin/qq-code-trial" activate >/dev/null
 status_output="$(XDG_STATE_HOME="$CLI_STATE" PI_CODING_AGENT_DIR="$CLI_STATE/pi-agent" "$ROOT/bin/qq-code-trial" status)"
