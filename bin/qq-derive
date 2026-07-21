@@ -6,13 +6,11 @@
 #
 # Key composition (qq-derive-v1) is a NUL-delimited sequence containing the
 # format marker, canonical Repository HEAD revision, derivation kind, input
-# count, and every --input value in command-line order. For derivations using
-# the common intent/brief/model inputs, callers pass exactly: intent text,
-# brief body, then model id. A kind with a different input set must pass every
-# stated derivation input in a stable order; kind is itself keyed. Thus a
-# revision, kind, input value, input order, or input count change changes the
-# key. Consumers recompute this key: a match is readable and a mismatch is a
-# miss to regenerate; there is no invalidation, timestamp, TTL, or daemon.
+# count, and exactly three --input values in command-line order: intent text,
+# brief body, then model id. Thus a revision, kind, or input value or order
+# change changes the key. Consumers recompute this key: a match is readable and
+# a mismatch is a miss to regenerate; there is no invalidation, timestamp, TTL,
+# or daemon.
 #
 # Artifacts live at <root>/<repo-id>/<key>. repo-id is the canonical Repository
 # basename with every byte outside [A-Za-z0-9._-] replaced by "_", followed by
@@ -108,6 +106,8 @@ repo_root="$(cd "$repo_root" 2>/dev/null && pwd -P)" \
 if [ "$operation" = key ]; then
   [ -z "$key" ] || error unexpected-argument '--key does not apply to key'
   [ "$path_only" = false ] || error unexpected-argument '--path does not apply to key'
+  [ "${#inputs[@]}" -eq 3 ] \
+    || error invalid-input-count 'key requires exactly three --input values: intent, brief, model id'
   revision="$("$git_bin" -C "$repo_root" rev-parse --verify HEAD 2>/dev/null)" \
     || error unreadable-revision 'Repository HEAD is not a readable commit'
   digest="$({

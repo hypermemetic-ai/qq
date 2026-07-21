@@ -36,6 +36,23 @@ key_two="$($DERIVE key "${key_args[@]}")"
 assert_equal "$key_one" "$key_two" 'same derivation inputs did not produce a stable key'
 [[ "$key_one" =~ ^[0-9a-f]{64}$ ]] || fail "key is not lowercase SHA-256: $key_one"
 
+assert_input_count_refused() {
+  local description="$1"
+  shift
+  if "$DERIVE" key --repo "$repo" --kind reviewer-brief "$@" \
+    >"$tmp/error.out" 2>"$tmp/error.err"; then
+    fail "$description input count was accepted"
+  fi
+  assert_file_contains "$tmp/error.err" 'invalid-input-count:' \
+    "$description input count lacked a named error"
+}
+
+assert_input_count_refused 'zero'
+assert_input_count_refused 'one' --input 'intent text'
+assert_input_count_refused 'two' --input 'intent text' --input 'brief body'
+assert_input_count_refused 'four' --input 'intent text' --input 'brief body' \
+  --input model-a --input extra
+
 assert_key_changes() {
   local description="$1"
   shift
@@ -84,7 +101,8 @@ assert_equal "$artifact" "$path" 'get --path did not return the artifact path'
 mode="$(stat -c '%a' "$artifact")"
 assert_equal 600 "$mode" 'artifact mode was not owner-only'
 
-atomic_key="$($DERIVE key --repo "$repo" --kind atomic-test --input writer)"
+atomic_key="$($DERIVE key --repo "$repo" --kind atomic-test \
+  --input 'atomic write intent' --input 'atomic write brief' --input test-model)"
 (
   printf 'partial bytes'
   sleep 30
