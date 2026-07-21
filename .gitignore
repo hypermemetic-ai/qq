@@ -11,3 +11,12 @@
 # retired knowledge-layer plugin residue — the code graph now lives out-of-repo
 # (codebase-memory-mcp, ~/.cache); nothing under here is ever tracked again
 .understand-anything/
+
+# operator-local herdr config (theme etc.) — lives on disk, never tracked
+/cockpit/herdr/config.toml
+
+# pi project-local state (plan loop, settings) — live agent state, never tracked
+/.pi/
+
+# machine-managed codex system skills — local installs, never tracked
+/skills/.system/
