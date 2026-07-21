@@ -146,6 +146,7 @@ git -C "$unmerged_worktree" commit -qm unmerged-worktree
 export FAKE_REPO="$repo"
 export FAKE_CLEAN_WORKTREE="$clean_worktree"
 export XDG_STATE_HOME="$tmp/rich-state"
+export XDG_CACHE_HOME="$tmp/rich-cache"
 
 status_before="$(git -C "$repo" status --porcelain --untracked-files=all)"
 branches_before="$(git -C "$repo" for-each-ref --format='%(refname)' refs/heads)"
@@ -155,7 +156,7 @@ run_reap 0 "$scan_json" scan --repo "$repo"
 jq -e '
   .status == "done"
   and (.state.report_path | type == "string" and length > 0)
-  and .state.nomination_counts == {docs:2,branches:1,worktrees:1,total:4}
+  and .state.nomination_counts == {docs:2,branches:1,worktrees:1,board_trash:0,total:4}
 ' "$scan_json" >/dev/null
 scan_report="$(jq -r '.state.report_path' "$scan_json")"
 [ -f "$scan_report" ] || fail 'scan did not write its dated report'
@@ -208,7 +209,7 @@ for scan_rail in live pane focus; do
   run_reap 2 "$rail_scan_json" scan --repo "$repo"
   jq -e --arg id "worktree:$clean_worktree" '
     .status == "refused"
-    and .state.nomination_counts == {docs:2,branches:1,worktrees:0,total:3}
+    and .state.nomination_counts == {docs:2,branches:1,worktrees:0,board_trash:0,total:3}
     and any(.state.worktree_refusals[];
       .id == $id and (.observed_state | type == "object"))
   ' "$rail_scan_json" >/dev/null
@@ -353,9 +354,10 @@ git -C "$revalidate_repo" push -q origin main
 export FAKE_REPO="$revalidate_repo"
 export FAKE_CLEAN_WORKTREE=""
 export XDG_STATE_HOME="$tmp/revalidate-state"
+export XDG_CACHE_HOME="$tmp/revalidate-cache"
 revalidate_scan_json="$tmp/revalidate-scan.json"
 run_reap 0 "$revalidate_scan_json" scan --repo "$revalidate_repo"
-jq -e '.state.nomination_counts == {docs:0,branches:1,worktrees:0,total:1}' \
+jq -e '.state.nomination_counts == {docs:0,branches:1,worktrees:0,board_trash:0,total:1}' \
   "$revalidate_scan_json" >/dev/null
 revalidate_report="$(jq -r '.state.report_path' "$revalidate_scan_json")"
 git -C "$revalidate_repo" switch -q was-merged
@@ -406,11 +408,12 @@ git -C "$fetched_repo" config --add remote.origin.fetch \
 export FAKE_REPO="$fetched_repo"
 export FAKE_CLEAN_WORKTREE=""
 export XDG_STATE_HOME="$tmp/fetched-oid-state"
+export XDG_CACHE_HOME="$tmp/fetched-oid-cache"
 fetched_json="$tmp/fetched-oid.json"
 run_reap 0 "$fetched_json" scan --repo "$fetched_repo"
 jq -e --arg oid "$fresh_remote_oid" '
   .state.fetched_main_oid == $oid
-  and .state.nomination_counts == {docs:0,branches:1,worktrees:0,total:1}
+  and .state.nomination_counts == {docs:0,branches:1,worktrees:0,board_trash:0,total:1}
 ' "$fetched_json" >/dev/null
 fetched_report="$(jq -r '.state.report_path' "$fetched_json")"
 assert_file_contains "$fetched_report" '"id":"branch:refs/heads/fresh-feature"'
@@ -440,6 +443,7 @@ git -C "$no_herdr_repo" worktree add -qb no-herdr-wt \
 export FAKE_REPO="$no_herdr_repo"
 export FAKE_CLEAN_WORKTREE="$no_herdr_worktree"
 export XDG_STATE_HOME="$tmp/no-herdr-state"
+export XDG_CACHE_HOME="$tmp/no-herdr-cache"
 no_herdr_safe_json="$tmp/no-herdr-safe.json"
 run_reap 0 "$no_herdr_safe_json" scan --repo "$no_herdr_repo"
 no_herdr_safe_report="$(jq -r '.state.report_path' "$no_herdr_safe_json")"
@@ -449,7 +453,7 @@ no_herdr_scan_json="$tmp/no-herdr-scan.json"
 run_reap 2 "$no_herdr_scan_json" scan --repo "$no_herdr_repo"
 jq -e '
   .status == "refused"
-  and .state.nomination_counts == {docs:1,branches:1,worktrees:0,total:2}
+  and .state.nomination_counts == {docs:1,branches:1,worktrees:0,board_trash:0,total:2}
   and (.state.degraded_checks[0] | contains("all worktree nominations"))
 ' "$no_herdr_scan_json" >/dev/null
 no_herdr_scan_report="$(jq -r '.state.report_path' "$no_herdr_scan_json")"
@@ -501,9 +505,10 @@ git -C "$linked_caller" commit -qm linked-only
 export FAKE_REPO="$full_ref_repo"
 export FAKE_CLEAN_WORKTREE=""
 export XDG_STATE_HOME="$tmp/full-ref-state"
+export XDG_CACHE_HOME="$tmp/full-ref-cache"
 full_ref_scan_json="$tmp/full-ref-scan.json"
 run_reap 0 "$full_ref_scan_json" scan --repo "$linked_caller"
-jq -e '.state.nomination_counts == {docs:0,branches:1,worktrees:0,total:1}' \
+jq -e '.state.nomination_counts == {docs:0,branches:1,worktrees:0,board_trash:0,total:1}' \
   "$full_ref_scan_json" >/dev/null
 full_ref_report="$(jq -r '.state.report_path' "$full_ref_scan_json")"
 assert_file_contains "$full_ref_report" '"id":"branch:refs/heads/foo"'
@@ -540,9 +545,10 @@ commit_and_push_base "$empty_repo"
 export FAKE_REPO="$empty_repo"
 export FAKE_CLEAN_WORKTREE=""
 export XDG_STATE_HOME="$tmp/empty-state"
+export XDG_CACHE_HOME="$tmp/empty-cache"
 empty_json="$tmp/empty.json"
 run_reap 0 "$empty_json" --repo "$empty_repo"
-jq -e '.state.nomination_counts == {docs:0,branches:0,worktrees:0,total:0}' \
+jq -e '.state.nomination_counts == {docs:0,branches:0,worktrees:0,board_trash:0,total:0}' \
   "$empty_json" >/dev/null
 empty_report="$(jq -r '.state.report_path' "$empty_json")"
 [ -f "$empty_report" ] || fail 'empty scan did not write a dated heartbeat'
@@ -587,5 +593,39 @@ assert_file_not_matches "$apply_report" 'git branch -D|--force' \
   'apply report suggested a forced deletion'
 assert_file_not_matches "$FAKE_HERDR_LOG" '(^|[[:space:]])--force([[:space:]]|$)' \
   'apply used forced Herdr removal'
+
+# Board-trash expiry: only this Repository's aged entries are nominated,
+# and apply deletes them through the containment rails.
+init_fixture "$tmp/trash"
+trash_repo="$fixture_repo"
+commit_and_push_base "$trash_repo"
+export FAKE_REPO="$trash_repo"
+export FAKE_CLEAN_WORKTREE=""
+export XDG_STATE_HOME="$tmp/trash-state"
+export XDG_CACHE_HOME="$tmp/trash-cache"
+trash_key="$(printf '%s' "$trash_repo" | sha256sum | awk '{print $1}')"
+trash_dir="$tmp/trash-cache/qq/board/.trash"
+now_epoch="$(date +%s)"
+old_epoch=$((now_epoch - 691200))
+old_entry="$trash_dir/.$trash_key.gen.abc123.$old_epoch.1"
+fresh_entry="$trash_dir/.$trash_key.gen.def456.$now_epoch.2"
+foreign_entry="$trash_dir/.0000000000000000000000000000000000000000000000000000000000000000.gen.fff999.$old_epoch.3"
+mkdir -p "$old_entry" "$fresh_entry" "$foreign_entry"
+trash_scan_json="$tmp/trash-scan.json"
+run_reap 0 "$trash_scan_json" scan --repo "$trash_repo"
+jq -e '
+  .state.nomination_counts == {docs:0,branches:0,worktrees:0,board_trash:1,total:1}
+' "$trash_scan_json" >/dev/null
+trash_scan_report="$(jq -r '.state.report_path' "$trash_scan_json")"
+assert_file_contains "$trash_scan_report" "\"id\":\"board-trash:.$trash_key.gen.abc123.$old_epoch.1\""
+trash_apply_json="$tmp/trash-apply.json"
+run_reap 0 "$trash_apply_json" apply "$trash_scan_report" --repo "$trash_repo"
+jq -e '
+  .state.applied_count == 1
+  and .state.skipped_count == 0
+' "$trash_apply_json" >/dev/null
+[ ! -e "$old_entry" ] || fail 'aged board-trash entry was not reaped'
+[ -d "$fresh_entry" ] || fail 'fresh board-trash entry was reaped'
+[ -d "$foreign_entry" ] || fail 'foreign board-trash entry was reaped'
 
 printf 'test-qq-reap: pass\n'

@@ -62,10 +62,11 @@ else
   qq_engine_set_action "$operation"
 fi
 
-if ! qq_resolve_bin git; then
-  qq_engine_error "$QQ_BIN_ERROR"
-fi
-git_bin="$QQ_BIN_RESULT"
+git_bin='' sha256sum_bin='' find_bin=''
+for dependency in git sha256sum find; do
+  qq_resolve_bin "$dependency" || qq_engine_error "$QQ_BIN_ERROR"
+  printf -v "${dependency}_bin" '%s' "$QQ_BIN_RESULT"
+done
 
 if [ -n "${XDG_STATE_HOME:-}" ]; then
   state_home="$XDG_STATE_HOME"
@@ -93,7 +94,7 @@ report_draft="$(mktemp "$reports_dir/.qq-reap-report.XXXXXX")" \
   || qq_engine_error 'cannot allocate the qq-reap report draft'
 
 repo_root=""
-nomination_counts='{"docs":0,"branches":0,"worktrees":0,"total":0}'
+nomination_counts='{"docs":0,"branches":0,"worktrees":0,"board_trash":0,"total":0}'
 degraded_checks='[]'
 current_nominations='[]'
 worktree_refusals='[]'
@@ -404,7 +405,7 @@ derive_nominations() {
   local refusal_id
 
   current_nominations='[]'
-  nomination_counts='{"docs":0,"branches":0,"worktrees":0,"total":0}'
+  nomination_counts='{"docs":0,"branches":0,"worktrees":0,"board_trash":0,"total":0}'
   degraded_checks='[]'
   worktree_refusals='[]'
   scan_rail_refused=false
@@ -536,20 +537,7 @@ derive_nominations() {
       append_worktree_refusal "worktree:$doc_path" \
         'Herdr is unavailable; worktree nomination refused' "$CENSUS_STATE"
     done < <("$QQ_ENGINE_JQ" -c '.[]' <<<"$worktrees")
-    current_nominations="$("$QQ_ENGINE_JQ" -c 'sort_by(.id)' \
-      <<<"$current_nominations")"
-    nomination_counts="$("$QQ_ENGINE_JQ" -cn --argjson nominations "$current_nominations" '
-      {
-        docs:([$nominations[] | select(.kind == "doc")] | length),
-        branches:([$nominations[] | select(.kind == "branch")] | length),
-        worktrees:0,
-        total:($nominations | length)
-      }
-    ')"
-    return 0
-  fi
-
-  while IFS= read -r worktree; do
+  else while IFS= read -r worktree; do
     if [ "$("$QQ_ENGINE_JQ" -r '.bare' <<<"$worktree")" = true ]; then
       continue
     fi
@@ -619,6 +607,8 @@ derive_nominations() {
       fi
     fi
   done < <("$QQ_ENGINE_JQ" -c '.[]' <<<"$worktrees")
+  fi
+  scan_board_trash
 
   current_nominations="$("$QQ_ENGINE_JQ" -c 'sort_by(.id)' \
     <<<"$current_nominations")"
@@ -627,9 +617,45 @@ derive_nominations() {
       docs:([$nominations[] | select(.kind == "doc")] | length),
       branches:([$nominations[] | select(.kind == "branch")] | length),
       worktrees:([$nominations[] | select(.kind == "worktree")] | length),
+      board_trash:([$nominations[] | select(.kind == "board-trash")] | length),
       total:($nominations | length)
     }
   ')"
+}
+
+# Board-trash expiry (T-88 disposition): qq-board disposes old scratch
+# generations into the shared cache trash and never deletes them itself;
+# entries for this Repository past the retention window are nominated for
+# deletion by this reaper. Age is read from the disposal epoch qq-board
+# writes into the trash name, never from mtime: a long-lived generation
+# gets its full retention after disposal. Shared by the Herdr-available
+# and refusal paths.
+scan_board_trash() {
+  local board_trash trash_repo_key trash_entry trash_name command nomination
+  local primary_canon now_epoch disposal_epoch
+  [ -n "$primary_main" ] || return 0
+  primary_canon="$(cd "$primary_main" 2>/dev/null && pwd -P)" || return 0
+  [ -n "${XDG_CACHE_HOME:-${HOME:-}}" ] || return 0
+  board_trash="$(readlink -m -- \
+    "${XDG_CACHE_HOME:-${HOME:-}/.cache}/qq/board")/.trash"
+  [ -d "$board_trash" ] || return 0
+  trash_repo_key="$(printf '%s' "$primary_canon" | "$sha256sum_bin" | awk '{print $1}')"
+  now_epoch="$(date +%s)"
+  while IFS= read -r -d '' trash_entry; do
+    trash_name="${trash_entry##*/}"
+    if [[ ! "$trash_name" =~ ^\.?${trash_repo_key}(\.gen\.[A-Za-z0-9]{6})?\.([0-9]+)\.[0-9]+$ ]]; then
+      continue
+    fi
+    disposal_epoch="${BASH_REMATCH[2]}"
+    [ $((now_epoch - disposal_epoch)) -gt 604800 ] || continue
+    shell_double_quote "$trash_entry"
+    command="rm -rf -- $QUOTED_VALUE"
+    nomination="$("$QQ_ENGINE_JQ" -cn \
+      --arg id "board-trash:$trash_name" --arg entry "$trash_name" \
+      --arg path "$trash_entry" --arg command "$command" \
+      '{id:$id,kind:"board-trash",evidence:{entry:$entry,path:$path},command:$command}')"
+    append_nomination "$nomination"
+  done < <("$find_bin" "$board_trash" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
 }
 
 if ! repo_root="$("$git_bin" -C "$repo" rev-parse --show-toplevel 2>/dev/null)"; then
@@ -661,6 +687,8 @@ write_scan_report() {
       "$("$QQ_ENGINE_JQ" -r '.branches' <<<"$nomination_counts")"
     printf -- '- clean merged linked worktrees: %s\n' \
       "$("$QQ_ENGINE_JQ" -r '.worktrees' <<<"$nomination_counts")"
+    printf -- '- board trash entries: %s\n' \
+      "$("$QQ_ENGINE_JQ" -r '.board_trash' <<<"$nomination_counts")"
     printf -- '- total: %s\n' \
       "$("$QQ_ENGINE_JQ" -r '.total' <<<"$nomination_counts")"
     printf '\n## Fetch boundary\n\n'
@@ -717,13 +745,19 @@ validate_nomination_id() {
       [ -n "$value" ] && [[ "$value" = /* ]] || return 1
       [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || return 1
       ;;
+    board-trash:*)
+      value="${id#board-trash:}"
+      [ -n "$value" ] || return 1
+      [[ "$value" != */* && "$value" != *$'\n'* && "$value" != *$'\r'* ]] \
+        || return 1
+      ;;
     *) return 1 ;;
   esac
 }
 
 parse_source_report() {
   local line section=before metadata_line="" metadata_count=0
-  local nomination id kind expected_kind
+  local nomination id kind
   local saw_heading=false saw_nominations=false saw_summary=false
   local tail_lines='[]' expected_tail
   local value short_value expected_command removal_value workspace_value branch_value
@@ -773,7 +807,7 @@ parse_source_report() {
             select(type == "object")
             | select((keys | sort) == ["command","evidence","id","kind"])
             | select(.id | type == "string" and length > 0)
-            | select(.kind == "doc" or .kind == "branch" or .kind == "worktree")
+            | select(.kind == "doc" or .kind == "branch" or .kind == "worktree" or .kind == "board-trash")
             | select(.evidence | type == "object")
             | select(.command | type == "string" and length > 0)
           ' <<<"$line" 2>/dev/null)"; then
@@ -781,13 +815,9 @@ parse_source_report() {
           fi
           id="$("$QQ_ENGINE_JQ" -r '.id' <<<"$nomination")"
           kind="$("$QQ_ENGINE_JQ" -r '.kind' <<<"$nomination")"
-          case "$id" in
-            doc:*) expected_kind=doc ;;
-            branch:*) expected_kind=branch ;;
-            worktree:*) expected_kind=worktree ;;
-            *) finish_problem error "unknown nomination id at line $line_number: $id" ;;
-          esac
-          [ "$kind" = "$expected_kind" ] \
+          [[ "$id" =~ ^(doc|branch|worktree|board-trash): ]] \
+            || finish_problem error "unknown nomination id at line $line_number: $id"
+          [ "${id%%:*}" = "$kind" ] \
             || finish_problem error "malformed report: nomination kind does not match id: $id"
           validate_nomination_id "$id" \
             || finish_problem error "unknown nomination id at line $line_number: $id"
@@ -861,6 +891,28 @@ parse_source_report() {
                 finish_problem error "malformed report: worktree evidence is inconsistent: $id"
               fi
               ;;
+            board-trash)
+              value="${id#board-trash:}"
+              trash_root="$(readlink -m -- \
+                "${XDG_CACHE_HOME:-${HOME:-}/.cache}/qq/board")/.trash"
+              # Key membership is verified against fresh nominations at
+              # apply; the report must carry a well-formed keyed entry.
+              if [[ ! "$value" =~ ^\.?[0-9a-f]{64}(\.gen\.[A-Za-z0-9]{6})?\.[0-9]+\.[0-9]+$ ]]; then
+                finish_problem error "malformed report: board-trash entry is not a keyed disposal name: $id"
+              fi
+              shell_double_quote "$trash_root/$value"
+              expected_command="rm -rf -- $QUOTED_VALUE"
+              if ! "$QQ_ENGINE_JQ" -e --arg value "$value" \
+                --arg path "$trash_root/$value" \
+                --arg command "$expected_command" '
+                  (.evidence | keys | sort) == ["entry","path"]
+                  and .evidence.entry == $value
+                  and .evidence.path == $path
+                  and .command == $command
+                ' <<<"$nomination" >/dev/null; then
+                finish_problem error "malformed report: board-trash evidence is inconsistent: $id"
+              fi
+              ;;
           esac
           if "$QQ_ENGINE_JQ" -e --arg id "$id" \
             '.[] | select(.id == $id)' <<<"$listed_nominations" >/dev/null; then
@@ -898,7 +950,7 @@ parse_source_report() {
     | select((.original_ids | unique | length) == (.original_ids | length))
     | select(.original_ids == (.original_ids | sort))
     | select(.counts | type == "object")
-    | select((.counts | keys | sort) == ["branches","docs","total","worktrees"])
+    | select((.counts | keys | sort) == ["board_trash","branches","docs","total","worktrees"])
     | select(all(.counts[]; type == "number" and floor == . and . >= 0))
     | select(.counts.total == (.original_ids | length))
     | select(.degraded_checks | type == "array")
@@ -926,6 +978,7 @@ parse_source_report() {
       docs:([$ids[] | select(startswith("doc:"))] | length),
       branches:([$ids[] | select(startswith("branch:"))] | length),
       worktrees:([$ids[] | select(startswith("worktree:"))] | length),
+      board_trash:([$ids[] | select(startswith("board-trash:"))] | length),
       total:($ids | length)
     }
   ')"
@@ -946,6 +999,7 @@ parse_source_report() {
       "- stale docs: " + ($metadata.counts.docs | tostring),
       "- merged local branches: " + ($metadata.counts.branches | tostring),
       "- clean merged linked worktrees: " + ($metadata.counts.worktrees | tostring),
+      "- board trash entries: " + ($metadata.counts.board_trash | tostring),
       "- total: " + ($metadata.counts.total | tostring),
       "",
       "## Fetch boundary",
@@ -1142,6 +1196,19 @@ while IFS= read -r -d '' id; do
           command_succeeded=true
         fi
       fi
+      ;;
+    board-trash)
+      trash_path="$("$QQ_ENGINE_JQ" -r '.evidence.path' <<<"$nomination")"
+      trash_root="$(readlink -m -- \
+        "${XDG_CACHE_HOME:-${HOME:-}/.cache}/qq/board")/.trash"
+      case "$trash_path" in
+        "$trash_root"/*)
+          if [ -d "$trash_path" ] && [ ! -L "$trash_path" ] \
+            && rm -rf -- "$trash_path" >/dev/null 2>&1; then
+            command_succeeded=true
+          fi
+          ;;
+      esac
       ;;
   esac
   if [ "$command_succeeded" = true ]; then

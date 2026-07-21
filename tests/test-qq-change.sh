@@ -195,11 +195,25 @@ jq -e '
 ' "$tmp/result.json" >/dev/null
 unset FAKE_GIT_MERGE_FAIL
 
-# Exit 0: verify merge ancestry, then fast-forward only the sole main checkout.
+# An untracked Task record is dirty primary state and blocks landing just like
+# every other untracked path.
 export FAKE_PR_STATE=MERGED
 mkdir -p "$main_checkout/backlog/tasks"
 managed_task="$main_checkout/backlog/tasks/t-83 - engine-—-task.md"
 printf 'in-flight task\n' >"$managed_task"
+run_change 2 land 83 --repo "$change_checkout"
+jq -e '
+  .status == "refused"
+  and (.message | contains("Primary main permits no tracked changes or untracked paths, including backlog/tasks"))
+  and .state.current_status == "?? backlog/tasks/t-83 - engine-—-task.md"
+' "$tmp/result.json" >/dev/null
+assert_not_contains "$(git -C "$main_checkout" rev-parse HEAD)" "$merge_oid" \
+  'dirty-primary refusal synchronized main'
+[ -f "$managed_task" ] || fail 'dirty-primary refusal removed the Task record'
+
+# Exit 0: a completely clean primary passes the same land rails.
+rm -- "$managed_task"
+rmdir -- "$main_checkout/backlog/tasks" "$main_checkout/backlog"
 run_change 0 land 83 --repo "$change_checkout"
 jq -e '
   .status == "done"
@@ -208,12 +222,26 @@ jq -e '
 ' --arg oid "$merge_oid" "$tmp/result.json" >/dev/null
 assert_equal "$merge_oid" "$(git -C "$main_checkout" rev-parse HEAD)" \
   'land did not synchronize main to the merge commit'
-[ -f "$managed_task" ] || fail 'land clobbered the allowed in-flight Task record'
 assert_file_not_matches "$FAKE_GIT_LOG" '(^|[[:space:]])pull([[:space:]]|$)' \
   'land performed a second fetch through git pull'
 
 # Land is idempotent when main already contains the verified merge.
 run_change 0 land 83 --repo "$main_checkout"
+
+# An uncommitted record in the Change checkout also fails the common clean
+# worktree rail before retirement can remove any lifecycle subject.
+mkdir -p "$change_checkout/backlog/tasks"
+change_task="$change_checkout/backlog/tasks/t-83 - unfinished.md"
+printf 'unfinished record\n' >"$change_task"
+run_change 2 retire change-ws --repo "$main_checkout" --branch feature \
+  --placeholder-pane change-ws:p1
+jq -e '
+  .status == "refused"
+  and (.message | contains("uncommitted Task record is dirty like any other path"))
+' "$tmp/result.json" >/dev/null
+[ -d "$change_checkout" ] || fail 'dirty-record refusal removed the checkout'
+rm -- "$change_task"
+rmdir -- "$change_checkout/backlog/tasks" "$change_checkout/backlog"
 
 # Retirement refuses while any live delegate remains and changes nothing.
 export FAKE_LIVE_AGENT=1

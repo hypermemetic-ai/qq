@@ -170,9 +170,6 @@ land_change() {
   while IFS= read -r -d '' status_record; do
     status_code="${status_record:0:2}"
     status_path="${status_record:3}"
-    if [ "$status_code" = '??' ] && [[ "$status_path" = backlog/tasks/* ]]; then
-      continue
-    fi
     unsafe_main_line="$status_code $status_path"
     break
   done <"$main_status_file"
@@ -182,7 +179,7 @@ land_change() {
       --arg current_status "$unsafe_main_line" \
       '{main_checkout:$main_checkout, current_status:$current_status}')"
     qq_engine_refuse \
-      'The primary main checkout has a tracked change or an untracked path outside backlog/tasks. Do not stash, clean, reset, or repair it; establish an uncontested eligible checkout and retry.' \
+      'The primary main checkout is not completely clean. Primary main permits no tracked changes or untracked paths, including backlog/tasks; do not stash, clean, reset, or repair it.' \
       "$state"
   fi
 
@@ -381,7 +378,7 @@ retire_change() {
       --arg checkout "$checkout_canonical" --arg current_status "$checkout_status" \
       '{workspace:$workspace, checkout:$checkout, current_status:$current_status}')"
     qq_engine_refuse \
-      'The Change checkout is not completely clean. Preserve the work session, every pane and tab, the checkout, and the branch for inspection; never stash, clean, reset, or force removal.' \
+      'The Change checkout is not completely clean; an uncommitted Task record is dirty like any other path. Preserve the work session, checkout, and branch for inspection; never stash, clean, reset, or force removal.' \
       "$state"
   fi
   checkout_ref="$({ "$git_bin" -C "$checkout_canonical" symbolic-ref -q HEAD 2>/dev/null || true; })"
