@@ -1,7 +1,7 @@
 ---
 id: T-121
 title: 'Build the derivation store: qq-derive + first fast-path consumers'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-07-20 17:52'
 labels: []
