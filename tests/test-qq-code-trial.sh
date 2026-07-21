@@ -10,6 +10,7 @@ source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd -- "$TESTS_DIR/.." && pwd -P)"
 
 command -v node >/dev/null 2>&1 || fail "node is required"
+command -v pi >/dev/null 2>&1 || fail "pi 0.80.10 is required"
 
 PI_ENTRY="$(readlink -f "$(command -v pi)")"
 ROOT="$ROOT" PI_ENTRY="$PI_ENTRY" node --experimental-strip-types --input-type=module - <<'JS'
