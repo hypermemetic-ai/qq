@@ -1,7 +1,7 @@
 ---
 id: T-124
 title: 'Delegate substrate hardening: attestation unstacking, /tmp scratch grants, confinement-suite semantics'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-20 19:40'
 labels: []
@@ -28,7 +28,7 @@ Decision ledger:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A production dispatch ends without the spurious attestation rejection, envelope intact
-- [ ] #2 Regression guards assert no /tmp glob and no runtime-root deny in role policies; live probe proves confined TMPDIR-scoped scratch; sibling writes stay denied
-- [ ] #3 Skills state the confinement-suite semantics (best-effort child run; owner native rerun + CI bind)
+- [x] #1 A production dispatch ends without the spurious attestation rejection, envelope intact
+- [x] #2 Regression guards assert no /tmp glob and no runtime-root deny in role policies; live probe proves confined TMPDIR-scoped scratch; sibling writes stay denied
+- [x] #3 Skills state the confinement-suite semantics (best-effort child run; owner native rerun + CI bind)
 <!-- AC:END -->

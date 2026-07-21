@@ -18,8 +18,9 @@ qq engines unconditionally: they own containment, degradation, and rails.
 2. Call `qq-herdr-home inspect --repo <root>`. Best-effort attach the Change
    checkout or create a work session from the agreed base. The Task record
    lives here: new work is born through Backlog's CLI; legacy tracked
-   records are edited on this branch, never primary `main`. Retain
-   workspace and root-placeholder IDs. Dispatch from project home; work in
+   records are edited on this branch, never primary `main`. Capture the
+   approved plan per `grilling`, its doc id cited in the ledger.
+   Retain workspace and pane IDs. Dispatch from project home; work in
    checkout. Cockpit attachment never blocks.
 3. Implement through one complete work order and `delegate-batch`; verify the
    completion envelope against the tree. Use `research` for decision-grade

@@ -1,10 +1,10 @@
 ---
 id: T-125
 title: Decide qq's standing agent web-access adoption
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-21 01:38'
-updated_date: '2026-07-21 02:52'
+updated_date: '2026-07-21 03:10'
 labels: []
 dependencies: []
 documentation:
@@ -16,11 +16,11 @@ ordinal: 54000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-DECIDED (operator ruling 2026-07-21): adopt @juicesharp/rpiv-web-tools as qq's standing web-access package, Exa active + Brave registered standby; pi-web-access removed. No trial run — operator ruling: where authority and knowledge cannot narrow further, decide on other signals.
-
-Rationale: doc-70 source-verified architecture audit — rpiv-web-tools: clean provider abstraction (SearchProvider/FetchProvider/ProviderMeta), CI with tsc --noEmit + 316 tests, config hardened 0600; pi-web-access: live crash paths in headless use (upstream #103/#126/#127, unmerged fixes, no CI/typecheck gate, no commits since 2026-06-25) — a process-kill risk in exactly qq's unattended delegate deployment, categorically worse than rpiv's survivable no-failover errors. Provider axis per doc-72: no independent comparison exists and vendor benchmarks mutually reverse, so provider reputation is not evidence; Exa active on the qq-like WebCode groundedness result + proven reachable from this machine; Brave registered standby for citation-precision strength and failover option value — combination held as a registered option, no routing machinery built (no preempting need).
-
-Accepted risk with declared threat model: rpiv's SSRF guard is host-literal only (no DNS/redirect validation, upstream-acknowledged). Accepted for a single-user workstation with no internal services to reach; revisit if qq goes multi-machine or delegates gain network-adjacent surfaces.
-
-Evidence: doc-70 (architecture audit, owner spot-checked), doc-72 (authority sweep, owner read-through; vendor benchmark reversals + official trial terms). Decision ledger: research rounds + codex/k3 execution, well-architected-over-small extension lens, zero-new-secret dropped for quality+speed, no-trial signal-based ruling, Exa+Brave combination, SSRF acceptance — all operator rulings, 2026-07-21 exchanges.
+Operator request (2026-07-21 alignment exchange): a proper research round, codex-handled, to determine the most natural web-access adoption for qq agents. Triggered by the T-121 latency-toolkit research needing live web access. Candidates: pi-web-access (installed 2026-07-21), @juicesharp/rpiv-web-tools (family-consistent with pinned rpiv@1.20.0 set), pi-web-search (discovered alternative), other pi.dev web packages, or curl-only (no package). Constraints: both named packages register web_search (collision); delegate egress is open (decision-8). Evaluation lens (operator-settled 2026-07-21, two rulings): (1) deliberately-small applies to qq's OWN surfaces, not adopted extensions — judge on architecture quality; feature breadth is no demerit when well-architected. (2) zero-new-secret is NOT a value — operator will happily hold provider keys; the deciding axes are search quality and speed ('good search, fast and useful'). Evidence: doc-70 (architecture audit, owner-verified). Remaining evidence gap doc-70 named: no apples-to-apples quality/latency comparison exists — a trial corpus run supplies it. Decision ledger: research round + codex execution = operator direction 2026-07-21; well-architected-over-small lens = same exchange; zero-new-secret dropped, quality+speed lens, keys acceptable = same exchange.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Adopted @juicesharp/rpiv-web-tools (Exa active, Brave registered standby), pi-web-access removed; keys configured at ~/.config/rpiv-web-tools/config.json (0600). Verified end-to-end: fresh delegate web_search via Exa + readable web_fetch both pass; Brave standby key verified via direct API. Evidence: doc-70, doc-72. SSRF gap accepted under declared single-user-workstation threat model.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -4,8 +4,11 @@ title: 'Build the derivation store: qq-derive + first fast-path consumers'
 status: In Progress
 assignee: []
 created_date: '2026-07-20 17:52'
+updated_date: '2026-07-21 01:57'
 labels: []
 dependencies: []
+documentation:
+  - doc-71
 priority: high
 type: task
 ordinal: 51000
