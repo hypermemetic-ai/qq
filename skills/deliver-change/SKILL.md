@@ -17,8 +17,8 @@ qq engines unconditionally: they own containment, degradation, and rails.
    Change. Confirm branch and worktree isolation.
 2. Call `qq-herdr-home inspect --repo <root>`. Best-effort attach the Change
    checkout or create a work session from the agreed base. The Task record
-   lives in this checkout: new work is born here through Backlog's CLI; edit
-   legacy tracked records only on this branch, never primary `main`. Retain
+   lives here: new work is born through Backlog's CLI; legacy tracked
+   records are edited on this branch, never primary `main`. Retain
    workspace and root-placeholder IDs. Dispatch from project home; work in
    checkout. Cockpit attachment never blocks.
 3. Implement through one complete work order and `delegate-batch`; verify the
@@ -33,9 +33,9 @@ qq engines unconditionally: they own containment, degradation, and rails.
    Checks, review each fix delta, then present the diff through `pi-hunk`.
 5. Commit and push only green units. Open one pull request carrying Task intent
    and Check evidence; pass final GitHub Checks.
-6. In the Task record's checkout, verify acceptance criteria, summarize, mark
-   Done through Backlog's CLI, push the finalization, and rerun affected Checks
-   before handoff.
+6. In its checkout, verify acceptance criteria, summarize, mark Done
+   through Backlog's CLI, push finalization, rerun affected Checks, then
+   hand off.
 7. An unmet criterion reactivates the same Task and Change. If the Change is
    unavailable, align its branch disposition without replacing the Task. A
    later intent change is new work and requires approval.

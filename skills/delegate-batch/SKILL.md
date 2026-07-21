@@ -16,8 +16,8 @@ the ticket and acceptance criteria, necessary batch context, exact orientation
 paths and verified facts, hard constraints, commit protocol, exact Checks, and
 required completion envelope. Writing delegates work locally, never push or
 open pull requests, and never edit `backlog/`. Keep durable intent in the
-Task; its record lives in the Change checkout. The `subagent` task is only
-the work-order file pointer.
+Task, whose record lives in its checkout. The `subagent` task is only the
+work-order file pointer.
 
 - Couple shared files or invariants and work them sequentially.
 - Fan out independent read-only work natively; give independent writers
