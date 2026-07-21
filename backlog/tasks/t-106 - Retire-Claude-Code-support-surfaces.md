@@ -1,10 +1,10 @@
 ---
 id: T-106
 title: 'Retire legacy engine support surfaces (Claude Code, codex CLI)'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-19 17:50'
-updated_date: '2026-07-21 09:49'
+updated_date: '2026-07-21 15:20'
 labels: []
 dependencies:
   - T-95
@@ -47,7 +47,7 @@ Decision ledger addition:
 - [x] #3 delegate-batch and deliver-change contain no Claude-subagent path once T-95 has landed
 - [x] #4 Codex CLI surfaces retired per the 2026-07-21 extension; no codex-CLI references remain outside backlog/ historical records, dated test evidence, retirement tripwires, and the retained openai-codex provider surfaces
 - [x] #5 Shell test suite green after the codex-CLI retirement
-- [ ] #6 Machine-side ~/.codex/skills mount removed at delivery (owner-side enactment, recorded in the final summary)
+- [x] #6 Machine-side ~/.codex/skills mount removed at delivery (owner-side enactment, recorded in the final summary)
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -55,3 +55,9 @@ Decision ledger addition:
 <!-- SECTION:NOTES:BEGIN -->
 Codex-CLI half delivered 2026-07-21 via wave-2 delegate batch: 6b2628e retires the install/mount/resolver surfaces and migrates fixtures (acceptance grep 64→46, remainder classified keep-list/historical/counter-name/removal-instruction). Confined review APPROVE: keep-list byte-identical, fixture inverse-substitution reproduces parents byte-for-byte, counters 0/0. Owner native full suite + ratchet green. AC#6 (remove machine-side ~/.codex/skills) is owner delivery work at merge.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Delivered in two halves: Claude Code surfaces via PR #177 (AC#1-3); codex CLI surfaces via PR #190 (AC#4-5: install/mount/resolver prose retired, fixtures migrated to other-agent, acceptance grep 64→46 all-classified; codex PROVIDER surfaces kept per operator scope: openai-codex/gpt-5.6-sol:xhigh pins, extensions/qq-codex-fast.ts). AC#6 completed 2026-07-21: machine-side ~/.codex/skills symlink (pointing into this checkout) removed by the owner after merge. Confined review APPROVE with keep-list byte-identity and fixture inverse-substitution evidence; owner native suite + ratchet green at merge.
+<!-- SECTION:FINAL_SUMMARY:END -->

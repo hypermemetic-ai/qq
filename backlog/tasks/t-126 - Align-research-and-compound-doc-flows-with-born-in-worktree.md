@@ -1,10 +1,10 @@
 ---
 id: T-126
 title: Align research and compound doc flows with born-in-worktree
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-21 02:15'
-updated_date: '2026-07-21 09:49'
+updated_date: '2026-07-21 15:20'
 labels: []
 dependencies: []
 ordinal: 55000
@@ -33,3 +33,9 @@ Decision ledger:
 <!-- SECTION:NOTES:BEGIN -->
 Delivered 2026-07-21 via wave-2 delegate batch: 562fad5 routes research/compound durable writes (creation, updates, --doc attaches) through the owning Task's open Change worktree or a chore branch/PR when none is open, explicitly prohibiting primary main. AC#2: prose ratchet re-measured in the same Change (7516→7623, budget + comment updated). Implementer left the tree uncommitted; owner verified natively (full suite + ratchet green) and committed as integration. Confined review APPROVE: independent measurement reproduced 7516→7623, record integrity verified, counters 0/0.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Delivered via PR #191 (2026-07-21): research and compound skills now route all durable writes (creation, updates, --doc attaches) through the owning Task's open Change worktree or a chore branch/PR when none is open, with primary main explicitly prohibited; prose ratchet re-measured in the same Change (7516→7623). Implementer delegate + owner integration commit; confined review APPROVE with independently reproduced measurement.
+<!-- SECTION:FINAL_SUMMARY:END -->
