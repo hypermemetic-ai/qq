@@ -1,10 +1,10 @@
 ---
 id: T-106
-title: Retire Claude Code support surfaces
+title: 'Retire legacy engine support surfaces (Claude Code, codex CLI)'
 status: In Progress
 assignee: []
 created_date: '2026-07-19 17:50'
-updated_date: '2026-07-21 02:34'
+updated_date: '2026-07-21 04:42'
 labels: []
 dependencies:
   - T-95
@@ -33,6 +33,11 @@ Related: T-97 already treats CLAUDE.md as upstream's managed file only; agent-me
 Decision ledger:
 - qq does not support Claude Code; all Claude-specific surfaces retire: operator instruction ('we won't support claude anymore so no need for claude md anywhere'), asked-and-answered alignment exchange, 2026-07-19 alignment session; ticket created on '106 approved' in the same session.
 - Sequencing after T-95 (skill rewrites first; one writer per file): 2026-07-19 alignment session recommendation, approved with this ticket.
+
+EXTENDED 2026-07-21 (operator direction, same realignment exchange): the codex CLI's residual support surfaces join this retirement. qq delegates run on the openai-codex MODEL PROVIDER (GPT-5.6) — that stays, and is not the CLI. The CLI surfaces to retire: README's codex Skill mount and migration prose, the stale 'and Codex' mention in the QQ_<TOOL>_BIN resolver sentence, and 'codex' fixture agent labels in herdr tests (rename to a generic non-pi label). Retirement tripwires (tests/test-qq-dispatch.sh codex-profiles absence check, ratchet codex_exec budget) STAY as drift-nets; dated test evidence stays historical. Machine-side: the ~/.codex/skills symlink is removed at delivery (owner-side enactment; delegates are confined). Implementation is delegated to a subagent per operator instruction.
+
+Decision ledger addition:
+- Codex CLI surfaces join the retirement; provider surfaces (openai-codex model pin, extensions/qq-codex-fast.ts, OAuth login) and retirement tripwires stay; implementation delegated to a subagent — operator direction, asked-and-answered exchange 2026-07-21 ('Retire CLI surfaces only', 'this should probably be combined with the claude retirement ticket', 'just make sure you delegate the implementation itself. to a subagent.').
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -40,4 +45,7 @@ Decision ledger:
 - [x] #1 Seed inventory verified fresh and completed; every Claude-specific surface removed or amended; no Claude references remain outside backlog/ historical records and dated test evidence
 - [x] #2 Tests updated and green; README and skills reflect the Pi + Codex mount story
 - [x] #3 delegate-batch and deliver-change contain no Claude-subagent path once T-95 has landed
+- [ ] #4 Codex CLI surfaces retired per the 2026-07-21 extension; no codex-CLI references remain outside backlog/ historical records, dated test evidence, retirement tripwires, and the retained openai-codex provider surfaces
+- [ ] #5 Shell test suite green after the codex-CLI retirement
+- [ ] #6 Machine-side ~/.codex/skills mount removed at delivery (owner-side enactment, recorded in the final summary)
 <!-- AC:END -->
