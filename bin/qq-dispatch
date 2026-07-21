@@ -120,6 +120,12 @@ if ! launcher_tmp="$(realpath -e -- "$launcher_tmp_input" 2>/dev/null)"; then
 fi
 [[ -d "$launcher_tmp" ]] \
   || fail 68 "launcher temporary path is not a directory"
+# pi-subagents stores child session transcripts beneath its configured
+# defaultSessionDir ($launcher_tmp/pi-subagent-sessions per README Install).
+# Create it here so the Landstrip policy's pi-subagent-* enumeration always
+# has the session root to grant, even after a /tmp wipe.
+mkdir -p -m 700 -- "$launcher_tmp/pi-subagent-sessions" \
+  || fail 68 "cannot create the pi-subagents session root"
 path_is_within "$runtime_root" "$system_tmp" \
   || fail 68 "runtime root must stay beneath /tmp"
 [[ "$runtime_root" != "$system_tmp" ]] \

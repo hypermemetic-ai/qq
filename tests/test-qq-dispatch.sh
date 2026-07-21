@@ -16,6 +16,7 @@ trap 'rm -rf "$tmp"' EXIT
 test_home="$tmp/home"
 parent_tmp="$tmp/parent-tmp"
 pi_subagent_own_temp="$parent_tmp/pi-subagent-THIS"
+pi_subagent_sess="$parent_tmp/pi-subagent-sessions"
 mkdir -p "$test_home" "$pi_subagent_own_temp"
 export HOME="$test_home"
 export TMPDIR="$parent_tmp"
@@ -236,7 +237,7 @@ PY
       --arg run "$role_run_dir" \
       --arg runtime "$runtime_root" \
       --arg auth "$pi_config_dir/auth.json" \
-      --arg temp "$pi_subagent_own_temp" '
+      --arg temp "$pi_subagent_own_temp" --arg sess "$pi_subagent_sess" '
         .enabled == true
         and .network == {
           allowNetwork: true,
@@ -247,7 +248,7 @@ PY
         and (.network | has("allowedDomains") | not)
         and (.network | has("deniedDomains") | not)
         and (.filesystem.allowWrite | sort) == (
-          [$run, $worktree, $common, $worktree_git, "/dev/null", $temp]
+          [$run, $worktree, $common, $worktree_git, "/dev/null", $temp, $sess]
           | unique
           | sort
         )
@@ -259,7 +260,7 @@ PY
       --arg run "$role_run_dir" \
       --arg runtime "$runtime_root" \
       --arg auth "$pi_config_dir/auth.json" \
-      --arg temp "$pi_subagent_own_temp" \
+      --arg temp "$pi_subagent_own_temp" --arg sess "$pi_subagent_sess" \
       '.enabled == true
        and .network == {
          allowNetwork: true,
@@ -269,7 +270,7 @@ PY
        }
        and (.network | has("allowedDomains") | not)
        and (.network | has("deniedDomains") | not)
-       and .filesystem.allowWrite == [$run, "/dev/null", $temp]
+       and .filesystem.allowWrite == [$run, "/dev/null", $temp, $sess]
        and (.filesystem.allowWrite | index($runtime)) == null
        and .filesystem.denyWrite == [$auth]
       ' \
@@ -321,8 +322,8 @@ cmp -s -- "$auth_source" "$staged_auth" \
   || fail 'staged auth does not match the launcher auth'
 assert_equal 600 "$(stat -c '%a' "$staged_auth")" \
   'staged auth mode is not 600'
-jq -e --arg run "$auth_run_dir" --arg auth "$staged_auth" --arg temp "$pi_subagent_own_temp" '
-  .filesystem.allowWrite == [$run, "/dev/null", $temp]
+jq -e --arg run "$auth_run_dir" --arg auth "$staged_auth" --arg temp "$pi_subagent_own_temp" --arg sess "$pi_subagent_sess" '
+  .filesystem.allowWrite == [$run, "/dev/null", $temp, $sess]
   and .filesystem.denyWrite == [$auth]
 ' "$tmp/auth-policy.json" >/dev/null
 for auth_output in \
@@ -432,9 +433,9 @@ jq -e \
   --arg worktree_git "$fixture_git_dir" \
   --arg run "$linked_run_dir" \
   --arg runtime "$fixture_runtime" \
-  --arg temp "$pi_subagent_own_temp" '
+  --arg temp "$pi_subagent_own_temp" --arg sess "$pi_subagent_sess" '
     .filesystem.allowWrite == [
-      $run, $worktree, $common, $worktree_git, "/dev/null", $temp
+      $run, $worktree, $common, $worktree_git, "/dev/null", $temp, $sess
     ]
     and (.filesystem.allowWrite | index($runtime)) == null
   ' "$tmp/linked-policy.json" >/dev/null
@@ -458,8 +459,8 @@ linked_capture_run_dir="$(dirname -- "$linked_capture_config_dir")"
 jq -e \
   --arg run "$linked_capture_run_dir" \
   --arg capture "$fixture_capture_path" \
-  --arg temp "$pi_subagent_own_temp" \
-  '.filesystem.allowWrite == [$run, $capture, "/dev/null", $temp]' \
+  --arg temp "$pi_subagent_own_temp" --arg sess "$pi_subagent_sess" \
+  '.filesystem.allowWrite == [$run, $capture, "/dev/null", $temp, $sess]' \
   "$tmp/linked-capture-policy.json" >/dev/null
 
 # Exercise the production shape: the canonical adapter and its policy sources
@@ -490,9 +491,9 @@ jq -e \
   --arg worktree_git "$fixture_git_dir" \
   --arg run "$canonical_run_dir" \
   --arg runtime "$canonical_runtime" \
-  --arg temp "$pi_subagent_own_temp" '
+  --arg temp "$pi_subagent_own_temp" --arg sess "$pi_subagent_sess" '
     .filesystem.allowWrite == [
-      $run, $worktree, $common, $worktree_git, "/dev/null", $temp
+      $run, $worktree, $common, $worktree_git, "/dev/null", $temp, $sess
     ]
     and (.filesystem.allowWrite | index($runtime)) == null
   ' "$tmp/canonical-policy.json" >/dev/null
@@ -514,8 +515,8 @@ canonical_capture_run_dir="$(dirname -- "$canonical_capture_config_dir")"
 jq -e \
   --arg run "$canonical_capture_run_dir" \
   --arg capture "$canonical_capture_path" \
-  --arg temp "$pi_subagent_own_temp" \
-  '.filesystem.allowWrite == [$run, $capture, "/dev/null", $temp]' \
+  --arg temp "$pi_subagent_own_temp" --arg sess "$pi_subagent_sess" \
+  '.filesystem.allowWrite == [$run, $capture, "/dev/null", $temp, $sess]' \
   "$tmp/canonical-capture-policy.json" >/dev/null
 
 jq -s -e '
@@ -550,20 +551,20 @@ capture_run_dir="$(dirname -- "$capture_config_dir")"
 jq -e \
   --arg run "$capture_run_dir" \
   --arg capture "$capture_path" \
-  --arg temp "$pi_subagent_own_temp" \
-  '.filesystem.allowWrite == [$run, $capture, "/dev/null", $temp]' \
+  --arg temp "$pi_subagent_own_temp" --arg sess "$pi_subagent_sess" \
+  '.filesystem.allowWrite == [$run, $capture, "/dev/null", $temp, $sess]' \
   "$tmp/capture-policy.json" >/dev/null
 jq -s -e \
   --arg run "$capture_run_dir" \
   --arg capture "$capture_path" \
-  --arg temp "$pi_subagent_own_temp" '
+  --arg temp "$pi_subagent_own_temp" --arg sess "$pi_subagent_sess" '
   map(select(.runId == "capture-smoke")) as $events
   | ($events | length) == 1
   and $events[0].type == "qq.dispatch.adapter.launch"
   and $events[0].role == "reviewer"
   and $events[0].policyIdentity == "qq-reviewer-read-only-v1"
   and $events[0].access == "read-only"
-  and $events[0].allowWrite == [$run, $capture, "/dev/null", $temp]
+  and $events[0].allowWrite == [$run, $capture, "/dev/null", $temp, $sess]
   and $events[0].structuredOutputCapture == $capture
   and $events[0].timeout == "2s"
   and $events[0].landstripVersion == "landstrip 0.17.31"
@@ -777,5 +778,14 @@ done
 if kill -0 "$child_pid" 2>/dev/null; then
   fail "process-tree supervisor leaked wedged descendant $child_pid"
 fi
+
+# The adapter pre-creates the pi-subagents session root (mode 700) beneath
+# the launcher temp dir so the Landstrip policy's pi-subagent-* enumeration
+# always has it to grant; without it, child session transcripts nest in the
+# parent session tree, which the policy deliberately does not grant (T-128).
+[ -d "$parent_tmp/pi-subagent-sessions" ] \
+  || fail "adapter did not create the pi-subagents session root"
+[ "$(stat -c %a "$parent_tmp/pi-subagent-sessions")" = "700" ] \
+  || fail "pi-subagents session root is not mode 700"
 
 printf 'test-qq-dispatch: pass\n'

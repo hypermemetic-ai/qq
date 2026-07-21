@@ -111,12 +111,17 @@ Set the dispatcher-side pi-subagents config at
 {
   "intercomBridge": {
     "mode": "off"
-  }
+  },
+  "defaultSessionDir": "/tmp/pi-subagent-sessions"
 }
 ```
 
 qq delegate visibility uses run artifacts and status, so the intercom bridge
 stays off instead of adding bridge tools to the staged child configuration.
+`defaultSessionDir` keeps child session transcripts under a Landstrip-granted
+`pi-subagent-*` temp root (the adapter re-creates it with mode 700 on every
+dispatch); without it, pi-subagents nests child sessions inside the parent
+session tree, which the confinement policy deliberately does not grant.
 
 The adapter and manifests are authoritative qq configuration from primary
 `main`; do not retarget these variables to a Change worktree's copies.

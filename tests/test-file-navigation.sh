@@ -132,7 +132,8 @@ assert_equal "$FAKE_FZF_PICK" "$(qqcd "$FAKE_FZF_QUERY"; pwd -P)"
 # in-process by .pi/extensions/qq-subagent-env.ts (tested in
 # test-qq-subagent-env.sh); the shell surface intentionally does not export
 # them, so other repositories' sessions keep the vanilla dispatcher.
-if bash -c 'source "$1"; [ -n "${PI_SUBAGENT_PI_BINARY:-}" ] || [ -n "${PI_SUBAGENT_EXTRA_AGENT_DIRS:-}" ]' _ "$NAVIGATION"; then
+if env -u PI_SUBAGENT_PI_BINARY -u PI_SUBAGENT_EXTRA_AGENT_DIRS \
+  bash -c 'source "$1"; [ -n "${PI_SUBAGENT_PI_BINARY:-}" ] || [ -n "${PI_SUBAGENT_EXTRA_AGENT_DIRS:-}" ]' _ "$NAVIGATION"; then
   fail "file-navigation.bash exports PI_SUBAGENT_* (that moved to .pi/extensions/qq-subagent-env.ts)"
 fi
 
