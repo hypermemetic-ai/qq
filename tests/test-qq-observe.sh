@@ -15,6 +15,7 @@ trap 'rm -rf "$tmp"' EXIT
 [ -x "$OBSERVE" ] || fail "qq-observe is not executable"
 export HOME="$tmp/home"
 export XDG_STATE_HOME="$tmp/state"
+unset PI_PARENT_SPAN_ID PI_ROOT_SPAN_ID QQ_TRACE_ID
 mkdir -p "$HOME"
 git_common_dir="$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)"
 repository_name="$(basename "$(dirname "$(realpath -e "$git_common_dir")")")"
@@ -274,6 +275,136 @@ primary_store="$linked_state/qq/spans/$(basename "$fixture_primary")/spans.jsonl
 [ ! -e "$linked_state/qq/spans/$(basename "$fixture_linked")" ] \
   || fail 'linked-worktree span created a basename-keyed store'
 
+summary_state="$tmp/summary-state"
+summary_store="$summary_state/qq/spans/$repository_name/spans.jsonl"
+mkdir -p "$(dirname "$summary_store")"
+summary_span() {
+  local start="$1" phase="$2" name="$3" actor="$4" duration="$5" trace="$6" status="$7"
+  jq -cn \
+    --arg start "$start" --arg phase "$phase" --arg name "$name" \
+    --arg actor "$actor" --argjson duration "$duration" --arg trace "$trace" \
+    --arg status "$status" '
+    {
+      schema_version: 1,
+      trace_id: $trace,
+      span_id: "2222222222222222",
+      parent_span_id: null,
+      root_span_id: "2222222222222222",
+      name: $name,
+      phase: (if $phase == "null" then null else $phase end),
+      actor: $actor,
+      start_time: $start,
+      end_time: $start,
+      duration_ms: $duration,
+      status: $status,
+      source: "test-fixture",
+      attributes: {}
+    }'
+}
+{
+  summary_span 2026-01-01T23:59:59Z implementation outside-before engine 900 \
+    00000000000000000000000000000000 ok
+  summary_span 2026-01-02T00:00:00Z implementation repeat alpha 100 \
+    11111111111111111111111111111111 ok
+  summary_span 2026-01-02T01:00:00Z implementation repeat alpha 300 \
+    11111111111111111111111111111111 error
+  summary_span 2026-01-03T00:00:00Z review inspect beta 200 \
+    22222222222222222222222222222222 ok
+  summary_span 2026-01-02T02:00:00Z null unphased gamma 50 \
+    33333333333333333333333333333333 timeout
+  for number in $(seq -w 1 21); do
+    summary_span 2026-01-02T03:00:00Z orientation "task-$number" worker "$((10#$number))" \
+      44444444444444444444444444444444 ok
+  done
+  printf '%s\n' '{not-json' '[]'
+  summary_span 2026-01-03T00:00:01Z delivery outside-after engine 800 \
+    55555555555555555555555555555555 ok
+} >"$summary_store"
+cp "$summary_store" "$tmp/summary-store.before"
+
+(
+  cd "$ROOT"
+  XDG_STATE_HOME="$summary_state" "$OBSERVE" summarize \
+    --since 2026-01-02T00:00:00Z --until 2026-01-03T00:00:00Z \
+    >"$tmp/summary.txt"
+  XDG_STATE_HOME="$summary_state" "$OBSERVE" summarize \
+    --since 2026-01-02T00:00:00Z --until 2026-01-03T00:00:00Z --json \
+    >"$tmp/summary.json"
+  XDG_STATE_HOME="$summary_state" "$OBSERVE" summarize \
+    --since 2026-01-03T00:00:00Z --until 2026-01-03T00:00:00Z \
+    >"$tmp/ok-only-summary.txt"
+)
+cmp "$tmp/summary-store.before" "$summary_store" \
+  || fail 'summarize modified the span store'
+assert_file_contains "$tmp/summary.txt" 'Window: [2026-01-02T00:00:00Z, 2026-01-03T00:00:00Z]'
+assert_file_contains "$tmp/summary.txt" 'Spans: 25'
+assert_file_contains "$tmp/summary.txt" 'Traces: 4'
+assert_file_contains "$tmp/summary.txt" 'Malformed lines skipped: 2'
+assert_file_contains "$tmp/summary.txt" 'implementation       2     400.0    200.0    100.0    300.0'
+assert_file_contains "$tmp/summary.txt" 'orientation         21     231.0     11.0     11.0     20.0'
+assert_file_contains "$tmp/summary.txt" 'review               1     200.0    200.0    200.0    200.0'
+assert_file_contains "$tmp/summary.txt" '(none)               1      50.0     50.0     50.0     50.0'
+assert_equal 20 "$(awk '/^Span recurrence$/ {seen=1; next} /^Non-ok statuses$/ {seen=0} seen && /^[^ -]/ {rows++} END {print rows-1}' "$tmp/summary.txt")" \
+  'recurrence report did not contain exactly 20 rows'
+assert_equal repeat "$(awk '/^Span recurrence$/ {seen=1; next} seen && $1 == "repeat" {print $1; exit}' "$tmp/summary.txt")" \
+  'highest-duration recurrence was not first'
+assert_file_contains "$tmp/summary.txt" 'task-05'
+if grep -Eq '^task-0[1-4][[:space:]]' "$tmp/summary.txt"; then
+  fail 'recurrence report did not cut off after the top 20 pairs'
+fi
+assert_file_contains "$tmp/summary.txt" 'error       1'
+assert_file_contains "$tmp/summary.txt" 'timeout     1'
+assert_file_contains "$tmp/ok-only-summary.txt" 'Spans: 1'
+assert_file_not_matches "$tmp/ok-only-summary.txt" '^Non-ok statuses$' \
+  'status section was printed when every selected span was ok'
+
+jq -e '
+  .window == {since:"2026-01-02T00:00:00Z", until:"2026-01-03T00:00:00Z"}
+  and .spans == 25 and .traces == 4 and .skipped == 2
+  and .phases == [
+    {phase:"implementation", spans:2, total_ms:400.0, mean_ms:200.0, p50_ms:100.0, p95_ms:300.0},
+    {phase:"orientation", spans:21, total_ms:231.0, mean_ms:11.0, p50_ms:11.0, p95_ms:20.0},
+    {phase:"review", spans:1, total_ms:200.0, mean_ms:200.0, p50_ms:200.0, p95_ms:200.0},
+    {phase:null, spans:1, total_ms:50.0, mean_ms:50.0, p50_ms:50.0, p95_ms:50.0}
+  ]
+  and (.recurrence | length) == 20
+  and .recurrence[0] == {name:"repeat", actor:"alpha", runs:2, total_ms:400.0, mean_ms:200.0}
+  and .recurrence[3] == {name:"task-21", actor:"worker", runs:1, total_ms:21.0, mean_ms:21.0}
+  and .recurrence[-1] == {name:"task-05", actor:"worker", runs:1, total_ms:5.0, mean_ms:5.0}
+  and .statuses == [{status:"error", count:1}, {status:"timeout", count:1}]
+' "$tmp/summary.json" >/dev/null || fail 'JSON summary did not match the text report aggregates'
+
+empty_state="$tmp/empty-summary-state"
+empty_store="$empty_state/qq/spans/$repository_name/spans.jsonl"
+(
+  cd "$ROOT"
+  XDG_STATE_HOME="$empty_state" "$OBSERVE" summarize >"$tmp/empty-summary.txt"
+)
+assert_equal $'Window: all\nSpans: 0\nTraces: 0\nMalformed lines skipped: 0' \
+  "$(cat "$tmp/empty-summary.txt")" 'empty store summary was not header-only'
+[ ! -e "$empty_store" ] || fail 'summarize created an absent span store file'
+
+set +e
+(
+  cd "$ROOT"
+  XDG_STATE_HOME="$symlink_state" "$OBSERVE" summarize
+) >"$tmp/summarize-symlink.stdout" 2>"$tmp/summarize-symlink.stderr"
+summarize_symlink_status=$?
+set -e
+assert_equal 64 "$summarize_symlink_status" 'summarize accepted a symlink store leaf'
+assert_file_contains "$tmp/summarize-symlink.stderr" 'span store leaf is not a regular file'
+assert_equal sentinel "$(cat "$symlink_target")" 'summarize modified a symlink leaf target'
+
+set +e
+(
+  cd "$ROOT"
+  XDG_STATE_HOME="$summary_state" "$OBSERVE" summarize --since 2026-01-02T00:00:00
+) >"$tmp/summarize-time.stdout" 2>"$tmp/summarize-time.stderr"
+summarize_time_status=$?
+set -e
+assert_equal 64 "$summarize_time_status" 'summarize accepted a timezone-free window bound'
+assert_file_contains "$tmp/summarize-time.stderr" 'timestamp requires a timezone'
+
 outside="$tmp/not-a-worktree"
 mkdir "$outside"
 set +e
@@ -286,5 +417,41 @@ outside_status=$?
 set -e
 assert_equal 65 "$outside_status" 'non-worktree invocation was accepted'
 assert_file_contains "$tmp/outside.stderr" 'not in a Git worktree'
+
+# Adversarial/malformed store lines must be skipped, never crash nor poison.
+adversarial_state="$tmp/adversarial-state"
+adversarial_store="$adversarial_state/qq/spans/$repository_name/spans.jsonl"
+mkdir -p "$(dirname "$adversarial_store")"
+summary_span 2026-01-02T00:00:00Z review honest delta 100 \
+  66666666666666666666666666666666 ok >"$adversarial_store"
+{
+  python3 -c 'print("{\"schema_version\":1,\"duration_ms\":" + "9"*5000 + ",\"name\":\"big\",\"actor\":\"a\",\"start_time\":\"2026-01-02T00:00:00Z\"}")'
+  jq -cn '{
+    schema_version: 1, trace_id: "77777777777777777777777777777777",
+    span_id: "3333333333333333", parent_span_id: null,
+    root_span_id: "3333333333333333", name: "rewound", phase: "review",
+    actor: "a", start_time: "2026-01-02T01:00:00Z",
+    end_time: "2026-01-02T00:00:00Z", duration_ms: 5.0,
+    status: "ok", source: "test-fixture", attributes: {}
+  }'
+  jq -cn '{
+    schema_version: 1, trace_id: "88888888888888888888888888888888",
+    span_id: "4444444444444444", parent_span_id: null,
+    root_span_id: "4444444444444444", name: "inflated", phase: "review",
+    actor: "a", start_time: "2026-01-02T00:00:00Z",
+    end_time: "2026-01-02T00:01:00Z", duration_ms: 999999999.0,
+    status: "ok", source: "test-fixture", attributes: {}
+  }'
+} >>"$adversarial_store"
+(
+  cd "$ROOT"
+  XDG_STATE_HOME="$adversarial_state" "$OBSERVE" summarize >"$tmp/adversarial.txt"
+  XDG_STATE_HOME="$adversarial_state" "$OBSERVE" summarize --json >"$tmp/adversarial.json"
+)
+assert_file_contains "$tmp/adversarial.txt" 'Spans: 1'
+assert_file_contains "$tmp/adversarial.txt" 'Malformed lines skipped: 3'
+jq -e '.spans == 1 and .skipped == 3 and (.phases[0].total_ms | isfinite)' \
+  "$tmp/adversarial.json" >/dev/null \
+  || fail 'JSON summary over adversarial lines was invalid or poisoned'
 
 printf 'test-qq-observe: pass\n'

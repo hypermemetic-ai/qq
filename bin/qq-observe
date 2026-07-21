@@ -16,6 +16,7 @@ usage:
   qq-observe id <span|trace>
   qq-observe record --name NAME --actor ACTOR --start TIME --end TIME [options]
   qq-observe read-session SESSION.jsonl [--actor ACTOR] [--phase PHASE] [context options]
+  qq-observe summarize [--since TS] [--until TS] [--json]
 
 context options: --trace-id ID --span-id ID --parent-span-id ID --root-span-id ID
 record options:  --phase PHASE --status STATUS --source SOURCE --attribute KEY=VALUE
@@ -38,7 +39,7 @@ case "${1:-}" in
     esac
     exit 0
     ;;
-  record | read-session) command="$1"; shift ;;
+  record | read-session | summarize) command="$1"; shift ;;
   *) usage ;;
 esac
 
@@ -103,6 +104,7 @@ store_file="$store_dir/spans.jsonl"
 exec "$python_binary" - "$command" "$store_file" "$@" <<'PY'
 import datetime as dt
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -114,6 +116,11 @@ command, store_file, *args = sys.argv[1:]
 HEX16 = re.compile(r"^[0-9a-f]{16}$")
 HEX32 = re.compile(r"^[0-9a-f]{32}$")
 PHASES = {"orientation", "alignment", "implementation", "review", "research", "delivery"}
+SPAN_FIELDS = {
+    "schema_version", "trace_id", "span_id", "parent_span_id", "root_span_id",
+    "name", "phase", "actor", "start_time", "end_time", "duration_ms",
+    "status", "source", "attributes",
+}
 
 def fail(message):
     print(f"qq-observe: {message}", file=sys.stderr)
@@ -130,6 +137,18 @@ def timestamp(value):
 
 def new_id(chars):
     return os.urandom(chars // 2).hex()
+
+def parse_summary_options(values):
+    options = {"json": False}
+    while values:
+        flag = values.pop(0)
+        if flag == "--json":
+            options["json"] = True
+        elif flag in {"--since", "--until"} and values:
+            options[flag[2:]] = values.pop(0)
+        else:
+            fail(f"invalid or incomplete option: {flag}")
+    return options
 
 def parse_options(values, session=False):
     options = {"attributes": {}}
@@ -191,6 +210,197 @@ def append(record):
     finally:
         os.close(fd)
 
+def read_store():
+    try:
+        existing = os.lstat(store_file)
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        fail(f"cannot inspect span store leaf: {error}")
+    if not stat.S_ISREG(existing.st_mode):
+        fail("span store leaf is not a regular file")
+    flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        directory = os.open(os.path.dirname(store_file), os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            if os.path.realpath(f"/proc/self/fd/{directory}") != os.path.dirname(store_file):
+                fail("span store directory changed during open")
+            fd = os.open(os.path.basename(store_file), flags, dir_fd=directory)
+        finally:
+            os.close(directory)
+    except OSError as error:
+        fail(f"cannot open span store leaf: {error}")
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            fail("span store leaf is not a regular file")
+        with os.fdopen(fd, "rb") as source:
+            fd = None
+            yield from source
+    except OSError as error:
+        fail(f"cannot read span store: {error}")
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+def summary_span(line):
+    try:
+        item = json.loads(line.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        return None
+    if not isinstance(item, dict) or not SPAN_FIELDS <= item.keys():
+        return None
+    try:
+        start = dt.datetime.fromisoformat(item["start_time"].replace("Z", "+00:00"))
+        end = dt.datetime.fromisoformat(item["end_time"].replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return None
+    duration = item.get("duration_ms")
+    phase = item.get("phase")
+    if isinstance(duration, bool) or not isinstance(duration, (int, float)):
+        return None
+    try:
+        duration = float(duration)
+    except OverflowError:
+        return None
+    if (
+        start.tzinfo is None
+        or end.tzinfo is None
+        or isinstance(item["schema_version"], bool)
+        or item["schema_version"] != 1
+        or not isinstance(item["trace_id"], str)
+        or not HEX32.fullmatch(item["trace_id"])
+        or not isinstance(item["span_id"], str)
+        or not HEX16.fullmatch(item["span_id"])
+        or (item["parent_span_id"] is not None and (
+            not isinstance(item["parent_span_id"], str) or not HEX16.fullmatch(item["parent_span_id"])
+        ))
+        or not isinstance(item["root_span_id"], str)
+        or not HEX16.fullmatch(item["root_span_id"])
+        or not isinstance(item["name"], str)
+        or not isinstance(item["actor"], str)
+        or (phase is not None and (not isinstance(phase, str) or phase not in PHASES))
+        or not math.isfinite(duration)
+        or duration < 0
+        or not isinstance(item["status"], str)
+        or not isinstance(item["source"], str)
+        or not isinstance(item["attributes"], dict)
+    ):
+        return None
+    # schema v1 derives duration_ms from start/end (see emit()): reject
+    # impossible ordering, and durations exceeding the span's own wall time
+    # beyond slack, so adversarial or corrupt lines cannot poison aggregates.
+    # Understated durations (active-time spans) remain admissible.
+    if end < start or duration > (end - start).total_seconds() * 1000 + 1000:
+        return None
+    item["duration_ms"] = duration
+    return item, start
+
+def rounded(value):
+    return float(f"{value:.1f}")
+
+def aggregate_summary(options):
+    since = timestamp(options["since"]) if "since" in options else None
+    until = timestamp(options["until"]) if "until" in options else None
+    if since is not None and until is not None and since > until:
+        fail("since timestamp follows until timestamp")
+    span_count = skipped = 0
+    traces = set()
+    phase_durations = {}
+    recurrence_stats = {}
+    status_counts = {}
+    for line in read_store():
+        parsed = summary_span(line)
+        if parsed is None:
+            skipped += 1
+            continue
+        item, start = parsed
+        if (since is not None and start < since) or (until is not None and start > until):
+            continue
+        span_count += 1
+        traces.add(item["trace_id"])
+        phase_durations.setdefault(item["phase"], []).append(item["duration_ms"])
+        recurrence = recurrence_stats.setdefault((item["name"], item["actor"]), [0, 0.0])
+        recurrence[0] += 1
+        recurrence[1] += item["duration_ms"]
+        if item["status"] != "ok":
+            status_counts[item["status"]] = status_counts.get(item["status"], 0) + 1
+
+    phases = []
+    for phase, durations in phase_durations.items():
+        ordered = sorted(durations)
+        total = sum(durations)
+        phases.append({
+            "phase": phase,
+            "spans": len(durations),
+            "total_ms": rounded(total),
+            "mean_ms": rounded(total / len(durations)),
+            "p50_ms": rounded(ordered[math.ceil(0.50 * len(ordered)) - 1]),
+            "p95_ms": rounded(ordered[math.ceil(0.95 * len(ordered)) - 1]),
+        })
+    phases.sort(key=lambda row: (
+        -sum(phase_durations[row["phase"]]),
+        "(none)" if row["phase"] is None else row["phase"],
+    ))
+
+    recurrence = [{
+        "name": name,
+        "actor": actor,
+        "runs": runs,
+        "total_ms": rounded(total),
+        "mean_ms": rounded(total / runs),
+    } for (name, actor), (runs, total) in recurrence_stats.items()]
+    recurrence.sort(key=lambda row: (
+        -recurrence_stats[(row["name"], row["actor"])][1], row["name"], row["actor"],
+    ))
+    recurrence = recurrence[:20]
+    statuses = [
+        {"status": status, "count": count}
+        for status, count in sorted(status_counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+    return {
+        "window": {"since": options.get("since"), "until": options.get("until")},
+        "spans": span_count,
+        "traces": len(traces),
+        "skipped": skipped,
+        "phases": phases,
+        "recurrence": recurrence,
+        "statuses": statuses,
+    }
+
+def print_summary(summary):
+    window = summary["window"]
+    if window["since"] is None and window["until"] is None:
+        print("Window: all")
+    else:
+        print(f"Window: [{window['since'] or '(open)'}, {window['until'] or '(open)'}]")
+    print(f"Spans: {summary['spans']}")
+    print(f"Traces: {summary['traces']}")
+    print(f"Malformed lines skipped: {summary['skipped']}")
+    if not summary["spans"]:
+        return
+
+    print("\nPhase latencies")
+    print("PHASE            SPANS  TOTAL_MS  MEAN_MS   P50_MS   P95_MS")
+    for row in summary["phases"]:
+        label = "(none)" if row["phase"] is None else row["phase"]
+        print(f"{label:<16} {row['spans']:>5d} {row['total_ms']:>9.1f} "
+              f"{row['mean_ms']:>8.1f} {row['p50_ms']:>8.1f} {row['p95_ms']:>8.1f}")
+
+    print("\nSpan recurrence")
+    name_width = max(len("NAME"), *(len(row["name"]) for row in summary["recurrence"]))
+    actor_width = max(len("ACTOR"), *(len(row["actor"]) for row in summary["recurrence"]))
+    print(f"{'NAME':<{name_width}}  {'ACTOR':<{actor_width}}  RUNS  TOTAL_MS  MEAN_MS")
+    for row in summary["recurrence"]:
+        print(f"{row['name']:<{name_width}}  {row['actor']:<{actor_width}}  {row['runs']:>4d} "
+              f"{row['total_ms']:>9.1f} {row['mean_ms']:>8.1f}")
+
+    if summary["statuses"]:
+        print("\nNon-ok statuses")
+        status_width = max(len("STATUS"), *(len(row["status"]) for row in summary["statuses"]))
+        print(f"{'STATUS':<{status_width}} COUNT")
+        for row in summary["statuses"]:
+            print(f"{row['status']:<{status_width}} {row['count']:>5d}")
+
 def emit(options, start, end):
     if end < start: fail("end timestamp precedes start timestamp")
     phase = options.get("phase")
@@ -214,6 +424,15 @@ def emit(options, start, end):
     }
     append(record)
     print(json.dumps({k: record[k] for k in ("trace_id", "span_id", "root_span_id")}, separators=(",", ":")))
+
+if command == "summarize":
+    summary_options = parse_summary_options(args)
+    summary = aggregate_summary(summary_options)
+    if summary_options["json"]:
+        print(json.dumps(summary, separators=(",", ":")))
+    else:
+        print_summary(summary)
+    raise SystemExit(0)
 
 options = parse_options(args, session=command == "read-session")
 if command == "record":
