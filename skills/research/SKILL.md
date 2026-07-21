@@ -45,11 +45,17 @@ the Repository artifact.
 
 ## Output
 
-Search the shared Backlog index before creating anything. Write exactly one
-final report through the Backlog CLI as a `research` document. Reconcile an
-older durable report only when the owning Task asks; otherwise raw notes remain
-temporary. Attach the report to an owning Task through the CLI. It is evidence,
-not a separate source of current system truth.
+Search the shared Backlog index before creating anything. Before any durable
+write, route the report through the owning Task's open Change worktree. When no
+Change is open for that Task, including unstarted work, use a chore
+branch/worktree and pull request. Never create, update, or attach a report in
+primary `main`.
+
+Write exactly one final report through the Backlog CLI as a `research` document.
+Reconcile an older durable report only when the owning Task asks; otherwise raw
+notes remain temporary. Attach the report to the owning Task through the CLI;
+any `--doc` attach rides the same branch as the report. It is evidence, not a
+separate source of current system truth.
 
 Keep it dense:
 

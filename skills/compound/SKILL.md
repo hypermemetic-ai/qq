@@ -21,6 +21,13 @@ work would learn nothing from a record, exit silently.
 A diff is not a lesson. The subject is the reusable cause, rationale, or
 invariant; implementation changes are supporting evidence.
 
+## Backlog routing
+
+Make every durable capture write in the owning Task's open Change worktree.
+When no Change is open for that Task, including no-Change or unstarted work, use
+a chore branch/worktree and pull request. Never create or update the capture in
+primary `main`. Any Task `--doc` attach rides the same branch as its document.
+
 1. Search Backlog's shared index for relevant `solutions` documents and read
    `CONCEPTS.md` before writing. Reuse the established vocabulary. When an
    existing document covers the same lesson, locate its CLI-generated Markdown
