@@ -192,6 +192,37 @@ alignment, Task and Change judgment, work orders, verdicts, UAT, and handoff.
 Bounded implementation, fresh review, and research run through pi-subagents;
 `qq-dispatch` is only its fail-closed Landstrip adapter.
 
+### Local latency observation
+
+`qq-observe` writes append-only JSONL spans to
+`${XDG_STATE_HOME:-$HOME/.local/state}/qq/spans/<repo-name>/spans.jsonl`.
+It refuses a store that resolves inside any Git worktree. There is no daemon,
+network export, or tracked runtime state. Record an engine span directly, or
+import the timestamp range of a Pi session JSONL file:
+
+```bash
+qq-observe record --name execute_tool --phase implementation --actor engine \
+  --start 2026-07-21T10:00:00Z --end 2026-07-21T10:00:01Z
+qq-observe read-session ~/.pi/agent/sessions/--path--/session.jsonl \
+  --phase orientation --actor accountable-session
+```
+
+At each delegate spawn, `qq-dispatch` records an `invoke_agent` span and injects
+`QQ_TRACE_ID`, `PI_ROOT_SPAN_ID`, and its new span ID as
+`PI_PARENT_SPAN_ID`. A policy-path experiment confirms these arbitrary parent
+environment variables reach the confined Pi child, so nested pi-subagents runs
+correlate automatically when the accountable session supplies root context.
+Observation failures are reported but never change the child exit status.
+
+The remaining substrate gap is the accountable interactive Pi session: Pi has
+no native local span emitter and cannot have its environment changed after
+startup. If that session was not launched with root context, each top-level
+dispatch starts a valid but separate trace. Work orders must then carry the
+`QQ_TRACE_ID` and root span ID, and Completion Envelopes must echo them, so a
+post-hoc `read-session` import can use the same IDs. Pi session JSONL itself has
+no cross-file correlation field; text echo is the required fallback for that
+case.
+
 On a machine migrating off the retired installer, remove the old Codex
 per-skill link directory first (after checking it holds nothing but links into
 this checkout): `rm -r ~/.codex/skills`. `ln -sT` fails loudly rather than

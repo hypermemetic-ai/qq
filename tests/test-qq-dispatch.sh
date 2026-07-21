@@ -284,6 +284,62 @@ PY
   fi
 done
 
+# Correlation propagation experiment: qq-dispatch receives accountable-side
+# context and the stubbed child records the environment that crosses the policy.
+propagation_runtime="$tmp/propagation-runtime"
+mkdir -p "$propagation_runtime"
+(
+  cd "$ROOT"
+  QQ_TRACE_ID=11111111111111111111111111111111 \
+  PI_ROOT_SPAN_ID=2222222222222222 \
+  PI_PARENT_SPAN_ID=3333333333333333 \
+  PI_SUBAGENT_CHILD_AGENT=reviewer \
+  PI_SUBAGENT_RUN_ID=trace-propagation-smoke \
+  PI_SUBAGENT_CHILD_INDEX=7 \
+  QQ_DISPATCH_RUNTIME_ROOT="$propagation_runtime" \
+    "$DISPATCH" --json
+) >"$tmp/propagation.stdout" 2>"$tmp/propagation.stderr"
+grep -Fxq 'QQ_TRACE_ID=11111111111111111111111111111111' "$FAKE_PI_ENV" \
+  || fail 'trace ID did not propagate to the child'
+grep -Fxq 'PI_ROOT_SPAN_ID=2222222222222222' "$FAKE_PI_ENV" \
+  || fail 'root span ID did not propagate to the child'
+propagated_parent="$(sed -n 's/^PI_PARENT_SPAN_ID=//p' "$FAKE_PI_ENV")"
+[[ "$propagated_parent" =~ ^[0-9a-f]{16}$ ]] \
+  || fail 'delegate span ID did not propagate as the child parent'
+[ "$propagated_parent" != 3333333333333333 ] \
+  || fail 'child was parented directly to the accountable parent instead of the delegate span'
+repository_name="$(basename "$(dirname "$git_common_dir")")"
+span_store="$HOME/.local/state/qq/spans/$repository_name/spans.jsonl"
+jq -s -e \
+  --arg parent "$propagated_parent" \
+  --arg worktree "$ROOT" '
+  map(select(.attributes["run.id"] == "trace-propagation-smoke")) as $spans
+  | ($spans | length) == 1
+  and $spans[0].name == "invoke_agent"
+  and $spans[0].phase == "review"
+  and $spans[0].trace_id == "11111111111111111111111111111111"
+  and $spans[0].span_id == $parent
+  and $spans[0].parent_span_id == "3333333333333333"
+  and $spans[0].root_span_id == "2222222222222222"
+  and $spans[0].attributes["child.index"] == "7"
+  and $spans[0].attributes.worktree == $worktree
+  and $spans[0].attributes["exit.status"] == "0"
+' "$span_store" >/dev/null
+
+# Observation is not on the dispatch critical path: an unsafe configured store
+# is refused, while the child result remains successful.
+(
+  cd "$ROOT"
+  XDG_STATE_HOME="$ROOT/.dispatch-observation-test" \
+  PI_SUBAGENT_CHILD_AGENT=reviewer \
+  PI_SUBAGENT_RUN_ID=observation-failure-smoke \
+    "$DISPATCH" --json
+) >"$tmp/observation-failure.stdout" 2>"$tmp/observation-failure.stderr"
+assert_file_contains "$tmp/observation-failure.stdout" 'pi-live-event role=reviewer'
+assert_file_contains "$tmp/observation-failure.stderr" 'observation write failed; dispatch result preserved'
+[ ! -e "$ROOT/.dispatch-observation-test" ] \
+  || fail 'failed observation wrote state inside the worktree'
+
 # Pi-subagents creates this run's temp directories before spawn. A later run's
 # directory, created after these policies were rendered, must not be covered by
 # an earlier policy (there is deliberately no shared pi-subagent-* grant).
@@ -835,5 +891,73 @@ env -u FAKE_PI_MODE PI_SUBAGENT_CHILD_AGENT=reviewer PI_SUBAGENT_RUN_ID=session-
   || fail "configured session root was not created"
 [ "$(stat -c %a "$parent_tmp/pi-subagent-custom")" = "700" ] \
   || fail "configured session root is not mode 700"
+
+# Observation spans below dispatch against the default session root again;
+# the session-root contract cases above leave a custom config in place.
+printf '{"defaultSessionDir": "%s"}\n' "$parent_tmp/pi-subagent-sessions" \
+  > "$test_home/.pi/agent/extensions/subagent/config.json"
+
+# PID-directed termination of qq-dispatch must be forwarded through timeout to
+# the process-tree supervisor, while still leaving an error observation.
+rm -f "$FAKE_CHILD_PID"
+(
+  cd "$ROOT"
+  PI_SUBAGENT_CHILD_AGENT=reviewer \
+  PI_SUBAGENT_RUN_ID=signal-smoke \
+  QQ_DISPATCH_TIMEOUT=30s \
+  FAKE_POLICY_SNAPSHOT="$tmp/signal-policy.json" \
+    exec "$DISPATCH" --json
+) >"$tmp/signal.stdout" 2>"$tmp/signal.stderr" &
+dispatch_pid=$!
+for _ in $(seq 1 100); do
+  [ -s "$FAKE_CHILD_PID" ] && break
+  sleep 0.02
+done
+[ -s "$FAKE_CHILD_PID" ] || fail 'signal probe did not announce its descendant'
+python3 - "$dispatch_pid" >"$tmp/signal-descendants" <<'PY'
+from pathlib import Path
+import sys
+
+root = int(sys.argv[1])
+parents = {}
+for entry in Path('/proc').iterdir():
+    if not entry.name.isdigit():
+        continue
+    try:
+        text = (entry / 'stat').read_text()
+        fields = text[text.rfind(')') + 2:].split()
+        parents[int(entry.name)] = int(fields[1])
+    except (FileNotFoundError, PermissionError, ValueError, IndexError):
+        pass
+found = set()
+while True:
+    added = {pid for pid, parent in parents.items() if parent == root or parent in found} - found
+    if not added:
+        break
+    found |= added
+print(*sorted(found), sep='\n')
+PY
+[ -s "$tmp/signal-descendants" ] || fail 'signal probe found no dispatch descendants'
+kill -TERM "$dispatch_pid"
+set +e
+wait "$dispatch_pid"
+signal_status=$?
+set -e
+assert_equal 143 "$signal_status" 'PID-directed SIGTERM status was not preserved'
+while read -r descendant_pid; do
+  [ -n "$descendant_pid" ] || continue
+  if kill -0 "$descendant_pid" 2>/dev/null; then
+    fail "PID-directed SIGTERM leaked dispatch descendant $descendant_pid"
+  fi
+done <"$tmp/signal-descendants"
+jq -s -e '
+  map(select(.attributes["run.id"] == "signal-smoke")) as $spans
+  | ($spans | length) == 1
+  and $spans[0].phase == "review"
+  and $spans[0].status == "error"
+  and $spans[0].duration_ms >= 0
+  and $spans[0].attributes["exit.status"] == "143"
+' "$span_store" >/dev/null
+
 
 printf 'test-qq-dispatch: pass\n'

@@ -1,0 +1,246 @@
+#!/usr/bin/env bash
+# Emit local qq observation spans and import Pi session JSONL.
+# shellcheck disable=SC1091
+set -euo pipefail
+
+umask 077
+
+self="$(readlink -f -- "${BASH_SOURCE[0]}")"
+bin_dir="$(cd -- "$(dirname -- "$self")" && pwd -P)"
+# shellcheck source=bin/lib/qq-bin.sh
+source "$bin_dir/lib/qq-bin.sh"
+
+usage() {
+  cat >&2 <<'EOF'
+usage:
+  qq-observe id <span|trace>
+  qq-observe record --name NAME --actor ACTOR --start TIME --end TIME [options]
+  qq-observe read-session SESSION.jsonl [--actor ACTOR] [--phase PHASE] [context options]
+
+context options: --trace-id ID --span-id ID --parent-span-id ID --root-span-id ID
+record options:  --phase PHASE --status STATUS --source SOURCE --attribute KEY=VALUE
+EOF
+  exit 64
+}
+
+random_hex() {
+  local bytes="$1"
+  od -An -N "$bytes" -tx1 /dev/urandom | tr -d ' \n'
+}
+
+case "${1:-}" in
+  id)
+    [ "$#" -eq 2 ] || usage
+    case "$2" in
+      span) random_hex 8 ;;
+      trace) random_hex 16 ;;
+      *) usage ;;
+    esac
+    exit 0
+    ;;
+  record | read-session) command="$1"; shift ;;
+  *) usage ;;
+esac
+
+if ! qq_resolve_bin python3; then
+  printf 'qq-observe: %s\n' "$QQ_BIN_ERROR" >&2
+  exit 69
+fi
+python_binary="$QQ_BIN_RESULT"
+if ! qq_resolve_bin git; then
+  printf 'qq-observe: %s\n' "$QQ_BIN_ERROR" >&2
+  exit 69
+fi
+git_binary="$QQ_BIN_RESULT"
+
+repo_root="$($git_binary rev-parse --show-toplevel 2>/dev/null)" \
+  || { printf 'qq-observe: current directory is not in a Git worktree\n' >&2; exit 65; }
+repo_root="$(realpath -e -- "$repo_root")"
+git_common_dir="$($git_binary rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+  || { printf 'qq-observe: cannot discover the Git common directory\n' >&2; exit 65; }
+git_common_dir="$(realpath -e -- "$git_common_dir")"
+repo_name="$(basename -- "$(dirname -- "$git_common_dir")")"
+[[ "$repo_name" =~ ^[A-Za-z0-9._-]+$ ]] \
+  || { printf 'qq-observe: unsafe Repository name: %s\n' "$repo_name" >&2; exit 65; }
+state_home="${XDG_STATE_HOME:-${HOME:?HOME is required when XDG_STATE_HOME is unset}/.local/state}"
+[[ "$state_home" == /* ]] \
+  || { printf 'qq-observe: state home must be absolute\n' >&2; exit 65; }
+store_paths="$("$python_binary" - "$state_home" "$repo_name" <<'PY'
+import os, sys
+state_root = os.path.realpath(sys.argv[1])
+store = os.path.realpath(os.path.join(sys.argv[1], "qq", "spans", sys.argv[2]))
+print(state_root)
+print(store)
+PY
+)"
+state_root="${store_paths%%$'\n'*}"
+store_candidate="${store_paths#*$'\n'}"
+path_is_within() {
+  local candidate="$1" root="$2"
+  [[ "$candidate" == "$root" || "$candidate" == "$root"/* ]]
+}
+path_is_within "$store_candidate" "$state_root" \
+  || { printf 'qq-observe: span store escapes the resolved state root: %s\n' "$store_candidate" >&2; exit 65; }
+existing="$store_candidate"
+while [[ ! -e "$existing" ]]; do
+  parent="$(dirname -- "$existing")"
+  [[ "$parent" != "$existing" ]] || break
+  existing="$parent"
+done
+if containing_root="$($git_binary -C "$existing" rev-parse --show-toplevel 2>/dev/null)"; then
+  containing_root="$(realpath -e -- "$containing_root")"
+  if path_is_within "$store_candidate" "$containing_root"; then
+    printf 'qq-observe: refusing span store inside Git worktree: %s\n' "$store_candidate" >&2
+    exit 65
+  fi
+fi
+mkdir -p -- "$store_candidate"
+store_dir="$(realpath -e -- "$store_candidate")"
+path_is_within "$store_dir" "$state_root" \
+  || { printf 'qq-observe: span store escapes the resolved state root: %s\n' "$store_dir" >&2; exit 65; }
+store_file="$store_dir/spans.jsonl"
+
+exec "$python_binary" - "$command" "$store_file" "$@" <<'PY'
+import datetime as dt
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+import uuid
+
+command, store_file, *args = sys.argv[1:]
+HEX16 = re.compile(r"^[0-9a-f]{16}$")
+HEX32 = re.compile(r"^[0-9a-f]{32}$")
+PHASES = {"orientation", "alignment", "implementation", "review", "research", "delivery"}
+
+def fail(message):
+    print(f"qq-observe: {message}", file=sys.stderr)
+    raise SystemExit(64)
+
+def timestamp(value):
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        fail(f"invalid timestamp: {value}")
+    if parsed.tzinfo is None:
+        fail(f"timestamp requires a timezone: {value}")
+    return parsed
+
+def new_id(chars):
+    return os.urandom(chars // 2).hex()
+
+def parse_options(values, session=False):
+    options = {"attributes": {}}
+    if session:
+        if not values or values[0].startswith("--"):
+            fail("read-session requires a session JSONL path")
+        options["session"] = values.pop(0)
+    valued = {"--name", "--actor", "--start", "--end", "--phase", "--status",
+              "--source", "--trace-id", "--span-id", "--parent-span-id", "--root-span-id"}
+    while values:
+        flag = values.pop(0)
+        if flag not in valued | {"--attribute"} or not values:
+            fail(f"invalid or incomplete option: {flag}")
+        value = values.pop(0)
+        if flag == "--attribute":
+            if "=" not in value or not value.split("=", 1)[0]:
+                fail("attributes must be KEY=VALUE")
+            key, item = value.split("=", 1)
+            options["attributes"][key] = item
+        else:
+            options[flag[2:].replace("-", "_")] = value
+    return options
+
+def context(options):
+    trace_id = options.get("trace_id") or os.environ.get("QQ_TRACE_ID") or new_id(32)
+    span_id = options.get("span_id") or new_id(16)
+    parent = options.get("parent_span_id") or os.environ.get("PI_PARENT_SPAN_ID") or None
+    root = options.get("root_span_id") or os.environ.get("PI_ROOT_SPAN_ID") or parent or span_id
+    if not HEX32.fullmatch(trace_id): fail("trace ID must be 32 lowercase hex characters")
+    for label, value in (("span ID", span_id), ("parent span ID", parent), ("root span ID", root)):
+        if value is not None and not HEX16.fullmatch(value):
+            fail(f"{label} must be 16 lowercase hex characters")
+    return trace_id, span_id, parent, root
+
+def append(record):
+    try:
+        existing = os.lstat(store_file)
+    except FileNotFoundError:
+        existing = None
+    except OSError as error:
+        fail(f"cannot inspect span store leaf: {error}")
+    if existing is not None and not stat.S_ISREG(existing.st_mode):
+        fail("span store leaf is not a regular file")
+    line = json.dumps(record, separators=(",", ":"), sort_keys=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(store_file, flags, 0o600)
+    except OSError as error:
+        fail(f"cannot open span store leaf: {error}")
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            fail("span store leaf is not a regular file")
+        os.write(fd, (line + "\n").encode())
+    finally:
+        os.close(fd)
+
+def emit(options, start, end):
+    if end < start: fail("end timestamp precedes start timestamp")
+    phase = options.get("phase")
+    if phase and phase not in PHASES: fail(f"unknown SDLC phase: {phase}")
+    trace_id, span_id, parent, root = context(options)
+    record = {
+        "schema_version": 1,
+        "trace_id": trace_id,
+        "span_id": span_id,
+        "parent_span_id": parent,
+        "root_span_id": root,
+        "name": options["name"],
+        "phase": phase,
+        "actor": options["actor"],
+        "start_time": start.isoformat(),
+        "end_time": end.isoformat(),
+        "duration_ms": round((end - start).total_seconds() * 1000, 3),
+        "status": options.get("status", "ok"),
+        "source": options.get("source", "qq-observe"),
+        "attributes": options["attributes"],
+    }
+    append(record)
+    print(json.dumps({k: record[k] for k in ("trace_id", "span_id", "root_span_id")}, separators=(",", ":")))
+
+options = parse_options(args, session=command == "read-session")
+if command == "record":
+    for required in ("name", "actor", "start", "end"):
+        if not options.get(required): fail(f"--{required} is required")
+    emit(options, timestamp(options["start"]), timestamp(options["end"]))
+else:
+    path = Path(options["session"])
+    if not path.is_file(): fail(f"session JSONL is not a regular file: {path}")
+    observed = []
+    entries = 0
+    header_seen = False
+    try:
+        with path.open(encoding="utf-8") as source:
+            for number, line in enumerate(source, 1):
+                if not line.strip(): continue
+                item = json.loads(line)
+                if not header_seen:
+                    if not isinstance(item, dict) or item.get("type") != "session" or item.get("version") != 3:
+                        fail("session JSONL must begin with a type=session, version=3 header")
+                    header_seen = True
+                if not isinstance(item, dict) or not isinstance(item.get("timestamp"), str):
+                    fail(f"session entry {number} lacks a timestamp")
+                observed.append(timestamp(item["timestamp"]))
+                entries += 1
+    except (OSError, json.JSONDecodeError) as error:
+        fail(f"cannot read session JSONL: {error}")
+    if not observed: fail("session JSONL has no timestamped entries")
+    options.setdefault("name", "invoke_workflow")
+    options.setdefault("actor", "accountable-session")
+    options.setdefault("source", "pi-session-jsonl")
+    options["attributes"].update({"session.file": str(path.resolve()), "session.entries": entries})
+    emit(options, min(observed), max(observed))
+PY
