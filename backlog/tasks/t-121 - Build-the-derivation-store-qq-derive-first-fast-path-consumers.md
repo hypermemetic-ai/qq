@@ -1,15 +1,18 @@
 ---
 id: T-121
-title: 'Build the derivation store: qq-derive + first fast-path consumers'
-status: In Progress
+title: >-
+  Derivation store qq-derive — candidate intervention pending observation
+  evidence
+status: To Do
 assignee: []
 created_date: '2026-07-20 17:52'
-updated_date: '2026-07-21 01:57'
+updated_date: '2026-07-21 03:27'
 labels: []
-dependencies: []
+dependencies:
+  - T-127
 documentation:
   - doc-71
-priority: high
+priority: medium
 type: task
 ordinal: 51000
 ---
@@ -17,24 +20,24 @@ ordinal: 51000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Foundational fast-path capability (operator-approved design, 2026-07-20): one derivation store with three rails. Cache and preload share one shape — (key, artifact, pointer) where the key hashes the inputs (repo revision, intent text, brief body, model id); freshness holds by construction (recompute key: match = read, mismatch = regenerate; no invalidation protocol). Parallelism is the discipline that fills it: never queue independent derivations.
+REFRAMED 2026-07-21 (operator rulings, accountable project-home session; reshape plan = doc-73): the derivation store is no longer foundational. It is one candidate latency intervention that T-127's observation evidence will select, reshape, or kill. Blocked by T-127, whose baseline measurements are the selecting evidence.
 
-Machinery (deliberately small): bin/qq-derive adapter (put/get/has, key computation) storing plain files under ~/.cache/qq/derivations/<repo>/<key> — runtime state, never tracked. Everything else is skill amendments pointing at the store. No daemon, no service, no new skill.
+The 2026-07-20 operator-approved design stays on file below; its pre-chosen consumer list (orientation digest, reviewer-brief pre-generation, review-context reuse, research/review fan-outs, deliver-change pipelining) and its 'foundational fast-path capability' framing were DE-APPROVED 2026-07-21 in favor of observation-first: measure where wall-time actually goes, then build only what the data selects.
 
-First consumers: orientation digest (preloaded at session_start, read by every consumer — highest hit rate), reviewer-brief pre-generation during implementation, review-context package reuse across rounds, research fan-out by default (T-93 pattern), review fan-out by lens with owner reconciliation, deliver-change pipelining overlaps. Subagent-based preloading rides the T-95 substrate (pi-subagents background runs); the rails that work on codex today need not wait for it.
+Design on file (2026-07-20): one derivation store with three rails. Cache and preload share one shape — (key, artifact, pointer) where the key hashes the inputs (repo revision, intent text, brief body, model id); freshness holds by construction (recompute key: match = read, mismatch = regenerate; no invalidation protocol). Parallelism is the discipline that fills it: never queue independent derivations. Machinery (deliberately small): bin/qq-derive adapter (put/get/has, key computation) storing plain files under ~/.cache/qq/derivations/<repo>/<key> — runtime state, never tracked. No daemon, no service, no new skill.
 
-Guardrails (operator-settled): no semantic answer-reuse across different questions (doc-16 authority rule); speculation is read-only; the 3-5 writing-ticket cap stands (operator bandwidth); fresh-context independence preserved. Every speed claim rides a fresh Check: latency probes (session-start-to-first-turn, dispatch-to-envelope, review-round wall time, store hit rate) baselined before, demonstrated after.
+Guardrails (still binding if activated): no semantic answer-reuse across different questions (doc-16 authority rule); speculation is read-only; the 3-5 writing-ticket cap stands; fresh-context independence preserved. Every speed claim rides a fresh Check: baselines before, demonstrated after.
 
 Decision ledger:
-- One-store/three-rails design, sequencing (T-94 unblock first, then T-95, then this), guardrails, and probe-based evidence: operator approval, asked-and-answered alignment exchange, 2026-07-20 project-home session ('Approve design and sequence').
-- Cache/preload/parallelize definitions (artifact derivation store; subagent generation with stored pointers; no false serialization): operator reframe in the same exchange, 2026-07-20.
-- Context-delivery architecture (cache as optimization, never authority; stable prefixes; capsule contracts): doc-16.
-- Substrate dependence of subagent preloading: T-95 (unblocked by T-120 evidence, PR #160).
+- 2026-07-20 design (one-store/three-rails, guardrails, probe evidence) — operator approval, asked-and-answered exchange 2026-07-20; retained on file.
+- Observation-first reframe; store-as-candidate; pre-chosen consumers and foundational framing de-approved; blocked by T-127 — operator rulings, asked-and-answered exchange 2026-07-21; reshape plan doc-73.
+- Market verdict: nothing off the shelf measures cross-session multi-agent SDLC-phase latency locally (hybrid leaning build) — doc-71.
+- Cache/preload/parallelize definitions; cache as optimization, never authority — doc-16.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 bin/qq-derive implements put/get/has with input-hashed keys and miss-regenerates semantics; shell tests green
-- [ ] #2 At least the orientation-digest and reviewer-brief consumers live as skill amendments with latency-probe baselines and after measurements demonstrating improvement
-- [ ] #3 Research and review fan-out defaults encoded in their skills with owner reconciliation preserved; probe evidence collected
+- [ ] #1 Dormant until T-127's baseline evidence exists; activation requires the observation data to rank artifact reuse (cache/preload) among the top measured interventions — otherwise this task is realigned or killed
+- [ ] #2 If activated: bin/qq-derive implements put/get/has with input-hashed keys and miss-regenerates semantics; shell tests green
+- [ ] #3 If activated: consumers selected by measured impact (not the de-approved 2026-07-20 list), each with before/after latency evidence
 <!-- AC:END -->
