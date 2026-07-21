@@ -6,7 +6,7 @@ description: Owns judgment and one-PR GitHub Flow delivery for authorized Reposi
 # Deliver a Change
 
 Retain scope, decisions, evidence, and delivery state; delegate only bounded
-work. `pi-hunk` owns local diff review; GitHub's UI owns Checks and merge. Call
+work. Diff review is presented inline; GitHub's UI owns Checks and merge. Call
 qq engines unconditionally: they own containment, degradation, and rails.
 
 1. Before mutation, require the owning Task Description's **decision ledger**
@@ -30,7 +30,7 @@ qq engines unconditionally: they own containment, degradation, and rails.
 4. Run fresh-context `code-review` after local verification for every
    non-trivial Change. Its brief declares trust boundaries beside the threat
    model. Verify findings, fix only confirmed in-scope failures, rerun affected
-   Checks, review each fix delta, then present the diff through `pi-hunk`.
+   Checks, review each fix delta, then present the diff inline.
 5. Commit and push only green units. Open one pull request carrying Task intent
    and Check evidence; pass final GitHub Checks.
 6. In its checkout, verify acceptance criteria, summarize, mark Done
