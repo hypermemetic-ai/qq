@@ -174,7 +174,7 @@ def append(record):
     if existing is not None and not stat.S_ISREG(existing.st_mode):
         fail("span store leaf is not a regular file")
     line = json.dumps(record, separators=(",", ":"), sort_keys=True)
-    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NONBLOCK
     flags |= getattr(os, "O_NOFOLLOW", 0)
     try:
         directory = os.open(os.path.dirname(store_file), os.O_RDONLY | os.O_DIRECTORY)

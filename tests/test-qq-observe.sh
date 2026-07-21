@@ -207,6 +207,55 @@ set -e
 [ "$ancestor_status" -ne 0 ] || fail 'swapped store ancestor was accepted'
 [ ! -e "$ancestor_target/spans.jsonl" ] || fail 'swapped store ancestor redirected a span outside the state root'
 
+# Delay only the leaf open, after append() has completed its lstat, and swap a
+# FIFO into that gap. The probe open must return without waiting for a reader.
+open_hook_dir="$tmp/open-hook"
+mkdir "$open_hook_dir"
+cat >"$open_hook_dir/sitecustomize.py" <<'PY'
+import os
+from pathlib import Path
+import time
+
+real_open = os.open
+
+def delayed_open(path, flags, *args, **kwargs):
+    if os.path.basename(os.fspath(path)) == "spans.jsonl":
+        Path(os.environ["DELAYED_OPEN_READY"]).touch()
+        while not Path(os.environ["DELAYED_OPEN_RELEASE"]).exists():
+            time.sleep(0.01)
+    return real_open(path, flags, *args, **kwargs)
+
+os.open = delayed_open
+PY
+fifo_swap_state="$tmp/fifo-swap-state"
+set +e
+(
+  cd "$ROOT"
+  DELAYED_OPEN_READY="$tmp/fifo-swap-ready" \
+  DELAYED_OPEN_RELEASE="$tmp/fifo-swap-release" \
+  PYTHONPATH="$open_hook_dir" \
+  XDG_STATE_HOME="$fifo_swap_state" \
+    timeout 2 "$OBSERVE" record --name invoke_agent --actor test \
+      --start 2026-07-21T00:00:00Z --end 2026-07-21T00:00:01Z
+) >"$tmp/fifo-swap.stdout" 2>"$tmp/fifo-swap.stderr" &
+fifo_swap_pid=$!
+set -e
+for _ in $(seq 1 200); do
+  [ -e "$tmp/fifo-swap-ready" ] && break
+  sleep 0.01
+done
+[ -e "$tmp/fifo-swap-ready" ] || fail 'FIFO swap probe did not reach the lstat-open window'
+fifo_swap_leaf="$fifo_swap_state/qq/spans/$repository_name/spans.jsonl"
+mkfifo "$fifo_swap_leaf"
+: >"$tmp/fifo-swap-release"
+set +e
+wait "$fifo_swap_pid"
+fifo_swap_status=$?
+set -e
+[ "$fifo_swap_status" -ne 124 ] || fail 'FIFO swapped after lstat blocked the probe open'
+[ "$fifo_swap_status" -ne 0 ] || fail 'FIFO swapped after lstat was accepted'
+[ -p "$fifo_swap_leaf" ] || fail 'FIFO swap probe did not preserve its special-file leaf'
+
 fixture_primary="$tmp/repository-primary"
 fixture_linked="$tmp/repository-linked"
 git init -q "$fixture_primary"
