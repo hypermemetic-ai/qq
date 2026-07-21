@@ -11,7 +11,7 @@ inheritSkills: false
 defaultContext: fresh
 acceptanceRole: read-only
 completionGuard: false
-timeoutMs: 900000
+timeoutMs: 2700000
 acceptance: {level: none, reason: "qq acceptance is the strict completion-envelope schema plus owner tree verification plus fresh-context review; pi-subagents attestation duplicates it and rejects complete runs (T-124)."}
 ---
 
