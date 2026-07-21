@@ -39,9 +39,11 @@ qq engines unconditionally: they own containment, degradation, and rails.
 7. An unmet criterion reactivates the same Task and Change. If the Change is
    unavailable, align its branch disposition without replacing the Task. A
    later intent change is new work and requires approval.
-8. Confirm the open pull request is reviewed, finalized, and green. Open its
-   resolved URL in the operator's browser, send a Herdr notification containing
-   it, and report it. Browser and cockpit behavior never block handoff.
+8. Confirm the open pull request is reviewed, finalized, and green; the gh
+   CLI (`gh pr checks`, `gh pr view --json mergeStateStatus,reviewDecision`)
+   is the authoritative terminal surface (T-112). Open its resolved URL in the
+   operator's browser, send a Herdr notification containing it, and report it.
+   Browser and cockpit behavior never block handoff.
 9. Never merge; the operator merges. Arm `qq_pr_watch`. Its wake is
    non-load-bearing: after a wake, resume, or operator message, call idempotent
    `qq-change land <pr> --repo <checkout>`.
