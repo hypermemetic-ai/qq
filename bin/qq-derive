@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+# Store derivations of explicitly stated inputs; never reuse an artifact as an
+# answer to a different or unstated question. Speculative derivations are
+# read-only to consumers, and every consumer must remain independently able to
+# derive its result in fresh context when this store misses.
+#
+# Key composition (qq-derive-v1) is a NUL-delimited sequence containing the
+# format marker, canonical Repository HEAD revision, derivation kind, input
+# count, and every --input value in command-line order. For derivations using
+# the common intent/brief/model inputs, callers pass exactly: intent text,
+# brief body, then model id. A kind with a different input set must pass every
+# stated derivation input in a stable order; kind is itself keyed. Thus a
+# revision, kind, input value, input order, or input count change changes the
+# key. Consumers recompute this key: a match is readable and a mismatch is a
+# miss to regenerate; there is no invalidation, timestamp, TTL, or daemon.
+#
+# Artifacts live at <root>/<repo-id>/<key>. repo-id is the canonical Repository
+# basename with every byte outside [A-Za-z0-9._-] replaced by "_", followed by
+# "--" and the first 16 hex characters of SHA-256(canonical Repository path).
+# The suffix keeps equal or sanitized-equal basenames in separate namespaces.
+#
+# This adapter is only a derivation store, never an authority: no semantic
+# answer reuse across questions, no mutation caused by speculation, and no
+# weakening of fresh-context independence is permitted.
+# shellcheck disable=SC1091
+set -euo pipefail
+export LC_ALL=C
+umask 077
+
+self="$(readlink -f -- "${BASH_SOURCE[0]}")"
+# shellcheck source=bin/lib/qq-bin.sh
+source "$(dirname "$self")/lib/qq-bin.sh"
+
+error() {
+  local name="$1"
+  shift
+  printf 'qq-derive: %s: %s\n' "$name" "$*" >&2
+  exit 2
+}
+
+[ "$#" -gt 0 ] || error unknown-operation 'expected key, has, get, or put'
+operation="$1"
+shift
+case "$operation" in
+  key | has | get | put) ;;
+  *) error unknown-operation "unknown operation: $operation" ;;
+esac
+
+repo=""
+kind=""
+key=""
+path_only=false
+inputs=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --repo)
+      [ "$#" -ge 2 ] || error missing-value '--repo requires a path'
+      [ -z "$repo" ] || error duplicate-argument '--repo was supplied more than once'
+      repo="$2"
+      shift 2
+      ;;
+    --kind)
+      [ "$#" -ge 2 ] || error missing-value '--kind requires a name'
+      [ -z "$kind" ] || error duplicate-argument '--kind was supplied more than once'
+      kind="$2"
+      shift 2
+      ;;
+    --key)
+      [ "$#" -ge 2 ] || error missing-value '--key requires a value'
+      [ -z "$key" ] || error duplicate-argument '--key was supplied more than once'
+      key="$2"
+      shift 2
+      ;;
+    --input)
+      [ "$#" -ge 2 ] || error missing-value '--input requires text'
+      inputs+=("$2")
+      shift 2
+      ;;
+    --path)
+      [ "$path_only" = false ] || error duplicate-argument '--path was supplied more than once'
+      path_only=true
+      shift
+      ;;
+    *) error unknown-argument "unknown argument: $1" ;;
+  esac
+done
+
+[ -n "$repo" ] || error missing-argument '--repo is required'
+[ -n "$kind" ] || error missing-argument '--kind is required'
+[[ "$kind" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
+  || error malformed-kind 'kind must match [A-Za-z0-9][A-Za-z0-9._-]*'
+
+if ! qq_resolve_bin git; then
+  error missing-tool "$QQ_BIN_ERROR"
+fi
+git_bin="$QQ_BIN_RESULT"
+if ! qq_resolve_bin sha256sum; then
+  error missing-tool "$QQ_BIN_ERROR"
+fi
+sha256_bin="$QQ_BIN_RESULT"
+
+if ! repo_root="$("$git_bin" -C "$repo" rev-parse --show-toplevel 2>/dev/null)"; then
+  error unreadable-repository "not a readable Git checkout: $repo"
+fi
+repo_root="$(cd "$repo_root" 2>/dev/null && pwd -P)" \
+  || error unreadable-repository "cannot canonicalize Repository root: $repo_root"
+
+if [ "$operation" = key ]; then
+  [ -z "$key" ] || error unexpected-argument '--key does not apply to key'
+  [ "$path_only" = false ] || error unexpected-argument '--path does not apply to key'
+  revision="$("$git_bin" -C "$repo_root" rev-parse --verify HEAD 2>/dev/null)" \
+    || error unreadable-revision 'Repository HEAD is not a readable commit'
+  digest="$({
+    printf '%s\0' 'qq-derive-v1' "$revision" "$kind" "${#inputs[@]}"
+    for input in "${inputs[@]}"; do
+      printf '%s\0' "$input"
+    done
+  } | "$sha256_bin")" || error key-computation 'could not hash derivation inputs'
+  printf '%s\n' "${digest%% *}"
+  exit 0
+fi
+
+[ "${#inputs[@]}" -eq 0 ] \
+  || error unexpected-argument '--input applies only to key'
+[ -n "$key" ] || error missing-argument '--key is required'
+[[ "$key" =~ ^[0-9a-f]{64}$ ]] \
+  || error malformed-key 'key must be exactly 64 lowercase hexadecimal characters'
+if [ "$operation" != get ] && [ "$path_only" = true ]; then
+  error unexpected-argument '--path applies only to get'
+fi
+
+if [ -n "${QQ_DERIVE_ROOT:-}" ]; then
+  store_root="$QQ_DERIVE_ROOT"
+elif [ -n "${HOME:-}" ]; then
+  store_root="$HOME/.cache/qq/derivations"
+else
+  error unreadable-store 'HOME is unset and QQ_DERIVE_ROOT was not provided'
+fi
+[[ "$store_root" = /* ]] \
+  || error unreadable-store 'store root must be an absolute path'
+
+repo_label="${repo_root##*/}"
+repo_label="$(printf '%s' "$repo_label" | sed 's/[^A-Za-z0-9._-]/_/g')" \
+  || error repository-identifier 'could not sanitize Repository basename'
+[ -n "$repo_label" ] || repo_label=repository
+repo_digest="$(printf '%s' "$repo_root" | "$sha256_bin")" \
+  || error repository-identifier 'could not hash Repository path'
+repo_id="$repo_label--${repo_digest:0:16}"
+repo_store="$store_root/$repo_id"
+artifact="$repo_store/$key"
+
+check_existing_directory() {
+  local directory="$1"
+  if [ -e "$directory" ] || [ -L "$directory" ]; then
+    [ -d "$directory" ] || error unreadable-store "store path is not a directory: $directory"
+    if [ ! -r "$directory" ] || [ ! -x "$directory" ]; then
+      error unreadable-store "store directory is unreadable: $directory"
+    fi
+  fi
+}
+
+check_existing_directory "$store_root"
+check_existing_directory "$repo_store"
+
+if [ "$operation" = has ] || [ "$operation" = get ]; then
+  if [ ! -e "$artifact" ] && [ ! -L "$artifact" ]; then
+    exit 1
+  fi
+  if [ ! -f "$artifact" ] || [ -L "$artifact" ]; then
+    error unreadable-artifact "artifact is not a plain file: $artifact"
+  fi
+  [ -r "$artifact" ] || error unreadable-artifact "artifact is unreadable: $artifact"
+  if [ "$operation" = has ]; then
+    exit 0
+  fi
+  if [ "$path_only" = true ]; then
+    printf '%s\n' "$artifact"
+  else
+    cat -- "$artifact" || error unreadable-artifact "could not read artifact: $artifact"
+  fi
+  exit 0
+fi
+
+mkdir -p -- "$repo_store" \
+  || error unreadable-store "cannot create store directory: $repo_store"
+chmod 700 -- "$repo_store" \
+  || error unreadable-store "cannot secure store directory: $repo_store"
+check_existing_directory "$repo_store"
+if { [ -e "$artifact" ] || [ -L "$artifact" ]; } \
+  && { [ ! -f "$artifact" ] || [ -L "$artifact" ]; }; then
+  error unreadable-artifact "artifact target is not a plain file: $artifact"
+fi
+
+temporary="$(mktemp "$repo_store/.qq-derive.${key}.XXXXXX")" \
+  || error atomic-write 'cannot allocate a temporary artifact'
+cleanup() {
+  rm -f -- "$temporary"
+}
+trap cleanup EXIT
+trap 'exit 143' HUP INT TERM
+chmod 600 -- "$temporary" || error atomic-write 'cannot secure temporary artifact'
+cat >"$temporary" || error atomic-write 'could not read artifact from stdin'
+chmod 600 -- "$temporary" || error atomic-write 'cannot secure artifact'
+mv -f -- "$temporary" "$artifact" || error atomic-write 'could not publish artifact'
+temporary=""
+trap - EXIT HUP INT TERM
+printf '%s\n' "$artifact"
