@@ -44,21 +44,11 @@ OpenWiki refresh is explicit rather than merge-triggered. An on-demand or schedu
 
 ## Knowledge maintenance
 
-OpenWiki and codebase-memory are installed separately. qq commands resolve from the checkout whose cockpit shell surface set `QQ_HOME` and prepended `$QQ_HOME/bin`; inspect that environment and the resolved executable when behavior appears to come from the wrong checkout. The README describes upstream runtime setup.
+OpenWiki is installed separately. qq commands resolve from the checkout whose cockpit shell surface set `QQ_HOME` and prepended `$QQ_HOME/bin`; inspect that environment and the resolved executable when behavior appears to come from the wrong checkout. The README describes upstream runtime setup.
 
 `qq-openwiki` validates command mode, provider, runtime, and required tools, then acquires a per-Git-common-directory runtime lock. It refuses to run when `AGENTS.md`, `CLAUDE.md`, or the generated workflow deviates from `HEAD`, including untracked or ignored setup. It shadows instruction symlinks with local regular files during generation; cleanup removes generated setup and restores every path outside `openwiki/**` from the invocation's Git baseline. `--update` requires a clean dedicated `openwiki/update` branch exactly equal to `origin/main`; `--correct` requires a fully staged baseline confined to `openwiki/` (`bin/qq-openwiki`; `tests/test-qq-openwiki.sh`).
 
 Ordinary source agents only consume the wiki, and the `openwiki-maintainer` Skill is the sole maintenance procedure.
-
-For codebase-memory 0.9+:
-
-```bash
-codebase-memory-mcp update
-codebase-memory-mcp config set auto_index true
-codebase-memory-mcp config set auto_watch true
-```
-
-Confirm graph readiness with its project/status tools and reindex after material branch or uncommitted changes. `detect_changes` analyzes impact; it does not prove freshness.
 
 ## Local documentation ownership
 

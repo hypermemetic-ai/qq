@@ -9,7 +9,6 @@ qq is deliberately a thin harness. It composes upstream ownership surfaces inste
   decisions.
 - Agent runtimes discover the methodology and Skills natively.
 - OpenWiki describes the current system.
-- codebase-memory maintains a derived structural graph outside the Repository.
 - herdr supplies named sessions and direct agent messaging.
 - The operator owns judgment, acceptance, and merge authority, including for OpenWiki documentation Changes.
 
@@ -34,13 +33,12 @@ Each surface answers a different question:
 | `CONCEPTS.md` | What do project terms mean? |
 | Backlog Tasks | What does the operator intend, and where does work stand? |
 | `openwiki/` | What is the current system? |
-| codebase-memory | How does code relate structurally? |
 | Backlog `research` documents | What evidence supports a decision? |
 | Backlog `solutions` documents | What non-obvious reusable lesson was verified? |
 | Backlog `Ideas` document | What idea should be preserved verbatim for later? |
 | Backlog decisions | What explicit decision has been recorded? |
 
-OpenWiki and codebase-memory are upstream tools, not vendored qq subsystems. Derived knowledge never outranks source files and freshly observed Checks.
+OpenWiki is an upstream tool, not a vendored qq subsystem. Derived knowledge never outranks source files and freshly observed Checks.
 
 ### Operator layer
 
@@ -58,7 +56,6 @@ qq has no application database or internal service API. Durable state is intenti
 - Agent runtime configuration and credentials live outside the Repository.
 - `qq-openwiki` uses the invocation's Git `HEAD` as its setup baseline. A per-common-directory runtime lock prevents concurrent writers; setup paths must match `HEAD`, including ignored files, and cleanup restores everything outside `openwiki/**` from that baseline (`bin/qq-openwiki:37-107`).
 - OpenWiki credentials stay under `~/.openwiki/` and must never be committed.
-- codebase-memory’s graph is external and derived; indexing may need refresh after material branch or uncommitted changes.
 
 ## Extension points
 

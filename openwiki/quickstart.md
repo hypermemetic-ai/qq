@@ -14,13 +14,13 @@ qq organizes work around seven entities:
 | **Change** | Branch, commits, and pull request as one delivery unit | GitHub Flow |
 | **Check** | Reproducible evidence about a Change | Local commands and GitHub Actions |
 | **Skill** | Stateless capability invoked by trigger | `skills/*/SKILL.md` |
-| **Knowledge item** | Current description, research, idea, lesson, or vocabulary | `openwiki/`, Backlog documents/decisions, `CONCEPTS.md`, external codebase-memory |
+| **Knowledge item** | Current description, research, idea, lesson, or vocabulary | `openwiki/`, Backlog documents/decisions, `CONCEPTS.md` |
 
 Use these capitalized terms consistently. The canonical definitions and behavioral terms such as **green**, **fresh-context independence**, **silent failure**, and **reproduce before you fix** live in [`CONCEPTS.md`](../CONCEPTS.md).
 
 ## Start here
 
-Start from the assignment and context already supplied, and read [`CONCEPTS.md`](../CONCEPTS.md) before working. Resolve only missing context through the surfaces relevant to the question: a Backlog Task or document for durable intent and decisions, this wiki for the landed system, codebase-memory for relational code questions, and source plus fresh Checks for verification. Backlog records are read and changed through its CLI; source and fresh Checks outrank derived knowledge.
+Start from the assignment and context already supplied, and read [`CONCEPTS.md`](../CONCEPTS.md) before working. Resolve only missing context through the surfaces relevant to the question: a Backlog Task or document for durable intent and decisions, this wiki for the landed system, and source plus fresh Checks for verification. Backlog records are read and changed through its CLI; source and fresh Checks outrank derived knowledge.
 
 For a genuinely new work item, the default `grilling` alignment brief belongs only to the operator-facing accountable owner, unless the operator explicitly opts out. Every Change must bind its consequential decisions to cited dispositions in the owning Task's decision ledger before Repository mutation; a genuinely open decision escalates to the full interview. Spawned, delegated, review, research, maintainer, and event-triggered Actors instead treat bounded assignments as aligned; they execute within scope and return new consequential decisions or scope gaps to their assigning or owning Actor. Do not restart grilling merely to continue already aligned work. Invoke other Skills only when their triggers and the Actor's role match the assignment; each Skill owns its procedure and exceptions.
 

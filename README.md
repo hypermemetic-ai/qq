@@ -16,7 +16,7 @@ qq uses seven descriptive entities:
 | **Change** | branch, commits, and pull request |
 | **Check** | local verification and GitHub Actions |
 | **Skill** | `skills/` |
-| **Knowledge item** | `CONCEPTS.md`, Backlog documents and decisions, OpenWiki, and codebase-memory |
+| **Knowledge item** | `CONCEPTS.md`, Backlog documents and decisions, and OpenWiki |
 
 Every retained component supports one of these entities or provides the minimum
 wiring needed to expose it.
@@ -318,8 +318,8 @@ source of truth without adding global guidance to unrelated Repositories.
 
 ## Knowledge runtime
 
-OpenWiki and codebase-memory are upstream tools, not vendored qq subsystems.
-Install and update them through their own package mechanisms.
+OpenWiki is an upstream tool, not a vendored qq subsystem. Install and update
+it through its own package mechanism.
 
 OpenWiki uses local ChatGPT OAuth and writes the Repository's current-system
 documentation under `openwiki/`:
@@ -378,17 +378,3 @@ scheduled GitHub Actions workflow and scheduled-workflow agent guidance.
 `qq-openwiki` removes that generated workflow and restores the pre-run root
 instruction state after every local run. Remove this compatibility behavior
 when OpenWiki supports local-only code recurrence without managing agent files.
-
-codebase-memory 0.9 or later maintains its derived graph outside the Repository.
-Enable initial indexing and background Git change detection:
-
-```bash
-codebase-memory-mcp update
-codebase-memory-mcp config set auto_index true
-codebase-memory-mcp config set auto_watch true
-```
-
-After restarting the agent runtime, index each long-lived Repository root once.
-codebase-memory's stock agent adapter owns usage guidance, while its configured
-indexer and watcher own freshness. `openwiki/operations.md` describes the
-running stack.

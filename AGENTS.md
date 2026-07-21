@@ -36,8 +36,6 @@ missing, using the surfaces present in the Repository:
 - Where present, Backlog documents and decisions preserve evidence, lessons,
   and settled choices.
 - Where present, `openwiki/` describes the landed system.
-- Where present, codebase-memory answers structural questions such as architecture,
-  dependencies, call paths, or impact.
 
 Use source files and fresh Checks to verify material conclusions. When a
 derived surface conflicts with them, trust source and Checks and report the
@@ -58,34 +56,6 @@ declares scope, the brief wins.
 The tool-managed sections below describe optional per-Repository surfaces.
 Each applies only where its named surface exists in the Repository being
 worked on.
-
-<!-- codebase-memory-mcp:start -->
-# Codebase Knowledge Graph (codebase-memory-mcp)
-
-codebase-memory-mcp maintains a graph. Use the graph for structural questions:
-callers, dependencies, and impact; use text search for literals, non-code files,
-or unknown shapes. Verify conclusions in source.
-
-In Pi, additive `fffind`, `ffgrep`, and `fff-multi-grep` tools are available alongside built-in `find`/`grep`; monitor `agent chooses built-ins over fff` in session logs.
-
-## Runtime routes
-
-When the runtime exposes native MCP tools, use these names:
-
-1. `search_graph` — find functions, classes, routes, variables by pattern
-2. `trace_path` — trace who calls a function or what it calls
-3. `get_code_snippet` — read specific function/class source code
-4. `query_graph` — run Cypher queries for complex patterns
-5. `get_architecture` — high-level project summary
-
-Pi has no MCP server. Run `codebase-memory-mcp cli list_projects`, then use the
-`name` whose `root_path` matches the checkout:
-
-- `codebase-memory-mcp cli search_graph --project <name> --name-pattern '.*OrderHandler.*'`
-- `codebase-memory-mcp cli trace_path --project <name> --function-name OrderHandler --direction inbound`
-
-Choose the available route; tool intent is identical.
-<!-- codebase-memory-mcp:end -->
 
 <!-- OPENWIKI:START -->
 
