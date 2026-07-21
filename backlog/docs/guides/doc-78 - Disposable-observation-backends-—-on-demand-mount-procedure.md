@@ -28,9 +28,10 @@ parenting gaps, or span-level detail a table cannot show.
 - **Arize Phoenix** — heavier, stronger analysis (span attribute search,
   OpenInference `session.id` grouping), ELv2. Mount it in a throwaway venv —
   bare `pip install` is both non-disposable and refused on PEP 668 hosts:
-  `python3 -m venv /tmp/phoenix-sprint && /tmp/phoenix-sprint/bin/pip install arize-phoenix && /tmp/phoenix-sprint/bin/phoenix serve`.
-  The venv is the disposability unit: deleting it in teardown removes every
-  trace. Choose Phoenix when the sprint needs session-grouped queries across
+  `python3 -m venv /tmp/phoenix-sprint && /tmp/phoenix-sprint/bin/pip install arize-phoenix && PHOENIX_WORKING_DIR=/tmp/phoenix-sprint/data /tmp/phoenix-sprint/bin/phoenix serve`.
+  The venv is the disposability unit: PHOENIX_WORKING_DIR keeps Phoenix's
+  SQLite trace store inside it (default $HOME/.phoenix would survive
+  teardown), so deleting the venv removes every trace. Choose Phoenix when the sprint needs session-grouped queries across
   many Changes.
 
 Adopt neither as a platform (doc-71): they are sprint tools.
