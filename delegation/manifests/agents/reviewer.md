@@ -2,7 +2,7 @@
 name: reviewer
 description: Review the assigned Change without modifying it.
 # Runtime model-identity verification is assigned to T-95 ticket 3.
-model: openai-codex/gpt-5.6-sol
+model: openai-codex/gpt-5.6-sol:xhigh
 tools: read, grep, find, ls, bash
 extensions:
 systemPromptMode: replace

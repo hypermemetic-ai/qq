@@ -39,11 +39,17 @@ done
 for role in implementer reviewer researcher; do
   manifest="$ROOT/delegation/manifests/agents/$role.md"
   assert_equal 1 \
-    "$(grep -c '^model: openai-codex/gpt-5\.6-sol$' "$manifest")" \
-    "$role does not have exactly one GPT-5.6 Sol model pin"
+    "$(grep -c '^model: openai-codex/gpt-5\.6-sol:xhigh$' "$manifest")" \
+    "$role does not have exactly one GPT-5.6 Sol xhigh model pin"
   assert_file_contains "$manifest" \
     '# Runtime model-identity verification is assigned to T-95 ticket 3.'
 done
+
+FAST_EXTENSION="$ROOT/extensions/qq-codex-fast.ts"
+[ -f "$FAST_EXTENSION" ] || fail "GPT-5.6 fast-mode extension is missing: $FAST_EXTENSION"
+assert_file_contains "$DISPATCH" 'qq-codex-fast.ts'
+assert_file_contains "$FAST_EXTENSION" 'service_tier'
+assert_file_contains "$FAST_EXTENSION" 'before_provider_request'
 jq -e '
   .schemaVersion == 1
   and .landstripVersion == "0.17.31"
@@ -186,14 +192,17 @@ for role in reviewer researcher implementer; do
     "$role did not retain the Pi events stream"
   assert_file_contains "$stderr_file" \
     "role=$role policy=$expected_policy scope=$expected_scope boundary=landstrip"
-  python3 - "$FAKE_PI_ARGS" <<'PY'
+  python3 - "$FAKE_PI_ARGS" "$ROOT" <<'PY'
 from pathlib import Path
 import sys
 
 args = Path(sys.argv[1]).read_bytes().split(b"\0")
+extension = str(Path(sys.argv[2]) / "extensions" / "qq-codex-fast.ts").encode()
 assert args == [
     b"--approve",
     b"--offline",
+    b"--extension",
+    extension,
     b"--json",
     b"--model",
     b"smoke/model",
@@ -381,13 +390,15 @@ git -C "$fixture_primary" worktree add -q -b dispatch-linked "$fixture_worktree"
 for fixture_checkout in "$fixture_primary" "$fixture_worktree"; do
   mkdir -p \
     "$fixture_checkout/bin/lib" \
-    "$fixture_checkout/delegation/policies"
+    "$fixture_checkout/delegation/policies" \
+    "$fixture_checkout/extensions"
   cp "$DISPATCH" "$fixture_checkout/bin/qq-dispatch"
   cp "$ROOT/bin/lib/qq-bin.sh" "$fixture_checkout/bin/lib/qq-bin.sh"
   cp "$RENDERER" "$fixture_checkout/bin/lib/qq-render-landstrip-policy.mjs"
   cp "$SUPERVISOR" "$fixture_checkout/bin/lib/qq-process-tree-supervisor.py"
   cp "$ROOT/delegation/policies/roles.json" \
     "$fixture_checkout/delegation/policies/roles.json"
+  cp "$FAST_EXTENSION" "$fixture_checkout/extensions/qq-codex-fast.ts"
 done
 fixture_common_dir="$(
   git -C "$fixture_worktree" rev-parse --path-format=absolute --git-common-dir
@@ -715,12 +726,13 @@ assert_file_contains "$tmp/mismatched-landstrip-version.stderr" \
 [ ! -s "$FAKE_PI_ARGS" ] || fail 'mismatched Landstrip version launched Pi'
 
 policy_fixture="$tmp/policy-fixture"
-mkdir -p "$policy_fixture/bin/lib"
+mkdir -p "$policy_fixture/bin/lib" "$policy_fixture/extensions"
 git init -q "$policy_fixture"
 cp "$DISPATCH" "$policy_fixture/bin/qq-dispatch"
 cp "$ROOT/bin/lib/qq-bin.sh" "$policy_fixture/bin/lib/qq-bin.sh"
 cp "$RENDERER" "$policy_fixture/bin/lib/qq-render-landstrip-policy.mjs"
 cp "$SUPERVISOR" "$policy_fixture/bin/lib/qq-process-tree-supervisor.py"
+cp "$FAST_EXTENSION" "$policy_fixture/extensions/qq-codex-fast.ts"
 
 : >"$FAKE_PI_ARGS"
 run_failure missing-policy "$policy_fixture" \

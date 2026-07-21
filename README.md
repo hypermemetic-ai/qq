@@ -122,8 +122,10 @@ role, while its `cwd` selects the assigned worktree. The canonical adapter
 serves any worktree from that Repository, refuses unrelated repositories,
 renders that worktree's Landstrip grants, and starts the real Pi child under
 bounded descendant cleanup. The three role manifests pin delegates to
-`openai-codex/gpt-5.6-sol` independently of the accountable session's default
-model.
+`openai-codex/gpt-5.6-sol:xhigh` independently of the accountable session's
+default model, and the adapter loads `extensions/qq-codex-fast.ts` into every
+child so delegate GPT-5.6 requests run on the priority service tier (fast
+mode).
 
 Start Pi and use `/login` to configure both providers: select Kimi For Coding
 for the accountable session's dedicated `pi-qq` credential, then select

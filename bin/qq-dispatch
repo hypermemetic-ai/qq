@@ -219,6 +219,15 @@ fi
 [[ "$pi_binary" != "$self" ]] \
   || fail 70 "Pi target cannot recurse into the adapter"
 
+fast_extension_input="$adapter_worktree/extensions/qq-codex-fast.ts"
+[[ -f "$fast_extension_input" && -r "$fast_extension_input" ]] \
+  || fail 70 "GPT-5.6 fast-mode extension is unavailable"
+if ! fast_extension="$(realpath -e -- "$fast_extension_input" 2>/dev/null)"; then
+  fail 70 "cannot resolve the GPT-5.6 fast-mode extension"
+fi
+path_is_within "$fast_extension" "$adapter_worktree" \
+  || fail 70 "GPT-5.6 fast-mode extension must resolve beneath the adapter worktree"
+
 timeout_spec="${QQ_DISPATCH_TIMEOUT:-30m}"
 [[ "$timeout_spec" =~ ^(0\.[0-9]+|[1-9][0-9]*(\.[0-9]+)?)([smhd])?$ ]] \
   || fail 71 "invalid QQ_DISPATCH_TIMEOUT '$timeout_spec'"
@@ -272,4 +281,4 @@ printf '[qq-dispatch] role=%s policy=%s scope=%s boundary=landstrip landstrip=%s
 exec "$timeout_binary" -k 10 --signal=TERM "$timeout_spec" \
   "$python_binary" "$tree_supervisor" -- \
   "$landstrip_binary" -p "$policy_path" \
-  "$pi_binary" --approve --offline "$@"
+  "$pi_binary" --approve --offline --extension "$fast_extension" "$@"
