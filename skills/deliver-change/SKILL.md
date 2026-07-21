@@ -15,13 +15,12 @@ qq engines unconditionally: they own containment, degradation, and rails.
    say `none`. Dispositions do not transfer. An uncited decision returns to
    alignment. Mint and cite a decision record when its reach exceeds this
    Change. Confirm branch and worktree isolation.
-2. Call `qq-herdr-home inspect --repo <root>`. Best-effort attach the Change
-   checkout or create a work session from the agreed base. The Task record
-   lives here: new work is born through Backlog's CLI; legacy tracked
-   records are edited on this branch, never primary `main`. Capture the
-   approved plan per `grilling`, its doc id cited in the ledger.
-   Retain workspace and pane IDs. Dispatch from project home; work in
-   checkout. Cockpit attachment never blocks.
+2. Call `qq-herdr-home inspect --repo <root>`. The Change is born as a plain
+   linked worktree from the agreed base; no Herdr workspace is created. The
+   Task record lives here: new work is born through Backlog's CLI; legacy
+   tracked records are edited on this branch, never primary `main`. Capture
+   the approved plan per `grilling`, its doc id cited in the ledger. Dispatch
+   from project home; work in checkout. Cockpit attachment never blocks.
 3. Implement through one complete work order and `delegate-batch`; verify the
    completion envelope against the tree. Use `research` for decision-grade
    evidence and retain judgment. Run Checks observing the changed behavior.
@@ -50,14 +49,15 @@ qq engines unconditionally: they own containment, degradation, and rails.
     sole primary `main` checkout. Exit 2 reports a rail refusal; exit 1 reports
     an error. Stop and retain the Change; repeating the call is safe. A closed
     or rejected Change follows step 7 without altering the completed Task.
-11. After landing succeeds, leave focus untouched and call `qq-change retire
-    <work-session-id> --repo <checkout> --branch <branch> --placeholder-pane
-    <root-placeholder-pane-id>`; for a session-absent path whose lifecycle the
-    owner verifiably owns, omit `--placeholder-pane` and add `--checkout <path>
-    --workspace-absent-owned`. Its idempotent rails own clean checkout, merged
-    branch, ownership, topology, and focus; it never forces removal. On refusal
-    or error, report state and leave every session, checkout, pane, and branch
-    intact. Never force-delete, stash, clean, reset, switch, or repair delivery
-    state.
+11. After landing succeeds, leave focus untouched. When the executing owner
+    verifiably owns the Change delegate lifecycle (the default posture; Changes
+    carry no work session), call `qq-change retire <change-id> --repo <checkout>
+    --branch <branch> --checkout <path> --workspace-absent-owned`. The
+    `--placeholder-pane <root-placeholder-pane-id>` form remains for retiring
+    legacy work sessions created before this posture. Its idempotent rails own
+    clean checkout, merged branch, ownership, topology, and focus; it never
+    forces removal. On refusal or error, report state and leave every session,
+    checkout, pane, and branch intact. Never force-delete, stash, clean, reset,
+    switch, or repair delivery state.
 12. Keep the five gates with the accountable owner: intent alignment, plan
     approval, review verdict, acceptance, and merge.

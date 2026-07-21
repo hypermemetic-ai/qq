@@ -1,4 +1,4 @@
 interface:
   display_name: "Deliver Change"
   short_description: "Drive a Change through verified PR disposition"
-  default_prompt: "Use $deliver-change to take this authorized repository modification through a short-labeled grouped work session, Task completion, a green pull request, operator disposition, safe home synchronization, and Backlog-board return."
+  default_prompt: "Use $deliver-change to take this authorized repository modification through Task completion, a green pull request, operator disposition, safe home synchronization, and Backlog-board return."

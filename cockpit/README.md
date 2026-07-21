@@ -46,21 +46,17 @@ on Space and Agent entries renders stage-boundary one-liners reported through
 (design: doc-43). The rows collapse when no stage is reported.
 
 Each Repository has one persistent project home bound to its primary `main`
-checkout. A dedicated single-pane `backlog board` tab and any operator-created
-general tabs stay at that level. Herdr groups each linked-worktree workspace
-beneath that home as one work session. Each has a unique, operator-agreed
-change label matching `[A-Za-z0-9-]{1,15}`; the label is a recognizable UI
-handle, not a branch name or a claim that Tasks and Changes are one-to-one.
-Accountable agents validate the home with `qq-herdr-home inspect --repo
-<root>`, create or open the worktree from that home workspace with that label,
-and dispatch delegated work into it while their own conversation stays in the
-project home. `qq-herdr-pull --workspace <workspace-id>` is an
-operator-invocable mover, not part of the delivery flow; it fails loudly
-unless the target contains exactly one idle shell placeholder.
+checkout. Its dedicated single-pane `backlog board` tab and operator-created
+general tabs stay at that level. Changes live in plain linked worktrees; no
+per-Change Herdr workspaces are created. Accountable agents validate the home
+with `qq-herdr-home inspect --repo <root>` and dispatch delegated work into the
+Change worktree while their own conversation stays in the project home.
+`qq-herdr-pull --workspace <workspace-id>` remains an operator-invocable mover
+for any workspaces that still exist; its binary is unchanged, and it is not
+part of the delivery flow.
 
-At terminal Change disposition, the accountable and operator-created work panes
-stay intact for inspection and explicit operator retirement, and operator focus
-is left untouched. `qq-herdr-home focus-board --repo <root>` is an
-operator-invocable validator, not part of the disposition flow: it validates
-the persistent home and its unique dedicated Backlog-board tab, then focuses
-that tab without moving or closing the work session.
+At terminal Change disposition, operator-created work panes stay intact for
+inspection, and operator focus is left untouched. `qq-herdr-home focus-board
+--repo <root>` remains an operator-invocable validator, not part of the
+disposition flow: it validates the persistent home and its unique dedicated
+Backlog-board tab, then focuses that tab.

@@ -162,11 +162,10 @@ reset_fake
 export FAKE_FOCUS_UNCONFIRMED=1
 expect_failure 'Backlog board focus was not confirmed' focus-board --repo "$repo"
 
-grep -Fq '[A-Za-z0-9-]{1,15}' "$ROOT/CONCEPTS.md"
-grep -Fq '[A-Za-z0-9-]{1,15}' "$ROOT/cockpit/README.md"
 tr '\n\t' '  ' <"$ROOT/CONCEPTS.md" | \
-  grep -Fq 'agent-chosen, operator-renameable'
-grep -Fq 'dispatches from the project home' "$ROOT/CONCEPTS.md"
+  grep -Fq 'Change checkouts are plain linked worktrees with no Herdr workspace, and delegated agents run as headless child processes in the Change worktree.'
+tr '\n\t' '  ' <"$ROOT/cockpit/README.md" | \
+  grep -Fq 'Changes live in plain linked worktrees; no per-Change Herdr workspaces are created.'
 tr '\n\t' '  ' <"$ROOT/cockpit/README.md" | \
   grep -Fq 'their own conversation stays in the project home'
 if tr '\n\t' '  ' <"$ROOT/cockpit/README.md" | \

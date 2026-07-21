@@ -7,7 +7,7 @@ description: Composes complete work orders and dispatches aligned bounded ticket
 
 Start only after intent and plan bounds settle. For aligned or board-driven
 work, the accountable session stays in the project home, owning judgment and
-delivery; each writing ticket gets its own work session and worktree.
+delivery; each writing ticket gets its own worktree.
 
 ## Work orders
 
@@ -20,7 +20,7 @@ lives in its checkout. The `subagent` task is only the work-order file pointer.
 
 - Couple shared files or invariants and work them sequentially.
 - Fan out independent read-only work natively; give independent writers
-  disjoint branches, worktrees, work sessions, and non-Git resources.
+  disjoint branches, worktrees, and non-Git resources.
 - Run only a dependency chain's unblocked frontier. Keep at most 3–5 writing
   tickets in flight; serialize integration.
 

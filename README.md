@@ -33,8 +33,8 @@ wiring needed to expose it.
 - The single `Ideas` Backlog document is the idea capture surface.
 - Backlog document categories `plans`, `research`, and `solutions` retain
   historical designs, cited investigations, and reusable lessons.
-- herdr provides persistent `main` project homes, short-labeled grouped
-  worktree sessions, named agents, and direct agent-to-agent messaging.
+- herdr provides persistent `main` project homes, named agents, and direct
+  agent-to-agent messaging.
 - `cockpit/` contains the operator's terminal configuration.
 - `delegation/` contains the production pi-subagents role manifests,
   Completion Envelope schema, and Landstrip role policy map.
