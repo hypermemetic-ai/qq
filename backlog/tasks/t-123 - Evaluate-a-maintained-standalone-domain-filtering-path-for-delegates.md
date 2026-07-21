@@ -1,9 +1,10 @@
 ---
 id: T-123
 title: Evaluate a maintained standalone domain-filtering path for delegates
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-07-20 23:59'
+updated_date: '2026-07-21 07:56'
 labels: []
 dependencies:
   - T-95
@@ -39,6 +40,12 @@ Decision ledger:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Per-candidate disposition recorded with hands-on evidence, including whether the domain boundary holds under a fresh off-list connection probe
+- [x] #1 Per-candidate disposition recorded with hands-on evidence, including whether the domain boundary holds under a fresh off-list connection probe
 - [ ] #2 If adopted, delegation policies enforce the delegate domain set fresh, and decision-8's accepted posture is amended by a new decision record
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+AC#1 delivered 2026-07-21 by the confined researcher delegate (eval/t123-egress); disposition minted as research doc-75. Verdict: no adoption; Tinyproxy 1.11.3 + Landstrip httpProxyPort is the single TRIAL recommendation (boundary probed fresh: off-list 403, numeric bypass NETWORK_DENIED, pi EnvHttpProxyAgent honored it). AC#2 awaits the operator's TRIAL decision — four open questions recorded in doc-75. Current delegates retain decision-8's accepted open egress.
+<!-- SECTION:NOTES:END -->
