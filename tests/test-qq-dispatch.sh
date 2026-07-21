@@ -238,12 +238,12 @@ PY
         and (.network | has("allowedDomains") | not)
         and (.network | has("deniedDomains") | not)
         and (.filesystem.allowWrite | sort) == (
-          [$run, $worktree, $common, $worktree_git, "/dev/null", $temp]
+          [$run, "/tmp", $worktree, $common, $worktree_git, "/dev/null", $temp]
           | unique
           | sort
         )
         and (.filesystem.allowWrite | index($runtime)) == null
-        and .filesystem.denyWrite == [$auth]
+        and .filesystem.denyWrite == [$runtime, $auth]
       ' "$policy_snapshot" >/dev/null
   else
     jq -e \
@@ -260,9 +260,9 @@ PY
        }
        and (.network | has("allowedDomains") | not)
        and (.network | has("deniedDomains") | not)
-       and .filesystem.allowWrite == [$run, "/dev/null", $temp]
+       and .filesystem.allowWrite == [$run, "/tmp", "/dev/null", $temp]
        and (.filesystem.allowWrite | index($runtime)) == null
-       and .filesystem.denyWrite == [$auth]
+       and .filesystem.denyWrite == [$runtime, $auth]
       ' \
       "$policy_snapshot" >/dev/null
   fi
@@ -312,9 +312,9 @@ cmp -s -- "$auth_source" "$staged_auth" \
   || fail 'staged auth does not match the launcher auth'
 assert_equal 600 "$(stat -c '%a' "$staged_auth")" \
   'staged auth mode is not 600'
-jq -e --arg run "$auth_run_dir" --arg auth "$staged_auth" --arg temp "$pi_subagent_own_temp" '
-  .filesystem.allowWrite == [$run, "/dev/null", $temp]
-  and .filesystem.denyWrite == [$auth]
+jq -e --arg run "$auth_run_dir" --arg runtime "$auth_runtime" --arg auth "$staged_auth" --arg temp "$pi_subagent_own_temp" '
+  .filesystem.allowWrite == [$run, "/tmp", "/dev/null", $temp]
+  and .filesystem.denyWrite == [$runtime, $auth]
 ' "$tmp/auth-policy.json" >/dev/null
 for auth_output in \
   "$tmp/auth.stdout" \
@@ -423,7 +423,7 @@ jq -e \
   --arg runtime "$fixture_runtime" \
   --arg temp "$pi_subagent_own_temp" '
     .filesystem.allowWrite == [
-      $run, $worktree, $common, $worktree_git, "/dev/null", $temp
+      $run, "/tmp", $worktree, $common, $worktree_git, "/dev/null", $temp
     ]
     and (.filesystem.allowWrite | index($runtime)) == null
   ' "$tmp/linked-policy.json" >/dev/null
@@ -448,7 +448,7 @@ jq -e \
   --arg run "$linked_capture_run_dir" \
   --arg capture "$fixture_capture_path" \
   --arg temp "$pi_subagent_own_temp" \
-  '.filesystem.allowWrite == [$run, $capture, "/dev/null", $temp]' \
+  '.filesystem.allowWrite == [$run, "/tmp", $capture, "/dev/null", $temp]' \
   "$tmp/linked-capture-policy.json" >/dev/null
 
 # Exercise the production shape: the canonical adapter and its policy sources
@@ -481,7 +481,7 @@ jq -e \
   --arg runtime "$canonical_runtime" \
   --arg temp "$pi_subagent_own_temp" '
     .filesystem.allowWrite == [
-      $run, $worktree, $common, $worktree_git, "/dev/null", $temp
+      $run, "/tmp", $worktree, $common, $worktree_git, "/dev/null", $temp
     ]
     and (.filesystem.allowWrite | index($runtime)) == null
   ' "$tmp/canonical-policy.json" >/dev/null
@@ -504,7 +504,7 @@ jq -e \
   --arg run "$canonical_capture_run_dir" \
   --arg capture "$canonical_capture_path" \
   --arg temp "$pi_subagent_own_temp" \
-  '.filesystem.allowWrite == [$run, $capture, "/dev/null", $temp]' \
+  '.filesystem.allowWrite == [$run, "/tmp", $capture, "/dev/null", $temp]' \
   "$tmp/canonical-capture-policy.json" >/dev/null
 
 jq -s -e '
@@ -540,7 +540,7 @@ jq -e \
   --arg run "$capture_run_dir" \
   --arg capture "$capture_path" \
   --arg temp "$pi_subagent_own_temp" \
-  '.filesystem.allowWrite == [$run, $capture, "/dev/null", $temp]' \
+  '.filesystem.allowWrite == [$run, "/tmp", $capture, "/dev/null", $temp]' \
   "$tmp/capture-policy.json" >/dev/null
 jq -s -e \
   --arg run "$capture_run_dir" \
@@ -552,7 +552,7 @@ jq -s -e \
   and $events[0].role == "reviewer"
   and $events[0].policyIdentity == "qq-reviewer-read-only-v1"
   and $events[0].access == "read-only"
-  and $events[0].allowWrite == [$run, $capture, "/dev/null", $temp]
+  and $events[0].allowWrite == [$run, "/tmp", $capture, "/dev/null", $temp]
   and $events[0].structuredOutputCapture == $capture
   and $events[0].timeout == "2s"
   and $events[0].landstripVersion == "landstrip 0.17.31"

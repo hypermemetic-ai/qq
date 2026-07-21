@@ -59,6 +59,7 @@ runtime_root="$tmp/runtime"
 launcher_tmp="$tmp/launcher-tmp"
 test_home="$tmp/home"
 reviewer_run="$runtime_root/runs/reviewer"
+researcher_run="$runtime_root/runs/researcher"
 implementer_run="$runtime_root/runs/implementer"
 own_subagent_tmp="$launcher_tmp/pi-subagent-THIS"
 mkdir -p \
@@ -66,10 +67,12 @@ mkdir -p \
   "$git_common_dir" \
   "$git_worktree_dir" \
   "$reviewer_run/pi-config" \
+  "$researcher_run/pi-config" \
   "$implementer_run/pi-config" \
   "$own_subagent_tmp" \
   "$test_home"
 printf '%s\n' 'staged-auth-sentinel' >"$reviewer_run/pi-config/auth.json"
+printf '%s\n' 'staged-auth-sentinel' >"$researcher_run/pi-config/auth.json"
 printf '%s\n' 'staged-auth-sentinel' >"$implementer_run/pi-config/auth.json"
 
 render_policy() {
@@ -95,9 +98,28 @@ render_policy() {
 }
 
 reviewer_policy="$reviewer_run/landstrip-policy.json"
+researcher_policy="$researcher_run/landstrip-policy.json"
 implementer_policy="$implementer_run/landstrip-policy.json"
 render_policy reviewer "$reviewer_run" "$reviewer_policy"
+render_policy researcher "$researcher_run" "$researcher_policy"
 render_policy implementer "$implementer_run" "$implementer_policy"
+
+for role in reviewer researcher implementer; do
+  policy_variable="${role}_policy"
+  run_variable="${role}_run"
+  policy="${!policy_variable}"
+  run_dir="${!run_variable}"
+  "$node_binary" -e '
+    const fs = require("node:fs");
+    const policy = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    const [runtimeRoot, authPath] = process.argv.slice(2);
+    if (!policy.filesystem.allowWrite.includes("/tmp")) process.exit(1);
+    if (JSON.stringify(policy.filesystem.denyWrite) !== JSON.stringify([runtimeRoot, authPath])) {
+      process.exit(1);
+    }
+  ' "$policy" "$runtime_root" "$run_dir/pi-config/auth.json" \
+    || fail "$role policy lacks the /tmp grant or ordered runtime/auth denies"
+done
 
 # This models a later pi-subagents run: it did not exist when either policy was
 # rendered, so neither policy may acquire access to it through a shared glob.
@@ -122,6 +144,12 @@ assert_write_denied() {
   local label="$3"
   local output="$tmp/$label.output"
   rm -f -- "$target"
+  "$node_binary" -e '
+    require("node:fs").writeFileSync(process.argv[1], "positive-control\n");
+  ' "$target" || fail "$label unsandboxed positive control failed"
+  [[ "$(cat "$target")" == 'positive-control' ]] \
+    || fail "$label unsandboxed positive control did not persist"
+  rm -f -- "$target"
   set +e
   "$landstrip_binary" -p "$policy" \
     "$node_binary" -e '
@@ -138,6 +166,14 @@ assert_overwrite_denied() {
   local target="$2"
   local label="$3"
   local output="$tmp/$label.output"
+  local original
+  original="$(cat "$target")"
+  "$node_binary" -e '
+    require("node:fs").writeFileSync(process.argv[1], "positive-control\n");
+  ' "$target" || fail "$label unsandboxed positive control failed"
+  [[ "$(cat "$target")" == 'positive-control' ]] \
+    || fail "$label unsandboxed positive control did not persist"
+  printf '%s\n' "$original" >"$target"
   set +e
   "$landstrip_binary" -p "$policy" \
     "$node_binary" -e '
@@ -151,10 +187,23 @@ assert_overwrite_denied() {
 }
 
 assert_policy_omits "$reviewer_policy" "$later_subagent_tmp"
+assert_policy_omits "$researcher_policy" "$later_subagent_tmp"
 assert_policy_omits "$implementer_policy" "$later_subagent_tmp"
 
 assert_write_denied \
   "$reviewer_policy" "$worktree/reviewer-created" reviewer-worktree
+
+unsandboxed_git_dir="$tmp/unsandboxed-git"
+confined_git_dir="$tmp/confined-git"
+mkdir "$unsandboxed_git_dir" "$confined_git_dir"
+git init -q "$unsandboxed_git_dir" \
+  || fail 'tmp git init unsandboxed positive control failed'
+"$landstrip_binary" -p "$implementer_policy" git init -q "$confined_git_dir" \
+  >"$tmp/confined-git.output" 2>&1 || {
+    sed -n '1,80p' "$tmp/confined-git.output" >&2
+    fail 'tmp git init was denied'
+  }
+[[ -d "$confined_git_dir/.git" ]] || fail 'tmp git init did not create .git'
 
 implementer_target="$worktree/implementer-created"
 "$landstrip_binary" -p "$implementer_policy" \
