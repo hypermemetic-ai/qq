@@ -16,8 +16,11 @@ EXT="$ROOT/.pi/extensions/qq-subagent-env.ts"
 # the checkout root via the extension's own location.
 assert_file_contains "$EXT" 'PI_SUBAGENT_PI_BINARY'
 assert_file_contains "$EXT" 'PI_SUBAGENT_EXTRA_AGENT_DIRS'
+assert_file_contains "$EXT" 'QQ_DISPATCH_RUNTIME_ROOT'
 assert_file_contains "$EXT" 'process.env.PI_SUBAGENT_PI_BINARY === undefined'
 assert_file_contains "$EXT" 'process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS === undefined'
+assert_file_contains "$EXT" 'process.env.QQ_DISPATCH_RUNTIME_ROOT === undefined'
+assert_file_contains "$EXT" 'pi-subagents-uid-'
 assert_file_contains "$EXT" '"bin/qq-dispatch"'
 assert_file_contains "$EXT" '"delegation",'
 assert_file_contains "$EXT" 'fileURLToPath(import.meta.url)'
@@ -56,6 +59,7 @@ fs.writeFileSync(path.join(cfgDir, "config.json"), JSON.stringify({ defaultSessi
 
 delete process.env.PI_SUBAGENT_PI_BINARY;
 delete process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS;
+delete process.env.QQ_DISPATCH_RUNTIME_ROOT;
 const mod = await import(pathToFileURL(ext).href);
 mod.default(pi);
 assertEq(process.env.PI_SUBAGENT_PI_BINARY, `${root}/bin/qq-dispatch`, "PI_SUBAGENT_PI_BINARY");
@@ -63,6 +67,13 @@ assertEq(
   process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS,
   `${root}/delegation/manifests/agents`,
   "PI_SUBAGENT_EXTRA_AGENT_DIRS",
+);
+const uid = process.getuid?.() ?? process.geteuid?.();
+if (uid === undefined) die("test runtime has no uid source");
+assertEq(
+  process.env.QQ_DISPATCH_RUNTIME_ROOT,
+  path.join(os.tmpdir(), `pi-subagents-uid-${uid}`),
+  "QQ_DISPATCH_RUNTIME_ROOT",
 );
 
 // Session root: created mode 700 when absent, tightened when loose.
@@ -76,10 +87,16 @@ assertEq(fs.statSync(sessRoot).mode & 0o777, 0o700, "session root tightened");
 // Explicit operator env wins, including an explicit empty value.
 process.env.PI_SUBAGENT_PI_BINARY = "/tmp/operator-override";
 process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS = "";
+process.env.QQ_DISPATCH_RUNTIME_ROOT = "/tmp/operator-runtime-override";
 const third = await import(pathToFileURL(ext).href + "?third");
 third.default(pi);
 assertEq(process.env.PI_SUBAGENT_PI_BINARY, "/tmp/operator-override", "operator override preserved");
 assertEq(process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS, "", "explicit empty override preserved");
+assertEq(
+  process.env.QQ_DISPATCH_RUNTIME_ROOT,
+  "/tmp/operator-runtime-override",
+  "runtime-root override preserved",
+);
 
 // A configured root outside the adapter-accepted set is left untouched.
 const outside = path.join(home, "outside-root");

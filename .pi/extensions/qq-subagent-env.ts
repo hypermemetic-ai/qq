@@ -9,6 +9,14 @@
 // include it) dispatches confined delegates by construction, while sessions
 // in other projects never load this file and keep the vanilla dispatcher.
 //
+// It also carries QQ_DISPATCH_RUNTIME_ROOT (T-137): pi-subagents places the
+// structured-output capture file beneath its own temp root
+// ($TMPDIR/pi-subagents-uid-<uid>), while bin/qq-dispatch's runtime root
+// defaults to $TMPDIR/qq-delegate-runtime, so the adapter's fail-closed
+// guard refused every strict-envelope dispatch (T-129's one-time waiver).
+// Setting the runtime root to pi-subagents' temp root keeps the capture
+// path inside it by construction.
+//
 // Explicitly-set variables always win — an operator may override either one
 // deliberately for a session, including to an empty value (pi-subagents
 // treats an empty value as selecting its vanilla fallback). Only a truly
@@ -35,6 +43,19 @@ function applyEnv(): void {
 			"manifests",
 			"agents",
 		);
+	}
+	if (process.env.QQ_DISPATCH_RUNTIME_ROOT === undefined) {
+		// Mirror pi-subagents' TEMP_ROOT_DIR scope (uid-<getuid>) so the
+		// structured-output capture path it creates beneath that root stays
+		// inside the adapter runtime root. Without a uid source we leave the
+		// variable absent and let the adapter refuse loudly.
+		const uid = process.getuid?.() ?? process.geteuid?.();
+		if (uid !== undefined) {
+			process.env.QQ_DISPATCH_RUNTIME_ROOT = join(
+				os.tmpdir(),
+				`pi-subagents-uid-${uid}`,
+			);
+		}
 	}
 }
 

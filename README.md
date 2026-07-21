@@ -90,12 +90,14 @@ mkdir -p ~/.pi/agent
 ln -sT "$HOME/projects/qq/skills" "$HOME/.pi/agent/skills"
 ```
 
-The project-local pi extension `.pi/extensions/qq-subagent-env.ts` sets both
-variables in-process for any pi session in this repository (and its
-worktrees), resolved from the checkout the session runs against:
+The project-local pi extension `.pi/extensions/qq-subagent-env.ts` sets the two
+delegation variables and the structured-output runtime root in-process for any
+pi session in this repository (and its worktrees), resolved from the checkout
+the session runs against:
 
 - `PI_SUBAGENT_PI_BINARY=<checkout>/bin/qq-dispatch`
 - `PI_SUBAGENT_EXTRA_AGENT_DIRS=<checkout>/delegation/manifests/agents`
+- `QQ_DISPATCH_RUNTIME_ROOT=<temporary-directory>/pi-subagents-uid-<uid>`
 
 Pi auto-discovers the extension once the project is trusted, so delegates
 dispatch confined by construction — no shell exports or launcher wrappers to
