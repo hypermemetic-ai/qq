@@ -121,7 +121,7 @@ if (!definition || typeof definition !== "object") fail(`role '${role}' is not d
 if (!["read-only", "workspace-write"].includes(definition.access)) fail(`role '${role}' has an invalid access scope`);
 if (typeof definition.policyIdentity !== "string" || !definition.policyIdentity) fail(`role '${role}' has no policy identity`);
 
-const allowWrite = [runDir, "/tmp"];
+const allowWrite = [runDir];
 if (definition.access === "workspace-write") {
   allowWrite.push(worktree, gitCommonDir, gitWorktreeDir);
 } else if (structuredOutputCapture) {
@@ -141,7 +141,7 @@ const policy = {
   },
   filesystem: {
     allowWrite: [...new Set(allowWrite)],
-    denyWrite: [runtimeRoot, piAuthPath],
+    denyWrite: [piAuthPath],
   },
 };
 writePrivateJson(policyPath, policy);
