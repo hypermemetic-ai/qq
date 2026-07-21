@@ -897,6 +897,46 @@ env -u FAKE_PI_MODE PI_SUBAGENT_CHILD_AGENT=reviewer PI_SUBAGENT_RUN_ID=session-
 printf '{"defaultSessionDir": "%s"}\n' "$parent_tmp/pi-subagent-sessions" \
   > "$test_home/.pi/agent/extensions/subagent/config.json"
 
+# A termination request in the startup handoff must be replayed after the
+# background timeout PID is captured. The DEBUG hook fires after the dispatch
+# traps are armed but before Bash launches that child, rather than waiting for
+# descendant readiness as the ordinary signal probe below does.
+startup_timeout="$tmp/startup-timeout"
+cat >"$startup_timeout" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+trap 'exit 143' TERM
+sleep 0.5
+: >"$STARTUP_TIMEOUT_EXPIRED"
+exit 124
+SH
+chmod +x "$startup_timeout"
+startup_hook="$tmp/startup-hook.bash"
+cat >"$startup_hook" <<'SH'
+trap 'if [[ "$BASH_COMMAND" == "\"\$timeout_binary\" -k 10 --signal=TERM "* ]]; then
+  trap - DEBUG
+  : >"$STARTUP_SIGNAL_WINDOW"
+  kill -TERM "$$"
+fi' DEBUG
+SH
+rm -f "$tmp/startup-signal-window" "$tmp/startup-timeout-expired"
+set +e
+(
+  cd "$ROOT"
+  BASH_ENV="$startup_hook" \
+  STARTUP_SIGNAL_WINDOW="$tmp/startup-signal-window" \
+  STARTUP_TIMEOUT_EXPIRED="$tmp/startup-timeout-expired" \
+  QQ_TIMEOUT_BIN="$startup_timeout" \
+  PI_SUBAGENT_CHILD_AGENT=reviewer \
+  PI_SUBAGENT_RUN_ID=startup-signal-smoke \
+    exec "$DISPATCH" --json
+) >"$tmp/startup-signal.stdout" 2>"$tmp/startup-signal.stderr"
+startup_signal_status=$?
+set -e
+assert_equal 143 "$startup_signal_status" "startup-window SIGTERM status was not preserved (got $startup_signal_status)"
+[ -e "$tmp/startup-signal-window" ] || fail 'startup signal probe missed the handoff window'
+[ ! -e "$tmp/startup-timeout-expired" ] || fail 'startup-window SIGTERM was not replayed to the child'
+
 # PID-directed termination of qq-dispatch must be forwarded through timeout to
 # the process-tree supervisor, while still leaving an error observation.
 rm -f "$FAKE_CHILD_PID"

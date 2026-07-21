@@ -371,6 +371,7 @@ set +e
   "$landstrip_binary" -p "$policy_path" \
   "$pi_binary" --approve --offline --extension "$fast_extension" "$@" &
 dispatch_pid=$!
+[[ -z "$termination_signal" ]] || forward_termination "$termination_signal"
 while true; do
   wait "$dispatch_pid"
   child_status=$?
