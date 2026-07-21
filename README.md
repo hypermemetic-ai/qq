@@ -91,15 +91,20 @@ ln -sT "$HOME/projects/qq/skills" "$HOME/.pi/agent/skills"
 ln -sT "$HOME/projects/qq/skills" "$HOME/.codex/skills"
 ```
 
-Set qq's production adapter and role manifests once in the environment that
-launches the accountable Pi session (cockpit/Herdr session configuration or
-shell rc). These are one-time environment settings. Both paths must be absolute
-and point into the Repository's primary `main` checkout:
+The sourced shell surface (`cockpit/shell/file-navigation.bash`, below)
+exports qq's production adapter and role manifests to every shell born inside
+the checkout, resolved from `QQ_HOME` so both paths stay absolute and point
+into the Repository's primary `main` checkout by construction:
 
 ```bash
-export PI_SUBAGENT_PI_BINARY="$HOME/projects/qq/bin/qq-dispatch"
-export PI_SUBAGENT_EXTRA_AGENT_DIRS="$HOME/projects/qq/delegation/manifests/agents"
+export PI_SUBAGENT_PI_BINARY="$QQ_HOME/bin/qq-dispatch"
+export PI_SUBAGENT_EXTRA_AGENT_DIRS="$QQ_HOME/delegation/manifests/agents"
 ```
+
+The born-inside-the-checkout scoping keeps pi sessions for other repositories
+on the vanilla dispatcher. Launch environments that bypass the interactive
+shell must set the same two variables themselves, against the primary `main`
+checkout.
 
 Set the dispatcher-side pi-subagents config at
 `~/.pi/agent/extensions/subagent/config.json` to include:
