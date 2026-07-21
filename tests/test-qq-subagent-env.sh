@@ -16,8 +16,8 @@ EXT="$ROOT/.pi/extensions/qq-subagent-env.ts"
 # the checkout root via the extension's own location.
 assert_file_contains "$EXT" 'PI_SUBAGENT_PI_BINARY'
 assert_file_contains "$EXT" 'PI_SUBAGENT_EXTRA_AGENT_DIRS'
-assert_file_contains "$EXT" 'process.env.PI_SUBAGENT_PI_BINARY?.trim()'
-assert_file_contains "$EXT" 'process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS?.trim()'
+assert_file_contains "$EXT" 'process.env.PI_SUBAGENT_PI_BINARY === undefined'
+assert_file_contains "$EXT" 'process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS === undefined'
 assert_file_contains "$EXT" '"bin", "qq-dispatch"'
 assert_file_contains "$EXT" '"delegation",'
 assert_file_contains "$EXT" 'fileURLToPath(import.meta.url)'
@@ -51,6 +51,13 @@ process.env.PI_SUBAGENT_PI_BINARY = "/tmp/operator-override";
 const second = await import(pathToFileURL(ext).href + "?second");
 second.default(pi);
 assertEq(process.env.PI_SUBAGENT_PI_BINARY, "/tmp/operator-override", "operator override preserved");
+
+// An explicit empty value is also an operator choice: pi-subagents reads it
+// as selecting the vanilla fallback, so the extension must leave it alone.
+process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS = "";
+const third = await import(pathToFileURL(ext).href + "?third");
+third.default(pi);
+assertEq(process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS, "", "explicit empty override preserved");
 ' || fail "extension applyEnv behavior mismatch"
 
 # The targets the extension points at must exist in this checkout.

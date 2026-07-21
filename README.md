@@ -119,12 +119,18 @@ Set the dispatcher-side pi-subagents config at
 qq delegate visibility uses run artifacts and status, so the intercom bridge
 stays off instead of adding bridge tools to the staged child configuration.
 `defaultSessionDir` keeps child session transcripts under a Landstrip-granted
-`pi-subagent-*` temp root (the adapter re-creates it with mode 700 on every
-dispatch); without it, pi-subagents nests child sessions inside the parent
-session tree, which the confinement policy deliberately does not grant.
+temp root; without it, pi-subagents nests child sessions inside the parent
+session tree, which the confinement policy deliberately does not grant. The
+configured path must be a direct `pi-subagent-*` child of the launcher temp
+directory (`$TMPDIR` or `/tmp`); the adapter enforces the contract on every
+dispatch and fails closed on a symlink, foreign ownership, or any mode other
+than 700 rather than widening the grant.
 
-The adapter and manifests are authoritative qq configuration from primary
-`main`; do not retarget these variables to a Change worktree's copies.
+The extension resolves the adapter and manifests from the checkout the
+session runs in — a session in a Change worktree uses that worktree's
+copies, which travel with the branch. Explicit environment variables always
+win, including empty values (pi-subagents reads those as its vanilla
+fallback); when overriding manually, point at the primary `main` checkout.
 Pi-subagents inherits the one-time setup for every spawn and supplies the child
 role, while its `cwd` selects the assigned worktree. The canonical adapter
 serves any worktree from that Repository, refuses unrelated repositories,

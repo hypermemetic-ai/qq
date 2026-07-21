@@ -15,8 +15,10 @@
 # operator-local herdr config (theme etc.) — lives on disk, never tracked
 /cockpit/herdr/config.toml
 
-# pi project-local state (plan loop, settings) — live agent state, never tracked
-/.pi/
+# pi project-local state (plan loop, settings) — live agent state, never tracked;
+# .pi/extensions/ IS tracked (project-local extensions are repository content)
+/.pi/*
+!/.pi/extensions/
 
 # machine-managed codex system skills — local installs, never tracked
 /skills/.system/

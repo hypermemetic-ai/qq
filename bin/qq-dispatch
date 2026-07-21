@@ -120,12 +120,6 @@ if ! launcher_tmp="$(realpath -e -- "$launcher_tmp_input" 2>/dev/null)"; then
 fi
 [[ -d "$launcher_tmp" ]] \
   || fail 68 "launcher temporary path is not a directory"
-# pi-subagents stores child session transcripts beneath its configured
-# defaultSessionDir ($launcher_tmp/pi-subagent-sessions per README Install).
-# Create it here so the Landstrip policy's pi-subagent-* enumeration always
-# has the session root to grant, even after a /tmp wipe.
-mkdir -p -m 700 -- "$launcher_tmp/pi-subagent-sessions" \
-  || fail 68 "cannot create the pi-subagents session root"
 path_is_within "$runtime_root" "$system_tmp" \
   || fail 68 "runtime root must stay beneath /tmp"
 [[ "$runtime_root" != "$system_tmp" ]] \
@@ -245,6 +239,43 @@ if ! qq_resolve_bin python3; then
   fail 71 "$QQ_BIN_ERROR"
 fi
 python_binary="$QQ_BIN_RESULT"
+
+# Establish the pi-subagents session root. pi-subagents stores child session
+# transcripts beneath its configured defaultSessionDir (README Install); the
+# Landstrip policy can only grant it when it sits directly beneath the
+# launcher temp dir with the pi-subagent- prefix, so enforce that contract
+# and create the root privately. Fail closed on a nonconforming configured
+# path, a symlink, foreign ownership, or a loose mode rather than
+# dispatching into a later EACCES or a transcript-readable directory.
+session_root_configured="$("$node_binary" -e '
+  try {
+    const c = JSON.parse(require("fs").readFileSync(
+      process.env.HOME + "/.pi/agent/extensions/subagent/config.json", "utf8"));
+    if (typeof c.defaultSessionDir === "string" && c.defaultSessionDir.trim()) {
+      process.stdout.write(c.defaultSessionDir);
+    }
+  } catch {}
+' 2>/dev/null)" || session_root_configured=""
+session_root="${session_root_configured:-$launcher_tmp/pi-subagent-sessions}"
+[[ "$session_root" == /* ]] \
+  || fail 68 "pi-subagents defaultSessionDir must be absolute: $session_root"
+session_root_leaf="${session_root#"$launcher_tmp"/}"
+[[ "$session_root_leaf" != "$session_root" && "$session_root_leaf" == pi-subagent-* && "$session_root_leaf" != */* ]] \
+  || fail 68 "pi-subagents defaultSessionDir must be a direct pi-subagent-* child of the launcher temp dir: $session_root"
+if [[ -L "$session_root" ]]; then
+  fail 68 "pi-subagents session root is a symlink: $session_root"
+elif [[ -e "$session_root" ]]; then
+  [[ -d "$session_root" ]] \
+    || fail 68 "pi-subagents session root is not a directory: $session_root"
+  [[ -O "$session_root" ]] \
+    || fail 68 "pi-subagents session root is not owned by the operator: $session_root"
+  session_root_mode="$(stat -c %a "$session_root")"
+  [[ "$session_root_mode" == "700" ]] \
+    || fail 68 "pi-subagents session root must be mode 700 (found $session_root_mode): $session_root"
+else
+  mkdir -m 700 -- "$session_root" \
+    || fail 68 "cannot create the pi-subagents session root: $session_root"
+fi
 
 policy_path="$run_dir/landstrip-policy.json"
 event_log="$runtime_root/wrapper-events.jsonl"

@@ -354,11 +354,12 @@ default_run_dir="$(dirname -- "$default_config_dir")"
 jq -e \
   --arg run "$default_run_dir" \
   --arg runtime "$default_runtime" \
-  --arg temp_prefix "$default_tmp/pi-subagent-" '
+  --arg temp_prefix "$default_tmp/pi-subagent-" \
+  --arg sess "$default_tmp/pi-subagent-sessions" '
     (.filesystem.allowWrite | index($run) != null)
     and (.filesystem.allowWrite | index($runtime) == null)
     and (.filesystem.allowWrite | index("/dev/null") != null)
-    and all(.filesystem.allowWrite[]; startswith($temp_prefix) | not)
+    and (.filesystem.allowWrite | map(select(startswith($temp_prefix))) == [$sess])
   ' \
   "$tmp/default-runtime-policy.json" >/dev/null
 
@@ -787,5 +788,33 @@ fi
   || fail "adapter did not create the pi-subagents session root"
 [ "$(stat -c %a "$parent_tmp/pi-subagent-sessions")" = "700" ] \
   || fail "pi-subagents session root is not mode 700"
+
+# The session-root contract fails closed: a loose-mode or symlinked root, or
+# a configured defaultSessionDir outside the launcher temp contract, must
+# refuse dispatch rather than widen the grant or strand the child (T-128).
+chmod 755 "$pi_subagent_sess"
+run_failure session-root-loose-mode "$ROOT" \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer PI_SUBAGENT_RUN_ID=session-root-guard "$DISPATCH" --json
+assert_file_contains "$tmp/session-root-loose-mode.stderr" 'must be mode 700'
+rm -rf "$pi_subagent_sess"
+ln -s "$parent_tmp/elsewhere" "$pi_subagent_sess"
+run_failure session-root-symlink "$ROOT" \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer PI_SUBAGENT_RUN_ID=session-root-guard "$DISPATCH" --json
+assert_file_contains "$tmp/session-root-symlink.stderr" 'is a symlink'
+rm -f "$pi_subagent_sess"
+mkdir -p "$test_home/.pi/agent/extensions/subagent"
+printf '{"defaultSessionDir": "%s"}\n' "$tmp/outside-root" \
+  > "$test_home/.pi/agent/extensions/subagent/config.json"
+run_failure session-root-bad-config "$ROOT" \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer PI_SUBAGENT_RUN_ID=session-root-guard "$DISPATCH" --json
+assert_file_contains "$tmp/session-root-bad-config.stderr" 'direct pi-subagent-* child'
+printf '{"defaultSessionDir": "%s"}\n' "$parent_tmp/pi-subagent-custom" \
+  > "$test_home/.pi/agent/extensions/subagent/config.json"
+env -u FAKE_PI_MODE PI_SUBAGENT_CHILD_AGENT=reviewer PI_SUBAGENT_RUN_ID=session-root-custom \
+  "$DISPATCH" --json >"$tmp/session-root-custom.stdout" 2>"$tmp/session-root-custom.stderr"
+[ -d "$parent_tmp/pi-subagent-custom" ] \
+  || fail "configured session root was not created"
+[ "$(stat -c %a "$parent_tmp/pi-subagent-custom")" = "700" ] \
+  || fail "configured session root is not mode 700"
 
 printf 'test-qq-dispatch: pass\n'
