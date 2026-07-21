@@ -30,9 +30,9 @@ consequential decision or says `none`. The plan loop exposes the intended
 outcome, ownership boundary, non-goals, success evidence, and each decision's
 disposition before explicit approval.
 
-On explicit approval, capture the final plan as a Backlog `plans` document
-through Backlog's CLI and attach it to the owning Task; `--doc` replaces the
-complete list. The loop's `.pi/plans/` scratch is never captured.
+On explicit approval, capture the plan as a Backlog `plans` document
+through Backlog's CLI, attached to the owning Task (`--doc` replaces the
+list); the loop's `.pi/plans/` scratch is never captured.
 
 For a settled decision reaching beyond one Change, mint its Backlog decision
 record in the Change checkout first encoding it, riding that pull request—never
