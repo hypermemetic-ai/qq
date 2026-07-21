@@ -1,0 +1,16 @@
+{
+  "preset": "pi-footer",
+  "iconMode": "text",
+  "separator": "none",
+  "extensionStatusRow": { "hiddenKeys": ["merge-ready"], "knownKeys": ["merge-ready"] },
+  "lines": [
+    [
+      { "type": "cwd", "options": { "raw": true, "fg": "pi:dim", "cwdDisplayStyle": "full-home" } },
+      { "type": "git-branch", "options": { "icon": " ", "fg": "pi:dim", "hideWhenEmpty": true, "gitBranchDisplayStyle": "round-brackets" } },
+      { "type": "session-name", "options": { "icon": " • ", "fg": "pi:dim", "hideWhenEmpty": true } },
+      { "type": "cost", "options": { "icon": " ", "fg": "pi:dim", "costFormatStyle": "compact", "hideWhenZero": true } },
+      { "type": "context", "options": { "icon": " ", "fg": "pi:dim", "contextConditionalColors": true, "contextWarningPercent": 20, "contextDangerPercent": 50, "warningFg": "pi:warning", "dangerFg": "pi:error" } },
+      { "type": "context-window", "options": { "icon": "/", "fg": "pi:dim", "contextConditionalColors": true, "contextWarningPercent": 20, "contextDangerPercent": 50, "warningFg": "pi:warning", "dangerFg": "pi:error", "tokenFormatStyle": "compact" } }
+    ]
+  ]
+}
