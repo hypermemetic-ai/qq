@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-07-21 07:41'
-updated_date: '2026-07-21 09:45'
+updated_date: '2026-07-21 10:41'
 labels: []
 dependencies: []
 type: bug
@@ -23,4 +23,6 @@ From the T-127 ticket-1 confined re-review (2026-07-21, verdict changes-requeste
 3. bin/qq-observe (~169-185): lstat-then-open gap with no O_NONBLOCK; replacing the leaf with a FIFO between lstat and open blocks inside os.open. Fix direction: O_NONBLOCK on the probe open, then fstat-verify regular file before writing.
 
 Reviewer also invoked REVIEW.md's same-fix-smaller loop: the fix delta grew counters (+67 production LOC, +16 decision points); the follow-up should seek the simplest form of each fix.
+
+Trust boundary (owner-declared 2026-07-21, review round 2): the defended adversary is the Landstrip-confined delegate child plus pre-planted static path objects. A confined child's write grants cover its worktree, its pi-subagent session dirs, and temp — never the operator's XDG state root — so it cannot rename or replace store-path components. Concurrent mutation of the store path by an unconfined operator-UID process is outside the defended model: such a process already holds everything the store boundary could protect. This restates the operator's 2026-07-21 disposition of this finding class (accepted residual risk, microsecond-window local-adversary cases) as the standing boundary for review.
 <!-- SECTION:DESCRIPTION:END -->
