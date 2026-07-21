@@ -88,7 +88,9 @@ worktree="$invocation_root"
 
 role="${PI_SUBAGENT_CHILD_AGENT:-}"
 case "$role" in
-  reviewer | researcher | implementer) ;;
+  implementer) observation_phase=implementation ;;
+  reviewer) observation_phase=review ;;
+  researcher) observation_phase=research ;;
   "") fail 66 "PI_SUBAGENT_CHILD_AGENT is required" ;;
   *) fail 66 "unsupported child role '$role'" ;;
 esac
@@ -317,10 +319,101 @@ export PI_CODING_AGENT_DIR="$pi_config_dir"
 export PI_CODING_AGENT_SESSION_DIR="$run_dir/sessions"
 export PI_OFFLINE=1
 
+observe="$bin_dir/qq-observe"
+observation_enabled=true
+trace_id="${QQ_TRACE_ID:-}"
+parent_span_id="${PI_PARENT_SPAN_ID:-}"
+root_span_id="${PI_ROOT_SPAN_ID:-}"
+if [[ -n "$trace_id" && ! "$trace_id" =~ ^[0-9a-f]{32}$ ]] \
+  || [[ -n "$parent_span_id" && ! "$parent_span_id" =~ ^[0-9a-f]{16}$ ]] \
+  || [[ -n "$root_span_id" && ! "$root_span_id" =~ ^[0-9a-f]{16}$ ]]; then
+  printf '[qq-dispatch] observation disabled: inherited trace context is malformed\n' >&2
+  unset QQ_TRACE_ID PI_PARENT_SPAN_ID PI_ROOT_SPAN_ID
+  observation_enabled=false
+elif [[ ! -x "$observe" ]]; then
+  printf '[qq-dispatch] observation disabled: qq-observe is unavailable\n' >&2
+  observation_enabled=false
+else
+  if [[ -z "$trace_id" ]]; then
+    trace_id="$($observe id trace 2>/dev/null)" || observation_enabled=false
+  fi
+  span_id="$($observe id span 2>/dev/null)" || observation_enabled=false
+  if $observation_enabled; then
+    [[ -n "$root_span_id" ]] || root_span_id="${parent_span_id:-$span_id}"
+    export QQ_TRACE_ID="$trace_id"
+    export PI_ROOT_SPAN_ID="$root_span_id"
+    export PI_PARENT_SPAN_ID="$span_id"
+    span_start="$(date --iso-8601=ns)"
+  else
+    printf '[qq-dispatch] observation disabled: cannot generate trace context\n' >&2
+  fi
+fi
+
 printf '[qq-dispatch] role=%s policy=%s scope=%s boundary=landstrip landstrip=%s timeout=%s\n' \
   "$role" "$policy_identity" "$access_scope" "$landstrip_version" "$timeout_spec" >&2
 
-exec "$timeout_binary" -k 10 --signal=TERM "$timeout_spec" \
+dispatch_pid=""
+termination_signal=""
+# shellcheck disable=SC2317  # Invoked asynchronously by the traps below.
+forward_termination() {
+  termination_signal="$1"
+  if [[ -n "$dispatch_pid" ]]; then
+    kill -s "$1" "$dispatch_pid" 2>/dev/null || true
+  fi
+}
+trap 'forward_termination TERM' TERM
+trap 'forward_termination INT' INT
+trap 'forward_termination HUP' HUP
+
+set +e
+"$timeout_binary" -k 10 --signal=TERM "$timeout_spec" \
   "$python_binary" "$tree_supervisor" -- \
   "$landstrip_binary" -p "$policy_path" \
-  "$pi_binary" --approve --offline --extension "$fast_extension" "$@"
+  "$pi_binary" --approve --offline --extension "$fast_extension" "$@" &
+dispatch_pid=$!
+while true; do
+  wait "$dispatch_pid"
+  child_status=$?
+  if [[ -n "$termination_signal" ]] && kill -0 "$dispatch_pid" 2>/dev/null; then
+    continue
+  fi
+  break
+done
+set -e
+trap - TERM INT HUP
+if [[ -n "$termination_signal" ]]; then
+  case "$termination_signal" in
+    HUP) child_status=129 ;;
+    INT) child_status=130 ;;
+    TERM) child_status=143 ;;
+  esac
+fi
+
+if $observation_enabled; then
+  span_end="$(date --iso-8601=ns)"
+  observation_status=ok
+  [[ "$child_status" -eq 0 ]] || observation_status=error
+  parent_context=()
+  if [[ -n "$parent_span_id" ]]; then
+    parent_context=(--parent-span-id "$parent_span_id")
+  fi
+  if ! "$observe" record \
+    --name invoke_agent \
+    --phase "$observation_phase" \
+    --actor "$role" \
+    --start "$span_start" \
+    --end "$span_end" \
+    --trace-id "$trace_id" \
+    --span-id "$span_id" \
+    --root-span-id "$root_span_id" \
+    "${parent_context[@]}" \
+    --status "$observation_status" \
+    --source qq-dispatch \
+    --attribute "run.id=${PI_SUBAGENT_RUN_ID:-manual}" \
+    --attribute "child.index=$child_index" \
+    --attribute "worktree=$worktree" \
+    --attribute "exit.status=$child_status" >/dev/null; then
+    printf '[qq-dispatch] observation write failed; dispatch result preserved\n' >&2
+  fi
+fi
+exit "$child_status"

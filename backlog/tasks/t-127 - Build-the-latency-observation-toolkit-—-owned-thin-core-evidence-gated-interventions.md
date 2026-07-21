@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-07-21 03:24'
-updated_date: '2026-07-21 03:25'
+updated_date: '2026-07-21 07:41'
 labels: []
 dependencies: []
 documentation:
@@ -32,9 +32,15 @@ Decision ledger:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Observation core: phase-span records emitted at the qq-dispatch chokepoints plus a reader over pi session JSONL; append-only local span store under a runtime path, never tracked; shell tests green
-- [ ] #2 Cross-session correlation: trace-context injection at dispatch spawn points; delegate and subagent spans parent under the accountable root wherever the substrate allows; gaps documented
+- [x] #1 Observation core: phase-span records emitted at the qq-dispatch chokepoints plus a reader over pi session JSONL; append-only local span store under a runtime path, never tracked; shell tests green
+- [x] #2 Cross-session correlation: trace-context injection at dispatch spawn points; delegate and subagent spans parent under the accountable root wherever the substrate allows; gaps documented
 - [ ] #3 Analysis surface: one command summarizing phase latencies and span recurrence over a window — the evidence surface that selects or kills intervention candidates, T-121 first among them
 - [ ] #4 Disposable backend: documented on-demand mount of Jaeger all-in-one or Phoenix for analysis sprints; nothing standing
 - [ ] #5 Baseline report: first real measurements over at least 5 delivered Changes attached as a research doc; intervention candidates ranked by measured impact with explicit select/kill recommendations
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Ticket 1 (AC#1+AC#2) delivered via the 2026-07-21 delegate batch: e7869e4 (observation core: append-only span store under XDG state, pi session-JSONL reader, dispatch span emission, trace-context propagation) + ad77a4a (review-round-1 fixes: signal-trap forwarding containment, store-leaf fencing, session version-3 guard, role-derived phases, repository-identity store). Two confined review rounds; round 2 verified all five substantive fixes and left three microsecond-window races, dispositioned as accepted residual risk by the operator 2026-07-21 (land now for the approved pi-code-tool A/B trial) and filed as T-136. Owner evidence: native full suite green at ad77a4a; new regression tests fail against e7869e4, pass at HEAD. Counter audits matched envelopes (+272 core; +67 LOC/+16 DP fix).
+<!-- SECTION:NOTES:END -->
