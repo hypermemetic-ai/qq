@@ -31,7 +31,7 @@ outcome, ownership boundary, non-goals, success evidence, and each decision's
 disposition before explicit approval.
 
 On explicit approval, capture the final plan as a Backlog `plans` document
-through the Backlog CLI and attach it to the owning Task; `--doc` replaces the
+through Backlog's CLI and attach it to the owning Task; `--doc` replaces the
 complete list. The loop's `.pi/plans/` scratch is never captured.
 
 For a settled decision reaching beyond one Change, mint its Backlog decision
