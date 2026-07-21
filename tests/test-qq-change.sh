@@ -113,7 +113,7 @@ case "${1:-} ${2:-}" in
     ;;
   "agent list")
     if [ "${FAKE_LIVE_AGENT:-}" = 1 ]; then
-      printf '%s\n' '{"result":{"agents":[{"workspace_id":"change-ws","agent":"codex"}]}}'
+      printf '%s\n' '{"result":{"agents":[{"workspace_id":"change-ws","agent":"other-agent"}]}}'
     else
       printf '%s\n' '{"result":{"agents":[]}}'
     fi

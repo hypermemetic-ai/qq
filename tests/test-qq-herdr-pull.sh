@@ -21,7 +21,7 @@ case "${1:-} ${2:-}" in
   "pane current")
     printf '{"result":{"pane":{"pane_id":"%s","workspace_id":"%s","agent":%s}}}\n' \
       "${FAKE_CURRENT_PANE:-source:p1}" "${FAKE_CURRENT_WORKSPACE:-source}" \
-      "${FAKE_CURRENT_AGENT_JSON:-\"codex\"}"
+      "${FAKE_CURRENT_AGENT_JSON:-\"other-agent\"}"
     ;;
   "workspace get")
     [ "${FAKE_WORKSPACE_MISSING:-}" != 1 ] || exit 1
@@ -124,7 +124,7 @@ assert_file_not_matches "$log" '^workspace get '
 assert_file_not_matches "$log" '^pane move '
 
 reset_fake
-export FAKE_TARGET_AGENT=codex
+export FAKE_TARGET_AGENT=other-agent
 expect_agent_failure "already occupied by an agent"
 assert_file_not_matches "$log" '^pane move '
 

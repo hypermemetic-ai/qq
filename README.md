@@ -82,13 +82,12 @@ package at the same version.) The Landstrip binary then lives beneath
 the absolute `QQ_LANDSTRIP_BIN` override when one is set. It does not resolve a
 Repository-local `.pi/npm` copy.
 
-Mount the qq Skill root directly into Pi and Codex. Each is one root mount, so
-Skill membership stays live by construction:
+Mount the qq Skill root directly into Pi. This is one root mount, so Skill
+membership stays live by construction:
 
 ```bash
-mkdir -p ~/.pi/agent ~/.codex
+mkdir -p ~/.pi/agent
 ln -sT "$HOME/projects/qq/skills" "$HOME/.pi/agent/skills"
-ln -sT "$HOME/projects/qq/skills" "$HOME/.codex/skills"
 ```
 
 The project-local pi extension `.pi/extensions/qq-subagent-env.ts` sets both
@@ -285,10 +284,8 @@ post-hoc `read-session` import can use the same IDs. Pi session JSONL itself has
 no cross-file correlation field; text echo is the required fallback for that
 case.
 
-On a machine migrating off the retired installer, remove the old Codex
-per-skill link directory first (after checking it holds nothing but links into
-this checkout): `rm -r ~/.codex/skills`. `ln -sT` fails loudly rather than
-nesting a link inside a directory that still exists.
+On a machine with the retired Skill mount, remove it if it exists (after
+checking it points into this checkout): `rm -r ~/.codex/skills`.
 
 Source the shell surface from `.bashrc`; it prepends `bin/` to `PATH` and
 provides the cockpit navigation helpers:
@@ -336,8 +333,8 @@ In a restricted fresh-agent or service environment, set `QQ_OPENWIKI_BIN` to the
 OpenWiki executable's absolute path. The wrapper validates and invokes that
 path directly; when it is unset, the shared resolver checks `PATH` and known
 Homebrew locations. It does not use a login shell for executable discovery.
-The same `QQ_<TOOL>_BIN` convention applies to Herdr, GitHub CLI, Git, and Codex
-where qq resolves those tools.
+The same `QQ_<TOOL>_BIN` convention applies to Herdr, GitHub CLI, and Git where
+qq resolves those tools.
 
 Temporary debt (2026-07-10): ChatGPT OAuth merged in OpenWiki PR #151 after the
 0.1.0 npm release. The operator machine is therefore built from upstream commit

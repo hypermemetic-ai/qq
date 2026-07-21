@@ -61,8 +61,8 @@ chmod +x "$fake"
 export QQ_HERDR_BIN="$fake"
 export FAKE_LOG="$log"
 export XDG_RUNTIME_DIR="$tmp"
-# Sidebar order: codex first, pi second in the project home.
-export FAKE_AGENTS_DEFAULT='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":"ws","agent":"codex"},{"pane_id":"ws:p3","workspace_id":"ws","agent":"pi"},{"pane_id":"other:p1","workspace_id":"other","agent":"codex"}]}}'
+# Sidebar order: other-agent first, pi second in the project home.
+export FAKE_AGENTS_DEFAULT='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":"ws","agent":"other-agent"},{"pane_id":"ws:p3","workspace_id":"ws","agent":"pi"},{"pane_id":"other:p1","workspace_id":"other","agent":"other-agent"}]}}'
 export FAKE_WORKSPACES_DEFAULT='{"result":{"workspaces":[{"workspace_id":"ws","worktree":{"checkout_path":"/repo","is_linked_worktree":false,"repo_root":"/repo"}},{"workspace_id":"other","worktree":null}]}}'
 state_file="$tmp/qq-herdr-snap.ws.prev"
 home_state_file="$tmp/qq-herdr-snap.home.prev"
@@ -90,7 +90,7 @@ assert_equal 'ws:p1' "$(cat "$state_file")" "state file should record the origin
 # From linked work, prefer this Repository's project-home pi even when a local
 # pi appears earlier; bounce back using home-keyed state.
 reset_fake
-export FAKE_AGENTS_JSON='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":"ws","agent":"codex"},{"pane_id":"ws:p3","workspace_id":"ws","agent":"pi"},{"pane_id":"home:p9","workspace_id":"home","agent":"codex"},{"pane_id":"home:p3","workspace_id":"home","agent":"pi"},{"pane_id":"other:p2","workspace_id":"other","agent":"codex"}]}}'
+export FAKE_AGENTS_JSON='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":"ws","agent":"other-agent"},{"pane_id":"ws:p3","workspace_id":"ws","agent":"pi"},{"pane_id":"home:p9","workspace_id":"home","agent":"other-agent"},{"pane_id":"home:p3","workspace_id":"home","agent":"pi"},{"pane_id":"other:p2","workspace_id":"other","agent":"other-agent"}]}}'
 export FAKE_WORKSPACES_JSON='{"result":{"workspaces":[{"workspace_id":"ws","worktree":{"checkout_path":"/repo-work","is_linked_worktree":true,"repo_root":"/repo"}},{"workspace_id":"sibling","worktree":{"checkout_path":"/repo-sibling","is_linked_worktree":true,"repo_root":"/repo"}},{"workspace_id":"other","worktree":{"checkout_path":"/other","is_linked_worktree":false,"repo_root":"/other"}},{"workspace_id":"home","worktree":{"checkout_path":"/repo","is_linked_worktree":false,"repo_root":"/repo"}}]}}'
 HERDR_PANE_ID=ws:p1 "$SNAP"
 assert_file_contains "$log" 'agent focus home:p3'
@@ -98,34 +98,34 @@ assert_equal 'ws:p1' "$(cat "$home_state_file")" "home state should record the o
 [ ! -e "$state_file" ] || fail "cross-space snap wrote state under the origin workspace"
 
 : >"$log"
-export FAKE_WORKSPACE=home FAKE_PREV_PANE=ws:p1 FAKE_PREV_AGENT_JSON='"codex"'
+export FAKE_WORKSPACE=home FAKE_PREV_PANE=ws:p1 FAKE_PREV_AGENT_JSON='"other-agent"'
 HERDR_PANE_ID=home:p3 "$SNAP"
 assert_file_contains "$log" 'agent focus ws:p1'
 
 # With no pi in the Repository home, prefer focused-workspace pi.
 reset_fake
-export FAKE_AGENTS_JSON='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":"ws","agent":"codex"},{"pane_id":"ws:p3","workspace_id":"ws","agent":"pi"},{"pane_id":"home:p9","workspace_id":"home","agent":"codex"}]}}'
+export FAKE_AGENTS_JSON='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":"ws","agent":"other-agent"},{"pane_id":"ws:p3","workspace_id":"ws","agent":"pi"},{"pane_id":"home:p9","workspace_id":"home","agent":"other-agent"}]}}'
 export FAKE_WORKSPACES_JSON='{"result":{"workspaces":[{"workspace_id":"ws","worktree":{"checkout_path":"/repo-work","is_linked_worktree":true,"repo_root":"/repo"}},{"workspace_id":"home","worktree":{"checkout_path":"/repo","is_linked_worktree":false,"repo_root":"/repo"}}]}}'
 output="$(HERDR_PANE_ID=ws:p1 QQ_HERDR_SNAP_DRY=1 "$SNAP")"
 assert_equal 'current=ws:p1 workspace=ws target=ws:p3 prev=none' "$output"
 
 # Failed home metadata still falls back to a valid focused-workspace pi.
 reset_fake
-export FAKE_AGENTS_JSON='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":"ws","agent":"codex"},{"pane_id":"ws:p3","workspace_id":"ws","agent":"pi"}]}}'
+export FAKE_AGENTS_JSON='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":"ws","agent":"other-agent"},{"pane_id":"ws:p3","workspace_id":"ws","agent":"pi"}]}}'
 export FAKE_WORKSPACES_JSON='not-json'
 HERDR_PANE_ID=ws:p1 "$SNAP"
 assert_file_contains "$log" 'agent focus ws:p3'
 
 # Without pi, no other runtime is selected.
 reset_fake
-export FAKE_AGENTS_JSON='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":"ws","agent":"codex"},{"pane_id":"ws:p2","workspace_id":"ws","agent":"codex"}]}}'
+export FAKE_AGENTS_JSON='{"result":{"agents":[{"pane_id":"ws:p9","workspace_id":"ws","agent":"other-agent"},{"pane_id":"ws:p2","workspace_id":"ws","agent":"other-agent"}]}}'
 HERDR_PANE_ID=ws:p1 "$SNAP"
 assert_file_contains "$log" 'notification show qq-snap --body no agent session in this space'
 assert_file_not_matches "$log" '^agent focus '
 
 # A reported non-Pi agent presence on the focused shell pane is not a target.
 reset_fake
-export FAKE_AGENTS_JSON='{"result":{"agents":[{"terminal_id":"term:1","agent_status":"working","workspace_id":"ws","tab_id":"ws:t1","pane_id":"ws:p1","focused":true,"revision":1,"agent":"codex","screen_detection_skipped":true}]}}'
+export FAKE_AGENTS_JSON='{"result":{"agents":[{"terminal_id":"term:1","agent_status":"working","workspace_id":"ws","tab_id":"ws:t1","pane_id":"ws:p1","focused":true,"revision":1,"agent":"other-agent","screen_detection_skipped":true}]}}'
 HERDR_PANE_ID=ws:p1 "$SNAP"
 assert_file_contains "$log" 'notification show qq-snap --body no agent session in this space'
 assert_file_not_matches "$log" 'already on the orchestrator'
@@ -133,7 +133,7 @@ assert_file_not_matches "$log" '^agent focus '
 
 # No agent in the focused workspace: best-effort notification, no focus.
 reset_fake
-export FAKE_AGENTS_JSON='{"result":{"agents":[{"pane_id":"other:p1","workspace_id":"other","agent":"codex"}]}}'
+export FAKE_AGENTS_JSON='{"result":{"agents":[{"pane_id":"other:p1","workspace_id":"other","agent":"other-agent"}]}}'
 HERDR_PANE_ID=ws:p1 "$SNAP"
 grep -q '^notification show qq-snap --body no agent session in this space$' "$log"
 assert_file_not_matches "$log" '^agent focus '
@@ -156,7 +156,7 @@ assert_file_not_matches "$log" '^agent focus '
 # Bounce: already on the orchestrator, previous pane hosts an agent.
 reset_fake
 printf 'ws:p1\n' >"$state_file"
-export FAKE_PREV_PANE=ws:p1 FAKE_PREV_AGENT_JSON='"codex"'
+export FAKE_PREV_PANE=ws:p1 FAKE_PREV_AGENT_JSON='"other-agent"'
 HERDR_PANE_ID=ws:p3 "$SNAP"
 grep -q '^agent focus ws:p1$' "$log"
 
