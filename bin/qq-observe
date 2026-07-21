@@ -245,7 +245,7 @@ def read_store():
 def summary_span(line):
     try:
         item = json.loads(line.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+    except (UnicodeDecodeError, ValueError, RecursionError):
         return None
     if not isinstance(item, dict) or not SPAN_FIELDS <= item.keys():
         return None
@@ -285,6 +285,12 @@ def summary_span(line):
         or not isinstance(item["source"], str)
         or not isinstance(item["attributes"], dict)
     ):
+        return None
+    # schema v1 derives duration_ms from start/end (see emit()): reject
+    # impossible ordering, and durations exceeding the span's own wall time
+    # beyond slack, so adversarial or corrupt lines cannot poison aggregates.
+    # Understated durations (active-time spans) remain admissible.
+    if end < start or duration > (end - start).total_seconds() * 1000 + 1000:
         return None
     item["duration_ms"] = duration
     return item, start

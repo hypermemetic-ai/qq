@@ -25,10 +25,13 @@ parenting gaps, or span-level detail a table cannot show.
   `docker run --rm -p 16686:16686 -p 4317:4317 cr.jaegertracing.io/jaegertracing/jaeger:2.13.0`
   (UI on 16686, OTLP ingest on 4317; in-memory storage — container stop is
   the teardown and loses nothing qq needs).
-- **Arize Phoenix** — heavier (one pip process), stronger analysis (span
-  attribute search, OpenInference `session.id` grouping), ELv2:
-  `pip install arize-phoenix && phoenix serve`. Choose it when the sprint
-  needs session-grouped queries across many Changes.
+- **Arize Phoenix** — heavier, stronger analysis (span attribute search,
+  OpenInference `session.id` grouping), ELv2. Mount it in a throwaway venv —
+  bare `pip install` is both non-disposable and refused on PEP 668 hosts:
+  `python3 -m venv /tmp/phoenix-sprint && /tmp/phoenix-sprint/bin/pip install arize-phoenix && /tmp/phoenix-sprint/bin/phoenix serve`.
+  The venv is the disposability unit: deleting it in teardown removes every
+  trace. Choose Phoenix when the sprint needs session-grouped queries across
+  many Changes.
 
 Adopt neither as a platform (doc-71): they are sprint tools.
 
@@ -45,6 +48,7 @@ vocabulary so the replay is a mechanical mapping, not a redesign.
 ## Teardown checklist
 
 1. Stop the container/process (Jaeger's `--rm` self-cleans).
-2. Delete any sprint-local replay script and exported data.
+2. Delete the Phoenix sprint venv (`rm -rf /tmp/phoenix-sprint`) and any
+   sprint-local replay script or exported data.
 3. Record the sprint's findings as a research doc attached to the owning
    Task; the span store itself is never exported off the machine.

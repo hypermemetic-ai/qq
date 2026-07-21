@@ -418,4 +418,40 @@ set -e
 assert_equal 65 "$outside_status" 'non-worktree invocation was accepted'
 assert_file_contains "$tmp/outside.stderr" 'not in a Git worktree'
 
+# Adversarial/malformed store lines must be skipped, never crash nor poison.
+adversarial_state="$tmp/adversarial-state"
+adversarial_store="$adversarial_state/qq/spans/$repository_name/spans.jsonl"
+mkdir -p "$(dirname "$adversarial_store")"
+summary_span 2026-01-02T00:00:00Z review honest delta 100 \
+  66666666666666666666666666666666 ok >"$adversarial_store"
+{
+  python3 -c 'print("{\"schema_version\":1,\"duration_ms\":" + "9"*5000 + ",\"name\":\"big\",\"actor\":\"a\",\"start_time\":\"2026-01-02T00:00:00Z\"}")'
+  jq -cn '{
+    schema_version: 1, trace_id: "77777777777777777777777777777777",
+    span_id: "3333333333333333", parent_span_id: null,
+    root_span_id: "3333333333333333", name: "rewound", phase: "review",
+    actor: "a", start_time: "2026-01-02T01:00:00Z",
+    end_time: "2026-01-02T00:00:00Z", duration_ms: 5.0,
+    status: "ok", source: "test-fixture", attributes: {}
+  }'
+  jq -cn '{
+    schema_version: 1, trace_id: "88888888888888888888888888888888",
+    span_id: "4444444444444444", parent_span_id: null,
+    root_span_id: "4444444444444444", name: "inflated", phase: "review",
+    actor: "a", start_time: "2026-01-02T00:00:00Z",
+    end_time: "2026-01-02T00:01:00Z", duration_ms: 999999999.0,
+    status: "ok", source: "test-fixture", attributes: {}
+  }'
+} >>"$adversarial_store"
+(
+  cd "$ROOT"
+  XDG_STATE_HOME="$adversarial_state" "$OBSERVE" summarize >"$tmp/adversarial.txt"
+  XDG_STATE_HOME="$adversarial_state" "$OBSERVE" summarize --json >"$tmp/adversarial.json"
+)
+assert_file_contains "$tmp/adversarial.txt" 'Spans: 1'
+assert_file_contains "$tmp/adversarial.txt" 'Malformed lines skipped: 3'
+jq -e '.spans == 1 and .skipped == 3 and (.phases[0].total_ms | isfinite)' \
+  "$tmp/adversarial.json" >/dev/null \
+  || fail 'JSON summary over adversarial lines was invalid or poisoned'
+
 printf 'test-qq-observe: pass\n'
