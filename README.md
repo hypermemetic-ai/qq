@@ -91,20 +91,18 @@ ln -sT "$HOME/projects/qq/skills" "$HOME/.pi/agent/skills"
 ln -sT "$HOME/projects/qq/skills" "$HOME/.codex/skills"
 ```
 
-The sourced shell surface (`cockpit/shell/file-navigation.bash`, below)
-exports qq's production adapter and role manifests to every shell born inside
-the checkout, resolved from `QQ_HOME` so both paths stay absolute and point
-into the Repository's primary `main` checkout by construction:
+The project-local pi extension `.pi/extensions/qq-subagent-env.ts` sets both
+variables in-process for any pi session in this repository (and its
+worktrees), resolved from the checkout the session runs against:
 
-```bash
-export PI_SUBAGENT_PI_BINARY="$QQ_HOME/bin/qq-dispatch"
-export PI_SUBAGENT_EXTRA_AGENT_DIRS="$QQ_HOME/delegation/manifests/agents"
-```
+- `PI_SUBAGENT_PI_BINARY=<checkout>/bin/qq-dispatch`
+- `PI_SUBAGENT_EXTRA_AGENT_DIRS=<checkout>/delegation/manifests/agents`
 
-The born-inside-the-checkout scoping keeps pi sessions for other repositories
-on the vanilla dispatcher. Launch environments that bypass the interactive
-shell must set the same two variables themselves, against the primary `main`
-checkout.
+Pi auto-discovers the extension once the project is trusted, so delegates
+dispatch confined by construction — no shell exports or launcher wrappers to
+remember. Variables already set in the environment are left untouched, and
+sessions in other projects never load the extension and keep the vanilla
+dispatcher. Relaunch pi (or `/reload`) after install or upgrade.
 
 Set the dispatcher-side pi-subagents config at
 `~/.pi/agent/extensions/subagent/config.json` to include:

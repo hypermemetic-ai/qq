@@ -1,9 +1,12 @@
 ---
 id: T-128
-title: Carry the pi-subagents dispatch adapter env in the sourced qq shell surface
+title: >-
+  Set the pi-subagents dispatch adapter env by construction via a project-local
+  pi extension
 status: To Do
 assignee: []
 created_date: '2026-07-21 04:21'
+updated_date: '2026-07-21 05:14'
 labels: []
 dependencies: []
 ordinal: 57000
@@ -12,17 +15,20 @@ ordinal: 57000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-2026-07-21: the accountable project-home session found PI_SUBAGENT_PI_BINARY and PI_SUBAGENT_EXTRA_AGENT_DIRS unset (and absent from ~/.bashrc), blocking all confined dispatch. Operator ruling (asked-and-answered alignment exchange, same session): make the env durable in the sourced qq shell surface (cockpit/shell/file-navigation.bash) instead of relying on per-session manual exports.
+2026-07-21: the accountable project-home session found PI_SUBAGENT_PI_BINARY and PI_SUBAGENT_EXTRA_AGENT_DIRS unset (and absent from ~/.bashrc), blocking all confined dispatch. Operator ruling (asked-and-answered alignment exchange, same session): make the env durable instead of relying on per-session manual exports.
 
-Scope: export both vars from cockpit/shell/file-navigation.bash, derived from QQ_HOME (primary main paths per README), scoped to shells born inside the checkout so pi sessions for other repositories keep the vanilla dispatcher; README Install prose updated to match.
+Mechanism (pivoted 2026-07-21, see ledger): the project-local pi extension .pi/extensions/qq-subagent-env.ts sets both variables in-process for any pi session in this repository (and its worktrees), resolved from the checkout via the extension file's own location. pi-subagents reads process.env at dispatch time, so in-process coverage is exact; sessions in other projects never load the extension and keep the vanilla dispatcher. Explicitly-set variables always win. The earlier shell-export design (cockpit/shell/file-navigation.bash) was reverted on this branch: its only consumer is pi-subagents in-process, and it depended on the operator's launch path sourcing the shell surface — the 2026-07-21 relaunch demonstrated that dependence is not guaranteed.
+
+Scope: add .pi/extensions/qq-subagent-env.ts; README Install prose updated to match; structural + functional test coverage (tests/test-qq-subagent-env.sh); pivot tripwire keeping the shell surface free of PI_SUBAGENT_* exports. A user-level bootstrap copy at ~/.pi/agent/extensions/qq-subagent-env.ts covers confined dispatch until this Change merges; the owner deletes it at delivery.
 
 Decision ledger:
-- Durable-in-shell-surface placement, QQ_HOME derivation, cwd-at-source-time scoping, README prose update — operator ruling, asked-and-answered exchange 2026-07-21 ("Make it durable first").
+- Durable placement, QQ_HOME/checkout derivation, other-projects-keep-vanilla scoping, README prose update — operator ruling, asked-and-answered exchange 2026-07-21 ("Make it durable first").
+- Mechanism pivot from shell exports to a project-local in-process pi extension; user-level bootstrap copy until merge, deleted at delivery — operator direction 2026-07-21 ("either give me specific commands or figure this out on your own"), after the relaunch showed the shell surface is not on the operator's pi launch path.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Interactive shells born inside the qq checkout carry PI_SUBAGENT_PI_BINARY and PI_SUBAGENT_EXTRA_AGENT_DIRS pointing at primary-main paths; shells born outside do not
-- [ ] #2 README Install section documents the by-construction env and the manual fallback for non-shell launch environments
-- [ ] #3 Shell test suite green
+- [ ] #1 Pi sessions in the qq checkout (and its worktrees) carry PI_SUBAGENT_PI_BINARY and PI_SUBAGENT_EXTRA_AGENT_DIRS in-process, resolved from the checkout; explicit operator-set values win; sessions in other projects keep the vanilla dispatcher
+- [ ] #2 README Install section documents the extension as the by-construction env mechanism, including project-trust and /reload notes
+- [ ] #3 Shell test suite green, including the extension's structural and functional coverage
 <!-- AC:END -->

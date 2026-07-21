@@ -128,16 +128,12 @@ export FAKE_FZF_QUERY=project
 export FAKE_FZF_PICK="$tmp/home/picked project"
 assert_equal "$FAKE_FZF_PICK" "$(qqcd "$FAKE_FZF_QUERY"; pwd -P)"
 
-# Dispatch adapter env: shells born inside QQ_HOME carry the adapter vars
-# resolved from QQ_HOME; shells born elsewhere keep the vanilla dispatcher.
-# env -u strips any inherited pair so the assertions stay deterministic in
-# shells that already carry them.
-probe_env() {
-  ( cd "$1" && env -u PI_SUBAGENT_PI_BINARY -u PI_SUBAGENT_EXTRA_AGENT_DIRS \
-      bash -c 'source "$1"; printf "%s|%s" "${PI_SUBAGENT_PI_BINARY:-unset}" "${PI_SUBAGENT_EXTRA_AGENT_DIRS:-unset}"' _ "$NAVIGATION" )
-}
-assert_equal "$QQ_HOME/bin/qq-dispatch|$QQ_HOME/delegation/manifests/agents" "$(probe_env "$QQ_HOME")"
-assert_equal "$QQ_HOME/bin/qq-dispatch|$QQ_HOME/delegation/manifests/agents" "$(probe_env "$QQ_HOME/nested")"
-assert_equal "unset|unset" "$(probe_env "$tmp/proj-deciq")"
+# Dispatch adapter env: the confined-delegate PI_SUBAGENT_* pair is set
+# in-process by .pi/extensions/qq-subagent-env.ts (tested in
+# test-qq-subagent-env.sh); the shell surface intentionally does not export
+# them, so other repositories' sessions keep the vanilla dispatcher.
+if bash -c 'source "$1"; [ -n "${PI_SUBAGENT_PI_BINARY:-}" ] || [ -n "${PI_SUBAGENT_EXTRA_AGENT_DIRS:-}" ]' _ "$NAVIGATION"; then
+  fail "file-navigation.bash exports PI_SUBAGENT_* (that moved to .pi/extensions/qq-subagent-env.ts)"
+fi
 
 printf 'test-file-navigation: pass\n'
