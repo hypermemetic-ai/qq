@@ -241,22 +241,27 @@ fi
 python_binary="$QQ_BIN_RESULT"
 
 # Establish the pi-subagents session root. pi-subagents stores child session
-# transcripts beneath its configured defaultSessionDir (README Install); the
-# Landstrip policy can only grant it when it sits directly beneath the
-# launcher temp dir with the pi-subagent- prefix, so enforce that contract
-# and create the root privately. Fail closed on a nonconforming configured
-# path, a symlink, foreign ownership, or a loose mode rather than
-# dispatching into a later EACCES or a transcript-readable directory.
-session_root_configured="$("$node_binary" -e '
+# transcripts beneath its configured defaultSessionDir (README Install); when
+# the config is missing or malformed it silently falls back to the parent
+# session tree, which the Landstrip policy deliberately does not grant — so
+# the config is REQUIRED here, and the configured path must be a direct
+# pi-subagent-* child of the launcher temp dir for the policy enumeration to
+# grant it. Fail closed on a missing/malformed/nonconforming config, a
+# symlink, foreign ownership, or a loose mode rather than dispatching into a
+# later EACCES or a transcript-readable directory.
+if ! session_root="$("$node_binary" -e '
   try {
     const c = JSON.parse(require("fs").readFileSync(
       process.env.HOME + "/.pi/agent/extensions/subagent/config.json", "utf8"));
     if (typeof c.defaultSessionDir === "string" && c.defaultSessionDir.trim()) {
       process.stdout.write(c.defaultSessionDir);
+      process.exit(0);
     }
   } catch {}
-' 2>/dev/null)" || session_root_configured=""
-session_root="${session_root_configured:-$launcher_tmp/pi-subagent-sessions}"
+  process.exit(1);
+')"; then
+  fail 68 "pi-subagents defaultSessionDir is not configured; set it per README Install"
+fi
 [[ "$session_root" == /* ]] \
   || fail 68 "pi-subagents defaultSessionDir must be absolute: $session_root"
 session_root_leaf="${session_root#"$launcher_tmp"/}"

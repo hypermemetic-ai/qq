@@ -23,6 +23,7 @@ Scope: add .pi/extensions/qq-subagent-env.ts; README Install prose updated to ma
 
 Decision ledger:
 - Durable placement, QQ_HOME/checkout derivation, other-projects-keep-vanilla scoping, README prose update — operator ruling, asked-and-answered exchange 2026-07-21 ("Make it durable first").
+- Session-root contract from confined review (two rounds): dispatcher-side config defaultSessionDir is REQUIRED (pi-subagents silently falls back to the ungranted parent session tree without it); the adapter enforces it fail-closed (direct pi-subagent-* child of launcher temp, no symlink, operator-owned, mode 700); the extension pre-creates/tightens the root at session start so pi-subagents' umask-based mkdir cannot deadlock a fresh install — confined reviewer findings 2026-07-21, verified against pi-subagents source.
 - Mechanism pivot from shell exports to a project-local in-process pi extension; user-level bootstrap copy until merge, deleted at delivery — operator direction 2026-07-21 ("either give me specific commands or figure this out on your own"), after the relaunch showed the shell surface is not on the operator's pi launch path.
 <!-- SECTION:DESCRIPTION:END -->
 

@@ -18,9 +18,18 @@ assert_file_contains "$EXT" 'PI_SUBAGENT_PI_BINARY'
 assert_file_contains "$EXT" 'PI_SUBAGENT_EXTRA_AGENT_DIRS'
 assert_file_contains "$EXT" 'process.env.PI_SUBAGENT_PI_BINARY === undefined'
 assert_file_contains "$EXT" 'process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS === undefined'
-assert_file_contains "$EXT" '"bin", "qq-dispatch"'
+assert_file_contains "$EXT" '"bin/qq-dispatch"'
 assert_file_contains "$EXT" '"delegation",'
 assert_file_contains "$EXT" 'fileURLToPath(import.meta.url)'
+
+# The extension establishes the pi-subagents session root at session start
+# (created mode 700 when absent, tightened when operator-owned and loose) so
+# pi-subagents' umask-dependent mkdir can never deadlock dispatch against
+# the adapter's fail-closed mode check.
+assert_file_contains "$EXT" 'ensureSessionRoot'
+assert_file_contains "$EXT" 'mkdirSync(root, { mode: 0o700 })'
+assert_file_contains "$EXT" 'chmodSync(root, 0o700)'
+assert_file_contains "$EXT" 'defaultSessionDir'
 
 # Functional: import the extension with a mock pi and observe process.env.
 EXT="$EXT" ROOT="$ROOT" node --experimental-strip-types --input-type=module -e '

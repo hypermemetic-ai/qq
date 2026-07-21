@@ -121,10 +121,13 @@ stays off instead of adding bridge tools to the staged child configuration.
 `defaultSessionDir` keeps child session transcripts under a Landstrip-granted
 temp root; without it, pi-subagents nests child sessions inside the parent
 session tree, which the confinement policy deliberately does not grant. The
-configured path must be a direct `pi-subagent-*` child of the launcher temp
-directory (`$TMPDIR` or `/tmp`); the adapter enforces the contract on every
-dispatch and fails closed on a symlink, foreign ownership, or any mode other
-than 700 rather than widening the grant.
+config is required: the adapter refuses dispatch when it is missing or
+malformed. The configured path must be a direct `pi-subagent-*` child of the
+launcher temp directory (`$TMPDIR` or `/tmp`). The project extension
+pre-creates the root (mode 700) at session start and tightens an
+operator-owned loose root; at dispatch the adapter enforces the contract and
+fails closed on a symlink, foreign ownership, or any mode other than 700
+rather than widening the grant.
 
 The extension resolves the adapter and manifests from the checkout the
 session runs in — a session in a Change worktree uses that worktree's

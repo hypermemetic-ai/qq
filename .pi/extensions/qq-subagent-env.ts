@@ -13,6 +13,8 @@
 // deliberately for a session, including to an empty value (pi-subagents
 // treats an empty value as selecting its vanilla fallback). Only a truly
 // absent variable is set here.
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync } from "node:fs";
+import os from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -24,7 +26,7 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 function applyEnv(): void {
 	if (process.env.PI_SUBAGENT_PI_BINARY === undefined) {
-		process.env.PI_SUBAGENT_PI_BINARY = join(REPO_ROOT, "bin", "qq-dispatch");
+		process.env.PI_SUBAGENT_PI_BINARY = join(REPO_ROOT, "bin/qq-dispatch");
 	}
 	if (process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS === undefined) {
 		process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS = join(
@@ -36,7 +38,56 @@ function applyEnv(): void {
 	}
 }
 
+// pi-subagents creates its session root (defaultSessionDir) with the parent
+// process umask before the adapter runs, and the adapter refuses a root that
+// is not mode 700. Establish the configured root here — at parent session
+// start, before any dispatch — so a fresh install never deadlocks. Absent:
+// create at 700. Present, operator-owned, not a symlink, wrong mode: tighten
+// to 700 (this path is qq-managed; tightening is monotonic). Anything else is
+// left for the adapter's fail-closed check to refuse loudly.
+function ensureSessionRoot(): void {
+	try {
+		let root = "/tmp/pi-subagent-sessions";
+		try {
+			const cfg = JSON.parse(
+				readFileSync(
+					join(os.homedir(), ".pi/agent/extensions/subagent/config.json"),
+					"utf8",
+				),
+			);
+			if (
+				typeof cfg.defaultSessionDir === "string" &&
+				cfg.defaultSessionDir.trim()
+			) {
+				root = cfg.defaultSessionDir;
+			}
+		} catch {
+			// No readable config: the adapter will refuse dispatch with a
+			// pointer to README; still keep the conventional root healthy.
+		}
+		if (!existsSync(root)) {
+			mkdirSync(root, { mode: 0o700 });
+			return;
+		}
+		const st = lstatSync(root);
+		if (
+			st.isDirectory() &&
+			!st.isSymbolicLink() &&
+			st.uid === process.geteuid() &&
+			(st.mode & 0o777) !== 0o700
+		) {
+			chmodSync(root, 0o700);
+		}
+	} catch {
+		// Best effort; bin/qq-dispatch enforces the contract fail-closed.
+	}
+}
+
 export default function (pi: ExtensionAPI) {
 	applyEnv();
-	pi.on("session_start", () => applyEnv());
+	ensureSessionRoot();
+	pi.on("session_start", () => {
+		applyEnv();
+		ensureSessionRoot();
+	});
 }

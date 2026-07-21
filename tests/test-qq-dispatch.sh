@@ -21,6 +21,12 @@ mkdir -p "$test_home" "$pi_subagent_own_temp"
 export HOME="$test_home"
 export TMPDIR="$parent_tmp"
 
+# The adapter requires the dispatcher-side pi-subagents config to name the
+# session root (README Install); stage it for every dispatch in this suite.
+mkdir -p "$test_home/.pi/agent/extensions/subagent"
+printf '{"defaultSessionDir": "%s"}\n' "$parent_tmp/pi-subagent-sessions" \
+  > "$test_home/.pi/agent/extensions/subagent/config.json"
+
 for expected in \
   "$DISPATCH" \
   "$SUPERVISOR" \
@@ -338,9 +344,14 @@ rm "$auth_source"
 
 default_tmp="$tmp/default-tmp"
 default_runtime="$default_tmp/qq-delegate-runtime"
+default_home="$tmp/default-home"
+mkdir -p "$default_home/.pi/agent/extensions/subagent"
+printf '{"defaultSessionDir": "%s"}\n' "$default_tmp/pi-subagent-sessions" \
+  > "$default_home/.pi/agent/extensions/subagent/config.json"
 (
   cd "$ROOT"
   env -u QQ_DISPATCH_RUNTIME_ROOT \
+    HOME="$default_home" \
     TMPDIR="$default_tmp" \
     PI_SUBAGENT_CHILD_AGENT=implementer \
     PI_SUBAGENT_RUN_ID=default-runtime-smoke \
@@ -802,6 +813,14 @@ run_failure session-root-symlink "$ROOT" \
   env PI_SUBAGENT_CHILD_AGENT=reviewer PI_SUBAGENT_RUN_ID=session-root-guard "$DISPATCH" --json
 assert_file_contains "$tmp/session-root-symlink.stderr" 'is a symlink'
 rm -f "$pi_subagent_sess"
+rm -f "$test_home/.pi/agent/extensions/subagent/config.json"
+run_failure session-root-no-config "$ROOT" \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer PI_SUBAGENT_RUN_ID=session-root-guard "$DISPATCH" --json
+assert_file_contains "$tmp/session-root-no-config.stderr" 'defaultSessionDir is not configured'
+printf 'not json\n' > "$test_home/.pi/agent/extensions/subagent/config.json"
+run_failure session-root-bad-json "$ROOT" \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer PI_SUBAGENT_RUN_ID=session-root-guard "$DISPATCH" --json
+assert_file_contains "$tmp/session-root-bad-json.stderr" 'defaultSessionDir is not configured'
 mkdir -p "$test_home/.pi/agent/extensions/subagent"
 printf '{"defaultSessionDir": "%s"}\n' "$tmp/outside-root" \
   > "$test_home/.pi/agent/extensions/subagent/config.json"
