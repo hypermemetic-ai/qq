@@ -22,16 +22,28 @@ the Change and code without inheriting the author's conclusions.
    required file, line, failure-path, and evidence shape; and the context-gap
    condition. Give coordinates and facts, never dumps, suspected findings,
    author conclusions, or transcript. `REVIEW.md` supplies owned rules.
-4. Call:
+4. Pi-launch env (one-time; cockpit/Herdr config/shell-rc):
 
-   ```sh
-   qq-dispatch reviewer \
-     --root <repository-root> --brief <brief> --output <report>
+   `PI_SUBAGENT_PI_BINARY=<repo-primary>/bin/qq-dispatch`,
+   `PI_SUBAGENT_EXTRA_AGENT_DIRS=<repo-primary>/delegation/manifests/agents`.
+
+   `~/.pi/agent/extensions/subagent/config.json`: `{"intercomBridge":{"mode":"off"}}`.
+
+   Use primary-`main`; never Change copies. `cwd` selects same-Repository
+   worktrees:
+   `<repo-primary>/delegation/manifests/agents/reviewer.md`.
+
+   ```ts
+   const completionEnvelopeSchema=JSON.parse(readFileSync("<absolute-change-worktree>/delegation/manifests/completion-envelope.schema.json","utf8"))
+   subagent({chain:[{agent:"reviewer",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema}],cwd:"<absolute-change-worktree>",context:"fresh",async:true,timeoutMs:900000})
    ```
 
-   Substitute only paths. The engine owns fresh read-only isolation, role
-   configuration, containment, artifacts, and retirement. State that the brief
-   completes orientation: no broad intent search or full-suite rerun.
+   Paths absolute; brief temporary. Pi-subagents owns lifecycle/artifacts;
+   adapter containment. Inspect id/`details.asyncDir` once: run/fleet status,
+   `status.json`, `events.jsonl`,
+   `output-<index>.log`, and `subagent-log-<run-id>.md`. `summary`: validated
+   verdict/findings. Brief completes orientation—no further broad intent
+   search/full-suite-rerun.
 5. The reviewer tests responsibilities against the brief, exact diff, callers,
    tests, and suspected failure paths. Review moves and deletions by invariant.
    A hole reports the missing or contradictory fact, why it controls the
@@ -55,6 +67,7 @@ the Change and code without inheriting the author's conclusions.
    Rerun affected Checks and review the fix delta.
 9. A finding class fixed in two prior rounds trips the convergence breaker:
    halt at the last green state and ask which layer owns the invariant.
-10. Dispatch error, nonzero exit, missing report, or context gap is not review.
-    Dispatch the unchanged or minimally completed brief fresh. Never narrow
-    scope or soften intent for a pass; repeated failure blocks.
+10. Dispatch error, nonzero result, missing/invalid structured output, or
+    context gap is not review. Dispatch the unchanged or minimally completed
+    brief fresh. Never narrow scope or soften intent for a pass; repeated
+    failure blocks.

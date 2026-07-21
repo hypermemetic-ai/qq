@@ -22,3 +22,13 @@ jobs:
           for test_script in tests/test-*.sh; do
             bash "$test_script"
           done
+      - name: Install Landstrip 0.17.31
+        shell: bash
+        run: >-
+          npm install --prefix "$RUNNER_TEMP/qq-landstrip"
+          --no-save --ignore-scripts @landstrip/landstrip-linux-x64@0.17.31
+      - name: Run native delegate enforcement test
+        shell: bash
+        env:
+          QQ_LANDSTRIP_BIN: ${{ runner.temp }}/qq-landstrip/node_modules/@landstrip/landstrip-linux-x64/bin/landstrip
+        run: bash tests/test-qq-delegate-enforcement.sh

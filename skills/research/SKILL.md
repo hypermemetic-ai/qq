@@ -7,20 +7,30 @@ description: Delegates decision-grade investigation to a fresh read-only researc
 
 Delegate the reading; retain the judgment. Write the exact question, decision,
 constraints, method, and relevant Repository paths into a brief under the OS
-temporary directory, then call:
+temporary directory. Pi-launch env (one-time; cockpit/Herdr config/shell-rc):
 
-```sh
-qq-dispatch researcher \
-  --root <working-root> \
-  --brief <brief-path> \
-  --output <findings-path>
+`PI_SUBAGENT_PI_BINARY=<repo-primary>/bin/qq-dispatch`,
+`PI_SUBAGENT_EXTRA_AGENT_DIRS=<repo-primary>/delegation/manifests/agents`.
+
+`~/.pi/agent/extensions/subagent/config.json`: `{"intercomBridge":{"mode":"off"}}`.
+
+Use primary-`main`; never Change copies. `cwd` selects same-Repository
+worktrees:
+`<repo-primary>/delegation/manifests/agents/researcher.md`.
+
+```ts
+const completionEnvelopeSchema=JSON.parse(readFileSync("<absolute-working-root>/delegation/manifests/completion-envelope.schema.json","utf8"))
+subagent({chain:[{agent:"researcher",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema}],cwd:"<absolute-working-root>",context:"fresh",async:true,timeoutMs:900000})
 ```
 
-Substitute only the paths; never put free text on the command line. The engine
-owns fresh-context isolation, read-only access, role configuration, containment,
-artifacts, and process retirement. Relaunch an unchanged brief after a failed
-dispatch. The owner spot-checks load-bearing citations, decides what the
-findings mean, and writes the Repository artifact.
+Paths absolute; task only the brief pointer. Pi-subagents owns
+lifecycle/artifacts; adapter containment. Inspect id/`details.asyncDir` once:
+run/fleet status, `status.json`, `events.jsonl`,
+`output-<index>.log`, and `subagent-log-<run-id>.md`. Terminal validated envelope
+`summary` carries cited, confidence-tagged findings; nonzero/missing/invalid
+fails. Relaunch unchanged briefs after dispatch failure. Owner
+spot-checks load-bearing citations, decides what the findings mean, and writes
+the Repository artifact.
 
 ## Method
 

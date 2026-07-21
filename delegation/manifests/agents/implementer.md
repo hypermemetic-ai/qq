@@ -1,6 +1,8 @@
 ---
 name: implementer
 description: Implement the bounded assignment in its assigned worktree.
+# Runtime model-identity verification is assigned to T-95 ticket 3.
+model: openai-codex/gpt-5.6-sol
 tools: read, grep, find, ls, bash, edit, write
 extensions:
 systemPromptMode: replace

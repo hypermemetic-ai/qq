@@ -1,0 +1,44 @@
+---
+id: T-123
+title: Evaluate a maintained standalone domain-filtering path for delegates
+status: To Do
+assignee: []
+created_date: '2026-07-20 23:59'
+labels: []
+dependencies:
+  - T-95
+priority: low
+type: task
+ordinal: 53000
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Revisit trigger from decision-8 (operator-accepted open delegate egress under
+Landstrip 0.17.x): find and evaluate a maintained way to restore a domain
+boundary for delegates without qq owning proxy machinery.
+
+Known landscape at filing (owner-verified 2026-07-20): Landstrip 0.17.31's
+binary schema has no domain lists (real fields: `httpProxyPort`,
+`socksProxyPort`); domain enforcement exists only inside pi-landstrip's
+extension-hosted proxy, which qq's binary-only adapter cannot run;
+extracting it ports vendor lifecycle code into qq (declined in decision-8's
+exchange).
+
+Candidate shapes: upstream Landstrip gaining standalone domain filtering
+(watch releases past 0.17.x); a separately maintained enforcing proxy the
+adapter could launch per session (httpProxyPort enforcement by the binary
+is real); a vendor-sanctioned standalone proxy mode. Ends in adopt/trial/drop
+with evidence; if adopted, decision-8's posture narrows accordingly.
+
+Decision ledger:
+- Filed as decision-8's named revisit trigger: operator-approved alignment
+  exchange, 2026-07-20 project-home session.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 Per-candidate disposition recorded with hands-on evidence, including whether the domain boundary holds under a fresh off-list connection probe
+- [ ] #2 If adopted, delegation policies enforce the delegate domain set fresh, and decision-8's accepted posture is amended by a new decision record
+<!-- AC:END -->

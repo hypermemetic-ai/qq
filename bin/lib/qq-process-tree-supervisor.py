@@ -19,7 +19,7 @@ KILL_GRACE_SECONDS = 0.75
 
 
 def fail(message: str) -> NoReturn:
-    print(f"[qq-pilot] process-tree supervisor: {message}", file=sys.stderr)
+    print(f"[qq-dispatch] process-tree supervisor: {message}", file=sys.stderr)
     raise SystemExit(125)
 
 
@@ -102,7 +102,7 @@ def cleanup(root_pid: int, first_signal: int = signal.SIGTERM) -> None:
 
 def main() -> int:
     if len(sys.argv) < 3 or sys.argv[1] != "--":
-        fail("usage: process-tree-supervisor.py -- command [args ...]")
+        fail("usage: qq-process-tree-supervisor.py -- command [args ...]")
     enable_subreaper()
     root_pid = os.getpid()
     pending_signal = 0

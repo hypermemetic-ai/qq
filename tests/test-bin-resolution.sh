@@ -61,8 +61,7 @@ if [ -x /home/linuxbrew/.linuxbrew/bin/herdr ]; then
 fi
 
 for script in \
-  qq-change qq-dispatch qq-herdr-home qq-herdr-pull qq-openwiki \
-  qq-status; do
+  qq-change qq-dispatch qq-herdr-home qq-herdr-pull qq-openwiki; do
   assert_file_contains "$ROOT/bin/$script" 'lib/qq-bin.sh' \
     "$script does not source the shared resolver"
 done
