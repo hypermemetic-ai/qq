@@ -1,10 +1,10 @@
 ---
 id: T-126
 title: Align research and compound doc flows with born-in-worktree
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-07-21 02:15'
-updated_date: '2026-07-21 04:28'
+updated_date: '2026-07-21 09:31'
 labels: []
 dependencies: []
 ordinal: 55000
