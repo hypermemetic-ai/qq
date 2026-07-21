@@ -1,10 +1,10 @@
 ---
 id: T-111
 title: Retire yazi cockpit surface in favor of files-widget
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-19 19:58'
-updated_date: '2026-07-19 20:21'
+updated_date: '2026-07-21 04:27'
 labels: []
 dependencies: []
 ordinal: 43000
@@ -26,3 +26,9 @@ Operator preference (T-107, 2026-07-19): files-widget over yazi as the browsing 
 <!-- SECTION:NOTES:BEGIN -->
 Operator direction 2026-07-19 ('legacy stuff needs to go; this isn't a museum'): when this gets its alignment brief, target FULL retirement — solve the parent-shell-cwd and focused-worktree problems properly (or accept their loss with a named replacement), do not frame demotion/keep-yazi as the default.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Landed via PR #165 (feat/t-111-retire-yazi, merged 2026-07-20): cockpit/yazi deleted, file-navigation.bash shrunk to qqroot/qq_space_dir/qqcd, prefix+f popups removed, MIME/Glow losses accepted per decision-7. Record flip was missed in the Change; repaired by this records chore.
+<!-- SECTION:FINAL_SUMMARY:END -->
