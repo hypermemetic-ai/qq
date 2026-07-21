@@ -2,7 +2,7 @@
   "preset": "pi-footer",
   "iconMode": "text",
   "separator": "none",
-  "extensionStatusRow": { "hiddenKeys": ["hunk", "merge-ready"], "knownKeys": ["hunk", "merge-ready"] },
+  "extensionStatusRow": { "hiddenKeys": ["hunk", "merge-ready", "pi-lens-lsp"], "knownKeys": ["hunk", "merge-ready", "pi-lens-lsp"] },
   "lines": [
     [
       { "type": "cwd", "options": { "raw": true, "fg": "pi:dim", "cwdDisplayStyle": "full-home" } },
