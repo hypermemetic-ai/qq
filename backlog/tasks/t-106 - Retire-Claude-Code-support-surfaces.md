@@ -1,9 +1,10 @@
 ---
 id: T-106
 title: Retire Claude Code support surfaces
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-07-19 17:50'
+updated_date: '2026-07-21 02:34'
 labels: []
 dependencies:
   - T-95
@@ -36,7 +37,7 @@ Decision ledger:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Seed inventory verified fresh and completed; every Claude-specific surface removed or amended; no Claude references remain outside backlog/ historical records and dated test evidence
-- [ ] #2 Tests updated and green; README and skills reflect the Pi + Codex mount story
-- [ ] #3 delegate-batch and deliver-change contain no Claude-subagent path once T-95 has landed
+- [x] #1 Seed inventory verified fresh and completed; every Claude-specific surface removed or amended; no Claude references remain outside backlog/ historical records and dated test evidence
+- [x] #2 Tests updated and green; README and skills reflect the Pi + Codex mount story
+- [x] #3 delegate-batch and deliver-change contain no Claude-subagent path once T-95 has landed
 <!-- AC:END -->
