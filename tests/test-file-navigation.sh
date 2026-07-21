@@ -10,7 +10,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 mkdir -p "$tmp/bin" "$tmp/herdr-only-bin" "$tmp/no-tools-bin"
-mkdir -p "$tmp/home/picked project" "$tmp/qq-home" "$tmp/proj-deciq" "$tmp/proj-qq"
+mkdir -p "$tmp/home/picked project" "$tmp/qq-home/nested" "$tmp/proj-deciq" "$tmp/proj-qq"
 
 cat >"$tmp/bin/herdr" <<'SH'
 #!/usr/bin/env bash
@@ -127,5 +127,17 @@ assert_contains "$output" "qqcd requires fzf"
 export FAKE_FZF_QUERY=project
 export FAKE_FZF_PICK="$tmp/home/picked project"
 assert_equal "$FAKE_FZF_PICK" "$(qqcd "$FAKE_FZF_QUERY"; pwd -P)"
+
+# Dispatch adapter env: shells born inside QQ_HOME carry the adapter vars
+# resolved from QQ_HOME; shells born elsewhere keep the vanilla dispatcher.
+# env -u strips any inherited pair so the assertions stay deterministic in
+# shells that already carry them.
+probe_env() {
+  ( cd "$1" && env -u PI_SUBAGENT_PI_BINARY -u PI_SUBAGENT_EXTRA_AGENT_DIRS \
+      bash -c 'source "$1"; printf "%s|%s" "${PI_SUBAGENT_PI_BINARY:-unset}" "${PI_SUBAGENT_EXTRA_AGENT_DIRS:-unset}"' _ "$NAVIGATION" )
+}
+assert_equal "$QQ_HOME/bin/qq-dispatch|$QQ_HOME/delegation/manifests/agents" "$(probe_env "$QQ_HOME")"
+assert_equal "$QQ_HOME/bin/qq-dispatch|$QQ_HOME/delegation/manifests/agents" "$(probe_env "$QQ_HOME/nested")"
+assert_equal "unset|unset" "$(probe_env "$tmp/proj-deciq")"
 
 printf 'test-file-navigation: pass\n'

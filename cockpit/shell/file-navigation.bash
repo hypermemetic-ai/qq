@@ -15,6 +15,17 @@ function qq_mount_bin() {
 qq_mount_bin
 unset -f qq_mount_bin
 export PATH
+# Confined delegation adapter env (README, Install): qq's pi-subagents
+# dispatch runs through bin/qq-dispatch with the production role manifests,
+# both resolved from QQ_HOME (primary main). Scoped to shells born inside
+# the checkout so pi sessions for other repositories keep the vanilla
+# dispatcher.
+case "$PWD" in
+    "$QQ_HOME"|"$QQ_HOME"/*)
+        export PI_SUBAGENT_PI_BINARY="$QQ_HOME/bin/qq-dispatch"
+        export PI_SUBAGENT_EXTRA_AGENT_DIRS="$QQ_HOME/delegation/manifests/agents"
+        ;;
+esac
 function qqroot() {
     if [ -d "$QQ_HOME" ]; then
         builtin cd -- "$QQ_HOME"
