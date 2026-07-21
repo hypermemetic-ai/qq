@@ -28,12 +28,7 @@ lives in its checkout. The `subagent` task is only the work-order file pointer.
 
 Pi-launch env (one-time; cockpit/Herdr config/shell-rc):
 
-```sh
-PI_SUBAGENT_PI_BINARY=<repo-primary>/bin/qq-dispatch
-PI_SUBAGENT_EXTRA_AGENT_DIRS=<repo-primary>/delegation/manifests/agents
-```
-
-`~/.pi/agent/extensions/subagent/config.json`: `{"intercomBridge":{"mode":"off"}}`.
+Dispatch env and dispatcher config: per README Install.
 
 Use primary-`main`; never Change copies. `cwd` selects same-Repository
 worktrees.

@@ -7,12 +7,7 @@ description: Delegates decision-grade investigation to a fresh read-only researc
 
 Delegate the reading; retain the judgment. Write the exact question, decision,
 constraints, method, and relevant Repository paths into a brief under the OS
-temporary directory. Pi-launch env (one-time; cockpit/Herdr config/shell-rc):
-
-`PI_SUBAGENT_PI_BINARY=<repo-primary>/bin/qq-dispatch`,
-`PI_SUBAGENT_EXTRA_AGENT_DIRS=<repo-primary>/delegation/manifests/agents`.
-
-`~/.pi/agent/extensions/subagent/config.json`: `{"intercomBridge":{"mode":"off"}}`.
+temporary directory. Dispatch env and dispatcher config: per README Install.
 
 Use primary-`main`; never Change copies. `cwd` selects same-Repository
 worktrees:

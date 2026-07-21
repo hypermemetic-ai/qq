@@ -22,12 +22,7 @@ the Change and code without inheriting the author's conclusions.
    required file, line, failure-path, and evidence shape; and the context-gap
    condition. Give coordinates and facts, never dumps, suspected findings,
    author conclusions, or transcript. `REVIEW.md` supplies owned rules.
-4. Pi-launch env (one-time; cockpit/Herdr config/shell-rc):
-
-   `PI_SUBAGENT_PI_BINARY=<repo-primary>/bin/qq-dispatch`,
-   `PI_SUBAGENT_EXTRA_AGENT_DIRS=<repo-primary>/delegation/manifests/agents`.
-
-   `~/.pi/agent/extensions/subagent/config.json`: `{"intercomBridge":{"mode":"off"}}`.
+4. Dispatch env and dispatcher config: per README Install.
 
    Use primary-`main`; never Change copies. `cwd` selects same-Repository
    worktrees:

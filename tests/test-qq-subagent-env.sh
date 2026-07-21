@@ -31,18 +31,28 @@ assert_file_contains "$EXT" 'mkdirSync(root, { mode: 0o700 })'
 assert_file_contains "$EXT" 'chmodSync(root, 0o700)'
 assert_file_contains "$EXT" 'defaultSessionDir'
 
-# Functional: import the extension with a mock pi and observe process.env.
+# Functional: import the extension with a mock pi under an ISOLATED HOME and
+# observe process.env and the session-root filesystem behavior.
 EXT="$EXT" ROOT="$ROOT" node --experimental-strip-types --input-type=module -e '
 import { pathToFileURL } from "node:url";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 const ext = process.env.EXT;
 const root = process.env.ROOT;
 const pi = { on() {} };
+const die = (msg) => { console.error(msg); process.exit(1); };
 const assertEq = (actual, expected, label) => {
-  if (actual !== expected) {
-    console.error(`${label}: expected ${expected}, got ${actual}`);
-    process.exit(1);
-  }
+  if (actual !== expected) die(`${label}: expected ${expected}, got ${actual}`);
 };
+
+// Isolated HOME so the extension never touches operator state.
+const home = fs.mkdtempSync(path.join(os.tmpdir(), "qq-ext-home-"));
+process.env.HOME = home;
+const cfgDir = path.join(home, ".pi/agent/extensions/subagent");
+fs.mkdirSync(cfgDir, { recursive: true });
+const sessRoot = path.join(os.tmpdir(), `pi-subagent-envtest-${process.pid}`);
+fs.writeFileSync(path.join(cfgDir, "config.json"), JSON.stringify({ defaultSessionDir: sessRoot }));
 
 delete process.env.PI_SUBAGENT_PI_BINARY;
 delete process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS;
@@ -55,19 +65,32 @@ assertEq(
   "PI_SUBAGENT_EXTRA_AGENT_DIRS",
 );
 
-// Explicit operator env wins: a re-loaded copy must not override it.
-process.env.PI_SUBAGENT_PI_BINARY = "/tmp/operator-override";
+// Session root: created mode 700 when absent, tightened when loose.
+if (!fs.existsSync(sessRoot)) die("session root was not created");
+assertEq(fs.statSync(sessRoot).mode & 0o777, 0o700, "session root mode");
+fs.chmodSync(sessRoot, 0o755);
 const second = await import(pathToFileURL(ext).href + "?second");
 second.default(pi);
-assertEq(process.env.PI_SUBAGENT_PI_BINARY, "/tmp/operator-override", "operator override preserved");
+assertEq(fs.statSync(sessRoot).mode & 0o777, 0o700, "session root tightened");
 
-// An explicit empty value is also an operator choice: pi-subagents reads it
-// as selecting the vanilla fallback, so the extension must leave it alone.
+// Explicit operator env wins, including an explicit empty value.
+process.env.PI_SUBAGENT_PI_BINARY = "/tmp/operator-override";
 process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS = "";
 const third = await import(pathToFileURL(ext).href + "?third");
 third.default(pi);
+assertEq(process.env.PI_SUBAGENT_PI_BINARY, "/tmp/operator-override", "operator override preserved");
 assertEq(process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS, "", "explicit empty override preserved");
-' || fail "extension applyEnv behavior mismatch"
+
+// A configured root outside the adapter-accepted set is left untouched.
+const outside = path.join(home, "outside-root");
+fs.writeFileSync(path.join(cfgDir, "config.json"), JSON.stringify({ defaultSessionDir: outside }));
+const fourth = await import(pathToFileURL(ext).href + "?fourth");
+fourth.default(pi);
+if (fs.existsSync(outside)) die("extension created a root outside the accepted set");
+
+fs.rmSync(sessRoot, { recursive: true, force: true });
+fs.rmSync(home, { recursive: true, force: true });
+' || fail "extension behavior mismatch"
 
 # The targets the extension points at must exist in this checkout.
 [ -x "$ROOT/bin/qq-dispatch" ] || fail "extension target missing: bin/qq-dispatch"

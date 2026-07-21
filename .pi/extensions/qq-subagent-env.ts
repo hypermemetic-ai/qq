@@ -65,6 +65,12 @@ function ensureSessionRoot(): void {
 			// No readable config: the adapter will refuse dispatch with a
 			// pointer to README; still keep the conventional root healthy.
 		}
+		// Mutate only inside the adapter-accepted set (a direct pi-subagent-*
+		// child of the OS temp dir); anything else is the adapter's
+		// fail-closed refusal, not a path this extension should touch.
+		const tmp = os.tmpdir();
+		const rel = root.startsWith(tmp + "/") ? root.slice(tmp.length + 1) : "";
+		if (!rel.startsWith("pi-subagent-") || rel.includes("/")) return;
 		if (!existsSync(root)) {
 			mkdirSync(root, { mode: 0o700 });
 			return;
