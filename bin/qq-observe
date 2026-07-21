@@ -177,7 +177,11 @@ def append(record):
     flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
     flags |= getattr(os, "O_NOFOLLOW", 0)
     try:
-        fd = os.open(store_file, flags, 0o600)
+        directory = os.open(os.path.dirname(store_file), os.O_RDONLY | os.O_DIRECTORY)
+        if os.path.realpath(f"/proc/self/fd/{directory}") != os.path.dirname(store_file):
+            fail("span store directory changed during open")
+        fd = os.open(os.path.basename(store_file), flags, 0o600, dir_fd=directory)
+        os.close(directory)
     except OSError as error:
         fail(f"cannot open span store leaf: {error}")
     try:
