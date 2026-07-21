@@ -4,7 +4,7 @@ title: 'Retire legacy engine support surfaces (Claude Code, codex CLI)'
 status: In Progress
 assignee: []
 created_date: '2026-07-19 17:50'
-updated_date: '2026-07-21 04:42'
+updated_date: '2026-07-21 09:49'
 labels: []
 dependencies:
   - T-95
@@ -45,7 +45,13 @@ Decision ledger addition:
 - [x] #1 Seed inventory verified fresh and completed; every Claude-specific surface removed or amended; no Claude references remain outside backlog/ historical records and dated test evidence
 - [x] #2 Tests updated and green; README and skills reflect the Pi + Codex mount story
 - [x] #3 delegate-batch and deliver-change contain no Claude-subagent path once T-95 has landed
-- [ ] #4 Codex CLI surfaces retired per the 2026-07-21 extension; no codex-CLI references remain outside backlog/ historical records, dated test evidence, retirement tripwires, and the retained openai-codex provider surfaces
-- [ ] #5 Shell test suite green after the codex-CLI retirement
+- [x] #4 Codex CLI surfaces retired per the 2026-07-21 extension; no codex-CLI references remain outside backlog/ historical records, dated test evidence, retirement tripwires, and the retained openai-codex provider surfaces
+- [x] #5 Shell test suite green after the codex-CLI retirement
 - [ ] #6 Machine-side ~/.codex/skills mount removed at delivery (owner-side enactment, recorded in the final summary)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Codex-CLI half delivered 2026-07-21 via wave-2 delegate batch: 6b2628e retires the install/mount/resolver surfaces and migrates fixtures (acceptance grep 64→46, remainder classified keep-list/historical/counter-name/removal-instruction). Confined review APPROVE: keep-list byte-identical, fixture inverse-substitution reproduces parents byte-for-byte, counters 0/0. Owner native full suite + ratchet green. AC#6 (remove machine-side ~/.codex/skills) is owner delivery work at merge.
+<!-- SECTION:NOTES:END -->
