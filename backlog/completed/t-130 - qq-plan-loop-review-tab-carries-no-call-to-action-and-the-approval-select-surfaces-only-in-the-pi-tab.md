@@ -3,10 +3,10 @@ id: T-130
 title: >-
   Retire the qq-plan-loop bridge and pi-hunk; grilling re-owns the planning
   interaction
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-21 05:57'
-updated_date: '2026-07-21 22:58'
+updated_date: '2026-07-22 00:07'
 labels: []
 dependencies: []
 documentation:
@@ -30,8 +30,14 @@ Non-goals: no replacement plan software adoption (Option B checked: the loop WAS
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 cockpit/pi/qq-plan-loop.ts and tests/test-plan-loop.sh deleted; no tracked reference to qq-plan-loop, plan_loop_submit, or pi-hunk remains outside backlog/ historical records
-- [ ] #2 grilling owns the interaction: structured questions via the native question tool, plan drafted under .pi/plans/ and presented inline, explicit conversational approval as the fail-closed gate; T-122 plans-doc capture retained
-- [ ] #3 deliver-change diff review is vendor-neutral (no pi-hunk prescription); ratchet baselines re-measured and tests/test-ratchet.sh green
-- [ ] #4 operator-machine removals at land: settings.json drops the qq-plan-loop.ts extension entry; pi-hunk package uninstalled
+- [x] #1 cockpit/pi/qq-plan-loop.ts and tests/test-plan-loop.sh deleted; no tracked reference to qq-plan-loop, plan_loop_submit, or pi-hunk remains outside backlog/ historical records
+- [x] #2 grilling owns the interaction: structured questions via the native question tool, plan drafted under .pi/plans/ and presented inline, explicit conversational approval as the fail-closed gate; T-122 plans-doc capture retained
+- [x] #3 deliver-change diff review is vendor-neutral (no pi-hunk prescription); ratchet baselines re-measured and tests/test-ratchet.sh green
+- [x] #4 operator-machine removals at land: settings.json drops the qq-plan-loop.ts extension entry; pi-hunk package uninstalled
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Landed 2026-07-21 via PR #198. Operator-machine removals executed: ~/.pi/agent/settings.json dropped the qq-plan-loop.ts extension entry; @roodriigoooo/pi-hunk uninstalled (settings and node_modules verified clean). Next pi start runs without the bridge; planning is conversational under grilling.
+<!-- SECTION:NOTES:END -->
