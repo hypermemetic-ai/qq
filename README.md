@@ -277,6 +277,18 @@ environment variables reach the confined Pi child, so nested pi-subagents runs
 correlate automatically when the accountable session supplies root context.
 Observation failures are reported but never change the child exit status.
 
+`qq-dispatch` maps the child exit code to a raw span status at write time. At
+read time, `qq-observe summarize` resolves raw errors for dispatch spans ending
+with teardown signal status 143, 130, or 129 from pi-subagents' run outcome at
+`<runtime-root>/async-subagent-runs/<run.id>/status.json`. The runtime root is
+`$QQ_DISPATCH_RUNTIME_ROOT` when set, otherwise
+`${TMPDIR:-/tmp}/pi-subagents-uid-<uid>`. A `complete` run resolves to `ok`;
+`failed` and `stopped` remain `error`, and a missing, unreadable, malformed, or
+other run state leaves the raw error in place as unresolved. Summarization does
+not modify the append-only store, and `summarize --json` exposes every span's
+`raw_status`, resolved `status`, and any `outcome` resolution note in
+`span_statuses`.
+
 The remaining substrate gap is the accountable interactive Pi session: Pi has
 no native local span emitter and cannot have its environment changed after
 startup. If that session was not launched with root context, each top-level
