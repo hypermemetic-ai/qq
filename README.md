@@ -289,14 +289,26 @@ not modify the append-only store, and `summarize --json` exposes every span's
 `raw_status`, resolved `status`, and any `outcome` resolution note in
 `span_statuses`.
 
-The remaining substrate gap is the accountable interactive Pi session: Pi has
-no native local span emitter and cannot have its environment changed after
-startup. If that session was not launched with root context, each top-level
-dispatch starts a valid but separate trace. Work orders must then carry the
-`QQ_TRACE_ID` and root span ID, and Completion Envelopes must echo them, so a
-post-hoc `read-session` import can use the same IDs. Pi session JSONL itself has
-no cross-file correlation field; text echo is the required fallback for that
-case.
+The project extension `.pi/extensions/qq-trace-context.ts` establishes one
+root trace context when an accountable interactive Pi session loads. When the
+variables are absent, it mints `QQ_TRACE_ID` and a session-root span ID, sets
+both `PI_ROOT_SPAN_ID` and `PI_PARENT_SPAN_ID` to that root, and records a
+zero-duration, phase-less `invoke_workflow` structural marker. Explicitly set
+values always win; delegate sessions inherit all three variables through
+`qq-dispatch`, so the extension is a no-op there. Each top-level dispatch is
+therefore a direct child of the accountable session root. The extension logs
+its IDs once as `[qq-trace-context] trace_id=… root_span_id=…`; observation
+failure is non-fatal.
+
+Use those logged IDs to import the session JSONL's coarse wall-time span into
+the same trace after the session:
+
+```bash
+qq-observe read-session <session.jsonl> --trace-id <trace> --parent-span-id <root>
+```
+
+The accountable session's own phases remain one coarse span, not per-phase
+splits.
 
 On a machine with the retired Skill mount, remove it if it exists (after
 checking it points into this checkout): `rm -r ~/.codex/skills`.
