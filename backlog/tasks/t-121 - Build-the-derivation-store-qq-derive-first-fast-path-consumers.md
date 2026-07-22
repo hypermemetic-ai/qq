@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-07-20 17:52'
-updated_date: '2026-07-21 03:27'
+updated_date: '2026-07-22 00:16'
 labels: []
 dependencies:
   - T-127
@@ -41,3 +41,9 @@ Decision ledger:
 - [ ] #2 If activated: bin/qq-derive implements put/get/has with input-hashed keys and miss-regenerates semantics; shell tests green
 - [ ] #3 If activated: consumers selected by measured impact (not the de-approved 2026-07-20 list), each with before/after latency evidence
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-07-22: baseline doc-79 delivered the evidence T-121's AC#1 gate requires — artifact reuse cannot rank among the top measured interventions (all measured cost is agent wall time). Operator disposition (asked-and-answered exchange): keep parked; revisit after further measurement windows (T-140/T-141 improve the evidence base). Not killed; not activated.
+<!-- SECTION:NOTES:END -->

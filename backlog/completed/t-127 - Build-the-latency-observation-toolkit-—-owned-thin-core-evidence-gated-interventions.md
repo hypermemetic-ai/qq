@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-07-21 03:24'
-updated_date: '2026-07-21 23:40'
+updated_date: '2026-07-22 00:14'
 labels: []
 dependencies: []
 documentation:
@@ -46,4 +46,6 @@ Decision ledger:
 Ticket 1 (AC#1+AC#2) delivered via the 2026-07-21 delegate batch: e7869e4 (observation core: append-only span store under XDG state, pi session-JSONL reader, dispatch span emission, trace-context propagation) + ad77a4a (review-round-1 fixes: signal-trap forwarding containment, store-leaf fencing, session version-3 guard, role-derived phases, repository-identity store). Two confined review rounds; round 2 verified all five substantive fixes and left three microsecond-window races, dispositioned as accepted residual risk by the operator 2026-07-21 (land now for the approved pi-code-tool A/B trial) and filed as T-136. Owner evidence: native full suite green at ad77a4a; new regression tests fail against e7869e4, pass at HEAD. Counter audits matched envelopes (+272 core; +67 LOC/+16 DP fix).
 
 2026-07-21: AC#3 (qq-observe summarize) and AC#4 (doc-78) delivered via PR #199; fresh-context review passed after a four-finding fix round. AC#5 remains: baseline report over >=5 delivered Changes now that instrumentation is active.
+
+Baseline 2026-07-21 (doc-79): 21 spans over 7 delivered Changes. All measured cost is minute-scale agent wall time; artifact-construction cost is unmeasurable-to-absent, so the evidence position on T-121 is KILL (operator disposition requested). Two follow-on SELECTs: teardown-SIGTERM status semantics (19/21 'error' is misleading) and trace-context propagation (21 spans / 21 traces).
 <!-- SECTION:NOTES:END -->
