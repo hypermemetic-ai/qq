@@ -374,6 +374,89 @@ jq -e '
   and .statuses == [{status:"error", count:1}, {status:"timeout", count:1}]
 ' "$tmp/summary.json" >/dev/null || fail 'JSON summary did not match the text report aggregates'
 
+outcome_state="$tmp/outcome-state"
+outcome_store="$outcome_state/qq/spans/$repository_name/spans.jsonl"
+outcome_runtime="$tmp/outcome-runtime"
+mkdir -p "$(dirname "$outcome_store")" "$outcome_runtime/async-subagent-runs"
+outcome_span() {
+  local span_id="$1" name="$2" source="$3" exit_status="$4" run_id="$5"
+  jq -cn \
+    --arg span_id "$span_id" --arg name "$name" --arg source "$source" \
+    --arg exit_status "$exit_status" --arg run_id "$run_id" '
+    {
+      schema_version: 1,
+      trace_id: "99999999999999999999999999999999",
+      span_id: $span_id,
+      parent_span_id: null,
+      root_span_id: $span_id,
+      name: $name,
+      phase: "implementation",
+      actor: "implementer",
+      start_time: "2026-01-04T00:00:00Z",
+      end_time: "2026-01-04T00:00:01Z",
+      duration_ms: 1000,
+      status: "error",
+      source: $source,
+      attributes: {"exit.status": $exit_status, "run.id": $run_id}
+    }'
+}
+for state in complete failed stopped; do
+  mkdir -p "$outcome_runtime/async-subagent-runs/$state"
+  printf '{"state":"%s"}\n' "$state" \
+    >"$outcome_runtime/async-subagent-runs/$state/status.json"
+done
+mkdir -p \
+  "$outcome_runtime/async-subagent-runs/non-dispatch" \
+  "$outcome_runtime/async-subagent-runs/non-signal"
+printf '{"state":"complete"}\n' \
+  >"$outcome_runtime/async-subagent-runs/non-dispatch/status.json"
+printf '{"state":"complete"}\n' \
+  >"$outcome_runtime/async-subagent-runs/non-signal/status.json"
+{
+  outcome_span aaaaaaaaaaaaaaaa teardown-complete qq-dispatch 143 complete
+  outcome_span bbbbbbbbbbbbbbbb teardown-failed qq-dispatch 130 failed
+  outcome_span cccccccccccccccc teardown-stopped qq-dispatch 129 stopped
+  outcome_span dddddddddddddddd teardown-missing qq-dispatch 143 missing
+  outcome_span eeeeeeeeeeeeeeee non-dispatch other-source 143 non-dispatch
+  outcome_span ffffffffffffffff non-signal qq-dispatch 124 non-signal
+  outcome_span 1212121212121212 manual-run qq-dispatch 143 manual
+} >"$outcome_store"
+cp "$outcome_store" "$tmp/outcome-store.before"
+(
+  cd "$ROOT"
+  XDG_STATE_HOME="$outcome_state" QQ_DISPATCH_RUNTIME_ROOT="$outcome_runtime" \
+    "$OBSERVE" summarize >"$tmp/outcome-summary.txt"
+  XDG_STATE_HOME="$outcome_state" QQ_DISPATCH_RUNTIME_ROOT="$outcome_runtime" \
+    "$OBSERVE" summarize --json >"$tmp/outcome-summary.json"
+)
+cmp "$tmp/outcome-store.before" "$outcome_store" \
+  || fail 'outcome resolution modified the span store'
+assert_file_contains "$tmp/outcome-summary.txt" 'Spans: 7'
+assert_file_contains "$tmp/outcome-summary.txt" 'error       6'
+jq -e '
+  def named($name): .span_statuses[] | select(.name == $name);
+  .statuses == [{status:"error", count:6}]
+  and (named("teardown-complete") |
+    .raw_status == "error" and .status == "ok"
+    and .outcome == {resolved:"complete", note:"teardown-signal"})
+  and (named("teardown-failed") |
+    .raw_status == "error" and .status == "error"
+    and .outcome == {resolved:"failed", note:"teardown-signal"})
+  and (named("teardown-stopped") |
+    .raw_status == "error" and .status == "error"
+    and .outcome == {resolved:"stopped", note:"teardown-signal"})
+  and (named("teardown-missing") |
+    .raw_status == "error" and .status == "error"
+    and .outcome == {resolved:"unresolved", note:"teardown-signal"})
+  and (named("non-dispatch") |
+    .raw_status == "error" and .status == "error" and (has("outcome") | not))
+  and (named("non-signal") |
+    .raw_status == "error" and .status == "error" and (has("outcome") | not))
+  and (named("manual-run") |
+    .raw_status == "error" and .status == "error" and (has("outcome") | not))
+' "$tmp/outcome-summary.json" >/dev/null \
+  || fail 'teardown span statuses did not reflect run outcomes'
+
 empty_state="$tmp/empty-summary-state"
 empty_store="$empty_state/qq/spans/$repository_name/spans.jsonl"
 (
