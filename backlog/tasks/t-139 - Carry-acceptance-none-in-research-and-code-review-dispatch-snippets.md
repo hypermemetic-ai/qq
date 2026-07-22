@@ -1,9 +1,10 @@
 ---
 id: T-139
 title: 'Carry acceptance:none in research and code-review dispatch snippets'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-21 23:57'
+updated_date: '2026-07-22 00:01'
 labels: []
 dependencies: []
 ordinal: 60000
@@ -17,6 +18,6 @@ T-124 follow-on. Root cause of the 2026-07-21 four failed dispatches: pi-subagen
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 research and code-review SKILL.md dispatch snippets carry acceptance:{level:"none",reason:"per the manifests"} inside the chain step
-- [ ] #2 a live chain dispatch with step-level acceptance:none shows no attestation contract and completes
+- [x] #1 research and code-review SKILL.md dispatch snippets carry acceptance:{level:"none",reason:"per the manifests"} inside the chain step
+- [x] #2 a live chain dispatch with step-level acceptance:none shows no attestation contract and completes
 <!-- AC:END -->
