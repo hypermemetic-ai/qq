@@ -20,6 +20,11 @@ usage:
 
 context options: --trace-id ID --span-id ID --parent-span-id ID --root-span-id ID
 record options:  --phase PHASE --status STATUS --source SOURCE --attribute KEY=VALUE
+
+qq-dispatch writes raw exit-code status; summarize resolves teardown signals
+from <runtime-root>/async-subagent-runs/<run.id>/status.json at read time.
+--json includes each span's raw and resolved status. runtime-root is
+QQ_DISPATCH_RUNTIME_ROOT or ${TMPDIR:-/tmp}/pi-subagents-uid-<uid>.
 EOF
   exit 64
 }
@@ -295,6 +300,69 @@ def summary_span(line):
     item["duration_ms"] = duration
     return item, start
 
+def resolved_span_status(item):
+    detail = {
+        "trace_id": item["trace_id"],
+        "span_id": item["span_id"],
+        "name": item["name"],
+        "raw_status": item["status"],
+        "status": item["status"],
+    }
+    attributes = item["attributes"]
+    exit_status = attributes.get("exit.status")
+    if (
+        item["source"] != "qq-dispatch"
+        or exit_status not in ("143", "130", "129")
+        or "run.id" not in attributes
+        or attributes["run.id"] == "manual"
+    ):
+        return detail
+
+    detail["status"] = "error"
+    detail["outcome"] = {"resolved": "unresolved", "note": "teardown-signal"}
+    run_id = attributes["run.id"]
+    if (
+        not isinstance(run_id, str)
+        or not run_id
+        or run_id in (".", "..")
+        or os.path.basename(run_id) != run_id
+    ):
+        return detail
+
+    if "QQ_DISPATCH_RUNTIME_ROOT" in os.environ:
+        runtime_root = Path(os.environ["QQ_DISPATCH_RUNTIME_ROOT"])
+    else:
+        runtime_root = Path(os.environ.get("TMPDIR") or "/tmp") / f"pi-subagents-uid-{os.getuid()}"
+    status_path = runtime_root / "async-subagent-runs" / run_id / "status.json"
+    fd = None
+    try:
+        existing = os.lstat(status_path)
+        if not stat.S_ISREG(existing.st_mode):
+            return detail
+        flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(status_path, flags)
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return detail
+        with os.fdopen(fd, encoding="utf-8") as source:
+            fd = None
+            record = json.load(source)
+    except (OSError, ValueError, UnicodeError, RecursionError):
+        return detail
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+    if not isinstance(record, dict):
+        return detail
+    state = record.get("state")
+    if state == "complete":
+        detail["status"] = "ok"
+        detail["outcome"]["resolved"] = state
+    elif state in ("failed", "stopped"):
+        detail["status"] = "error"
+        detail["outcome"]["resolved"] = state
+    return detail
+
 def rounded(value):
     return float(f"{value:.1f}")
 
@@ -308,6 +376,7 @@ def aggregate_summary(options):
     phase_durations = {}
     recurrence_stats = {}
     status_counts = {}
+    span_statuses = []
     for line in read_store():
         parsed = summary_span(line)
         if parsed is None:
@@ -322,8 +391,11 @@ def aggregate_summary(options):
         recurrence = recurrence_stats.setdefault((item["name"], item["actor"]), [0, 0.0])
         recurrence[0] += 1
         recurrence[1] += item["duration_ms"]
-        if item["status"] != "ok":
-            status_counts[item["status"]] = status_counts.get(item["status"], 0) + 1
+        status_detail = resolved_span_status(item)
+        span_statuses.append(status_detail)
+        status = status_detail["status"]
+        if status != "ok":
+            status_counts[status] = status_counts.get(status, 0) + 1
 
     phases = []
     for phase, durations in phase_durations.items():
@@ -365,6 +437,7 @@ def aggregate_summary(options):
         "phases": phases,
         "recurrence": recurrence,
         "statuses": statuses,
+        "span_statuses": span_statuses,
     }
 
 def print_summary(summary):

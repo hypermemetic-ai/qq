@@ -432,7 +432,7 @@ cp "$outcome_store" "$tmp/outcome-store.before"
 cmp "$tmp/outcome-store.before" "$outcome_store" \
   || fail 'outcome resolution modified the span store'
 assert_file_contains "$tmp/outcome-summary.txt" 'Spans: 7'
-assert_file_contains "$tmp/outcome-summary.txt" 'error       6'
+assert_file_contains "$tmp/outcome-summary.txt" 'error      6'
 jq -e '
   def named($name): .span_statuses[] | select(.name == $name);
   .statuses == [{status:"error", count:6}]
