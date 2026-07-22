@@ -105,68 +105,6 @@ remember. Variables already set in the environment are left untouched, and
 sessions in other projects never load the extension and keep the vanilla
 dispatcher. Relaunch pi (or `/reload`) after install or upgrade.
 
-The separate project-local extension `.pi/extensions/qq-code-tool-trial.ts`
-is the inert control surface for the approved T-135 prospective trial. Merely
-landing or loading the extension does not enroll inputs, resolve
-`pi-code-tool`, or register `code`. Do not prepare or activate it until T-127's
-observation instrumentation is active. Then place the exact dependency in the
-existing Pi-owned npm tree without registering it as a global Pi extension:
-
-```bash
-npm install --prefix "$HOME/.pi/agent/npm" --legacy-peer-deps --save-exact pi-code-tool@0.6.1
-bin/qq-code-trial status
-bin/qq-code-trial activate
-```
-
-Do not use `pi install npm:pi-code-tool`; that would expose `code` outside the
-assigned treatment inputs. Activation is an explicit, single-use private
-record. While it exists, every idle non-command interactive or RPC input is
-assigned before treatment by the fixed T-135 pair schedule. Treatment resolves
-only the Pi-owned `pi-code-tool@0.6.1`, verifies its manifest and exact
-`package-lock.json` version/integrity provenance, registers the restricted
-wrapper, and activates `code` before the current prompt is built.
-Control removes `code` from both the current model tool set and its tool
-snippet. Slash commands, user shell commands, extension messages, steering,
-and queued follow-ups do not consume an index.
-
-The append-only ledger and activation record live at
-`${XDG_STATE_HOME:-$HOME/.local/state}/qq/t135-pi-code-tool-v1.*`, outside every
-worktree, with mode 600. They contain prompt digests and lengths, never prompt
-text. A fail-closed session-lifetime writer claim prevents a second live Pi
-collector, while a short append lock prevents duplicate indexes; unsafe leaf
-types, symlink paths, corrupt lines, and loose record permissions are refused.
-Inspect collection progress, then exit the collector Pi session before sealing
-and analyzing the trial:
-
-```bash
-bin/qq-code-trial status
-# exit the collector Pi session first
-bin/qq-code-trial deactivate
-bin/qq-code-trial analyze
-```
-
-A crashed Pi process deliberately leaves its writer claim behind, and an
-interrupted append may leave its short-lock claim. `status` shows their recorded
-PIDs and claim times. After independently confirming that every recorded
-process is gone, run `bin/qq-code-trial unlock`; it validates both private JSON
-claims, checks that each PID is no longer live, and refuses to remove any claim
-while one is live or unsafe. Ordinary appends recover a validated stale short
-lock automatically; nothing silently ages out a session writer.
-
-`deactivate` refuses while a collector writer remains, appends the final sealed
-record with the preceding ledger's SHA-256 and committed record count, and then
-removes activation. A retry completes activation removal if interruption occurs
-after sealing. `analyze` requires that sealed, inactive, writer-free, lock-free
-state; it will not report an active or unsealed prefix.
-
-`analyze` validates the complete intention-to-treat ledger, preserves
-treatment non-use and failures in their assigned arm, and reports the measures
-available from Pi events. It deliberately does not issue an adoption verdict.
-The recorded Pi session ID and session-file digest are the join seam to T-127
-spans and session JSONL for distinct Changes, applicable Checks, evidence
-completeness, review findings, and rework; those measures are not reliably
-exposed to this extension layer and must not be fabricated.
-
 Set the dispatcher-side pi-subagents config at
 `~/.pi/agent/extensions/subagent/config.json` to include:
 

@@ -1,10 +1,10 @@
 ---
 id: T-135
 title: Run a prospective natural-work pi-code-tool A/B trial
-status: In Progress
+status: To Do
 assignee: []
 created_date: '2026-07-21 07:27'
-updated_date: '2026-07-21 07:32'
+updated_date: '2026-07-22 21:53'
 labels: []
 dependencies:
   - T-127
@@ -43,3 +43,18 @@ Non-goals: synthetic benchmarks, hand-picked favorable tasks, post-treatment enr
 <!-- SECTION:PLAN:BEGIN -->
 Approved protocol and execution record: doc-76.
 <!-- SECTION:PLAN:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+created: 2026-07-22 21:53
+---
+Operator canceled the trial on 2026-07-22 after the Pi update made the active rig disruptive and directed that it be removed. The prospective run stopped at 26 of 40 enrolled inputs; no adoption verdict is inferred from the incomplete sample.
+---
+<!-- COMMENTS:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Canceled by operator after 26/40 inputs. Activation disabled; project-local extension, trial CLI/library/tests/documentation, and the trial-only Pi npm dependency removed. The incomplete private ledger remains as historical evidence, not an active control surface.
+<!-- SECTION:FINAL_SUMMARY:END -->

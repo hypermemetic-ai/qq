@@ -28,9 +28,11 @@ and the reader is not.
 
 A buyer deciding whether to trust you with money and their own
 clients — and whoever they forward the document to: IT, procurement, a
-partner. This reader skims by title, reads the numbers, and has sat
-through enough pitches to bill every clever line as selling. Sales
-language is not neutral to this reader; it is evidence against you.
+partner. This reader skims by title, reads the numbers, hates reading,
+and has sat through enough pitches to bill every clever line as
+selling. Sales language is not neutral to this reader; it is evidence
+against you. So is length: every line that changes no decision is a
+line they skip, and skipping is contagious.
 
 ## the voice
 
@@ -58,6 +60,10 @@ trusts the writer who does not need the drama.
   was done and when.
 - Say a thing once per screen. A title and the first line beneath it
   carry different words; the reader bills repetition as padding.
+- Default to the shortest form that carries the load-bearing facts —
+  then cut once more. The average client hates reading; an email is
+  closer to a text message than a deck. If a fact needs a caveat,
+  the caveat gets the same short sentence, not a paragraph.
 
 ## the tell
 
@@ -106,7 +112,9 @@ Re-read the demonstration below, then draft or judge.
    earns its place out loud or rewrites to the fact.
 4. Self-praise: no line grades its own author.
 5. Honesty: every limit and failure behavior survived the pass.
-6. Render: the shipped form was seen as the reader will see it.
+6. Length: the draft survived a halving pass — no line stands that
+   changes no decision for the reader.
+7. Render: the shipped form was seen as the reader will see it.
 
 ## the demonstration — target register; re-read this, then draft
 
@@ -149,3 +157,9 @@ transcript — a limit your product design already accepts.
   titles, authored without this skill by a full-context agent,
   refused at the operator's read the same day. An edit that changes
   what this file teaches re-runs the probe.
+- Brevity rule added 2026-07-22 on operator direction (DecIQ client
+  invite-sheet email): "the average client hates reading. less
+  words." A 330-word draft that already passed the register check
+  went to ~80 words and shipped better. Shortest form is a feature
+  of the register, not a style preference; the halving pass joined
+  the check.
