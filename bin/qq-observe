@@ -360,7 +360,7 @@ def resolved_span_status(item):
     if not isinstance(record, dict):
         return detail
     state = record.get("state")
-    status = {"complete": "ok", "failed": "error", "stopped": "error"}.get(state)
+    status = {"complete": "ok", "failed": "error", "stopped": "error"}.get(state) if isinstance(state, str) else None
     if status:
         detail["status"] = status
         detail["outcome"]["resolved"] = state

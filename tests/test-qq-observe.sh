@@ -405,6 +405,16 @@ for state in complete failed stopped; do
   printf '{"state":"%s"}\n' "$state" \
     >"$outcome_runtime/async-subagent-runs/$state/status.json"
 done
+while read -r run_id state; do
+  mkdir -p "$outcome_runtime/async-subagent-runs/$run_id"
+  printf '{"state":%s}\n' "$state" \
+    >"$outcome_runtime/async-subagent-runs/$run_id/status.json"
+done <<'EOF'
+state-array []
+state-object {}
+state-number 123
+state-boolean true
+EOF
 mkdir -p \
   "$outcome_runtime/async-subagent-runs/non-dispatch" \
   "$outcome_runtime/async-subagent-runs/non-signal" \
@@ -426,6 +436,10 @@ printf '{"state":"complete"}\n' \
   outcome_span ffffffffffffffff non-signal qq-dispatch 124 non-signal
   outcome_span 1212121212121212 manual-run qq-dispatch 143 manual
   outcome_span 3434343434343434 teardown-oversized qq-dispatch 143 oversized
+  outcome_span 4545454545454545 teardown-state-array qq-dispatch 143 state-array
+  outcome_span 5656565656565656 teardown-state-object qq-dispatch 143 state-object
+  outcome_span 6767676767676767 teardown-state-number qq-dispatch 143 state-number
+  outcome_span 7878787878787878 teardown-state-boolean qq-dispatch 143 state-boolean
 } >"$outcome_store"
 cp "$outcome_store" "$tmp/outcome-store.before"
 (
@@ -437,11 +451,14 @@ cp "$outcome_store" "$tmp/outcome-store.before"
 )
 cmp "$tmp/outcome-store.before" "$outcome_store" \
   || fail 'outcome resolution modified the span store'
-assert_file_contains "$tmp/outcome-summary.txt" 'Spans: 8'
-assert_file_contains "$tmp/outcome-summary.txt" 'error      7'
+assert_file_contains "$tmp/outcome-summary.txt" 'Spans: 12'
+assert_file_contains "$tmp/outcome-summary.txt" 'error     11'
 jq -e '
   def named($name): .span_statuses[] | select(.name == $name);
-  .statuses == [{status:"error", count:7}]
+  def unresolved($name): named($name) |
+    .raw_status == "error" and .status == "error"
+    and .outcome == {resolved:"unresolved", note:"teardown-signal"};
+  .statuses == [{status:"error", count:11}]
   and (named("teardown-complete") |
     .raw_status == "error" and .status == "ok"
     and .outcome == {resolved:"complete", note:"teardown-signal"})
@@ -463,6 +480,10 @@ jq -e '
   and (named("teardown-oversized") |
     .raw_status == "error" and .status == "error"
     and .outcome == {resolved:"unresolved", note:"teardown-signal"})
+  and unresolved("teardown-state-array")
+  and unresolved("teardown-state-object")
+  and unresolved("teardown-state-number")
+  and unresolved("teardown-state-boolean")
 ' "$tmp/outcome-summary.json" >/dev/null \
   || fail 'teardown span statuses did not reflect run outcomes'
 
