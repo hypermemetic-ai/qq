@@ -30,7 +30,7 @@ the Change and code without inheriting the author's conclusions.
 
    ```ts
    const completionEnvelopeSchema=JSON.parse(readFileSync("<absolute-change-worktree>/delegation/manifests/completion-envelope.schema.json","utf8"))
-   subagent({chain:[{agent:"reviewer",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema}],cwd:"<absolute-change-worktree>",context:"fresh",async:true,timeoutMs:900000})
+   subagent({chain:[{agent:"reviewer",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema,acceptance:{level:"none",reason:"per the manifests"}}],cwd:"<absolute-change-worktree>",context:"fresh",async:true,timeoutMs:900000})
    ```
 
    Paths absolute; brief temporary. Pi-subagents owns lifecycle/artifacts;

@@ -15,7 +15,7 @@ worktrees:
 
 ```ts
 const completionEnvelopeSchema=JSON.parse(readFileSync("<absolute-working-root>/delegation/manifests/completion-envelope.schema.json","utf8"))
-subagent({chain:[{agent:"researcher",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema}],cwd:"<absolute-working-root>",context:"fresh",async:true,timeoutMs:900000})
+subagent({chain:[{agent:"researcher",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema,acceptance:{level:"none",reason:"per the manifests"}}],cwd:"<absolute-working-root>",context:"fresh",async:true,timeoutMs:900000})
 ```
 
 Paths absolute; task only the brief pointer. Pi-subagents owns
