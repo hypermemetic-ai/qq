@@ -10,7 +10,7 @@ import registerPrWatch from "./qq-pr-watch.ts";
 import registerContinue from "./qq-continue.ts";
 import registerSplitFork from "./qq-split-fork.ts";
 import registerOperatorStage from "./qq-operator-stage.ts";
-import registerBacklogGuard from "../cockpit/pi/qq-backlog-guard.ts";
+import registerBacklogGuard from "./qq-backlog-guard.ts";
 
 export default function register(pi) {
   registerPrWatch(pi);

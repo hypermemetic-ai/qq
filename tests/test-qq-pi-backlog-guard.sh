@@ -8,7 +8,7 @@ TEST_NAME="test-qq-pi-backlog-guard"
 # shellcheck source=tests/helpers.sh
 source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd -- "$TESTS_DIR/.." && pwd -P)"
-EXTENSION="$ROOT/cockpit/pi/qq-backlog-guard.ts"
+EXTENSION="$ROOT/extensions/qq-backlog-guard.ts"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
