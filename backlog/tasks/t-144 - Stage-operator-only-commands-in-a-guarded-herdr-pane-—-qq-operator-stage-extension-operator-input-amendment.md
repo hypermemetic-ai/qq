@@ -3,9 +3,10 @@ id: T-144
 title: >-
   Stage operator-only commands in a guarded herdr pane — qq-operator-stage
   extension + operator-input amendment
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-23 00:01'
+updated_date: '2026-07-23 04:33'
 labels: []
 dependencies: []
 type: feature
@@ -26,3 +27,9 @@ Decision ledger: the staged-pane rule and the extension-over-skill shape — ope
 - [ ] #2 operator-input SKILL.md amended to prescribe staging over dictation; prose ratchet green (fits budget or explicit approved raise recorded)
 - [ ] #3 Native test suite green including new coverage for guard behavior and teardown discipline
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Delivered: qq-operator-stage extension (operator_stage tool — guarded herdr pane staging, never sends Enter, danger-matched guard, auto-close on success, pane-read-back outcome validation) + operator-input staging-over-dictation amendment (ratchet lowered 7606 to 7605) + README install docs (PR #217). Two fresh-context review passes: five confirmed findings fixed with real-bash reproduction; second pass clean.
+<!-- SECTION:FINAL_SUMMARY:END -->
