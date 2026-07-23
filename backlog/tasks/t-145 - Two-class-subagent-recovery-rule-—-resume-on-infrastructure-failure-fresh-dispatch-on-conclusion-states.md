@@ -3,9 +3,10 @@ id: T-145
 title: >-
   Two-class subagent recovery rule — resume on infrastructure failure, fresh
   dispatch on conclusion states
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-23 00:42'
+updated_date: '2026-07-23 03:27'
 labels: []
 dependencies: []
 type: enhancement
@@ -29,3 +30,9 @@ Decision ledger: the two-class recovery rule and its application to both skills 
 - [ ] #3 Prose ratchet green (amendment replaces text without growing budgets, or carries an explicit operator-approved raise)
 - [ ] #4 Native test suite green
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Delivered: two-class recovery rule landed in code-review step 10 and the research relaunch line (PR #214). Infrastructure failure (sandbox kill, API error, intact-session timeout) resumes the same child; conclusion states (formed findings, invalid structured output, context-gap report) dispatch fresh. Ratchet-net-zero in both skills; native suite green; fresh-context review confirmed one blocker (ambiguous 'nonzero result' example) fixed in-review to the 'formed findings' criterion.
+<!-- SECTION:FINAL_SUMMARY:END -->
