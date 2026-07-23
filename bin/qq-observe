@@ -1456,6 +1456,28 @@ def ledger_event(event_type, **fields):
     }
 
 
+def repair_ledger_tail(fd):
+    end = os.lseek(fd, 0, os.SEEK_END)
+    if end == 0:
+        return
+    if os.pread(fd, 1, end - 1) == b"\n":
+        return
+    truncate_to = 0
+    cursor = end
+    while cursor:
+        size = min(cursor, 1024 * 1024)
+        cursor -= size
+        chunk = os.pread(fd, size, cursor)
+        if len(chunk) != size:
+            raise OSError("short read while repairing ledger event store")
+        newline = chunk.rfind(b"\n")
+        if newline >= 0:
+            truncate_to = cursor + newline + 1
+            break
+    os.ftruncate(fd, truncate_to)
+    os.fsync(fd)
+
+
 def open_ledger_events():
     root = observer_store_root(create=True)
     ledger_dir = root / "ledger"
@@ -1486,7 +1508,12 @@ def open_ledger_events():
     if not stat.S_ISREG(os.fstat(fd).st_mode):
         os.close(fd)
         fail("ledger event store is not a regular file", 65)
-    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        repair_ledger_tail(fd)
+    except OSError as error:
+        os.close(fd)
+        fail(f"cannot lock or repair ledger event store: {error}", 65)
     return fd
 
 
@@ -1508,9 +1535,13 @@ def read_ledger_events(fd, since=None):
             chunks.append(chunk)
     except OSError as error:
         fail(f"cannot read ledger event store: {error}", 65)
+    data = b"".join(chunks)
+    if data and not data.endswith(b"\n"):
+        last_newline = data.rfind(b"\n")
+        data = data[:last_newline + 1] if last_newline >= 0 else b""
     events = []
     unknown = 0
-    for raw in b"".join(chunks).splitlines():
+    for raw in data.splitlines():
         try:
             item = json.loads(
                 raw.decode("utf-8"),
@@ -1533,18 +1564,14 @@ def read_ledger_events(fd, since=None):
 def append_ledger_events(fd, events):
     if not events:
         return
-    data = b"".join(
-        (json.dumps(event, separators=(",", ":"), sort_keys=True) + "\n").encode("utf-8")
-        for event in events
-    )
     try:
         os.lseek(fd, 0, os.SEEK_END)
-        view = memoryview(data)
-        while view:
-            written = os.write(fd, view)
-            if written <= 0:
-                fail("cannot append ledger events", 65)
-            view = view[written:]
+        for event in events:
+            data = (
+                json.dumps(event, separators=(",", ":"), sort_keys=True) + "\n"
+            ).encode("utf-8")
+            if os.write(fd, data) != len(data):
+                fail("cannot append complete ledger event", 65)
         os.fsync(fd)
     except OSError as error:
         fail(f"cannot append ledger events: {error}", 65)

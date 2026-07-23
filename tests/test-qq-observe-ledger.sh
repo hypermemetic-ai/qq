@@ -55,9 +55,20 @@ run_1="$(make_run pr-1 1 guided 2026-08-01T10:00:00Z "$first_episodes")"
 run_1_blind="$(make_run pr-1-blind 1 blind 2026-08-01T10:01:00Z "$first_episodes")"
 run_2="$(make_run pr-2 2 guided 2026-08-02T10:00:00Z "$first_episodes")"
 
+# Opening the append log repairs a crash-torn tail before reading or appending.
+mkdir -p "$(dirname "$events")"
+printf '%s\n' '{"schema":"qq-observer.ledger-event","schema_version":1,"ts":"2026-08-01T09:00:00Z","type":"disposition","pr":99,"outcomes":[]}' >"$events"
+printf '%s' '{"schema":"qq-observer.ledger-event","schema_version":1,"ts":' >>"$events"
+chmod 600 "$events"
 "$OBSERVE" ledger-update --run "$run_1" >"$tmp/update-1.json"
 jq -e '.findings == 2 and .promoted == 0 and .already_applied == false' \
   "$tmp/update-1.json" >/dev/null || fail 'first ledger update has the wrong result'
+jq -s -e '
+  length == 3
+  and .[0].type == "disposition" and .[0].pr == 99
+  and ([.[] | select(.type == "finding_seen") | .recurrence_key] == ["alpha","beta"])
+' "$events" >/dev/null || fail 'torn ledger tail was not repaired before append'
+[ -f "$run_1/.ledger-applied" ] || fail 'torn-tail recovery did not write the applied marker'
 assert_equal 2 "$(jq -s '[.[] | select(.type == "finding_seen")] | length' "$events")" \
   'first ledger update did not emit one finding per episode'
 assert_equal 0 "$(jq -s '[.[] | select(.type == "promoted")] | length' "$events")" \
