@@ -118,15 +118,15 @@
         "cost": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["turns", "tokens", "seconds", "source"],
+          "required": ["turns", "tokens", "duration_ms", "source"],
           "properties": {
             "turns": { "type": "integer", "minimum": 0, "maximum": 1000000000000000 },
             "tokens": { "type": "integer", "minimum": 0, "maximum": 1000000000000000 },
-            "seconds": { "type": "number", "minimum": 0, "maximum": 1000000000000000 },
+            "duration_ms": { "type": "integer", "minimum": 0, "maximum": 1000000000000000 },
             "source": {
               "type": "string",
               "minLength": 1,
-              "description": "The validator requires exactly facts:<sessions[0] path> and grounds all cost fields in supplied facts JSON."
+              "description": "The validator canonicalizes the path, requires exactly facts:<sessions[0] canonical path>, and grounds all cost fields in supplied facts JSON."
             }
           }
         },

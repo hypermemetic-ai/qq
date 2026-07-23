@@ -147,7 +147,6 @@ ANALYSIS_ROOT_CAUSE_LOCATIONS = {
 ANALYSIS_CONFIDENCE = {"high": 3, "medium": 2, "low": 1}
 # Sane-session bound: rejects absurd magnitudes before cost arithmetic.
 SANE_SESSION_BOUND = 10 ** 15
-COST_MILLISECONDS_TOLERANCE = 1
 SPAN_FIELDS = {
     "schema_version", "trace_id", "span_id", "parent_span_id", "root_span_id",
     "name", "phase", "actor", "start_time", "end_time", "duration_ms",
@@ -965,21 +964,17 @@ def analysis_string(value, label, nonempty=False, maximum=None):
         fail(f"analysis schema violation: {label} exceeds {maximum} characters")
 
 
-def bounded_number(value, label, integer=False, minimum=None, maximum=None):
-    accepted = (int,) if integer else (int, float)
-    kind = "integer" if integer else "number"
-    if isinstance(value, bool) or not isinstance(value, accepted):
-        fail(f"{label} must be a {kind}")
-    if isinstance(value, float) and not math.isfinite(value):
-        fail(f"{label} must be finite")
+def bounded_integer(value, label, minimum=None, maximum=None):
+    if isinstance(value, bool) or not isinstance(value, int):
+        fail(f"{label} must be an integer")
     if minimum is not None and value < minimum:
         fail(f"{label} must be at least {minimum}")
-    if maximum is not None and abs(value) > maximum:
+    if maximum is not None and value > maximum:
         fail(f"{label} magnitude exceeds {maximum}")
 
 
-def analysis_number(value, label, **bounds):
-    bounded_number(value, f"analysis schema violation: {label}", **bounds)
+def analysis_integer(value, label, **bounds):
+    bounded_integer(value, f"analysis schema violation: {label}", **bounds)
 
 
 def analysis_string_array(value, label, minimum=0):
@@ -993,12 +988,21 @@ def analysis_entry_array(value, label):
     if not isinstance(value, list) or not value:
         fail(f"analysis schema violation: {label} must contain at least one entry")
     for index, item in enumerate(value):
-        analysis_number(item, f"{label}[{index}]", integer=True, minimum=1)
+        analysis_integer(item, f"{label}[{index}]", minimum=1)
 
 
 def refuse_duplicates(values, message):
     if len(set(values)) != len(values):
         fail(message)
+
+
+def canonical_path(value):
+    return os.path.realpath(value)
+
+
+def canonical_source(value):
+    prefix, separator, path = value.partition(":")
+    return f"{prefix}{separator}{canonical_path(path)}"
 
 
 def validate_analysis_shape(item):
@@ -1027,6 +1031,8 @@ def validate_analysis_shape(item):
     analysis_object(run, {"change", "sessions"}, "run")
     analysis_string(run["change"], "run.change", nonempty=True)
     analysis_string_array(run["sessions"], "run.sessions", minimum=1)
+    run["sessions"] = list(map(canonical_path, run["sessions"]))
+    refuse_duplicates(run["sessions"], "duplicate session in run.sessions")
 
     episodes = item["episodes"]
     if not isinstance(episodes, list) or len(episodes) > 5:
@@ -1040,12 +1046,13 @@ def validate_analysis_shape(item):
         label = f"episodes[{episode_index}]"
         analysis_object(episode, episode_fields, label, optional={"rank"})
         if "rank" in episode:
-            analysis_number(episode["rank"], f"{label}.rank", integer=True, minimum=1)
+            analysis_integer(episode["rank"], f"{label}.rank", minimum=1)
         analysis_string(episode["kind"], f"{label}.kind")
         if episode["kind"] not in ANALYSIS_KINDS:
             fail(f"analysis schema violation: {label}.kind is not in the taxonomy")
         analysis_string(episode["title"], f"{label}.title", nonempty=True)
         analysis_string_array(episode["sessions"], f"{label}.sessions", minimum=1)
+        episode["sessions"] = list(map(canonical_path, episode["sessions"]))
         refuse_duplicates(episode["sessions"], "duplicate session in episode.sessions")
         evidence = episode["evidence"]
         if not isinstance(evidence, list) or not evidence:
@@ -1054,6 +1061,7 @@ def validate_analysis_shape(item):
             citation_label = f"{label}.evidence[{evidence_index}]"
             analysis_object(citation, {"session", "entries", "quote"}, citation_label)
             analysis_string(citation["session"], f"{citation_label}.session")
+            citation["session"] = canonical_path(citation["session"])
             analysis_entry_array(citation["entries"], f"{citation_label}.entries")
             refuse_duplicates(citation["entries"], "duplicate entry in citation")
             analysis_string(citation["quote"], f"{citation_label}.quote", maximum=200)
@@ -1063,19 +1071,11 @@ def validate_analysis_shape(item):
         if episode["root_cause_location"] not in ANALYSIS_ROOT_CAUSE_LOCATIONS:
             fail(f"analysis schema violation: {label}.root_cause_location is invalid")
         cost = episode["cost"]
-        analysis_object(cost, {"turns", "tokens", "seconds", "source"}, f"{label}.cost")
-        analysis_number(
-            cost["turns"], f"{label}.cost.turns", integer=True,
-            minimum=0, maximum=SANE_SESSION_BOUND,
-        )
-        analysis_number(
-            cost["tokens"], f"{label}.cost.tokens", integer=True,
-            minimum=0, maximum=SANE_SESSION_BOUND,
-        )
-        analysis_number(
-            cost["seconds"], f"{label}.cost.seconds", minimum=0, maximum=SANE_SESSION_BOUND,
-        )
+        analysis_object(cost, {"turns", "tokens", "duration_ms", "source"}, f"{label}.cost")
+        for field in ("turns", "tokens", "duration_ms"):
+            analysis_integer(cost[field], f"{label}.cost.{field}", minimum=0, maximum=SANE_SESSION_BOUND)
         analysis_string(cost["source"], f"{label}.cost.source", nonempty=True)
+        cost["source"] = canonical_source(cost["source"])
         remedy = episode["remedy"]
         analysis_object(remedy, {"type", "smallest_change"}, f"{label}.remedy")
         analysis_string(remedy["type"], f"{label}.remedy.type", nonempty=True)
@@ -1135,14 +1135,14 @@ def load_cost_facts(path, session):
     for role, value in turns.items():
         if not isinstance(role, str):
             fail(f"{prefix} turns_by_role keys must be strings")
-        bounded_number(
-            value, f"{prefix} turns_by_role value", integer=True,
+        bounded_integer(
+            value, f"{prefix} turns_by_role value",
             minimum=0, maximum=SANE_SESSION_BOUND,
         )
 
     usage_records = item.get("token_usage_records")
-    bounded_number(
-        usage_records, f"{prefix} token_usage_records", integer=True,
+    bounded_integer(
+        usage_records, f"{prefix} token_usage_records",
         minimum=0, maximum=SANE_SESSION_BOUND,
     )
     token_usage = item.get("token_usage")
@@ -1152,8 +1152,8 @@ def load_cost_facts(path, session):
     for field in ("input", "output"):
         value = token_usage.get(field)
         if value is not None:
-            bounded_number(
-                value, f"{prefix} token_usage.{field}", integer=True,
+            bounded_integer(
+                value, f"{prefix} token_usage.{field}",
                 minimum=0, maximum=SANE_SESSION_BOUND,
             )
             if usage_records == 0:
@@ -1164,9 +1164,8 @@ def load_cost_facts(path, session):
     if not isinstance(wall_clock, dict):
         fail(f"{prefix} wall_clock must be an object")
     duration = wall_clock.get("duration_ms")
-    bounded_number(
-        duration, f"{prefix} wall_clock.duration_ms", minimum=0,
-        maximum=SANE_SESSION_BOUND * 1000,
+    bounded_integer(
+        duration, f"{prefix} wall_clock.duration_ms", minimum=0, maximum=SANE_SESSION_BOUND,
     )
     return {
         "turns": sum(turns.values()),
@@ -1212,7 +1211,7 @@ def parse_analysis_package(values):
             "validate-analysis requires an analysis JSON, at least one session JSONL, "
             "and one --facts pair per session"
         )
-    analysis_path = Path(values[0])
+    analysis_path = Path(canonical_path(values[0]))
     supplied = []
     facts_paths = {}
     index = 1
@@ -1227,14 +1226,15 @@ def parse_analysis_package(values):
             session, facts_path = pair.split("=", 1)
             if not session or not facts_path:
                 fail("--facts requires non-empty session and facts paths")
+            session = canonical_path(session)
             if session in facts_paths:
                 fail(f"duplicate --facts session: {session}")
-            facts_paths[session] = Path(facts_path)
+            facts_paths[session] = Path(canonical_path(facts_path))
             index += 2
             continue
         if value.startswith("--"):
             fail(f"unknown validate-analysis option: {value}")
-        supplied.append(value)
+        supplied.append(canonical_path(value))
         index += 1
 
     if not supplied:
@@ -1254,11 +1254,11 @@ def validate_episode_cost(episode, facts):
     expected_turns = 0
     expected_tokens = 0
     tokens_verifiable = False
-    expected_ms = 0
+    expected_duration_ms = 0
     for session in episode["sessions"]:
         record = facts[session]
         expected_turns += record["turns"]
-        expected_ms += record["duration_ms"]
+        expected_duration_ms += record["duration_ms"]
         if record["tokens_verifiable"]:
             tokens_verifiable = True
             expected_tokens += record["tokens"]
@@ -1268,9 +1268,8 @@ def validate_episode_cost(episode, facts):
         cost_mismatch("turns", expected_turns, cost["turns"])
     if tokens_verifiable and cost["tokens"] != expected_tokens:
         cost_mismatch("tokens", expected_tokens, cost["tokens"])
-    actual_ms = cost["seconds"] * 1000
-    if abs(actual_ms - expected_ms) > COST_MILLISECONDS_TOLERANCE:
-        cost_mismatch("seconds", expected_ms / 1000, cost["seconds"])
+    if cost["duration_ms"] != expected_duration_ms:
+        cost_mismatch("duration_ms", expected_duration_ms, cost["duration_ms"])
     expected_source = f"facts:{episode['sessions'][0]}"
     if cost["source"] != expected_source:
         cost_mismatch("source", expected_source, cost["source"])

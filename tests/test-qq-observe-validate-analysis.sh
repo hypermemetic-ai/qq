@@ -26,6 +26,9 @@ cat >"$session_b" <<'JSONL'
 {"type":"session","version":3,"timestamp":"2026-07-23T00:00:00Z"}
 {"type":"message","timestamp":"2026-07-23T00:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}
 JSONL
+session_a_dot="$tmp/./session-a.jsonl"
+session_a_link="$tmp/session-a-link.jsonl"
+ln -s "$session_a" "$session_a_link"
 
 facts_a="$tmp/facts-a.json"
 cat >"$facts_a" <<'JSON'
@@ -34,14 +37,6 @@ JSON
 facts_b="$tmp/facts-b.json"
 cat >"$facts_b" <<'JSON'
 {"schema":"qq-observe.facts","schema_version":2,"turns_by_role":{"assistant":1},"token_usage":{"input":40,"output":10},"token_usage_records":1,"wall_clock":{"duration_ms":2000}}
-JSON
-facts_a_1001="$tmp/facts-a-1001.json"
-cat >"$facts_a_1001" <<'JSON'
-{"schema":"qq-observe.facts","schema_version":2,"turns_by_role":{"assistant":4},"token_usage":{"input":7,"output":3},"token_usage_records":1,"wall_clock":{"duration_ms":1001}}
-JSON
-facts_a_1002="$tmp/facts-a-1002.json"
-cat >"$facts_a_1002" <<'JSON'
-{"schema":"qq-observe.facts","schema_version":2,"turns_by_role":{"assistant":4},"token_usage":{"input":7,"output":3},"token_usage_records":1,"wall_clock":{"duration_ms":1002}}
 JSON
 facts_a_null="$tmp/facts-a-null.json"
 cat >"$facts_a_null" <<'JSON'
@@ -54,7 +49,7 @@ JSON
 
 valid="$tmp/valid.json"
 jq -n --arg a "$session_a" --arg b "$session_b" '
-  def episode($title; $confidence; $session; $quote; $turns; $tokens; $seconds; $kind; $location): {
+  def episode($title; $confidence; $session; $quote; $turns; $tokens; $duration_ms; $kind; $location): {
     kind:$kind,
     title:$title,
     sessions:[$session],
@@ -62,7 +57,7 @@ jq -n --arg a "$session_a" --arg b "$session_b" '
     what_happened:"A cited event happened.",
     root_cause:"A cited harness cause.",
     root_cause_location:$location,
-    cost:{turns:$turns,tokens:$tokens,seconds:$seconds,source:("facts:" + $session)},
+    cost:{turns:$turns,tokens:$tokens,duration_ms:$duration_ms,source:("facts:" + $session)},
     remedy:{type:"harness-redesign",smallest_change:"Change one harness rule."},
     confidence:$confidence,
     confidence_why:"The citation is direct.",
@@ -73,11 +68,11 @@ jq -n --arg a "$session_a" --arg b "$session_b" '
     schema_version:1,
     run:{change:"T-142-fixture",sessions:[$a,$b]},
     episodes:[
-      episode("Low tokens high";"high";$a;"expected";4;10;1;"waste";"agent-behavior"),
-      episode("High tokens high";"high";$b;"done";1;50;2;"design-question";"harness-design"),
-      episode("Medium huge";"medium";$b;"done";1;50;2;"friction";"instruction"),
-      episode("Zulu low tie";"low";$a;"expected";4;10;1;"substrate";"substrate"),
-      episode("Alpha low tie";"low";$a;"expected";4;10;1;"failure";"tool")
+      episode("Low tokens high";"high";$a;"expected";4;10;1000;"waste";"agent-behavior"),
+      episode("High tokens high";"high";$b;"done";1;50;2000;"design-question";"harness-design"),
+      episode("Medium huge";"medium";$b;"done";1;50;2000;"friction";"instruction"),
+      episode("Zulu low tie";"low";$a;"expected";4;10;1000;"substrate";"substrate"),
+      episode("Alpha low tie";"low";$a;"expected";4;10;1000;"failure";"tool")
     ],
     dropped_signals:[{kind:"compaction",entries:[2],why:"Benign fixture signal."}],
     limitations:"Fixture analysis."
@@ -152,6 +147,29 @@ if ! cmp -s "$tmp/ranked.json" "$tmp/revalidated.stdout"; then
   diff -u "$tmp/ranked.json" "$tmp/revalidated.stdout" >&2 || true
   fail 'ranked output did not revalidate to the same ranked analysis'
 fi
+expect_analysis_success analysis-path-alias "$tmp/./valid.json"
+
+jq --arg canonical "$session_a" --arg alias "$session_a_dot" '
+  .run.sessions |= map(if . == $canonical then $alias else . end)
+  | .episodes |= map(
+      if .sessions[0] == $canonical then
+        .sessions[0] = $alias
+        | .evidence[0].session = $alias
+        | .cost.source = ("facts:" + $alias)
+      else . end
+    )
+' "$valid" >"$tmp/canonicalized-analysis-paths.json"
+expect_analysis_success canonicalized-analysis-paths "$tmp/canonicalized-analysis-paths.json" \
+  "$session_a" "$session_b" \
+  --facts "$session_a=$tmp/./facts-a.json" --facts "$session_b=$facts_b"
+jq -e --arg canonical "$session_a" '
+  .run.sessions[0] == $canonical
+  and ([.episodes[] | select(.sessions[0] == $canonical)] | length) == 3
+  and ([.episodes[].evidence[] | select(.session == $canonical)] | length) == 3
+  and ([.episodes[] | select(.sessions[0] == $canonical) | .cost.source]
+    | all(. == ("facts:" + $canonical)))
+' "$tmp/canonicalized-analysis-paths.stdout" >/dev/null \
+  || fail 'analysis path aliases were not emitted canonically'
 
 jq '.episodes[0].evidence[0].quote = "unrelated event"' \
   "$valid" >"$tmp/bogus-quote.json"
@@ -204,16 +222,35 @@ jq '.episodes[0].evidence[0].session = "/not/in/the/package.jsonl"' \
   "$valid" >"$tmp/unknown-session.json"
 expect_analysis_failure unknown-session "$tmp/unknown-session.json"
 
-jq --arg session "$session_a" '
-  .episodes[0].sessions = [$session,$session]
+jq --arg session "$session_a" --arg alias "$session_a_dot" '
+  .episodes[0].sessions = [$session,$alias]
   | .episodes[0].cost = {
-      turns:8, tokens:20, seconds:2, source:("facts:" + $session)
+      turns:8, tokens:20, duration_ms:2000, source:("facts:" + $session)
     }
 ' "$valid" >"$tmp/duplicate-episode-session.json"
 expect_analysis_failure duplicate-episode-session "$tmp/duplicate-episode-session.json"
 assert_file_contains "$tmp/duplicate-episode-session.stdout" \
   'duplicate session in episode.sessions' \
-  'duplicate episode session did not use the required reason'
+  'alias-duplicate episode session did not use the required reason'
+
+jq --arg a "$session_a" --arg alias "$session_a_dot" --arg b "$session_b" \
+  '.run.sessions = [$a,$alias,$b]' "$valid" >"$tmp/duplicate-run-session.json"
+expect_analysis_failure duplicate-run-session "$tmp/duplicate-run-session.json"
+assert_file_contains "$tmp/duplicate-run-session.stdout" 'duplicate session in run.sessions' \
+  'alias-duplicate run session did not use the required reason'
+
+expect_analysis_failure duplicate-facts-alias "$valid" \
+  "$session_a" "$session_b" \
+  --facts "$session_a=$facts_a" --facts "$session_a_dot=$facts_a" \
+  --facts "$session_b=$facts_b"
+assert_file_contains "$tmp/duplicate-facts-alias.stdout" 'duplicate --facts session:' \
+  'alias-duplicate facts pair did not use the required reason'
+
+expect_analysis_failure duplicate-symlink-session "$valid" \
+  "$session_a" "$session_a_link" "$session_b" \
+  --facts "$session_a=$facts_a" --facts "$session_b=$facts_b"
+assert_file_contains "$tmp/duplicate-symlink-session.stdout" 'duplicate session JSONL path' \
+  'symlinked session alias did not use the required reason'
 
 expect_analysis_failure missing-facts "$valid" \
   "$session_a" "$session_b" --facts "$session_a=$facts_a"
@@ -238,17 +275,18 @@ expect_analysis_failure bad-tokens "$tmp/bad-tokens.json"
 assert_file_contains "$tmp/bad-tokens.stdout" 'cost.tokens mismatch: expected 10, actual 11' \
   'token mismatch did not report expected and actual values'
 
-jq '.episodes[0].cost.seconds = 1.002' "$valid" >"$tmp/bad-seconds.json"
-expect_analysis_failure bad-seconds "$tmp/bad-seconds.json"
-assert_file_contains "$tmp/bad-seconds.stdout" 'cost.seconds mismatch: expected 1.0, actual 1.002' \
-  'seconds mismatch did not report expected and actual values'
+jq '.episodes[0].cost.duration_ms = 1001' "$valid" >"$tmp/bad-duration.json"
+expect_analysis_failure bad-duration "$tmp/bad-duration.json"
+assert_file_contains "$tmp/bad-duration.stdout" \
+  'cost.duration_ms mismatch: expected 1000, actual 1001' \
+  'duration mismatch did not report expected and actual values'
 
 jq '.episodes[0].cost.source = "not a facts pointer"' "$valid" >"$tmp/bad-source.json"
 expect_analysis_failure bad-source "$tmp/bad-source.json"
 assert_file_contains "$tmp/bad-source.stdout" 'cost.source mismatch:' \
   'source mismatch did not identify the field'
 
-for field in turns tokens seconds; do
+for field in turns tokens duration_ms; do
   python3 - "$valid" "$tmp/huge-$field.json" "$field" <<'PY'
 import json
 import sys
@@ -265,26 +303,11 @@ PY
     "huge $field did not fail at the sane-session bound"
 done
 
-jq '.episodes[0].cost.seconds = 1.001' "$valid" >"$tmp/seconds-boundary.json"
-expect_analysis_success seconds-boundary "$tmp/seconds-boundary.json"
-
-jq '.episodes |= map(if .sessions[0] | endswith("session-a.jsonl") then .cost.seconds = 1.002 else . end)' \
-  "$valid" >"$tmp/seconds-1001-boundary.json"
-expect_analysis_success seconds-1001-boundary "$tmp/seconds-1001-boundary.json" \
-  "$session_a" "$session_b" \
-  --facts "$session_a=$facts_a_1001" --facts "$session_b=$facts_b"
-
-expect_analysis_failure seconds-1002-outside "$valid" \
-  "$session_a" "$session_b" \
-  --facts "$session_a=$facts_a_1002" --facts "$session_b=$facts_b"
-assert_file_contains "$tmp/seconds-1002-outside.stdout" 'cost.seconds mismatch:' \
-  'two-millisecond mismatch did not identify cost.seconds'
-
 jq --arg a "$session_a" --arg b "$session_b" '
   .episodes = [.episodes[0]]
   | .episodes[0].sessions = [$a,$b]
   | .episodes[0].cost = {
-      turns:5, tokens:50, seconds:3, source:("facts:" + $a)
+      turns:5, tokens:50, duration_ms:3000, source:("facts:" + $a)
     }
 ' "$valid" >"$tmp/null-usage-mixed.json"
 expect_analysis_success null-usage-mixed "$tmp/null-usage-mixed.json" \

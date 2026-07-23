@@ -17,9 +17,11 @@ package, proposes harness improvements, and never applies a proposal.
 A package contains `facts.json` and `signals.json` for every session, the
 corresponding session transcripts, the qq tool and skill inventory, and the live
 instruction corpus (including AGENTS.md, CONCEPTS.md, skills, and manifests).
-Paths in the analysis must name sessions in that package. Facts and signals are
-the numeric and candidate-discovery authority; transcripts supply cited context.
-Pass each facts file to validation as `--facts SESSION_PATH=FACTS_PATH`.
+Paths in the analysis must name sessions in that package. The observer writes
+canonical absolute paths; validation canonicalizes all package and analysis paths
+defensively before identity comparisons. Facts and signals are the numeric and
+candidate-discovery authority; transcripts supply cited context. Pass each facts
+file to validation as `--facts SESSION_PATH=FACTS_PATH`.
 
 ## Procedure
 
@@ -99,12 +101,11 @@ fixed from the episode's `sessions`:
   null fields as zero and excluding sessions with zero usage records; when no
   episode session has usage records, only the token field is unverifiable and
   left unchecked;
-- `seconds` is the sum of `wall_clock.duration_ms / 1000`, checked in
-  milliseconds with an inclusive 1 ms tolerance; and
+- `duration_ms` is exactly the sum of `wall_clock.duration_ms`; and
 - `source` is exactly `facts:<sessions[0]>`.
 
-The validator's sane-session bound rejects `turns`, `tokens`, or `seconds`
-magnitudes above 10^15 before arithmetic. Duplicate episode sessions and
+The validator's sane-session bound rejects `turns`, `tokens`, or `duration_ms`
+values above 10^15 before arithmetic. Duplicate episode sessions and
 duplicate entries within one citation are invalid rather than deduplicated.
 
 After emission, `qq-observe validate-analysis` resolves verbatim citations,
