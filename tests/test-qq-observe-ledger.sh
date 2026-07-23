@@ -69,6 +69,11 @@ jq -s -e '
   and ([.[] | select(.type == "finding_seen") | .recurrence_key] == ["alpha","beta"])
 ' "$events" >/dev/null || fail 'torn ledger tail was not repaired before append'
 [ -f "$run_1/.ledger-applied" ] || fail 'torn-tail recovery did not write the applied marker'
+jq -s -e '
+  [.[] | select(.type == "finding_seen")]
+  | length == 2
+    and all(.[]; (.ts | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$")))
+' "$events" >/dev/null || fail 'generated ledger timestamps do not have millisecond UTC precision'
 assert_equal 2 "$(jq -s '[.[] | select(.type == "finding_seen")] | length' "$events")" \
   'first ledger update did not emit one finding per episode'
 assert_equal 0 "$(jq -s '[.[] | select(.type == "promoted")] | length' "$events")" \
@@ -319,6 +324,32 @@ jq -cn '{
   cost:{turns:1,tokens:1,duration_ms:1}
 }' >>"$events"
 
+# Equal timestamps resolve by ledger position for findings and dispositions.
+jq -cn '{
+  schema:"qq-observer.ledger-event",schema_version:1,
+  ts:"2026-09-03T10:00:00.123Z",type:"finding_seen",pr:10,
+  recurrence_key:"tied",kind:"waste",title:"Stale tied opportunity",
+  rank:2,confidence:"low",no_signal:false,
+  cost:{turns:1,tokens:1,duration_ms:1}
+}' >>"$events"
+jq -cn '{
+  schema:"qq-observer.ledger-event",schema_version:1,
+  ts:"2026-09-03T10:00:00.123Z",type:"finding_seen",pr:11,
+  recurrence_key:"tied",kind:"friction",title:"Latest tied opportunity",
+  rank:1,confidence:"high",no_signal:false,
+  cost:{turns:1,tokens:1,duration_ms:1}
+}' >>"$events"
+jq -cn '{
+  schema:"qq-observer.ledger-event",schema_version:1,
+  ts:"2026-09-03T11:00:00.456Z",type:"disposition",pr:10,
+  outcomes:[{recurrence_key:"tied",verdict:"accepted",task_refs:[],note:"Stale tie."}]
+}' >>"$events"
+jq -cn '{
+  schema:"qq-observer.ledger-event",schema_version:1,
+  ts:"2026-09-03T11:00:00.456Z",type:"disposition",pr:11,
+  outcomes:[{recurrence_key:"tied",verdict:"rejected",task_refs:[],note:"Latest tie."}]
+}' >>"$events"
+
 # Unknown event shapes are counted rather than silently interpreted.
 printf '{"schema":"qq-observer.future-event","schema_version":99}\n' >>"$events"
 "$OBSERVE" digest >"$tmp/digest.md"
@@ -328,6 +359,9 @@ assert_file_contains "$tmp/digest.md" '| 3 | 2 | `beta`' \
   'rejected recurrence did not receive its 0.5 multiplier'
 assert_file_contains "$tmp/digest.md" '| 3 | 1 | `gamma`' \
   'open finding ranking is wrong'
+assert_file_contains "$tmp/digest.md" \
+  '| 3 | 2 | `tied` | Latest tied opportunity | `friction` | #10, #11 | low, high | rejected (×0.5) |' \
+  'equal-timestamp finding or disposition did not resolve by ledger position'
 assert_file_contains "$tmp/digest.md" 'guided-only'
 assert_file_contains "$tmp/digest.md" 'blind-only'
 assert_file_contains "$tmp/digest.md" 'unabsorbed'
@@ -335,8 +369,34 @@ assert_file_contains "$tmp/digest.md" 'Coverage: 5 finalized, 1 failed.'
 assert_file_contains "$tmp/digest.md" 'Unknown ledger entries: 1.'
 digest_path="$(find "$XDG_STATE_HOME/qq/observer/digests" -type f -name '*.md')"
 cmp "$tmp/digest.md" "$digest_path" >/dev/null || fail 'stored digest differs from stdout'
-sleep 1
-"$OBSERVE" digest --since 2026-09-01T00:00:00Z >"$tmp/windowed-digest.md"
+
+# Freeze the embedded Python clock so two digests collide in the same millisecond.
+real_python="$(command -v python3)"
+clock_python="$tmp/frozen-python3"
+cat >"$clock_python" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" != - ]; then
+  exec "$REAL_PYTHON3" "$@"
+fi
+script="$CLOCK_TMP/frozen-clock-$$.py"
+trap 'rm -f "$script"' EXIT
+sed 's/dt\.datetime\.now(dt\.timezone\.utc)/dt.datetime(2040, 1, 2, 3, 4, 5, 6000, tzinfo=dt.timezone.utc)/g' >"$script"
+"$REAL_PYTHON3" "$script" "${@:2}"
+SH
+chmod 700 "$clock_python"
+REAL_PYTHON3="$real_python" CLOCK_TMP="$tmp" QQ_PYTHON3_BIN="$clock_python" \
+  "$OBSERVE" digest --since 2026-09-01T00:00:00Z >"$tmp/windowed-digest.md"
+REAL_PYTHON3="$real_python" CLOCK_TMP="$tmp" QQ_PYTHON3_BIN="$clock_python" \
+  "$OBSERVE" digest --since 2026-09-01T00:00:00Z >"$tmp/windowed-digest-2.md"
+assert_file_contains "$tmp/windowed-digest.md" 'Generated: `2040-01-02T03:04:05.006Z`'
+cmp "$tmp/windowed-digest.md" "$tmp/windowed-digest-2.md" >/dev/null \
+  || fail 'equal-millisecond digests differ'
+digest_dir="$XDG_STATE_HOME/qq/observer/digests"
+[ -f "$digest_dir/2040-01-02T03:04:05.006Z.md" ] \
+  || fail 'equal-millisecond digest base file is missing'
+[ -f "$digest_dir/2040-01-02T03:04:05.006Z-2.md" ] \
+  || fail 'equal-millisecond digest suffix file is missing'
 assert_file_contains "$tmp/windowed-digest.md" \
   '| 9 | 2 | `windowed` | Windowed opportunity | `waste` | #8, #9 | high, high | accepted (×1.5) |' \
   'windowed finding lost global recurrence or disposition state'

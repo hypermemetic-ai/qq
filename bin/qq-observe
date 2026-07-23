@@ -345,10 +345,13 @@ def preflight_append(path, data):
     return old is not None
 
 
-def atomic_append(path, data):
+def atomic_append(path, data, content_idempotent=True):
     path = Path(path)
     ensure_directory(path.parent)
-    if preflight_append(path, data):
+    if content_idempotent:
+        if preflight_append(path, data):
+            return False
+    elif existing_bytes(path) is not None:
         return False
     directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
     temporary = None
@@ -376,8 +379,9 @@ def atomic_append(path, data):
             os.link(temporary, path.name, src_dir_fd=directory, dst_dir_fd=directory,
                     follow_symlinks=False)
         except FileExistsError:
-            if read_regular(path, f"append-only destination {path}") != data:
-                fail(f"append-only conflict at {path}", 65)
+            if content_idempotent:
+                if read_regular(path, f"append-only destination {path}") != data:
+                    fail(f"append-only conflict at {path}", 65)
             return False
         os.fsync(directory)
         return True
@@ -437,7 +441,7 @@ def parse_time(value, label):
 
 
 def utc_now():
-    return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def pi_first_record(path):
@@ -1764,37 +1768,45 @@ def rounds(values):
 def digest_score_rows(events):
     findings = {}
     promoted = set()
-    for event in events:
+    for position, event in enumerate(events):
         if event["type"] == "finding_seen":
-            findings.setdefault(event["recurrence_key"], []).append(event)
+            findings.setdefault(event["recurrence_key"], []).append((position, event))
         elif event["type"] == "promoted":
             promoted.add(event["recurrence_key"])
     latest_by_key = {
-        key: max(history, key=lambda event: time_value(event["ts"]))
+        key: max(
+            history,
+            key=lambda entry: (time_value(entry[1]["ts"]), entry[0]),
+        )[1]
         for key, history in findings.items()
     }
     kind_by_key = {key: event["kind"] for key, event in latest_by_key.items()}
     key_verdict = {}
     kind_verdict = {}
-    for event in events:
+    for position, event in enumerate(events):
         if event["type"] != "disposition":
             continue
+        order = (time_value(event["ts"]), position)
         for outcome in event["outcomes"]:
             key = outcome["recurrence_key"]
             verdict = outcome["verdict"]
-            key_verdict[key] = verdict
+            if key not in key_verdict or order > key_verdict[key][0]:
+                key_verdict[key] = (order, verdict)
             if key in kind_by_key:
-                kind_verdict[kind_by_key[key]] = verdict
+                kind = kind_by_key[key]
+                if kind not in kind_verdict or order > kind_verdict[kind][0]:
+                    kind_verdict[kind] = (order, verdict)
     rows = []
     for key, history in findings.items():
         latest = latest_by_key[key]
-        prs = sorted({event["pr"] for event in history})
-        verdict = key_verdict.get(key, kind_verdict.get(latest["kind"]))
+        prs = sorted({event["pr"] for _, event in history})
+        verdict_row = key_verdict.get(key, kind_verdict.get(latest["kind"]))
+        verdict = verdict_row[1] if verdict_row is not None else None
         multiplier = VERDICT_MULTIPLIER.get(verdict, 1.0)
         score = len(prs) * CONFIDENCE_WEIGHT[latest["confidence"]] * multiplier
         rows.append({
             "key": key, "title": latest["title"], "kind": latest["kind"],
-            "confidence": [event["confidence"] for event in history],
+            "confidence": [event["confidence"] for _, event in history],
             "prs": prs, "count": len(prs), "verdict": verdict or "none",
             "multiplier": multiplier, "score": score, "promoted": key in promoted,
             "_latest_time": time_value(latest["ts"]),
@@ -1876,7 +1888,13 @@ def digest(values):
     ])
     data = "\n".join(lines).encode("utf-8")
     root = observer_store_root(create=True)
-    atomic_append(root / "digests" / f"{generated}.md", data)
+    suffix = 1
+    while True:
+        suffix_text = "" if suffix == 1 else f"-{suffix}"
+        path = root / "digests" / f"{generated}{suffix_text}.md"
+        if atomic_append(path, data, content_idempotent=False):
+            break
+        suffix += 1
     sys.stdout.write(data.decode("utf-8"))
 
 
