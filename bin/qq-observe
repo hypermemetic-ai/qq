@@ -26,6 +26,11 @@ usage:
   qq-observe render-doc --run DIR
   qq-observe finalize --run DIR \
     (--analysis FILE --analyst-trace FILE | --failed REASON [--analyst-trace FILE])
+  qq-observe ledger-update --run DIR
+  qq-observe digest [--since ISO]
+  qq-observe mark-discussed --run DIR --outcomes FILE.json
+  qq-observe rounds
+  qq-observe record-comparison --guided DIR --blind DIR
 
 context options: --trace-id ID --span-id ID --parent-span-id ID --root-span-id ID
 record options:  --phase PHASE --status STATUS --source SOURCE --attribute KEY=VALUE
@@ -60,7 +65,8 @@ case "${1:-}" in
     exit 0
     ;;
   record | read-session | summarize | facts | signals | validate-analysis | \
-  assemble | verify-delivery | render-doc | finalize) command="$1"; shift ;;
+  assemble | verify-delivery | render-doc | finalize | ledger-update | digest | \
+  mark-discussed | rounds | record-comparison) command="$1"; shift ;;
   *) usage ;;
 esac
 
@@ -74,7 +80,8 @@ python_binary="$QQ_BIN_RESULT"
 # them before the legacy Repository/store bootstrap so their explicit --repo
 # and --run subjects remain authoritative.
 case "$command" in
-  assemble | verify-delivery | render-doc | finalize)
+  assemble | verify-delivery | render-doc | finalize | ledger-update | digest | \
+  mark-discussed | rounds | record-comparison)
     observer_git=""
     observer_gh=""
     if [[ "$command" == assemble || "$command" == verify-delivery ]]; then
@@ -93,6 +100,8 @@ case "$command" in
     fi
     exec "$python_binary" - "$self" "$command" "$observer_git" "$observer_gh" "$@" <<'PY_ASSEMBLER'
 import datetime as dt
+import fcntl
+import hashlib
 import json
 import math
 import os
@@ -1288,6 +1297,565 @@ def minimal_analysis(item):
     return item
 
 
+LEDGER_SCHEMA = "qq-observer.ledger-event"
+LEDGER_VERSION = 1
+CONFIDENCE_WEIGHT = {"high": 3, "medium": 2, "low": 1}
+VERDICT_MULTIPLIER = {"accepted": 1.5, "rejected": 0.5, "reshaped": 1.0}
+
+
+def observer_store_root(create=False):
+    runs_root = observer_runs_root(create=create)
+    root = runs_root.parent
+    if create:
+        try:
+            root = root.resolve(strict=True)
+        except (OSError, RuntimeError, ValueError) as error:
+            fail(f"cannot resolve observer store root: {error}", 65)
+    return root
+
+
+def package_identity(run_dir, require_timestamp=False):
+    package = json_document(
+        read_regular(run_dir / "package.json", "observer package"),
+        "observer package",
+    )
+    if not isinstance(package, dict):
+        fail("observer package has the wrong shape", 65)
+    pr = package.get("pr")
+    variant = package.get("variant", "guided")
+    timestamp = package.get("assembled_at")
+    if isinstance(pr, bool) or not isinstance(pr, int) or pr <= 0:
+        fail("observer package lacks a positive PR number", 65)
+    if variant not in ("guided", "blind"):
+        fail("observer package has an invalid variant", 65)
+    if require_timestamp:
+        if not isinstance(timestamp, str):
+            fail("observer package lacks assembled_at", 65)
+        parse_time(timestamp, "observer package assembled_at")
+    return pr, variant, timestamp
+
+
+def valid_outcomes(value):
+    if not isinstance(value, list):
+        return False
+    keys = set()
+    for outcome in value:
+        if not isinstance(outcome, dict) or set(outcome) != {
+            "recurrence_key", "verdict", "task_refs", "note",
+        }:
+            return False
+        key = outcome.get("recurrence_key")
+        if not isinstance(key, str) or not key or key in keys:
+            return False
+        keys.add(key)
+        if outcome.get("verdict") not in VERDICT_MULTIPLIER:
+            return False
+        if (
+            not isinstance(outcome.get("task_refs"), list)
+            or not all(isinstance(item, str) and item for item in outcome["task_refs"])
+            or not isinstance(outcome.get("note"), str)
+        ):
+            return False
+    return True
+
+
+def valid_ledger_event(item):
+    if (
+        not isinstance(item, dict)
+        or item.get("schema") != LEDGER_SCHEMA
+        or item.get("schema_version") != LEDGER_VERSION
+        or not isinstance(item.get("ts"), str)
+        or not isinstance(item.get("type"), str)
+    ):
+        return False
+    try:
+        time_value(item["ts"])
+    except ValueError:
+        return False
+    event_type = item["type"]
+    if event_type == "finding_seen":
+        cost = item.get("cost")
+        return (
+            isinstance(item.get("pr"), int) and not isinstance(item["pr"], bool) and item["pr"] > 0
+            and all(isinstance(item.get(field), str) and item[field]
+                    for field in ("recurrence_key", "kind", "title"))
+            and isinstance(item.get("rank"), int) and not isinstance(item["rank"], bool)
+            and item["rank"] > 0
+            and item.get("confidence") in CONFIDENCE_WEIGHT
+            and isinstance(item.get("no_signal"), bool)
+            and isinstance(cost, dict)
+            and all(
+                isinstance(cost.get(field), int) and not isinstance(cost[field], bool)
+                and cost[field] >= 0
+                for field in ("turns", "tokens", "duration_ms")
+            )
+        )
+    if event_type == "promoted":
+        prs = item.get("prs")
+        return (
+            isinstance(item.get("recurrence_key"), str) and bool(item["recurrence_key"])
+            and isinstance(item.get("kind"), str) and bool(item["kind"])
+            and isinstance(prs, list) and len(prs) >= 2
+            and all(isinstance(pr, int) and not isinstance(pr, bool) and pr > 0 for pr in prs)
+            and len(prs) == len(set(prs))
+        )
+    if event_type == "disposition":
+        return (
+            isinstance(item.get("pr"), int) and not isinstance(item["pr"], bool) and item["pr"] > 0
+            and valid_outcomes(item.get("outcomes"))
+        )
+    if event_type == "signal_tune_candidate":
+        signal_kind = item.get("signal_kind")
+        return (
+            isinstance(item.get("pr"), int) and not isinstance(item["pr"], bool) and item["pr"] > 0
+            and item.get("direction") in ("prune", "promote")
+            and (signal_kind is None or isinstance(signal_kind, str) and bool(signal_kind))
+            and isinstance(item.get("episode_title"), str) and bool(item["episode_title"])
+            and isinstance(item.get("recurrence_key"), str) and bool(item["recurrence_key"])
+            and item.get("evidence") in ("guided-only", "blind-only", "unabsorbed")
+        )
+    return False
+
+
+def ledger_event(event_type, **fields):
+    return {
+        "schema": LEDGER_SCHEMA, "schema_version": LEDGER_VERSION,
+        "ts": utc_now(), "type": event_type, **fields,
+    }
+
+
+def open_ledger_events():
+    root = observer_store_root(create=True)
+    ledger_dir = root / "ledger"
+    ensure_directory(ledger_dir, root)
+    path = ledger_dir / "events.jsonl"
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        info = None
+    except OSError as error:
+        fail(f"cannot inspect ledger event store: {error}", 65)
+    if info is not None and not stat.S_ISREG(info.st_mode):
+        fail("ledger event store is not a regular file", 65)
+    directory = None
+    try:
+        directory = os.open(ledger_dir, os.O_RDONLY | os.O_DIRECTORY)
+        resolved = os.path.realpath(f"/proc/self/fd/{directory}")
+        if resolved != os.fspath(ledger_dir):
+            fail("ledger directory changed during open", 65)
+        flags = os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_NONBLOCK
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(path.name, flags, 0o600, dir_fd=directory)
+    except OSError as error:
+        fail(f"cannot open ledger event store: {error}", 65)
+    finally:
+        if directory is not None:
+            os.close(directory)
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        fail("ledger event store is not a regular file", 65)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    return fd
+
+
+def close_ledger_events(fd):
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def read_ledger_events(fd, since=None):
+    try:
+        os.lseek(fd, 0, os.SEEK_SET)
+        chunks = []
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    except OSError as error:
+        fail(f"cannot read ledger event store: {error}", 65)
+    events = []
+    unknown = 0
+    for raw in b"".join(chunks).splitlines():
+        try:
+            item = json.loads(
+                raw.decode("utf-8"),
+                parse_constant=lambda value: (_ for _ in ()).throw(
+                    ValueError(f"invalid JSON constant: {value}")
+                ),
+            )
+        except (UnicodeDecodeError, ValueError, RecursionError):
+            unknown += 1
+            continue
+        if not valid_ledger_event(item):
+            unknown += 1
+            continue
+        if since is not None and time_value(item["ts"]) < since:
+            continue
+        events.append(item)
+    return events, unknown
+
+
+def append_ledger_events(fd, events):
+    if not events:
+        return
+    data = b"".join(
+        (json.dumps(event, separators=(",", ":"), sort_keys=True) + "\n").encode("utf-8")
+        for event in events
+    )
+    try:
+        os.lseek(fd, 0, os.SEEK_END)
+        view = memoryview(data)
+        while view:
+            written = os.write(fd, view)
+            if written <= 0:
+                fail("cannot append ledger events", 65)
+            view = view[written:]
+        os.fsync(fd)
+    except OSError as error:
+        fail(f"cannot append ledger events: {error}", 65)
+
+
+def ledger_update_run(run_dir):
+    analysis_path = run_dir / "analysis.json"
+    if not regular_file(analysis_path):
+        fail(f"finalized analysis is missing: {analysis_path}", 65)
+    raw = read_regular(analysis_path, "finalized analysis")
+    analysis = minimal_analysis(json_document(raw, "finalized analysis"))
+    pr, _, _ = package_identity(run_dir)
+    marker_data = (
+        json.dumps({
+            "schema": "qq-observer.ledger-applied", "schema_version": 1,
+            "analysis_sha256": hashlib.sha256(raw).hexdigest(),
+        }, separators=(",", ":"), sort_keys=True) + "\n"
+    ).encode("utf-8")
+    marker = run_dir / ".ledger-applied"
+    fd = open_ledger_events()
+    try:
+        if preflight_append(marker, marker_data):
+            return {"findings": 0, "promoted": 0, "already_applied": True}
+        previous, _ = read_ledger_events(fd)
+        already_promoted = {
+            event["recurrence_key"] for event in previous if event["type"] == "promoted"
+        }
+        prs_by_key = {}
+        kinds_by_key = {}
+        for event in previous:
+            if event["type"] == "finding_seen":
+                prs_by_key.setdefault(event["recurrence_key"], set()).add(event["pr"])
+                kinds_by_key[event["recurrence_key"]] = event["kind"]
+        findings = []
+        for index, episode in enumerate(analysis["episodes"], 1):
+            confidence = episode["confidence"]
+            key = episode["recurrence_key"]
+            kind = episode["kind"]
+            if confidence not in CONFIDENCE_WEIGHT:
+                fail(f"analysis episode has invalid confidence: {confidence}", 65)
+            if not key or not kind or not episode["title"]:
+                fail("analysis episode has an empty ledger identity", 65)
+            rank = episode.get("rank", index)
+            no_signal = episode.get("no_signal", False)
+            cost = episode["cost"]
+            event = ledger_event(
+                "finding_seen", pr=pr, recurrence_key=key, kind=kind,
+                title=episode["title"], rank=rank, confidence=confidence,
+                no_signal=no_signal,
+                cost={field: cost[field] for field in ("turns", "tokens", "duration_ms")},
+            )
+            if not valid_ledger_event(event):
+                fail(f"analysis episode {index} cannot be represented as a ledger event", 65)
+            findings.append(event)
+            prs_by_key.setdefault(key, set()).add(pr)
+            kinds_by_key[key] = kind
+        promotions = []
+        for key in sorted(prs_by_key):
+            prs = sorted(prs_by_key[key])
+            if len(prs) >= 2 and key not in already_promoted:
+                promotions.append(ledger_event(
+                    "promoted", recurrence_key=key,
+                    kind=kinds_by_key[key], prs=prs,
+                ))
+        append_ledger_events(fd, findings + promotions)
+        atomic_append(marker, marker_data)
+        return {
+            "findings": len(findings), "promoted": len(promotions),
+            "already_applied": False,
+        }
+    finally:
+        close_ledger_events(fd)
+
+
+def ledger_update(values):
+    options = parse_flags(values, {"--run"})
+    if "--run" not in options:
+        fail("ledger-update requires --run")
+    run_dir = run_directory(options["--run"])
+    result = ledger_update_run(run_dir)
+    emit({"status": "updated", "run_dir": os.fspath(run_dir), **result})
+
+
+def mark_discussed(values):
+    options = parse_flags(values, {"--run", "--outcomes"})
+    if set(options) != {"--run", "--outcomes"}:
+        fail("mark-discussed requires --run and --outcomes")
+    run_dir = run_directory(options["--run"])
+    pr, _, _ = package_identity(run_dir)
+    outcomes_path = canonical_existing(options["--outcomes"], "outcomes input")
+    outcomes = json_document(read_regular(outcomes_path, "outcomes input"), "outcomes input")
+    if not valid_outcomes(outcomes):
+        fail("outcomes schema violation", 65)
+    path = run_dir / "discussed.json"
+    fd = open_ledger_events()
+    try:
+        old = existing_bytes(path)
+        if old is not None:
+            existing = json_document(old, "discussed mark")
+            if not valid_ledger_event(existing) or existing.get("type") != "disposition":
+                fail(f"invalid discussed mark at {path}", 65)
+            if existing["pr"] == pr and existing["outcomes"] == outcomes:
+                emit({"status": "already discussed", "run_dir": os.fspath(run_dir)})
+            fail(f"append-only conflict at {path}", 65)
+        event = ledger_event("disposition", pr=pr, outcomes=outcomes)
+        append_ledger_events(fd, [event])
+        atomic_append(
+            path,
+            (json.dumps(event, separators=(",", ":"), sort_keys=True) + "\n").encode("utf-8"),
+        )
+    finally:
+        close_ledger_events(fd)
+    emit({"status": "discussed", "run_dir": os.fspath(run_dir)})
+
+
+def observer_run_rows(since=None):
+    runs_root = observer_runs_root(create=False)
+    if not runs_root.exists():
+        return []
+    try:
+        root_info = os.lstat(runs_root)
+    except OSError as error:
+        fail(f"cannot inspect observer runs root: {error}", 65)
+    if not stat.S_ISDIR(root_info.st_mode):
+        fail("observer runs root is not a directory", 65)
+    rows = []
+    for run_dir in sorted(runs_root.iterdir(), key=lambda path: path.name):
+        try:
+            info = os.lstat(run_dir)
+        except OSError as error:
+            fail(f"cannot inspect observer run {run_dir}: {error}", 65)
+        if not stat.S_ISDIR(info.st_mode):
+            continue
+        pr, variant, timestamp = package_identity(run_dir, require_timestamp=True)
+        timestamp_value = time_value(timestamp)
+        if since is not None and timestamp_value < since:
+            continue
+        analyzed = regular_file(run_dir / "analysis.json")
+        failed = regular_file(run_dir / "analysis_failed.json")
+        if analyzed and failed:
+            fail(f"observer run has both terminal markers: {run_dir}", 65)
+        discussed_path = run_dir / "discussed.json"
+        discussed = regular_file(discussed_path)
+        if os.path.lexists(discussed_path) and not discussed:
+            fail(f"discussed mark is not a regular file: {discussed_path}", 65)
+        if discussed:
+            mark = json_document(read_regular(discussed_path, "discussed mark"), "discussed mark")
+            if (
+                not valid_ledger_event(mark) or mark.get("type") != "disposition"
+                or mark.get("pr") != pr
+            ):
+                fail(f"invalid discussed mark at {discussed_path}", 65)
+        rows.append({
+            "pr": pr, "variant": variant, "analyzed": analyzed,
+            "failed": failed, "discussed": discussed, "ts": timestamp,
+            "_time": timestamp_value,
+        })
+    return rows
+
+
+def rounds(values):
+    if values:
+        fail(f"invalid or incomplete option: {values[0]}")
+    rows = observer_run_rows()
+    rows.sort(key=lambda row: (
+        row["discussed"], -row["_time"].timestamp(), row["pr"], row["variant"],
+    ))
+    for row in rows:
+        row.pop("_time")
+    print(json.dumps(rows, separators=(",", ":"), sort_keys=True))
+
+
+def digest_score_rows(events):
+    findings = {}
+    promoted = set()
+    for event in events:
+        if event["type"] == "finding_seen":
+            findings.setdefault(event["recurrence_key"], []).append(event)
+        elif event["type"] == "promoted":
+            promoted.add(event["recurrence_key"])
+    kind_by_key = {key: history[-1]["kind"] for key, history in findings.items()}
+    key_verdict = {}
+    kind_verdict = {}
+    for event in events:
+        if event["type"] != "disposition":
+            continue
+        for outcome in event["outcomes"]:
+            key = outcome["recurrence_key"]
+            verdict = outcome["verdict"]
+            key_verdict[key] = verdict
+            if key in kind_by_key:
+                kind_verdict[kind_by_key[key]] = verdict
+    rows = []
+    for key, history in findings.items():
+        latest = history[-1]
+        prs = sorted({event["pr"] for event in history})
+        verdict = key_verdict.get(key, kind_verdict.get(latest["kind"]))
+        multiplier = VERDICT_MULTIPLIER.get(verdict, 1.0)
+        score = len(prs) * CONFIDENCE_WEIGHT[latest["confidence"]] * multiplier
+        rows.append({
+            "key": key, "title": latest["title"], "kind": latest["kind"],
+            "confidence": [event["confidence"] for event in history],
+            "prs": prs, "count": len(prs), "verdict": verdict or "none",
+            "multiplier": multiplier, "score": score, "promoted": key in promoted,
+        })
+    rows.sort(key=lambda row: (-row["score"], row["key"]))
+    return rows
+
+
+def score_text(value):
+    return f"{value:.15g}"
+
+
+def digest(values):
+    options = parse_flags(values, {"--since"})
+    since = None
+    if "--since" in options:
+        since = parse_time(options["--since"], "--since")
+    fd = open_ledger_events()
+    try:
+        events, unknown = read_ledger_events(fd, since=since)
+    finally:
+        close_ledger_events(fd)
+    rows = digest_score_rows(events)
+    generated = utc_now()
+    lines = [
+        "# qq observer digest", "", f"Generated: `{generated}`", "",
+        "Scoring constants: confidence `high=3`, `medium=2`, `low=1`; "
+        "disposition `accepted=1.5`, `rejected=0.5`, default `1.0`.", "",
+    ]
+
+    def add_findings(title, selected):
+        lines.extend([
+            f"## {title}", "",
+            "| Score | Recurrences | Recurrence key | Latest title | Kind | PRs | Confidence history | Disposition |",
+            "| ---: | ---: | --- | --- | --- | --- | --- | --- |",
+        ])
+        if not selected:
+            lines.append("| — | — | None | — | — | — | — | — |")
+        for row in selected:
+            lines.append(
+                f"| {score_text(row['score'])} | {row['count']} | "
+                f"`{markdown_inline(row['key'])}` | {markdown_inline(row['title'])} | "
+                f"`{markdown_inline(row['kind'])}` | "
+                f"{', '.join('#' + str(pr) for pr in row['prs'])} | "
+                f"{', '.join(row['confidence'])} | {row['verdict']} "
+                f"(×{score_text(row['multiplier'])}) |"
+            )
+        lines.append("")
+
+    add_findings("Opportunities ledger", [row for row in rows if row["promoted"]])
+    add_findings("Open findings", [row for row in rows if not row["promoted"]])
+    lines.extend([
+        "## Signal-tuning candidates", "",
+        "| PR | Direction | Evidence | Signal kind | Episode title | Recurrence key |",
+        "| ---: | --- | --- | --- | --- | --- |",
+    ])
+    candidates = [event for event in events if event["type"] == "signal_tune_candidate"]
+    if not candidates:
+        lines.append("| — | None | — | — | — | — |")
+    for event in candidates:
+        lines.append(
+            f"| #{event['pr']} | {event['direction']} | {event['evidence']} | "
+            f"{markdown_inline(event.get('signal_kind', '—'))} | "
+            f"{markdown_inline(event['episode_title'])} | "
+            f"`{markdown_inline(event['recurrence_key'])}` |"
+        )
+    run_rows = observer_run_rows(since=since)
+    finalized = sum(row["analyzed"] for row in run_rows)
+    failed = sum(row["failed"] for row in run_rows)
+    lines.extend([
+        "", f"Coverage: {finalized} finalized, {failed} failed.",
+        f"Unknown ledger entries: {unknown}.", "",
+    ])
+    data = "\n".join(lines).encode("utf-8")
+    root = observer_store_root(create=True)
+    atomic_append(root / "digests" / f"{generated}.md", data)
+    sys.stdout.write(data.decode("utf-8"))
+
+
+def analysis_for_comparison(run_dir, expected_variant):
+    if not regular_file(run_dir / "analysis.json"):
+        fail(f"comparison run lacks analysis.json: {run_dir}", 65)
+    analysis = minimal_analysis(json_document(
+        read_regular(run_dir / "analysis.json", "comparison analysis"),
+        "comparison analysis",
+    ))
+    pr, variant, _ = package_identity(run_dir)
+    if variant != expected_variant:
+        fail(f"comparison {expected_variant} run has variant {variant}", 65)
+    return pr, analysis
+
+
+def record_comparison(values):
+    options = parse_flags(values, {"--guided", "--blind"})
+    if set(options) != {"--guided", "--blind"}:
+        fail("record-comparison requires --guided and --blind")
+    guided_dir = run_directory(options["--guided"])
+    blind_dir = run_directory(options["--blind"])
+    guided_pr, guided = analysis_for_comparison(guided_dir, "guided")
+    blind_pr, blind = analysis_for_comparison(blind_dir, "blind")
+    if guided_pr != blind_pr:
+        fail("comparison runs have different PR numbers", 65)
+    guided_by_key = {episode["recurrence_key"]: episode for episode in guided["episodes"]}
+    blind_by_key = {episode["recurrence_key"]: episode for episode in blind["episodes"]}
+    if any(not key for key in guided_by_key) or any(not key for key in blind_by_key):
+        fail("comparison analysis has an empty recurrence key", 65)
+    events = []
+    for key in sorted(guided_by_key.keys() - blind_by_key.keys()):
+        episode = guided_by_key[key]
+        events.append(ledger_event(
+            "signal_tune_candidate", pr=guided_pr, direction="prune",
+            episode_title=episode["title"], recurrence_key=key,
+            evidence="guided-only",
+        ))
+    for key in sorted(blind_by_key.keys() - guided_by_key.keys()):
+        episode = blind_by_key[key]
+        events.append(ledger_event(
+            "signal_tune_candidate", pr=guided_pr, direction="promote",
+            episode_title=episode["title"], recurrence_key=key,
+            evidence="blind-only",
+        ))
+    guided_kinds = {episode["kind"] for episode in guided["episodes"]}
+    dropped = {}
+    for signal in guided["dropped_signals"]:
+        dropped.setdefault(signal["kind"], signal)
+    for kind in sorted(dropped.keys() - guided_kinds):
+        signal = dropped[kind]
+        events.append(ledger_event(
+            "signal_tune_candidate", pr=guided_pr, direction="prune",
+            signal_kind=kind, episode_title=f"Unabsorbed {kind} signal",
+            recurrence_key=f"signal:{kind}", evidence="unabsorbed",
+        ))
+    if not all(valid_ledger_event(event) for event in events):
+        fail("comparison produced an invalid ledger event", 65)
+    fd = open_ledger_events()
+    try:
+        append_ledger_events(fd, events)
+    finally:
+        close_ledger_events(fd)
+    emit({"status": "recorded", "pr": guided_pr, "candidates": len(events)})
+
+
 def markdown_inline(value):
     return str(value).replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")
 
@@ -1537,6 +2105,8 @@ def finalize(values):
     for path, data in writes:
         if atomic_append(path, data):
             changed.append(path.name)
+    if "--analysis" in options:
+        ledger_update_run(run_dir)
     emit({"status": "finalized", "run_dir": os.fspath(run_dir), "written": changed})
 
 
@@ -1548,6 +2118,16 @@ elif command == "render-doc":
     render_doc(args)
 elif command == "finalize":
     finalize(args)
+elif command == "ledger-update":
+    ledger_update(args)
+elif command == "digest":
+    digest(args)
+elif command == "mark-discussed":
+    mark_discussed(args)
+elif command == "rounds":
+    rounds(args)
+elif command == "record-comparison":
+    record_comparison(args)
 else:
     fail(f"unknown package command: {command}")
 PY_ASSEMBLER
