@@ -966,16 +966,20 @@ def session_signals(analysis):
     )
 
     for result in errors:
-        later = [call for call in calls if call["line"] > result["line"]]
+        later = [
+            call for call in calls
+            if call["line"] > result["line"]
+            and call["line"] - result["line"] <= SIGNAL_WINDOW
+            and call["name"] == result["name"]
+        ]
         if not later:
             continue
         retry = later[0]
-        if retry["name"] == result["name"] and retry["line"] - result["line"] <= SIGNAL_WINDOW:
-            cited = [result.get("call_line"), result["line"], retry["line"]]
-            episodes.append({
-                "kind": "error_retry_loop",
-                "entries": list(dict.fromkeys(line for line in cited if line is not None)),
-            })
+        cited = [result.get("call_line"), result["line"], retry["line"]]
+        episodes.append({
+            "kind": "error_retry_loop",
+            "entries": list(dict.fromkeys(line for line in cited if line is not None)),
+        })
 
     identical = {}
     for call in calls:
