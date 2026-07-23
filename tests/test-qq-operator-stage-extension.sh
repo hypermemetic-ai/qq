@@ -49,10 +49,6 @@ function createHarness(options = {}) {
         stderr: "",
       };
     }
-    if (args[1] === "read") {
-      const sent = execCalls.find(({ args: candidate }) => candidate[1] === "send-text");
-      return { code: 0, stdout: `$ ${sent.args[3]}`, stderr: "" };
-    }
     return { code: 0, stdout: "", stderr: "" };
   };
 
@@ -98,7 +94,7 @@ async function testRegistrationAndLowDanger() {
     undefined,
   );
 
-  assert.deepEqual(operationNames(h.execCalls), ["split", "rename", "send-text", "read"]);
+  assert.deepEqual(operationNames(h.execCalls), ["split", "rename", "send-text", "wait-output"]);
   assert.deepEqual(h.execCalls[0].args, [
     "pane",
     "split",
@@ -115,17 +111,27 @@ async function testRegistrationAndLowDanger() {
     "wM:p4Q",
     "op-stage: verify release",
   ]);
-  const requiredLine = "printf ok; __qq_s=$?; [ $__qq_s -eq 0 ] && exit";
+  const requiredLine = "bash -c 'printf ok'; __qq_s=$?; [ $__qq_s -eq 0 ] && exit";
   assert.deepEqual(h.execCalls[2].args, ["pane", "send-text", "wM:p4Q", requiredLine]);
-  assert.deepEqual(h.execCalls[3].args, ["pane", "read", "wM:p4Q"]);
+  assert.deepEqual(h.execCalls[3].args, [
+    "pane",
+    "wait-output",
+    "--source",
+    "recent-unwrapped",
+    "--timeout",
+    "5000",
+    "--match",
+    requiredLine,
+    "wM:p4Q",
+  ]);
   assert.equal(h.execCalls.some(({ args }) => args[1] === "send-keys"), false);
   assert.equal(h.execCalls.some(({ args }) => args[1] === "close"), false);
+  assert.equal(h.execCalls.some(({ args }) => args[1] === "read"), false);
 
   assert.equal(outcome.details.pane_id, "wM:p4Q");
   assert.equal(outcome.details.danger, "low");
   assert.equal(outcome.details.description, "verify release");
   assert.equal(outcome.details.staged_line, requiredLine);
-  assert.match(outcome.details.readback, /printf ok/);
   assert.match(outcome.content[0].text, /press Enter once/);
   assert.match(outcome.content[0].text, /herdr pane read wM:p4Q/);
   assert.match(outcome.content[0].text, /pane gone.*succeeded.*auto-closed/);
@@ -144,11 +150,11 @@ async function testHighDanger() {
     undefined,
   );
 
-  assert.deepEqual(operationNames(h.execCalls), ["split", "rename", "send-text", "read"]);
+  assert.deepEqual(operationNames(h.execCalls), ["split", "rename", "send-text", "wait-output"]);
   const line = h.execCalls[2].args[3];
   assert.equal(
     line,
-    `read -n1 -r -p 'HIGH DANGER — remove owner'"'"'s output — press y to run: ' __qq_c; [ "$__qq_c" = y ] && { ${command}; __qq_s=$?; [ $__qq_s -eq 0 ] && exit; }`,
+    `read -n1 -r -p 'HIGH DANGER — remove owner'"'"'s output — press y to run: ' __qq_c; [ "$__qq_c" = y ] && { bash -c '${command}'; __qq_s=$?; [ $__qq_s -eq 0 ] && exit; }`,
   );
   assert.match(line, /read -n1/);
   assert.match(line, /\[ "\$__qq_c" = y \]/);
@@ -159,6 +165,32 @@ async function testHighDanger() {
   assert.equal(outcome.details.staged_line, line);
   assert.match(outcome.content[0].text, /press Enter, then press y/);
   assert.match(outcome.content[0].text, /any other key aborts/);
+}
+
+async function testShellCompositionSafety() {
+  setHerdrPane("source-pane");
+  const h = createHarness();
+  // A command whose bare composition would break status capture or parsing
+  // must run inside bash -c so its exit status is the child's status.
+  const outcome = await h.tool.execute(
+    "call-compose",
+    { command: "exit 7;", description: "status-capture probe", danger: "low" },
+    undefined,
+  );
+  const line = h.execCalls[2].args[3];
+  assert.equal(line, "bash -c 'exit 7;'; __qq_s=$?; [ $__qq_s -eq 0 ] && exit");
+  assert.equal(outcome.details.staged_line, line);
+
+  const h2 = createHarness();
+  await h2.tool.execute(
+    "call-quote",
+    { command: "printf 'a b'", description: "quoting probe", danger: "low" },
+    undefined,
+  );
+  assert.equal(
+    h2.execCalls[2].args[3],
+    `bash -c 'printf '"'"'a b'"'"''; __qq_s=$?; [ $__qq_s -eq 0 ] && exit`,
+  );
 }
 
 async function testRefusalsMakeNoExecCalls() {
@@ -179,6 +211,18 @@ async function testRefusalsMakeNoExecCalls() {
       name: "missing herdr",
       env: undefined,
       params: { command: "printf ok", description: "no pane", danger: "low" },
+      message: /operator_stage requires a herdr session/,
+    },
+    {
+      name: "empty herdr",
+      env: "",
+      params: { command: "printf ok", description: "empty pane id", danger: "low" },
+      message: /operator_stage requires a herdr session/,
+    },
+    {
+      name: "blank herdr",
+      env: "   ",
+      params: { command: "printf ok", description: "blank pane id", danger: "low" },
       message: /operator_stage requires a herdr session/,
     },
   ];
@@ -254,6 +298,8 @@ async function testSendFailureOwnsTeardown() {
 
   assertErrorResult(outcome);
   assert.match(outcome.content[0].text, /send denied/);
+  assert.doesNotMatch(outcome.content[0].text, /orphaned/);
+  assert.equal(outcome.details.teardown, "closed");
   assert.deepEqual(operationNames(h.execCalls), ["split", "rename", "send-text", "close"]);
   const closes = h.execCalls.filter(({ args }) => args[1] === "close");
   assert.equal(closes.length, 1);
@@ -261,7 +307,7 @@ async function testSendFailureOwnsTeardown() {
   assert.equal(h.execCalls.some(({ args }) => args[1] === "send-keys"), false);
 }
 
-async function testReadBackMustContainCommand() {
+async function testWaitOutputVerifiesStaging() {
   setHerdrPane("source-pane");
   const h = createHarness({
     execReply(call) {
@@ -272,33 +318,75 @@ async function testReadBackMustContainCommand() {
           stderr: "",
         };
       }
-      if (call.args[1] === "read") {
-        return { code: 0, stdout: "$ unrelated shell content", stderr: "" };
+      if (call.args[1] === "wait-output") {
+        return { code: 1, stdout: "", stderr: "timeout" };
       }
       return { code: 0, stdout: "", stderr: "" };
     },
   });
   const outcome = await h.tool.execute(
-    "missing-readback",
-    { command: "printf expected", description: "verify readback", danger: "low" },
+    "unverified-staging",
+    { command: "printf expected", description: "verify staging", danger: "low" },
     undefined,
   );
 
   assertErrorResult(outcome);
   assert.match(outcome.content[0].text, /could not verify/);
-  assert.deepEqual(operationNames(h.execCalls), ["split", "rename", "send-text", "read", "close"]);
-  assert.equal(outcome.details.readback, "$ unrelated shell content");
+  assert.deepEqual(
+    operationNames(h.execCalls),
+    ["split", "rename", "send-text", "wait-output", "close"],
+  );
+  const waits = h.execCalls.filter(({ args }) => args[1] === "wait-output");
+  assert.equal(waits.length, 1);
+  assert.equal(waits[0].args.includes("recent-unwrapped"), true);
+  assert.equal(waits[0].args.includes("5000"), true);
+  assert.equal(
+    waits[0].args.includes("bash -c 'printf expected'; __qq_s=$?; [ $__qq_s -eq 0 ] && exit"),
+    true,
+  );
   assert.deepEqual(h.execCalls[4].args, ["pane", "close", "wM:p8R"]);
   assert.equal(h.execCalls.some(({ args }) => args[1] === "send-keys"), false);
 }
 
+async function testCloseFailureReportsOrphan() {
+  setHerdrPane("source-pane");
+  const h = createHarness({
+    execReply(call) {
+      if (call.args[1] === "split") {
+        return { code: 0, stdout: "created wM:p7T", stderr: "" };
+      }
+      if (call.args[1] === "send-text") {
+        return { code: 1, stdout: "", stderr: "send denied" };
+      }
+      if (call.args[1] === "close") {
+        return { code: 1, stdout: "", stderr: "close denied" };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    },
+  });
+  const outcome = await h.tool.execute(
+    "close-failure",
+    { command: "printf ok", description: "close failure", danger: "low" },
+    undefined,
+  );
+
+  assertErrorResult(outcome);
+  assert.match(outcome.content[0].text, /send denied/);
+  assert.match(outcome.content[0].text, /could not be torn down/);
+  assert.match(outcome.content[0].text, /orphaned/);
+  assert.equal(outcome.details.teardown, "close-failed: close denied");
+  assert.deepEqual(operationNames(h.execCalls), ["split", "rename", "send-text", "close"]);
+}
+
 await testRegistrationAndLowDanger();
 await testHighDanger();
+await testShellCompositionSafety();
 await testRefusalsMakeNoExecCalls();
 await testSplitFailure();
 await testUnparseablePaneId();
 await testSendFailureOwnsTeardown();
-await testReadBackMustContainCommand();
+await testWaitOutputVerifiesStaging();
+await testCloseFailureReportsOrphan();
 setHerdrPane(undefined);
 
 console.log("test-qq-operator-stage-extension: pass");

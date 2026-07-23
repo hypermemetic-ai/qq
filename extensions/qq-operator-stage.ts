@@ -38,14 +38,15 @@ function result(message, details) {
 }
 
 function stagedLine(command, description, danger) {
+  const quoted = shellQuote(command);
   if (danger === "low") {
-    return `${command}; __qq_s=$?; [ $__qq_s -eq 0 ] && exit`;
+    return `bash -c ${quoted}; __qq_s=$?; [ $__qq_s -eq 0 ] && exit`;
   }
 
   const prompt = shellQuote(
     `HIGH DANGER — ${description} — press y to run: `,
   );
-  return `read -n1 -r -p ${prompt} __qq_c; [ "$__qq_c" = y ] && { ${command}; __qq_s=$?; [ $__qq_s -eq 0 ] && exit; }`;
+  return `read -n1 -r -p ${prompt} __qq_c; [ "$__qq_c" = y ] && { bash -c ${quoted}; __qq_s=$?; [ $__qq_s -eq 0 ] && exit; }`;
 }
 
 export default function register(pi, deps = {}) {
@@ -78,7 +79,6 @@ export default function register(pi, deps = {}) {
         danger: typeof danger === "string" ? danger : "",
         description: typeof description === "string" ? description : "",
         staged_line: "",
-        readback: "",
       };
 
       if (typeof command !== "string" || command.length === 0) {
@@ -93,7 +93,10 @@ export default function register(pi, deps = {}) {
       if (danger !== "low" && danger !== "high") {
         return result("operator_stage danger must be low or high.", baseDetails);
       }
-      if (process.env.HERDR_PANE_ID === undefined) {
+      if (
+        process.env.HERDR_PANE_ID === undefined ||
+        process.env.HERDR_PANE_ID.trim() === ""
+      ) {
         return result("operator_stage requires a herdr session.", baseDetails);
       }
 
@@ -135,14 +138,22 @@ export default function register(pi, deps = {}) {
       }
       details.pane_id = paneId;
 
-      async function failOwnedPane(message, readback = "") {
-        details.readback = readback;
+      async function failOwnedPane(message) {
+        let teardown = "closed";
         try {
-          await run("herdr", ["pane", "close", paneId]);
-        } catch {
-          // The primary failure remains the reported outcome after one teardown attempt.
+          const closed = await run("herdr", ["pane", "close", paneId]);
+          if (closed?.code !== 0) {
+            teardown = `close-failed: ${executionReason(closed, "unknown herdr close error")}`;
+          }
+        } catch (error) {
+          teardown = `close-failed: ${error instanceof Error ? error.message : String(error)}`;
         }
-        return result(message, details);
+        details.teardown = teardown;
+        const suffix =
+          teardown === "closed"
+            ? ""
+            : ` The staged pane could not be torn down (${teardown}); it may be orphaned — inform the operator.`;
+        return result(message + suffix, details);
       }
 
       let rename;
@@ -179,25 +190,30 @@ export default function register(pi, deps = {}) {
         );
       }
 
-      let reading;
+      let wait;
       try {
-        reading = await run("herdr", ["pane", "read", paneId], { signal });
+        wait = await run(
+          "herdr",
+          [
+            "pane",
+            "wait-output",
+            "--source",
+            "recent-unwrapped",
+            "--timeout",
+            "5000",
+            "--match",
+            line,
+            paneId,
+          ],
+          { signal },
+        );
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         return failOwnedPane(`operator_stage could not verify pane ${paneId}: ${reason}`);
       }
-      const readback = typeof reading?.stdout === "string" ? reading.stdout : "";
-      details.readback = readback;
-      if (reading?.code !== 0) {
-        return failOwnedPane(
-          `operator_stage could not verify pane ${paneId}: ${executionReason(reading, "unknown herdr read error")}`,
-          readback,
-        );
-      }
-      if (!readback.includes(command)) {
+      if (wait?.code !== 0) {
         return failOwnedPane(
           `operator_stage could not verify that pane ${paneId} contains the staged command.`,
-          readback,
         );
       }
 
