@@ -29,6 +29,12 @@ Read `CONCEPTS.md` before working and use its vocabulary. Where present,
 `CONCEPTS.local.md` appends the Repository's own vocabulary to that
 glossary.
 
+Pi is qq scope: qq runs on Pi, so a Pi change is a methodology change and qq
+owns the Pi surface—configuration, extensions, and agent integration. Herdr is
+shared multi-harness infrastructure; qq owns only its Herdr tenancy
+(`cockpit/`, `bin/qq-herdr-*`, and the workspace), not Herdr itself. Agents
+perform documented Pi activation steps; never hand them to the operator.
+
 Start with the assignment and context already provided. Resolve only what is
 missing, using the surfaces present in the Repository:
 
