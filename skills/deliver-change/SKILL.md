@@ -51,7 +51,15 @@ qq engines unconditionally: they own containment, degradation, and rails.
     sole primary `main` checkout. Exit 2 reports a rail refusal; exit 1 reports
     an error. Stop and retain the Change; repeating the call is safe. A closed
     or rejected Change follows step 7 without altering the completed Task.
-11. After landing succeeds, leave focus untouched. When the executing owner
+11. Launch the observer before retiring: `qq-observe assemble --pr <pr>
+    --repo <root>` while the worktree lives; dispatch the `observer` agent
+    async (fresh-context, task = procedure and package paths, outputSchema
+    `delegation/manifests/observer-analysis.schema.json`, acceptance none),
+    then continue. On its wake: `qq-observe validate-analysis`, then
+    `qq-observe finalize --analysis` with the analyst trace; any failure:
+    `qq-observe finalize --failed`. Automatic, headless: no veto window, no
+    UAT exception; `qq-observe verify-delivery` shows coverage.
+12. After landing succeeds, leave focus untouched. When the executing owner
     verifiably owns the Change delegate lifecycle (the default posture; Changes
     carry no work session), call `qq-change retire <change-id> --repo <checkout>
     --branch <branch> --checkout <path> --workspace-absent-owned`. The
@@ -61,5 +69,5 @@ qq engines unconditionally: they own containment, degradation, and rails.
     forces removal. On refusal or error, report state and leave every session,
     checkout, pane, and branch intact. Never force-delete, stash, clean, reset,
     switch, or repair delivery state.
-12. Keep the five gates with the accountable owner: intent alignment, plan
+13. Keep the five gates with the accountable owner: intent alignment, plan
     approval, review verdict, acceptance, and merge.

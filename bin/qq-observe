@@ -21,6 +21,11 @@ usage:
   qq-observe signals SESSION.jsonl
   qq-observe validate-analysis ANALYSIS.json SESSION.jsonl [SESSION.jsonl...] \
     --facts SESSION_PATH=FACTS_PATH [--facts SESSION_PATH=FACTS_PATH...]
+  qq-observe assemble --pr N --repo ROOT [--worktree-root DIR] [--variant guided|blind]
+  qq-observe verify-delivery --repo ROOT [--since ISO]
+  qq-observe render-doc --run DIR
+  qq-observe finalize --run DIR \
+    (--analysis FILE --analyst-trace FILE | --failed REASON [--analyst-trace FILE])
 
 context options: --trace-id ID --span-id ID --parent-span-id ID --root-span-id ID
 record options:  --phase PHASE --status STATUS --source SOURCE --attribute KEY=VALUE
@@ -54,7 +59,8 @@ case "${1:-}" in
     esac
     exit 0
     ;;
-  record | read-session | summarize | facts | signals | validate-analysis) command="$1"; shift ;;
+  record | read-session | summarize | facts | signals | validate-analysis | \
+  assemble | verify-delivery | render-doc | finalize) command="$1"; shift ;;
   *) usage ;;
 esac
 
@@ -63,6 +69,1491 @@ if ! qq_resolve_bin python3; then
   exit 69
 fi
 python_binary="$QQ_BIN_RESULT"
+
+# Package assembly and delivery commands do not use the span store. Dispatch
+# them before the legacy Repository/store bootstrap so their explicit --repo
+# and --run subjects remain authoritative.
+case "$command" in
+  assemble | verify-delivery | render-doc | finalize)
+    observer_git=""
+    observer_gh=""
+    if [[ "$command" == assemble || "$command" == verify-delivery ]]; then
+      if ! qq_resolve_bin git; then
+        printf 'qq-observe: %s\n' "$QQ_BIN_ERROR" >&2
+        exit 69
+      fi
+      observer_git="$QQ_BIN_RESULT"
+    fi
+    if [[ "$command" == assemble ]]; then
+      if ! qq_resolve_bin gh; then
+        printf 'qq-observe: %s\n' "$QQ_BIN_ERROR" >&2
+        exit 69
+      fi
+      observer_gh="$QQ_BIN_RESULT"
+    fi
+    exec "$python_binary" - "$self" "$command" "$observer_git" "$observer_gh" "$@" <<'PY_ASSEMBLER'
+import datetime as dt
+import json
+import math
+import os
+from pathlib import Path, PurePosixPath
+import re
+import stat
+import subprocess
+import sys
+
+self_path, command, git_binary, gh_binary, *args = sys.argv[1:]
+SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9._-]+$")
+PR_MERGE = re.compile(r"^Merge pull request #(\d+)\b")
+PR_SQUASH = re.compile(r"(?:^|\s)\(#(\d+)\)$")
+STATUS_CAP = 1024 * 1024
+FIRST_LINE_CAP = 1024 * 1024
+
+
+def fail(message, status=64):
+    print(f"qq-observe: {message}", file=sys.stderr)
+    raise SystemExit(status)
+
+
+def emit(value, status=0):
+    print(json.dumps(value, separators=(",", ":"), sort_keys=True))
+    raise SystemExit(status)
+
+
+def parse_flags(values, valued):
+    result = {}
+    index = 0
+    while index < len(values):
+        flag = values[index]
+        if flag not in valued or index + 1 >= len(values):
+            fail(f"invalid or incomplete option: {flag}")
+        if flag in result:
+            fail(f"duplicate option: {flag}")
+        result[flag] = values[index + 1]
+        index += 2
+    return result
+
+
+def canonical_existing(value, label, directory=False):
+    if not isinstance(value, str) or not value or not os.path.isabs(value):
+        fail(f"{label} must be an absolute path")
+    try:
+        path = Path(value).resolve(strict=True)
+    except (OSError, RuntimeError, ValueError) as error:
+        fail(f"cannot resolve {label}: {error}")
+    try:
+        mode = path.stat().st_mode
+    except OSError as error:
+        fail(f"cannot inspect {label}: {error}")
+    if directory and not stat.S_ISDIR(mode):
+        fail(f"{label} is not a directory: {path}")
+    if not directory and not stat.S_ISREG(mode):
+        fail(f"{label} is not a regular file: {path}")
+    return path
+
+
+def canonical_directory(value, label):
+    return canonical_existing(value, label, directory=True)
+
+
+def within(path, root):
+    try:
+        return os.path.commonpath(
+            (os.fspath(path), os.fspath(root)),
+        ) == os.fspath(root)
+    except ValueError:
+        return False
+
+
+def run_process(argv, label, cwd=None, input_bytes=None):
+    environment = None
+    if git_binary and argv and argv[0] == git_binary:
+        environment = os.environ.copy()
+        environment["GIT_NO_LAZY_FETCH"] = "1"
+        environment["GIT_TERMINAL_PROMPT"] = "0"
+    try:
+        return subprocess.run(
+            argv, cwd=cwd, input=input_bytes, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, check=False, env=environment,
+        )
+    except OSError as error:
+        fail(f"cannot run {label}: {error}", 65)
+
+
+def checked(argv, label, cwd=None):
+    process = run_process(argv, label, cwd=cwd)
+    if process.returncode != 0:
+        detail = process.stderr.decode("utf-8", "replace").strip()
+        fail(f"{label} failed{': ' + detail if detail else ''}", 65)
+    return process.stdout
+
+
+def git_text(repo, *arguments, label="Git command"):
+    raw = checked([git_binary, "-C", os.fspath(repo), *arguments], label)
+    try:
+        return raw.decode("utf-8").strip()
+    except UnicodeDecodeError as error:
+        fail(f"{label} emitted invalid UTF-8: {error}", 65)
+
+
+def git_root(value):
+    requested = canonical_directory(value, "Repository root")
+    top = git_text(requested, "rev-parse", "--show-toplevel", label="Repository discovery")
+    top = canonical_directory(top, "Git top level")
+    if requested != top:
+        fail(f"--repo must name the Repository root: {requested}")
+    common = git_text(
+        top, "rev-parse", "--path-format=absolute", "--git-common-dir",
+        label="Git common-directory discovery",
+    )
+    common = canonical_directory(common, "Git common directory")
+    return top, common
+
+
+def nearest_existing(path):
+    candidate = path
+    while not candidate.exists():
+        parent = candidate.parent
+        if parent == candidate:
+            break
+        candidate = parent
+    return candidate
+
+
+def observer_runs_root(create=False):
+    state_value = os.environ.get("XDG_STATE_HOME")
+    if state_value is None:
+        home = os.environ.get("HOME")
+        if not home:
+            fail("HOME is required when XDG_STATE_HOME is unset", 65)
+        state_value = os.path.join(home, ".local", "state")
+    if not os.path.isabs(state_value):
+        fail("state home must be absolute", 65)
+    state_root = Path(os.path.realpath(state_value))
+    candidate = Path(os.path.realpath(os.path.join(state_value, "qq", "observer", "runs")))
+    if not within(candidate, state_root):
+        fail(f"observer store escapes the resolved state root: {candidate}", 65)
+    if git_binary:
+        existing = nearest_existing(candidate)
+        probe = run_process(
+            [git_binary, "-C", os.fspath(existing), "rev-parse", "--show-toplevel"],
+            "observer-store containment probe",
+        )
+        if probe.returncode == 0:
+            try:
+                containing = Path(probe.stdout.decode("utf-8").strip()).resolve(strict=True)
+            except (OSError, UnicodeDecodeError, RuntimeError, ValueError):
+                fail("cannot resolve observer-store containing worktree", 65)
+            if within(candidate, containing):
+                fail(f"refusing observer store inside Git worktree: {candidate}", 65)
+    if create:
+        state_parent = nearest_existing(state_root)
+        ensure_directory(state_root, state_parent)
+        ensure_directory(candidate, state_root)
+        resolved = candidate.resolve(strict=True)
+        if not within(resolved, state_root):
+            fail(f"observer store escapes the resolved state root: {resolved}", 65)
+        return resolved
+    return candidate
+
+
+def ensure_directory(path, root=None):
+    path = Path(path)
+    if root is None:
+        root = nearest_existing(path)
+    root = Path(root)
+    if not within(Path(os.path.realpath(path)), Path(os.path.realpath(root))):
+        fail(f"directory escapes its root: {path}", 65)
+    try:
+        root_info = os.lstat(root)
+    except OSError as error:
+        fail(f"cannot inspect directory root {root}: {error}", 65)
+    if not stat.S_ISDIR(root_info.st_mode):
+        fail(f"directory root is not a directory: {root}", 65)
+    relative = Path(os.path.relpath(path, root))
+    current = root
+    for part in relative.parts:
+        if part in ("", "."):
+            continue
+        if part == "..":
+            fail(f"directory escapes its root: {path}", 65)
+        current = current / part
+        try:
+            info = os.lstat(current)
+        except FileNotFoundError:
+            try:
+                os.mkdir(current, 0o700)
+            except FileExistsError:
+                pass
+            except OSError as error:
+                fail(f"cannot create directory {current}: {error}", 65)
+            info = os.lstat(current)
+        except OSError as error:
+            fail(f"cannot inspect directory {current}: {error}", 65)
+        if not stat.S_ISDIR(info.st_mode):
+            fail(f"observer path component is not a directory: {current}", 65)
+
+
+def read_regular(path, label):
+    path = Path(path)
+    try:
+        info = os.lstat(path)
+    except OSError as error:
+        fail(f"cannot inspect {label}: {error}")
+    if not stat.S_ISREG(info.st_mode):
+        fail(f"{label} is not a regular file: {path}")
+    flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as error:
+        fail(f"cannot open {label}: {error}")
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            fail(f"{label} is not a regular file: {path}")
+        chunks = []
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
+def existing_bytes(path):
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return None
+    return read_regular(path, f"append-only destination {path}")
+
+
+def preflight_append(path, data):
+    old = existing_bytes(path)
+    if old is not None and old != data:
+        fail(f"append-only conflict at {path}", 65)
+    return old is not None
+
+
+def atomic_append(path, data):
+    path = Path(path)
+    ensure_directory(path.parent)
+    if preflight_append(path, data):
+        return False
+    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    temporary = None
+    try:
+        for _ in range(100):
+            name = f".{path.name}.tmp-{os.getpid()}-{os.urandom(8).hex()}"
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+            try:
+                fd = os.open(name, flags, 0o600, dir_fd=directory)
+                temporary = name
+                break
+            except FileExistsError:
+                continue
+        else:
+            fail(f"cannot allocate temporary file for {path}", 65)
+        try:
+            view = memoryview(data)
+            while view:
+                written = os.write(fd, view)
+                view = view[written:]
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        try:
+            os.link(temporary, path.name, src_dir_fd=directory, dst_dir_fd=directory,
+                    follow_symlinks=False)
+        except FileExistsError:
+            if read_regular(path, f"append-only destination {path}") != data:
+                fail(f"append-only conflict at {path}", 65)
+            return False
+        os.fsync(directory)
+        return True
+    finally:
+        if temporary is not None:
+            try:
+                os.unlink(temporary, dir_fd=directory)
+            except FileNotFoundError:
+                pass
+        os.close(directory)
+
+
+def json_document(raw, label):
+    try:
+        return json.loads(
+            raw.decode("utf-8"),
+            parse_constant=lambda value: (_ for _ in ()).throw(
+                ValueError(f"invalid JSON constant: {value}")
+            ),
+        )
+    except (UnicodeDecodeError, ValueError, RecursionError) as error:
+        fail(f"cannot read {label}: {error}")
+
+
+def regular_file(path):
+    try:
+        return stat.S_ISREG(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
+def time_value(value):
+    if isinstance(value, bool):
+        raise ValueError("not a timestamp")
+    if isinstance(value, (int, float)):
+        seconds = value / 1000 if abs(value) >= 100_000_000_000 else value
+        try:
+            return dt.datetime.fromtimestamp(seconds, dt.timezone.utc)
+        except (OverflowError, OSError, ValueError) as error:
+            raise ValueError("not a timestamp") from error
+    if not isinstance(value, str):
+        raise ValueError("not a timestamp")
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError("not an ISO timestamp") from error
+    if parsed.tzinfo is None:
+        raise ValueError("requires a timezone")
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def parse_time(value, label):
+    try:
+        return time_value(value)
+    except ValueError as error:
+        fail(f"{label} {error}")
+
+
+def utc_now():
+    return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def pi_first_record(path):
+    try:
+        with Path(path).open("rb") as source:
+            raw = source.readline(FIRST_LINE_CAP + 1)
+    except OSError:
+        return False, "cannot read JSONL"
+    if len(raw) > FIRST_LINE_CAP:
+        return False, "first JSONL record exceeds size limit"
+    if not raw.strip():
+        return False, "empty JSONL"
+    try:
+        item = json.loads(raw.decode("utf-8-sig"))
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        return False, "malformed first JSONL record"
+    if not isinstance(item, dict) or item.get("type") != "session" or item.get("version") != 3:
+        return False, "first record is not a Pi v3 session header"
+    return True, ""
+
+
+def content_contains(path, text):
+    needle = text.encode("utf-8")
+    overlap = max(0, len(needle) - 1)
+    tail = b""
+    try:
+        with Path(path).open("rb") as source:
+            while True:
+                chunk = source.read(1024 * 1024)
+                if not chunk:
+                    return False
+                block = tail + chunk
+                if needle in block:
+                    return True
+                tail = block[-overlap:] if overlap else b""
+    except OSError:
+        return False
+
+
+def session_in_window(path, start, end):
+    observed_in_window = False
+    observed_any = False
+    try:
+        with Path(path).open("rb") as source:
+            for raw in source:
+                try:
+                    item = json.loads(raw.decode("utf-8-sig"))
+                except (UnicodeDecodeError, ValueError, RecursionError):
+                    return False, "malformed session JSONL"
+                if isinstance(item, dict) and "timestamp" in item:
+                    try:
+                        observed = time_value(item["timestamp"])
+                    except ValueError:
+                        return False, "invalid session timestamp"
+                    observed_any = True
+                    if start <= observed <= end:
+                        observed_in_window = True
+    except OSError:
+        return False, "cannot read session JSONL"
+    if not observed_any:
+        return False, "session JSONL has no timestamped entries"
+    return observed_in_window, None
+
+
+def git_paths(repo, commit, *pathspecs):
+    raw = checked(
+        [git_binary, "-C", os.fspath(repo), "ls-tree", "-r", "-z", "--name-only",
+         commit, "--", *pathspecs],
+        "merge-commit tree inventory",
+    )
+    paths = []
+    for value in raw.split(b"\0"):
+        if not value:
+            continue
+        try:
+            path = value.decode("utf-8")
+        except UnicodeDecodeError as error:
+            fail(f"merge-commit path is not UTF-8: {error}", 65)
+        pure = PurePosixPath(path)
+        if pure.is_absolute() or ".." in pure.parts:
+            fail(f"unsafe merge-commit path: {path}", 65)
+        paths.append(path)
+    return sorted(paths)
+
+
+def git_blob(repo, commit, path):
+    return checked(
+        [git_binary, "-C", os.fspath(repo), "show", f"{commit}:{path}"],
+        f"read merge-commit path {path}",
+    )
+
+
+def frontmatter_description(raw):
+    try:
+        lines = raw.decode("utf-8").splitlines()
+    except UnicodeDecodeError:
+        return None
+    if not lines or lines[0] != "---":
+        return None
+    for line in lines[1:]:
+        if line == "---":
+            break
+        if line.startswith("description:"):
+            value = line.split(":", 1)[1].strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            return value or None
+    return None
+
+
+def append_unknown(items, path, reason):
+    row = {"path": os.fspath(path), "reason": reason}
+    if row not in items:
+        items.append(row)
+
+
+def clone_input_tree(source, destination, runs_root):
+    try:
+        source_info = os.lstat(source)
+    except OSError as error:
+        fail(f"cannot inspect guided package input {source}: {error}", 65)
+    if not stat.S_ISDIR(source_info.st_mode):
+        fail(f"guided package input is not a directory: {source}", 65)
+    ensure_directory(destination, runs_root)
+    try:
+        entries = sorted(source.iterdir(), key=lambda item: item.name)
+    except OSError as error:
+        fail(f"cannot enumerate guided package input {source}: {error}", 65)
+    for entry in entries:
+        target = destination / entry.name
+        try:
+            info = os.lstat(entry)
+        except OSError as error:
+            fail(f"cannot inspect guided package input {entry}: {error}", 65)
+        if stat.S_ISDIR(info.st_mode):
+            clone_input_tree(entry, target, runs_root)
+        elif stat.S_ISREG(info.st_mode):
+            atomic_append(target, read_regular(entry, "guided package input"))
+        else:
+            fail(f"guided package input is not a regular file or directory: {entry}", 65)
+
+
+def assemble_blind(pr, repo, runs_root):
+    guided_name = f"pr-{pr}"
+    guided_dir = runs_root / guided_name
+    guided_path = guided_dir / "package.json"
+    if not regular_file(guided_path):
+        fail(f"guided package is required before blind assembly: {guided_path}", 65)
+    guided = json_document(
+        read_regular(guided_path, "guided observer package"),
+        "guided observer package",
+    )
+    if (
+        not isinstance(guided, dict)
+        or guided.get("schema") != "qq-observer.package"
+        or isinstance(guided.get("schema_version"), bool)
+        or guided.get("schema_version") != 1
+        or guided.get("pr") != pr
+        or guided.get("repo") != os.fspath(repo)
+        or guided.get("variant", "guided") != "guided"
+        or not isinstance(guided.get("sessions"), list)
+    ):
+        fail(f"guided package has the wrong identity or shape: {guided_path}", 65)
+
+    run_dir = runs_root / f"{guided_name}-blind"
+    blind = json.loads(json.dumps(guided))
+    blind["variant"] = "blind"
+    blind["derived_from"] = guided_name
+    for row in blind["sessions"]:
+        if not isinstance(row, dict):
+            fail("guided package session has the wrong shape", 65)
+        label = row.get("label")
+        if not isinstance(label, str) or not SAFE_COMPONENT.fullmatch(label):
+            fail("guided package session has an unsafe label", 65)
+        guided_session = guided_dir / "sessions" / f"{label}.jsonl"
+        guided_facts = guided_dir / "facts" / f"{label}.json"
+        if not regular_file(guided_session) or not regular_file(guided_facts):
+            fail(f"guided package session inputs are incomplete: {label}", 65)
+        row["facts"] = os.fspath(run_dir / "facts" / f"{label}.json")
+        row.pop("signals", None)
+
+    package_data = (
+        json.dumps(blind, separators=(",", ":"), sort_keys=True) + "\n"
+    ).encode()
+    package_path = run_dir / "package.json"
+    if package_path.exists() or package_path.is_symlink():
+        if read_regular(package_path, "blind observer package") != package_data:
+            fail(f"append-only conflict at {package_path}", 65)
+        for marker in ("analysis.json", "analysis_failed.json"):
+            marker_path = run_dir / marker
+            if marker_path.exists() or marker_path.is_symlink():
+                read_regular(marker_path, f"finalized analysis {marker_path}")
+                emit({"status": "already finalized", "run_dir": os.fspath(run_dir)})
+        emit({"status": "already assembled", "run_dir": os.fspath(run_dir)})
+
+    ensure_directory(run_dir, runs_root)
+    clone_input_tree(guided_dir / "sessions", run_dir / "sessions", runs_root)
+    clone_input_tree(guided_dir / "facts", run_dir / "facts", runs_root)
+    atomic_append(
+        run_dir / "inventory.json",
+        read_regular(guided_dir / "inventory.json", "guided package inventory"),
+    )
+    clone_input_tree(guided_dir / "corpus", run_dir / "corpus", runs_root)
+    atomic_append(package_path, package_data)
+    emit({
+        "status": "assembled", "run_dir": os.fspath(run_dir),
+        "sessions": len(blind["sessions"]),
+        "warnings": len(blind.get("warnings", [])),
+        "unknown_entries": len(blind.get("unknown_entries", [])),
+        "variant": "blind", "derived_from": guided_name,
+    })
+
+
+def assemble(values):
+    options = parse_flags(values, {"--pr", "--repo", "--worktree-root", "--variant"})
+    if "--pr" not in options or "--repo" not in options:
+        fail("assemble requires --pr and --repo")
+    if not re.fullmatch(r"[1-9][0-9]*", options["--pr"]):
+        fail("--pr must be a positive integer")
+    variant = options.get("--variant", "guided")
+    if variant not in ("guided", "blind"):
+        fail("--variant must be guided or blind")
+    pr = int(options["--pr"])
+    repo, common = git_root(options["--repo"])
+    runs_root = observer_runs_root(create=True)
+    if variant == "blind":
+        assemble_blind(pr, repo, runs_root)
+
+    gh = run_process(
+        [gh_binary, "pr", "view", str(pr), "--json",
+         "headRefName,mergeCommit,mergedAt,state"],
+        "pull-request inspection", cwd=repo,
+    )
+    if gh.returncode != 0:
+        detail = gh.stderr.decode("utf-8", "replace").strip()
+        fail(f"pull-request inspection failed{': ' + detail if detail else ''}", 65)
+    record = json_document(gh.stdout, "pull-request inspection JSON")
+    if not isinstance(record, dict) or record.get("state") != "MERGED":
+        fail(f"pull request #{pr} is not verifiably MERGED", 65)
+    branch = record.get("headRefName")
+    merged_at_value = record.get("mergedAt")
+    merge_value = record.get("mergeCommit")
+    merge_commit = merge_value.get("oid") if isinstance(merge_value, dict) else merge_value
+    if not isinstance(branch, str) or not branch:
+        fail("merged pull request has no headRefName", 65)
+    if not isinstance(merge_commit, str) or not re.fullmatch(r"[0-9a-fA-F]{7,64}", merge_commit):
+        fail("merged pull request has no valid merge commit", 65)
+    if not isinstance(merged_at_value, str):
+        fail("merged pull request has no mergedAt timestamp", 65)
+    merged_at = parse_time(merged_at_value, "mergedAt")
+    checked(
+        [git_binary, "-C", os.fspath(repo), "cat-file", "-e", f"{merge_commit}^{{commit}}"],
+        "merge-commit verification",
+    )
+    merge_commit = git_text(repo, "rev-parse", f"{merge_commit}^{{commit}}",
+                            label="merge-commit canonicalization")
+    landed = run_process(
+        [git_binary, "-C", os.fspath(repo), "merge-base", "--is-ancestor",
+         merge_commit, "main"],
+        "merge-commit main ancestry verification",
+    )
+    if landed.returncode != 0:
+        detail = landed.stderr.decode("utf-8", "replace").strip()
+        fail(
+            f"merge commit {merge_commit} is not an ancestor of local main"
+            f"{': ' + detail if detail else ''}",
+            65,
+        )
+
+    run_name = f"pr-{pr}"
+    run_dir = runs_root / run_name
+    ensure_directory(run_dir, runs_root)
+    package_path = run_dir / "package.json"
+    existing_package = False
+    if package_path.exists() or package_path.is_symlink():
+        package = json_document(read_regular(package_path, "observer package"), "observer package")
+        if (
+            not isinstance(package, dict)
+            or package.get("schema") != "qq-observer.package"
+            or isinstance(package.get("schema_version"), bool)
+            or package.get("schema_version") != 1
+            or package.get("pr") != pr
+            or package.get("repo") != os.fspath(repo)
+            or package.get("branch") != branch
+            or package.get("merge_commit") != merge_commit
+            or package.get("variant", "guided") != variant
+        ):
+            fail(f"append-only conflict at {package_path}", 65)
+        existing_package = True
+    for marker in ("analysis.json", "analysis_failed.json"):
+        marker_path = run_dir / marker
+        if marker_path.exists() or marker_path.is_symlink():
+            read_regular(marker_path, f"finalized analysis {marker_path}")
+            emit({"status": "already finalized", "run_dir": os.fspath(run_dir)})
+    if existing_package:
+        emit({"status": "already assembled", "run_dir": os.fspath(run_dir)})
+
+    if "--worktree-root" in options:
+        worktree_value = options["--worktree-root"]
+    else:
+        home = os.environ.get("HOME")
+        if not home:
+            fail("HOME is required for the default worktree root", 65)
+        worktree_value = os.path.join(
+            home, ".herdr", "worktrees", common.parent.name,
+        )
+    if not os.path.isabs(worktree_value):
+        fail("worktree root must be absolute")
+    worktree_root = Path(os.path.realpath(worktree_value))
+    if worktree_root.exists() and not worktree_root.is_dir():
+        fail(f"worktree root is not a directory: {worktree_root}")
+
+    runtime_value = os.environ.get("QQ_DISPATCH_RUNTIME_ROOT")
+    if runtime_value is None:
+        runtime_value = os.path.join(
+            os.environ.get("TMPDIR") or "/tmp", f"pi-subagents-uid-{os.getuid()}",
+        )
+    if not os.path.isabs(runtime_value):
+        fail("dispatch runtime root must be absolute", 65)
+    runtime = Path(os.path.realpath(runtime_value))
+    async_root = runtime / "async-subagent-runs"
+    selected_runs = {}
+    status_records = {}
+    unknown = []
+    warnings = []
+    window_start = merged_at - dt.timedelta(days=30)
+    window_end = merged_at + dt.timedelta(days=1)
+
+    if async_root.exists():
+        if not async_root.is_dir():
+            fail(f"async run root is not a directory: {async_root}", 65)
+        for entry in sorted(async_root.iterdir(), key=lambda item: item.name):
+            if not entry.is_dir() or entry.is_symlink():
+                append_unknown(unknown, entry, "async run entry is not a directory")
+                continue
+            run_id = entry.name
+            if not SAFE_COMPONENT.fullmatch(run_id) or run_id in (".", ".."):
+                append_unknown(unknown, entry, "unsafe delegate run ID")
+                continue
+            status_path = entry / "status.json"
+            if not regular_file(status_path):
+                append_unknown(unknown, status_path, "missing or non-regular status.json")
+                continue
+            try:
+                raw = read_regular(status_path, "delegate status")
+                if len(raw) > STATUS_CAP:
+                    raise ValueError("status.json exceeds size limit")
+                status_record = json.loads(
+                    raw.decode("utf-8"),
+                    parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
+                )
+                if not isinstance(status_record, dict):
+                    raise ValueError("top level is not an object")
+                session_id = status_record.get("sessionId")
+                cwd_value = status_record.get("cwd")
+                if not isinstance(session_id, str) or not os.path.isabs(session_id):
+                    raise ValueError("sessionId is not an absolute path")
+                if not isinstance(cwd_value, str) or not os.path.isabs(cwd_value):
+                    raise ValueError("cwd is not an absolute path")
+                started_at = time_value(status_record.get("startedAt"))
+                last_activity = status_record.get("lastActivityAt")
+                if (
+                    isinstance(last_activity, bool)
+                    or not isinstance(last_activity, (int, float))
+                    or not math.isfinite(last_activity)
+                    or not isinstance(status_record.get("mode"), str)
+                    or not isinstance(status_record.get("isNested"), bool)
+                    or not isinstance(status_record.get("state"), str)
+                ):
+                    raise ValueError("status metadata has the wrong shape")
+            except (OSError, UnicodeDecodeError, ValueError, RecursionError):
+                append_unknown(unknown, status_path, "malformed delegate status.json")
+                continue
+            parent = Path(os.path.realpath(session_id))
+            cwd_path = Path(os.path.realpath(cwd_value))
+            status_records[run_id] = {
+                "path": status_path, "parent": parent, "cwd": cwd_path,
+                "started": started_at,
+                "session_file": status_record.get("sessionFile"),
+                "session_dir": status_record.get("sessionDir"),
+            }
+
+            live_common = None
+            branch_process = None
+            if cwd_path.is_dir():
+                common_process = run_process(
+                    [git_binary, "-C", os.fspath(cwd_path), "rev-parse",
+                     "--path-format=absolute", "--git-common-dir"],
+                    "delegate worktree inspection",
+                )
+                if common_process.returncode == 0:
+                    try:
+                        live_common = Path(
+                            common_process.stdout.decode("utf-8").strip()
+                        ).resolve(strict=True)
+                    except (OSError, UnicodeDecodeError, RuntimeError, ValueError):
+                        live_common = None
+                    branch_process = run_process(
+                        [git_binary, "-C", os.fspath(cwd_path), "symbolic-ref", "--short", "HEAD"],
+                        "delegate branch inspection",
+                    )
+            branch_readable = branch_process is not None and branch_process.returncode == 0
+            if live_common == common and branch_readable:
+                try:
+                    observed_branch = branch_process.stdout.decode("utf-8").strip()
+                except UnicodeDecodeError:
+                    observed_branch = ""
+                if observed_branch == branch:
+                    selected_runs[run_id] = "live-worktree-branch"
+                continue
+            if live_common is not None and live_common != common:
+                continue
+            if branch_readable:
+                continue
+            if (
+                within(cwd_path, worktree_root)
+                and window_start <= started_at <= window_end
+                and regular_file(parent)
+                and content_contains(parent, branch)
+            ):
+                selected_runs[run_id] = "retired-worktree-content"
+    elif async_root.is_symlink():
+        fail(f"async run root is not a directory: {async_root}", 65)
+
+    session_rows = []
+    session_sources = set()
+    label_sources = {}
+
+    def add_session(source, label, role, evidence, run_id=None):
+        source = Path(os.path.realpath(source))
+        if source in session_sources:
+            return
+        if not regular_file(source):
+            append_unknown(unknown, source, "selected session is missing or non-regular")
+            warnings.append(f"selected {role} session is unavailable: {source}")
+            return
+        valid, reason = pi_first_record(source)
+        if not valid:
+            append_unknown(unknown, source, reason)
+            warnings.append(f"selected {role} session is not Pi v3: {source}")
+            return
+        if not SAFE_COMPONENT.fullmatch(label) or label in (".", ".."):
+            append_unknown(unknown, source, "session label is unsafe")
+            return
+        previous = label_sources.get(label)
+        if previous is not None and previous != source:
+            fail(f"session label collision for {label}", 65)
+        label_sources[label] = source
+        session_sources.add(source)
+        row = {
+            "label": label, "source": source, "role": role, "evidence": evidence,
+        }
+        if run_id is not None:
+            row["run_id"] = run_id
+        session_rows.append(row)
+
+    for run_id in sorted(selected_runs):
+        parent = status_records[run_id]["parent"]
+        stem = parent.stem
+        identifier = stem.rsplit("_", 1)[-1]
+        add_session(parent, f"accountable-{identifier}", "accountable", "parent-of-delegate")
+
+    scanned_jsonl = set()
+    for run_id in sorted(selected_runs):
+        record = status_records[run_id]
+        session_file_value = record["session_file"]
+        if not isinstance(session_file_value, str) or not os.path.isabs(session_file_value):
+            append_unknown(
+                unknown, record["path"],
+                "delegate sessionFile is missing or not an absolute path",
+            )
+            warnings.append(f"delegate {run_id} has no valid sessionFile")
+            continue
+        session_file = Path(os.path.realpath(session_file_value))
+        scanned_jsonl.add(session_file)
+        add_session(
+            session_file, f"delegate-{run_id}-primary", "delegate",
+            selected_runs[run_id], run_id=run_id,
+        )
+
+    for run_id in sorted(selected_runs):
+        record = status_records[run_id]
+        session_dir_value = record["session_dir"]
+        if not isinstance(session_dir_value, str) or not os.path.isabs(session_dir_value):
+            append_unknown(
+                unknown, record["path"],
+                "delegate sessionDir is missing or not an absolute path",
+            )
+            continue
+        root = Path(os.path.realpath(session_dir_value))
+        if not root.exists():
+            continue
+        if not root.is_dir():
+            append_unknown(unknown, root, "delegate sessionDir is not a directory")
+            continue
+        candidates = sorted(root.rglob("*.jsonl"), key=lambda item: os.fspath(item))
+        for index, candidate in enumerate(candidates, start=1):
+            canonical = Path(os.path.realpath(candidate))
+            if canonical in scanned_jsonl:
+                continue
+            scanned_jsonl.add(canonical)
+            if not regular_file(candidate) or candidate.is_symlink():
+                append_unknown(unknown, candidate, "JSONL candidate is not a regular file")
+                continue
+            valid, reason = pi_first_record(candidate)
+            if not valid:
+                append_unknown(unknown, candidate, reason)
+                continue
+            add_session(
+                candidate, f"delegate-{run_id}-sessiondir-{index}", "delegate",
+                selected_runs[run_id], run_id=run_id,
+            )
+
+    for run_id in sorted(selected_runs):
+        roots = [runtime / "runs" / run_id, async_root / run_id]
+        for root in roots:
+            if not root.exists():
+                continue
+            if not root.is_dir() or root.is_symlink():
+                append_unknown(unknown, root, "delegate transcript root is not a directory")
+                continue
+            for candidate in sorted(root.rglob("*.jsonl"), key=lambda item: os.fspath(item)):
+                canonical = Path(os.path.realpath(candidate))
+                if canonical in scanned_jsonl:
+                    continue
+                scanned_jsonl.add(canonical)
+                if not regular_file(candidate) or candidate.is_symlink():
+                    append_unknown(unknown, candidate, "JSONL candidate is not a regular file")
+                    continue
+                valid, reason = pi_first_record(candidate)
+                if not valid:
+                    append_unknown(unknown, candidate, reason)
+                    continue
+                basename = candidate.stem
+                add_session(
+                    candidate, f"delegate-{run_id}-{basename}", "delegate",
+                    selected_runs[run_id], run_id=run_id,
+                )
+
+    if not selected_runs:
+        home = os.environ.get("HOME")
+        if not home or not os.path.isabs(home):
+            fail("HOME must be absolute for Repository session discovery", 65)
+        repo_home = repo
+        encoded = repo_home.as_posix().rstrip("/").replace("/", "-")
+        names = [f"-{encoded}--", f"-{encoded}-"]
+        sessions_base = Path(home) / ".pi" / "agent" / "sessions"
+        candidates = [sessions_base / name for name in names if (sessions_base / name).is_dir()]
+        if len(candidates) > 1:
+            warnings.append("multiple Repository-home Pi session directories matched the encoding")
+        matched = []
+        for directory in candidates:
+            for candidate in sorted(directory.glob("*.jsonl"), key=lambda item: item.name):
+                canonical = Path(os.path.realpath(candidate))
+                if canonical in {row[0] for row in matched}:
+                    continue
+                if not regular_file(candidate) or candidate.is_symlink():
+                    append_unknown(unknown, candidate, "session-search candidate is not a regular file")
+                    continue
+                valid, reason = pi_first_record(candidate)
+                if not valid:
+                    append_unknown(unknown, candidate, reason)
+                    continue
+                in_window, session_error = session_in_window(
+                    candidate, window_start, window_end,
+                )
+                if session_error is not None:
+                    append_unknown(unknown, candidate, session_error)
+                    continue
+                if content_contains(candidate, branch) and in_window:
+                    matched.append((canonical, candidate.stem.rsplit("_", 1)[-1]))
+        for source, identifier in matched:
+            add_session(source, f"accountable-{identifier}", "accountable", "content-search")
+        if len(matched) != 1:
+            warnings.append(
+                f"no delegate runs selected; accountable content search found {len(matched)} matches"
+            )
+        else:
+            warnings.append("no delegate runs selected; used accountable content search")
+
+    session_rows.sort(key=lambda row: (0 if row["role"] == "accountable" else 1, row["label"]))
+    packaged_sessions = []
+    for row in session_rows:
+        label = row["label"]
+        source = row["source"]
+        session_rel = f"sessions/{label}.jsonl"
+        facts_rel = f"facts/{label}.json"
+        signals_rel = f"signals/{label}.json"
+        atomic_append(run_dir / session_rel, read_regular(source, "selected session transcript"))
+        derivatives = [("facts", facts_rel)]
+        if variant == "guided":
+            derivatives.append(("signals", signals_rel))
+        for subcommand, relative in derivatives:
+            process = run_process(
+                [self_path, subcommand, os.fspath(run_dir / session_rel)],
+                f"qq-observe {subcommand}", cwd=repo,
+            )
+            if process.returncode != 0:
+                detail = process.stderr.decode("utf-8", "replace").strip()
+                fail(f"qq-observe {subcommand} failed for {source}{': ' + detail if detail else ''}")
+            json_document(process.stdout, f"{subcommand} output for {source}")
+            atomic_append(run_dir / relative, process.stdout)
+        package_row = {
+            "label": label,
+            "source_path": os.fspath(source),
+            "role": row["role"],
+            "evidence": row["evidence"],
+            "facts": os.fspath((run_dir / facts_rel).resolve(strict=True)),
+        }
+        if variant == "guided":
+            package_row["signals"] = os.fspath(
+                (run_dir / signals_rel).resolve(strict=True)
+            )
+        if "run_id" in row:
+            package_row["run_id"] = row["run_id"]
+        packaged_sessions.append(package_row)
+
+    all_paths = git_paths(repo, merge_commit, "bin", "extensions", "skills", "delegation/manifests")
+    bin_names = sorted(
+        PurePosixPath(path).name for path in all_paths
+        if len(PurePosixPath(path).parts) == 2 and path.startswith("bin/")
+    )
+    extension_names = sorted(
+        PurePosixPath(path).name for path in all_paths
+        if len(PurePosixPath(path).parts) == 2
+        and path.startswith("extensions/") and path.endswith(".ts")
+    )
+    skill_paths = [
+        path for path in all_paths
+        if len(PurePosixPath(path).parts) == 3
+        and path.startswith("skills/") and path.endswith("/SKILL.md")
+    ]
+    skills = []
+    for path in skill_paths:
+        raw = git_blob(repo, merge_commit, path)
+        description = frontmatter_description(raw)
+        if description is None:
+            append_unknown(unknown, f"git:{merge_commit}:{path}", "missing skill description")
+        skills.append({
+            "name": PurePosixPath(path).parts[1],
+            "description": description,
+        })
+    manifest_names = sorted(
+        path.removeprefix("delegation/manifests/") for path in all_paths
+        if path.startswith("delegation/manifests/")
+    )
+    inventory = {
+        "schema": "qq-observer.inventory",
+        "schema_version": 1,
+        "merge_commit": merge_commit,
+        "bin": bin_names,
+        "extensions": extension_names,
+        "skills": skills,
+        "delegation_manifests": manifest_names,
+    }
+    atomic_append(
+        run_dir / "inventory.json",
+        (json.dumps(inventory, separators=(",", ":"), sort_keys=True) + "\n").encode(),
+    )
+
+    corpus_paths = []
+    root_paths = set(git_paths(repo, merge_commit, "AGENTS.md", "CONCEPTS.md", "REVIEW.md"))
+    corpus_paths.extend(sorted(root_paths))
+    corpus_paths.extend(skill_paths)
+    corpus_paths.extend(sorted(
+        path for path in all_paths
+        if len(PurePosixPath(path).parts) == 3
+        and path.startswith("delegation/manifests/") and path.endswith(".md")
+    ))
+    for path in dict.fromkeys(corpus_paths):
+        atomic_append(run_dir / "corpus" / Path(*PurePosixPath(path).parts),
+                      git_blob(repo, merge_commit, path))
+
+    unknown.sort(key=lambda row: (row["path"], row["reason"]))
+    warnings = list(dict.fromkeys(warnings))
+    package = {
+        "schema": "qq-observer.package",
+        "schema_version": 1,
+        "pr": pr,
+        "branch": branch,
+        "merge_commit": merge_commit,
+        "merged_at": merged_at_value,
+        "assembled_at": utc_now(),
+        "variant": variant,
+        "repo": os.fspath(repo),
+        "sessions": packaged_sessions,
+        "warnings": warnings,
+        "unknown_entries": unknown,
+    }
+    atomic_append(
+        package_path,
+        (json.dumps(package, separators=(",", ":"), sort_keys=True) + "\n").encode(),
+    )
+    emit({
+        "status": "assembled", "run_dir": os.fspath(run_dir),
+        "sessions": len(packaged_sessions), "warnings": len(warnings),
+        "unknown_entries": len(unknown), "variant": variant,
+    })
+
+
+def verify_delivery(values):
+    options = parse_flags(values, {"--repo", "--since"})
+    if "--repo" not in options:
+        fail("verify-delivery requires --repo")
+    repo, _ = git_root(options["--repo"])
+    if "--since" in options:
+        since_time = parse_time(options["--since"], "--since")
+        since = options["--since"]
+    else:
+        since_time = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=7)
+        since = since_time.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    log = checked(
+        [git_binary, "-C", os.fspath(repo), "log", "main", "--first-parent",
+         f"--since={since_time.isoformat()}", "--format=%H%x00%s"],
+        "local main history inspection",
+    )
+    commits = []
+    for raw_line in log.splitlines():
+        if not raw_line:
+            continue
+        try:
+            oid_raw, subject_raw = raw_line.split(b"\0", 1)
+            oid = oid_raw.decode("ascii")
+            subject = subject_raw.decode("utf-8")
+        except (UnicodeDecodeError, ValueError) as error:
+            fail(f"local main history is malformed or not UTF-8: {error}", 65)
+        if not re.fullmatch(r"[0-9a-f]{40,64}", oid):
+            fail(f"local main history emitted an invalid commit ID: {oid}", 65)
+        commits.append({"oid": oid, "subject": subject})
+
+    prs = set()
+    unresolved = []
+    for commit in commits:
+        subject = commit["subject"]
+        match = PR_MERGE.match(subject) or PR_SQUASH.search(subject)
+        if match is None:
+            unresolved.append(commit)
+        else:
+            prs.add(int(match.group(1)))
+    prs = sorted(prs)
+    runs_root = observer_runs_root(create=False)
+    covered = []
+    uncovered = []
+    for pr in prs:
+        run = runs_root / f"pr-{pr}"
+        if regular_file(run / "analysis.json") or regular_file(run / "analysis_failed.json"):
+            covered.append(pr)
+        else:
+            uncovered.append(pr)
+    if unresolved:
+        status = "unparseable history present"
+    elif uncovered:
+        status = "uncovered Changes present"
+    elif not commits:
+        status = "no landed Changes in window"
+    else:
+        status = "covered"
+    ok = not uncovered and not unresolved
+    report = {
+        "ok": ok,
+        "status": status,
+        "since": since,
+        "prs": prs,
+        "covered": covered,
+        "uncovered": uncovered,
+        "unresolved_commits": unresolved,
+    }
+    emit(report, 0 if ok else 1)
+
+
+def minimal_analysis(item):
+    if not isinstance(item, dict):
+        fail("analysis schema violation: top level must be an object")
+    if (
+        item.get("schema") != "qq-observer.analysis"
+        or isinstance(item.get("schema_version"), bool)
+        or item.get("schema_version") != 1
+    ):
+        fail("analysis schema violation: unsupported schema or schema_version")
+    if item.get("status") == "analysis_failed":
+        fail("rendering requires a successful analysis")
+    if not isinstance(item.get("run"), dict):
+        fail("analysis schema violation: run must be an object")
+    if not isinstance(item["run"].get("change"), str) or not item["run"]["change"]:
+        fail("analysis schema violation: run.change must be a non-empty string")
+    sessions = item["run"].get("sessions")
+    if not isinstance(sessions, list) or not sessions or not all(isinstance(value, str) for value in sessions):
+        fail("analysis schema violation: run.sessions must be a non-empty string array")
+    episodes = item.get("episodes")
+    if not isinstance(episodes, list):
+        fail("analysis schema violation: episodes must be an array")
+    episode_fields = {
+        "kind": str, "title": str, "sessions": list, "evidence": list,
+        "what_happened": str, "root_cause": str, "root_cause_location": str,
+        "cost": dict, "remedy": dict, "confidence": str,
+        "confidence_why": str, "recurrence_key": str,
+    }
+    for index, episode in enumerate(episodes):
+        if not isinstance(episode, dict):
+            fail(f"analysis schema violation: episodes[{index}] must be an object")
+        for field, expected in episode_fields.items():
+            if not isinstance(episode.get(field), expected):
+                fail(f"analysis schema violation: episodes[{index}].{field} has the wrong shape")
+        if (
+            not episode["sessions"]
+            or not all(isinstance(value, str) for value in episode["sessions"])
+            or not episode["evidence"]
+        ):
+            fail(f"analysis schema violation: episodes[{index}] session/evidence shape is invalid")
+        if "rank" in episode and (
+            isinstance(episode["rank"], bool) or not isinstance(episode["rank"], int)
+        ):
+            fail(f"analysis schema violation: episodes[{index}].rank must be an integer")
+        if "no_signal" in episode and not isinstance(episode["no_signal"], bool):
+            fail(f"analysis schema violation: episodes[{index}].no_signal must be a boolean")
+        for citation in episode["evidence"]:
+            if (
+                not isinstance(citation, dict)
+                or not isinstance(citation.get("session"), str)
+                or not isinstance(citation.get("entries"), list)
+                or not all(isinstance(value, int) and not isinstance(value, bool)
+                           for value in citation["entries"])
+                or not isinstance(citation.get("quote"), str)
+            ):
+                fail(f"analysis schema violation: episodes[{index}].evidence has the wrong shape")
+        cost = episode["cost"]
+        if (
+            not all(field in cost for field in ("turns", "tokens", "duration_ms", "source"))
+            or not all(
+                isinstance(cost[field], int) and not isinstance(cost[field], bool)
+                for field in ("turns", "tokens", "duration_ms")
+            )
+            or not isinstance(cost["source"], str)
+        ):
+            fail(f"analysis schema violation: episodes[{index}].cost has the wrong shape")
+        remedy = episode["remedy"]
+        if not isinstance(remedy.get("type"), str) or not isinstance(remedy.get("smallest_change"), str):
+            fail(f"analysis schema violation: episodes[{index}].remedy has the wrong shape")
+    dropped = item.get("dropped_signals")
+    if not isinstance(dropped, list):
+        fail("analysis schema violation: dropped_signals must be an array")
+    for signal in dropped:
+        if (
+            not isinstance(signal, dict)
+            or not isinstance(signal.get("kind"), str)
+            or not isinstance(signal.get("entries"), list)
+            or not signal["entries"]
+            or not all(
+                isinstance(value, int) and not isinstance(value, bool)
+                for value in signal["entries"]
+            )
+            or not isinstance(signal.get("why"), str)
+        ):
+            fail("analysis schema violation: dropped_signals item has the wrong shape")
+    if not isinstance(item.get("limitations"), str):
+        fail("analysis schema violation: limitations must be a string")
+    return item
+
+
+def markdown_inline(value):
+    return str(value).replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")
+
+
+def compact_value(value):
+    return json.dumps(value, separators=(",", ":"), sort_keys=True)
+
+
+def render_bytes(run_dir, analysis=None):
+    package = json_document(read_regular(run_dir / "package.json", "observer package"), "observer package")
+    if not isinstance(package, dict) or not isinstance(package.get("sessions"), list):
+        fail("observer package has the wrong shape")
+    if analysis is None:
+        analysis = json_document(read_regular(run_dir / "analysis.json", "analysis JSON"), "analysis JSON")
+    analysis = minimal_analysis(analysis)
+    facts_rows = []
+    facts_dir = run_dir / "facts"
+    if not facts_dir.is_dir() or facts_dir.is_symlink():
+        fail(f"facts directory is missing: {facts_dir}")
+    for path in sorted(facts_dir.glob("*.json"), key=lambda item: item.name):
+        facts = json_document(read_regular(path, "facts JSON"), f"facts JSON {path}")
+        required = {
+            "entries": int, "turns_by_role": dict, "token_usage": dict,
+            "tool_calls": dict, "tool_errors": dict, "wall_clock": dict,
+            "unknown_entries": dict,
+        }
+        if (
+            not isinstance(facts, dict)
+            or facts.get("schema") != "qq-observe.facts"
+            or facts.get("schema_version") != 2
+            or any(not isinstance(facts.get(field), expected) for field, expected in required.items())
+            or not isinstance(facts["tool_calls"].get("total"), int)
+            or not isinstance(facts["tool_errors"].get("total"), int)
+            or not isinstance(facts["wall_clock"].get("duration_ms"), int)
+            or not isinstance(facts["unknown_entries"].get("total"), int)
+        ):
+            fail(f"facts JSON has the wrong shape: {path}")
+        facts_rows.append((path.stem, facts))
+    if not facts_rows:
+        fail("facts directory contains no facts JSON")
+
+    pr = package.get("pr")
+    generated = package.get("assembled_at")
+    if not isinstance(pr, int) or isinstance(pr, bool) or not isinstance(generated, str):
+        fail("observer package lacks pr or assembled_at")
+    lines = [
+        f"# qq observer analysis — PR #{pr}", "",
+        f"- Generated at: `{generated}`",
+        f"- Change: `{analysis['run']['change']}`",
+        "- Sessions:",
+    ]
+    for session in analysis["run"]["sessions"]:
+        lines.append(f"  - `{session}`")
+    lines.extend([
+        "", "## Session facts", "",
+        "| Session | Entries | Turns by role | Token usage | Tool calls | Tool errors | Duration ms | Unknown entries |",
+        "| --- | ---: | --- | --- | ---: | ---: | ---: | ---: |",
+    ])
+    for label, facts in facts_rows:
+        lines.append(
+            f"| {markdown_inline(label)} | {facts['entries']} | "
+            f"`{markdown_inline(compact_value(facts['turns_by_role']))}` | "
+            f"`{markdown_inline(compact_value(facts['token_usage']))}` | "
+            f"{facts['tool_calls']['total']} | {facts['tool_errors']['total']} | "
+            f"{facts['wall_clock']['duration_ms']} | {facts['unknown_entries']['total']} |"
+        )
+    lines.extend(["", "## Episodes", ""])
+    ordered = sorted(
+        enumerate(analysis["episodes"]),
+        key=lambda pair: (pair[1].get("rank", pair[0] + 1), pair[0]),
+    )
+    if not ordered:
+        lines.append("No episodes retained.")
+        lines.append("")
+    for position, (_, episode) in enumerate(ordered, 1):
+        rank = episode.get("rank", position)
+        lines.extend([
+            f"### {rank}. {episode['title']}", "",
+            f"- Kind: `{episode['kind']}`",
+            "- Sessions: " + ", ".join(f"`{value}`" for value in episode["sessions"]),
+            f"- Confidence: `{episode['confidence']}` — {episode['confidence_why']}",
+            f"- Recurrence key: `{episode['recurrence_key']}`", "",
+            "#### Evidence", "",
+        ])
+        for citation in episode["evidence"]:
+            entries = ", ".join(str(value) for value in citation["entries"])
+            lines.extend([
+                f"- Session `{citation['session']}`, entries {entries}",
+                f"  > {citation['quote'].replace(chr(10), chr(10) + '  > ')}",
+            ])
+        cost = episode["cost"]
+        remedy = episode["remedy"]
+        lines.extend([
+            "", "#### What happened", "", episode["what_happened"],
+            "", "#### Root cause", "", episode["root_cause"],
+            "", f"Location: `{episode['root_cause_location']}`",
+            "", "#### Cost", "",
+            f"- Turns: {cost['turns']}", f"- Tokens: {cost['tokens']}",
+            f"- Duration ms: {cost['duration_ms']}", f"- Source: `{cost['source']}`",
+            "", "#### Remedy", "", f"- Type: `{remedy['type']}`",
+            f"- Smallest change: {remedy['smallest_change']}", "",
+        ])
+    lines.extend(["## Dropped signals", ""])
+    if analysis["dropped_signals"]:
+        for signal in analysis["dropped_signals"]:
+            entries = ", ".join(str(value) for value in signal["entries"])
+            lines.append(f"- `{signal['kind']}` (entries {entries}): {signal['why']}")
+    else:
+        lines.append("None.")
+    lines.extend(["", "## Limitations", "", analysis["limitations"], ""])
+    return "\n".join(lines).encode("utf-8")
+
+
+def run_directory(value):
+    run_dir = canonical_directory(value, "run directory")
+    runs_root = observer_runs_root(create=False)
+    try:
+        runs_root = runs_root.resolve(strict=True)
+    except (OSError, RuntimeError, ValueError) as error:
+        fail(f"cannot resolve observer runs root: {error}", 65)
+    if not within(run_dir, runs_root):
+        fail(f"run directory is outside observer runs root: {run_dir}", 65)
+    return run_dir
+
+
+def validated_package_analysis(run_dir, analysis_path):
+    package = json_document(
+        read_regular(run_dir / "package.json", "observer package"),
+        "observer package",
+    )
+    if not isinstance(package, dict) or not isinstance(package.get("sessions"), list):
+        fail("observer package has the wrong shape", 65)
+    repo_value = package.get("repo")
+    if not isinstance(repo_value, str):
+        fail("observer package lacks its Repository root", 65)
+    repo = canonical_directory(repo_value, "package Repository root")
+    sessions = []
+    facts = []
+    labels = set()
+    for row in package["sessions"]:
+        if not isinstance(row, dict):
+            fail("observer package session has the wrong shape", 65)
+        label = row.get("label")
+        if (
+            not isinstance(label, str)
+            or not SAFE_COMPONENT.fullmatch(label)
+            or label in labels
+        ):
+            fail("observer package session has an unsafe or duplicate label", 65)
+        labels.add(label)
+        session = run_dir / "sessions" / f"{label}.jsonl"
+        fact = run_dir / "facts" / f"{label}.json"
+        if not regular_file(session) or not regular_file(fact):
+            fail(f"observer package session inputs are incomplete: {label}", 65)
+        sessions.append(session)
+        facts.append(fact)
+    if not sessions:
+        fail("observer package contains no sessions", 65)
+
+    validation = [self_path, "validate-analysis", os.fspath(analysis_path)]
+    validation.extend(map(os.fspath, sessions))
+    for session, fact in zip(sessions, facts):
+        validation.extend(("--facts", f"{session}={fact}"))
+    process = run_process(validation, "analysis validation", cwd=repo)
+    if process.returncode != 0:
+        reason = "validator refused the analysis"
+        try:
+            failure = json.loads(process.stdout.decode("utf-8"))
+            if (
+                isinstance(failure, dict)
+                and failure.get("status") == "analysis_failed"
+                and isinstance(failure.get("reason"), str)
+            ):
+                reason = failure["reason"]
+        except (UnicodeDecodeError, ValueError, RecursionError):
+            detail = process.stderr.decode("utf-8", "replace").strip()
+            if detail:
+                reason = detail
+        fail(
+            f"analysis validation failed: {reason}; record the run with --failed instead",
+            65,
+        )
+    ranked = json_document(process.stdout, "validated analysis output")
+    if isinstance(ranked, dict) and ranked.get("status") == "analysis_failed":
+        fail("successful finalization requires findings; use --failed instead", 65)
+    ranked = minimal_analysis(ranked)
+    return (
+        json.dumps(ranked, separators=(",", ":"), sort_keys=True) + "\n"
+    ).encode()
+
+
+def render_doc(values):
+    options = parse_flags(values, {"--run"})
+    if "--run" not in options:
+        fail("render-doc requires --run")
+    run_dir = run_directory(options["--run"])
+    data = render_bytes(run_dir)
+    atomic_append(run_dir / "analysis.md", data)
+    emit({"status": "rendered", "path": os.fspath(run_dir / "analysis.md")})
+
+
+def finalize(values):
+    options = parse_flags(values, {"--run", "--analysis", "--failed", "--analyst-trace"})
+    if "--run" not in options:
+        fail("finalize requires --run")
+    if ("--analysis" in options) == ("--failed" in options):
+        fail("finalize requires exactly one of --analysis or --failed")
+    if "--analysis" in options and "--analyst-trace" not in options:
+        fail("--analyst-trace is required with --analysis")
+    run_dir = run_directory(options["--run"])
+    writes = []
+    trace_data = None
+    if "--analyst-trace" in options:
+        trace = canonical_existing(options["--analyst-trace"], "analyst trace")
+        valid, reason = pi_first_record(trace)
+        if not valid:
+            fail(f"analyst trace is not Pi v3: {reason}")
+        trace_data = read_regular(trace, "analyst trace")
+    if "--analysis" in options:
+        source = canonical_existing(options["--analysis"], "analysis input")
+        raw = validated_package_analysis(run_dir, source)
+        analysis = json_document(raw, "validated analysis output")
+        if os.path.lexists(run_dir / "analysis_failed.json"):
+            fail("run already contains analysis_failed.json", 65)
+        writes.append((run_dir / "analysis.json", raw))
+        markdown = render_bytes(run_dir, analysis=analysis)
+        writes.append((run_dir / "analysis.md", markdown))
+    else:
+        reason = options["--failed"]
+        if not reason:
+            fail("--failed requires a non-empty reason")
+        if os.path.lexists(run_dir / "analysis.json"):
+            fail("run already contains analysis.json", 65)
+        failure = {
+            "schema": "qq-observer.analysis", "schema_version": 1,
+            "status": "analysis_failed", "reason": reason,
+        }
+        writes.append((
+            run_dir / "analysis_failed.json",
+            (json.dumps(failure, separators=(",", ":"), sort_keys=True) + "\n").encode(),
+        ))
+    if trace_data is not None:
+        writes.append((run_dir / "analyst-trace.jsonl", trace_data))
+    for path, data in writes:
+        preflight_append(path, data)
+    changed = []
+    for path, data in writes:
+        if atomic_append(path, data):
+            changed.append(path.name)
+    emit({"status": "finalized", "run_dir": os.fspath(run_dir), "written": changed})
+
+
+if command == "assemble":
+    assemble(args)
+elif command == "verify-delivery":
+    verify_delivery(args)
+elif command == "render-doc":
+    render_doc(args)
+elif command == "finalize":
+    finalize(args)
+else:
+    fail(f"unknown package command: {command}")
+PY_ASSEMBLER
+    ;;
+esac
+
 if ! qq_resolve_bin git; then
   printf 'qq-observe: %s\n' "$QQ_BIN_ERROR" >&2
   exit 69
@@ -133,14 +1624,57 @@ HEX16 = re.compile(r"^[0-9a-f]{16}$")
 HEX32 = re.compile(r"^[0-9a-f]{32}$")
 PHASES = {"orientation", "alignment", "implementation", "review", "research", "delivery"}
 STATUS_JSON_CAP = 1024 * 1024
-# Tunable v1 heuristics from the 2026-07-23 operator note.
+# Tunable deterministic heuristics from the 2026-07-23/24 operator notes.
 REASONING_VOLUME_CHARS = 20000
 REASONING_CONTORTION_MESSAGES = 3
 REASONING_CONTORTION_CHARS = 5000
+STALL_GAP_ENTRIES = 40
+OPERATOR_REQUEST_TOOL_NAME_IDIOMS = (
+    re.compile(r"^operator_stage$", re.IGNORECASE),
+    re.compile(r"^(?:operator_request|request_operator)$", re.IGNORECASE),
+)
+OPERATOR_REQUEST_ARGUMENT_IDIOMS = (
+    re.compile(r"\bherdr\s+notification\s+show\b", re.IGNORECASE),
+    re.compile(r'"(?:operator_directed|operatorDirected)":true', re.IGNORECASE),
+    re.compile(r'"(?:recipient|target)":"operator"', re.IGNORECASE),
+)
+HERDR_NOTIFICATION_TOOL_NAME_IDIOMS = (
+    re.compile(r"(?:^|[_-])notification(?:$|[_-])", re.IGNORECASE),
+)
+HERDR_TOOL_NAME_IDIOMS = (
+    re.compile(r"^herdr$", re.IGNORECASE),
+)
+NOTIFICATION_ARGUMENT_IDIOMS = (
+    re.compile(r"\bnotification\b", re.IGNORECASE),
+)
+NOTIFICATION_SHOW_ARGUMENT_IDIOMS = (
+    re.compile(r"\bshow\b", re.IGNORECASE),
+)
+MUTATING_TOOL_NAMES = ("edit", "write")
+COMMIT_SHAPED_COMMAND_IDIOMS = (
+    re.compile(
+        r'(?:^|[;&|"]\s*)git(?:\s+[^;&|\s]+){0,12}\s+commit\b',
+        re.IGNORECASE,
+    ),
+)
+CHECK_SHAPED_COMMAND_IDIOMS = (
+    re.compile(r"tests/", re.IGNORECASE),
+    re.compile(r"\bratchet\b", re.IGNORECASE),
+    re.compile(r"\bshell-tests\b", re.IGNORECASE),
+    re.compile(r"\bgh\s+pr\s+checks\b", re.IGNORECASE),
+)
+COMPLETION_CLAIM_IDIOMS = re.compile(
+    r"\b(?:checks?\s+pass(?:ed)?|green|ready\s+to\s+merge|"
+    r"all\s+tests?\s+pass(?:ed)?|done\s+and\s+verified)\b",
+    re.IGNORECASE,
+)
 ANALYSIS_KINDS = {
     "tool-gap.capability-unknown", "tool-gap.tool-missing", "instruction-conflict",
     "instruction-deficiency", "tool-misuse", "friction", "waste", "failure",
-    "substrate", "design-question",
+    "substrate", "design-question", "operator-seam.unconfirmed-assumption",
+    "operator-seam.unseen-request", "operator-seam.misread-direction",
+    "operator-seam.misleading-claim", "operator-seam.stale-world",
+    "operator-seam.cross-session", "operator-seam.abandonment",
 }
 ANALYSIS_ROOT_CAUSE_LOCATIONS = {
     "work-order", "skill", "instruction", "tool", "agent-behavior", "substrate",
@@ -609,6 +2143,7 @@ def new_session_analysis(entries, observed):
         "calls": [],
         "results": [],
         "users": [],
+        "assistant_texts": [],
         "assistant_reasoning": [],
         "message_roles": [],
         "compactions": [],
@@ -722,6 +2257,7 @@ def parse_pi(analysis):
             analysis["users"].append((line, content_text(content)))
         if role == "assistant":
             add_usage(analysis, message.get("usage"), usage_names)
+            analysis["assistant_texts"].append((line, content_text(content)))
         if role == "toolResult":
             analysis["blocks"]["toolResult"] += 1
             call_id = message.get("toolCallId")
@@ -853,6 +2389,36 @@ def session_facts(analysis):
     }
 
 
+def matches_any(value, idioms):
+    return any(idiom.search(value) for idiom in idioms)
+
+
+def operator_request_call(call):
+    name = call["name"]
+    arguments = call["arguments"]
+    if matches_any(name, OPERATOR_REQUEST_TOOL_NAME_IDIOMS):
+        return True
+    if matches_any(arguments, OPERATOR_REQUEST_ARGUMENT_IDIOMS):
+        return True
+    if (
+        matches_any(name, HERDR_NOTIFICATION_TOOL_NAME_IDIOMS)
+        and matches_any(arguments, NOTIFICATION_SHOW_ARGUMENT_IDIOMS)
+    ):
+        return True
+    return (
+        matches_any(name, HERDR_TOOL_NAME_IDIOMS)
+        and matches_any(arguments, NOTIFICATION_ARGUMENT_IDIOMS)
+        and matches_any(arguments, NOTIFICATION_SHOW_ARGUMENT_IDIOMS)
+    )
+
+
+def mutating_call(call):
+    name = call["name"].lower()
+    if name in MUTATING_TOOL_NAMES:
+        return True
+    return name == "bash" and matches_any(call["arguments"], COMMIT_SHAPED_COMMAND_IDIOMS)
+
+
 def session_signals(analysis):
     episodes = []
     calls = sorted(analysis["calls"], key=lambda call: call["line"])
@@ -860,6 +2426,59 @@ def session_signals(analysis):
         (result for result in analysis["results"] if result["error"]),
         key=lambda result: result["line"],
     )
+
+    results_by_call = {}
+    for result in analysis["results"]:
+        if result["call_line"] is not None:
+            results_by_call.setdefault(result["call_line"], []).append(result["line"])
+    user_lines = sorted(line for line, _ in analysis["users"])
+    agent_lines = [
+        line for line, role in analysis["message_roles"] if role != "user"
+    ]
+    for request in (call for call in calls if operator_request_call(call)):
+        next_user = next((line for line in user_lines if line > request["line"]), None)
+        request_entries = [request["line"]] + [
+            line for line in sorted(results_by_call.get(request["line"], []))
+            if next_user is None or line < next_user
+        ]
+        if next_user is None:
+            episodes.append({
+                "kind": "operator_request_unacknowledged",
+                "entries": list(dict.fromkeys(request_entries)),
+            })
+            continue
+        intervening = sum(
+            request["line"] < line < next_user for line in agent_lines
+        )
+        if intervening >= STALL_GAP_ENTRIES:
+            episodes.append({
+                "kind": "operator_request_stalled",
+                "entries": list(dict.fromkeys(request_entries + [next_user])),
+            })
+
+    mutating_calls = [call for call in calls if mutating_call(call)]
+    check_calls = [
+        call for call in calls
+        if call["name"].lower() in ("bash", "shell")
+        and matches_any(call["arguments"], CHECK_SHAPED_COMMAND_IDIOMS)
+    ]
+    for claim_line, text in analysis["assistant_texts"]:
+        if not COMPLETION_CLAIM_IDIOMS.search(text):
+            continue
+        previous_mutations = [
+            call for call in mutating_calls if call["line"] < claim_line
+        ]
+        if not previous_mutations:
+            continue
+        mutation = previous_mutations[-1]
+        verified = any(
+            mutation["line"] < call["line"] < claim_line for call in check_calls
+        )
+        if not verified:
+            episodes.append({
+                "kind": "unverified_completion_claim",
+                "entries": [mutation["line"], claim_line],
+            })
 
     for result in errors:
         later = [
@@ -1049,9 +2668,11 @@ def validate_analysis_shape(item):
     }
     for episode_index, episode in enumerate(episodes):
         label = f"episodes[{episode_index}]"
-        analysis_object(episode, episode_fields, label, optional={"rank"})
+        analysis_object(episode, episode_fields, label, optional={"rank", "no_signal"})
         if "rank" in episode:
             analysis_integer(episode["rank"], f"{label}.rank", minimum=1)
+        if "no_signal" in episode and not isinstance(episode["no_signal"], bool):
+            fail(f"analysis schema violation: {label}.no_signal must be a boolean")
         analysis_string(episode["kind"], f"{label}.kind")
         if episode["kind"] not in ANALYSIS_KINDS:
             fail(f"analysis schema violation: {label}.kind is not in the taxonomy")
