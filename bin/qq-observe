@@ -145,7 +145,9 @@ ANALYSIS_ROOT_CAUSE_LOCATIONS = {
     "harness-design",
 }
 ANALYSIS_CONFIDENCE = {"high": 3, "medium": 2, "low": 1}
-COST_SECONDS_TOLERANCE = 0.001
+# Sane-session bound: rejects absurd magnitudes before cost arithmetic.
+SANE_SESSION_BOUND = 10 ** 15
+COST_MILLISECONDS_TOLERANCE = 1
 SPAN_FIELDS = {
     "schema_version", "trace_id", "span_id", "parent_span_id", "root_span_id",
     "name", "phase", "actor", "start_time", "end_time", "duration_ms",
@@ -963,19 +965,21 @@ def analysis_string(value, label, nonempty=False, maximum=None):
         fail(f"analysis schema violation: {label} exceeds {maximum} characters")
 
 
-def analysis_integer(value, label, minimum=None):
-    if isinstance(value, bool) or not isinstance(value, int):
-        fail(f"analysis schema violation: {label} must be an integer")
+def bounded_number(value, label, integer=False, minimum=None, maximum=None):
+    accepted = (int,) if integer else (int, float)
+    kind = "integer" if integer else "number"
+    if isinstance(value, bool) or not isinstance(value, accepted):
+        fail(f"{label} must be a {kind}")
+    if isinstance(value, float) and not math.isfinite(value):
+        fail(f"{label} must be finite")
     if minimum is not None and value < minimum:
-        fail(f"analysis schema violation: {label} must be at least {minimum}")
+        fail(f"{label} must be at least {minimum}")
+    if maximum is not None and abs(value) > maximum:
+        fail(f"{label} magnitude exceeds {maximum}")
 
 
-def analysis_number(value, label, minimum=None):
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        fail(f"analysis schema violation: {label} must be a number")
-    finite = isinstance(value, int) or math.isfinite(value)
-    if not finite or (minimum is not None and value < minimum):
-        fail(f"analysis schema violation: {label} must be finite and at least {minimum}")
+def analysis_number(value, label, **bounds):
+    bounded_number(value, f"analysis schema violation: {label}", **bounds)
 
 
 def analysis_string_array(value, label, minimum=0):
@@ -989,7 +993,12 @@ def analysis_entry_array(value, label):
     if not isinstance(value, list) or not value:
         fail(f"analysis schema violation: {label} must contain at least one entry")
     for index, item in enumerate(value):
-        analysis_integer(item, f"{label}[{index}]", minimum=1)
+        analysis_number(item, f"{label}[{index}]", integer=True, minimum=1)
+
+
+def refuse_duplicates(values, message):
+    if len(set(values)) != len(values):
+        fail(message)
 
 
 def validate_analysis_shape(item):
@@ -1031,12 +1040,13 @@ def validate_analysis_shape(item):
         label = f"episodes[{episode_index}]"
         analysis_object(episode, episode_fields, label, optional={"rank"})
         if "rank" in episode:
-            analysis_integer(episode["rank"], f"{label}.rank", minimum=1)
+            analysis_number(episode["rank"], f"{label}.rank", integer=True, minimum=1)
         analysis_string(episode["kind"], f"{label}.kind")
         if episode["kind"] not in ANALYSIS_KINDS:
             fail(f"analysis schema violation: {label}.kind is not in the taxonomy")
         analysis_string(episode["title"], f"{label}.title", nonempty=True)
         analysis_string_array(episode["sessions"], f"{label}.sessions", minimum=1)
+        refuse_duplicates(episode["sessions"], "duplicate session in episode.sessions")
         evidence = episode["evidence"]
         if not isinstance(evidence, list) or not evidence:
             fail(f"analysis schema violation: {label}.evidence must contain at least one citation")
@@ -1045,6 +1055,7 @@ def validate_analysis_shape(item):
             analysis_object(citation, {"session", "entries", "quote"}, citation_label)
             analysis_string(citation["session"], f"{citation_label}.session")
             analysis_entry_array(citation["entries"], f"{citation_label}.entries")
+            refuse_duplicates(citation["entries"], "duplicate entry in citation")
             analysis_string(citation["quote"], f"{citation_label}.quote", maximum=200)
         for field in ("what_happened", "root_cause"):
             analysis_string(episode[field], f"{label}.{field}", nonempty=True)
@@ -1053,9 +1064,17 @@ def validate_analysis_shape(item):
             fail(f"analysis schema violation: {label}.root_cause_location is invalid")
         cost = episode["cost"]
         analysis_object(cost, {"turns", "tokens", "seconds", "source"}, f"{label}.cost")
-        analysis_integer(cost["turns"], f"{label}.cost.turns", minimum=0)
-        analysis_integer(cost["tokens"], f"{label}.cost.tokens", minimum=0)
-        analysis_number(cost["seconds"], f"{label}.cost.seconds", minimum=0)
+        analysis_number(
+            cost["turns"], f"{label}.cost.turns", integer=True,
+            minimum=0, maximum=SANE_SESSION_BOUND,
+        )
+        analysis_number(
+            cost["tokens"], f"{label}.cost.tokens", integer=True,
+            minimum=0, maximum=SANE_SESSION_BOUND,
+        )
+        analysis_number(
+            cost["seconds"], f"{label}.cost.seconds", minimum=0, maximum=SANE_SESSION_BOUND,
+        )
         analysis_string(cost["source"], f"{label}.cost.source", nonempty=True)
         remedy = episode["remedy"]
         analysis_object(remedy, {"type", "smallest_change"}, f"{label}.remedy")
@@ -1114,42 +1133,46 @@ def load_cost_facts(path, session):
     if not isinstance(turns, dict):
         fail(f"{prefix} turns_by_role must be an object")
     for role, value in turns.items():
-        if not isinstance(role, str) or isinstance(value, bool) or not isinstance(value, int) or value < 0:
-            fail(f"{prefix} turns_by_role values must be non-negative integers")
+        if not isinstance(role, str):
+            fail(f"{prefix} turns_by_role keys must be strings")
+        bounded_number(
+            value, f"{prefix} turns_by_role value", integer=True,
+            minimum=0, maximum=SANE_SESSION_BOUND,
+        )
 
     usage_records = item.get("token_usage_records")
-    if isinstance(usage_records, bool) or not isinstance(usage_records, int) or usage_records < 0:
-        fail(f"{prefix} token_usage_records must be a non-negative integer")
+    bounded_number(
+        usage_records, f"{prefix} token_usage_records", integer=True,
+        minimum=0, maximum=SANE_SESSION_BOUND,
+    )
     token_usage = item.get("token_usage")
     if not isinstance(token_usage, dict):
         fail(f"{prefix} token_usage must be an object")
     token_total = 0
     for field in ("input", "output"):
         value = token_usage.get(field)
-        if value is not None and (
-            isinstance(value, bool) or not isinstance(value, int) or value < 0
-        ):
-            fail(f"{prefix} token_usage.{field} must be a non-negative integer or null")
-        if usage_records == 0 and value is not None:
-            fail(f"{prefix} zero usage records require null token_usage.{field}")
-        token_total += value or 0
+        if value is not None:
+            bounded_number(
+                value, f"{prefix} token_usage.{field}", integer=True,
+                minimum=0, maximum=SANE_SESSION_BOUND,
+            )
+            if usage_records == 0:
+                fail(f"{prefix} zero usage records require null token_usage.{field}")
+            token_total += value
 
     wall_clock = item.get("wall_clock")
     if not isinstance(wall_clock, dict):
         fail(f"{prefix} wall_clock must be an object")
     duration = wall_clock.get("duration_ms")
-    if (
-        isinstance(duration, bool)
-        or not isinstance(duration, (int, float))
-        or (isinstance(duration, float) and not math.isfinite(duration))
-        or duration < 0
-    ):
-        fail(f"{prefix} wall_clock.duration_ms must be a non-negative finite number")
+    bounded_number(
+        duration, f"{prefix} wall_clock.duration_ms", minimum=0,
+        maximum=SANE_SESSION_BOUND * 1000,
+    )
     return {
         "turns": sum(turns.values()),
         "tokens": token_total,
         "tokens_verifiable": usage_records > 0,
-        "seconds": duration / 1000,
+        "duration_ms": duration,
     }
 
 
@@ -1231,11 +1254,11 @@ def validate_episode_cost(episode, facts):
     expected_turns = 0
     expected_tokens = 0
     tokens_verifiable = False
-    expected_seconds = 0
+    expected_ms = 0
     for session in episode["sessions"]:
         record = facts[session]
         expected_turns += record["turns"]
-        expected_seconds += record["seconds"]
+        expected_ms += record["duration_ms"]
         if record["tokens_verifiable"]:
             tokens_verifiable = True
             expected_tokens += record["tokens"]
@@ -1245,8 +1268,9 @@ def validate_episode_cost(episode, facts):
         cost_mismatch("turns", expected_turns, cost["turns"])
     if tokens_verifiable and cost["tokens"] != expected_tokens:
         cost_mismatch("tokens", expected_tokens, cost["tokens"])
-    if abs(cost["seconds"] - expected_seconds) > COST_SECONDS_TOLERANCE:
-        cost_mismatch("seconds", expected_seconds, cost["seconds"])
+    actual_ms = cost["seconds"] * 1000
+    if abs(actual_ms - expected_ms) > COST_MILLISECONDS_TOLERANCE:
+        cost_mismatch("seconds", expected_ms / 1000, cost["seconds"])
     expected_source = f"facts:{episode['sessions'][0]}"
     if cost["source"] != expected_source:
         cost_mismatch("source", expected_source, cost["source"])

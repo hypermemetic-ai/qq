@@ -120,9 +120,9 @@
           "additionalProperties": false,
           "required": ["turns", "tokens", "seconds", "source"],
           "properties": {
-            "turns": { "type": "integer", "minimum": 0 },
-            "tokens": { "type": "integer", "minimum": 0 },
-            "seconds": { "type": "number", "minimum": 0 },
+            "turns": { "type": "integer", "minimum": 0, "maximum": 1000000000000000 },
+            "tokens": { "type": "integer", "minimum": 0, "maximum": 1000000000000000 },
+            "seconds": { "type": "number", "minimum": 0, "maximum": 1000000000000000 },
             "source": {
               "type": "string",
               "minLength": 1,

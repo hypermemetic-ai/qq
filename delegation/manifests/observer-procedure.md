@@ -99,9 +99,13 @@ fixed from the episode's `sessions`:
   null fields as zero and excluding sessions with zero usage records; when no
   episode session has usage records, only the token field is unverifiable and
   left unchecked;
-- `seconds` is the sum of `wall_clock.duration_ms / 1000`, with validator
-  tolerance 0.001 seconds; and
+- `seconds` is the sum of `wall_clock.duration_ms / 1000`, checked in
+  milliseconds with an inclusive 1 ms tolerance; and
 - `source` is exactly `facts:<sessions[0]>`.
+
+The validator's sane-session bound rejects `turns`, `tokens`, or `seconds`
+magnitudes above 10^15 before arithmetic. Duplicate episode sessions and
+duplicate entries within one citation are invalid rather than deduplicated.
 
 After emission, `qq-observe validate-analysis` resolves verbatim citations,
 grounds costs using the supplied facts, rejects invalid output, and ranks valid
