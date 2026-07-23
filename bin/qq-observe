@@ -33,6 +33,8 @@ QQ_DISPATCH_RUNTIME_ROOT or ${TMPDIR:-/tmp}/pi-subagents-uid-<uid>.
 facts, signals, and validate-analysis accept Pi v3 session JSONL. Signal
 entries and unknown-entry citations are 1-based physical JSONL line numbers.
 validate-analysis requires one --facts SESSION_PATH=FACTS_PATH pair per session.
+facts emits token fields as integer-rounded accumulated totals (Python half-to-even);
+fields with no observed value remain null.
 EOF
   exit 64
 }
@@ -802,7 +804,7 @@ def session_facts(analysis):
     errors = [result for result in analysis["results"] if result["error"]]
     error_names = Counter(result["name"] for result in errors)
     token_usage = {
-        field: json_number(analysis["token_totals"][field])
+        field: int(round(analysis["token_totals"][field]))
         if analysis["token_present"][field]
         else None
         for field in TOKEN_FIELDS
