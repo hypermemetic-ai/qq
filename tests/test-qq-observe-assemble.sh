@@ -35,26 +35,31 @@ description: Fixture skill at merge time.
 EOF
 printf '# fixture manifest\n' >"$repo/delegation/manifests/fixture.md"
 git -C "$repo" add .
-git -C "$repo" -c user.name=test -c user.email=test@example.invalid commit -qm base
+GIT_AUTHOR_DATE=2020-01-01T00:00:00Z GIT_COMMITTER_DATE=2020-01-01T00:00:00Z \
+  git -C "$repo" -c user.name=test -c user.email=test@example.invalid commit -qm base
 git -C "$repo" worktree add -qb feature "$strong_worktree" main
 printf 'feature\n' >"$strong_worktree/change.txt"
 git -C "$strong_worktree" add change.txt
-git -C "$strong_worktree" -c user.name=test -c user.email=test@example.invalid commit -qm feature
-git -C "$repo" -c user.name=test -c user.email=test@example.invalid \
-  merge -q --no-ff -m 'Merge pull request #41 from fixture/feature' feature
+GIT_AUTHOR_DATE=2020-01-02T00:00:00Z GIT_COMMITTER_DATE=2020-01-02T00:00:00Z \
+  git -C "$strong_worktree" -c user.name=test -c user.email=test@example.invalid commit -qm feature
+GIT_AUTHOR_DATE=2026-07-20T12:00:00Z GIT_COMMITTER_DATE=2026-07-20T12:00:00Z \
+  git -C "$repo" -c user.name=test -c user.email=test@example.invalid \
+    merge -q --no-ff -m 'Merge pull request #41 from fixture/feature' feature
 merge_41="$(git -C "$repo" rev-parse HEAD)"
 
 git -C "$repo" switch -qc solo
 git -C "$repo" switch -q main
 printf 'solo\n' >"$repo/solo.txt"
 git -C "$repo" add solo.txt
-git -C "$repo" -c user.name=test -c user.email=test@example.invalid commit -qm solo
+GIT_AUTHOR_DATE=2020-01-03T00:00:00Z GIT_COMMITTER_DATE=2020-01-03T00:00:00Z \
+  git -C "$repo" -c user.name=test -c user.email=test@example.invalid commit -qm solo
 solo_commit="$(git -C "$repo" rev-parse HEAD)"
 # Rebuild this as a PR-shaped merge while retaining a local solo branch.
 git -C "$repo" reset -q --hard "$merge_41"
 git -C "$repo" branch -f solo "$solo_commit"
-git -C "$repo" -c user.name=test -c user.email=test@example.invalid \
-  merge -q --no-ff -m 'Merge pull request #42 from fixture/solo' solo
+GIT_AUTHOR_DATE=2026-07-20T13:00:00Z GIT_COMMITTER_DATE=2026-07-20T13:00:00Z \
+  git -C "$repo" -c user.name=test -c user.email=test@example.invalid \
+    merge -q --no-ff -m 'Merge pull request #42 from fixture/solo' solo
 merge_42="$(git -C "$repo" rev-parse HEAD)"
 
 fake_gh="$tmp/gh"
@@ -310,9 +315,9 @@ set -e
 assert_equal 65 "$status" 'differing finalized analysis did not hit append-only refusal'
 assert_file_contains "$tmp/differing.stderr" 'append-only conflict'
 
-# Delivery is incomplete until every local PR-shaped merge has a terminal marker.
+# Delivery is incomplete until every local landed Change has a terminal marker.
 set +e
-"$OBSERVE" verify-delivery --repo "$repo" --since 2020-01-01T00:00:00Z \
+"$OBSERVE" verify-delivery --repo "$repo" --since 2026-07-01T00:00:00Z \
   >"$tmp/gap.json"
 status=$?
 set -e
@@ -328,7 +333,7 @@ jq -e '
   .schema == "qq-observer.analysis" and .schema_version == 1
   and .status == "analysis_failed" and .reason == "observer fixture failed"
 ' "$run_42/analysis_failed.json" >/dev/null || fail 'analysis_failed marker has the wrong shape'
-"$OBSERVE" verify-delivery --repo "$repo" --since 2020-01-01T00:00:00Z \
+"$OBSERVE" verify-delivery --repo "$repo" --since 2026-07-01T00:00:00Z \
   >"$tmp/covered.json"
 jq -e '.ok == true and .uncovered == [] and .covered == [41,42]' \
   "$tmp/covered.json" >/dev/null || fail 'covered delivery window did not pass'

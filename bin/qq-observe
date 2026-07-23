@@ -105,6 +105,7 @@ import sys
 self_path, command, git_binary, gh_binary, *args = sys.argv[1:]
 SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9._-]+$")
 PR_MERGE = re.compile(r"^Merge pull request #(\d+)\b")
+PR_SQUASH = re.compile(r"(?:^|\s)\(#(\d+)\)$")
 STATUS_CAP = 1024 * 1024
 FIRST_LINE_CAP = 1024 * 1024
 
@@ -1128,15 +1129,34 @@ def verify_delivery(values):
         since_time = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=7)
         since = since_time.replace(microsecond=0).isoformat().replace("+00:00", "Z")
     log = checked(
-        [git_binary, "-C", os.fspath(repo), "log", "main", "--merges",
-         f"--since={since_time.isoformat()}", "--format=%s"],
-        "local main merge-log inspection",
+        [git_binary, "-C", os.fspath(repo), "log", "main",
+         f"--since={since_time.isoformat()}", "--format=%H%x00%s"],
+        "local main history inspection",
     )
-    try:
-        subjects = log.decode("utf-8").splitlines()
-    except UnicodeDecodeError as error:
-        fail(f"local main merge log is not UTF-8: {error}", 65)
-    prs = sorted({int(match.group(1)) for subject in subjects if (match := PR_MERGE.match(subject))})
+    commits = []
+    for raw_line in log.splitlines():
+        if not raw_line:
+            continue
+        try:
+            oid_raw, subject_raw = raw_line.split(b"\0", 1)
+            oid = oid_raw.decode("ascii")
+            subject = subject_raw.decode("utf-8")
+        except (UnicodeDecodeError, ValueError) as error:
+            fail(f"local main history is malformed or not UTF-8: {error}", 65)
+        if not re.fullmatch(r"[0-9a-f]{40,64}", oid):
+            fail(f"local main history emitted an invalid commit ID: {oid}", 65)
+        commits.append({"oid": oid, "subject": subject})
+
+    prs = set()
+    unresolved = []
+    for commit in commits:
+        subject = commit["subject"]
+        match = PR_MERGE.match(subject) or PR_SQUASH.search(subject)
+        if match is None:
+            unresolved.append(commit)
+        else:
+            prs.add(int(match.group(1)))
+    prs = sorted(prs)
     runs_root = observer_runs_root(create=False)
     covered = []
     uncovered = []
@@ -1146,14 +1166,25 @@ def verify_delivery(values):
             covered.append(pr)
         else:
             uncovered.append(pr)
+    if unresolved:
+        status = "unparseable history present"
+    elif uncovered:
+        status = "uncovered Changes present"
+    elif not commits:
+        status = "no landed Changes in window"
+    else:
+        status = "covered"
+    ok = not uncovered and not unresolved
     report = {
-        "ok": not uncovered,
+        "ok": ok,
+        "status": status,
         "since": since,
         "prs": prs,
         "covered": covered,
         "uncovered": uncovered,
+        "unresolved_commits": unresolved,
     }
-    emit(report, 0 if not uncovered else 1)
+    emit(report, 0 if ok else 1)
 
 
 def minimal_analysis(item):
