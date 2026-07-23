@@ -3,7 +3,7 @@ id: doc-81
 title: Plan — Session-observer analyst v1 (approved 2026-07-22)
 type: other
 created_date: '2026-07-22 23:25'
-updated_date: '2026-07-22 23:25'
+updated_date: '2026-07-23 01:24'
 tags:
   - plan
 ---
@@ -61,7 +61,7 @@ the model.
   surfaced, never silently dropped. Precision measured against hand-counted
   fixtures. (HarnessScope lesson: naive parsing → confident wrong numbers.)
 - **Run-tree assembler:** given a Change, harvest the accountable pi session +
-  pi-subagents run sessions + codex delegate sessions into the XDG store at
+  pi-subagents run sessions into the XDG store at
   landing time. Post-hoc, no instrumentation; also fixes /tmp volatility of
   subagent session files.
 - **Observer agent:** read-only delegation manifest + skill carrying the
@@ -76,9 +76,17 @@ the model.
   v1 includes a calibration pass where the owner verifies every cited episode on
   the first N real runs before the digest's promotions carry weight.
 
+## Amendment 2026-07-22 — pi-only scope
+
+Operator directive (asked-and-answered exchange, 2026-07-22): qq runs on pi;
+codex is removed from qq. The pre-pass and assembler are pi-only; the
+pi+codex parsing line and the codex risk item below are superseded, and the
+three codex mentions in this document were amended inline the same day.
+
 ## Change sequence
 
-1. **Reader/pre-pass:** defensive pi+codex transcript parsing, facts JSON,
+1. **Reader/pre-pass:** defensive pi transcript parsing (pi-only per the
+   amendment below), facts JSON,
    fixtures with hand-counted precision evidence. Mints the two decision records.
 2. **Observer v0:** manifest + skill + schema + taxonomy; manual invocation over
    already-delivered Changes; owner calibration of citation validity and finding
@@ -113,8 +121,6 @@ rigs. No cross-Repository scope.
 
 ## Risks / open items
 
-- Codex delegate transcript format: parsed defensively in Change 1; precision
-  evidence required before the observer trusts those counts.
 - Huge sessions: chunk facets then merge (/insights shape); the deterministic
   pre-pass carries global counts so the summarization bottleneck (doc-80
   pitfall #6) can't corrupt statistics.
