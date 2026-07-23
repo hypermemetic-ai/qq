@@ -575,6 +575,15 @@ def session_jsonl(path, legacy=False):
         and isinstance(first.get("payload"), dict)
     ):
         session_format = "codex"
+        metadata_time = first["payload"].get("timestamp")
+        if isinstance(metadata_time, str):
+            try:
+                metadata_time = dt.datetime.fromisoformat(metadata_time.replace("Z", "+00:00"))
+            except ValueError:
+                fail(f"invalid session metadata timestamp at line 1: {metadata_time}")
+            if metadata_time.tzinfo is None:
+                fail(f"session metadata timestamp requires a timezone at line 1: {metadata_time}")
+            observed.append(metadata_time)
     else:
         fail("cannot auto-detect session format from line 1")
     if not observed:

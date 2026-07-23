@@ -1,4 +1,4 @@
-{"timestamp":"2026-07-02T00:00:00Z","type":"session_meta","payload":{"id":"codex-fixture","timestamp":"2026-07-02T00:00:00Z","cwd":"/fixture","originator":"codex_exec"}}
+{"timestamp":"2026-07-02T00:00:00.500Z","type":"session_meta","payload":{"id":"codex-fixture","timestamp":"2026-07-02T00:00:00Z","cwd":"/fixture","originator":"codex_exec"}}
 {"timestamp":"2026-07-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"Fixture instructions."}]}}
 {"timestamp":"2026-07-02T00:00:02Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Run the build."}]}}
 {"timestamp":"2026-07-02T00:00:03Z","type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"I will run it."}]}}
