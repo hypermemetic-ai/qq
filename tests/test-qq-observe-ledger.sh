@@ -83,6 +83,17 @@ jq -e '.already_applied == true and .findings == 0 and .promoted == 0' \
   "$tmp/update-idempotent.json" >/dev/null || fail 'idempotent update result is wrong'
 [ -f "$run_2/.ledger-applied" ] || fail 'ledger-applied marker was not written'
 
+# A retry after events were fsynced but before the marker was written is a no-op.
+rm "$run_2/.ledger-applied"
+before="$(wc -l <"$events")"
+"$OBSERVE" ledger-update --run "$run_2" >"$tmp/update-after-marker-crash.json"
+assert_equal "$before" "$(wc -l <"$events")" \
+  'marker-write crash recovery duplicated finding events'
+jq -e '.findings == 0 and .promoted == 0 and .already_applied == false' \
+  "$tmp/update-after-marker-crash.json" >/dev/null \
+  || fail 'marker-write crash recovery has the wrong result'
+[ -f "$run_2/.ledger-applied" ] || fail 'marker-write crash recovery did not write the marker'
+
 # Successful finalize feeds the ledger without a separate ledger-update command.
 run_3="$runs/pr-3"
 mkdir -p "$run_3/sessions" "$run_3/facts"

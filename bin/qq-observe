@@ -1535,11 +1535,14 @@ def ledger_update_run(run_dir):
     marker = run_dir / ".ledger-applied"
     fd = open_ledger_events()
     try:
-        if preflight_append(marker, marker_data):
-            return {"findings": 0, "promoted": 0, "already_applied": True}
+        marker_exists = preflight_append(marker, marker_data)
         previous, _ = read_ledger_events(fd)
         already_promoted = {
             event["recurrence_key"] for event in previous if event["type"] == "promoted"
+        }
+        existing_findings = {
+            (event["pr"], event["recurrence_key"], event["kind"], event["title"])
+            for event in previous if event["type"] == "finding_seen"
         }
         prs_by_key = {}
         kinds_by_key = {}
@@ -1567,7 +1570,10 @@ def ledger_update_run(run_dir):
             )
             if not valid_ledger_event(event):
                 fail(f"analysis episode {index} cannot be represented as a ledger event", 65)
-            findings.append(event)
+            identity = (pr, key, kind, episode["title"])
+            if identity not in existing_findings:
+                findings.append(event)
+                existing_findings.add(identity)
             prs_by_key.setdefault(key, set()).add(pr)
             kinds_by_key[key] = kind
         promotions = []
@@ -1582,7 +1588,7 @@ def ledger_update_run(run_dir):
         atomic_append(marker, marker_data)
         return {
             "findings": len(findings), "promoted": len(promotions),
-            "already_applied": False,
+            "already_applied": marker_exists and not findings and not promotions,
         }
     finally:
         close_ledger_events(fd)
