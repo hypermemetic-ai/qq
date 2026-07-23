@@ -22,34 +22,30 @@ import { pathToFileURL } from "node:url";
 
 const [indexPath] = process.argv.slice(2);
 const { default: register } = await import(pathToFileURL(indexPath));
-const registrations = {
-  tools: [],
-  shortcuts: [],
-  commands: [],
-  listeners: [],
-};
 
-register({
-  registerTool(tool) {
-    registrations.tools.push(tool.name);
-  },
-  registerShortcut(shortcut) {
-    registrations.shortcuts.push(shortcut);
-  },
-  registerCommand(command) {
-    registrations.commands.push(command);
-  },
-  on(eventName) {
-    registrations.listeners.push(eventName);
-  },
-});
+function recordingPi() {
+  const registrations = [];
+  return {
+    registrations,
+    pi: {
+      registerTool(tool) {
+        registrations.push(`tool:${tool.name}`);
+      },
+      registerShortcut(shortcut) {
+        registrations.push(`shortcut:${shortcut}`);
+      },
+      registerCommand(command) {
+        registrations.push(`command:${command}`);
+      },
+      on(eventName) {
+        registrations.push(`listener:${eventName}`);
+      },
+    },
+  };
+}
 
-const count = (items, item) => items.filter((candidate) => candidate === item).length;
-assert.equal(count(registrations.tools, "qq_pr_watch"), 1, "qq_pr_watch was not registered exactly once");
-assert.equal(count(registrations.tools, "operator_stage"), 1, "operator_stage was not registered exactly once");
-assert.equal(count(registrations.shortcuts, "shift+alt+enter"), 1, "continue shortcut was not registered exactly once");
-assert.equal(count(registrations.commands, "split-fork"), 1, "split-fork was not registered exactly once");
-assert.equal(count(registrations.listeners, "tool_call"), 1, "backlog guard was not registered exactly once");
+const indexRecording = recordingPi();
+register(indexRecording.pi);
 
 const indexSource = await readFile(indexPath, "utf8");
 const extensionFiles = (await readdir(dirname(indexPath)))
@@ -71,6 +67,28 @@ assert.doesNotMatch(
   indexSource,
   /from\s+["']\.\/qq-codex-fast\.ts["']/,
   "delegate-only qq-codex-fast.ts was mounted globally",
+);
+
+const siblingRegistrations = [];
+for (const filename of extensionFiles) {
+  if (excluded.has(filename)) continue;
+  const { default: registerSibling } = await import(
+    pathToFileURL(`${dirname(indexPath)}/${filename}`)
+  );
+  const siblingRecording = recordingPi();
+  registerSibling(siblingRecording.pi);
+  assert.notEqual(
+    siblingRecording.registrations.length,
+    0,
+    `${filename} registered nothing when invoked directly`,
+  );
+  siblingRegistrations.push(...siblingRecording.registrations);
+}
+
+assert.deepEqual(
+  indexRecording.registrations.sort(),
+  siblingRegistrations.sort(),
+  "extensions/index.ts registrations differ from its mounted extension siblings",
 );
 
 console.log("test-qq-extension-mount: pass");
