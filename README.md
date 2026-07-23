@@ -155,30 +155,26 @@ and keep the file private:
 chmod 600 ~/.pi/agent/auth.json
 ```
 
-Merge these defaults into `~/.pi/agent/settings.json`. Replace the example
-extension path with the output of this command; the JSON value must be an
-absolute path, not a `$HOME` expression.
-
-```bash
-readlink -f "$HOME/projects/qq/cockpit/pi/qq-backlog-guard.ts"
-readlink -f "$HOME/projects/qq/extensions/qq-pr-watch.ts"
-readlink -f "$HOME/projects/qq/extensions/qq-operator-stage.ts"
-```
+Merge these defaults into `~/.pi/agent/settings.json`:
 
 ```json
 {
   "defaultProvider": "kimi-coding",
   "defaultModel": "k3",
-  "defaultThinkingLevel": "max",
-  "extensions": [
-    "/home/USER/projects/qq/cockpit/pi/qq-backlog-guard.ts",
-    "/home/USER/projects/qq/extensions/qq-pr-watch.ts",
-    "/home/USER/projects/qq/extensions/qq-operator-stage.ts"
-  ]
+  "defaultThinkingLevel": "max"
 }
 ```
 
 These defaults select the native `kimi-coding/k3` route with max thinking.
+The accountable agent creates the global `qq` extension link once per machine:
+
+```bash
+mkdir -p "$HOME/.pi/agent/extensions"
+ln -sfn "$HOME/projects/qq/extensions" "$HOME/.pi/agent/extensions/qq"
+```
+
+That one link mounts the Repository extension set, which is live in every Pi
+session from then on. `settings.json` no longer carries extension paths.
 
 The Repository extension gives local feedback when Pi's built-in `write` or
 `edit` targets the normalized `backlog/` path of the checkout containing

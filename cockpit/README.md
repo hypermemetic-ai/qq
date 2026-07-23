@@ -7,8 +7,6 @@ same file; the shell surface is sourced straight from this checkout.
 
 ## Files
 
-- `pi/qq-backlog-guard.ts` — Pi's path-only managed-Backlog drift-net for
-  built-in `write` and `edit` calls.
 - `glow/glow.yml` — fixed-width, no-pager Glow defaults for pane rendering.
 - `glow/tuned.json` — the hand-tuned Markdown theme used by Glow.
 - `herdr/config.toml` — tokyo-night, onboarding suppressed, priority-sorted
@@ -33,12 +31,13 @@ bindings use `qq-herdr-pull <N|next>`. `alt+o` snaps to Pi in the Repository
 project home, or to focused-workspace Pi when no home runtime exists. Pressing
 it again at the target bounces back.
 
-Load `pi/qq-backlog-guard.ts` from Pi's global settings with its absolute
-checkout path. On each built-in `write` or `edit`, it discovers the current
-Git checkout from Pi's working directory and blocks normalized targets inside
-that checkout's `backlog/`, returning the Backlog-CLI guidance. It deliberately
-allows reads and Bash, including Backlog CLI commands; it is a path-only
-drift-net, not a security boundary or shell policy.
+`extensions/qq-backlog-guard.ts` loads as part of the mounted qq extension set
+through the one global symlink described in the root README's Install section.
+On each built-in `write` or `edit`, it discovers the current Git checkout from
+Pi's working directory and blocks normalized targets inside that checkout's
+`backlog/`, returning the Backlog-CLI guidance. It deliberately allows reads
+and Bash, including Backlog CLI commands; it is a path-only drift-net, not a
+security boundary or shell policy.
 
 The sidebar carries the delegate status surface's ambient tier: a `$stage` row
 on Space and Agent entries renders stage-boundary one-liners reported through
