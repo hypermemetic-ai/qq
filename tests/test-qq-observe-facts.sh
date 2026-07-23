@@ -72,6 +72,27 @@ jq -e '
 ' "$tmp/no-usage-facts.json" >/dev/null \
   || fail 'absent token fields were zeroed or not counted'
 
+invalid_constant="$tmp/invalid-constant.jsonl"
+cat >"$invalid_constant" <<'JSONL'
+{"type":"session","version":3,"timestamp":"2026-07-03T00:00:00Z"}
+{"type":"message","timestamp":"2026-07-03T00:00:01Z","message":{"role":"assistant","content":[],"usage":{"input":NaN}}}
+JSONL
+for command in facts signals; do
+  set +e
+  (
+    cd "$ROOT"
+    "$OBSERVE" "$command" "$invalid_constant"
+  ) >"$tmp/$command-invalid-constant.stdout" 2>"$tmp/$command-invalid-constant.stderr"
+  status=$?
+  set -e
+  assert_equal 64 "$status" "$command accepted a non-RFC JSON constant"
+  [ ! -s "$tmp/$command-invalid-constant.stdout" ] \
+    || fail "$command emitted stdout for a non-RFC JSON constant"
+  assert_file_contains "$tmp/$command-invalid-constant.stderr" \
+    'malformed JSON at line 2:' \
+    "$command non-RFC constant failure did not cite the malformed physical line"
+done
+
 malformed_pi="$tmp/malformed-pi.jsonl"
 cat >"$malformed_pi" <<'JSONL'
 {"type":"session","version":3,"timestamp":"2026-07-03T00:00:00Z"}

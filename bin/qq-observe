@@ -523,7 +523,7 @@ def session_jsonl(path, legacy=False):
                     entries.append({"line": number, "item": item})
                     continue
                 try:
-                    item = json.loads(raw)
+                    item = json.loads(raw, parse_constant=int)
                 except (UnicodeDecodeError, ValueError, RecursionError) as error:
                     detail = error.msg if isinstance(error, json.JSONDecodeError) else str(error)
                     fail(f"malformed JSON at line {number}: {detail}")
