@@ -462,8 +462,10 @@ jq -cn --arg repo "$ROOT" '{
 }' >"$rebuild_missing/package.json"
 rebuild_unmarked="$(make_run pr-24 24 guided 2026-10-24T10:00:00Z "$first_episodes")"
 
-"$OBSERVE" ledger-update --run "$rebuild_20" >"$tmp/rebuild-update-20.json"
 "$OBSERVE" ledger-update --run "$rebuild_21" >"$tmp/rebuild-update-21.json"
+"$OBSERVE" ledger-update --run "$rebuild_20" >"$tmp/rebuild-update-20.json"
+touch -d '2026-10-21T10:00:00.000Z' "$rebuild_21/.ledger-applied"
+touch -d '2026-10-21T10:01:00.000Z' "$rebuild_20/.ledger-applied"
 "$OBSERVE" mark-discussed --run "$rebuild_21" --outcomes "$outcomes" \
   >"$tmp/rebuild-discussed-21.json"
 "$OBSERVE" record-comparison --guided "$rebuild_20" --blind "$rebuild_20_blind" \
@@ -471,7 +473,7 @@ rebuild_unmarked="$(make_run pr-24 24 guided 2026-10-24T10:00:00Z "$first_episod
 touch -d '2026-10-21T11:00:00.000Z' "$rebuild_21/discussed.json"
 touch -d '2026-10-21T12:00:00.000Z' "$rebuild_20/comparison.json"
 jq -cS 'if .type == "disposition" or .type == "signal_tune_candidate" then del(.ts) else . end' \
-  "$events" | sort >"$tmp/pre-loss-events.jsonl"
+  "$events" >"$tmp/pre-loss-events.jsonl"
 
 "$OBSERVE" ledger-rebuild >"$tmp/rebuild-intact.json"
 jq -e '
@@ -486,9 +488,9 @@ jq -e '
   and .events_appended == 7 and .events_skipped == 0
 ' "$tmp/rebuilt.json" >/dev/null || fail 'lost-ledger rebuild summary is wrong'
 jq -cS 'if .type == "disposition" or .type == "signal_tune_candidate" then del(.ts) else . end' \
-  "$events" | sort >"$tmp/rebuilt-events.jsonl"
+  "$events" >"$tmp/rebuilt-events.jsonl"
 cmp "$tmp/pre-loss-events.jsonl" "$tmp/rebuilt-events.jsonl" >/dev/null \
-  || fail 'rebuilt ledger event content differs from the pre-loss events'
+  || fail 'chronological rebuild did not reproduce the pre-loss event sequence'
 jq -s -e '
   ([.[] | .type] | sort) ==
     ["disposition","finding_seen","finding_seen","finding_seen","finding_seen","promoted","signal_tune_candidate"]

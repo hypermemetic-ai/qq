@@ -1818,14 +1818,14 @@ def ledger_rebuild(values):
     replay_items = []
     replayed_runs = set()
     for run_dir in run_dirs:
+        run_items = []
         analysis = run_dir / "analysis.json"
         marker = run_dir / ".ledger-applied"
         if (
             not regular_file(run_dir / "analysis_failed.json")
             and regular_file(analysis) and regular_file(marker)
         ):
-            replay_items.append((run_dir, "finding_seen", os.lstat(marker)))
-            replayed_runs.add(run_dir)
+            run_items.append(("finding_seen", os.lstat(marker)))
         for name, kind in (
             ("discussed.json", "disposition"),
             ("comparison.json", "signal_tune_candidate"),
@@ -1838,8 +1838,15 @@ def ledger_rebuild(values):
                     fail(f"cannot inspect replay record {path}: {error}", 65)
                 if not stat.S_ISREG(info.st_mode):
                     fail(f"replay record is not a regular file: {path}", 65)
-                replay_items.append((run_dir, kind, info))
-                replayed_runs.add(run_dir)
+                run_items.append((kind, info))
+        if run_items:
+            pr, _, _ = package_identity(run_dir)
+            replay_items.extend(
+                (info.st_mtime_ns, pr, kind, run_dir, info)
+                for kind, info in run_items
+            )
+            replayed_runs.add(run_dir)
+    replay_items.sort(key=lambda item: item[:3])
 
     fd = open_ledger_events()
     try:
@@ -1862,7 +1869,7 @@ def ledger_rebuild(values):
     events_appended = 0
     events_skipped = 0
     skipped_promotions = set()
-    for run_dir, kind, info in replay_items:
+    for _, _, kind, run_dir, info in replay_items:
         if kind == "finding_seen":
             result = ledger_update_run(run_dir, skipped_promotions)
             events_appended += result["findings"] + result["promoted"]
