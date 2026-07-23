@@ -17,6 +17,8 @@ usage:
   qq-observe record --name NAME --actor ACTOR --start TIME --end TIME [options]
   qq-observe read-session SESSION.jsonl [--actor ACTOR] [--phase PHASE] [context options]
   qq-observe summarize [--since TS] [--until TS] [--json]
+  qq-observe facts SESSION.jsonl
+  qq-observe signals SESSION.jsonl
 
 context options: --trace-id ID --span-id ID --parent-span-id ID --root-span-id ID
 record options:  --phase PHASE --status STATUS --source SOURCE --attribute KEY=VALUE
@@ -26,6 +28,8 @@ from <runtime-root>/async-subagent-runs/<run.id>/status.json at read time:
 complete becomes ok; failed, stopped, or unresolved outcomes remain error.
 --json includes each span's raw and resolved status. runtime-root is
 QQ_DISPATCH_RUNTIME_ROOT or ${TMPDIR:-/tmp}/pi-subagents-uid-<uid>.
+facts and signals accept Pi v3 session JSONL. Signal entries and
+unknown-entry citations are 1-based physical JSONL line numbers.
 EOF
   exit 64
 }
@@ -45,7 +49,7 @@ case "${1:-}" in
     esac
     exit 0
     ;;
-  record | read-session | summarize) command="$1"; shift ;;
+  record | read-session | summarize | facts | signals) command="$1"; shift ;;
   *) usage ;;
 esac
 
@@ -108,6 +112,7 @@ path_is_within "$store_dir" "$state_root" \
 store_file="$store_dir/spans.jsonl"
 
 exec "$python_binary" - "$command" "$store_file" "$@" <<'PY'
+from collections import Counter
 import datetime as dt
 import json
 import math
@@ -477,6 +482,390 @@ def print_summary(summary):
         for row in summary["statuses"]:
             print(f"{row['status']:<{status_width}} {row['count']:>5d}")
 
+OBSERVE_BLOCKS = ("text", "thinking", "toolCall", "toolResult")
+TOKEN_FIELDS = ("input", "output", "cache_read", "cache_write")
+CORRECTION = re.compile(
+    r"(?:^\s*(?:no\b|actually\b|correction\b|instead\b|stop\b)"
+    r"|\b(?:that's|that is)\s+(?:not|wrong)\b"
+    r"|\byou\s+(?:misunderstood|missed|ignored)\b"
+    r"|\bi\s+(?:said|asked|meant)\b"
+    r"|\b(?:do not|don't)\s+do that\b)",
+    re.IGNORECASE,
+)
+SIGNAL_WINDOW = 10
+PI_CONTROL_ENTRIES = {
+    "session", "model_change", "thinking_level_change", "custom_message",
+    "custom", "session_info",
+}
+
+
+def session_jsonl(path, legacy=False):
+    """Read once; facts/signals accept BOM, while legacy preserves read-session's Pi contract."""
+    entries = []
+    observed = []
+    header_seen = False
+    try:
+        with path.open("rb") as source:
+            for number, raw in enumerate(source, 1):
+                if not raw.strip():
+                    if legacy:
+                        continue
+                    fail(f"malformed JSON at line {number}: blank line")
+                if legacy:
+                    item = json.loads(raw.decode("utf-8"))
+                    if not header_seen:
+                        if not isinstance(item, dict) or item.get("type") != "session" or item.get("version") != 3:
+                            fail("session JSONL must begin with a type=session, version=3 header")
+                        header_seen = True
+                    if not isinstance(item, dict) or not isinstance(item.get("timestamp"), str):
+                        fail(f"session entry {number} lacks a timestamp")
+                    observed.append(timestamp(item["timestamp"]))
+                    entries.append({"line": number, "item": item})
+                    continue
+                try:
+                    item = json.loads(raw, parse_constant=int)
+                except (UnicodeDecodeError, ValueError, RecursionError) as error:
+                    detail = error.msg if isinstance(error, json.JSONDecodeError) else str(error)
+                    fail(f"malformed JSON at line {number}: {detail}")
+                parsed_time = None
+                if isinstance(item, dict) and isinstance(item.get("timestamp"), str):
+                    value = item["timestamp"]
+                    try:
+                        parsed_time = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+                    except ValueError:
+                        fail(f"invalid timestamp at line {number}: {value}")
+                    if parsed_time.tzinfo is None:
+                        fail(f"timestamp requires a timezone at line {number}: {value}")
+                    observed.append(parsed_time)
+                entries.append({"line": number, "item": item, "time": parsed_time})
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:
+        if legacy:
+            fail(f"cannot read session JSONL: {error}")
+        fail(f"cannot read session JSONL: {error}")
+
+    if legacy:
+        if not observed:
+            fail("session JSONL has no timestamped entries")
+        return entries, observed
+    if not entries:
+        fail("session JSONL has no entries")
+    first = entries[0]["item"]
+    if not isinstance(first, dict) or first.get("type") != "session":
+        fail("cannot auto-detect session format from line 1")
+    if first.get("version") != 3:
+        fail("session JSONL must begin with a type=session, version=3 header")
+    if not observed:
+        fail("session JSONL has no timestamped entries")
+    return entries, observed
+
+
+def new_session_analysis(entries, observed):
+    return {
+        "format": "pi",
+        "entries": entries,
+        "observed": observed,
+        "turns": Counter(),
+        "blocks": Counter({name: 0 for name in OBSERVE_BLOCKS}),
+        "token_totals": {name: 0 for name in TOKEN_FIELDS},
+        "token_present": Counter(),
+        "token_unavailable": Counter({name: 0 for name in TOKEN_FIELDS}),
+        "usage_records": 0,
+        "calls": [],
+        "results": [],
+        "users": [],
+        "compactions": [],
+        "unknown": {},
+    }
+
+
+def entry_type(item):
+    if not isinstance(item, dict):
+        return f"<{type(item).__name__}>"
+    value = item.get("type")
+    return value if isinstance(value, str) else "<missing-type>"
+
+
+def mark_unknown(analysis, line, shape):
+    analysis["unknown"].setdefault(line, shape)
+
+
+def numeric_token(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def add_usage(analysis, record, names):
+    analysis["usage_records"] += 1
+    for field in TOKEN_FIELDS:
+        value = record.get(names[field]) if isinstance(record, dict) else None
+        candidate = analysis["token_totals"][field] + value if numeric_token(value) else None
+        if numeric_token(value) and numeric_token(candidate):
+            analysis["token_totals"][field] = candidate
+            analysis["token_present"][field] += 1
+        else:
+            analysis["token_unavailable"][field] += 1
+
+
+def content_text(content):
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    return "\n".join(
+        block.get("text", "")
+        for block in content
+        if isinstance(block, dict)
+        and block.get("type") == "text"
+        and isinstance(block.get("text"), str)
+    )
+
+
+def canonical_arguments(value):
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (ValueError, RecursionError):
+            return value
+    try:
+        return json.dumps(value, separators=(",", ":"), sort_keys=True)
+    except (TypeError, ValueError, RecursionError):
+        return repr(value)
+
+
+def add_call(analysis, line, payload, name, arguments, call_id):
+    if not isinstance(name, str) or not name:
+        name = "(unknown)"
+        mark_unknown(analysis, line, f"{analysis['format']}:toolCall:missing-name")
+    analysis["blocks"]["toolCall"] += 1
+    analysis["calls"].append({
+        "line": line,
+        "name": name,
+        "arguments": canonical_arguments(arguments),
+        "id": call_id if isinstance(call_id, str) else None,
+        "payload": payload,
+    })
+
+
+def parse_pi(analysis):
+    usage_names = {
+        "input": "input", "output": "output",
+        "cache_read": "cacheRead", "cache_write": "cacheWrite",
+    }
+    for entry in analysis["entries"]:
+        line, item = entry["line"], entry["item"]
+        if not isinstance(item, dict):
+            mark_unknown(analysis, line, f"pi:{entry_type(item)}")
+            continue
+        kind = item.get("type")
+        if not isinstance(kind, str):
+            mark_unknown(analysis, line, "pi:<missing-type>")
+            continue
+        if kind == "compaction":
+            analysis["compactions"].append(line)
+            continue
+        if kind in PI_CONTROL_ENTRIES:
+            continue
+        if kind != "message" or not isinstance(item.get("message"), dict):
+            mark_unknown(analysis, line, f"pi:{entry_type(item)}")
+            continue
+        message = item["message"]
+        role = message.get("role")
+        if not isinstance(role, str) or not role:
+            mark_unknown(analysis, line, "pi:message:missing-role")
+            continue
+        analysis["turns"][role] += 1
+        content = message.get("content")
+        if role == "user":
+            analysis["users"].append((line, content_text(content)))
+        if role == "assistant":
+            add_usage(analysis, message.get("usage"), usage_names)
+        if role == "toolResult":
+            analysis["blocks"]["toolResult"] += 1
+            call_id = message.get("toolCallId")
+            name = message.get("toolName")
+            analysis["results"].append({
+                "line": line,
+                "name": name if isinstance(name, str) else None,
+                "id": call_id if isinstance(call_id, str) else None,
+                "error": message.get("isError") is True,
+            })
+        if isinstance(content, str):
+            analysis["blocks"]["text"] += 1
+        elif isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict):
+                    mark_unknown(analysis, line, "pi:message:block:<non-object>")
+                    continue
+                block_type = block.get("type")
+                if block_type == "text":
+                    analysis["blocks"]["text"] += 1
+                elif block_type == "thinking":
+                    analysis["blocks"]["thinking"] += 1
+                elif block_type == "toolCall":
+                    add_call(
+                        analysis, line, block, block.get("name"),
+                        block.get("arguments"), block.get("id"),
+                    )
+                elif block_type != "image":
+                    mark_unknown(analysis, line, f"pi:message:block:{block_type or '<missing-type>'}")
+        elif content is not None:
+            mark_unknown(analysis, line, f"pi:message:content:<{type(content).__name__}>")
+
+
+def analyze_session(entries, observed):
+    analysis = new_session_analysis(entries, observed)
+    for entry in entries:
+        if entry["time"] is None:
+            mark_unknown(
+                analysis, entry["line"],
+                f"pi:{entry_type(entry['item'])}:missing-timestamp",
+            )
+    parse_pi(analysis)
+    calls_by_id = {call["id"]: call for call in analysis["calls"] if call["id"] is not None}
+    for result in analysis["results"]:
+        call = calls_by_id.get(result["id"])
+        if call is not None:
+            result["name"] = result["name"] or call["name"]
+            result["call_line"] = call["line"]
+        else:
+            result["call_line"] = None
+        result["name"] = result["name"] or "(unknown)"
+    return analysis
+
+
+def json_number(value):
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
+def utc_text(value):
+    return value.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def session_facts(analysis):
+    start, end = min(analysis["observed"]), max(analysis["observed"])
+    duration = round((end - start).total_seconds() * 1000, 3)
+    unknown_rows = [
+        {"entry": line, "shape": shape}
+        for line, shape in sorted(analysis["unknown"].items())
+    ]
+    unknown_shapes = Counter(row["shape"] for row in unknown_rows)
+    call_names = Counter(call["name"] for call in analysis["calls"])
+    errors = [result for result in analysis["results"] if result["error"]]
+    error_names = Counter(result["name"] for result in errors)
+    token_usage = {
+        field: json_number(analysis["token_totals"][field])
+        if analysis["token_present"][field]
+        else None
+        for field in TOKEN_FIELDS
+    }
+    return {
+        "schema": "qq-observe.facts",
+        "schema_version": 1,
+        "session_format": analysis["format"],
+        "entry_index_base": 1,
+        "entries": len(analysis["entries"]),
+        "turns_by_role": dict(sorted(analysis["turns"].items())),
+        "message_blocks": {name: analysis["blocks"][name] for name in OBSERVE_BLOCKS},
+        "token_usage": token_usage,
+        "token_usage_records": analysis["usage_records"],
+        "tokens_unavailable": {
+            field: analysis["token_unavailable"][field] for field in TOKEN_FIELDS
+        },
+        "tool_calls": {"total": len(analysis["calls"]), "by_name": dict(sorted(call_names.items()))},
+        "tool_errors": {"total": len(errors), "by_name": dict(sorted(error_names.items()))},
+        "wall_clock": {
+            "start": utc_text(start),
+            "end": utc_text(end),
+            "duration_ms": json_number(duration),
+        },
+        "unknown_entries": {
+            "total": len(unknown_rows),
+            "by_shape": dict(sorted(unknown_shapes.items())),
+            "entries": unknown_rows,
+        },
+    }
+
+
+def session_signals(analysis):
+    episodes = []
+    calls = sorted(analysis["calls"], key=lambda call: call["line"])
+    errors = sorted(
+        (result for result in analysis["results"] if result["error"]),
+        key=lambda result: result["line"],
+    )
+
+    for result in errors:
+        later = [
+            call for call in calls
+            if call["line"] > result["line"]
+            and call["line"] - result["line"] <= SIGNAL_WINDOW
+            and call["name"] == result["name"]
+        ]
+        if not later:
+            continue
+        retry = later[0]
+        cited = [result.get("call_line"), result["line"], retry["line"]]
+        episodes.append({
+            "kind": "error_retry_loop",
+            "entries": list(dict.fromkeys(line for line in cited if line is not None)),
+        })
+
+    identical = {}
+    for call in calls:
+        identical.setdefault((call["name"], call["arguments"]), []).append(call["line"])
+    for lines in identical.values():
+        if len(lines) >= 3:
+            episodes.append({
+                "kind": "repeated_identical_calls",
+                "entries": list(dict.fromkeys(lines)),
+            })
+
+    for line, text in analysis["users"]:
+        if CORRECTION.search(text):
+            episodes.append({"kind": "operator_correction", "entries": [line]})
+
+    compaction_groups = [[line] for line in sorted(analysis["compactions"])]
+    episodes.extend(
+        {"kind": "compaction", "entries": group}
+        for group in compaction_groups
+    )
+
+    index = 0
+    while index + 2 < len(errors):
+        stop = index
+        while stop < len(errors) and errors[stop]["line"] - errors[index]["line"] <= SIGNAL_WINDOW:
+            stop += 1
+        if stop - index >= 3:
+            episodes.append({
+                "kind": "tool_error_burst",
+                "entries": [result["line"] for result in errors[index:stop]],
+            })
+            index = stop
+        else:
+            index += 1
+
+    unique = {}
+    for episode in episodes:
+        unique[(episode["kind"], tuple(episode["entries"]))] = episode
+    ordered = sorted(
+        unique.values(),
+        key=lambda episode: (episode["entries"][0], episode["kind"], episode["entries"]),
+    )
+    return {
+        "schema": "qq-observe.signals",
+        "schema_version": 1,
+        "session_format": analysis["format"],
+        "entry_index_base": 1,
+        "episodes": ordered,
+    }
+
+
 def emit(options, start, end):
     if end < start: fail("end timestamp precedes start timestamp")
     phase = options.get("phase")
@@ -510,6 +899,18 @@ if command == "summarize":
         print_summary(summary)
     raise SystemExit(0)
 
+if command in {"facts", "signals"}:
+    if len(args) != 1 or args[0].startswith("--"):
+        fail(f"{command} requires exactly one session JSONL path")
+    path = Path(args[0])
+    if not path.is_file():
+        fail(f"session JSONL is not a regular file: {path}")
+    session_entries, observed = session_jsonl(path)
+    analysis = analyze_session(session_entries, observed)
+    result = session_facts(analysis) if command == "facts" else session_signals(analysis)
+    print(json.dumps(result, separators=(",", ":"), sort_keys=True))
+    raise SystemExit(0)
+
 options = parse_options(args, session=command == "read-session")
 if command == "record":
     for required in ("name", "actor", "start", "end"):
@@ -518,28 +919,10 @@ if command == "record":
 else:
     path = Path(options["session"])
     if not path.is_file(): fail(f"session JSONL is not a regular file: {path}")
-    observed = []
-    entries = 0
-    header_seen = False
-    try:
-        with path.open(encoding="utf-8") as source:
-            for number, line in enumerate(source, 1):
-                if not line.strip(): continue
-                item = json.loads(line)
-                if not header_seen:
-                    if not isinstance(item, dict) or item.get("type") != "session" or item.get("version") != 3:
-                        fail("session JSONL must begin with a type=session, version=3 header")
-                    header_seen = True
-                if not isinstance(item, dict) or not isinstance(item.get("timestamp"), str):
-                    fail(f"session entry {number} lacks a timestamp")
-                observed.append(timestamp(item["timestamp"]))
-                entries += 1
-    except (OSError, json.JSONDecodeError) as error:
-        fail(f"cannot read session JSONL: {error}")
-    if not observed: fail("session JSONL has no timestamped entries")
+    session_entries, observed = session_jsonl(path, legacy=True)
     options.setdefault("name", "invoke_workflow")
     options.setdefault("actor", "accountable-session")
     options.setdefault("source", "pi-session-jsonl")
-    options["attributes"].update({"session.file": str(path.resolve()), "session.entries": entries})
+    options["attributes"].update({"session.file": str(path.resolve()), "session.entries": len(session_entries)})
     emit(options, min(observed), max(observed))
 PY

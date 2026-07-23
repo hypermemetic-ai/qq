@@ -1,0 +1,13 @@
+{"type":"session","version":3,"timestamp":"2026-07-01T00:00:00Z","id":"pi-fixture"}
+{"type":"model_change","timestamp":"2026-07-01T00:00:01Z","provider":"fixture","modelId":"fixture-model"}
+{"type":"message","timestamp":"2026-07-01T00:00:02Z","message":{"role":"user","content":[{"type":"text","text":"Run the build."}]}}
+{"type":"message","timestamp":"2026-07-01T00:00:03Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"I will run it."},{"type":"toolCall","id":"pi-call-1","name":"shell","arguments":{"command":"make"}}],"usage":{"input":10,"output":2,"cacheRead":3,"cacheWrite":1}}}
+{"type":"message","timestamp":"2026-07-01T00:00:04Z","message":{"role":"toolResult","toolCallId":"pi-call-1","toolName":"shell","content":[{"type":"text","text":"failed one"}],"isError":true}}
+{"type":"message","timestamp":"2026-07-01T00:00:05Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"pi-call-2","name":"shell","arguments":{"command":"make"}}],"usage":{"input":20,"output":3,"cacheRead":4,"cacheWrite":0}}}
+{"type":"message","timestamp":"2026-07-01T00:00:06Z","message":{"role":"toolResult","toolCallId":"pi-call-2","toolName":"shell","content":[{"type":"text","text":"failed two"}],"isError":true}}
+{"type":"message","timestamp":"2026-07-01T00:00:07Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"pi-call-3","name":"shell","arguments":{"command":"make"}}]}}
+{"type":"message","timestamp":"2026-07-01T00:00:08Z","message":{"role":"toolResult","toolCallId":"pi-call-3","toolName":"shell","content":[{"type":"text","text":"failed three"}],"isError":true}}
+{"type":"message","timestamp":"2026-07-01T00:00:09Z","message":{"role":"user","content":[{"type":"text","text":"Actually, run the tests instead."}]}}
+{"type":"compaction","timestamp":"2026-07-01T00:00:10Z","summary":"fixture summary"}
+{"type":"message","timestamp":"2026-07-01T00:00:11Z","message":{"role":"assistant","content":[{"type":"text","text":"Understood."}],"usage":{"input":5,"output":7}}}
+{"type":"future_pi_entry","timestamp":"2026-07-01T00:00:12Z","payload":{"note":"must be surfaced"}}

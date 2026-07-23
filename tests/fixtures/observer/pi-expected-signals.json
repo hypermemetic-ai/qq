@@ -1,0 +1,1 @@
+{"entry_index_base":1,"episodes":[{"entries":[4,5,6],"kind":"error_retry_loop"},{"entries":[4,6,8],"kind":"repeated_identical_calls"},{"entries":[5,7,9],"kind":"tool_error_burst"},{"entries":[6,7,8],"kind":"error_retry_loop"},{"entries":[10],"kind":"operator_correction"},{"entries":[11],"kind":"compaction"}],"schema":"qq-observe.signals","schema_version":1,"session_format":"pi"}
