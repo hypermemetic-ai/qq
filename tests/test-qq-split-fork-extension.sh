@@ -141,7 +141,7 @@ async function testHerdrLaunch() {
       "right",
       "--cwd",
       h.cwd,
-      "--no-focus",
+      "--focus",
     ],
   });
   assert.equal(h.execCalls[1].executable, "herdr");

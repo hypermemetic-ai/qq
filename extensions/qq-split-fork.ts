@@ -142,7 +142,7 @@ export default function register(pi, deps = {}) {
             "right",
             "--cwd",
             ctx.cwd,
-            "--no-focus",
+            "--focus",
           ]);
         } catch (error) {
           notifyManualLaunch(
