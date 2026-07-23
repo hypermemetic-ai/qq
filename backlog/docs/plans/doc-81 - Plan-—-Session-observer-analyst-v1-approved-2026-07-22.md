@@ -3,7 +3,7 @@ id: doc-81
 title: Plan — Session-observer analyst v1 (approved 2026-07-22)
 type: other
 created_date: '2026-07-22 23:25'
-updated_date: '2026-07-23 01:24'
+updated_date: '2026-07-23 04:23'
 tags:
   - plan
 ---
@@ -82,6 +82,38 @@ Operator directive (asked-and-answered exchange, 2026-07-22): qq runs on pi;
 codex is removed from qq. The pre-pass and assembler are pi-only; the
 pi+codex parsing line and the codex risk item below are superseded, and the
 three codex mentions in this document were amended inline the same day.
+
+## Amendment 2026-07-23 — architect-tab consumption model
+
+Operator directive (second exchange, 2026-07-23): the consumption half of this plan is
+replaced; production stands with two additions.
+
+**Production (stands, plus):** the post-land headless delegation and the
+analysis/`analysis_failed` coverage guarantee are unchanged. Added: no veto window and
+no UAT exception on the trigger (UAT outcomes become new Tasks), and the analyst run's
+own full session trace is stored beside each analysis document.
+
+**Consumption (replaced):** the operator does not read analysis documents by default;
+documents are artifacts and agent-facing sources of truth. Consumption happens in ONE
+persistent architect tab in the qq Herdr workspace (qq-space only — methodology
+machinery, not per-Repository). A qq-owned pi extension provides a command that opens
+a selector over stored analysis rounds (undiscussed first); the operator picks one and
+discusses it with the architect — a stateless skill/manifest knowing the XDG store
+layout, the ledger, and its role; sessions in the tab are replaceable. Discussion is
+grilling-shaped (unpack, accept/reject/reshape); accepted findings become Tasks through
+normal flow (T-126 routing, chore branch when no Change is open). A round leaves the
+list only on an explicit operator discussed-mark; marks and outcomes are recorded per
+round and feed the digest's acceptance learning — this supplies the disposition-capture
+mechanism the trigger-wiring section left unspecified. Calibration (first-N citation
+verification) happens inside architect discussions.
+
+**Change-sequence impact:** new final Change ⑤ (architect extension + architect
+skill/manifest + tab wiring in the qq workspace). Change ③ gains analyst-trace storage;
+Change ④ gains discussed-state tracking and mark/outcome recording. Folded in from the
+same day's earlier operator note: taxonomy v1 gains a design-question/system-design
+episode class, the pre-pass gains reasoning-volume/contortion signals, and the remedy
+contract opens to harness-level proposals on all levels — still cited, ranked, and
+operator-disposed.
 
 ## Change sequence
 
