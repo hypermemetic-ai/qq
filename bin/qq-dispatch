@@ -91,6 +91,7 @@ case "$role" in
   implementer) observation_phase=implementation ;;
   reviewer) observation_phase=review ;;
   researcher) observation_phase=research ;;
+  observer) observation_phase=analysis ;;
   "") fail 66 "PI_SUBAGENT_CHILD_AGENT is required" ;;
   *) fail 66 "unsupported child role '$role'" ;;
 esac

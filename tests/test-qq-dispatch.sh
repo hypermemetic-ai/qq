@@ -167,8 +167,12 @@ git_worktree_dir="$(realpath -e "$git_worktree_dir")"
 declare -A role_policy_snapshots=()
 declare -A role_run_dirs=()
 
-for role in reviewer researcher implementer; do
+for role in reviewer researcher implementer observer; do
   case "$role" in
+    observer)
+      expected_policy=qq-observer-read-only-v1
+      expected_scope=read-only
+      ;;
     reviewer)
       expected_policy=qq-reviewer-read-only-v1
       expected_scope=read-only

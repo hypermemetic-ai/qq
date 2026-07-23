@@ -13,6 +13,10 @@
     "implementer": {
       "access": "workspace-write",
       "policyIdentity": "qq-implementer-workspace-write-v1"
+    },
+    "observer": {
+      "access": "read-only",
+      "policyIdentity": "qq-observer-read-only-v1"
     }
   }
 }
