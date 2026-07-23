@@ -60,8 +60,23 @@ const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 for (const filename of extensionFiles) {
   if (excluded.has(filename)) continue;
-  const importSpecifier = new RegExp(`from\\s+["']\\./${escapeRegExp(filename)}["']`);
+  const escapedFilename = escapeRegExp(filename);
+  const importSpecifier = new RegExp(`from\\s+["']\\./${escapedFilename}["']`);
   assert.match(indexSource, importSpecifier, `${filename} is missing from extensions/index.ts`);
+  const defaultImport = new RegExp(
+    `import\\s+([A-Za-z_$][\\w$]*)\\s+from\\s+["']\\./${escapedFilename}["']`,
+  );
+  const importMatch = indexSource.match(defaultImport);
+  assert.ok(
+    importMatch,
+    `${filename} is imported in extensions/index.ts but its default-import binding cannot be identified`,
+  );
+  const binding = importMatch[1];
+  assert.match(
+    indexSource,
+    new RegExp(`\\b${binding}\\s*\\(`),
+    `${filename} is imported in extensions/index.ts but its register is never invoked`,
+  );
 }
 assert.doesNotMatch(
   indexSource,
