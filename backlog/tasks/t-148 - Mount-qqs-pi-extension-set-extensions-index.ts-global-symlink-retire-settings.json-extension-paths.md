@@ -3,10 +3,10 @@ id: T-148
 title: >-
   Mount qq's pi extension set: extensions/index.ts + global symlink, retire
   settings.json extension paths
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-23 15:31'
-updated_date: '2026-07-23 16:54'
+updated_date: '2026-07-23 17:39'
 labels: []
 dependencies: []
 ordinal: 68000
@@ -26,10 +26,10 @@ Decision ledger: pi-is-qq-scope ruling and the herdr tenancy boundary — operat
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 extensions/index.ts imports and registers all five qq extensions; a repo test asserts every extensions/*.ts sibling registers (mount completeness), native suite green
-- [ ] #2 ~/.pi/agent/extensions/qq symlink created; verified that pi auto-discovers and loads the set through the symlink exactly once (no double registration with settings paths removed)
-- [ ] #3 settings.json extension paths removed (all other keys preserved, backup kept); README install section now documents the symlink instead of the absolute paths
-- [ ] #4 Doctrine paragraph (pi is qq scope; herdr tenancy boundary; documented pi activation steps are agent-performed) landed in AGENTS.md or CONCEPTS.md with the prose ratchet green (net-zero or explicit approved raise recorded)
+- [x] #1 extensions/index.ts imports and registers all five qq extensions; a repo test asserts every extensions/*.ts sibling registers (mount completeness), native suite green
+- [x] #2 ~/.pi/agent/extensions/qq symlink created; verified that pi auto-discovers and loads the set through the symlink exactly once (no double registration with settings paths removed)
+- [x] #3 settings.json extension paths removed (all other keys preserved, backup kept); README install section now documents the symlink instead of the absolute paths
+- [x] #4 Doctrine paragraph (pi is qq scope; herdr tenancy boundary; documented pi activation steps are agent-performed) landed in AGENTS.md or CONCEPTS.md with the prose ratchet green (net-zero or explicit approved raise recorded)
 <!-- AC:END -->
 
 <!-- SECTION:DESCRIPTION:END -->
