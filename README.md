@@ -162,6 +162,7 @@ absolute path, not a `$HOME` expression.
 ```bash
 readlink -f "$HOME/projects/qq/cockpit/pi/qq-backlog-guard.ts"
 readlink -f "$HOME/projects/qq/extensions/qq-pr-watch.ts"
+readlink -f "$HOME/projects/qq/extensions/qq-operator-stage.ts"
 ```
 
 ```json
@@ -171,7 +172,8 @@ readlink -f "$HOME/projects/qq/extensions/qq-pr-watch.ts"
   "defaultThinkingLevel": "max",
   "extensions": [
     "/home/USER/projects/qq/cockpit/pi/qq-backlog-guard.ts",
-    "/home/USER/projects/qq/extensions/qq-pr-watch.ts"
+    "/home/USER/projects/qq/extensions/qq-pr-watch.ts",
+    "/home/USER/projects/qq/extensions/qq-operator-stage.ts"
   ]
 }
 ```
@@ -187,6 +189,10 @@ not parse shell commands.
 The pull-request extension provides the session-scoped `qq_pr_watch` tool. It
 polls one exact pull request and sends one follow-up when it reaches `MERGED`
 or `CLOSED`, or when inspection fails.
+
+The operator-stage extension provides the `operator_stage` tool. It stages an
+operator-only command, without executing it, in a focused right-hand herdr pane
+with low- or high-danger confirmation and pane-read-back outcome validation.
 
 The accountable Pi session stays in the Repository project home and owns
 alignment, Task and Change judgment, work orders, verdicts, UAT, and handoff.

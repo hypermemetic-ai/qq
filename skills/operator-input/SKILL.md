@@ -21,19 +21,20 @@ where dependencies allow. Do not dribble avoidable interruptions one at a time.
 
 ## Minimize each step
 
-Reduce every surviving step to the smallest feasible operator action. Prefer
-one click, one paste, or one yes/no when possible, but do not treat that as a
-rigid rule. Remove every part the agent can absorb: link to the exact page,
-prepare paste-ready commands, pre-fill files or diffs around the missing value,
-and state the value's expected shape. These are examples, not a checklist.
+Reduce every surviving step to the smallest operator action. Prefer
+one click, one paste, or one yes/no when possible. Remove every part the agent
+can absorb: link to the exact page, pre-fill files or diffs around the missing
+value, and state the value's expected shape. These are examples, not a
+checklist. Never dictate copy-paste commands: stage them through
+`operator_stage` and read the pane back to validate the outcome.
 
-Validate the operator's input immediately when it arrives, then resume without
-further operator involvement.
+Validate the operator's input immediately, then resume without further operator
+involvement.
 
 ## Bring the surface to the operator
 
-Open or pre-stage the destination yourself when possible instead of sending the
-operator elsewhere with instructions. For secrets such as API keys, tokens, or
+Open or pre-stage the destination yourself instead of sending the operator
+elsewhere with instructions. For secrets such as API keys, tokens, or
 passwords, prepare the destination and mark the paste point so the secret lands
 where it belongs without transiting the transcript. If the operator pastes a
 secret into chat anyway, place it without repeating it and plainly flag the
