@@ -26,16 +26,11 @@ assert_exact_output() {
   fi
 }
 
-for format in pi codex; do
-  case "$format" in
-    pi) fixture="$FIXTURES/pi-session.jsonl" ;;
-    codex) fixture="$FIXTURES/codex-rollout.jsonl" ;;
-  esac
-  assert_exact_output facts "$fixture" "$FIXTURES/$format-expected-facts.json" \
-    "$tmp/$format-facts.json"
-  assert_exact_output signals "$fixture" "$FIXTURES/$format-expected-signals.json" \
-    "$tmp/$format-signals.json"
-done
+fixture="$FIXTURES/pi-session.jsonl"
+assert_exact_output facts "$fixture" "$FIXTURES/pi-expected-facts.json" \
+  "$tmp/pi-facts.json"
+assert_exact_output signals "$fixture" "$FIXTURES/pi-expected-signals.json" \
+  "$tmp/pi-signals.json"
 
 jq -e '
   .unknown_entries.total == 1
@@ -43,12 +38,24 @@ jq -e '
   and .unknown_entries.entries == [{entry:13, shape:"pi:future_pi_entry"}]
 ' "$tmp/pi-facts.json" >/dev/null \
   || fail 'Pi unknown entry was not counted and cited'
-jq -e '
-  .unknown_entries.total == 1
-  and .unknown_entries.by_shape == {"codex:event_msg:future_event":1}
-  and .unknown_entries.entries == [{entry:20, shape:"codex:event_msg:future_event"}]
-' "$tmp/codex-facts.json" >/dev/null \
-  || fail 'Codex unknown entry was not counted and cited'
+codex_meta="$tmp/codex-session-meta.jsonl"
+printf '%s\n' '{"type":"session_meta","payload":{"timestamp":"2026-07-03T00:00:00Z"}}' \
+  >"$codex_meta"
+set +e
+(
+  cd "$ROOT"
+  "$OBSERVE" facts "$codex_meta"
+) >"$tmp/codex-meta.stdout" 2>"$tmp/codex-meta.stderr"
+status=$?
+set -e
+assert_equal 64 "$status" 'facts accepted Codex session metadata'
+[ ! -s "$tmp/codex-meta.stdout" ] || fail 'Codex refusal emitted stdout'
+printf '%s\n' 'qq-observe: cannot auto-detect session format from line 1' \
+  >"$tmp/codex-meta-expected.stderr"
+if ! cmp -s "$tmp/codex-meta-expected.stderr" "$tmp/codex-meta.stderr"; then
+  diff -u "$tmp/codex-meta-expected.stderr" "$tmp/codex-meta.stderr" >&2 || true
+  fail 'Codex session metadata did not hit the exact auto-detection refusal'
+fi
 
 no_usage="$tmp/no-usage.jsonl"
 cat >"$no_usage" <<'JSONL'

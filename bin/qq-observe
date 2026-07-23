@@ -28,8 +28,8 @@ from <runtime-root>/async-subagent-runs/<run.id>/status.json at read time:
 complete becomes ok; failed, stopped, or unresolved outcomes remain error.
 --json includes each span's raw and resolved status. runtime-root is
 QQ_DISPATCH_RUNTIME_ROOT or ${TMPDIR:-/tmp}/pi-subagents-uid-<uid>.
-facts and signals auto-detect Pi v3 and Codex rollout JSONL. Signal entries
-and unknown-entry citations are 1-based physical JSONL line numbers.
+facts and signals accept Pi v3 session JSONL. Signal entries and
+unknown-entry citations are 1-based physical JSONL line numbers.
 EOF
   exit 64
 }
@@ -497,21 +497,6 @@ PI_CONTROL_ENTRIES = {
     "session", "model_change", "thinking_level_change", "custom_message",
     "custom", "session_info",
 }
-CODEX_OUTER_ENTRIES = {
-    "session_meta", "turn_context", "world_state",
-    "inter_agent_communication_metadata",
-}
-CODEX_EVENT_ENTRIES = {
-    "agent_message", "agent_reasoning", "context_compacted", "mcp_tool_call_end",
-    "patch_apply_end", "sub_agent_activity", "task_complete", "task_started",
-    "thread_rolled_back", "thread_settings_applied", "token_count", "turn_aborted",
-    "user_message", "web_search_end",
-}
-CODEX_RESPONSE_ENTRIES = {
-    "agent_message", "custom_tool_call", "custom_tool_call_output", "function_call",
-    "function_call_output", "message", "reasoning", "tool_search_call",
-    "tool_search_output", "web_search_call",
-}
 
 
 def session_jsonl(path, legacy=False):
@@ -561,39 +546,22 @@ def session_jsonl(path, legacy=False):
     if legacy:
         if not observed:
             fail("session JSONL has no timestamped entries")
-        return "pi", entries, observed
+        return entries, observed
     if not entries:
         fail("session JSONL has no entries")
     first = entries[0]["item"]
-    if isinstance(first, dict) and first.get("type") == "session":
-        if first.get("version") != 3:
-            fail("session JSONL must begin with a type=session, version=3 header")
-        session_format = "pi"
-    elif (
-        isinstance(first, dict)
-        and first.get("type") == "session_meta"
-        and isinstance(first.get("payload"), dict)
-    ):
-        session_format = "codex"
-        metadata_time = first["payload"].get("timestamp")
-        if isinstance(metadata_time, str):
-            try:
-                metadata_time = dt.datetime.fromisoformat(metadata_time.replace("Z", "+00:00"))
-            except ValueError:
-                fail(f"invalid session metadata timestamp at line 1: {metadata_time}")
-            if metadata_time.tzinfo is None:
-                fail(f"session metadata timestamp requires a timezone at line 1: {metadata_time}")
-            observed.append(metadata_time)
-    else:
+    if not isinstance(first, dict) or first.get("type") != "session":
         fail("cannot auto-detect session format from line 1")
+    if first.get("version") != 3:
+        fail("session JSONL must begin with a type=session, version=3 header")
     if not observed:
         fail("session JSONL has no timestamped entries")
-    return session_format, entries, observed
+    return entries, observed
 
 
-def new_session_analysis(session_format, entries, observed):
+def new_session_analysis(entries, observed):
     return {
-        "format": session_format,
+        "format": "pi",
         "entries": entries,
         "observed": observed,
         "turns": Counter(),
@@ -642,7 +610,7 @@ def add_usage(analysis, record, names):
             analysis["token_unavailable"][field] += 1
 
 
-def content_text(content, accepted=("text",)):
+def content_text(content):
     if isinstance(content, str):
         return content
     if not isinstance(content, list):
@@ -651,7 +619,7 @@ def content_text(content, accepted=("text",)):
         block.get("text", "")
         for block in content
         if isinstance(block, dict)
-        and block.get("type") in accepted
+        and block.get("type") == "text"
         and isinstance(block.get("text"), str)
     )
 
@@ -680,42 +648,6 @@ def add_call(analysis, line, payload, name, arguments, call_id):
         "id": call_id if isinstance(call_id, str) else None,
         "payload": payload,
     })
-
-
-def output_text(value):
-    if isinstance(value, str):
-        return value
-    if isinstance(value, list):
-        return "\n".join(output_text(item) for item in value)
-    if isinstance(value, dict):
-        pieces = []
-        for key, item in value.items():
-            if key in {"text", "output", "stderr", "stdout", "message"}:
-                pieces.append(output_text(item))
-        return "\n".join(pieces)
-    return ""
-
-
-def codex_tool_error(payload):
-    if payload.get("is_error") is True or payload.get("isError") is True:
-        return True
-    if payload.get("success") is False:
-        return True
-    status = payload.get("status")
-    if isinstance(status, str) and status.lower() in {"error", "failed", "failure"}:
-        return True
-    output = payload.get("output")
-    if isinstance(output, dict):
-        if output.get("is_error") is True or output.get("success") is False:
-            return True
-        if "Err" in output and output["Err"] is not None:
-            return True
-    match = re.search(
-        r"(?:process|command)?\s*(?:exited with code|exit code[: ]+)\s*(-?\d+)",
-        output_text(output),
-        re.IGNORECASE,
-    )
-    return bool(match and int(match.group(1)) != 0)
 
 
 def parse_pi(analysis):
@@ -784,112 +716,15 @@ def parse_pi(analysis):
             mark_unknown(analysis, line, f"pi:message:content:<{type(content).__name__}>")
 
 
-def parse_codex_message(analysis, line, payload):
-    role = payload.get("role")
-    if not isinstance(role, str) or not role:
-        mark_unknown(analysis, line, "codex:response_item:message:missing-role")
-        return
-    analysis["turns"][role] += 1
-    content = payload.get("content")
-    if role == "user":
-        analysis["users"].append((line, content_text(content, ("input_text", "output_text"))))
-    if isinstance(content, str):
-        analysis["blocks"]["text"] += 1
-    elif isinstance(content, list):
-        for block in content:
-            if not isinstance(block, dict):
-                mark_unknown(analysis, line, "codex:message:block:<non-object>")
-                continue
-            block_type = block.get("type")
-            if isinstance(block_type, str) and block_type in {"input_text", "output_text"}:
-                analysis["blocks"]["text"] += 1
-            else:
-                mark_unknown(analysis, line, f"codex:message:block:{block_type or '<missing-type>'}")
-    elif content is not None:
-        mark_unknown(analysis, line, f"codex:message:content:<{type(content).__name__}>")
-
-
-def parse_codex(analysis):
-    usage_names = {
-        "input": "input_tokens", "output": "output_tokens",
-        "cache_read": "cached_input_tokens", "cache_write": "cache_write_input_tokens",
-    }
-    for entry in analysis["entries"]:
-        line, item = entry["line"], entry["item"]
-        if not isinstance(item, dict):
-            mark_unknown(analysis, line, f"codex:{entry_type(item)}")
-            continue
-        outer = item.get("type")
-        payload = item.get("payload")
-        if not isinstance(outer, str):
-            mark_unknown(analysis, line, "codex:<missing-type>")
-            continue
-        if outer == "compacted" and isinstance(payload, dict):
-            analysis["compactions"].append(line)
-            continue
-        if outer in CODEX_OUTER_ENTRIES and isinstance(payload, dict):
-            continue
-        if outer == "event_msg" and isinstance(payload, dict):
-            kind = payload.get("type")
-            if not isinstance(kind, str) or kind not in CODEX_EVENT_ENTRIES:
-                mark_unknown(analysis, line, f"codex:event_msg:{kind or '<missing-type>'}")
-            elif kind == "token_count":
-                info = payload.get("info")
-                record = info.get("last_token_usage") if isinstance(info, dict) else None
-                add_usage(analysis, record, usage_names)
-            elif kind == "context_compacted":
-                analysis["compactions"].append(line)
-            elif kind == "web_search_end":
-                # Codex persists web search completion as an event rather than a
-                # response_item output; normalize it to the same result block.
-                analysis["blocks"]["toolResult"] += 1
-                analysis["results"].append({
-                    "line": line, "name": "web_search", "id": None,
-                    "error": False,
-                })
-            continue
-        if outer != "response_item" or not isinstance(payload, dict):
-            mark_unknown(analysis, line, f"codex:{entry_type(item)}")
-            continue
-        kind = payload.get("type")
-        if not isinstance(kind, str) or kind not in CODEX_RESPONSE_ENTRIES:
-            mark_unknown(analysis, line, f"codex:response_item:{kind or '<missing-type>'}")
-        elif kind == "message":
-            parse_codex_message(analysis, line, payload)
-        elif kind == "reasoning":
-            analysis["blocks"]["thinking"] += 1
-        elif kind in {"function_call", "custom_tool_call", "web_search_call", "tool_search_call"}:
-            if kind == "web_search_call":
-                name, arguments = "web_search", payload.get("action")
-            elif kind == "tool_search_call":
-                name, arguments = "tool_search", payload.get("arguments")
-            else:
-                name = payload.get("name")
-                arguments = payload.get("arguments") if kind == "function_call" else payload.get("input")
-            add_call(analysis, line, payload, name, arguments, payload.get("call_id"))
-        elif kind in {"function_call_output", "custom_tool_call_output", "tool_search_output"}:
-            analysis["blocks"]["toolResult"] += 1
-            call_id = payload.get("call_id")
-            analysis["results"].append({
-                "line": line,
-                "name": None,
-                "id": call_id if isinstance(call_id, str) else None,
-                "error": codex_tool_error(payload),
-            })
-
-
-def analyze_session(session_format, entries, observed):
-    analysis = new_session_analysis(session_format, entries, observed)
+def analyze_session(entries, observed):
+    analysis = new_session_analysis(entries, observed)
     for entry in entries:
         if entry["time"] is None:
             mark_unknown(
                 analysis, entry["line"],
-                f"{session_format}:{entry_type(entry['item'])}:missing-timestamp",
+                f"pi:{entry_type(entry['item'])}:missing-timestamp",
             )
-    if session_format == "pi":
-        parse_pi(analysis)
-    else:
-        parse_codex(analysis)
+    parse_pi(analysis)
     calls_by_id = {call["id"]: call for call in analysis["calls"] if call["id"] is not None}
     for result in analysis["results"]:
         call = calls_by_id.get(result["id"])
@@ -995,16 +830,7 @@ def session_signals(analysis):
         if CORRECTION.search(text):
             episodes.append({"kind": "operator_correction", "entries": [line]})
 
-    compaction_groups = []
-    for line in sorted(analysis["compactions"]):
-        if (
-            analysis["format"] == "codex"
-            and compaction_groups
-            and line - compaction_groups[-1][-1] <= 3
-        ):
-            compaction_groups[-1].append(line)
-        else:
-            compaction_groups.append([line])
+    compaction_groups = [[line] for line in sorted(analysis["compactions"])]
     episodes.extend(
         {"kind": "compaction", "entries": group}
         for group in compaction_groups
@@ -1079,8 +905,8 @@ if command in {"facts", "signals"}:
     path = Path(args[0])
     if not path.is_file():
         fail(f"session JSONL is not a regular file: {path}")
-    session_format, session_entries, observed = session_jsonl(path)
-    analysis = analyze_session(session_format, session_entries, observed)
+    session_entries, observed = session_jsonl(path)
+    analysis = analyze_session(session_entries, observed)
     result = session_facts(analysis) if command == "facts" else session_signals(analysis)
     print(json.dumps(result, separators=(",", ":"), sort_keys=True))
     raise SystemExit(0)
@@ -1093,7 +919,7 @@ if command == "record":
 else:
     path = Path(options["session"])
     if not path.is_file(): fail(f"session JSONL is not a regular file: {path}")
-    _, session_entries, observed = session_jsonl(path, legacy=True)
+    session_entries, observed = session_jsonl(path, legacy=True)
     options.setdefault("name", "invoke_workflow")
     options.setdefault("actor", "accountable-session")
     options.setdefault("source", "pi-session-jsonl")
