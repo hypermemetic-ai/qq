@@ -434,7 +434,7 @@ rebuild_unmarked="$(make_run pr-24 24 guided 2026-10-24T10:00:00Z "$first_episod
 
 "$OBSERVE" ledger-update --run "$rebuild_20" >"$tmp/rebuild-update-20.json"
 "$OBSERVE" ledger-update --run "$rebuild_21" >"$tmp/rebuild-update-21.json"
-jq -cS 'del(.ts)' "$events" >"$tmp/pre-loss-events.jsonl"
+jq -cS '.' "$events" >"$tmp/pre-loss-events.jsonl"
 
 "$OBSERVE" ledger-rebuild >"$tmp/rebuild-intact.json"
 jq -e '
@@ -448,7 +448,7 @@ jq -e '
   .runs_seen == 5 and .runs_replayed == 2
   and .events_appended == 5 and .events_skipped == 0
 ' "$tmp/rebuilt.json" >/dev/null || fail 'lost-ledger rebuild summary is wrong'
-jq -cS 'del(.ts)' "$events" >"$tmp/rebuilt-events.jsonl"
+jq -cS '.' "$events" >"$tmp/rebuilt-events.jsonl"
 cmp "$tmp/pre-loss-events.jsonl" "$tmp/rebuilt-events.jsonl" >/dev/null \
   || fail 'rebuilt ledger event content or order differs from the pre-loss sequence'
 

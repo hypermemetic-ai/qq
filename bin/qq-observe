@@ -1608,7 +1608,8 @@ def ledger_update_run(run_dir, skipped_promotions=None):
         fail(f"finalized analysis is missing: {analysis_path}", 65)
     raw = read_regular(analysis_path, "finalized analysis")
     analysis = minimal_analysis(json_document(raw, "finalized analysis"))
-    pr, _, _ = package_identity(run_dir)
+    pr, _, timestamp = package_identity(run_dir, require_timestamp=True)
+    timestamp = time_value(timestamp).isoformat(timespec="milliseconds").replace("+00:00", "Z")
     marker_data = (
         json.dumps({
             "schema": "qq-observer.ledger-applied", "schema_version": 1,
@@ -1647,7 +1648,7 @@ def ledger_update_run(run_dir, skipped_promotions=None):
             no_signal = episode.get("no_signal", False)
             cost = episode["cost"]
             event = ledger_event(
-                "finding_seen", pr=pr, recurrence_key=key, kind=kind,
+                "finding_seen", ts=timestamp, pr=pr, recurrence_key=key, kind=kind,
                 title=episode["title"], rank=rank, confidence=confidence,
                 no_signal=no_signal,
                 cost={field: cost[field] for field in ("turns", "tokens", "duration_ms")},
@@ -1669,7 +1670,7 @@ def ledger_update_run(run_dir, skipped_promotions=None):
                 continue
             if key not in already_promoted:
                 promotions.append(ledger_event(
-                    "promoted", recurrence_key=key,
+                    "promoted", ts=timestamp, recurrence_key=key,
                     kind=kinds_by_key[key], prs=prs,
                 ))
             elif skipped_promotions is not None and key not in skipped_promotions:
