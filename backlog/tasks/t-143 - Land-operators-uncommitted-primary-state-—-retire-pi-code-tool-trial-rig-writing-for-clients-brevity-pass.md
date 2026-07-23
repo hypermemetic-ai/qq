@@ -3,10 +3,10 @@ id: T-143
 title: >-
   Land operator's uncommitted primary state — retire pi-code-tool trial rig,
   writing-for-clients brevity pass
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-22 23:38'
-updated_date: '2026-07-22 23:42'
+updated_date: '2026-07-23 02:31'
 labels: []
 dependencies: []
 type: chore
@@ -26,3 +26,9 @@ Decision ledger: teardown performed by the operator uncommitted in primary main 
 - [ ] #1 Working-tree state recreated byte-identical to primary main's uncommitted state (cmp-verified on README, SKILL.md, archived task; deletions absent)
 - [ ] #2 Test suite green with the trial test removed
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Delivered: operator's uncommitted primary state rescued byte-identical into managed Change (PR #206, merged 2026-07-22); pi code-tool trial rig retired; writing-for-clients brevity pass landed with approved ratchet raise 7468 to 7606.
+<!-- SECTION:FINAL_SUMMARY:END -->
