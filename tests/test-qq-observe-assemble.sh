@@ -217,6 +217,19 @@ jq -e '
   and (.warnings | length) >= 1
 ' "$run_42/package.json" >/dev/null || fail 'accountable-only content search did not preserve evidence'
 
+# Run-scoped commands may act only beneath the observer runs store.
+outside_finalize="$tmp/outside-finalize"
+mkdir "$outside_finalize"
+set +e
+"$OBSERVE" finalize --run "$outside_finalize" --failed 'outside store' \
+  >"$tmp/outside-finalize.stdout" 2>"$tmp/outside-finalize.stderr"
+status=$?
+set -e
+assert_equal 65 "$status" 'finalize accepted a run outside the observer store'
+assert_file_contains "$tmp/outside-finalize.stderr" 'outside observer runs root'
+[ ! -e "$outside_finalize/analysis_failed.json" ] \
+  || fail 'outside finalize wrote analysis_failed.json'
+
 # A finalized successful analysis must pass the full package validator before
 # rendering. Its run session set and episode costs come from the assembled package.
 session_path="$run_41/sessions/delegate-strong-run-primary.jsonl"
@@ -269,7 +282,16 @@ assert_file_contains "$tmp/missing-trace.stderr" '--analyst-trace is required'
   --analyst-trace "$parent_strong" >"$tmp/finalized-41.json"
 "$OBSERVE" render-doc --run "$run_41" >"$tmp/rendered-41.json"
 jq -e '.status == "rendered"' "$tmp/rendered-41.json" >/dev/null \
-  || fail 'render-doc did not report its deterministic no-op render'
+  || fail 'render-doc did not accept a run inside the observer store'
+outside_render="$tmp/outside-render"
+cp -a "$run_41" "$outside_render"
+set +e
+"$OBSERVE" render-doc --run "$outside_render" \
+  >"$tmp/outside-render.stdout" 2>"$tmp/outside-render.stderr"
+status=$?
+set -e
+assert_equal 65 "$status" 'render-doc accepted a run outside the observer store'
+assert_file_contains "$tmp/outside-render.stderr" 'outside observer runs root'
 assert_file_contains "$run_41/analysis.md" '## Session facts'
 assert_file_contains "$run_41/analysis.md" '### 1. Fixture episode'
 assert_file_contains "$run_41/analysis.md" '## Dropped signals'

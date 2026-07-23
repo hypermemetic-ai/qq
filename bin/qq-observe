@@ -1359,7 +1359,15 @@ def render_bytes(run_dir, analysis=None):
 
 
 def run_directory(value):
-    return canonical_directory(value, "run directory")
+    run_dir = canonical_directory(value, "run directory")
+    runs_root = observer_runs_root(create=False)
+    try:
+        runs_root = runs_root.resolve(strict=True)
+    except (OSError, RuntimeError, ValueError) as error:
+        fail(f"cannot resolve observer runs root: {error}", 65)
+    if not within(run_dir, runs_root):
+        fail(f"run directory is outside observer runs root: {run_dir}", 65)
+    return run_dir
 
 
 def validated_package_analysis(run_dir, analysis_path):
