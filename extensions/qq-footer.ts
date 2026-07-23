@@ -339,34 +339,40 @@ function rightText(pi, ctx, footerData) {
   return text;
 }
 
-function rightAlignedLine(left, right, width) {
+function rightAlignedLine(left, right, width, measure, cut) {
   if (width <= 0) return "";
-  if (right === "") return truncate(left, width);
+  if (right === "") return cut(left, width);
   if (left === "") {
-    const visibleRight = truncate(right, width, "");
-    return " ".repeat(Math.max(0, width - textWidth(visibleRight))) + visibleRight;
+    const visibleRight = cut(right, width, "");
+    return " ".repeat(Math.max(0, width - measure(visibleRight))) + visibleRight;
   }
 
   const gap = 2;
-  if (textWidth(right) >= width) return truncate(right, width, "");
-  const leftLimit = width - textWidth(right) - gap;
-  const visibleLeft = truncate(left, Math.max(0, leftLimit));
+  if (measure(right) >= width) return cut(right, width, "");
+  const leftLimit = width - measure(right) - gap;
+  const visibleLeft = cut(left, Math.max(0, leftLimit));
   if (visibleLeft === "") {
-    return " ".repeat(width - textWidth(right)) + right;
+    return " ".repeat(width - measure(right)) + right;
   }
   return (
     visibleLeft +
-    " ".repeat(width - textWidth(visibleLeft) - textWidth(right)) +
+    " ".repeat(width - measure(visibleLeft) - measure(right)) +
     right
   );
 }
 
-function createFooter(pi, ctx, tui, theme, footerData, quotaCache) {
+function createFooter(pi, ctx, tui, theme, footerData, quotaCache, widthKit) {
   const repaint = () => tui.requestRender();
   const unsubscribe = footerData.onBranchChange?.(repaint);
+  const measure = (value) => widthKit.visibleWidth(stripAnsi(value));
+  const cut = (value, width, ellipsis = "...") =>
+    widthKit.truncateToWidth(stripAnsi(value), width, ellipsis);
 
   return {
     render(width) {
+      const w = Number.isFinite(width)
+        ? Math.min(Math.max(0, Math.floor(width)), 10000)
+        : 0;
       let first = collapsedCwd(ctx.cwd, homedir());
       const branch = singleLine(footerData.getGitBranch?.());
       if (branch !== "") first += ` (${branch})`;
@@ -383,11 +389,13 @@ function createFooter(pi, ctx, tui, theme, footerData, quotaCache) {
       const second = rightAlignedLine(
         leftParts.join(" • "),
         rightText(pi, ctx, footerData),
-        width,
+        w,
+        measure,
+        cut,
       );
 
       return [
-        theme.fg("dim", truncate(singleLine(first), width)),
+        theme.fg("dim", cut(singleLine(first), w)),
         theme.fg("dim", second),
       ];
     },
@@ -408,6 +416,14 @@ export default function register(pi, deps = {}) {
   const stopTimeout = deps.clearTimeout ?? globalThis.clearTimeout;
   const quotaCache = new Map();
   const unauthorizedAuth = new Map();
+  // Width semantics come from pi-tui (the host's own visibleWidth/truncateToWidth,
+  // same functions pi core's footer uses). Injected in tests; the code-point
+  // fallback exists only so render stays total if the host import ever fails.
+  const fallbackWidthKit = {
+    visibleWidth: (value) => textWidth(value),
+    truncateToWidth: (value, width, ellipsis) => truncate(value, width, ellipsis),
+  };
+  let widthKit = deps.widthKit ?? fallbackWidthKit;
   let ctx;
   let tui;
   let timer;
@@ -489,9 +505,19 @@ export default function register(pi, deps = {}) {
         if (flight.cancelled) return;
         if (response?.status === 401) {
           unauthorizedAuth.set(provider, authFingerprint);
+          if (!flight.cancelled) {
+            quotaCache.delete(provider);
+            repaint();
+          }
           return;
         }
-        if (!response || response.ok === false) return;
+        if (!response || response.ok === false) {
+          if (!flight.cancelled) {
+            quotaCache.delete(provider);
+            repaint();
+          }
+          return;
+        }
         let body;
         try {
           body = await response.json();
@@ -538,12 +564,28 @@ export default function register(pi, deps = {}) {
     },
   });
 
-  pi.on("session_start", (_event, nextCtx) => {
+  pi.on("session_start", async (_event, nextCtx) => {
     cancelPoll();
     ctx = nextCtx;
+    if (!deps.widthKit && widthKit === fallbackWidthKit) {
+      try {
+        const mod = await import("@earendil-works/pi-tui");
+        if (
+          typeof mod.visibleWidth === "function" &&
+          typeof mod.truncateToWidth === "function"
+        ) {
+          widthKit = {
+            visibleWidth: mod.visibleWidth,
+            truncateToWidth: mod.truncateToWidth,
+          };
+        }
+      } catch {
+        // pi always provides pi-tui; the fallback keeps render total regardless.
+      }
+    }
     ctx.ui.setFooter((nextTui, theme, footerData) => {
       tui = nextTui;
-      return createFooter(pi, ctx, nextTui, theme, footerData, quotaCache);
+      return createFooter(pi, ctx, nextTui, theme, footerData, quotaCache, widthKit);
     });
     if (timer !== undefined) stopInterval(timer);
     timer = startInterval(() => {

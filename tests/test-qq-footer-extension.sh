@@ -64,6 +64,33 @@ function jsonResponse(body, status = 200) {
   };
 }
 
+// Column-correct fake of pi-tui's visibleWidth/truncateToWidth: wide chars
+// count two columns. The extension must bound every line to the supplied
+// terminal columns under these semantics, not code points.
+const WIDE = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFF60\uFFE0-\uFFE6]/u;
+const testWidthKit = {
+  visibleWidth(value) {
+    let width = 0;
+    for (const ch of String(value)) width += WIDE.test(ch) ? 2 : 1;
+    return width;
+  },
+  truncateToWidth(value, width, ellipsis = "...") {
+    const text = String(value);
+    if (this.visibleWidth(text) <= width) return text;
+    const ellipsisWidth = this.visibleWidth(ellipsis);
+    if (width <= ellipsisWidth) return [...ellipsis].slice(0, width).join("");
+    let out = "";
+    let used = 0;
+    for (const ch of text) {
+      const cell = WIDE.test(ch) ? 2 : 1;
+      if (used + cell > width - ellipsisWidth) break;
+      used += cell;
+      out += ch;
+    }
+    return out + ellipsis;
+  },
+};
+
 async function waitFor(predicate, message) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (predicate()) return;
@@ -165,6 +192,7 @@ function createHarness({
 
   register(pi, {
     authPath: fixture,
+    widthKit: testWidthKit,
     fetch: async (url, options) => {
       fetches.push({ url, options });
       return fetchImpl(url, options, fetches.length);
@@ -219,7 +247,10 @@ const kimi = createHarness({
   oauth: false,
   fetchImpl: async (_url, _options, callCount) => {
     if (callCount === 1) return jsonResponse(kimiBody);
-    throw new Error("synthetic refresh failure");
+    if (callCount === 2) throw new Error("synthetic transport failure");
+    if (callCount === 3) return jsonResponse({}, 500);
+    if (callCount === 4) return jsonResponse(kimiBody);
+    return jsonResponse({}, 401);
   },
 });
 assert.equal(typeof kimi.events.get("session_start"), "function");
@@ -250,13 +281,28 @@ assert.ok(kimiLines[1].endsWith("(kimi-coding) kimi-k2 • high"));
 assert.equal([...kimiLines[1]].length, 120, "model was not right-aligned");
 assert.doesNotMatch(kimiLines[1], /↑|↓|(?:^| )R\d|(?:^| )W\d|CH\d/);
 assert.doesNotMatch(kimiLines.join("\n"), /\x1b\[/);
+assert.doesNotThrow(() => kimi.render(600000000), "render threw at huge width");
+assert.doesNotThrow(() => kimi.render(Number.NaN), "render threw at NaN width");
+assert.doesNotThrow(() => kimi.render(-5), "render threw at negative width");
 
 await kimi.commands.get("qq-footer-refresh").handler("", kimi.ctx);
 assert.equal(kimi.fetches.length, 2, "refresh command did not force a fetch");
 assert.ok(
   kimi.render()[1].includes("K ▓░░░░░░░ 5h · ▓▓▓▓▓▓▓░ wk"),
-  "fetch failure discarded the last-good quota cache",
+  "transport failure discarded the last-good quota cache",
 );
+await kimi.commands.get("qq-footer-refresh").handler("", kimi.ctx);
+assert.equal(kimi.fetches.length, 3);
+assert.ok(!kimi.render()[1].includes(" • K "), "HTTP 500 kept stale quota visible");
+await kimi.commands.get("qq-footer-refresh").handler("", kimi.ctx);
+assert.equal(kimi.fetches.length, 4);
+assert.ok(
+  kimi.render()[1].includes("K ▓░░░░░░░ 5h · ▓▓▓▓▓▓▓░ wk"),
+  "recovery after HTTP 500 did not restore quota",
+);
+await kimi.commands.get("qq-footer-refresh").handler("", kimi.ctx);
+assert.equal(kimi.fetches.length, 5);
+assert.ok(!kimi.render()[1].includes(" • K "), "HTTP 401 kept stale quota visible");
 kimi.events.get("session_shutdown")({ type: "session_shutdown" }, kimi.ctx);
 assert.equal(kimi.intervals.size, 0, "session shutdown did not clear polling");
 assert.equal(kimi.footerWasCleared, true, "session shutdown did not restore the built-in footer");
@@ -268,7 +314,7 @@ const codex = createHarness({
   availableProviders: 1,
   fetchImpl: async () => jsonResponse(codexBody),
 });
-codex.events.get("session_start")({ type: "session_start" }, codex.ctx);
+await codex.events.get("session_start")({ type: "session_start" }, codex.ctx);
 await waitFor(() => codex.renderCount > 0, "Codex quota fetch did not repaint");
 const codexLine = codex.render()[1];
 assert.equal(codex.fetches[0].url, "https://chatgpt.com/backend-api/wham/usage");
@@ -285,7 +331,7 @@ const noAuth = createHarness({
   fixture: noAuthPath,
   fetchImpl: async () => assert.fail("provider without auth attempted a fetch"),
 });
-noAuth.events.get("session_start")({ type: "session_start" }, noAuth.ctx);
+await noAuth.events.get("session_start")({ type: "session_start" }, noAuth.ctx);
 await waitFor(() => noAuth.renderCount > 0, "missing-auth poll did not settle");
 assert.equal(noAuth.fetches.length, 0);
 assert.ok(!noAuth.render()[1].includes(" • A "), "provider without auth rendered quota");
@@ -297,7 +343,7 @@ const failed = createHarness({
     throw new Error("synthetic network failure");
   },
 });
-failed.events.get("session_start")({ type: "session_start" }, failed.ctx);
+await failed.events.get("session_start")({ type: "session_start" }, failed.ctx);
 await waitFor(() => failed.fetches.length === 1, "failing fetch was not attempted");
 await new Promise((resolve) => setImmediate(resolve));
 assert.ok(!failed.render()[1].includes(" • K "), "fetch failure rendered fake quota");
@@ -307,7 +353,7 @@ const anthropic = createHarness({
   modelId: "claude-test",
   fetchImpl: async () => jsonResponse(anthropicBody),
 });
-anthropic.events.get("session_start")({ type: "session_start" }, anthropic.ctx);
+await anthropic.events.get("session_start")({ type: "session_start" }, anthropic.ctx);
 await waitFor(() => anthropic.renderCount > 0, "Anthropic quota fetch did not repaint");
 const anthropicLine = anthropic.render()[1];
 assert.equal(anthropic.fetches[0].url, "https://api.anthropic.com/api/oauth/usage");
@@ -323,9 +369,25 @@ const compacted = createHarness({
   fetchImpl: async () => assert.fail("unsupported provider attempted a fetch"),
 });
 compacted.ctx.getContextUsage = () => ({ tokens: 0, contextWindow: 200000, percent: null });
-compacted.events.get("session_start")({ type: "session_start" }, compacted.ctx);
+await compacted.events.get("session_start")({ type: "session_start" }, compacted.ctx);
 assert.ok(compacted.render()[1].includes("?/200k • $0.012 (sub)"));
 assert.ok(compacted.render()[1].endsWith("(unsupported-provider) plain-model"));
+
+const cjk = createHarness({
+  provider: "kimi-coding",
+  modelId: "模型",
+  fetchImpl: async () => jsonResponse(kimiBody),
+});
+await cjk.events.get("session_start")({ type: "session_start" }, cjk.ctx);
+await waitFor(() => cjk.renderCount > 0, "CJK model fetch did not repaint");
+for (const width of [0, 5, 18, 20, 24, 30, 120]) {
+  for (const line of cjk.render(width)) {
+    assert.ok(
+      testWidthKit.visibleWidth(line) <= width,
+      `line exceeded ${width} terminal columns: ${JSON.stringify(line)}`,
+    );
+  }
+}
 
 console.log("test-qq-footer-extension: pass");
 JS
