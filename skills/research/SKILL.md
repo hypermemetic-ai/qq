@@ -23,7 +23,7 @@ lifecycle/artifacts; adapter containment. Inspect id/`details.asyncDir` once:
 run/fleet status, `status.json`, `events.jsonl`,
 `output-<index>.log`, and `subagent-log-<run-id>.md`. Terminal validated envelope
 `summary` carries cited, confidence-tagged findings; nonzero/missing/invalid
-fails. Relaunch unchanged briefs after dispatch failure. Owner
+fails. Infrastructure failure: resume; conclusions: relaunch fresh. Owner
 spot-checks load-bearing citations, decides what the findings mean, and writes
 the Repository artifact.
 

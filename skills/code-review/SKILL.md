@@ -62,7 +62,7 @@ the Change and code without inheriting the author's conclusions.
    Rerun affected Checks and review the fix delta.
 9. A finding class fixed in two prior rounds trips the convergence breaker:
    halt at the last green state and ask which layer owns the invariant.
-10. Dispatch error, nonzero result, missing/invalid structured output, or
-    context gap is not review. Dispatch the unchanged or minimally completed
-    brief fresh. Never narrow scope or soften intent for a pass; repeated
-    failure blocks.
+10. Infrastructure failure (sandbox kill, API error, intact-session timeout):
+    resume the child; conclusion states (formed findings, invalid output,
+    context gap): dispatch fresh. Never narrow scope or soften intent for a
+    pass; repeated failure blocks.
