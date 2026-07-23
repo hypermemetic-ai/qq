@@ -24,8 +24,8 @@ usage:
   qq-observe assemble --pr N --repo ROOT [--worktree-root DIR] [--variant guided|blind]
   qq-observe verify-delivery --repo ROOT [--since ISO]
   qq-observe render-doc --run DIR
-  qq-observe finalize --run DIR (--analysis FILE | --failed REASON) \
-    [--analyst-trace FILE]
+  qq-observe finalize --run DIR \
+    (--analysis FILE --analyst-trace FILE | --failed REASON [--analyst-trace FILE])
 
 context options: --trace-id ID --span-id ID --parent-span-id ID --root-span-id ID
 record options:  --phase PHASE --status STATUS --source SOURCE --attribute KEY=VALUE
@@ -1362,6 +1362,72 @@ def run_directory(value):
     return canonical_directory(value, "run directory")
 
 
+def validated_package_analysis(run_dir, analysis_path):
+    package = json_document(
+        read_regular(run_dir / "package.json", "observer package"),
+        "observer package",
+    )
+    if not isinstance(package, dict) or not isinstance(package.get("sessions"), list):
+        fail("observer package has the wrong shape", 65)
+    repo_value = package.get("repo")
+    if not isinstance(repo_value, str):
+        fail("observer package lacks its Repository root", 65)
+    repo = canonical_directory(repo_value, "package Repository root")
+    sessions = []
+    facts = []
+    labels = set()
+    for row in package["sessions"]:
+        if not isinstance(row, dict):
+            fail("observer package session has the wrong shape", 65)
+        label = row.get("label")
+        if (
+            not isinstance(label, str)
+            or not SAFE_COMPONENT.fullmatch(label)
+            or label in labels
+        ):
+            fail("observer package session has an unsafe or duplicate label", 65)
+        labels.add(label)
+        session = run_dir / "sessions" / f"{label}.jsonl"
+        fact = run_dir / "facts" / f"{label}.json"
+        if not regular_file(session) or not regular_file(fact):
+            fail(f"observer package session inputs are incomplete: {label}", 65)
+        sessions.append(session)
+        facts.append(fact)
+    if not sessions:
+        fail("observer package contains no sessions", 65)
+
+    validation = [self_path, "validate-analysis", os.fspath(analysis_path)]
+    validation.extend(map(os.fspath, sessions))
+    for session, fact in zip(sessions, facts):
+        validation.extend(("--facts", f"{session}={fact}"))
+    process = run_process(validation, "analysis validation", cwd=repo)
+    if process.returncode != 0:
+        reason = "validator refused the analysis"
+        try:
+            failure = json.loads(process.stdout.decode("utf-8"))
+            if (
+                isinstance(failure, dict)
+                and failure.get("status") == "analysis_failed"
+                and isinstance(failure.get("reason"), str)
+            ):
+                reason = failure["reason"]
+        except (UnicodeDecodeError, ValueError, RecursionError):
+            detail = process.stderr.decode("utf-8", "replace").strip()
+            if detail:
+                reason = detail
+        fail(
+            f"analysis validation failed: {reason}; record the run with --failed instead",
+            65,
+        )
+    ranked = json_document(process.stdout, "validated analysis output")
+    if isinstance(ranked, dict) and ranked.get("status") == "analysis_failed":
+        fail("successful finalization requires findings; use --failed instead", 65)
+    ranked = minimal_analysis(ranked)
+    return (
+        json.dumps(ranked, separators=(",", ":"), sort_keys=True) + "\n"
+    ).encode()
+
+
 def render_doc(values):
     options = parse_flags(values, {"--run"})
     if "--run" not in options:
@@ -1378,12 +1444,21 @@ def finalize(values):
         fail("finalize requires --run")
     if ("--analysis" in options) == ("--failed" in options):
         fail("finalize requires exactly one of --analysis or --failed")
+    if "--analysis" in options and "--analyst-trace" not in options:
+        fail("--analyst-trace is required with --analysis")
     run_dir = run_directory(options["--run"])
     writes = []
+    trace_data = None
+    if "--analyst-trace" in options:
+        trace = canonical_existing(options["--analyst-trace"], "analyst trace")
+        valid, reason = pi_first_record(trace)
+        if not valid:
+            fail(f"analyst trace is not Pi v3: {reason}")
+        trace_data = read_regular(trace, "analyst trace")
     if "--analysis" in options:
         source = canonical_existing(options["--analysis"], "analysis input")
-        raw = read_regular(source, "analysis input")
-        analysis = minimal_analysis(json_document(raw, "analysis input"))
+        raw = validated_package_analysis(run_dir, source)
+        analysis = json_document(raw, "validated analysis output")
         if os.path.lexists(run_dir / "analysis_failed.json"):
             fail("run already contains analysis_failed.json", 65)
         writes.append((run_dir / "analysis.json", raw))
@@ -1403,12 +1478,8 @@ def finalize(values):
             run_dir / "analysis_failed.json",
             (json.dumps(failure, separators=(",", ":"), sort_keys=True) + "\n").encode(),
         ))
-    if "--analyst-trace" in options:
-        trace = canonical_existing(options["--analyst-trace"], "analyst trace")
-        valid, reason = pi_first_record(trace)
-        if not valid:
-            fail(f"analyst trace is not Pi v3: {reason}")
-        writes.append((run_dir / "analyst-trace.jsonl", read_regular(trace, "analyst trace")))
+    if trace_data is not None:
+        writes.append((run_dir / "analyst-trace.jsonl", trace_data))
     for path, data in writes:
         preflight_append(path, data)
     changed = []

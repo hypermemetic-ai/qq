@@ -217,25 +217,56 @@ jq -e '
   and (.warnings | length) >= 1
 ' "$run_42/package.json" >/dev/null || fail 'accountable-only content search did not preserve evidence'
 
-# A finalized successful analysis renders the facts table, ranked episode, drops, and limitations.
-session_path="$(find "$run_41/sessions" -type f | sort | head -n1)"
+# A finalized successful analysis must pass the full package validator before
+# rendering. Its run session set and episode costs come from the assembled package.
+session_path="$run_41/sessions/delegate-strong-run-primary.jsonl"
+facts_path="$run_41/facts/delegate-strong-run-primary.json"
+run_sessions="$(find "$run_41/sessions" -type f -print | sort | jq -Rsc 'split("\n")[:-1]')"
+turns="$(jq '[.turns_by_role[]] | add' "$facts_path")"
+tokens="$(jq '(.token_usage.input // 0) + (.token_usage.output // 0)' "$facts_path")"
+duration="$(jq '.wall_clock.duration_ms' "$facts_path")"
 analysis="$tmp/analysis.json"
-jq -n --arg session "$session_path" '{
+jq -n --arg session "$session_path" --argjson sessions "$run_sessions" \
+  --argjson turns "$turns" --argjson tokens "$tokens" --argjson duration "$duration" '{
   schema:"qq-observer.analysis",schema_version:1,
-  run:{change:"PR-41",sessions:[$session]},
+  run:{change:"PR-41",sessions:$sessions},
   episodes:[{
-    rank:1,kind:"friction",title:"Fixture episode",sessions:[$session],
-    evidence:[{session:$session,entries:[2],quote:"fixture quote"}],
+    kind:"friction",title:"Fixture episode",sessions:[$session],
+    evidence:[{session:$session,entries:[2],quote:"delegate strong-run"}],
     what_happened:"Fixture behavior happened.",root_cause:"Fixture root cause.",
     root_cause_location:"instruction",
-    cost:{turns:1,tokens:2,duration_ms:3,source:("facts:"+$session)},
+    cost:{turns:$turns,tokens:$tokens,duration_ms:$duration,source:("facts:"+$session)},
     remedy:{type:"process",smallest_change:"Use the fixture remedy."},
     confidence:"high",confidence_why:"Direct fixture evidence.",recurrence_key:"fixture-key"
   }],
   dropped_signals:[{kind:"compaction",entries:[2],why:"Not relevant."}],
   limitations:"Fixture limitation."
 }' >"$analysis"
-"$OBSERVE" finalize --run "$run_41" --analysis "$analysis" >"$tmp/finalized-41.json"
+
+jq '.episodes[0].cost.turns += 1' "$analysis" >"$tmp/invalid-analysis.json"
+set +e
+"$OBSERVE" finalize --run "$run_41" --analysis "$tmp/invalid-analysis.json" \
+  --analyst-trace "$parent_strong" >"$tmp/invalid-finalize.stdout" \
+  2>"$tmp/invalid-finalize.stderr"
+status=$?
+set -e
+assert_equal 65 "$status" 'finalize accepted an analysis with facts-ungrounded cost'
+assert_file_contains "$tmp/invalid-finalize.stderr" '--failed'
+for absent in analysis.json analysis.md analyst-trace.jsonl; do
+  [ ! -e "$run_41/$absent" ] || fail "invalid finalize wrote $absent"
+done
+
+set +e
+"$OBSERVE" finalize --run "$run_41" --analysis "$analysis" \
+  >"$tmp/missing-trace.stdout" 2>"$tmp/missing-trace.stderr"
+status=$?
+set -e
+assert_equal 64 "$status" 'finalize accepted successful analysis without analyst trace'
+assert_file_contains "$tmp/missing-trace.stderr" '--analyst-trace is required'
+[ ! -e "$run_41/analysis.json" ] || fail 'missing-trace refusal wrote analysis.json'
+
+"$OBSERVE" finalize --run "$run_41" --analysis "$analysis" \
+  --analyst-trace "$parent_strong" >"$tmp/finalized-41.json"
 "$OBSERVE" render-doc --run "$run_41" >"$tmp/rendered-41.json"
 jq -e '.status == "rendered"' "$tmp/rendered-41.json" >/dev/null \
   || fail 'render-doc did not report its deterministic no-op render'
@@ -243,12 +274,14 @@ assert_file_contains "$run_41/analysis.md" '## Session facts'
 assert_file_contains "$run_41/analysis.md" '### 1. Fixture episode'
 assert_file_contains "$run_41/analysis.md" '## Dropped signals'
 assert_file_contains "$run_41/analysis.md" 'Fixture limitation.'
-"$OBSERVE" finalize --run "$run_41" --analysis "$analysis" >"$tmp/finalized-identical.json"
+"$OBSERVE" finalize --run "$run_41" --analysis "$analysis" \
+  --analyst-trace "$parent_strong" >"$tmp/finalized-identical.json"
 jq -e '.written == []' "$tmp/finalized-identical.json" >/dev/null \
   || fail 'identical finalize was not a no-op'
 jq '.episodes[0].title = "Differing episode"' "$analysis" >"$tmp/differing-analysis.json"
 set +e
 "$OBSERVE" finalize --run "$run_41" --analysis "$tmp/differing-analysis.json" \
+  --analyst-trace "$parent_strong" \
   >"$tmp/differing.stdout" 2>"$tmp/differing.stderr"
 status=$?
 set -e
