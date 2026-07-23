@@ -213,16 +213,26 @@ cat >"$outcomes" <<'JSON'
   {"recurrence_key":"beta","verdict":"rejected","task_refs":[],"note":"Do not pursue."}
 ]
 JSON
+# Simulate a crash after the discussed mark was fsynced but before its event.
+jq -cn --argjson outcomes "$(cat "$outcomes")" '{
+  schema:"qq-observer.ledger-event",schema_version:1,
+  ts:"2026-08-02T11:00:00Z",type:"disposition",pr:2,outcomes:$outcomes
+}' >"$run_2/discussed.json"
+disposition_before="$(jq -s '[.[] | select(.type == "disposition")] | length' "$events")"
 "$OBSERVE" mark-discussed --run "$run_2" --outcomes "$outcomes" >"$tmp/discussed.json"
 jq -e '.type == "disposition" and .pr == 2 and .outcomes[0].verdict == "accepted"' \
   "$run_2/discussed.json" >/dev/null || fail 'discussed mark has the wrong shape'
 disposition_count="$(jq -s '[.[] | select(.type == "disposition")] | length' "$events")"
+assert_equal "$((disposition_before + 1))" "$disposition_count" \
+  'retry with only a discussed mark did not append exactly one disposition'
+jq -e '.status == "discussed"' "$tmp/discussed.json" >/dev/null \
+  || fail 'discussed mark recovery reported the wrong status'
 "$OBSERVE" mark-discussed --run "$run_2" --outcomes "$outcomes" >"$tmp/discussed-again.json"
 assert_equal "$disposition_count" \
   "$(jq -s '[.[] | select(.type == "disposition")] | length' "$events")" \
   'identical discussed mark appended another disposition'
 jq -e '.status == "already discussed"' "$tmp/discussed-again.json" >/dev/null \
-  || fail 'identical discussed mark was not a no-op'
+  || fail 'identical discussed mark and event were not a full no-op'
 
 jq '.[0].note = "different"' "$outcomes" >"$tmp/different-outcomes.json"
 set +e

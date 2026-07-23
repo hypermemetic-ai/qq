@@ -1618,21 +1618,31 @@ def mark_discussed(values):
     try:
         old = existing_bytes(path)
         if old is not None:
-            existing = json_document(old, "discussed mark")
-            if not valid_ledger_event(existing) or existing.get("type") != "disposition":
+            event = json_document(old, "discussed mark")
+            if not valid_ledger_event(event) or event.get("type") != "disposition":
                 fail(f"invalid discussed mark at {path}", 65)
-            if existing["pr"] == pr and existing["outcomes"] == outcomes:
-                emit({"status": "already discussed", "run_dir": os.fspath(run_dir)})
-            fail(f"append-only conflict at {path}", 65)
-        event = ledger_event("disposition", pr=pr, outcomes=outcomes)
-        append_ledger_events(fd, [event])
-        atomic_append(
-            path,
-            (json.dumps(event, separators=(",", ":"), sort_keys=True) + "\n").encode("utf-8"),
+            if event["pr"] != pr or event["outcomes"] != outcomes:
+                fail(f"append-only conflict at {path}", 65)
+            mark_written = False
+        else:
+            event = ledger_event("disposition", pr=pr, outcomes=outcomes)
+            mark_written = atomic_append(
+                path,
+                (json.dumps(event, separators=(",", ":"), sort_keys=True) + "\n").encode("utf-8"),
+            )
+        previous, _ = read_ledger_events(fd)
+        event_present = any(
+            previous_event["type"] == "disposition"
+            and previous_event["pr"] == pr
+            and previous_event["outcomes"] == outcomes
+            for previous_event in previous
         )
+        if not event_present:
+            append_ledger_events(fd, [event])
     finally:
         close_ledger_events(fd)
-    emit({"status": "discussed", "run_dir": os.fspath(run_dir)})
+    status = "discussed" if mark_written or not event_present else "already discussed"
+    emit({"status": status, "run_dir": os.fspath(run_dir)})
 
 
 def observer_run_rows(since=None):
