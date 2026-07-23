@@ -282,6 +282,32 @@ jq -s -e '
   ]
 ' "$events" >/dev/null || fail 'comparison evidence directions are wrong'
 
+# Promotion and disposition state remain global when findings are windowed.
+jq -cn '{
+  schema:"qq-observer.ledger-event",schema_version:1,
+  ts:"2026-08-31T10:00:00Z",type:"finding_seen",pr:8,
+  recurrence_key:"windowed",kind:"waste",title:"Windowed opportunity",
+  rank:1,confidence:"high",no_signal:false,
+  cost:{turns:1,tokens:1,duration_ms:1}
+}' >>"$events"
+jq -cn '{
+  schema:"qq-observer.ledger-event",schema_version:1,
+  ts:"2026-08-31T11:00:00Z",type:"promoted",
+  recurrence_key:"windowed",kind:"waste",prs:[8,9]
+}' >>"$events"
+jq -cn '{
+  schema:"qq-observer.ledger-event",schema_version:1,
+  ts:"2026-08-31T12:00:00Z",type:"disposition",pr:8,
+  outcomes:[{recurrence_key:"windowed",verdict:"accepted",task_refs:["T-202"],note:"Learned globally."}]
+}' >>"$events"
+jq -cn '{
+  schema:"qq-observer.ledger-event",schema_version:1,
+  ts:"2026-09-02T10:00:00Z",type:"finding_seen",pr:9,
+  recurrence_key:"windowed",kind:"waste",title:"Windowed opportunity",
+  rank:1,confidence:"high",no_signal:false,
+  cost:{turns:1,tokens:1,duration_ms:1}
+}' >>"$events"
+
 # Unknown event shapes are counted rather than silently interpreted.
 printf '{"schema":"qq-observer.future-event","schema_version":99}\n' >>"$events"
 "$OBSERVE" digest >"$tmp/digest.md"
@@ -298,6 +324,19 @@ assert_file_contains "$tmp/digest.md" 'Coverage: 5 finalized, 1 failed.'
 assert_file_contains "$tmp/digest.md" 'Unknown ledger entries: 1.'
 digest_path="$(find "$XDG_STATE_HOME/qq/observer/digests" -type f -name '*.md')"
 cmp "$tmp/digest.md" "$digest_path" >/dev/null || fail 'stored digest differs from stdout'
+sleep 1
+"$OBSERVE" digest --since 2026-09-01T00:00:00Z >"$tmp/windowed-digest.md"
+assert_file_contains "$tmp/windowed-digest.md" \
+  '| 9 | 2 | `windowed` | Windowed opportunity | `waste` | #8, #9 | high, high | accepted (×1.5) |' \
+  'windowed finding lost global recurrence or disposition state'
+awk '
+  /^## Opportunities ledger$/ { opportunities = 1; next }
+  /^## Open findings$/ { opportunities = 0 }
+  opportunities && /`windowed`/ { found = 1 }
+  END { exit found ? 0 : 1 }
+' "$tmp/windowed-digest.md" || fail 'globally promoted finding appeared open in a windowed digest'
+assert_file_not_matches "$tmp/windowed-digest.md" '`alpha`' \
+  'finding whose latest event predates --since was listed'
 
 # Refusal paths do not fabricate events or state.
 missing="$runs/pr-6"

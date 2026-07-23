@@ -1711,7 +1711,11 @@ def digest_score_rows(events):
             findings.setdefault(event["recurrence_key"], []).append(event)
         elif event["type"] == "promoted":
             promoted.add(event["recurrence_key"])
-    kind_by_key = {key: history[-1]["kind"] for key, history in findings.items()}
+    latest_by_key = {
+        key: max(history, key=lambda event: time_value(event["ts"]))
+        for key, history in findings.items()
+    }
+    kind_by_key = {key: event["kind"] for key, event in latest_by_key.items()}
     key_verdict = {}
     kind_verdict = {}
     for event in events:
@@ -1725,7 +1729,7 @@ def digest_score_rows(events):
                 kind_verdict[kind_by_key[key]] = verdict
     rows = []
     for key, history in findings.items():
-        latest = history[-1]
+        latest = latest_by_key[key]
         prs = sorted({event["pr"] for event in history})
         verdict = key_verdict.get(key, kind_verdict.get(latest["kind"]))
         multiplier = VERDICT_MULTIPLIER.get(verdict, 1.0)
@@ -1735,6 +1739,7 @@ def digest_score_rows(events):
             "confidence": [event["confidence"] for event in history],
             "prs": prs, "count": len(prs), "verdict": verdict or "none",
             "multiplier": multiplier, "score": score, "promoted": key in promoted,
+            "_latest_time": time_value(latest["ts"]),
         })
     rows.sort(key=lambda row: (-row["score"], row["key"]))
     return rows
@@ -1751,10 +1756,12 @@ def digest(values):
         since = parse_time(options["--since"], "--since")
     fd = open_ledger_events()
     try:
-        events, unknown = read_ledger_events(fd, since=since)
+        events, unknown = read_ledger_events(fd)
     finally:
         close_ledger_events(fd)
     rows = digest_score_rows(events)
+    if since is not None:
+        rows = [row for row in rows if row["_latest_time"] >= since]
     generated = utc_now()
     lines = [
         "# qq observer digest", "", f"Generated: `{generated}`", "",
@@ -1788,7 +1795,11 @@ def digest(values):
         "| PR | Direction | Evidence | Signal kind | Episode title | Recurrence key |",
         "| ---: | --- | --- | --- | --- | --- |",
     ])
-    candidates = [event for event in events if event["type"] == "signal_tune_candidate"]
+    candidates = [
+        event for event in events
+        if event["type"] == "signal_tune_candidate"
+        and (since is None or time_value(event["ts"]) >= since)
+    ]
     if not candidates:
         lines.append("| — | None | — | — | — | — |")
     for event in candidates:
