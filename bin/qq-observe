@@ -1803,6 +1803,12 @@ def comparison_candidate_content(event):
     return content
 
 
+def comparison_candidate_identity(event):
+    return json.dumps(
+        comparison_candidate_content(event), separators=(",", ":"), sort_keys=True,
+    )
+
+
 def replay_record_timestamp(path, info, field, label):
     record = json_document(read_regular(path, label), label)
     timestamp = record.get(field) if isinstance(record, dict) else None
@@ -1851,7 +1857,7 @@ def replay_comparison(run_dir, timestamp, available):
     events = []
     skipped = 0
     for candidate in record["candidates"]:
-        identity = json.dumps(candidate, separators=(",", ":"), sort_keys=True)
+        identity = comparison_candidate_identity(candidate)
         if available.get(identity, 0):
             available[identity] -= 1
             skipped += 1
@@ -1920,9 +1926,7 @@ def ledger_rebuild(values):
     for event in previous:
         if event["type"] != "signal_tune_candidate":
             continue
-        identity = json.dumps(
-            comparison_candidate_content(event), separators=(",", ":"), sort_keys=True,
-        )
+        identity = comparison_candidate_identity(event)
         available_candidates[identity] = available_candidates.get(identity, 0) + 1
 
     events_appended = 0
@@ -2237,24 +2241,33 @@ def record_comparison(values):
                 fail(f"append-only conflict at {path}", 65)
             status = "already recorded"
         else:
-            written_at = utc_now()
             record = {
                 "schema": COMPARISON_SCHEMA, "schema_version": COMPARISON_VERSION,
                 "guided": os.fspath(guided_dir), "blind": os.fspath(blind_dir),
-                "written_at": written_at, "candidates": candidates,
+                "written_at": utc_now(), "candidates": candidates,
             }
             if not valid_comparison_record(record):
                 fail("comparison produced an invalid durable record", 65)
-            events = [
-                ledger_event("signal_tune_candidate", ts=written_at, **candidate)
-                for candidate in candidates
-            ]
-            append_ledger_events(fd, events)
             atomic_append(
                 path,
                 (json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n").encode(),
             )
             status = "recorded"
+        previous, _ = read_ledger_events(fd)
+        existing_candidates = {
+            comparison_candidate_identity(event)
+            for event in previous if event["type"] == "signal_tune_candidate"
+        }
+        events = []
+        for candidate in record["candidates"]:
+            identity = comparison_candidate_identity(candidate)
+            if identity in existing_candidates:
+                continue
+            events.append(ledger_event(
+                "signal_tune_candidate", ts=record["written_at"], **candidate,
+            ))
+            existing_candidates.add(identity)
+        append_ledger_events(fd, events)
     finally:
         close_ledger_events(fd)
     emit({"status": status, "pr": guided_pr, "candidates": len(candidates)})

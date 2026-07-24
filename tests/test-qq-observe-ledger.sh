@@ -570,6 +570,53 @@ assert_file_contains "$tmp/chronology-after-loss.md" \
   '| 3 | 2 | `chronology` | Chronology opportunity | `waste` | #2, #3 | high, high | rejected (×0.5) |' \
   'equal-mtime rebuild reversed internal disposition chronology'
 
+# A record-first comparison retry completes events after an interrupted first attempt.
+export XDG_STATE_HOME="$tmp/comparison-crash-state"
+runs="$XDG_STATE_HOME/qq/observer/runs"
+events="$XDG_STATE_HOME/qq/observer/ledger/events.jsonl"
+crash_common="$(make_episode crash-common friction 'Crash common episode')"
+crash_only="$(make_episode crash-only waste 'Crash guided-only episode')"
+crash_guided_episodes="$(jq -cn --argjson common "$crash_common" --argjson only "$crash_only" '[$common,$only]')"
+crash_blind_episodes="$(jq -cn --argjson common "$crash_common" '[$common]')"
+crash_guided="$(make_run pr-30 30 guided 2026-12-01T10:00:00Z "$crash_guided_episodes")"
+crash_blind="$(make_run pr-30-blind 30 blind 2026-12-01T10:01:00Z "$crash_blind_episodes")"
+real_python="$(command -v python3)"
+crash_python="$tmp/crash-python3"
+cat >"$crash_python" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" != - ]; then
+  exec "$REAL_PYTHON3" "$@"
+fi
+script="$CRASH_TMP/comparison-crash-$$.py"
+trap 'rm -f "$script"' EXIT
+sed '/^        append_ledger_events(fd, events)$/i\
+        raise SystemExit(99)' >"$script"
+"$REAL_PYTHON3" "$script" "${@:2}"
+SH
+chmod 700 "$crash_python"
+set +e
+REAL_PYTHON3="$real_python" CRASH_TMP="$tmp" QQ_PYTHON3_BIN="$crash_python" \
+  "$OBSERVE" record-comparison --guided "$crash_guided" --blind "$crash_blind" \
+  >"$tmp/comparison-crash.stdout" 2>"$tmp/comparison-crash.stderr"
+status=$?
+set -e
+assert_equal 99 "$status" 'comparison crash injection did not fire'
+[ -f "$crash_guided/comparison.json" ] \
+  || fail 'comparison crash did not leave its durable record'
+assert_equal 0 "$(jq -s '[.[] | select(.type == "signal_tune_candidate" and .pr == 30)] | length' "$events")" \
+  'comparison crash appended candidates before the injected exit'
+"$OBSERVE" record-comparison --guided "$crash_guided" --blind "$crash_blind" \
+  >"$tmp/comparison-crash-retry.json"
+assert_equal 1 "$(jq -s '[.[] | select(.type == "signal_tune_candidate" and .pr == 30)] | length' "$events")" \
+  'comparison crash retry did not append exactly one candidate event'
+jq -cS . "$events" >"$tmp/comparison-before-loss.jsonl"
+rm -rf "$(dirname "$events")"
+"$OBSERVE" ledger-rebuild >"$tmp/comparison-rebuild.json"
+jq -cS . "$events" >"$tmp/comparison-after-loss.jsonl"
+cmp "$tmp/comparison-before-loss.jsonl" "$tmp/comparison-after-loss.jsonl" >/dev/null \
+  || fail 'comparison event set changed after rebuild from durable record'
+
 export XDG_STATE_HOME="$primary_state"
 runs="$primary_runs"
 events="$primary_events"
