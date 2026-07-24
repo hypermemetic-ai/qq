@@ -26,6 +26,12 @@ usage:
   qq-observe render-doc --run DIR
   qq-observe finalize --run DIR \
     (--analysis FILE --analyst-trace FILE | --failed REASON [--analyst-trace FILE])
+  qq-observe ledger-update --run DIR
+  qq-observe ledger-rebuild
+  qq-observe digest [--since ISO]
+  qq-observe mark-discussed --run DIR --outcomes FILE.json
+  qq-observe rounds
+  qq-observe record-comparison --guided DIR --blind DIR
 
 context options: --trace-id ID --span-id ID --parent-span-id ID --root-span-id ID
 record options:  --phase PHASE --status STATUS --source SOURCE --attribute KEY=VALUE
@@ -39,7 +45,9 @@ facts, signals, and validate-analysis accept Pi v3 session JSONL. Signal
 entries and unknown-entry citations are 1-based physical JSONL line numbers.
 validate-analysis requires one --facts SESSION_PATH=FACTS_PATH pair per session.
 facts emits token fields as integer-rounded accumulated totals (Python half-to-even);
-fields with no observed value remain null.
+fields with no observed value remain null. Ledger events are stored at
+<observer-store>/ledger/events.jsonl; durable feed order is carried by each
+source record's written_seq.
 EOF
   exit 64
 }
@@ -60,7 +68,8 @@ case "${1:-}" in
     exit 0
     ;;
   record | read-session | summarize | facts | signals | validate-analysis | \
-  assemble | verify-delivery | render-doc | finalize) command="$1"; shift ;;
+  assemble | verify-delivery | render-doc | finalize | ledger-update | ledger-rebuild | \
+  digest | mark-discussed | rounds | record-comparison) command="$1"; shift ;;
   *) usage ;;
 esac
 
@@ -74,7 +83,8 @@ python_binary="$QQ_BIN_RESULT"
 # them before the legacy Repository/store bootstrap so their explicit --repo
 # and --run subjects remain authoritative.
 case "$command" in
-  assemble | verify-delivery | render-doc | finalize)
+  assemble | verify-delivery | render-doc | finalize | ledger-update | ledger-rebuild | \
+  digest | mark-discussed | rounds | record-comparison)
     observer_git=""
     observer_gh=""
     if [[ "$command" == assemble || "$command" == verify-delivery ]]; then
@@ -93,6 +103,8 @@ case "$command" in
     fi
     exec "$python_binary" - "$self" "$command" "$observer_git" "$observer_gh" "$@" <<'PY_ASSEMBLER'
 import datetime as dt
+import fcntl
+import hashlib
 import json
 import math
 import os
@@ -336,10 +348,13 @@ def preflight_append(path, data):
     return old is not None
 
 
-def atomic_append(path, data):
+def atomic_append(path, data, content_idempotent=True):
     path = Path(path)
     ensure_directory(path.parent)
-    if preflight_append(path, data):
+    if content_idempotent:
+        if preflight_append(path, data):
+            return False
+    elif existing_bytes(path) is not None:
         return False
     directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
     temporary = None
@@ -367,8 +382,9 @@ def atomic_append(path, data):
             os.link(temporary, path.name, src_dir_fd=directory, dst_dir_fd=directory,
                     follow_symlinks=False)
         except FileExistsError:
-            if read_regular(path, f"append-only destination {path}") != data:
-                fail(f"append-only conflict at {path}", 65)
+            if content_idempotent:
+                if read_regular(path, f"append-only destination {path}") != data:
+                    fail(f"append-only conflict at {path}", 65)
             return False
         os.fsync(directory)
         return True
@@ -428,7 +444,7 @@ def parse_time(value, label):
 
 
 def utc_now():
-    return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def pi_first_record(path):
@@ -450,7 +466,7 @@ def pi_first_record(path):
     return True, ""
 
 
-def content_contains(path, text):
+def content_match(path, text):
     needle = text.encode("utf-8")
     overlap = max(0, len(needle) - 1)
     tail = b""
@@ -465,7 +481,11 @@ def content_contains(path, text):
                     return True
                 tail = block[-overlap:] if overlap else b""
     except OSError:
-        return False
+        return None
+
+
+def content_contains(path, text):
+    return content_match(path, text) is True
 
 
 def session_in_window(path, start, end):
@@ -849,6 +869,33 @@ def assemble(values):
                 and regular_file(parent)
                 and content_contains(parent, branch)
             ):
+                session_file_value = status_records[run_id]["session_file"]
+                if not isinstance(session_file_value, str) or not os.path.isabs(session_file_value):
+                    append_unknown(
+                        unknown, status_path,
+                        "weak delegate sessionFile is missing or not an absolute path",
+                    )
+                    continue
+                session_file = Path(os.path.realpath(session_file_value))
+                if not regular_file(session_file):
+                    append_unknown(
+                        unknown, session_file,
+                        "weak delegate sessionFile is missing or non-regular",
+                    )
+                    continue
+                branch_match = content_match(session_file, branch)
+                if branch_match is None:
+                    append_unknown(
+                        unknown, session_file,
+                        "weak delegate sessionFile is unreadable",
+                    )
+                    continue
+                if not branch_match:
+                    append_unknown(
+                        unknown, session_file,
+                        "weak delegate transcript does not mention the PR branch",
+                    )
+                    continue
                 selected_runs[run_id] = "retired-worktree-content"
     elif async_root.is_symlink():
         fail(f"async run root is not a directory: {async_root}", 65)
@@ -1170,11 +1217,40 @@ def verify_delivery(values):
             prs.add(int(match.group(1)))
     prs = sorted(prs)
     runs_root = observer_runs_root(create=False)
+    finding_counts = {}
+    events_path = runs_root.parent / "ledger" / "events.jsonl"
+    if os.path.lexists(events_path):
+        if not regular_file(events_path):
+            fail(f"ledger event store is not a regular file: {events_path}", 65)
+        fd = open_ledger_events()
+        try:
+            events, _ = read_ledger_events(fd)
+        finally:
+            close_ledger_events(fd)
+        for event in events:
+            if event["type"] == "finding_seen" and "variant" in event:
+                identity = (event["pr"], event["variant"])
+                finding_counts[identity] = finding_counts.get(identity, 0) + 1
     covered = []
     uncovered = []
     for pr in prs:
         run = runs_root / f"pr-{pr}"
-        if regular_file(run / "analysis.json") or regular_file(run / "analysis_failed.json"):
+        analyzed = False
+        analysis_path = run / "analysis.json"
+        marker_path = run / ".ledger-applied"
+        if regular_file(analysis_path) and regular_file(marker_path):
+            raw = read_regular(analysis_path, "finalized analysis")
+            marker = json_document(
+                read_regular(marker_path, "ledger-applied marker"),
+                "ledger-applied marker",
+            )
+            analysis_sha256 = hashlib.sha256(raw).hexdigest()
+            analyzed = (
+                valid_ledger_marker(marker, analysis_sha256)
+                and "episode_count" in marker
+                and finding_counts.get((pr, "guided"), 0) == marker["episode_count"]
+            )
+        if analyzed or regular_file(run / "analysis_failed.json"):
             covered.append(pr)
         else:
             uncovered.append(pr)
@@ -1286,6 +1362,1107 @@ def minimal_analysis(item):
     if not isinstance(item.get("limitations"), str):
         fail("analysis schema violation: limitations must be a string")
     return item
+
+
+LEDGER_SCHEMA = "qq-observer.ledger-event"
+LEDGER_VERSION = 1
+COMPARISON_SCHEMA = "qq-observer.comparison"
+COMPARISON_VERSION = 1
+CONFIDENCE_WEIGHT = {"high": 3, "medium": 2, "low": 1}
+VERDICT_MULTIPLIER = {"accepted": 1.5, "rejected": 0.5, "reshaped": 1.0}
+
+
+def observer_store_root(create=False):
+    runs_root = observer_runs_root(create=create)
+    root = runs_root.parent
+    if create:
+        try:
+            root = root.resolve(strict=True)
+        except (OSError, RuntimeError, ValueError) as error:
+            fail(f"cannot resolve observer store root: {error}", 65)
+    return root
+
+
+def observer_run_directories():
+    runs_root = observer_runs_root(create=False)
+    if not runs_root.exists():
+        return []
+    try:
+        root_info = os.lstat(runs_root)
+    except OSError as error:
+        fail(f"cannot inspect observer runs root: {error}", 65)
+    if not stat.S_ISDIR(root_info.st_mode):
+        fail("observer runs root is not a directory", 65)
+    run_dirs = []
+    for run_dir in sorted(runs_root.iterdir(), key=lambda path: path.name):
+        try:
+            info = os.lstat(run_dir)
+        except OSError as error:
+            fail(f"cannot inspect observer run {run_dir}: {error}", 65)
+        if stat.S_ISDIR(info.st_mode):
+            run_dirs.append(run_dir)
+    return run_dirs
+
+
+def package_identity(run_dir, require_timestamp=False):
+    package = json_document(
+        read_regular(run_dir / "package.json", "observer package"),
+        "observer package",
+    )
+    if not isinstance(package, dict):
+        fail("observer package has the wrong shape", 65)
+    pr = package.get("pr")
+    variant = package.get("variant", "guided")
+    timestamp = package.get("assembled_at")
+    if isinstance(pr, bool) or not isinstance(pr, int) or pr <= 0:
+        fail("observer package lacks a positive PR number", 65)
+    if variant not in ("guided", "blind"):
+        fail("observer package has an invalid variant", 65)
+    if require_timestamp:
+        if not isinstance(timestamp, str):
+            fail("observer package lacks assembled_at", 65)
+        parse_time(timestamp, "observer package assembled_at")
+    return pr, variant, timestamp
+
+
+def valid_outcomes(value):
+    if not isinstance(value, list):
+        return False
+    keys = set()
+    for outcome in value:
+        if not isinstance(outcome, dict) or set(outcome) != {
+            "recurrence_key", "verdict", "task_refs", "note",
+        }:
+            return False
+        key = outcome.get("recurrence_key")
+        if not isinstance(key, str) or not key or key in keys:
+            return False
+        keys.add(key)
+        if outcome.get("verdict") not in VERDICT_MULTIPLIER:
+            return False
+        if (
+            not isinstance(outcome.get("task_refs"), list)
+            or not all(isinstance(item, str) and item for item in outcome["task_refs"])
+            or not isinstance(outcome.get("note"), str)
+        ):
+            return False
+    return True
+
+
+def valid_written_seq(value):
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def valid_ledger_event(item):
+    if (
+        not isinstance(item, dict)
+        or item.get("schema") != LEDGER_SCHEMA
+        or item.get("schema_version") != LEDGER_VERSION
+        or not isinstance(item.get("ts"), str)
+        or not isinstance(item.get("type"), str)
+        or ("written_seq" in item and not valid_written_seq(item["written_seq"]))
+    ):
+        return False
+    try:
+        time_value(item["ts"])
+    except ValueError:
+        return False
+    event_type = item["type"]
+    if event_type == "finding_seen":
+        cost = item.get("cost")
+        return (
+            isinstance(item.get("pr"), int) and not isinstance(item["pr"], bool) and item["pr"] > 0
+            and ("variant" not in item or item["variant"] in ("guided", "blind"))
+            and all(isinstance(item.get(field), str) and item[field]
+                    for field in ("recurrence_key", "kind", "title"))
+            and isinstance(item.get("rank"), int) and not isinstance(item["rank"], bool)
+            and item["rank"] > 0
+            and item.get("confidence") in CONFIDENCE_WEIGHT
+            and isinstance(item.get("no_signal"), bool)
+            and isinstance(cost, dict)
+            and all(
+                isinstance(cost.get(field), int) and not isinstance(cost[field], bool)
+                and cost[field] >= 0
+                for field in ("turns", "tokens", "duration_ms")
+            )
+        )
+    if event_type == "promoted":
+        prs = item.get("prs")
+        return (
+            isinstance(item.get("recurrence_key"), str) and bool(item["recurrence_key"])
+            and isinstance(item.get("kind"), str) and bool(item["kind"])
+            and isinstance(prs, list) and len(prs) >= 2
+            and all(isinstance(pr, int) and not isinstance(pr, bool) and pr > 0 for pr in prs)
+            and len(prs) == len(set(prs))
+        )
+    if event_type == "disposition":
+        return (
+            isinstance(item.get("pr"), int) and not isinstance(item["pr"], bool) and item["pr"] > 0
+            and valid_outcomes(item.get("outcomes"))
+        )
+    if event_type == "signal_tune_candidate":
+        signal_kind = item.get("signal_kind")
+        return (
+            isinstance(item.get("pr"), int) and not isinstance(item["pr"], bool) and item["pr"] > 0
+            and item.get("direction") in ("prune", "promote")
+            and (signal_kind is None or isinstance(signal_kind, str) and bool(signal_kind))
+            and isinstance(item.get("episode_title"), str) and bool(item["episode_title"])
+            and isinstance(item.get("recurrence_key"), str) and bool(item["recurrence_key"])
+            and item.get("evidence") in ("guided-only", "blind-only", "unabsorbed")
+        )
+    return False
+
+
+def valid_ledger_marker(item, analysis_sha256):
+    legacy = {"schema", "schema_version", "analysis_sha256"}
+    current = legacy | {"written_at", "written_seq", "episode_count"}
+    if (
+        not isinstance(item, dict)
+        or set(item) not in (legacy, legacy | {"written_at"}, legacy | {
+            "written_at", "written_seq",
+        }, current)
+        or item.get("schema") != "qq-observer.ledger-applied"
+        or item.get("schema_version") != 1
+        or item.get("analysis_sha256") != analysis_sha256
+        or ("written_seq" in item and not valid_written_seq(item["written_seq"]))
+        or (
+            "episode_count" in item
+            and (
+                not isinstance(item["episode_count"], int)
+                or isinstance(item["episode_count"], bool)
+                or item["episode_count"] < 0
+            )
+        )
+    ):
+        return False
+    if "written_at" not in item:
+        return True
+    if not isinstance(item["written_at"], str):
+        return False
+    try:
+        time_value(item["written_at"])
+    except ValueError:
+        return False
+    return True
+
+
+def valid_comparison_record(item):
+    required = {
+        "schema", "schema_version", "guided", "blind", "written_at", "candidates",
+    }
+    if (
+        not isinstance(item, dict)
+        or set(item) not in (required, required | {"written_seq"})
+        or item.get("schema") != COMPARISON_SCHEMA
+        or item.get("schema_version") != COMPARISON_VERSION
+        or not isinstance(item.get("guided"), str) or not item["guided"]
+        or not isinstance(item.get("blind"), str) or not item["blind"]
+        or not isinstance(item.get("written_at"), str)
+        or not isinstance(item.get("candidates"), list)
+        or ("written_seq" in item and not valid_written_seq(item["written_seq"]))
+    ):
+        return False
+    try:
+        time_value(item["written_at"])
+    except ValueError:
+        return False
+    identities = set()
+    for candidate in item["candidates"]:
+        if not isinstance(candidate, dict):
+            return False
+        required = {
+            "pr", "direction", "episode_title", "recurrence_key", "evidence",
+        }
+        if set(candidate) not in (required, required | {"signal_kind"}):
+            return False
+        event = {
+            "schema": LEDGER_SCHEMA, "schema_version": LEDGER_VERSION,
+            "ts": item["written_at"], "type": "signal_tune_candidate", **candidate,
+        }
+        if "written_seq" in item:
+            event["written_seq"] = item["written_seq"]
+        if not valid_ledger_event(event):
+            return False
+        identity = json.dumps(candidate, separators=(",", ":"), sort_keys=True)
+        if identity in identities:
+            return False
+        identities.add(identity)
+    return True
+
+
+def ledger_event(event_type, **fields):
+    return {
+        "schema": LEDGER_SCHEMA, "schema_version": LEDGER_VERSION,
+        "ts": utc_now(), "type": event_type, **fields,
+    }
+
+
+def mtime_timestamp(info):
+    seconds, nanoseconds = divmod(info.st_mtime_ns, 1_000_000_000)
+    value = dt.datetime.fromtimestamp(seconds, dt.timezone.utc) + dt.timedelta(
+        microseconds=nanoseconds // 1000,
+    )
+    return value.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def maximum_recorded_sequence():
+    maximum = 0
+    for run_dir in observer_run_directories():
+        for name in (".ledger-applied", "discussed.json", "comparison.json"):
+            path = run_dir / name
+            if not os.path.lexists(path):
+                continue
+            record = json_document(
+                read_regular(path, f"feed record {path}"), f"feed record {path}",
+            )
+            if not isinstance(record, dict):
+                fail(f"feed record has the wrong shape: {path}", 65)
+            if "written_seq" not in record:
+                continue
+            written_seq = record["written_seq"]
+            if not valid_written_seq(written_seq):
+                fail(f"invalid written_seq at {path}", 65)
+            maximum = max(maximum, written_seq)
+    events_path = observer_store_root(create=True) / "ledger" / "events.jsonl"
+    if os.path.lexists(events_path):
+        fd = open_ledger_events()
+        try:
+            events, _ = read_ledger_events(fd)
+        finally:
+            close_ledger_events(fd)
+        for event in events:
+            if "written_seq" in event:
+                maximum = max(maximum, event["written_seq"])
+    return maximum
+
+
+def read_high_water():
+    path = observer_store_root(create=True) / "ledger" / ".high-water"
+    if not os.path.lexists(os.fspath(path)):
+        return 0
+    raw = read_regular(path, "ledger high-water")
+    try:
+        text = raw.decode("ascii").strip()
+    except UnicodeDecodeError:
+        fail("ledger high-water is not ASCII", 65)
+    if not re.fullmatch(r"[0-9]{1,19}", text):
+        fail("ledger high-water is not a non-negative integer", 65)
+    return int(text)
+
+
+def replace_file(path, data):
+    path = Path(path)
+    ensure_directory(path.parent)
+    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    temporary = None
+    try:
+        name = f".{path.name}.tmp-{os.getpid()}-{os.urandom(8).hex()}"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            fd = os.open(name, flags, 0o600, dir_fd=directory)
+            temporary = name
+        except FileExistsError:
+            fail(f"cannot allocate temporary file for {path}", 65)
+        try:
+            view = memoryview(data)
+            while view:
+                written = os.write(fd, view)
+                view = view[written:]
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.rename(temporary, path.name, src_dir_fd=directory, dst_dir_fd=directory)
+        os.fsync(directory)
+    finally:
+        if temporary is not None:
+            try:
+                os.unlink(temporary, dir_fd=directory)
+            except FileNotFoundError:
+                pass
+        os.close(directory)
+
+
+def next_feed_sequence():
+    # Every caller holds the store-wide writer lock. The high-water file is
+    # the one ledger-state value that is never derived: it records the
+    # greatest sequence ever allocated, surviving record deletion and
+    # full-view rebuilds. Removing the whole ledger directory (the
+    # documented recovery path) resets it to the surviving records' maximum.
+    allocated = max(read_high_water(), maximum_recorded_sequence()) + 1
+    replace_file(
+        observer_store_root(create=True) / "ledger" / ".high-water",
+        f"{allocated}\n".encode("ascii"),
+    )
+    return allocated
+
+
+def open_ledger_writer_lock():
+    root = observer_store_root(create=True)
+    ledger_dir = root / "ledger"
+    ensure_directory(ledger_dir, root)
+    path = ledger_dir / ".lock"
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        info = None
+    except OSError as error:
+        fail(f"cannot inspect ledger writer lock: {error}", 65)
+    if info is not None and not stat.S_ISREG(info.st_mode):
+        fail("ledger writer lock is not a regular file", 65)
+    directory = None
+    try:
+        directory = os.open(ledger_dir, os.O_RDONLY | os.O_DIRECTORY)
+        resolved = os.path.realpath(f"/proc/self/fd/{directory}")
+        if resolved != os.fspath(ledger_dir):
+            fail("ledger directory changed during writer lock open", 65)
+        flags = os.O_RDWR | os.O_CREAT | os.O_NONBLOCK
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(path.name, flags, 0o600, dir_fd=directory)
+    except OSError as error:
+        fail(f"cannot open ledger writer lock: {error}", 65)
+    finally:
+        if directory is not None:
+            os.close(directory)
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        fail("ledger writer lock is not a regular file", 65)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+    except OSError as error:
+        os.close(fd)
+        fail(f"cannot acquire ledger writer lock: {error}", 65)
+    return fd
+
+
+def close_ledger_writer_lock(fd):
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def open_ledger_events():
+    root = observer_store_root(create=True)
+    ledger_dir = root / "ledger"
+    ensure_directory(ledger_dir, root)
+    path = ledger_dir / "events.jsonl"
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        info = None
+    except OSError as error:
+        fail(f"cannot inspect ledger event store: {error}", 65)
+    if info is not None and not stat.S_ISREG(info.st_mode):
+        fail("ledger event store is not a regular file", 65)
+    directory = None
+    try:
+        directory = os.open(ledger_dir, os.O_RDONLY | os.O_DIRECTORY)
+        resolved = os.path.realpath(f"/proc/self/fd/{directory}")
+        if resolved != os.fspath(ledger_dir):
+            fail("ledger directory changed during open", 65)
+        flags = os.O_RDWR | os.O_CREAT | os.O_NONBLOCK
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(path.name, flags, 0o600, dir_fd=directory)
+    except OSError as error:
+        fail(f"cannot open ledger event store: {error}", 65)
+    finally:
+        if directory is not None:
+            os.close(directory)
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        fail("ledger event store is not a regular file", 65)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH)
+    except OSError as error:
+        os.close(fd)
+        fail(f"cannot lock ledger event store: {error}", 65)
+    return fd
+
+
+def close_ledger_events(fd):
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def read_ledger_events(fd, since=None):
+    try:
+        os.lseek(fd, 0, os.SEEK_SET)
+        chunks = []
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    except OSError as error:
+        fail(f"cannot read ledger event store: {error}", 65)
+    events = []
+    unknown = 0
+    for raw in b"".join(chunks).splitlines():
+        try:
+            item = json.loads(
+                raw.decode("utf-8"),
+                parse_constant=lambda value: (_ for _ in ()).throw(
+                    ValueError(f"invalid JSON constant: {value}")
+                ),
+            )
+        except (UnicodeDecodeError, ValueError, RecursionError):
+            unknown += 1
+            continue
+        if not valid_ledger_event(item):
+            unknown += 1
+            continue
+        if since is not None and time_value(item["ts"]) < since:
+            continue
+        events.append(item)
+    events.sort(key=lambda event: (
+        "written_seq" in event, event.get("written_seq", 0),
+    ))
+    return events, unknown
+
+
+def ledger_event_bytes(event):
+    return (json.dumps(event, separators=(",", ":"), sort_keys=True) + "\n").encode(
+        "utf-8",
+    )
+
+
+def replace_ledger_events(events):
+    root = observer_store_root(create=True)
+    ledger_dir = root / "ledger"
+    ensure_directory(ledger_dir, root)
+    path = ledger_dir / "events.jsonl"
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        info = None
+    except OSError as error:
+        fail(f"cannot inspect ledger event store: {error}", 65)
+    if info is not None and not stat.S_ISREG(info.st_mode):
+        fail("ledger event store is not a regular file", 65)
+    data = b"".join(ledger_event_bytes(event) for event in events)
+    directory = os.open(ledger_dir, os.O_RDONLY | os.O_DIRECTORY)
+    temporary = None
+    try:
+        for _ in range(100):
+            temporary = f".events.jsonl.tmp-{os.getpid()}-{os.urandom(8).hex()}"
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+            try:
+                fd = os.open(temporary, flags, 0o600, dir_fd=directory)
+                break
+            except FileExistsError:
+                continue
+        else:
+            fail("cannot allocate temporary ledger event store", 65)
+        try:
+            view = memoryview(data)
+            while view:
+                view = view[os.write(fd, view):]
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(temporary, path.name, src_dir_fd=directory, dst_dir_fd=directory)
+        temporary = None
+        os.fsync(directory)
+    except OSError as error:
+        fail(f"cannot replace ledger event store: {error}", 65)
+    finally:
+        if temporary is not None:
+            try:
+                os.unlink(temporary, dir_fd=directory)
+            except FileNotFoundError:
+                pass
+        os.close(directory)
+
+
+def persist_ledger_marker(run_dir):
+    analysis_path = run_dir / "analysis.json"
+    if not regular_file(analysis_path):
+        fail(f"finalized analysis is missing: {analysis_path}", 65)
+    raw = read_regular(analysis_path, "finalized analysis")
+    analysis = minimal_analysis(json_document(raw, "finalized analysis"))
+    package_identity(run_dir, require_timestamp=True)
+    marker = run_dir / ".ledger-applied"
+    analysis_sha256 = hashlib.sha256(raw).hexdigest()
+    old_marker = existing_bytes(marker)
+    if old_marker is not None:
+        marker_record = json_document(old_marker, "ledger-applied marker")
+        canonical_marker = ledger_event_bytes(marker_record)
+        if (
+            not valid_ledger_marker(marker_record, analysis_sha256)
+            or old_marker != canonical_marker
+        ):
+            fail(f"append-only conflict at {marker}", 65)
+        return marker_record, False
+    marker_record = {
+        "schema": "qq-observer.ledger-applied", "schema_version": 1,
+        "analysis_sha256": analysis_sha256,
+        "episode_count": len(analysis["episodes"]),
+        "written_at": utc_now(), "written_seq": next_feed_sequence(),
+    }
+    atomic_append(marker, ledger_event_bytes(marker_record))
+    return marker_record, True
+
+
+def ledger_update_run(run_dir):
+    marker, marker_written = persist_ledger_marker(run_dir)
+    result = materialize_ledger()
+    source_events = [
+        event for event in result.pop("_added_events")
+        if event.get("written_seq") == marker.get("written_seq")
+    ]
+    findings = sum(event["type"] == "finding_seen" for event in source_events)
+    promoted = sum(event["type"] == "promoted" for event in source_events)
+    return {
+        "findings": findings, "promoted": promoted,
+        "events_skipped": marker.get("episode_count", 0) - findings,
+        "already_applied": not marker_written and not findings and not promoted,
+    }
+
+
+def ledger_update(values):
+    options = parse_flags(values, {"--run"})
+    if "--run" not in options:
+        fail("ledger-update requires --run")
+    run_dir = run_directory(options["--run"])
+    result = ledger_update_run(run_dir)
+    emit({"status": "updated", "run_dir": os.fspath(run_dir), **result})
+
+
+def comparison_candidate_content(event):
+    content = {
+        field: event[field]
+        for field in ("pr", "direction", "episode_title", "recurrence_key", "evidence")
+    }
+    if "signal_kind" in event:
+        content["signal_kind"] = event["signal_kind"]
+    return content
+
+
+def comparison_candidate_identity(event):
+    return json.dumps(
+        comparison_candidate_content(event), separators=(",", ":"), sort_keys=True,
+    )
+
+
+def replay_record_metadata(path, info, field, label):
+    record = json_document(read_regular(path, label), label)
+    timestamp = record.get(field) if isinstance(record, dict) else None
+    if timestamp is None:
+        timestamp = mtime_timestamp(info)
+    elif not isinstance(timestamp, str):
+        fail(f"invalid internal timestamp at {path}", 65)
+    try:
+        timestamp_value = time_value(timestamp)
+    except ValueError:
+        fail(f"invalid internal timestamp at {path}", 65)
+    has_written_seq = isinstance(record, dict) and "written_seq" in record
+    written_seq = record["written_seq"] if has_written_seq else None
+    if has_written_seq and not valid_written_seq(written_seq):
+        fail(f"invalid written_seq at {path}", 65)
+    return timestamp, timestamp_value, written_seq
+
+
+def materialize_findings(
+    run_dir, written_seq, events, seen_findings, seen_promotions, prs_by_key,
+    kinds_by_key,
+):
+    analysis_path = run_dir / "analysis.json"
+    raw = read_regular(analysis_path, "finalized analysis")
+    analysis = minimal_analysis(json_document(raw, "finalized analysis"))
+    marker_path = run_dir / ".ledger-applied"
+    marker_raw = read_regular(marker_path, "ledger-applied marker")
+    marker = json_document(marker_raw, "ledger-applied marker")
+    if (
+        not valid_ledger_marker(marker, hashlib.sha256(raw).hexdigest())
+        or marker_raw != ledger_event_bytes(marker)
+    ):
+        fail(f"invalid ledger-applied marker at {marker_path}", 65)
+    pr, variant, timestamp = package_identity(run_dir, require_timestamp=True)
+    timestamp = time_value(timestamp).isoformat(timespec="milliseconds").replace(
+        "+00:00", "Z",
+    )
+    sequence_fields = {} if written_seq is None else {"written_seq": written_seq}
+    for index, episode in enumerate(analysis["episodes"], 1):
+        confidence = episode["confidence"]
+        key = episode["recurrence_key"]
+        kind = episode["kind"]
+        if confidence not in CONFIDENCE_WEIGHT:
+            fail(f"analysis episode has invalid confidence: {confidence}", 65)
+        if not key or not kind or not episode["title"]:
+            fail("analysis episode has an empty ledger identity", 65)
+        cost = episode["cost"]
+        event = ledger_event(
+            "finding_seen", ts=timestamp, pr=pr, variant=variant,
+            recurrence_key=key, kind=kind, title=episode["title"],
+            rank=episode.get("rank", index), confidence=confidence,
+            no_signal=episode.get("no_signal", False),
+            cost={field: cost[field] for field in ("turns", "tokens", "duration_ms")},
+            **sequence_fields,
+        )
+        if not valid_ledger_event(event):
+            fail(f"analysis episode {index} cannot be represented as a ledger event", 65)
+        episode_digest = hashlib.sha256(
+            json.dumps(
+                {
+                    field: episode[field]
+                    for field in (
+                        "recurrence_key", "kind", "title", "what_happened",
+                        "root_cause", "root_cause_location", "remedy",
+                        "confidence", "confidence_why",
+                    )
+                } | {
+                    "evidence": [
+                        {"entries": item["entries"], "quote": item["quote"]}
+                        for item in episode["evidence"]
+                    ]
+                },
+                separators=(",", ":"), sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        identity = (pr, key, kind, episode["title"], episode_digest)
+        if identity not in seen_findings:
+            events.append(event)
+            seen_findings.add(identity)
+        prs_by_key.setdefault(key, set()).add(pr)
+        kinds_by_key[key] = kind
+    for key in sorted(prs_by_key):
+        prs = sorted(prs_by_key[key])
+        if len(prs) >= 2 and key not in seen_promotions:
+            events.append(ledger_event(
+                "promoted", ts=timestamp, recurrence_key=key,
+                kind=kinds_by_key[key], prs=prs, **sequence_fields,
+            ))
+            seen_promotions.add(key)
+
+
+def materialize_disposition(run_dir, timestamp, written_seq, events, seen):
+    path = run_dir / "discussed.json"
+    mark = json_document(read_regular(path, "discussed mark"), "discussed mark")
+    pr, _, _ = package_identity(run_dir)
+    if (
+        not valid_ledger_event(mark) or mark.get("type") != "disposition"
+        or mark.get("pr") != pr
+    ):
+        fail(f"invalid discussed mark at {path}", 65)
+    identity = (pr, json.dumps(mark["outcomes"], separators=(",", ":"), sort_keys=True))
+    if identity in seen:
+        return
+    sequence_fields = {} if written_seq is None else {"written_seq": written_seq}
+    events.append(ledger_event(
+        "disposition", ts=timestamp, pr=pr, outcomes=mark["outcomes"],
+        **sequence_fields,
+    ))
+    seen.add(identity)
+
+
+def materialize_comparison(run_dir, timestamp, written_seq, events, seen):
+    path = run_dir / "comparison.json"
+    record = json_document(read_regular(path, "comparison record"), "comparison record")
+    pr, variant, _ = package_identity(run_dir)
+    if (
+        not valid_comparison_record(record) or variant != "guided"
+        or record.get("guided") != os.fspath(run_dir)
+        or any(candidate["pr"] != pr for candidate in record.get("candidates", []))
+    ):
+        fail(f"invalid comparison record at {path}", 65)
+    sequence_fields = {} if written_seq is None else {"written_seq": written_seq}
+    for candidate in record["candidates"]:
+        identity = comparison_candidate_identity(candidate)
+        if identity in seen:
+            continue
+        event = ledger_event(
+            "signal_tune_candidate", ts=timestamp, **candidate, **sequence_fields,
+        )
+        if not valid_ledger_event(event):
+            fail(f"invalid comparison candidate at {path}", 65)
+        events.append(event)
+        seen.add(identity)
+
+
+def materialize_ledger():
+    run_dirs = observer_run_directories()
+    replay_items = []
+    replayed_runs = set()
+    sequenced_records = {}
+    for run_dir in run_dirs:
+        run_items = []
+        marker = run_dir / ".ledger-applied"
+        if (
+            not regular_file(run_dir / "analysis_failed.json")
+            and regular_file(run_dir / "analysis.json") and regular_file(marker)
+        ):
+            info = os.lstat(marker)
+            timestamp, timestamp_value, written_seq = replay_record_metadata(
+                marker, info, "written_at", "ledger-applied marker",
+            )
+            run_items.append((
+                "finding_seen", marker, info, timestamp, timestamp_value, written_seq,
+            ))
+        for name, kind, field, label in (
+            ("discussed.json", "disposition", "ts", "discussed mark"),
+            ("comparison.json", "signal_tune_candidate", "written_at", "comparison record"),
+        ):
+            path = run_dir / name
+            if not os.path.lexists(path):
+                continue
+            try:
+                info = os.lstat(path)
+            except OSError as error:
+                fail(f"cannot inspect replay record {path}: {error}", 65)
+            if not stat.S_ISREG(info.st_mode):
+                fail(f"replay record is not a regular file: {path}", 65)
+            timestamp, timestamp_value, written_seq = replay_record_metadata(
+                path, info, field, label,
+            )
+            run_items.append((kind, path, info, timestamp, timestamp_value, written_seq))
+        if run_items:
+            pr, _, _ = package_identity(run_dir)
+            for kind, path, info, timestamp, timestamp_value, written_seq in run_items:
+                if written_seq is None:
+                    sort_key = (0, timestamp_value, info.st_mtime_ns, pr, kind)
+                else:
+                    if written_seq in sequenced_records:
+                        fail(
+                            f"duplicate written_seq {written_seq} at "
+                            f"{sequenced_records[written_seq]} and {path}", 65,
+                        )
+                    sequenced_records[written_seq] = path
+                    sort_key = (1, written_seq)
+                replay_items.append((
+                    sort_key, kind, run_dir, timestamp, written_seq,
+                ))
+            replayed_runs.add(run_dir)
+    replay_items.sort(key=lambda item: item[0])
+
+    events = []
+    seen_findings = set()
+    seen_promotions = set()
+    seen_dispositions = set()
+    seen_candidates = set()
+    prs_by_key = {}
+    kinds_by_key = {}
+    for _, kind, run_dir, timestamp, written_seq in replay_items:
+        if kind == "finding_seen":
+            materialize_findings(
+                run_dir, written_seq, events, seen_findings, seen_promotions,
+                prs_by_key, kinds_by_key,
+            )
+        elif kind == "disposition":
+            materialize_disposition(
+                run_dir, timestamp, written_seq, events, seen_dispositions,
+            )
+        else:
+            materialize_comparison(
+                run_dir, timestamp, written_seq, events, seen_candidates,
+            )
+
+    fd = open_ledger_events()
+    try:
+        previous, _ = read_ledger_events(fd)
+    finally:
+        close_ledger_events(fd)
+    previous_bytes = {ledger_event_bytes(event) for event in previous}
+    added_events = [event for event in events if ledger_event_bytes(event) not in previous_bytes]
+    replace_ledger_events(events)
+    return {
+        "runs_seen": len(run_dirs), "runs_replayed": len(replayed_runs),
+        "events_appended": len(added_events),
+        "events_skipped": len(events) - len(added_events),
+        "_added_events": added_events,
+    }
+
+
+def ledger_rebuild(values):
+    if values:
+        fail(f"invalid or incomplete option: {values[0]}")
+    result = materialize_ledger()
+    result.pop("_added_events")
+    emit(result)
+
+
+def mark_discussed(values):
+    options = parse_flags(values, {"--run", "--outcomes"})
+    if set(options) != {"--run", "--outcomes"}:
+        fail("mark-discussed requires --run and --outcomes")
+    run_dir = run_directory(options["--run"])
+    pr, _, _ = package_identity(run_dir)
+    outcomes_path = canonical_existing(options["--outcomes"], "outcomes input")
+    outcomes = json_document(read_regular(outcomes_path, "outcomes input"), "outcomes input")
+    if not valid_outcomes(outcomes):
+        fail("outcomes schema violation", 65)
+    path = run_dir / "discussed.json"
+    old = existing_bytes(path)
+    if old is not None:
+        event = json_document(old, "discussed mark")
+        if not valid_ledger_event(event) or event.get("type") != "disposition":
+            fail(f"invalid discussed mark at {path}", 65)
+        if event["pr"] != pr or event["outcomes"] != outcomes:
+            fail(f"append-only conflict at {path}", 65)
+        mark_written = False
+    else:
+        event = ledger_event(
+            "disposition", pr=pr, outcomes=outcomes,
+            written_seq=next_feed_sequence(),
+        )
+        mark_written = atomic_append(path, ledger_event_bytes(event))
+    result = materialize_ledger()
+    event_added = any(
+        item["type"] == "disposition" and item["pr"] == pr
+        and item["outcomes"] == outcomes for item in result["_added_events"]
+    )
+    status = "discussed" if mark_written or event_added else "already discussed"
+    emit({"status": status, "run_dir": os.fspath(run_dir)})
+
+
+def observer_run_rows(since=None):
+    rows = []
+    for run_dir in observer_run_directories():
+        pr, variant, timestamp = package_identity(run_dir, require_timestamp=True)
+        timestamp_value = time_value(timestamp)
+        if since is not None and timestamp_value < since:
+            continue
+        analysis_present = regular_file(run_dir / "analysis.json")
+        analyzed = analysis_present and regular_file(run_dir / ".ledger-applied")
+        failed = regular_file(run_dir / "analysis_failed.json")
+        if analysis_present and failed:
+            fail(f"observer run has both terminal markers: {run_dir}", 65)
+        discussed_path = run_dir / "discussed.json"
+        discussed = regular_file(discussed_path)
+        if os.path.lexists(discussed_path) and not discussed:
+            fail(f"discussed mark is not a regular file: {discussed_path}", 65)
+        if discussed:
+            mark = json_document(read_regular(discussed_path, "discussed mark"), "discussed mark")
+            if (
+                not valid_ledger_event(mark) or mark.get("type") != "disposition"
+                or mark.get("pr") != pr
+            ):
+                fail(f"invalid discussed mark at {discussed_path}", 65)
+        rows.append({
+            "pr": pr, "variant": variant, "analyzed": analyzed,
+            "failed": failed, "discussed": discussed, "ts": timestamp,
+            "_time": timestamp_value,
+        })
+    return rows
+
+
+def rounds(values):
+    if values:
+        fail(f"invalid or incomplete option: {values[0]}")
+    rows = observer_run_rows()
+    rows.sort(key=lambda row: (
+        row["discussed"], -row["_time"].timestamp(), row["pr"], row["variant"],
+    ))
+    for row in rows:
+        row.pop("_time")
+    print(json.dumps(rows, separators=(",", ":"), sort_keys=True))
+
+
+def digest_score_rows(events):
+    findings = {}
+    promoted = set()
+    for position, event in enumerate(events):
+        if event["type"] == "finding_seen":
+            findings.setdefault(event["recurrence_key"], []).append((position, event))
+        elif event["type"] == "promoted":
+            promoted.add(event["recurrence_key"])
+    latest_by_key = {
+        key: max(history, key=lambda entry: entry[0])[1]
+        for key, history in findings.items()
+    }
+    kind_by_key = {key: event["kind"] for key, event in latest_by_key.items()}
+    key_verdict = {}
+    kind_verdict = {}
+    newest_first = reversed(list(enumerate(events)))
+    for _, event in newest_first:
+        if event["type"] != "disposition":
+            continue
+        for outcome in event["outcomes"]:
+            key = outcome["recurrence_key"]
+            verdict = outcome["verdict"]
+            key_verdict.setdefault(key, verdict)
+            if key in kind_by_key:
+                kind_verdict.setdefault(kind_by_key[key], verdict)
+    rows = []
+    for key, history in findings.items():
+        latest = latest_by_key[key]
+        prs = sorted({event["pr"] for _, event in history})
+        verdict = key_verdict.get(key, kind_verdict.get(latest["kind"]))
+        multiplier = VERDICT_MULTIPLIER.get(verdict, 1.0)
+        score = len(prs) * CONFIDENCE_WEIGHT[latest["confidence"]] * multiplier
+        rows.append({
+            "key": key, "title": latest["title"], "kind": latest["kind"],
+            "confidence": [event["confidence"] for _, event in history],
+            "prs": prs, "count": len(prs), "verdict": verdict or "none",
+            "multiplier": multiplier, "score": score, "promoted": key in promoted,
+            "_latest_time": time_value(latest["ts"]),
+        })
+    rows.sort(key=lambda row: (-row["score"], row["key"]))
+    return rows
+
+
+def score_text(value):
+    return f"{value:.15g}"
+
+
+def digest(values):
+    options = parse_flags(values, {"--since"})
+    since = None
+    if "--since" in options:
+        since = parse_time(options["--since"], "--since")
+    fd = open_ledger_events()
+    try:
+        events, unknown = read_ledger_events(fd)
+    finally:
+        close_ledger_events(fd)
+    rows = digest_score_rows(events)
+    if since is not None:
+        rows = [row for row in rows if row["_latest_time"] >= since]
+    generated = utc_now()
+    lines = [
+        "# qq observer digest", "", f"Generated: `{generated}`", "",
+        "Scoring constants: confidence `high=3`, `medium=2`, `low=1`; "
+        "disposition `accepted=1.5`, `rejected=0.5`, default `1.0`.", "",
+    ]
+
+    def add_findings(title, selected):
+        lines.extend([
+            f"## {title}", "",
+            "| Score | Recurrences | Recurrence key | Latest title | Kind | PRs | Confidence history | Disposition |",
+            "| ---: | ---: | --- | --- | --- | --- | --- | --- |",
+        ])
+        if not selected:
+            lines.append("| — | — | None | — | — | — | — | — |")
+        for row in selected:
+            lines.append(
+                f"| {score_text(row['score'])} | {row['count']} | "
+                f"`{markdown_inline(row['key'])}` | {markdown_inline(row['title'])} | "
+                f"`{markdown_inline(row['kind'])}` | "
+                f"{', '.join('#' + str(pr) for pr in row['prs'])} | "
+                f"{', '.join(row['confidence'])} | {row['verdict']} "
+                f"(×{score_text(row['multiplier'])}) |"
+            )
+        lines.append("")
+
+    add_findings("Opportunities ledger", [row for row in rows if row["promoted"]])
+    add_findings("Open findings", [row for row in rows if not row["promoted"]])
+    lines.extend([
+        "## Signal-tuning candidates", "",
+        "| PR | Direction | Evidence | Signal kind | Episode title | Recurrence key |",
+        "| ---: | --- | --- | --- | --- | --- |",
+    ])
+    candidates = [
+        event for event in events
+        if event["type"] == "signal_tune_candidate"
+        and (since is None or time_value(event["ts"]) >= since)
+    ]
+    if not candidates:
+        lines.append("| — | None | — | — | — | — |")
+    for event in candidates:
+        lines.append(
+            f"| #{event['pr']} | {event['direction']} | {event['evidence']} | "
+            f"{markdown_inline(event.get('signal_kind', '—'))} | "
+            f"{markdown_inline(event['episode_title'])} | "
+            f"`{markdown_inline(event['recurrence_key'])}` |"
+        )
+    run_rows = observer_run_rows(since=since)
+    finalized = sum(row["analyzed"] for row in run_rows)
+    failed = sum(row["failed"] for row in run_rows)
+    lines.extend([
+        "", f"Coverage: {finalized} finalized, {failed} failed.",
+        f"Unknown ledger entries: {unknown}.", "",
+    ])
+    data = "\n".join(lines).encode("utf-8")
+    root = observer_store_root(create=True)
+    suffix = 1
+    while True:
+        suffix_text = "" if suffix == 1 else f"-{suffix}"
+        path = root / "digests" / f"{generated}{suffix_text}.md"
+        if atomic_append(path, data, content_idempotent=False):
+            break
+        suffix += 1
+    sys.stdout.write(data.decode("utf-8"))
+
+
+def analysis_for_comparison(run_dir, expected_variant):
+    if not regular_file(run_dir / "analysis.json"):
+        fail(f"comparison run lacks analysis.json: {run_dir}", 65)
+    analysis = minimal_analysis(json_document(
+        read_regular(run_dir / "analysis.json", "comparison analysis"),
+        "comparison analysis",
+    ))
+    pr, variant, _ = package_identity(run_dir)
+    if variant != expected_variant:
+        fail(f"comparison {expected_variant} run has variant {variant}", 65)
+    return pr, analysis
+
+
+def record_comparison(values):
+    options = parse_flags(values, {"--guided", "--blind"})
+    if set(options) != {"--guided", "--blind"}:
+        fail("record-comparison requires --guided and --blind")
+    guided_dir = run_directory(options["--guided"])
+    blind_dir = run_directory(options["--blind"])
+    guided_pr, guided = analysis_for_comparison(guided_dir, "guided")
+    blind_pr, blind = analysis_for_comparison(blind_dir, "blind")
+    if guided_pr != blind_pr:
+        fail("comparison runs have different PR numbers", 65)
+    guided_by_key = {episode["recurrence_key"]: episode for episode in guided["episodes"]}
+    blind_by_key = {episode["recurrence_key"]: episode for episode in blind["episodes"]}
+    if any(not key for key in guided_by_key) or any(not key for key in blind_by_key):
+        fail("comparison analysis has an empty recurrence key", 65)
+    candidates = []
+    for key in sorted(guided_by_key.keys() - blind_by_key.keys()):
+        episode = guided_by_key[key]
+        candidates.append({
+            "pr": guided_pr, "direction": "prune",
+            "episode_title": episode["title"], "recurrence_key": key,
+            "evidence": "guided-only",
+        })
+    for key in sorted(blind_by_key.keys() - guided_by_key.keys()):
+        episode = blind_by_key[key]
+        candidates.append({
+            "pr": guided_pr, "direction": "promote",
+            "episode_title": episode["title"], "recurrence_key": key,
+            "evidence": "blind-only",
+        })
+    guided_kinds = {episode["kind"] for episode in guided["episodes"]}
+    dropped = {}
+    for signal in guided["dropped_signals"]:
+        dropped.setdefault(signal["kind"], signal)
+    for kind in sorted(dropped.keys() - guided_kinds):
+        signal = dropped[kind]
+        candidates.append({
+            "pr": guided_pr, "direction": "prune", "signal_kind": kind,
+            "episode_title": f"Unabsorbed {kind} signal",
+            "recurrence_key": f"signal:{kind}", "evidence": "unabsorbed",
+        })
+    path = guided_dir / "comparison.json"
+    old = existing_bytes(path)
+    if old is not None:
+        record = json_document(old, "comparison record")
+        if (
+            not valid_comparison_record(record)
+            or record["guided"] != os.fspath(guided_dir)
+            or record["blind"] != os.fspath(blind_dir)
+            or record["candidates"] != candidates
+        ):
+            fail(f"append-only conflict at {path}", 65)
+        status = "already recorded"
+    else:
+        record = {
+            "schema": COMPARISON_SCHEMA, "schema_version": COMPARISON_VERSION,
+            "guided": os.fspath(guided_dir), "blind": os.fspath(blind_dir),
+            "written_at": utc_now(), "written_seq": next_feed_sequence(),
+            "candidates": candidates,
+        }
+        if not valid_comparison_record(record):
+            fail("comparison produced an invalid durable record", 65)
+        atomic_append(path, ledger_event_bytes(record))
+        status = "recorded"
+    materialize_ledger()
+    emit({"status": status, "pr": guided_pr, "candidates": len(candidates)})
 
 
 def markdown_inline(value):
@@ -1537,19 +2714,43 @@ def finalize(values):
     for path, data in writes:
         if atomic_append(path, data):
             changed.append(path.name)
+    if "--analysis" in options:
+        ledger_update_run(run_dir)
     emit({"status": "finalized", "run_dir": os.fspath(run_dir), "written": changed})
 
 
-if command == "assemble":
-    assemble(args)
-elif command == "verify-delivery":
-    verify_delivery(args)
-elif command == "render-doc":
-    render_doc(args)
-elif command == "finalize":
-    finalize(args)
-else:
-    fail(f"unknown package command: {command}")
+ledger_writer = None
+try:
+    if command in {
+        "finalize", "ledger-update", "ledger-rebuild", "mark-discussed",
+        "record-comparison",
+    }:
+        ledger_writer = open_ledger_writer_lock()
+    if command == "assemble":
+        assemble(args)
+    elif command == "verify-delivery":
+        verify_delivery(args)
+    elif command == "render-doc":
+        render_doc(args)
+    elif command == "finalize":
+        finalize(args)
+    elif command == "ledger-update":
+        ledger_update(args)
+    elif command == "ledger-rebuild":
+        ledger_rebuild(args)
+    elif command == "digest":
+        digest(args)
+    elif command == "mark-discussed":
+        mark_discussed(args)
+    elif command == "rounds":
+        rounds(args)
+    elif command == "record-comparison":
+        record_comparison(args)
+    else:
+        fail(f"unknown package command: {command}")
+finally:
+    if ledger_writer is not None:
+        close_ledger_writer_lock(ledger_writer)
 PY_ASSEMBLER
     ;;
 esac

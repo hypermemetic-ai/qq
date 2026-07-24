@@ -97,16 +97,21 @@ export QQ_DISPATCH_RUNTIME_ROOT="$runtime"
 mkdir -p "$runtime/async-subagent-runs" "$runtime/runs"
 parent_strong="$tmp/2026-07-20T00-00-00_parent-strong.jsonl"
 parent_weak="$tmp/2026-07-20T00-00-00_parent-weak.jsonl"
+parent_weak_missing="$tmp/2026-07-20T00-00-00_parent-weak-missing.jsonl"
 cat >"$parent_strong" <<'JSONL'
 {"type":"session","version":3,"timestamp":"2026-07-20T10:00:00Z","branch":"feature"}
 {"type":"message","timestamp":"2026-07-20T10:00:01Z","message":{"role":"user","content":"work feature"}}
 JSONL
 cat >"$parent_weak" <<'JSONL'
 {"type":"session","version":3,"timestamp":"2026-07-20T10:00:00Z"}
-{"type":"message","timestamp":"2026-07-20T10:00:01Z","message":{"role":"user","content":"retired feature worktree"}}
+{"type":"message","timestamp":"2026-07-20T10:00:01Z","message":{"role":"user","content":"retired feature and solo worktrees"}}
+JSONL
+cat >"$parent_weak_missing" <<'JSONL'
+{"type":"session","version":3,"timestamp":"2026-07-20T10:00:00Z"}
+{"type":"message","timestamp":"2026-07-20T10:00:01Z","message":{"role":"user","content":"retired feature worktree with missing delegate transcript"}}
 JSONL
 make_run() {
-  local run_id="$1" cwd="$2" parent="$3" session_hash="$4"
+  local run_id="$1" cwd="$2" parent="$3" session_hash="$4" transcript_text="${5:-delegate $1}"
   local session_dir="$TMPDIR/pi-subagent-sessions/$session_hash"
   local session_file="$session_dir/run-0/session.jsonl"
   mkdir -p "$runtime/async-subagent-runs/$run_id" "$runtime/runs/$run_id" \
@@ -117,16 +122,21 @@ make_run() {
     startedAt:"2026-07-20T10:00:00Z",lastActivityAt:1784541600000,
     mode:"async",isNested:false,state:"complete"
   }' >"$runtime/async-subagent-runs/$run_id/status.json"
-  cat >"$session_file" <<JSONL
-{"type":"session","version":3,"timestamp":"2026-07-20T10:00:00Z"}
-{"type":"message","timestamp":"2026-07-20T10:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"delegate $run_id"}],"usage":{"input":2,"output":3}}}
-JSONL
+  jq -cn --arg text "$transcript_text" '
+    {type:"session",version:3,timestamp:"2026-07-20T10:00:00Z"},
+    {type:"message",timestamp:"2026-07-20T10:00:02Z",message:{role:"assistant",content:[{type:"text",text:$text}],usage:{input:2,output:3}}}
+  ' >"$session_file"
 }
 make_run strong-run "$strong_worktree" "$parent_strong" strong-hash
-make_run weak-run "$worktree_root/retired" "$parent_weak" weak-hash
+make_run weak-run "$worktree_root/retired-a" "$parent_weak" weak-hash 'delegate feature work'
+make_run weak-other-run "$worktree_root/retired-b" "$parent_weak" weak-other-hash 'delegate solo work'
 make_run missing-run "$strong_worktree" "$parent_strong" missing-hash
 missing_session_file="$TMPDIR/pi-subagent-sessions/missing-hash/run-0/session.jsonl"
 rm "$missing_session_file"
+make_run weak-missing-run "$worktree_root/retired-missing" "$parent_weak_missing" \
+  weak-missing-hash 'delegate feature work'
+weak_missing_session_file="$TMPDIR/pi-subagent-sessions/weak-missing-hash/run-0/session.jsonl"
+rm "$weak_missing_session_file"
 mkdir -p "$TMPDIR/pi-subagent-sessions/strong-hash/async-strong-run"
 cat >"$TMPDIR/pi-subagent-sessions/strong-hash/async-strong-run/session.jsonl" <<'JSONL'
 {"type":"session","version":3,"timestamp":"2026-07-20T10:30:00Z"}
@@ -148,14 +158,22 @@ assert_file_contains "$tmp/outside-main.stderr" 'not an ancestor of local main'
 
 "$OBSERVE" assemble --pr 41 --repo "$repo" >"$tmp/assembled-41.json"
 run_41="$XDG_STATE_HOME/qq/observer/runs/pr-41"
-jq -e --arg repo "$(realpath "$repo")" --arg missing "$missing_session_file" '
+jq -e --arg repo "$(realpath "$repo")" --arg missing "$missing_session_file" \
+  --arg weak_other "$TMPDIR/pi-subagent-sessions/weak-other-hash/run-0/session.jsonl" \
+  --arg weak_missing "$weak_missing_session_file" '
   .schema == "qq-observer.package" and .schema_version == 1
   and .pr == 41 and .branch == "feature" and .repo == $repo
   and .variant == "guided"
   and ([.sessions[] | select(.role == "delegate" and .evidence == "live-worktree-branch")] | length) == 2
-  and ([.sessions[] | select(.role == "delegate" and .evidence == "retired-worktree-content")] | length) == 1
+  and ([.sessions[] | select(
+    .role == "delegate" and .evidence == "retired-worktree-content" and .run_id == "weak-run"
+  )] | length) == 1
+  and ([.sessions[] | select(.run_id == "weak-other-run" or .run_id == "weak-missing-run")] | length) == 0
   and ([.sessions[] | select(.role == "accountable" and .evidence == "parent-of-delegate")] | length) == 2
+  and ([.sessions[] | select(.label == "accountable-parent-weak-missing")] | length) == 0
   and ([.unknown_entries[] | select(.path == $missing and (.reason | length > 0))] | length) == 1
+  and ([.unknown_entries[] | select(.path == $weak_other and (.reason | contains("does not mention")))] | length) == 1
+  and ([.unknown_entries[] | select(.path == $weak_missing and (.reason | contains("missing")))] | length) == 1
   and ([.unknown_entries[] | select(.path | endswith("spans.jsonl"))] | length) == 1
   and ([.unknown_entries[] | select(.path | endswith("malformed-run/status.json"))] | length) == 1
 ' "$run_41/package.json" >/dev/null || fail 'external delegate sessions were not assembled defensively'
