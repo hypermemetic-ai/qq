@@ -5,6 +5,10 @@ import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
 const OBSERVE_COMMAND = "bin/qq-observe";
+const DIGEST_CHOICE = "Discuss current digest";
+const DIGEST_TABLE_HEADER = "| Score | Recurrences | Recurrence key | Latest title | Kind | PRs | Confidence history | Disposition |";
+const DIGEST_TABLE_DIVIDER = "| ---: | ---: | --- | --- | --- | --- | --- | --- |";
+const DIGEST_EMPTY_ROW = ["—", "—", "None", "—", "—", "—", "—", "—"];
 const VERDICTS = ["accepted", "rejected", "reshaped", "skip"];
 
 function executionReason(execution, fallback) {
@@ -16,6 +20,113 @@ function notifyNeedsUi(ctx) {
     "The architect flow needs an interactive Pi session.",
     "warning",
   );
+}
+
+function digestCells(line) {
+  if (!line.startsWith("|") || !line.endsWith("|")) {
+    throw new Error("digest table row is not pipe-delimited");
+  }
+  const cells = [];
+  let start = 1;
+  function addCell(end) {
+    const cell = line.slice(start, end);
+    if (!cell.startsWith(" ") || !cell.endsWith(" ")) {
+      throw new Error("digest table cell padding is malformed");
+    }
+    cells.push(cell.slice(1, -1));
+    start = end + 1;
+  }
+  for (let index = 1; index < line.length - 1; index += 1) {
+    if (line[index] !== "|") continue;
+    let escapes = 0;
+    for (let before = index - 1; before >= 0 && line[before] === "\\"; before -= 1) {
+      escapes += 1;
+    }
+    if (escapes % 2 === 0) addCell(index);
+  }
+  addCell(line.length - 1);
+  if (cells.length !== 8) throw new Error("digest table row has the wrong width");
+  return cells;
+}
+
+function digestText(value) {
+  return value.replace(/\\([\\|])/g, "$1");
+}
+
+function digestCode(value) {
+  if (value.length < 3 || !value.startsWith("`") || !value.endsWith("`")) {
+    throw new Error("digest code cell is malformed");
+  }
+  return digestText(value.slice(1, -1));
+}
+
+function parseDigestTable(lines, heading, label) {
+  const position = lines.indexOf(heading);
+  if (position < 0 || position !== lines.lastIndexOf(heading)) {
+    throw new Error("digest table heading is missing or duplicated");
+  }
+  if (
+    lines[position + 1] !== "" ||
+    lines[position + 2] !== DIGEST_TABLE_HEADER ||
+    lines[position + 3] !== DIGEST_TABLE_DIVIDER
+  ) {
+    throw new Error("digest table header is malformed");
+  }
+
+  const rows = [];
+  let index = position + 4;
+  while (index < lines.length && lines[index] !== "") {
+    rows.push(digestCells(lines[index]));
+    index += 1;
+  }
+  if (rows.length === 0 || index === lines.length) {
+    throw new Error("digest table is incomplete");
+  }
+  if (rows.some((row) => row.every((cell, cellIndex) => cell === DIGEST_EMPTY_ROW[cellIndex]))) {
+    if (rows.length !== 1) throw new Error("digest empty sentinel is mixed with findings");
+    return { position, text: `${label}\n- None` };
+  }
+
+  const rendered = rows.map((row) => {
+    const [score, recurrences, key, title, kind, prs, confidence, disposition] = row;
+    if (
+      !/^(?:[1-9][0-9]*(?:\.[0-9]+)?|0\.[0-9]+)(?:e[+-]?[0-9]+)?$/i.test(score) ||
+      !/^[1-9][0-9]*$/.test(recurrences) ||
+      digestText(title).length === 0 ||
+      !/^#[1-9][0-9]*(, #[1-9][0-9]*)*$/.test(prs) ||
+      !/^(high|medium|low)(, (high|medium|low))*$/.test(confidence) ||
+      !/^(none|accepted|rejected|reshaped) \(×(0\.5|1|1\.5)\)$/.test(disposition)
+    ) {
+      throw new Error("digest finding row has the wrong shape");
+    }
+    const recurrenceKey = digestCode(key);
+    const findingKind = digestCode(kind);
+    if (recurrenceKey.length === 0 || findingKind.length === 0) {
+      throw new Error("digest finding identity is empty");
+    }
+    return `- Score: ${score}; Recurrences: ${recurrences}; Recurrence key: ${recurrenceKey}; Latest title: ${digestText(title)}; Kind: ${findingKind}; PRs: ${prs}; Confidence history: ${confidence}; Disposition: ${disposition}`;
+  });
+  return { position, text: `${label}\n${rendered.join("\n")}` };
+}
+
+function parseDigest(stdout) {
+  if (typeof stdout !== "string" || stdout.trim() === "" || stdout.includes("\r")) {
+    throw new Error("empty or non-canonical output");
+  }
+  const lines = stdout.split("\n");
+  if (
+    lines[0] !== "# qq observer digest" ||
+    lines[1] !== "" ||
+    !/^Generated: `[^`]+`$/.test(lines[2] ?? "")
+  ) {
+    throw new Error("digest preamble is malformed");
+  }
+  const opportunities = parseDigestTable(lines, "## Opportunities ledger", "Opportunities ledger");
+  const open = parseDigestTable(lines, "## Open findings", "Open findings");
+  if (opportunities.position >= open.position) {
+    throw new Error("digest ranked tables are out of order");
+  }
+  return { markdown: stdout, selectorTitle: `Current observer digest\n\n${opportunities.text}\n\n${open.text}` };
 }
 
 function parseRounds(stdout) {
@@ -112,6 +223,33 @@ export default function register(pi, deps = {}) {
   const setMode = deps.chmod ?? chmod;
   const remove = deps.rm ?? rm;
 
+  async function readDigest(ctx) {
+    let execution;
+    try {
+      execution = await run(OBSERVE_COMMAND, ["digest"], { cwd: ctx.cwd });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(`Cannot load observer digest: ${reason}`, "error");
+      return undefined;
+    }
+    if (execution?.killed || execution?.code !== 0) {
+      ctx.ui.notify(
+        `Cannot load observer digest: ${executionReason(execution, "qq-observe digest failed")}`,
+        "error",
+      );
+      return undefined;
+    }
+    try {
+      return parseDigest(execution.stdout);
+    } catch {
+      ctx.ui.notify(
+        "Cannot load observer digest: qq-observe digest returned unreadable or incomplete Markdown.",
+        "error",
+      );
+      return undefined;
+    }
+  }
+
   async function readRounds(ctx) {
     let execution;
     try {
@@ -140,13 +278,15 @@ export default function register(pi, deps = {}) {
   }
 
   pi.registerCommand("architect", {
-    description: "Select an observer round and begin an architect-style discussion.",
+    description: "Discuss the observer digest or select a round for a deep dive.",
     handler: async (_args, ctx) => {
       if (!ctx.hasUI) {
         notifyNeedsUi(ctx);
         return;
       }
 
+      const digest = await readDigest(ctx);
+      if (digest === undefined) return;
       const rows = await readRounds(ctx);
       if (rows === undefined) return;
       const finalized = rows
@@ -158,16 +298,18 @@ export default function register(pi, deps = {}) {
             right.row.ts.localeCompare(left.row.ts) ||
             left.index - right.index,
         );
-      if (finalized.length === 0) {
-        ctx.ui.notify("No finalized observer rounds are available.", "info");
+
+      const choices = [DIGEST_CHOICE, ...finalized.map(({ row }) => roundLabel(row))];
+      const selected = await ctx.ui.select(digest.selectorTitle, choices);
+      if (selected === undefined) return;
+      if (selected === DIGEST_CHOICE) {
+        pi.sendUserMessage(
+          `Discussing the current observer digest:\n\n${digest.markdown}\n\nWalk the whole ranked ledger with me architect-style: identify cross-finding themes, priorities, and useful round deep dives while still examining each promoted and open finding. Keep digest/theme-level disposition writing parked; do not record or propose a digest-level verdict.`,
+        );
         return;
       }
-
-      const choices = finalized.map(({ row }) => roundLabel(row));
-      const selected = await ctx.ui.select("Select an observer round", choices);
-      if (selected === undefined) return;
-      const position = choices.indexOf(selected);
-      if (position < 0) {
+      const position = choices.indexOf(selected) - 1;
+      if (position < 0 || position >= finalized.length) {
         ctx.ui.notify("The selected observer round could not be identified.", "error");
         return;
       }

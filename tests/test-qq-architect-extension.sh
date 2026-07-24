@@ -39,6 +39,46 @@ function rounds(rows) {
   return execution(JSON.stringify(rows));
 }
 
+const emptyDigestRow = "| — | — | None | — | — | — | — | — |";
+
+function digest(options = {}) {
+  const opportunities = options.opportunities ?? [emptyDigestRow];
+  const open = options.open ?? [emptyDigestRow];
+  return [
+    "# qq observer digest",
+    "",
+    "Generated: `2026-08-20T10:00:00Z`",
+    "",
+    "Scoring constants: fixture.",
+    "",
+    "## Opportunities ledger",
+    "",
+    "| Score | Recurrences | Recurrence key | Latest title | Kind | PRs | Confidence history | Disposition |",
+    "| ---: | ---: | --- | --- | --- | --- | --- | --- |",
+    ...opportunities,
+    "",
+    "## Open findings",
+    "",
+    "| Score | Recurrences | Recurrence key | Latest title | Kind | PRs | Confidence history | Disposition |",
+    "| ---: | ---: | --- | --- | --- | --- | --- | --- |",
+    ...open,
+    "",
+    "## Signal-tuning candidates",
+    "",
+    "| PR | Direction | Evidence | Signal kind | Episode title | Recurrence key |",
+    "| ---: | --- | --- | --- | --- | --- |",
+    "| — | None | — | — | — | — |",
+    "",
+    "Coverage: 0 finalized, 0 failed.",
+    "Unknown ledger entries: 0.",
+    "",
+  ].join("\n");
+}
+
+function digestExecution(options = {}) {
+  return execution(digest(options));
+}
+
 function row(pr, options = {}) {
   return {
     pr,
@@ -110,12 +150,36 @@ async function invoke(harness, name, args = "") {
   await harness.commands.get(name).handler(args, harness.ctx);
 }
 
+async function testDigestFailuresNotifyAndStop() {
+  const killed = execution("", 0, "digest process was killed");
+  killed.killed = true;
+  for (const reply of [
+    execution("", 65, "observer store is malformed"),
+    killed,
+    execution("not-markdown"),
+    execution(digest().replace("## Open findings", "## Missing findings")),
+    execution(digest({ open: [
+      "| 2 | nope | `broken-key` | Broken row | `friction` | #8 | high | none (×1) |",
+    ] })),
+  ]) {
+    const h = createHarness([reply]);
+    await invoke(h, "architect");
+    assert.equal(h.notifications.length, 1);
+    assert.equal(h.notifications[0].level, "error");
+    assert.match(h.notifications[0].message, /Cannot load observer digest/);
+    assert.equal(h.calls.length, 1, "rounds ran after digest refusal");
+    assert.deepEqual(h.calls[0].args, ["digest"]);
+    assert.equal(h.selectPrompts.length, 0);
+    assert.equal(h.userMessages.length, 0);
+  }
+}
+
 async function testRoundsFailuresNotify() {
   for (const reply of [
     execution("", 65, "observer store is malformed"),
     execution("not-json"),
   ]) {
-    const h = createHarness([reply]);
+    const h = createHarness([digestExecution(), reply]);
     await invoke(h, "architect");
     assert.equal(h.notifications.length, 1);
     assert.equal(h.notifications[0].level, "error");
@@ -125,30 +189,95 @@ async function testRoundsFailuresNotify() {
   }
 }
 
+async function testDigestFirstSelectorAndKickoff() {
+  const currentDigest = digest({
+    opportunities: [
+      "| 6 | 2 | `repeat-key` | Repeated \\| title | `waste` | #7, #9 | high, medium | accepted (×1.5) |",
+    ],
+    open: [
+      "| 1 | 1 | `open-key` | Open issue | `friction` | #11 | low | none (×1) |",
+    ],
+  });
+  const h = createHarness([
+    execution(currentDigest),
+    rounds([
+      row(10, { discussed: true, ts: "2026-08-10T10:00:00Z" }),
+      row(11, { ts: "2026-08-11T10:00:00Z" }),
+    ]),
+  ]);
+  await invoke(h, "architect");
+  assert.deepEqual(h.calls.map(({ args }) => args), [["digest"], ["rounds"]]);
+  assert.deepEqual(h.selectPrompts[0].choices, [
+    "Discuss current digest",
+    "pr-11 [guided] — analyzed 2026-08-11T10:00:00Z",
+    "pr-10 [guided] — analyzed discussed 2026-08-10T10:00:00Z",
+  ]);
+  const title = h.selectPrompts[0].prompt;
+  assert.match(title, /Opportunities ledger/);
+  assert.match(title, /Open findings/);
+  for (const field of [
+    "Score: 6",
+    "Recurrences: 2",
+    "Recurrence key: repeat-key",
+    "Latest title: Repeated | title",
+    "Kind: waste",
+    "PRs: #7, #9",
+    "Confidence history: high, medium",
+    "Disposition: accepted (×1.5)",
+    "Score: 1",
+    "Recurrence key: open-key",
+    "Latest title: Open issue",
+    "Kind: friction",
+    "PRs: #11",
+    "Confidence history: low",
+    "Disposition: none (×1)",
+  ]) {
+    assert.ok(title.includes(field), `digest selector omitted ${field}`);
+  }
+  assert.equal(h.userMessages.length, 1);
+  assert.ok(h.userMessages[0].includes(currentDigest), "digest kickoff omitted current Markdown");
+  assert.match(h.userMessages[0], /whole ranked ledger/);
+  assert.match(h.userMessages[0], /digest\/theme-level disposition writing parked/);
+  assert.doesNotMatch(h.userMessages[0], /mark-discussed/);
+  assert.equal(h.calls.some(({ args }) => args[0] === "mark-discussed"), false);
+}
+
+async function testNoRoundDigestWorks() {
+  const h = createHarness([digestExecution(), rounds([])]);
+  await invoke(h, "architect");
+  assert.deepEqual(h.selectPrompts[0].choices, ["Discuss current digest"]);
+  assert.match(h.selectPrompts[0].prompt, /Opportunities ledger\n- None/);
+  assert.match(h.selectPrompts[0].prompt, /Open findings\n- None/);
+  assert.equal(h.userMessages.length, 1);
+  assert.match(h.userMessages[0], /Discussing the current observer digest/);
+  assert.equal(h.notifications.length, 0);
+}
+
 async function testOrderingAndAnalyzedKickoff() {
   const analyzedRun = await makeRun(12);
   await writeFile(join(analyzedRun, "analysis.md"), "# Fixture analysis\n");
   await writeFile(join(analyzedRun, "analyst-trace.jsonl"), "{}\n");
   const h = createHarness([
+    digestExecution(),
     rounds([
       row(10, { discussed: true, ts: "2026-08-10T10:00:00Z" }),
       row(11, { ts: "2026-08-11T10:00:00Z" }),
       row(12, { ts: "2026-08-12T10:00:00Z" }),
     ]),
-  ], { selects: [(choices) => choices[0]] });
+  ], { selects: [(choices) => choices[1]] });
   await invoke(h, "architect");
   assert.deepEqual(
-    h.selectPrompts[0].choices.map((choice) => choice.match(/^pr-[0-9]+/)[0]),
+    h.selectPrompts[0].choices.slice(1).map((choice) => choice.match(/^pr-[0-9]+/)[0]),
     ["pr-12", "pr-11", "pr-10"],
     "selector was not undiscussed-first and newest-first",
   );
-  assert.match(h.selectPrompts[0].choices[2], /analyzed discussed/);
+  assert.match(h.selectPrompts[0].choices[3], /analyzed discussed/);
   assert.equal(h.userMessages.length, 1);
   assert.equal(
     h.userMessages[0],
     `Discussing observer round pr-12. Analysis document: ${join(analyzedRun, "analysis.md")}. Analyst trace: ${join(analyzedRun, "analyst-trace.jsonl")}. Walk it with me architect-style: unpack the episodes, and for each we reach accept, reject, or reshape.`,
   );
-  assert.deepEqual(h.calls[0], {
+  assert.deepEqual(h.calls[1], {
     command: "bin/qq-observe",
     args: ["rounds"],
     options: { cwd: "/fixture/repo" },
@@ -159,8 +288,9 @@ async function testAnalyzedKickoffFallsBackToJson() {
   const analyzedRun = await makeRun(19);
   await writeFile(join(analyzedRun, "analysis.json"), '{"episodes":[]}\n');
   const h = createHarness([
+    digestExecution(),
     rounds([row(19)]),
-  ]);
+  ], { selects: [(choices) => choices[1]] });
   await invoke(h, "architect");
   assert.equal(h.userMessages.length, 1);
   assert.ok(
@@ -179,8 +309,9 @@ async function testFailedKickoff() {
     JSON.stringify({ status: "analysis_failed", reason: "analyst timed out" }),
   );
   const h = createHarness([
+    digestExecution(),
     rounds([row(13, { variant: "blind", analyzed: false, failed: true })]),
-  ]);
+  ], { selects: [(choices) => choices[1]] });
   await invoke(h, "architect");
   assert.equal(h.userMessages.length, 1);
   assert.match(h.userMessages[0], /This run has only analysis_failed\.json/);
@@ -333,7 +464,10 @@ async function testAlreadyDiscussedAndHeadlessRefuseEarly() {
 }
 
 await mkdir(runsRoot, { recursive: true });
+await testDigestFailuresNotifyAndStop();
 await testRoundsFailuresNotify();
+await testDigestFirstSelectorAndKickoff();
+await testNoRoundDigestWorks();
 await testOrderingAndAnalyzedKickoff();
 await testAnalyzedKickoffFallsBackToJson();
 await testFailedKickoff();
