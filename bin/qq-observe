@@ -1498,6 +1498,8 @@ def valid_ledger_event(item):
     if event_type == "disposition":
         return (
             isinstance(item.get("pr"), int) and not isinstance(item["pr"], bool) and item["pr"] > 0
+            and item.get("variant", "guided") in ("guided", "blind")
+            and ("note" not in item or isinstance(item["note"], str))
             and valid_outcomes(item.get("outcomes"))
         )
     if event_type == "signal_tune_candidate":
@@ -2040,19 +2042,24 @@ def materialize_findings(
 def materialize_disposition(run_dir, timestamp, written_seq, events, seen):
     path = run_dir / "discussed.json"
     mark = json_document(read_regular(path, "discussed mark"), "discussed mark")
-    pr, _, _ = package_identity(run_dir)
+    pr, package_variant, _ = package_identity(run_dir)
+    variant = mark.get("variant", "guided") if isinstance(mark, dict) else None
     if (
         not valid_ledger_event(mark) or mark.get("type") != "disposition"
-        or mark.get("pr") != pr
+        or mark.get("pr") != pr or variant != package_variant
     ):
         fail(f"invalid discussed mark at {path}", 65)
-    identity = (pr, json.dumps(mark["outcomes"], separators=(",", ":"), sort_keys=True))
+    identity = (
+        pr, variant,
+        json.dumps(mark["outcomes"], separators=(",", ":"), sort_keys=True),
+    )
     if identity in seen:
         return
     sequence_fields = {} if written_seq is None else {"written_seq": written_seq}
+    note_fields = {"note": mark["note"]} if "note" in mark else {}
     events.append(ledger_event(
-        "disposition", ts=timestamp, pr=pr, outcomes=mark["outcomes"],
-        **sequence_fields,
+        "disposition", ts=timestamp, pr=pr, variant=variant,
+        outcomes=mark["outcomes"], **note_fields, **sequence_fields,
     ))
     seen.add(identity)
 
@@ -2211,7 +2218,10 @@ def mark_discussed(values):
         event = json_document(old, "discussed mark")
         if not valid_ledger_event(event) or event.get("type") != "disposition":
             fail(f"invalid discussed mark at {path}", 65)
-        if event["pr"] != pr or event["outcomes"] != outcomes:
+        if (
+            event["pr"] != pr or event.get("variant", "guided") != variant
+            or event["outcomes"] != outcomes
+        ):
             fail(f"append-only conflict at {path}", 65)
         mark_written = False
     else:
@@ -2235,7 +2245,7 @@ def mark_discussed(values):
 
     if old is None:
         event = ledger_event(
-            "disposition", pr=pr, outcomes=outcomes,
+            "disposition", pr=pr, variant=variant, outcomes=outcomes,
             written_seq=next_feed_sequence(),
         )
         mark_written = atomic_append(path, ledger_event_bytes(event))
@@ -2251,6 +2261,7 @@ def mark_discussed(values):
     result = materialize_ledger()
     event_added = any(
         item["type"] == "disposition" and item["pr"] == pr
+        and item.get("variant", "guided") == variant
         and item["outcomes"] == outcomes for item in result["_added_events"]
     )
     status = "discussed" if mark_written or event_added else "already discussed"
@@ -2281,7 +2292,7 @@ def observer_run_rows(since=None):
             mark = json_document(read_regular(discussed_path, "discussed mark"), "discussed mark")
             if (
                 not valid_ledger_event(mark) or mark.get("type") != "disposition"
-                or mark.get("pr") != pr
+                or mark.get("pr") != pr or mark.get("variant", "guided") != variant
             ):
                 fail(f"invalid discussed mark at {discussed_path}", 65)
         rows.append({
