@@ -46,8 +46,8 @@ entries and unknown-entry citations are 1-based physical JSONL line numbers.
 validate-analysis requires one --facts SESSION_PATH=FACTS_PATH pair per session.
 facts emits token fields as integer-rounded accumulated totals (Python half-to-even);
 fields with no observed value remain null. Ledger events are stored at
-<observer-store>/ledger/events.jsonl; durable feed order is stored at
-<observer-store>/feed-seq.
+<observer-store>/ledger/events.jsonl; durable feed order is carried by each
+source record's written_seq.
 EOF
   exit 64
 }
@@ -1633,71 +1633,9 @@ def maximum_recorded_sequence():
 
 
 def next_feed_sequence():
-    root = observer_store_root(create=True)
-    path = root / "feed-seq"
-    try:
-        directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
-    except OSError as error:
-        fail(f"cannot open observer store for feed sequence: {error}", 65)
-    try:
-        fcntl.flock(directory, fcntl.LOCK_EX)
-    except OSError as error:
-        os.close(directory)
-        fail(f"cannot lock observer store for feed sequence: {error}", 65)
-    fd = None
-    try:
-        try:
-            info = os.lstat(path)
-            created = False
-        except FileNotFoundError:
-            info = None
-            created = True
-        except OSError as error:
-            fail(f"cannot inspect observer feed sequence: {error}", 65)
-        if info is not None and not stat.S_ISREG(info.st_mode):
-            fail("observer feed sequence is not a regular file", 65)
-        flags = os.O_RDWR | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
-        if created:
-            flags |= os.O_CREAT
-        try:
-            fd = os.open(path, flags, 0o600)
-        except OSError as error:
-            fail(f"cannot open observer feed sequence: {error}", 65)
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            fail("observer feed sequence is not a regular file", 65)
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        if created:
-            if os.fstat(fd).st_size != 0:
-                fail("observer feed sequence changed during creation", 65)
-            written_seq = maximum_recorded_sequence() + 1
-        else:
-            try:
-                size = os.fstat(fd).st_size
-                if size < 2 or size > 1024:
-                    fail("observer feed sequence contains garbage", 65)
-                raw = os.pread(fd, size, 0)
-            except OSError as error:
-                fail(f"cannot read observer feed sequence: {error}", 65)
-            if len(raw) != size or not re.fullmatch(rb"[1-9][0-9]*\n", raw):
-                fail("observer feed sequence contains garbage", 65)
-            written_seq = int(raw[:-1]) + 1
-        data = f"{written_seq}\n".encode("ascii")
-        try:
-            if os.pwrite(fd, data, 0) != len(data):
-                fail("cannot write complete observer feed sequence", 65)
-            os.fsync(fd)
-            if created:
-                os.fsync(directory)
-        except OSError as error:
-            fail(f"cannot write observer feed sequence: {error}", 65)
-        return written_seq
-    finally:
-        if fd is not None:
-            os.close(fd)
-        try:
-            fcntl.flock(directory, fcntl.LOCK_UN)
-        finally:
-            os.close(directory)
+    # Every caller holds the store-wide writer lock, so durable source records
+    # are the sequence authority and no independently recoverable counter exists.
+    return maximum_recorded_sequence() + 1
 
 
 def open_ledger_writer_lock():

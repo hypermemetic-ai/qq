@@ -530,8 +530,6 @@ jq -s -e 'map(.written_seq) == [1,2,3,4]' \
   "$rebuild_21/.ledger-applied" "$rebuild_20/.ledger-applied" \
   "$rebuild_21/discussed.json" "$rebuild_20/comparison.json" >/dev/null \
   || fail 'ledger-feeding records did not receive monotonic cross-kind sequences'
-assert_equal 4 "$(cat "$XDG_STATE_HOME/qq/observer/feed-seq")" \
-  'feed sequence counter did not retain the latest allocated sequence'
 jq -s -e '
   all(.[] | select(.type == "finding_seen" and .pr == 21); .written_seq == 1)
   and all(.[] | select((.type == "finding_seen" and .pr == 20) or .type == "promoted"); .written_seq == 2)
@@ -551,7 +549,6 @@ jq -e '
 ' "$tmp/rebuild-intact.json" >/dev/null || fail 'intact-ledger rebuild was not a no-op'
 
 rm -rf "$(dirname "$events")"
-rm "$XDG_STATE_HOME/qq/observer/feed-seq"
 "$OBSERVE" ledger-rebuild >"$tmp/rebuilt.json"
 jq -e '
   .runs_seen == 6 and .runs_replayed == 2
@@ -576,31 +573,14 @@ jq -e '
   and .events_appended == 0 and .events_skipped == 7
 ' "$tmp/rebuilt-again.json" >/dev/null || fail 'second rebuild was not a full no-op'
 
-# Loss of both derived state and its counter recovers above every source sequence.
+# Loss of the derived ledger still allocates above every durable source sequence.
 rebuild_25="$(make_run pr-25 25 guided 2026-10-25T10:00:00Z "$first_episodes")"
 rm -rf "$(dirname "$events")"
-rm -f "$XDG_STATE_HOME/qq/observer/feed-seq"
 "$OBSERVE" ledger-update --run "$rebuild_25" >"$tmp/rebuild-update-25.json"
 jq -e '.written_seq == 5' "$rebuild_25/.ledger-applied" >/dev/null \
-  || fail 'missing feed counter did not recover to max existing written_seq plus one'
-assert_equal 5 "$(cat "$XDG_STATE_HOME/qq/observer/feed-seq")" \
-  'recovered feed counter has the wrong value'
+  || fail 'source records did not allocate max written_seq plus one'
 jq -s -e 'length == 2 and all(.[]; .written_seq == 5)' "$events" >/dev/null \
   || fail 'post-recovery events collided with pre-loss record sequences'
-
-# Existing counter garbage refuses a write rather than guessing an order.
-rebuild_26="$(make_run pr-26 26 guided 2026-10-26T10:00:00Z "$first_episodes")"
-rm "$XDG_STATE_HOME/qq/observer/feed-seq"
-printf 'not-a-sequence\n' >"$XDG_STATE_HOME/qq/observer/feed-seq"
-set +e
-"$OBSERVE" ledger-update --run "$rebuild_26" \
-  >"$tmp/garbage-seq.stdout" 2>"$tmp/garbage-seq.stderr"
-status=$?
-set -e
-assert_equal 65 "$status" 'garbage feed sequence was accepted'
-assert_file_contains "$tmp/garbage-seq.stderr" 'feed sequence contains garbage'
-[ ! -e "$rebuild_26/.ledger-applied" ] \
-  || fail 'garbage feed sequence fabricated a ledger marker'
 
 # Nanosecond mtimes preserve same-timestamp legacy disposition chronology during recovery.
 export XDG_STATE_HOME="$tmp/chronology-state"
