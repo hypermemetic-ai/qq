@@ -274,56 +274,96 @@ export default function register(pi, deps = {}) {
         return;
       }
       const runDir = roundDirectory(runsRoot, row);
-      const analysisPath = join(runDir, "analysis.json");
-      let analysis;
-      try {
-        analysis = parseAnalysis(await loadFile(analysisPath, "utf8"));
-      } catch (error) {
-        ctx.ui.notify(
-          `Cannot read analysis.json for observer round pr-${pr}: ${error instanceof Error ? error.message : String(error)}`,
-          "error",
-        );
-        return;
-      }
-
       const outcomes = [];
-      for (const episode of analysis.episodes) {
+      if (row.failed) {
+        const failurePath = join(runDir, "analysis_failed.json");
+        let failure;
+        try {
+          failure = JSON.parse(await loadFile(failurePath, "utf8"));
+        } catch (error) {
+          ctx.ui.notify(
+            `Cannot read analysis_failed.json for observer round pr-${pr}: ${error instanceof Error ? error.message : String(error)}`,
+            "error",
+          );
+          return;
+        }
+        if (typeof failure?.reason !== "string" || failure.reason.length === 0) {
+          ctx.ui.notify(
+            `Cannot read analysis_failed.json for observer round pr-${pr}: failure reason is missing.`,
+            "error",
+          );
+          return;
+        }
         ctx.ui.notify(
-          `Episode ${episode.rank} — ${episode.kind}: ${episode.title}`,
-          "info",
+          `Observer round pr-${pr} analysis failed: ${failure.reason}`,
+          "warning",
         );
-        const verdict = await ctx.ui.select(
-          `Verdict for ${episode.recurrence_key}`,
-          VERDICTS,
+        const confirmation = await ctx.ui.select(
+          `Mark failed observer round pr-${pr} discussed with no episode outcomes?`,
+          ["mark discussed", "cancel"],
         );
-        if (verdict === undefined) {
+        if (confirmation === undefined || confirmation === "cancel") {
           ctx.ui.notify(
             `Discussion marking for pr-${pr} was cancelled; no outcomes were written.`,
             "warning",
           );
           return;
         }
-        if (!VERDICTS.includes(verdict)) {
-          ctx.ui.notify(`Unsupported verdict for ${episode.recurrence_key}.`, "error");
+        if (confirmation !== "mark discussed") {
+          ctx.ui.notify(`Unsupported discussion confirmation for pr-${pr}.`, "error");
           return;
         }
-        if (verdict === "skip") continue;
+      } else {
+        const analysisPath = join(runDir, "analysis.json");
+        let analysis;
+        try {
+          analysis = parseAnalysis(await loadFile(analysisPath, "utf8"));
+        } catch (error) {
+          ctx.ui.notify(
+            `Cannot read analysis.json for observer round pr-${pr}: ${error instanceof Error ? error.message : String(error)}`,
+            "error",
+          );
+          return;
+        }
 
-        const note =
-          (await ctx.ui.input(`Optional note for ${episode.recurrence_key}`)) ?? "";
-        const refs =
-          (await ctx.ui.input(
-            `Task refs for ${episode.recurrence_key} (comma-separated)`,
-          )) ?? "";
-        outcomes.push({
-          recurrence_key: episode.recurrence_key,
-          verdict,
-          task_refs: refs
-            .split(",")
-            .map((value) => value.trim())
-            .filter(Boolean),
-          note,
-        });
+        for (const episode of analysis.episodes) {
+          ctx.ui.notify(
+            `Episode ${episode.rank} — ${episode.kind}: ${episode.title}`,
+            "info",
+          );
+          const verdict = await ctx.ui.select(
+            `Verdict for ${episode.recurrence_key}`,
+            VERDICTS,
+          );
+          if (verdict === undefined) {
+            ctx.ui.notify(
+              `Discussion marking for pr-${pr} was cancelled; no outcomes were written.`,
+              "warning",
+            );
+            return;
+          }
+          if (!VERDICTS.includes(verdict)) {
+            ctx.ui.notify(`Unsupported verdict for ${episode.recurrence_key}.`, "error");
+            return;
+          }
+          if (verdict === "skip") continue;
+
+          const note =
+            (await ctx.ui.input(`Optional note for ${episode.recurrence_key}`)) ?? "";
+          const refs =
+            (await ctx.ui.input(
+              `Task refs for ${episode.recurrence_key} (comma-separated)`,
+            )) ?? "";
+          outcomes.push({
+            recurrence_key: episode.recurrence_key,
+            verdict,
+            task_refs: refs
+              .split(",")
+              .map((value) => value.trim())
+              .filter(Boolean),
+            note,
+          });
+        }
       }
 
       let temporaryDirectory;

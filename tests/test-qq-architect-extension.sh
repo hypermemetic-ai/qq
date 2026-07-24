@@ -172,6 +172,27 @@ async function testFailedKickoff() {
   assert.match(h.userMessages[0], /decide how to recover architect-style/);
 }
 
+async function testFailedRoundCanBeMarkedDiscussed() {
+  const run = await makeRun(18);
+  await writeFile(
+    join(run, "analysis_failed.json"),
+    JSON.stringify({ status: "analysis_failed", reason: "analyst exhausted its budget" }),
+  );
+  let captured;
+  const h = createHarness([
+    rounds([row(18, { analyzed: false, failed: true })]),
+    async (call) => {
+      assert.deepEqual(call.args.slice(0, 4), ["mark-discussed", "--run", run, "--outcomes"]);
+      captured = JSON.parse(await readFile(call.args[4], "utf8"));
+      return execution('{"status":"discussed"}\n');
+    },
+  ], { selects: ["mark discussed"] });
+  await invoke(h, "architect-discussed", "18");
+  assert.deepEqual(captured, []);
+  assert.ok(h.notifications.some(({ message }) => message.includes("analyst exhausted its budget")));
+  assert.ok(h.selectPrompts.some(({ prompt }) => prompt.includes("no episode outcomes")));
+}
+
 async function testDiscussedHappyPath() {
   const run = await makeRun(14);
   await writeFile(join(run, "analysis.json"), JSON.stringify({
@@ -241,6 +262,7 @@ await mkdir(runsRoot, { recursive: true });
 await testRoundsFailuresNotify();
 await testOrderingAndAnalyzedKickoff();
 await testFailedKickoff();
+await testFailedRoundCanBeMarkedDiscussed();
 await testDiscussedHappyPath();
 await testRefusalIsSurfaced();
 await testAlreadyDiscussedAndHeadlessRefuseEarly();
