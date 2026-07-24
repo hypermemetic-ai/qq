@@ -1807,9 +1807,7 @@ def append_ledger_events(fd, events):
         fail(f"cannot append ledger events: {error}", 65)
 
 
-def ledger_update_run(
-    run_dir, skipped_promotions=None, seen_findings=None, seen_promotions=None,
-):
+def ledger_update_run(run_dir, skipped_promotions=None):
     analysis_path = run_dir / "analysis.json"
     if not regular_file(analysis_path):
         fail(f"finalized analysis is missing: {analysis_path}", 65)
@@ -1836,19 +1834,25 @@ def ledger_update_run(
     try:
         previous, _ = read_ledger_events(fd)
         written_seq = (
-            None if marker_record is None else marker_record.get("written_seq")
+            next_feed_sequence()
+            if marker_record is None else marker_record.get("written_seq")
         )
         sequence_fields = {} if written_seq is None else {"written_seq": written_seq}
-        if seen_promotions is None:
-            seen_promotions = {
-                event["recurrence_key"]
-                for event in previous if event["type"] == "promoted"
-            }
-        if seen_findings is None:
-            seen_findings = {
-                (event["pr"], event["recurrence_key"], event["kind"], event["title"])
-                for event in previous if event["type"] == "finding_seen"
-            }
+        if written_seq is None:
+            previous = [event for event in previous if "written_seq" not in event]
+        else:
+            previous = [
+                event for event in previous
+                if event.get("written_seq", written_seq) <= written_seq
+            ]
+        seen_promotions = {
+            event["recurrence_key"]
+            for event in previous if event["type"] == "promoted"
+        }
+        seen_findings = {
+            (event["pr"], event["recurrence_key"], event["kind"], event["title"])
+            for event in previous if event["type"] == "finding_seen"
+        }
         prs_by_key = {}
         kinds_by_key = {}
         for event in previous:
@@ -1904,14 +1908,12 @@ def ledger_update_run(
                 "schema": "qq-observer.ledger-applied", "schema_version": 1,
                 "analysis_sha256": analysis_sha256,
                 "episode_count": len(analysis["episodes"]),
-                "written_at": utc_now(), "written_seq": next_feed_sequence(),
+                "written_at": utc_now(), "written_seq": written_seq,
             }
             marker_data = (
                 json.dumps(marker_record, separators=(",", ":"), sort_keys=True) + "\n"
             ).encode("utf-8")
             atomic_append(marker, marker_data)
-            for event in findings + promotions:
-                event["written_seq"] = marker_record["written_seq"]
         append_ledger_events(fd, findings + promotions)
         return {
             "findings": len(findings), "promoted": len(promotions),
@@ -2083,13 +2085,6 @@ def ledger_rebuild(values):
         previous, _ = read_ledger_events(fd)
     finally:
         close_ledger_events(fd)
-    existing_findings = {
-        (event["pr"], event["recurrence_key"], event["kind"], event["title"])
-        for event in previous if event["type"] == "finding_seen"
-    }
-    existing_promotions = {
-        event["recurrence_key"] for event in previous if event["type"] == "promoted"
-    }
     existing_dispositions = {
         (event["pr"], json.dumps(event["outcomes"], separators=(",", ":"), sort_keys=True))
         for event in previous if event["type"] == "disposition"
@@ -2104,9 +2099,7 @@ def ledger_rebuild(values):
     skipped_promotions = set()
     for _, kind, run_dir, timestamp, written_seq in replay_items:
         if kind == "finding_seen":
-            result = ledger_update_run(
-                run_dir, skipped_promotions, existing_findings, existing_promotions,
-            )
+            result = ledger_update_run(run_dir, skipped_promotions)
             events_appended += result["findings"] + result["promoted"]
             events_skipped += result["events_skipped"]
         elif kind == "disposition":

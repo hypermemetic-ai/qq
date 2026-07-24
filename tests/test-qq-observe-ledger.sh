@@ -794,15 +794,18 @@ if [ "${1:-}" != - ]; then
 fi
 printf 'ready\n' >>"$SERIAL_READY"
 while [ ! -e "$SERIAL_GATE" ]; do sleep 0.01; done
+# Make the new update win the writer lock so rebuild must ignore its logically
+# later event while replaying the two older source records.
+if [ "${3:-}" = ledger-rebuild ]; then sleep 0.1; fi
 script="$SERIAL_TMP/serialized-$$.py"
 trap 'rm -f "$script"' EXIT
 "$REAL_PYTHON3" -c '
 import sys
 source = sys.stdin.read()
-needle = "    finally:\n        close_ledger_events(fd)\n    existing_findings = {\n"
+needle = "    finally:\n        close_ledger_events(fd)\n    existing_dispositions = {\n"
 if source.count(needle) != 1:
     raise SystemExit("ledger rebuild read/replay boundary not found")
-replacement = "    finally:\n        close_ledger_events(fd)\n    __import__(\"time\").sleep(0.25)\n    existing_findings = {\n"
+replacement = "    finally:\n        close_ledger_events(fd)\n    __import__(\"time\").sleep(0.25)\n    existing_dispositions = {\n"
 sys.stdout.write(source.replace(needle, replacement))
 ' >"$script"
 "$REAL_PYTHON3" "$script" "${@:2}"
@@ -836,11 +839,10 @@ wait "$rebuild_pid_2"
 wait "$update_pid"
 jq -s -e '
   ([.[] | select(.type == "finding_seen")] | length == 3)
-  and ([.[] | select(.type == "promoted")] | length == 1)
+  and ([.[] | select(.type == "promoted") | .prs] == [[61,62]])
 ' "$events" >/dev/null || fail 'concurrent ledger writers replayed stale membership'
 
-# Compare with the sequential composition selected by the winning writer.
-actual_promoted_with_63="$(jq -s '[.[] | select(.type == "promoted" and (.prs | index(63)))] | length' "$events")"
+# Physical writer order must equal the source-sequence composition.
 actual_state="$XDG_STATE_HOME"
 actual_events="$events"
 export XDG_STATE_HOME="$tmp/sequential-ledger-state"
@@ -852,15 +854,9 @@ sequential_run_3="$(make_run pr-63 63 guided 2026-12-04T10:02:00Z "$lock_episode
 "$OBSERVE" ledger-update --run "$sequential_run_1" >"$tmp/sequential-seed-1.json"
 "$OBSERVE" ledger-update --run "$sequential_run_2" >"$tmp/sequential-seed-2.json"
 rm "$events"
-if [ "$actual_promoted_with_63" -eq 1 ]; then
-  "$OBSERVE" ledger-update --run "$sequential_run_3" >"$tmp/sequential-update.json"
-  "$OBSERVE" ledger-rebuild >"$tmp/sequential-rebuild-1.json"
-  "$OBSERVE" ledger-rebuild >"$tmp/sequential-rebuild-2.json"
-else
-  "$OBSERVE" ledger-rebuild >"$tmp/sequential-rebuild-1.json"
-  "$OBSERVE" ledger-rebuild >"$tmp/sequential-rebuild-2.json"
-  "$OBSERVE" ledger-update --run "$sequential_run_3" >"$tmp/sequential-update.json"
-fi
+"$OBSERVE" ledger-rebuild >"$tmp/sequential-rebuild-1.json"
+"$OBSERVE" ledger-rebuild >"$tmp/sequential-rebuild-2.json"
+"$OBSERVE" ledger-update --run "$sequential_run_3" >"$tmp/sequential-update.json"
 jq -cS -s 'sort_by(.written_seq, .type, (.pr // 0), (.recurrence_key // ""))[]' \
   "$actual_events" >"$tmp/concurrent-events-canonical.jsonl"
 jq -cS -s 'sort_by(.written_seq, .type, (.pr // 0), (.recurrence_key // ""))[]' \
