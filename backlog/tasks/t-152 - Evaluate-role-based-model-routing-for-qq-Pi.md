@@ -1,12 +1,14 @@
 ---
 id: T-152
 title: Evaluate role-based model routing for qq Pi
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-24 05:26'
-updated_date: '2026-07-24 06:07'
+updated_date: '2026-07-24 06:19'
 labels: []
 dependencies: []
+references:
+  - 'https://github.com/hypermemetic-ai/qq/pull/233'
 documentation:
   - doc-87
   - doc-88
@@ -36,7 +38,7 @@ Decision ledger:
 - [x] #1 The approved six-role and install-wide routing contract is captured in the owning Task and attached plan document.
 - [x] #2 A cited research report verifies current Pi, pi-subagents, package, and Codex service-tier capabilities against every load-bearing requirement, separating fact, inference, confidence, and gaps.
 - [x] #3 The report compares adopt, adapt, small qq extension, and upstream-gap options and recommends the smallest resulting system with a bounded implementation brief.
-- [ ] #4 The research-only Change contains no routing implementation or machine-setting mutation, passes applicable Checks, and receives fresh-context review.
+- [x] #4 The research-only Change contains no routing implementation or machine-setting mutation, passes applicable Checks, and receives fresh-context review.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -54,3 +56,9 @@ Bounded next Change: upstream a typed execution-profile seam in Pi; after that r
 
 Review correction: current PI_SUBAGENT_CHILD_AGENT is not a trusted role assertion. pi-subagents project discovery can replace qq's same-name user-source manifest, then passes only the selected agent name. The bounded next Change must reserve canonical seats to verified trusted qq manifest-source metadata and derive a dedicated role assertion from that source; same-name project agents cannot claim occupancy.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed the research-only role-routing evaluation. The cited report (doc-88) recommends UPSTREAM-FIRST, then a thin qq-owned resolver: Pi must add a fail-fast request-local execution-profile seam; qq must retain six-role policy and trusted occupancy; pi-subagents must reserve canonical delegated seats to verified qq manifest-source metadata; existing displays need service-class telemetry. No routing, settings, access policy, role catalog, or UI was changed. All repository tests, native delegate enforcement, Backlog validation, diff checks, and fresh-context review passed.
+<!-- SECTION:FINAL_SUMMARY:END -->
