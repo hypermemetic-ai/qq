@@ -215,6 +215,7 @@ export default function register(pi, deps = {}) {
       }
 
       const analysisPath = join(runDir, "analysis.md");
+      let analysisSource = `Analysis document: ${analysisPath}.`;
       try {
         await loadFile(analysisPath, "utf8");
       } catch (error) {
@@ -225,9 +226,20 @@ export default function register(pi, deps = {}) {
           );
           return;
         }
+        const jsonPath = join(runDir, "analysis.json");
+        try {
+          await loadFile(jsonPath, "utf8");
+        } catch (jsonError) {
+          ctx.ui.notify(
+            `Cannot read observer analysis for pr-${row.pr}: ${jsonError instanceof Error ? jsonError.message : String(jsonError)}`,
+            "error",
+          );
+          return;
+        }
+        analysisSource = `Readable analysis source: ${jsonPath}. analysis.md was not produced.`;
       }
       pi.sendUserMessage(
-        `Discussing observer round pr-${row.pr}. Analysis document: ${analysisPath}. Analyst trace: ${traceText}. Walk it with me architect-style: unpack the episodes, and for each we reach accept, reject, or reshape.`,
+        `Discussing observer round pr-${row.pr}. ${analysisSource} Analyst trace: ${traceText}. Walk it with me architect-style: unpack the episodes, and for each we reach accept, reject, or reshape.`,
       );
     },
   });

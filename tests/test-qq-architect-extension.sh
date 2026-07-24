@@ -155,6 +155,23 @@ async function testOrderingAndAnalyzedKickoff() {
   });
 }
 
+async function testAnalyzedKickoffFallsBackToJson() {
+  const analyzedRun = await makeRun(19);
+  await writeFile(join(analyzedRun, "analysis.json"), '{"episodes":[]}\n');
+  const h = createHarness([
+    rounds([row(19)]),
+  ]);
+  await invoke(h, "architect");
+  assert.equal(h.userMessages.length, 1);
+  assert.ok(
+    h.userMessages[0].includes(
+      `Readable analysis source: ${join(analyzedRun, "analysis.json")}.`,
+    ),
+  );
+  assert.match(h.userMessages[0], /analysis\.md was not produced\./);
+  assert.doesNotMatch(h.userMessages[0], /Analysis document:/);
+}
+
 async function testFailedKickoff() {
   const failedRun = await makeRun(13, "blind");
   await writeFile(
@@ -267,6 +284,7 @@ async function testAlreadyDiscussedAndHeadlessRefuseEarly() {
 await mkdir(runsRoot, { recursive: true });
 await testRoundsFailuresNotify();
 await testOrderingAndAnalyzedKickoff();
+await testAnalyzedKickoffFallsBackToJson();
 await testFailedKickoff();
 await testFailedRoundCanBeMarkedDiscussed();
 await testDiscussedHappyPath();
