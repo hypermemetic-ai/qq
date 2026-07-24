@@ -3,10 +3,10 @@ id: T-142
 title: >-
   Session-observer analyst — dedicated post-hoc improvement discovery over pi
   sessions
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-22 22:46'
-updated_date: '2026-07-23 21:12'
+updated_date: '2026-07-24 04:23'
 labels: []
 dependencies: []
 documentation:
@@ -41,4 +41,5 @@ Decision ledger: commissioning the research sweep — operator instruction, acco
 
 <!-- SECTION:NOTES:BEGIN -->
 2026-07-23: Change ② (observer v0) delivered through six fresh-context review passes and a convergence-breaker arc — operator ruled exactness-by-representation (integer duration_ms/token totals, canonical session identity). PR #218 green and handed off. Calibration venue per the consumption-model directive: architect discussions (Change ⑤); first-N citation verification happens there, not as a pre-merge gate. Remaining: ③ assembler/trigger + analyst-trace storage; ④ ledger/digest + discussed-state; ⑤ architect extension + skill + tab wiring.
+2026-07-24: ALL CHANGES DELIVERED. ③ PR #226 (assembler, post-land trigger, seam observability; three-round review arc to ACCEPT; operator-approved philosophy amendment — reading-first, signals-as-audit, seam walk, dual-run calibration — and ratchet raise 7662→7726). ④ PR #229 (ledger/digest/discussed-state; twelve-round arc, two convergence-breaker halts, operator-ruled materialized-view rebuild and seq ordering). ⑤ PR #230 (architect extension + focus-architect + architect skill; four-round arc; ratchet raise 7726→7997). Supporting: PR #227 (observer role in dispatch adapter), PR #228 (analysis SDLC phase). AC#3 verified: three real analyses finalized over PRs #226/#228/#229 with every pitfall mitigation exercised — analysis_failed paths (substrate + citation failures), ranking, defensive parsing, verify-delivery coverage. Live: post-land trigger automatic; architect tab created (label 'architect', qq workspace wM:t3T); first discussion rounds queued undiscussed-first. Trace-rig retirement remains a separate later Change (OPEN per ledger).
 <!-- SECTION:NOTES:END -->
