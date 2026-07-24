@@ -12,6 +12,7 @@ import registerSplitFork from "./qq-split-fork.ts";
 import registerOperatorStage from "./qq-operator-stage.ts";
 import registerBacklogGuard from "./qq-backlog-guard.ts";
 import registerQqFooter from "./qq-footer.ts";
+import registerArchitect from "./qq-architect.ts";
 
 export default function register(pi) {
   registerPrWatch(pi);
@@ -20,4 +21,5 @@ export default function register(pi) {
   registerOperatorStage(pi);
   registerBacklogGuard(pi);
   registerQqFooter(pi);
+  registerArchitect(pi);
 }
