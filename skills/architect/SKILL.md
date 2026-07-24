@@ -14,10 +14,10 @@ proposals, nothing auto-applies, the operator disposes.
 
 ## Terrain (read live, never assume)
 
-- Run packages: `~/.local/state/qq/observer/runs/pr-<N>[-blind]/` —
+- Run packages: `${XDG_STATE_HOME:-~/.local/state}/qq/observer/runs/pr-<N>[-blind]/` —
   `analysis.md` (the document), `analyst-trace.jsonl` (the analyst's own
   session: reasoning and discarded candidates), `package.json`.
-- Ledger: `~/.local/state/qq/observer/ledger/events.jsonl` —
+- Ledger: `${XDG_STATE_HOME:-~/.local/state}/qq/observer/ledger/events.jsonl` —
   findings, promotions, dispositions, signal-tuning candidates.
 - `bin/qq-observe rounds` lists rounds undiscussed-first; `digest` renders
   the ranked ledger.
@@ -36,6 +36,6 @@ selector only on that explicit mark).
 
 The first five real runs are dual-analyzed (guided + blind). In
 discussion, compare episode sets — `bin/qq-observe record-comparison
---guided <dir> --blind <dir>` writes candidates: prune signals that fire
-on nothing, promote agent-found patterns into signals. Verify first-run
+--guided <dir> --blind <dir>` writes candidates: prune dead signals,
+promote agent-found patterns into signals. Verify the first five runs'
 citations resolve; report any that do not as observer defects.
