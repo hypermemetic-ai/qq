@@ -709,6 +709,27 @@ jq -e '.episode_count == 2' "$dup_run/.ledger-applied" >/dev/null \
 jq -s -e '[.[] | select(.type == "finding_seen")] | length == 2' \
   "$events" >/dev/null || fail 'distinct duplicate-identity episodes were suppressed'
 
+# Guided/blind twins with identical semantics but run-local paths deduplicate.
+export XDG_STATE_HOME="$tmp/twin-identity-state"
+runs="$XDG_STATE_HOME/qq/observer/runs"
+events="$XDG_STATE_HOME/qq/observer/ledger/events.jsonl"
+twin_guided="$(jq -cn --argjson base "$(make_episode twin waste 'Twin opportunity')" '
+  $base | .sessions = ["/fixture/guided/session.jsonl"]
+        | .evidence = [{session:"/fixture/guided/session.jsonl",entries:[1],quote:"twin"}]
+        | .cost.source = "facts:/fixture/guided/session.jsonl"')"
+twin_blind="$(jq -cn --argjson base "$twin_guided" '
+  $base | .sessions = ["/fixture/blind/session.jsonl"]
+        | .evidence = [{session:"/fixture/blind/session.jsonl",entries:[1],quote:"twin"}]
+        | .cost.source = "facts:/fixture/blind/session.jsonl"')"
+twin_guided_episodes="$(jq -cn --argjson e "$twin_guided" '[$e]')"
+twin_blind_episodes="$(jq -cn --argjson e "$twin_blind" '[$e]')"
+twin_g="$(make_run pr-96 96 guided 2026-11-06T10:00:00Z "$twin_guided_episodes")"
+twin_b="$(make_run pr-96-blind 96 blind 2026-11-06T10:01:00Z "$twin_blind_episodes")"
+"$OBSERVE" ledger-update --run "$twin_g" >"$tmp/twin-g.json"
+"$OBSERVE" ledger-update --run "$twin_b" >"$tmp/twin-b.json"
+jq -s -e '[.[] | select(.type == "finding_seen")] | length == 1' \
+  "$events" >/dev/null || fail 'guided/blind twin findings were not deduplicated'
+
 # Nanosecond mtimes preserve same-timestamp legacy disposition chronology during recovery.
 export XDG_STATE_HOME="$tmp/chronology-state"
 runs="$XDG_STATE_HOME/qq/observer/runs"

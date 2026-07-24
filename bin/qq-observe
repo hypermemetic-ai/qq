@@ -1671,10 +1671,7 @@ def replace_file(path, data):
             os.fsync(fd)
         finally:
             os.close(fd)
-        if os.path.lexists(os.path.join(os.fspath(path.parent), path.name)):
-            os.unlink(path.name, dir_fd=directory)
-        os.link(temporary, path.name, src_dir_fd=directory, dst_dir_fd=directory,
-                follow_symlinks=False)
+        os.rename(temporary, path.name, src_dir_fd=directory, dst_dir_fd=directory)
         os.fsync(directory)
     finally:
         if temporary is not None:
@@ -2007,7 +2004,23 @@ def materialize_findings(
         if not valid_ledger_event(event):
             fail(f"analysis episode {index} cannot be represented as a ledger event", 65)
         episode_digest = hashlib.sha256(
-            json.dumps(episode, separators=(",", ":"), sort_keys=True).encode("utf-8")
+            json.dumps(
+                {
+                    field: episode[field]
+                    for field in (
+                        "recurrence_key", "kind", "title", "what_happened",
+                        "root_cause", "root_cause_location", "remedy",
+                        "confidence", "confidence_why",
+                    )
+                } | {
+                    "no_signal": episode.get("no_signal", False),
+                    "evidence": [
+                        {"entries": item["entries"], "quote": item["quote"]}
+                        for item in episode["evidence"]
+                    ]
+                },
+                separators=(",", ":"), sort_keys=True,
+            ).encode("utf-8")
         ).hexdigest()
         identity = (pr, key, kind, episode["title"], episode_digest)
         if identity not in seen_findings:
