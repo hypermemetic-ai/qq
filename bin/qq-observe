@@ -1485,6 +1485,29 @@ def append_events(events):
         close_ledger_events(fd)
 
 
+def valid_ledger_marker(item, analysis_sha256):
+    if (
+        not isinstance(item, dict)
+        or set(item) not in (
+            {"schema", "schema_version", "analysis_sha256"},
+            {"schema", "schema_version", "analysis_sha256", "written_at"},
+        )
+        or item.get("schema") != "qq-observer.ledger-applied"
+        or item.get("schema_version") != 1
+        or item.get("analysis_sha256") != analysis_sha256
+    ):
+        return False
+    if "written_at" not in item:
+        return True
+    if not isinstance(item["written_at"], str):
+        return False
+    try:
+        time_value(item["written_at"])
+    except ValueError:
+        return False
+    return True
+
+
 def valid_comparison_record(item):
     if (
         not isinstance(item, dict)
@@ -1668,16 +1691,32 @@ def ledger_update_run(run_dir, skipped_promotions=None):
     analysis = minimal_analysis(json_document(raw, "finalized analysis"))
     pr, _, timestamp = package_identity(run_dir, require_timestamp=True)
     timestamp = time_value(timestamp).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-    marker_data = (
-        json.dumps({
-            "schema": "qq-observer.ledger-applied", "schema_version": 1,
-            "analysis_sha256": hashlib.sha256(raw).hexdigest(),
-        }, separators=(",", ":"), sort_keys=True) + "\n"
-    ).encode("utf-8")
     marker = run_dir / ".ledger-applied"
+    analysis_sha256 = hashlib.sha256(raw).hexdigest()
+    old_marker = existing_bytes(marker)
+    if old_marker is None:
+        marker_record = {
+            "schema": "qq-observer.ledger-applied", "schema_version": 1,
+            "analysis_sha256": analysis_sha256, "written_at": utc_now(),
+        }
+        marker_data = (
+            json.dumps(marker_record, separators=(",", ":"), sort_keys=True) + "\n"
+        ).encode("utf-8")
+        marker_exists = False
+    else:
+        marker_record = json_document(old_marker, "ledger-applied marker")
+        canonical_marker = (
+            json.dumps(marker_record, separators=(",", ":"), sort_keys=True) + "\n"
+        ).encode("utf-8")
+        if (
+            not valid_ledger_marker(marker_record, analysis_sha256)
+            or old_marker != canonical_marker
+        ):
+            fail(f"append-only conflict at {marker}", 65)
+        marker_data = old_marker
+        marker_exists = True
     fd = open_ledger_events()
     try:
-        marker_exists = preflight_append(marker, marker_data)
         previous, _ = read_ledger_events(fd)
         already_promoted = {
             event["recurrence_key"] for event in previous if event["type"] == "promoted"
@@ -1764,6 +1803,20 @@ def comparison_candidate_content(event):
     return content
 
 
+def replay_record_timestamp(path, info, field, label):
+    record = json_document(read_regular(path, label), label)
+    timestamp = record.get(field) if isinstance(record, dict) else None
+    if timestamp is None:
+        return mtime_timestamp(info)
+    if not isinstance(timestamp, str):
+        fail(f"invalid internal timestamp at {path}", 65)
+    try:
+        value = time_value(timestamp)
+    except ValueError:
+        fail(f"invalid internal timestamp at {path}", 65)
+    return value.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
 def replay_disposition(run_dir, timestamp, existing):
     path = run_dir / "discussed.json"
     mark = json_document(read_regular(path, "discussed mark"), "discussed mark")
@@ -1825,10 +1878,14 @@ def ledger_rebuild(values):
             not regular_file(run_dir / "analysis_failed.json")
             and regular_file(analysis) and regular_file(marker)
         ):
-            run_items.append(("finding_seen", os.lstat(marker)))
-        for name, kind in (
-            ("discussed.json", "disposition"),
-            ("comparison.json", "signal_tune_candidate"),
+            info = os.lstat(marker)
+            run_items.append((
+                "finding_seen", info,
+                replay_record_timestamp(marker, info, "written_at", "ledger-applied marker"),
+            ))
+        for name, kind, field, label in (
+            ("discussed.json", "disposition", "ts", "discussed mark"),
+            ("comparison.json", "signal_tune_candidate", "written_at", "comparison record"),
         ):
             path = run_dir / name
             if os.path.lexists(path):
@@ -1838,12 +1895,14 @@ def ledger_rebuild(values):
                     fail(f"cannot inspect replay record {path}: {error}", 65)
                 if not stat.S_ISREG(info.st_mode):
                     fail(f"replay record is not a regular file: {path}", 65)
-                run_items.append((kind, info))
+                run_items.append((
+                    kind, info, replay_record_timestamp(path, info, field, label),
+                ))
         if run_items:
             pr, _, _ = package_identity(run_dir)
             replay_items.extend(
-                (info.st_mtime_ns, pr, kind, run_dir, info)
-                for kind, info in run_items
+                (time_value(timestamp), pr, kind, run_dir, timestamp)
+                for kind, _, timestamp in run_items
             )
             replayed_runs.add(run_dir)
     replay_items.sort(key=lambda item: item[:3])
@@ -1869,20 +1928,20 @@ def ledger_rebuild(values):
     events_appended = 0
     events_skipped = 0
     skipped_promotions = set()
-    for _, _, kind, run_dir, info in replay_items:
+    for _, _, kind, run_dir, timestamp in replay_items:
         if kind == "finding_seen":
             result = ledger_update_run(run_dir, skipped_promotions)
             events_appended += result["findings"] + result["promoted"]
             events_skipped += result["events_skipped"]
         elif kind == "disposition":
             appended, skipped = replay_disposition(
-                run_dir, mtime_timestamp(info), existing_dispositions,
+                run_dir, timestamp, existing_dispositions,
             )
             events_appended += appended
             events_skipped += skipped
         else:
             appended, skipped = replay_comparison(
-                run_dir, mtime_timestamp(info), available_candidates,
+                run_dir, timestamp, available_candidates,
             )
             events_appended += appended
             events_skipped += skipped

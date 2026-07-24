@@ -69,6 +69,11 @@ jq -s -e '
   and ([.[] | select(.type == "finding_seen") | .recurrence_key] == ["alpha","beta"])
 ' "$events" >/dev/null || fail 'torn ledger tail was not repaired before append'
 [ -f "$run_1/.ledger-applied" ] || fail 'torn-tail recovery did not write the applied marker'
+jq -e '
+  .schema == "qq-observer.ledger-applied" and .schema_version == 1
+  and (.analysis_sha256 | test("^[0-9a-f]{64}$"))
+  and (.written_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"))
+' "$run_1/.ledger-applied" >/dev/null || fail 'ledger marker lacks its internal write time'
 jq -s -e '
   [.[] | select(.type == "finding_seen")]
   | length == 2
@@ -464,14 +469,20 @@ rebuild_unmarked="$(make_run pr-24 24 guided 2026-10-24T10:00:00Z "$first_episod
 
 "$OBSERVE" ledger-update --run "$rebuild_21" >"$tmp/rebuild-update-21.json"
 "$OBSERVE" ledger-update --run "$rebuild_20" >"$tmp/rebuild-update-20.json"
-touch -d '2026-10-21T10:00:00.000Z' "$rebuild_21/.ledger-applied"
-touch -d '2026-10-21T10:01:00.000Z' "$rebuild_20/.ledger-applied"
 "$OBSERVE" mark-discussed --run "$rebuild_21" --outcomes "$outcomes" \
   >"$tmp/rebuild-discussed-21.json"
+jq -c '.ts = "2026-10-21T10:00:00.300Z"' "$rebuild_21/discussed.json" \
+  >"$tmp/rebuild-discussed-record-21.json"
+mv "$tmp/rebuild-discussed-record-21.json" "$rebuild_21/discussed.json"
 "$OBSERVE" record-comparison --guided "$rebuild_20" --blind "$rebuild_20_blind" \
   >"$tmp/rebuild-comparison-20.json"
-touch -d '2026-10-21T11:00:00.000Z' "$rebuild_21/discussed.json"
-touch -d '2026-10-21T12:00:00.000Z' "$rebuild_20/comparison.json"
+jq -c '.written_at = "2026-10-21T10:00:00.400Z"' "$rebuild_20/comparison.json" \
+  >"$tmp/rebuild-comparison-record-20.json"
+mv "$tmp/rebuild-comparison-record-20.json" "$rebuild_20/comparison.json"
+touch -d '2030-01-01T00:00:00.100Z' "$rebuild_21/.ledger-applied"
+touch -d '2030-01-01T00:00:00.000Z' "$rebuild_20/.ledger-applied"
+touch -d '2030-01-01T00:00:00.000Z' \
+  "$rebuild_21/discussed.json" "$rebuild_20/comparison.json"
 jq -cS 'if .type == "disposition" or .type == "signal_tune_candidate" then del(.ts) else . end' \
   "$events" >"$tmp/pre-loss-events.jsonl"
 
@@ -500,9 +511,9 @@ jq -s -e '
        and .[0].recurrence_key == "beta" and .[0].direction == "prune")
 ' "$events" >/dev/null || fail 'rebuild did not restore every durable event kind'
 jq -s -e '
-  ([.[] | select(.type == "disposition") | .ts] == ["2026-10-21T11:00:00.000Z"])
-  and ([.[] | select(.type == "signal_tune_candidate") | .ts] == ["2026-10-21T12:00:00.000Z"])
-' "$events" >/dev/null || fail 'replayed durable event timestamps do not use record mtimes'
+  ([.[] | select(.type == "disposition") | .ts] == ["2026-10-21T10:00:00.300Z"])
+  and ([.[] | select(.type == "signal_tune_candidate") | .ts] == ["2026-10-21T10:00:00.400Z"])
+' "$events" >/dev/null || fail 'replayed durable events do not use internal record timestamps'
 
 before="$(wc -l <"$events")"
 "$OBSERVE" ledger-rebuild >"$tmp/rebuilt-again.json"
@@ -511,6 +522,53 @@ jq -e '
   .runs_seen == 6 and .runs_replayed == 2
   and .events_appended == 0 and .events_skipped == 7
 ' "$tmp/rebuilt-again.json" >/dev/null || fail 'second rebuild was not a full no-op'
+
+# Equal mtimes cannot reverse same-second disposition chronology during recovery.
+export XDG_STATE_HOME="$tmp/chronology-state"
+runs="$XDG_STATE_HOME/qq/observer/runs"
+events="$XDG_STATE_HOME/qq/observer/ledger/events.jsonl"
+chronology_episode="$(make_episode chronology waste 'Chronology opportunity')"
+chronology_episodes="$(jq -cn --argjson episode "$chronology_episode" '[$episode]')"
+chronology_2="$(make_run pr-2 2 guided 2026-11-02T10:00:00Z "$chronology_episodes")"
+chronology_3="$(make_run pr-3 3 guided 2026-11-03T10:00:00Z "$chronology_episodes")"
+"$OBSERVE" ledger-update --run "$chronology_2" >"$tmp/chronology-update-2.json"
+"$OBSERVE" ledger-update --run "$chronology_3" >"$tmp/chronology-update-3.json"
+jq -c 'del(.written_at)' "$chronology_3/.ledger-applied" \
+  >"$tmp/chronology-legacy-marker-3.json"
+mv "$tmp/chronology-legacy-marker-3.json" "$chronology_3/.ledger-applied"
+touch -d '2099-01-01T00:00:00.000Z' "$chronology_3/.ledger-applied"
+accepted_outcome="$tmp/chronology-accepted.json"
+rejected_outcome="$tmp/chronology-rejected.json"
+jq -cn '[{recurrence_key:"chronology",verdict:"accepted",task_refs:[],note:"Older."}]' \
+  >"$accepted_outcome"
+jq -cn '[{recurrence_key:"chronology",verdict:"rejected",task_refs:[],note:"Newer."}]' \
+  >"$rejected_outcome"
+jq -cn --argjson outcomes "$(cat "$accepted_outcome")" '{
+  schema:"qq-observer.ledger-event",schema_version:1,
+  ts:"2026-11-04T10:00:00.100Z",type:"disposition",pr:3,outcomes:$outcomes
+}' >"$chronology_3/discussed.json"
+"$OBSERVE" mark-discussed --run "$chronology_3" --outcomes "$accepted_outcome" \
+  >"$tmp/chronology-discussed-3.json"
+jq -cn --argjson outcomes "$(cat "$rejected_outcome")" '{
+  schema:"qq-observer.ledger-event",schema_version:1,
+  ts:"2026-11-04T10:00:00.900Z",type:"disposition",pr:2,outcomes:$outcomes
+}' >"$chronology_2/discussed.json"
+"$OBSERVE" mark-discussed --run "$chronology_2" --outcomes "$rejected_outcome" \
+  >"$tmp/chronology-discussed-2.json"
+touch -d '2030-01-01T00:00:00.000Z' \
+  "$chronology_3/discussed.json" "$chronology_2/discussed.json"
+"$OBSERVE" digest >"$tmp/chronology-before-loss.md"
+assert_file_contains "$tmp/chronology-before-loss.md" \
+  '| 3 | 2 | `chronology` | Chronology opportunity | `waste` | #2, #3 | high, high | rejected (×0.5) |' \
+  'original disposition chronology did not end with rejection'
+rm -rf "$(dirname "$events")"
+"$OBSERVE" ledger-rebuild >"$tmp/chronology-rebuild.json"
+jq -e 'has("written_at") | not' "$chronology_3/.ledger-applied" >/dev/null \
+  || fail 'legacy ledger marker was not replayed lawfully by mtime'
+"$OBSERVE" digest >"$tmp/chronology-after-loss.md"
+assert_file_contains "$tmp/chronology-after-loss.md" \
+  '| 3 | 2 | `chronology` | Chronology opportunity | `waste` | #2, #3 | high, high | rejected (×0.5) |' \
+  'equal-mtime rebuild reversed internal disposition chronology'
 
 export XDG_STATE_HOME="$primary_state"
 runs="$primary_runs"
