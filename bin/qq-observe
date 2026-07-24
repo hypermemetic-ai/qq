@@ -1770,6 +1770,9 @@ def read_ledger_events(fd, since=None):
         if since is not None and time_value(item["ts"]) < since:
             continue
         events.append(item)
+    events.sort(key=lambda event: (
+        "written_seq" in event, event.get("written_seq", 0),
+    ))
     return events, unknown
 
 

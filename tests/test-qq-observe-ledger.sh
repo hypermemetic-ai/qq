@@ -692,6 +692,65 @@ jq -cS . "$events" >"$tmp/comparison-dedupe-after-loss.jsonl"
 cmp "$tmp/comparison-dedupe-before-loss.jsonl" "$tmp/comparison-dedupe-after-loss.jsonl" >/dev/null \
   || fail 'globally deduplicated comparison rebuild was not byte-exact'
 
+# Logical written_seq, not physical append position, orders every ledger consumer.
+export XDG_STATE_HOME="$tmp/logical-order-state"
+runs="$XDG_STATE_HOME/qq/observer/runs"
+events="$XDG_STATE_HOME/qq/observer/ledger/events.jsonl"
+mkdir -p "$(dirname "$events")"
+jq -cn '{
+  schema:"qq-observer.ledger-event",schema_version:1,written_seq:2,
+  ts:"2026-12-03T10:00:00Z",type:"disposition",pr:51,
+  outcomes:[{recurrence_key:"logical",verdict:"accepted",task_refs:[],note:"Latest logically."}]
+}' >"$events"
+jq -cn '{
+  schema:"qq-observer.ledger-event",schema_version:1,written_seq:6,
+  ts:"2026-12-03T10:00:00Z",type:"finding_seen",pr:52,
+  recurrence_key:"logical",kind:"friction",title:"Latest logical opportunity",
+  rank:1,confidence:"high",no_signal:false,
+  cost:{turns:1,tokens:1,duration_ms:1}
+}' >>"$events"
+jq -cn '{
+  schema:"qq-observer.ledger-event",schema_version:1,written_seq:4,
+  ts:"2026-12-03T10:00:00Z",type:"signal_tune_candidate",pr:51,
+  direction:"prune",episode_title:"Second logical candidate",
+  recurrence_key:"logical-second",evidence:"guided-only"
+}' >>"$events"
+jq -cn '{
+  schema:"qq-observer.ledger-event",schema_version:1,written_seq:1,
+  ts:"2026-12-03T10:00:00Z",type:"disposition",pr:50,
+  outcomes:[{recurrence_key:"logical",verdict:"rejected",task_refs:[],note:"Stale logically."}]
+}' >>"$events"
+jq -cn '{
+  schema:"qq-observer.ledger-event",schema_version:1,written_seq:5,
+  ts:"2026-12-03T10:00:00Z",type:"finding_seen",pr:51,
+  recurrence_key:"logical",kind:"waste",title:"Stale logical opportunity",
+  rank:2,confidence:"low",no_signal:false,
+  cost:{turns:1,tokens:1,duration_ms:1}
+}' >>"$events"
+jq -cn '{
+  schema:"qq-observer.ledger-event",schema_version:1,written_seq:3,
+  ts:"2026-12-03T10:00:00Z",type:"signal_tune_candidate",pr:50,
+  direction:"promote",episode_title:"First logical candidate",
+  recurrence_key:"logical-first",evidence:"blind-only"
+}' >>"$events"
+chmod 600 "$events"
+"$OBSERVE" digest >"$tmp/logical-order-a.md"
+assert_file_contains "$tmp/logical-order-a.md" \
+  '| 9 | 2 | `logical` | Latest logical opportunity | `friction` | #51, #52 | low, high | accepted (×1.5) |' \
+  'digest latest state followed physical append order instead of written_seq'
+first_candidate_line="$(grep -n 'First logical candidate' "$tmp/logical-order-a.md" | cut -d: -f1)"
+second_candidate_line="$(grep -n 'Second logical candidate' "$tmp/logical-order-a.md" | cut -d: -f1)"
+[ "$first_candidate_line" -lt "$second_candidate_line" ] \
+  || fail 'signal-tuning candidates followed physical append order instead of written_seq'
+jq -cs 'reverse[]' "$events" >"$tmp/logical-order-reversed.jsonl"
+mv "$tmp/logical-order-reversed.jsonl" "$events"
+chmod 600 "$events"
+"$OBSERVE" digest >"$tmp/logical-order-b.md"
+sed '/^Generated:/d' "$tmp/logical-order-a.md" >"$tmp/logical-order-a-normalized.md"
+sed '/^Generated:/d' "$tmp/logical-order-b.md" >"$tmp/logical-order-b-normalized.md"
+cmp "$tmp/logical-order-a-normalized.md" "$tmp/logical-order-b-normalized.md" >/dev/null \
+  || fail 'digest changed when only ledger physical order changed'
+
 export XDG_STATE_HOME="$primary_state"
 runs="$primary_runs"
 events="$primary_events"
