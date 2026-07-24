@@ -1,11 +1,11 @@
 ---
 id: T-151
 title: Architect digest view — whole-picture default in the /architect selector
-status: In Progress
+status: Done
 assignee:
   - '@qqp-dev'
 created_date: '2026-07-24 04:30'
-updated_date: '2026-07-24 04:40'
+updated_date: '2026-07-24 05:21'
 labels: []
 dependencies: []
 documentation:
@@ -25,9 +25,9 @@ Decision ledger: digest-as-default view — operator selection 2026-07-24 (optio
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 /architect's opening view renders the current digest (promoted + open findings, ranked) as the default, with undiscussed rounds listed beneath for deep-dive selection
-- [ ] #2 Round selection, discussed-mark flow, and failed-round behavior are unchanged
-- [ ] #3 Fresh Checks cover the digest-first selector
+- [x] #1 /architect's opening view renders the current digest (promoted + open findings, ranked) as the default, with undiscussed rounds listed beneath for deep-dive selection
+- [x] #2 Round selection, discussed-mark flow, and failed-round behavior are unchanged
+- [x] #3 Fresh Checks cover the digest-first selector
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -71,3 +71,15 @@ Change only the qq-owned Pi extension and its focused extension test. Consume th
 - Digest/theme-level dispositions remain parked: T-151 decision ledger, same exchange.
 - Built-in selector header plus default digest choice, rather than a new custom TUI: recommended here for explicit operator approval; it satisfies the view while preserving the extension’s dependency-free test/runtime shape.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented the approved digest-first built-in selector. Fresh-context review found two boundary-A canonical-digest gaps; both were reproduced, fixed, and their fix deltas reviewed. The final signal-row fix has 0 production-LOC and 0 decision-point delta after the required same-fix-smaller pass. Verification: focused extension suite pass; truncated and malformed Signal-tuning inputs now refuse before rounds/selector/turn; LSP 0 diagnostics; GitHub shell-tests pass; operator UAT in pane wM:p55 confirmed the ranked digest view, default whole-ledger kickoff, rounds beneath, and parked digest-level dispositions.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Made the ranked observer digest the default /architect view with optional round deep dives, while preserving round/discussed/failed behavior and keeping digest-level dispositions parked. Verified by focused automated tests, reproduced failure-path checks, fresh-context review through final PASS, green GitHub shell-tests, and explicit operator UAT acceptance.
+<!-- SECTION:FINAL_SUMMARY:END -->
