@@ -877,35 +877,89 @@ runs="$XDG_STATE_HOME/qq/observer/runs"
 events="$XDG_STATE_HOME/qq/observer/ledger/events.jsonl"
 lock_episode="$(make_episode serialized waste 'Serialized opportunity')"
 lock_episodes="$(jq -cn --argjson episode "$lock_episode" '[$episode]')"
-lock_run_1="$(make_run pr-61 61 guided 2026-12-04T10:00:00Z "$lock_episodes")"
-lock_run_2="$(make_run pr-62 62 guided 2026-12-04T10:01:00Z "$lock_episodes")"
-lock_run_3="$(make_run pr-63 63 guided 2026-12-04T10:02:00Z "$lock_episodes")"
-"$OBSERVE" ledger-update --run "$lock_run_1" >"$tmp/lock-seed-1.json"
-"$OBSERVE" ledger-update --run "$lock_run_2" >"$tmp/lock-seed-2.json"
-rm "$events"
+lock_common="$(make_episode serialized-common friction 'Serialized common episode')"
+lock_only="$(make_episode serialized-only waste 'Serialized guided-only episode')"
+lock_guided_episodes="$(jq -cn --argjson common "$lock_common" --argjson only "$lock_only" '[$common,$only]')"
+lock_blind_episodes="$(jq -cn --argjson common "$lock_common" '[$common]')"
+lock_update_run="$(make_run pr-61 61 guided 2026-12-04T10:00:00Z "$lock_episodes")"
+lock_discussed_run="$(make_run pr-62 62 guided 2026-12-04T10:01:00Z '[]')"
+lock_guided_run="$(make_run pr-63 63 guided 2026-12-04T10:02:00Z "$lock_guided_episodes")"
+lock_blind_run="$(make_run pr-63-blind 63 blind 2026-12-04T10:03:00Z "$lock_blind_episodes")"
+lock_outcomes="$tmp/lock-outcomes.json"
+jq -cn '[{
+  recurrence_key:"serialized",verdict:"accepted",task_refs:[],note:"Serialized."
+}]' >"$lock_outcomes"
+
+# Release all four commands into the Python entry point together. This wrapper
+# only supplies a start gate; it does not rewrite or search the implementation.
+real_python="$(command -v python3)"
+concurrent_python="$tmp/concurrent-python3"
+cat >"$concurrent_python" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" != - ]; then
+  exec "$REAL_PYTHON3" "$@"
+fi
+printf 'ready\n' >>"$CONCURRENT_READY"
+while [ ! -e "$CONCURRENT_GATE" ]; do sleep 0.01; done
+exec "$REAL_PYTHON3" "$@"
+SH
+chmod 700 "$concurrent_python"
+concurrent_ready="$tmp/concurrent-ready"
+concurrent_gate="$tmp/concurrent-gate"
+: >"$concurrent_ready"
 (
-  "$OBSERVE" ledger-rebuild >"$tmp/concurrent-rebuild-1.json"
-) &
-rebuild_pid_1=$!
-(
-  "$OBSERVE" ledger-rebuild >"$tmp/concurrent-rebuild-2.json"
-) &
-rebuild_pid_2=$!
-(
-  "$OBSERVE" ledger-update --run "$lock_run_3" >"$tmp/concurrent-update.json"
+  REAL_PYTHON3="$real_python" CONCURRENT_READY="$concurrent_ready" \
+    CONCURRENT_GATE="$concurrent_gate" QQ_PYTHON3_BIN="$concurrent_python" \
+    "$OBSERVE" ledger-update --run "$lock_update_run" >"$tmp/concurrent-update.json"
 ) &
 update_pid=$!
-wait "$rebuild_pid_1"
-wait "$rebuild_pid_2"
+(
+  REAL_PYTHON3="$real_python" CONCURRENT_READY="$concurrent_ready" \
+    CONCURRENT_GATE="$concurrent_gate" QQ_PYTHON3_BIN="$concurrent_python" \
+    "$OBSERVE" mark-discussed --run "$lock_discussed_run" --outcomes "$lock_outcomes" \
+    >"$tmp/concurrent-discussed.json"
+) &
+discussed_pid=$!
+(
+  REAL_PYTHON3="$real_python" CONCURRENT_READY="$concurrent_ready" \
+    CONCURRENT_GATE="$concurrent_gate" QQ_PYTHON3_BIN="$concurrent_python" \
+    "$OBSERVE" record-comparison --guided "$lock_guided_run" --blind "$lock_blind_run" \
+    >"$tmp/concurrent-comparison.json"
+) &
+comparison_pid=$!
+(
+  REAL_PYTHON3="$real_python" CONCURRENT_READY="$concurrent_ready" \
+    CONCURRENT_GATE="$concurrent_gate" QQ_PYTHON3_BIN="$concurrent_python" \
+    "$OBSERVE" ledger-rebuild >"$tmp/concurrent-rebuild.json"
+) &
+rebuild_pid=$!
+while [ "$(wc -l <"$concurrent_ready")" -lt 4 ]; do sleep 0.01; done
+: >"$concurrent_gate"
 wait "$update_pid"
+wait "$discussed_pid"
+wait "$comparison_pid"
+wait "$rebuild_pid"
+
+jq -s -e 'map(.written_seq) | sort == [1,2,3]' \
+  "$lock_update_run/.ledger-applied" "$lock_discussed_run/discussed.json" \
+  "$lock_guided_run/comparison.json" >/dev/null \
+  || fail 'concurrent ledger writers did not allocate unique serialized sequences'
 jq -s -e '
-  ([.[] | select(.type == "finding_seen")] | length == 3)
-  and ([.[] | select(.type == "promoted") | .prs] == [[61,62]])
-' "$events" >/dev/null || fail 'concurrent ledger writers replayed stale membership'
+  length == 3
+  and ([.[].written_seq] == ([.[].written_seq] | sort))
+  and ([.[] | select(.type == "finding_seen") | {pr,variant,key:.recurrence_key}] ==
+    [{pr:61,variant:"guided",key:"serialized"}])
+  and ([.[] | select(.type == "disposition") | .pr] == [62])
+  and ([.[] | select(.type == "signal_tune_candidate") |
+    {pr,direction,key:.recurrence_key}] ==
+    [{pr:63,direction:"prune",key:"serialized-only"}])
+' "$events" >/dev/null || fail 'concurrent ledger writers lost a durable record'
 cp "$events" "$tmp/concurrent-events.jsonl"
-"$OBSERVE" ledger-rebuild >"$tmp/concurrent-final-rebuild.json"
+rm "$events"
+"$OBSERVE" ledger-rebuild >"$tmp/concurrent-sequential-rebuild.json"
 cmp "$tmp/concurrent-events.jsonl" "$events" >/dev/null \
-  || fail 'concurrent writer result differs from a full rebuild'
+  || fail 'concurrent live result differs byte-for-byte from sequential rebuild'
 
 # An unusable lock path refuses mutation rather than proceeding unlocked.
 ledger_lock="$(dirname "$events")/.lock"
