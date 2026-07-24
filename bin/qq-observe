@@ -1477,6 +1477,14 @@ def valid_ledger_event(item):
     return False
 
 
+def append_events(events):
+    fd = open_ledger_events()
+    try:
+        append_ledger_events(fd, events)
+    finally:
+        close_ledger_events(fd)
+
+
 def valid_comparison_record(item):
     if (
         not isinstance(item, dict)
@@ -1771,12 +1779,8 @@ def replay_disposition(run_dir, timestamp, existing):
     event = ledger_event(
         "disposition", ts=timestamp, pr=pr, outcomes=mark["outcomes"],
     )
-    fd = open_ledger_events()
-    try:
-        append_ledger_events(fd, [event])
-    finally:
-        close_ledger_events(fd)
     existing.add(identity)
+    append_events([event])
     return 1, 0
 
 
@@ -1803,11 +1807,7 @@ def replay_comparison(run_dir, timestamp, available):
         if not valid_ledger_event(event):
             fail(f"invalid comparison candidate at {path}", 65)
         events.append(event)
-    fd = open_ledger_events()
-    try:
-        append_ledger_events(fd, events)
-    finally:
-        close_ledger_events(fd)
+    append_events(events)
     return len(events), skipped
 
 
