@@ -153,11 +153,13 @@ async function invoke(harness, name, args = "") {
 async function testDigestFailuresNotifyAndStop() {
   const killed = execution("", 0, "digest process was killed");
   killed.killed = true;
+  const truncatedAfterOpenTable = digest().split("\n").slice(0, 18).join("\n");
   for (const reply of [
     execution("", 65, "observer store is malformed"),
     killed,
     execution("not-markdown"),
     execution(digest().replace("## Open findings", "## Missing findings")),
+    execution(truncatedAfterOpenTable),
     execution(digest({ open: [
       "| 2 | nope | `broken-key` | Broken row | `friction` | #8 | high | none (×1) |",
     ] })),

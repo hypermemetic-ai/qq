@@ -84,7 +84,7 @@ function parseDigestTable(lines, heading, label) {
   }
   if (rows.some((row) => row.every((cell, cellIndex) => cell === DIGEST_EMPTY_ROW[cellIndex]))) {
     if (rows.length !== 1) throw new Error("digest empty sentinel is mixed with findings");
-    return { position, text: `${label}\n- None` };
+    return { position, end: index, text: `${label}\n- None` };
   }
 
   const rendered = rows.map((row) => {
@@ -106,7 +106,7 @@ function parseDigestTable(lines, heading, label) {
     }
     return `- Score: ${score}; Recurrences: ${recurrences}; Recurrence key: ${recurrenceKey}; Latest title: ${digestText(title)}; Kind: ${findingKind}; PRs: ${prs}; Confidence history: ${confidence}; Disposition: ${disposition}`;
   });
-  return { position, text: `${label}\n${rendered.join("\n")}` };
+  return { position, end: index, text: `${label}\n${rendered.join("\n")}` };
 }
 
 function parseDigest(stdout) {
@@ -125,6 +125,10 @@ function parseDigest(stdout) {
   const open = parseDigestTable(lines, "## Open findings", "Open findings");
   if (opportunities.position >= open.position) {
     throw new Error("digest ranked tables are out of order");
+  }
+  const suffix = lines.slice(open.end + 1).join("\n");
+  if (!/^## Signal-tuning candidates\n\n\| PR \| Direction \| Evidence \| Signal kind \| Episode title \| Recurrence key \|\n\| ---: \| --- \| --- \| --- \| --- \| --- \|\n(?:\| .* \|\n)+\nCoverage: [0-9]+ finalized, [0-9]+ failed\.\nUnknown ledger entries: [0-9]+\.\n(?![\s\S])/.test(suffix)) {
+    throw new Error("digest suffix is malformed");
   }
   return { markdown: stdout, selectorTitle: `Current observer digest\n\n${opportunities.text}\n\n${open.text}` };
 }
