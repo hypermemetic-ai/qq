@@ -1,10 +1,10 @@
 ---
 id: T-160
 title: Adopt native Context7 for researcher children only
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-25 01:25'
-updated_date: '2026-07-25 02:34'
+updated_date: '2026-07-25 02:38'
 labels: []
 dependencies: []
 documentation:
@@ -56,7 +56,7 @@ The approved package/configuration mutation is conditional: do not change the op
 - [x] #4 Fresh canary and promoted-process evidence proves only researchers have `resolve-library-id` and `query-docs`; parent, reviewer, implementer, and observer do not; no MCP process, Context7 key, global package registration, prompt, or copied vendor Skill exists.
 - [x] #5 Only after every promotion gate passes, the operator Pi npm prefix gains exact dependency `@upstash/context7-pi: 0.1.1`, researcher child selection and privacy policy land, `.mcp.json` retires, and rollback is verified without silent MCP fallback.
 - [x] #6 Completion Envelopes, acceptance:none, assigned cwd, canonical trusted manifests, resume provenance, Landstrip policies, persisted-session observation, cleanup, and exact vendor/runtime pins remain intact.
-- [ ] #7 Focused boundary/privacy/integrity/rollback Checks, all Repository Checks, ratchet, diagnostics, fresh review, and GitHub CI pass; no unrelated package upgrade or broader research-policy rewrite lands.
+- [x] #7 Focused boundary/privacy/integrity/rollback Checks, all Repository Checks, ratchet, diagnostics, fresh review, and GitHub CI pass; no unrelated package upgrade or broader research-policy rewrite lands.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -74,3 +74,9 @@ Pre-promotion review `b6f2ded7-75dc-4057-a730-cdca7c79fa96` returned NO-GO on tw
 
 Final full review `63ee99b0...` identified two P2s: inherited `CONTEXT7_API_KEY` was not fail-closed and manifest assertions admitted scope expansion. `qq-dispatch` now refuses a nonempty inherited key for researcher at role selection with exit 66 before Pi launch; fake-harness and production-shaped direct dispatch proved exact status/message, zero child args/event/process, while no-key canonical researcher `6724a414...` remained green. The focused manifest Check now enforces exact line counts/order and rejects inline, comma, and supported YAML block-list extension expansion. First fix review `b2dc918e...` found missing block-list and exact-exit enforcement; both were corrected. Second review initially hit WebSocket 1006, then contract-preserving resume `f5de099e` returned ACCEPT. The final affected suite and all 35 Repository shell Checks, ShellCheck, ratchet, diff check, and active diagnostics pass.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Adopted exact native `@upstash/context7-pi@0.1.1` only for canonical researcher children through one home-relative `subagentOnlyExtensions` path and strict `resolve-library-id`/`query-docs` tools. Decision-15 supersedes decision-2 only for current qq dispatch; `.mcp.json` retires after a clear ownership audit. Parents, reviewers, implementers, and observers remain Context7-free. Research queries are limited to public library/API concepts; researcher dispatch refuses inherited `CONTEXT7_API_KEY` before Pi launch. Exact registry SHA-1/SRI, stable peer resolution, pre-promotion public resolve/query+resume, promoted per-role tool registries, Completion Envelopes, acceptance:none, canonical manifests/cwd, Landstrip policies, cleanup, persisted observation, exact package/runtime/vendor pins, and a full uninstall/reinstall/no-MCP-fallback rollback cycle passed. Review blockers across pre-promotion and final rounds were fixed and the final enforcement review returned ACCEPT. All 35 Repository shell Checks, focused boundary/privacy/integrity/rollback tests, ShellCheck, lowered ratchet 7992, diagnostics, diff check, and PR #246 GitHub CI pass. The operator npm prefix contains only the exact unregistered dependency; Pi settings remain byte-identical and no key/process/copied vendor resource exists. Awaiting operator merge; the agent will land, observe, retire, and offer proportional researcher-tool UAT afterward.
+<!-- SECTION:FINAL_SUMMARY:END -->

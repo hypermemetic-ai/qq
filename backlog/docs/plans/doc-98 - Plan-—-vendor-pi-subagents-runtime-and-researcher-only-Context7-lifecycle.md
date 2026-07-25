@@ -11,7 +11,7 @@ tags:
 ---
 # Plan — retain pi-subagents as vendor runtime, then adopt researcher-only native Context7
 
-Status: approved by the operator on 2026-07-24; Change 1 delivered and retired, Change 2 in progress
+Status: approved by the operator on 2026-07-24; Change 1 delivered and retired, Change 2 reviewed and green for operator merge
 
 ## Outcome
 
