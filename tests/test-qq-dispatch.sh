@@ -816,6 +816,21 @@ run_failure unsupported-role "$ROOT" \
 assert_file_contains "$tmp/unsupported-role.stderr" \
   "unsupported child role 'planner'"
 
+: >"$FAKE_PI_ARGS"
+set +e
+(
+  cd "$ROOT"
+  PI_SUBAGENT_CHILD_AGENT=researcher \
+  CONTEXT7_API_KEY=ctx7sk_test-only-never-send \
+    "$DISPATCH" --json
+) >"$tmp/researcher-context7-key.stdout" 2>"$tmp/researcher-context7-key.stderr"
+researcher_key_status=$?
+set -e
+assert_equal 66 "$researcher_key_status" 'researcher Context7 key refusal did not exit 66'
+assert_file_contains "$tmp/researcher-context7-key.stderr" \
+  'researcher dispatch forbids inherited CONTEXT7_API_KEY'
+[ ! -s "$FAKE_PI_ARGS" ] || fail 'researcher Context7 key refusal launched Pi'
+
 unrelated_repository="$tmp/unrelated-repository"
 git init -q "$unrelated_repository"
 run_failure unrelated-repository "$unrelated_repository" \

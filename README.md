@@ -302,6 +302,56 @@ shared promotion contract for the vendor and qq dispatch boundaries. Run it
 against both the installed rollback checkout and a prepared candidate before
 changing the production pin.
 
+#### Researcher-only native Context7
+
+Canonical researcher children receive only the native `resolve-library-id` and
+`query-docs` tools from exact `@upstash/context7-pi@0.1.1`. The researcher
+manifest loads its extension through `subagentOnlyExtensions`; accountable
+parents, reviewers, implementers, and observers do not receive it. Do not add
+an API key, register Context7 with `pi install`, restore MCP automatically, or
+copy the vendor prompt or Skill. `qq-dispatch` refuses a researcher launch when
+it inherits a nonempty `CONTEXT7_API_KEY`; it does not silently clear or use the
+credential. Delegates have openly available network egress under decision-8, so
+Research-Skill privacy rules—not a network boundary—govern query content.
+
+Install the exact dependency in Pi's operator-owned npm prefix without package
+registration or lifecycle scripts. Review the package/lock diff and stop if npm
+moves any existing dependency rather than adding the exact root dependency and
+its lock entry:
+
+```bash
+npm install --prefix "$HOME/.pi/agent/npm" --ignore-scripts --save-exact \
+  @upstash/context7-pi@0.1.1
+```
+
+Verify the installed artifact, registry integrity recorded in the lock, and
+absence from Pi's global package registry:
+
+```bash
+prefix="$HOME/.pi/agent/npm"
+test "$(jq -r '.dependencies["@upstash/context7-pi"]' "$prefix/package.json")" = 0.1.1
+test "$(jq -r '.packages["node_modules/@upstash/context7-pi"].version' "$prefix/package-lock.json")" = 0.1.1
+test "$(jq -r '.packages["node_modules/@upstash/context7-pi"].integrity' "$prefix/package-lock.json")" = \
+  'sha512-RVwu0alq02SoniWzn3oRbtRzQmM3g/UuVwKEGHGKj77B0twq6RHRyXuq1Gs/WF+hgtA2eI2QaSnSVq7lGjElbA=='
+test -f "$prefix/node_modules/@upstash/context7-pi/extensions/context7.ts"
+context7_count="$(jq '[.packages[]? | if type == "string" then . else .source? // "" end |
+  select(test("context7"; "i"))] | length' "$HOME/.pi/agent/settings.json")" &&
+  test "$context7_count" = 0
+```
+
+Rollback first removes the researcher manifest's Context7 tool and
+`subagentOnlyExtensions` entries through a reviewed qq Change, then removes the
+exact npm dependency:
+
+```bash
+npm uninstall --prefix "$HOME/.pi/agent/npm" --ignore-scripts \
+  @upstash/context7-pi
+```
+
+A failed or rolled-back adoption leaves Context7 absent. Restore `.mcp.json`
+only after a new explicit operator decision; never silently fall back to the
+retired `npx @latest` route.
+
 Mount the qq Skill root directly into Pi. This is one root mount, so Skill
 membership stays live by construction:
 
