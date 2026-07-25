@@ -107,28 +107,33 @@ two-build reproducibility Checks, then install only the reviewed artifact.
 Moving tags, `@latest`, global Pi, and raw-binary overrides are not runtime
 authorities.
 
-### Temporary pi-subagents bridge
+### Retained pi-subagents vendor runtime
 
-Delegation temporarily uses a qq-owned pi-subagents bridge while T-154.2 builds
-the narrow qq runtime. Its authoritative Pi package source is the exact,
-immutable fork pin
-`git:github.com/hypermemetic-ai/pi-subagents@b7c531c238469e43866a1fe6697cb44279158c1c`.
-The fork commit's sole parent is the exact upstream
+Delegation uses pi-subagents as the retained vendor runtime behind qq's thin
+policy adapter. Its authoritative Pi package source is the exact, immutable
+fork pin
+`git:github.com/hypermemetic-ai/pi-subagents@9e045ed75e09a163afa17271e55150ed1e8369df`.
+The fork commit's sole parent is the exact reviewed upstream
 [`nicobailon/pi-subagents`](https://github.com/nicobailon/pi-subagents) base
-`f1540b09283a1c176a0c721878453c6382ecd399`; the exact fork commit is
-`b7c531c238469e43866a1fe6697cb44279158c1c` in
+`e2a125ee09c2e9ec61b2f6e11f9c2fa887398a39`; the exact fork commit is
+`9e045ed75e09a163afa17271e55150ed1e8369df` in
 [`hypermemetic-ai/pi-subagents`](https://github.com/hypermemetic-ai/pi-subagents).
+Rollback remains the previous exact fork commit
+`b7c531c238469e43866a1fe6697cb44279158c1c`.
 
-The bridge carries one behavioral delta: a successful terminal
+The fork carries two qq runtime semantics. First, a successful terminal
 `structured_output` tool result is a trusted recovery watermark. Failed tool
 results, bare calls, missing or invalid captures, and later errors remain
-failures under parent schema validation. This closes the observed terminal
-recovery hole without trusting unvalidated child prose or changing any other
-pi-subagents behavior.
+failures under parent schema validation. Second, when
+`PI_SUBAGENT_TRUSTED_AGENT_PATHS` is set, the canonical reviewer, researcher,
+implementer, and observer seats must resolve from their exact qq manifest
+paths before launch or resume. The source lock is a same-name configuration
+drift-net, not a hostile-process security boundary or the broader T-152
+execution-profile resolver.
 
 For a new install, use the verified qq `pi` wrapper and Pi's Git-package
-syntax with that exact commit. The bridge remains compatible with the patched
-runtime; it does not authorize stock-Pi fallback. npm
+syntax with that exact commit. The vendor runtime remains compatible with the
+patched runtime; it does not authorize stock-Pi fallback. npm
 packages, branches, tags, version ranges, moving refs, and local paths are not
 authoritative pi-subagents install sources. Install the Landstrip binary package
 directly into Pi's operator-owned npm tree. Do NOT
@@ -137,7 +142,7 @@ accountable session's own Bash in a sandbox, and unversioned installs drift from
 the adapter's pinned Landstrip version (`delegation/policies/roles.json`).
 
 ```bash
-pi install git:github.com/hypermemetic-ai/pi-subagents@b7c531c238469e43866a1fe6697cb44279158c1c
+pi install git:github.com/hypermemetic-ai/pi-subagents@9e045ed75e09a163afa17271e55150ed1e8369df
 npm install --prefix ~/.pi/agent/npm --legacy-peer-deps @landstrip/landstrip-linux-x64@0.17.31
 ```
 
@@ -146,7 +151,7 @@ pin (use the exact old settings source instead when migrating another source):
 
 ```bash
 pi remove npm:pi-subagents
-pi install git:github.com/hypermemetic-ai/pi-subagents@b7c531c238469e43866a1fe6697cb44279158c1c
+pi install git:github.com/hypermemetic-ai/pi-subagents@9e045ed75e09a163afa17271e55150ed1e8369df
 ```
 
 (On macOS/Windows install the matching `@landstrip/landstrip-<platform>-<arch>`
@@ -155,15 +160,15 @@ package at the same version.) The Landstrip binary then lives beneath
 the absolute `QQ_LANDSTRIP_BIN` override when one is set. It does not resolve a
 Repository-local `.pi/npm` copy.
 
-#### Bridge maintenance
+#### Vendor-runtime maintenance
 
-Reconstruct the current bridge from its exact base and verify its provenance
+Reconstruct the current fork from its exact base and verify its provenance
 before preparing an update:
 
 ```bash
 work="$(mktemp -d)"
-base=f1540b09283a1c176a0c721878453c6382ecd399
-pin=b7c531c238469e43866a1fe6697cb44279158c1c
+base=e2a125ee09c2e9ec61b2f6e11f9c2fa887398a39
+pin=9e045ed75e09a163afa17271e55150ed1e8369df
 git clone https://github.com/nicobailon/pi-subagents.git "$work/pi-subagents"
 git -C "$work/pi-subagents" remote add fork https://github.com/hypermemetic-ai/pi-subagents.git
 git -C "$work/pi-subagents" fetch fork "$pin"
@@ -172,15 +177,15 @@ git -C "$work/pi-subagents" switch --detach "$pin"
 ```
 
 For a deliberate update, start from the exact reviewed upstream commit, apply
-only the bridge delta, review the complete staged delta, and run the package's
+only the qq fork delta, review the complete staged delta, and run the package's
 full suite before creating and publishing a new commit:
 
 ```bash
 new_base=<exact-reviewed-upstream-commit>
 git -C "$work/pi-subagents" fetch origin "$new_base"
-git -C "$work/pi-subagents" switch -c qq-bridge-update "$new_base"
+git -C "$work/pi-subagents" switch -c qq-runtime-update "$new_base"
 git -C "$work/pi-subagents" cherry-pick -n "$pin"
-# Resolve only the deliberate bridge delta, then stage its reviewed paths.
+# Resolve only the deliberate qq fork delta, then stage its reviewed paths.
 git -C "$work/pi-subagents" add <reviewed-paths>
 git -C "$work/pi-subagents" diff --cached --check
 git -C "$work/pi-subagents" diff --cached
@@ -191,13 +196,14 @@ test ! -e /var/tmp/.pi
 test_root="$(mktemp -d /var/tmp/pi-subagents-test.XXXXXX)"
 trap 'rm -rf "$test_root"' EXIT
 env -u PI_SUBAGENT_PI_BINARY -u PI_SUBAGENT_EXTRA_AGENT_DIRS \
-  -u QQ_DISPATCH_RUNTIME_ROOT -u PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE \
+  -u PI_SUBAGENT_TRUSTED_AGENT_PATHS -u QQ_DISPATCH_RUNTIME_ROOT \
+  -u PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE \
   -u PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA TMPDIR="$test_root" \
   npm --prefix "$work/pi-subagents" run test:all
-git -C "$work/pi-subagents" commit -m 'fix: preserve terminal structured output'
+git -C "$work/pi-subagents" commit -m 'fix: preserve qq runtime contracts'
 new_pin="$(git -C "$work/pi-subagents" rev-parse HEAD)"
 test "$(git -C "$work/pi-subagents" rev-parse HEAD^)" = "$new_base"
-git -C "$work/pi-subagents" push fork "$new_pin:refs/heads/qq-bridge-$new_pin"
+git -C "$work/pi-subagents" push fork "$new_pin:refs/heads/qq-runtime-$new_pin"
 ```
 
 Publish each accepted commit under a new hash-named ref; never force-update or
@@ -206,7 +212,7 @@ delete that publication ref. Update this README's pin and focused Check with
 install the new exact source; never install the update by branch or tag:
 
 ```bash
-old_source=git:github.com/hypermemetic-ai/pi-subagents@b7c531c238469e43866a1fe6697cb44279158c1c
+old_source=git:github.com/hypermemetic-ai/pi-subagents@9e045ed75e09a163afa17271e55150ed1e8369df
 new_source=git:github.com/hypermemetic-ai/pi-subagents@<new-exact-commit>
 pi remove "$old_source"
 pi install "$new_source"
@@ -216,8 +222,8 @@ Verify user settings, every combined user/project package identity, and the
 installed checkout's Git HEAD and source before reloading:
 
 ```bash
-source=git:github.com/hypermemetic-ai/pi-subagents@b7c531c238469e43866a1fe6697cb44279158c1c
-pin=b7c531c238469e43866a1fe6697cb44279158c1c
+source=git:github.com/hypermemetic-ai/pi-subagents@9e045ed75e09a163afa17271e55150ed1e8369df
+pin=9e045ed75e09a163afa17271e55150ed1e8369df
 checkout="$HOME/.pi/agent/git/github.com/hypermemetic-ai/pi-subagents"
 jq -e --arg source "$source" '
   [
@@ -280,13 +286,21 @@ test "$(git -C "$checkout" remote get-url origin)" = https://github.com/hypermem
 ```
 
 Relaunch Pi or run `/reload`. Moving refs and `pi update` or other automatic
-package movement are forbidden for this bridge: delegation is production
+package movement are forbidden for this runtime: delegation is production
 infrastructure, so movement without a deliberate source review breaks the
 provenance and invalidates the test evidence bound to the installed commit.
 
-Retire the bridge only when T-154.2's implementation-neutral contract suite
-passes, production Skills and observer assembly use the qq runtime, and the
-installed fork pin is removed.
+One-command rollback removes the retained pin and reinstalls the previously
+qualified exact fork commit:
+
+```bash
+pi remove git:github.com/hypermemetic-ai/pi-subagents@9e045ed75e09a163afa17271e55150ed1e8369df && pi install git:github.com/hypermemetic-ai/pi-subagents@b7c531c238469e43866a1fe6697cb44279158c1c
+```
+
+`tests/vendor-runtime-contract.sh <absolute-pi-subagents-checkout>` is the
+shared promotion contract for the vendor and qq dispatch boundaries. Run it
+against both the installed rollback checkout and a prepared candidate before
+changing the production pin.
 
 Mount the qq Skill root directly into Pi. This is one root mount, so Skill
 membership stays live by construction:
@@ -296,13 +310,14 @@ mkdir -p ~/.pi/agent
 ln -sT "$HOME/projects/qq/skills" "$HOME/.pi/agent/skills"
 ```
 
-The project-local pi extension `.pi/extensions/qq-subagent-env.ts` sets the two
-delegation variables and the structured-output runtime root in-process for any
-pi session in this repository (and its worktrees), resolved from the checkout
-the session runs against:
+The project-local pi extension `.pi/extensions/qq-subagent-env.ts` sets the
+adapter, canonical agent directory, exact trusted-seat map, and
+structured-output runtime root in-process for any pi session in this repository (and its
+worktrees), resolved from the checkout the session runs against:
 
 - `PI_SUBAGENT_PI_BINARY=<checkout>/bin/qq-dispatch`
 - `PI_SUBAGENT_EXTRA_AGENT_DIRS=<checkout>/delegation/manifests/agents`
+- `PI_SUBAGENT_TRUSTED_AGENT_PATHS={...exact canonical manifest paths...}`
 - `QQ_DISPATCH_RUNTIME_ROOT=<temporary-directory>/pi-subagents-uid-<uid>`
 
 Pi auto-discovers the extension once the project is trusted, so delegates
@@ -345,8 +360,8 @@ Pi-subagents inherits the one-time setup for every spawn and supplies the child
 role, while its `cwd` selects the assigned worktree. The canonical adapter
 serves any worktree from that Repository, refuses unrelated repositories,
 renders that worktree's Landstrip grants, and starts the real Pi child under
-bounded descendant cleanup. The three role manifests pin delegates to
-`openai-codex/gpt-5.6-sol:xhigh` independently of the accountable session's
+bounded descendant cleanup. The four canonical role manifests pin delegates
+to `openai-codex/gpt-5.6-sol:xhigh` independently of the accountable session's
 default model, and the adapter loads `extensions/qq-codex-fast.ts` into every
 child so delegate GPT-5.6 requests run on the priority service tier (fast
 mode).

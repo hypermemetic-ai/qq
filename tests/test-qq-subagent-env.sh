@@ -12,13 +12,15 @@ EXT="$ROOT/.pi/extensions/qq-subagent-env.ts"
 
 [ -f "$EXT" ] || fail "missing extension: $EXT"
 
-# Structural guards: both adapter vars, set only when unset, resolved from
-# the checkout root via the extension's own location.
+# Structural guards: adapter and trusted-seat vars, set only when unset,
+# resolved from the checkout root via the extension's own location.
 assert_file_contains "$EXT" 'PI_SUBAGENT_PI_BINARY'
 assert_file_contains "$EXT" 'PI_SUBAGENT_EXTRA_AGENT_DIRS'
+assert_file_contains "$EXT" 'PI_SUBAGENT_TRUSTED_AGENT_PATHS'
 assert_file_contains "$EXT" 'QQ_DISPATCH_RUNTIME_ROOT'
 assert_file_contains "$EXT" 'process.env.PI_SUBAGENT_PI_BINARY === undefined'
 assert_file_contains "$EXT" 'process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS === undefined'
+assert_file_contains "$EXT" 'process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS === undefined'
 assert_file_contains "$EXT" 'process.env.QQ_DISPATCH_RUNTIME_ROOT === undefined'
 assert_file_contains "$EXT" 'pi-subagents-uid-'
 assert_file_contains "$EXT" '"bin/qq-dispatch"'
@@ -59,6 +61,7 @@ fs.writeFileSync(path.join(cfgDir, "config.json"), JSON.stringify({ defaultSessi
 
 delete process.env.PI_SUBAGENT_PI_BINARY;
 delete process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS;
+delete process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS;
 delete process.env.QQ_DISPATCH_RUNTIME_ROOT;
 const mod = await import(pathToFileURL(ext).href);
 mod.default(pi);
@@ -67,6 +70,16 @@ assertEq(
   process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS,
   `${root}/delegation/manifests/agents`,
   "PI_SUBAGENT_EXTRA_AGENT_DIRS",
+);
+assertEq(
+  process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS,
+  JSON.stringify({
+    implementer: `${root}/delegation/manifests/agents/implementer.md`,
+    observer: `${root}/delegation/manifests/agents/observer.md`,
+    researcher: `${root}/delegation/manifests/agents/researcher.md`,
+    reviewer: `${root}/delegation/manifests/agents/reviewer.md`,
+  }),
+  "PI_SUBAGENT_TRUSTED_AGENT_PATHS",
 );
 const uid = process.getuid?.() ?? process.geteuid?.();
 if (uid === undefined) die("test runtime has no uid source");
@@ -87,11 +100,13 @@ assertEq(fs.statSync(sessRoot).mode & 0o777, 0o700, "session root tightened");
 // Explicit operator env wins, including an explicit empty value.
 process.env.PI_SUBAGENT_PI_BINARY = "/tmp/operator-override";
 process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS = "";
+process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS = "{}";
 process.env.QQ_DISPATCH_RUNTIME_ROOT = "/tmp/operator-runtime-override";
 const third = await import(pathToFileURL(ext).href + "?third");
 third.default(pi);
 assertEq(process.env.PI_SUBAGENT_PI_BINARY, "/tmp/operator-override", "operator override preserved");
 assertEq(process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS, "", "explicit empty override preserved");
+assertEq(process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS, "{}", "trusted-path override preserved");
 assertEq(
   process.env.QQ_DISPATCH_RUNTIME_ROOT,
   "/tmp/operator-runtime-override",
@@ -111,7 +126,7 @@ fs.rmSync(home, { recursive: true, force: true });
 
 # The targets the extension points at must exist in this checkout.
 [ -x "$ROOT/bin/qq-dispatch" ] || fail "extension target missing: bin/qq-dispatch"
-for role in implementer reviewer researcher; do
+for role in implementer observer reviewer researcher; do
   [ -f "$ROOT/delegation/manifests/agents/$role.md" ] || fail "extension target missing: $role manifest"
 done
 
