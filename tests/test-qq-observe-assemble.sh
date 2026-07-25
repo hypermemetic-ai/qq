@@ -100,7 +100,10 @@ parent_strong_dir="$HOME/.pi/agent/sessions/--fixture-accountable--"
 parent_strong="$parent_strong_dir/2026-07-20T00-00-00_${parent_uuid}.jsonl"
 parent_weak="$tmp/2026-07-20T00-00-00_parent-weak.jsonl"
 parent_weak_missing="$tmp/2026-07-20T00-00-00_parent-weak-missing.jsonl"
-mkdir -p "$parent_strong_dir"
+collision_parent_a="$tmp/collision-a/parent-session.jsonl"
+collision_parent_b="$tmp/collision-b/parent-session.jsonl"
+mkdir -p "$parent_strong_dir" "$(dirname "$collision_parent_a")" \
+  "$(dirname "$collision_parent_b")"
 cat >"$parent_strong" <<'JSONL'
 {"type":"session","version":3,"timestamp":"2026-07-20T10:00:00Z","branch":"feature"}
 {"type":"message","timestamp":"2026-07-20T10:00:01Z","message":{"role":"user","content":"work feature"}}
@@ -113,6 +116,12 @@ cat >"$parent_weak_missing" <<'JSONL'
 {"type":"session","version":3,"timestamp":"2026-07-20T10:00:00Z"}
 {"type":"message","timestamp":"2026-07-20T10:00:01Z","message":{"role":"user","content":"retired feature worktree with missing delegate transcript"}}
 JSONL
+for collision_parent in "$collision_parent_a" "$collision_parent_b"; do
+  cat >"$collision_parent" <<'JSONL'
+{"type":"session","version":3,"timestamp":"2026-07-20T10:00:00Z","branch":"feature"}
+{"type":"message","timestamp":"2026-07-20T10:00:01Z","message":{"role":"user","content":"distinct accountable session with a shared basename"}}
+JSONL
+done
 make_run() {
   local run_id="$1" cwd="$2" parent="$3" session_hash="$4" transcript_text="${5:-delegate $1}"
   local session_root="$TMPDIR/pi-subagent-sessions/$session_hash"
@@ -134,6 +143,13 @@ make_run() {
 strong_session_dir="$TMPDIR/pi-subagent-sessions/strong-hash/async-strong-run"
 make_run strong-run "$strong_worktree" "$parent_uuid" strong-hash 'delegate strong-run' \
   "$strong_session_dir" single
+make_run collision-a-run "$strong_worktree" "$collision_parent_a" collision-a-hash \
+  'delegate collision-a-run'
+make_run collision-b-run "$strong_worktree" "$collision_parent_b" collision-b-hash \
+  'delegate collision-b-run'
+collision_parent_b_label="accountable-parent-session-$(
+  printf '%s' "$(realpath "$collision_parent_b")" | sha256sum | cut -c1-12
+)"
 make_run weak-run "$worktree_root/retired-a" "$parent_weak" weak-hash 'delegate feature work'
 make_run weak-other-run "$worktree_root/retired-b" "$parent_weak" weak-other-hash 'delegate solo work'
 make_run missing-run "$strong_worktree" "$parent_strong" missing-hash
@@ -215,7 +231,11 @@ assert_file_contains "$tmp/outside-main.stderr" 'not an ancestor of local main'
 "$OBSERVE" assemble --pr 41 --repo "$repo" >"$tmp/assembled-41.json"
 run_41="$XDG_STATE_HOME/qq/observer/runs/pr-41"
 jq -e --arg repo "$(realpath "$repo")" --arg missing "$missing_session_file" \
-  --arg parent_strong "$parent_strong" --arg ambiguous_uuid "$ambiguous_uuid" \
+  --arg parent_strong "$parent_strong" --arg collision_parent_a "$collision_parent_a" \
+  --arg collision_parent_b "$collision_parent_b" \
+  --arg collision_parent_b_label "$collision_parent_b_label" \
+  --arg accountable_strong "accountable-$parent_uuid" \
+  --arg ambiguous_uuid "$ambiguous_uuid" \
   --arg zero_uuid "$zero_uuid" --arg weak_invalid_uuid "$weak_invalid_uuid" \
   --arg weak_invalid_delegate "$weak_invalid_delegate" \
   --arg weak_other "$TMPDIR/pi-subagent-sessions/weak-other-hash/run-0/session.jsonl" \
@@ -223,8 +243,17 @@ jq -e --arg repo "$(realpath "$repo")" --arg missing "$missing_session_file" \
   .schema == "qq-observer.package" and .schema_version == 1
   and .pr == 41 and .branch == "feature" and .repo == $repo
   and .variant == "guided"
-  and ([.sessions[] | select(.role == "delegate" and .evidence == "live-worktree-branch")] | length) == 3
-  and ([.sessions[] | select(.role == "accountable" and .source_path == $parent_strong)] | length) == 1
+  and ([.sessions[] | select(.role == "delegate" and .evidence == "live-worktree-branch")] | length) == 5
+  and ([.sessions[] | select(
+    .role == "accountable" and .source_path == $parent_strong and .label == $accountable_strong
+  )] | length) == 1
+  and ([.sessions[] | select(
+    .source_path == $collision_parent_a and .label == "accountable-parent-session"
+  )] | length) == 1
+  and ([.sessions[] | select(
+    .source_path == $collision_parent_b and .label == $collision_parent_b_label
+  )] | length) == 1
+  and ([.sessions[].label] | length) == ([.sessions[].label] | unique | length)
   and ([.sessions[] | select(.role == "delegate" and .run_id == "ambiguous-run")] | length) == 1
   and ([.sessions[] | select(.source_path | contains($ambiguous_uuid))] | length) == 0
   and ([.sessions[] | select(
@@ -235,7 +264,8 @@ jq -e --arg repo "$(realpath "$repo")" --arg missing "$missing_session_file" \
     or .run_id == "weak-absolute-invalid-run" or .run_id == "weak-absolute-symlink-run"
     or .run_id == "weak-invalid-delegate-run"
   )] | length) == 0
-  and ([.sessions[] | select(.role == "accountable" and .evidence == "parent-of-delegate")] | length) == 2
+  and ([.sessions[] | select(.role == "accountable" and .evidence == "parent-of-delegate")] | length) == 4
+  and ([.sessions[] | select(.label == "accountable-parent-weak")] | length) == 1
   and ([.sessions[] | select(.label == "accountable-parent-weak-missing")] | length) == 0
   and ([.unknown_entries[] | select(.path == $missing and (.reason | length > 0))] | length) == 1
   and ([.unknown_entries[] | select(.path == $weak_other and (.reason | contains("does not mention")))] | length) == 1
@@ -265,9 +295,9 @@ jq -e --arg repo "$(realpath "$repo")" --arg missing "$missing_session_file" \
 [ -f "$run_41/corpus/skills/fixture/SKILL.md" ] || fail 'merge-time corpus was not snapshotted'
 jq -e '.skills == [{name:"fixture",description:"Fixture skill at merge time."}]' \
   "$run_41/inventory.json" >/dev/null || fail 'skill inventory did not preserve the merge-time description'
-assert_equal 6 "$(find "$run_41/sessions" -type f | wc -l)" 'session transcript count is wrong'
-assert_equal 6 "$(find "$run_41/facts" -type f | wc -l)" 'facts count is wrong'
-assert_equal 6 "$(find "$run_41/signals" -type f | wc -l)" 'signals count is wrong'
+assert_equal 10 "$(find "$run_41/sessions" -type f | wc -l)" 'session transcript count is wrong'
+assert_equal 10 "$(find "$run_41/facts" -type f | wc -l)" 'facts count is wrong'
+assert_equal 10 "$(find "$run_41/signals" -type f | wc -l)" 'signals count is wrong'
 jq -e '[.sessions[] | has("signals")] | all' "$run_41/package.json" >/dev/null \
   || fail 'guided package omitted a session signals pointer'
 
@@ -291,9 +321,9 @@ jq -S 'del(.variant) | .sessions |= map(del(.facts,.signals))' \
   "$run_41/package.json" >"$tmp/guided-comparable.json"
 cmp "$tmp/guided-comparable.json" "$tmp/blind-comparable.json" \
   || fail 'blind package identity or session inputs differ from guided'
-assert_equal 6 "$(find "$blind_run_41/sessions" -type f | wc -l)" \
+assert_equal 10 "$(find "$blind_run_41/sessions" -type f | wc -l)" \
   'blind session transcript count is wrong'
-assert_equal 6 "$(find "$blind_run_41/facts" -type f | wc -l)" \
+assert_equal 10 "$(find "$blind_run_41/facts" -type f | wc -l)" \
   'blind facts count is wrong'
 [ ! -e "$blind_run_41/signals" ] || fail 'blind package wrote a signals directory'
 [ "$blind_run_41" != "$run_41" ] || fail 'guided and blind variants shared a run directory'

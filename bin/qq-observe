@@ -970,7 +970,11 @@ def assemble(values):
             return
         previous = label_sources.get(label)
         if previous is not None and previous != source:
-            fail(f"session label collision for {label}", 65)
+            suffix = hashlib.sha256(os.fsencode(source)).hexdigest()[:12]
+            label = f"{label}-{suffix}"
+            previous = label_sources.get(label)
+            if previous is not None and previous != source:
+                fail(f"session label collision for {label}", 65)
         label_sources[label] = source
         session_sources.add(source)
         row = {
