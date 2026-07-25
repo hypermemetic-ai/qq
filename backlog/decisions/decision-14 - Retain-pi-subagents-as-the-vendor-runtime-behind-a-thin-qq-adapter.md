@@ -72,3 +72,12 @@ the rollback baseline until then.
   in force.
 - Context7 tool ownership and decision-2 are separate. This decision neither
   installs Context7 nor changes MCP configuration.
+
+## Implementation note — 2026-07-24
+
+The qualified fork commit is
+`9e045ed75e09a163afa17271e55150ed1e8369df`, with sole parent exact upstream
+`e2a125ee09c2e9ec61b2f6e11f9c2fa887398a39`. Its external Change landed as
+[`hypermemetic-ai/pi-subagents#1`](https://github.com/hypermemetic-ai/pi-subagents/pull/1).
+The previous `b7c531c238469e43866a1fe6697cb44279158c1c` pin remains the verified
+one-command rollback.

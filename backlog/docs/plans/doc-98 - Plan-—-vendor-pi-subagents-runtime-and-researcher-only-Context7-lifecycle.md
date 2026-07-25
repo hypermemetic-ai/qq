@@ -1,9 +1,9 @@
 ---
-id: doc-96
+id: doc-98
 title: Plan — vendor pi-subagents runtime and researcher-only Context7 lifecycle
 type: other
-created_date: '2026-07-24 19:22'
-updated_date: '2026-07-24 19:22'
+created_date: '2026-07-24 21:48'
+updated_date: '2026-07-24 21:48'
 tags:
   - plan
   - pi-subagents
@@ -11,7 +11,7 @@ tags:
 ---
 # Plan — retain pi-subagents as vendor runtime, then adopt researcher-only native Context7
 
-Status: awaiting explicit operator approval
+Status: approved by the operator on 2026-07-24; Change 1 delivery in progress
 
 ## Outcome
 

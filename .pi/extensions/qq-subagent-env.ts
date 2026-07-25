@@ -2,9 +2,10 @@
 //
 // qq's pi-subagents dispatch must run through bin/qq-dispatch (Landstrip
 // confinement) with the production role manifests as extra agent dirs
-// (README, Install). pi-subagents reads PI_SUBAGENT_PI_BINARY and
-// PI_SUBAGENT_EXTRA_AGENT_DIRS from process.env at dispatch time, so this
-// project-local extension sets them in-process: any pi session in this
+// (README, Install). pi-subagents reads PI_SUBAGENT_PI_BINARY,
+// PI_SUBAGENT_EXTRA_AGENT_DIRS, and PI_SUBAGENT_TRUSTED_AGENT_PATHS from
+// process.env at dispatch time, so this project-local extension sets them
+// in-process: any pi session in this
 // repository (and its worktrees, which carry this file on branches that
 // include it) dispatches confined delegates by construction, while sessions
 // in other projects never load this file and keep the vanilla dispatcher.
@@ -17,10 +18,9 @@
 // Setting the runtime root to pi-subagents' temp root keeps the capture
 // path inside it by construction.
 //
-// Explicitly-set variables always win — an operator may override either one
-// deliberately for a session, including to an empty value (pi-subagents
-// treats an empty value as selecting its vanilla fallback). Only a truly
-// absent variable is set here.
+// Explicitly-set variables always win — an operator may override any one
+// deliberately for a session, including to an empty value where the owning
+// runtime defines that meaning. Only a truly absent variable is set here.
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync } from "node:fs";
 import os from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -33,16 +33,20 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 function applyEnv(): void {
+	const agentDir = join(REPO_ROOT, "delegation", "manifests", "agents");
 	if (process.env.PI_SUBAGENT_PI_BINARY === undefined) {
 		process.env.PI_SUBAGENT_PI_BINARY = join(REPO_ROOT, "bin/qq-dispatch");
 	}
 	if (process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS === undefined) {
-		process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS = join(
-			REPO_ROOT,
-			"delegation",
-			"manifests",
-			"agents",
-		);
+		process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS = agentDir;
+	}
+	if (process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS === undefined) {
+		process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS = JSON.stringify({
+			implementer: join(agentDir, "implementer.md"),
+			observer: join(agentDir, "observer.md"),
+			researcher: join(agentDir, "researcher.md"),
+			reviewer: join(agentDir, "reviewer.md"),
+		});
 	}
 	if (process.env.QQ_DISPATCH_RUNTIME_ROOT === undefined) {
 		// Mirror pi-subagents' TEMP_ROOT_DIR scope (uid-<getuid>) so the

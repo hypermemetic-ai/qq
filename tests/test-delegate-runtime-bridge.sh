@@ -39,17 +39,20 @@ for skill in "$REVIEW_SKILL" "$DELEGATE_SKILL"; do
     "one-step chain syntax returned in $skill"
 done
 
-source_pin='git:github.com/hypermemetic-ai/pi-subagents@b7c531c238469e43866a1fe6697cb44279158c1c'
-base='f1540b09283a1c176a0c721878453c6382ecd399'
-fork_commit='b7c531c238469e43866a1fe6697cb44279158c1c'
+source_pin='git:github.com/hypermemetic-ai/pi-subagents@9e045ed75e09a163afa17271e55150ed1e8369df'
+base='e2a125ee09c2e9ec61b2f6e11f9c2fa887398a39'
+fork_commit='9e045ed75e09a163afa17271e55150ed1e8369df'
+rollback_commit='b7c531c238469e43866a1fe6697cb44279158c1c'
 settings_filter='[(.packages // [])[] | (if type == "string" then . else .source? // empty end) | select(. == $source)] == [$source]'
 
 assert_file_contains "$README" "$source_pin"
 assert_file_contains "$README" "$base"
 assert_file_contains "$README" "$fork_commit"
 assert_file_contains "$README" 'The fork commit'
-assert_file_contains "$README" 'sole parent is the exact upstream'
+assert_file_contains "$README" 'sole parent is the exact reviewed upstream'
 assert_file_contains "$README" 'https://github.com/hypermemetic-ai/pi-subagents'
+assert_file_contains "$README" "$rollback_commit"
+assert_file_contains "$README" 'PI_SUBAGENT_TRUSTED_AGENT_PATHS'
 assert_file_contains "$README" 'a successful terminal'
 assert_file_contains "$README" '`structured_output` tool result is a trusted recovery watermark'
 assert_file_contains "$README" 'Failed tool'
@@ -173,11 +176,11 @@ assert_file_contains "$README" 'test ! -e /var/tmp/.agents'
 assert_file_contains "$README" 'test ! -e /var/tmp/.pi'
 assert_file_contains "$README" 'mktemp -d /var/tmp/pi-subagents-test.XXXXXX'
 assert_file_contains "$README" 'env -u PI_SUBAGENT_PI_BINARY -u PI_SUBAGENT_EXTRA_AGENT_DIRS'
-assert_file_contains "$README" '-u QQ_DISPATCH_RUNTIME_ROOT -u PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE'
+assert_file_contains "$README" '-u PI_SUBAGENT_TRUSTED_AGENT_PATHS -u QQ_DISPATCH_RUNTIME_ROOT'
+assert_file_contains "$README" '-u PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE'
 assert_file_contains "$README" '-u PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA TMPDIR="$test_root"'
 assert_file_contains "$README" 'Moving refs and `pi update` or other automatic'
-assert_file_contains "$README" "Retire the bridge only when T-154.2's implementation-neutral contract suite"
-assert_file_contains "$README" 'passes, production Skills and observer assembly use the qq runtime, and the'
-assert_file_contains "$README" 'installed fork pin is removed.'
+assert_file_contains "$README" 'One-command rollback removes the retained pin'
+assert_file_contains "$README" 'tests/vendor-runtime-contract.sh <absolute-pi-subagents-checkout>'
 
 printf 'test-delegate-runtime-bridge: pass\n'
