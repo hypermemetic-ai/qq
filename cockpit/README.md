@@ -7,6 +7,12 @@ same file; the shell surface is sourced straight from this checkout.
 
 ## Files
 
+- `ghostty/config` — the living-room terminal profile: console-derived palette,
+  IBM-derived 3× glyphs, 480-pixel horizontal field, block cursor, and static
+  Herdr surface normalization.
+- `ghostty/shaders/column-rails.glsl` — masks Herdr's session-only right edge
+  while drawing no decorative bars; the two rejected rail placements remain
+  documented as recoverable presets.
 - `glow/glow.yml` — fixed-width, no-pager Glow defaults for pane rendering.
 - `glow/tuned.json` — the hand-tuned Markdown theme used by Glow.
 - `herdr/config.toml` — tokyo-night, onboarding suppressed, priority-sorted
@@ -14,6 +20,10 @@ same file; the shell surface is sourced straight from this checkout.
   (doc-43), direct navigation, agent-pull, and project-home snap bindings.
 - `shell/file-navigation.bash` — `QQ_HOME`, `qqroot`, focused-worktree lookup
   through `qq_space_dir`, and shell directory changes through `qqcd`.
+
+The Ghostty profile expects the locally installed `BigBlue TerminalPlus` font,
+with `MxPlus IBM VGA 8x16` as its fallback. Font binaries remain external
+dependencies rather than Repository-owned assets.
 
 ## Flow
 

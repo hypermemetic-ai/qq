@@ -1,0 +1,55 @@
+# Framebuffer Deluxe: the local virtual console's palette and IBM-derived
+# letterforms, sized for exact integer scaling on the living-room display.
+font-family = BigBlue TerminalPlus
+font-family = MxPlus IBM VGA 8x16
+font-size = 27
+font-synthetic-style = false
+font-feature = -liga
+font-feature = -calt
+freetype-load-flags = hinting,monochrome
+
+# Exact palette exposed by this machine's Linux virtual terminal.
+palette = 0=#010101
+palette = 1=#de382b
+palette = 2=#39b54a
+palette = 3=#ffc706
+palette = 4=#006fb8
+palette = 5=#762671
+palette = 6=#2cb5e9
+palette = 7=#cccccc
+palette = 8=#808080
+palette = 9=#ff0000
+palette = 10=#00ff00
+palette = 11=#ffff00
+palette = 12=#0000ff
+palette = 13=#ff00ff
+palette = 14=#00ffff
+palette = 15=#ffffff
+background = #010101
+foreground = #cccccc
+cursor-color = #cccccc
+cursor-text = #010101
+selection-background = #cccccc
+selection-foreground = #010101
+
+# Keep faint and application-selected colors readable from the couch.
+minimum-contrast = 4.5
+faint-opacity = 0.75
+
+background-opacity = 1
+unfocused-split-opacity = 1
+# Reserve the same balanced outer field in every Ghostty surface.
+window-padding-x = 480
+window-padding-y = 0
+
+cursor-style = block
+cursor-style-blink = false
+
+# Keep Herdr surfaces visually consistent by neutralizing its session-only
+# right edge. The shader's current mode deliberately draws no outer bars.
+custom-shader = ~/.config/ghostty/shaders/column-rails.glsl
+# The normalization is static and must not force a continuous 4K render loop.
+custom-shader-animation = false
+
+# Ctrl+C copies when text is selected, otherwise passes through (SIGINT).
+keybind = performable:ctrl+c=copy_to_clipboard
