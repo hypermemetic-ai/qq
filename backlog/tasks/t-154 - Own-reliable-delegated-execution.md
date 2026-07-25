@@ -1,10 +1,10 @@
 ---
 id: T-154
 title: Own reliable delegated execution
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-24 07:12'
-updated_date: '2026-07-25 00:19'
+updated_date: '2026-07-25 01:00'
 labels: []
 dependencies: []
 documentation:
@@ -46,3 +46,9 @@ T-154.2 qualification is locally complete at exact fork pin `9e045ed75e09a163afa
 
 Settled-composition revalidation is now complete after T-153 landed corrections #242/#243 at `931693a`: final reviewer async+resume, implementer, researcher, exact trusted-seat recovery descriptors, Landstrip role identities, Completion Envelopes, acceptance:none, and persisted-session observations all passed against installed pi-subagents `9e045ed...`; final rollback/candidate shared contracts and all 34 Repository Checks pass. T-154 remains In Progress only through T-154.2 review, operator merge, observation, and retirement.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Restored reliable delegated execution and settled qq’s long-term boundary: pi-subagents owns vendor orchestration/lifecycle mechanics while qq retains canonical role/model policy, Completion Envelopes, qq-dispatch/Landstrip, persisted-session-only content observation, operator visibility, review, delivery, and merge authority. T-154.1 restored the bridge; T-154.2 qualified and promoted exact retained vendor pin `9e045ed...` through PR #244 with verified rollback. Post-merge observation was finalized and delivery coverage passed. The separately approved researcher-only Context7 lifecycle can now begin after T-154.4 lands and all worktrees retire.
+<!-- SECTION:FINAL_SUMMARY:END -->
