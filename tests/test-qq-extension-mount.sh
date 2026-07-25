@@ -51,11 +51,7 @@ const indexSource = await readFile(indexPath, "utf8");
 const extensionFiles = (await readdir(dirname(indexPath)))
   .filter((filename) => filename.endsWith(".ts"))
   .sort();
-const excluded = new Set([
-  "index.ts",
-  // Delegate-child scope via bin/qq-dispatch; never a global extension.
-  "qq-codex-fast.ts",
-]);
+const excluded = new Set(["index.ts"]);
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 for (const filename of extensionFiles) {
@@ -78,12 +74,6 @@ for (const filename of extensionFiles) {
     `${filename} is imported in extensions/index.ts but its register is never invoked`,
   );
 }
-assert.doesNotMatch(
-  indexSource,
-  /from\s+["']\.\/qq-codex-fast\.ts["']/,
-  "delegate-only qq-codex-fast.ts was mounted globally",
-);
-
 const siblingRegistrations = [];
 for (const filename of extensionFiles) {
   if (excluded.has(filename)) continue;
