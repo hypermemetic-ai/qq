@@ -1,10 +1,10 @@
 ---
 id: T-161
 title: Disable fast mode for all delegates
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-25 17:30'
-updated_date: '2026-07-25 17:55'
+updated_date: '2026-07-25 17:59'
 labels: []
 dependencies: []
 documentation:
@@ -41,10 +41,10 @@ Retire qq's automatic fast/priority delegation so every canonical delegate uses 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 qq-dispatch launches implementer, reviewer, researcher, and observer without injecting qq-codex-fast.ts or any priority service-tier request.
-- [ ] #2 The retired fast extension and its current dispatcher/mount test assumptions are removed without changing delegate model, xhigh effort, confinement, completion, or generic patched-Pi service-class support.
-- [ ] #3 Current README/runtime documentation states that canonical delegates use the standard/default service tier, and a durable accepted decision prevents future role-profile work from silently restoring fast mode.
-- [ ] #4 Targeted dispatcher and extension-mount checks, applicable Repository checks, and fresh-context code review pass before publication.
+- [x] #1 qq-dispatch launches implementer, reviewer, researcher, and observer without injecting qq-codex-fast.ts or any priority service-tier request.
+- [x] #2 The retired fast extension and its current dispatcher/mount test assumptions are removed without changing delegate model, xhigh effort, confinement, completion, or generic patched-Pi service-class support.
+- [x] #3 Current README/runtime documentation states that canonical delegates use the standard/default service tier, and a durable accepted decision prevents future role-profile work from silently restoring fast mode.
+- [x] #4 Targeted dispatcher and extension-mount checks, applicable Repository checks, and fresh-context code review pass before publication.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -60,3 +60,9 @@ The current primary dispatcher was itself the prohibited fast-mode injector, so 
 
 Verification: exact role argv regressions prove reviewer, researcher, implementer, and observer receive no injected fast extension; dispatcher and extension-mount focused checks pass; `git diff --check`, Bash syntax, `shellcheck -x`, ratchet, all 35 Repository shell Checks, and all 21 embedded runtime tests pass. Kimi fresh review was unavailable because that account is also quota-exhausted; a fresh read-only GPT-5.6 reviewer was therefore launched through this Change checkout's already-standard dispatcher, not the priority primary dispatcher. Its strict envelope reports PASS with no material findings, context gaps, open questions, or unresolved risks (`/tmp/qq-t161-review-envelope.json`). Production delta is a net 62-line reduction (10 insertions, 72 deletions before Backlog records).
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Retired qq's automatic delegate fast mode in PR #247. `qq-dispatch` no longer resolves or injects `qq-codex-fast.ts`; the extension is deleted; canonical implementer, reviewer, researcher, and observer children retain `openai-codex/gpt-5.6-sol:xhigh` but use the standard/default service tier. decision-16 makes that policy durable while preserving generic patched-Pi service-class support. Exact role-argv regressions, all 35 Repository shell Checks, all 21 embedded runtime tests, ShellCheck, ratchet, diff checks, fresh standard-tier review, and initial GitHub CI passed with no material finding.
+<!-- SECTION:FINAL_SUMMARY:END -->
