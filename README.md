@@ -545,7 +545,8 @@ Outside Pi, the system's `xdg-open` associations own MIME opening.
 Link the cockpit configurations whose tools read fixed `~/.config` paths:
 
 ```bash
-mkdir -p ~/.config/glow ~/.config/herdr
+mkdir -p ~/.config ~/.config/glow ~/.config/herdr
+ln -s "$HOME/projects/qq/cockpit/ghostty" ~/.config/ghostty
 ln -s "$HOME/projects/qq/cockpit/glow/glow.yml" ~/.config/glow/glow.yml
 ln -s "$HOME/projects/qq/cockpit/glow/tuned.json" ~/.config/glow/tuned.json
 ln -s "$HOME/projects/qq/cockpit/herdr/config.toml" ~/.config/herdr/config.toml
