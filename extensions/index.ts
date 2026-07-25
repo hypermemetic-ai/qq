@@ -3,8 +3,6 @@
 // (~/.pi/agent/extensions/qq -> <repo>/extensions) makes the whole set live by
 // construction (mount, don't mirror). Adding or removing an extension is a
 // repo-only change: change the file and one import line here.
-// qq-codex-fast.ts is intentionally absent because bin/qq-dispatch loads it
-// only for delegate children; it is not a global extension.
 
 import registerPrWatch from "./qq-pr-watch.ts";
 import registerContinue from "./qq-continue.ts";
