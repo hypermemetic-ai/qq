@@ -457,8 +457,9 @@ polls one exact pull request and sends one follow-up when it reaches `MERGED`
 or `CLOSED`, or when inspection fails.
 
 The operator-stage extension provides the `operator_stage` tool. It stages an
-operator-only command, without executing it, in a focused right-hand herdr pane
-with low- or high-danger confirmation and pane-read-back outcome validation.
+operator-only command, without executing it, in a no-focus guarded right-hand
+Herdr pane, then sends a Herdr request notification; low- or high-danger
+confirmation and pane-read-back outcome validation remain in the pane.
 
 The accountable Pi session stays in the Repository project home and owns
 alignment, Task and Change judgment, work orders, verdicts, UAT, and handoff.

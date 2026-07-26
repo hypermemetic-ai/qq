@@ -37,6 +37,30 @@ function result(message, details) {
   };
 }
 
+// Root-session drift-net for ordinary commands, not a shell parser or security boundary.
+const HERDR_COMMAND = /^(?:"\$HERDR"|'\$HERDR'|\$HERDR|["']?(?:[^\s"']*\/)?herdr["']?)\s+(.+)$/i;
+const QQ_FOCUS = /^(?:["']?(?:[^\s"']*\/)?(?:qq-herdr-(?:snap|pull)["']?(?=\s|$)|qq-herdr-home["']?\s+(?:focus-board|focus-architect)(?:\s|$)))/i;
+const FOCUS_ACTION = /(?:^|\s)(?:(?:workspace|tab|agent|pane)\s+focus|plugin\s+pane\s+focus)(?:\s|$)/i;
+const NO_FOCUS_CREATION = /(?:^|\s)(?:pane\s+split|tab\s+create|workspace\s+create|worktree\s+(?:create|open)|plugin\s+pane\s+open)(?:\s|$)/i;
+const FOCUS_FLAG = /(?:^|\s)--focus(?=\s|$)/;
+const NO_FOCUS_FLAG = /(?:^|\s)--no-focus(?=\s|$)/;
+
+function requestsHerdrFocus(command) {
+  for (const segment of command.split(/[;&|\n]+/).map((part) => part.trim())) {
+    const herdrArgs = segment.match(HERDR_COMMAND)?.[1];
+    if (
+      (herdrArgs &&
+        (FOCUS_ACTION.test(herdrArgs) ||
+          FOCUS_FLAG.test(herdrArgs) ||
+          (NO_FOCUS_CREATION.test(herdrArgs) && !NO_FOCUS_FLAG.test(herdrArgs)))) ||
+      QQ_FOCUS.test(segment)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function stagedLine(command, description, danger) {
   const quoted = shellQuote(command);
   if (danger === "low") {
@@ -52,11 +76,24 @@ function stagedLine(command, description, danger) {
 export default function register(pi, deps = {}) {
   const run = deps.exec ?? ((command, args, options) => pi.exec(command, args, options));
 
+  pi.on("tool_call", (event) => {
+    if (process.env.PI_SUBAGENT_CHILD_AGENT || event.toolName !== "bash") return undefined;
+    const command = event.input?.command;
+    if (typeof command !== "string" || !requestsHerdrFocus(command)) return undefined;
+
+    return {
+      block: true,
+      reason:
+        "Blocked by qq's no-focus rule: orchestrator and architect roots do not initiate " +
+        "Herdr focus. Use --no-focus and send a Herdr request notification instead.",
+    };
+  });
+
   pi.registerTool({
     name: "operator_stage",
     label: "Operator Stage",
     description:
-      "Stage an operator-only command, unexecuted, in a focused guarded herdr pane.",
+      "Stage an operator-only command, unexecuted, in a no-focus guarded herdr pane with a request notification.",
     parameters: {
       type: "object",
       properties: {
@@ -99,7 +136,6 @@ export default function register(pi, deps = {}) {
       ) {
         return result("operator_stage requires a herdr session.", baseDetails);
       }
-
       const line = stagedLine(command, description, danger);
       const details = { ...baseDetails, staged_line: line };
       let split;
@@ -114,7 +150,7 @@ export default function register(pi, deps = {}) {
             "right",
             "--cwd",
             process.cwd(),
-            "--focus",
+            "--no-focus",
           ],
           { signal },
         );
@@ -217,12 +253,39 @@ export default function register(pi, deps = {}) {
         );
       }
 
+      let notified;
+      try {
+        notified = await run(
+          "herdr",
+          [
+            "notification",
+            "show",
+            "Operator action ready",
+            "--body",
+            `Navigate to pane ${paneId}: ${description.slice(0, 80)}`,
+            "--sound",
+            "request",
+          ],
+          { signal },
+        );
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        return failOwnedPane(
+          `operator_stage could not notify the operator about pane ${paneId}: ${reason}`,
+        );
+      }
+      if (notified?.code !== 0) {
+        return failOwnedPane(
+          `operator_stage could not notify the operator about pane ${paneId}: ${executionReason(notified, "unknown herdr notification error")}`,
+        );
+      }
+
       const operatorAction =
         danger === "low"
           ? "Operator: press Enter once to run it."
           : "Operator: press Enter, then press y to run it (two presses); any other key aborts.";
       const message =
-        `Command staged, unexecuted, in pane ${paneId}. ${operatorAction} ` +
+        `Command staged, unexecuted, in no-focus pane ${paneId}. A Herdr request notification was sent; navigate to pane ${paneId}. ${operatorAction} ` +
         `Afterwards the agent validates by running \`herdr pane read ${paneId}\`: ` +
         "pane gone means the command succeeded and auto-closed; pane present means failure or abort, so read the visible error. " +
         "The agent never sends keys into the pane.";

@@ -31,14 +31,11 @@ checklist. Never dictate copy-paste commands: stage them through
 Validate the operator's input immediately, then resume without further operator
 involvement.
 
-## Bring the surface to the operator
+## Prepare without pulling focus
 
-Open or pre-stage the destination yourself instead of sending the operator
-elsewhere with instructions. For secrets such as API keys, tokens, or
-passwords, prepare the destination and mark the paste point so the secret lands
-where it belongs without transiting the transcript. If the operator pastes a
-secret into chat anyway, place it without repeating it and plainly flag the
-transcript exposure.
+Prepare destinations without pulling focus; notify the operator where to
+navigate. For secrets, mark the paste point. If one enters chat, place it
+without repeating it and flag the exposure.
 
 This Skill governs operator-only steps. It does not run interviews: alignment
 decisions belong to `grilling`, and hands-on acceptance Checks belong to

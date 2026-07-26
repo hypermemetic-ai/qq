@@ -11,7 +11,8 @@ actual use.
 
 After verification, offer the owner a hands-on check for user-facing changes.
 Keep it proportional: a small change may need one check; a larger flow may need
-several. Internal-only work ends with autonomous verification.
+several. Internal-only work ends with autonomous verification. Prepare
+acceptance without changing focus; notify the owner where to navigate.
 
 1. Derive the smallest useful set of user-observable outcomes from the request,
    diff, and verification evidence.
