@@ -30,10 +30,15 @@ function setHerdrPane(value) {
 
 function createHarness(options = {}) {
   const registrations = [];
+  const listeners = [];
   const execCalls = [];
+  let listenerCalls = 0;
   const pi = {
     registerTool(tool) {
       registrations.push(tool);
+    },
+    on(eventName, handler) {
+      listeners.push({ eventName, handler });
     },
   };
   const exec = async (executable, args, execOptions) => {
@@ -54,7 +59,18 @@ function createHarness(options = {}) {
 
   register(pi, { exec });
   assert.equal(registrations.length, 1, "extension must register exactly one tool");
-  return { tool: registrations[0], execCalls };
+  return {
+    tool: registrations[0],
+    execCalls,
+    listenerNames: listeners.map(({ eventName }) => eventName),
+    get listenerCalls() {
+      return listenerCalls;
+    },
+    async toolCall(event) {
+      listenerCalls += 1;
+      return listeners[0]?.handler(event, {});
+    },
+  };
 }
 
 function operationNames(execCalls) {
@@ -73,8 +89,12 @@ async function testRegistrationAndLowDanger() {
   setHerdrPane("source-pane");
   const h = createHarness();
   assert.equal(h.tool.name, "operator_stage");
+  assert.deepEqual(h.listenerNames, ["tool_call"]);
   assert.equal(h.tool.label, "Operator Stage");
   assert.equal(typeof h.tool.description, "string");
+  assert.match(h.tool.description, /no-focus guarded herdr pane/i);
+  assert.match(h.tool.description, /request notification/i);
+  assert.doesNotMatch(h.tool.description, /focused guarded/i);
   assert.deepEqual(h.tool.parameters, {
     type: "object",
     properties: {
@@ -94,7 +114,10 @@ async function testRegistrationAndLowDanger() {
     undefined,
   );
 
-  assert.deepEqual(operationNames(h.execCalls), ["split", "rename", "send-text", "wait-output"]);
+  assert.deepEqual(
+    operationNames(h.execCalls),
+    ["split", "rename", "send-text", "wait-output", "show"],
+  );
   assert.deepEqual(h.execCalls[0].args, [
     "pane",
     "split",
@@ -103,8 +126,13 @@ async function testRegistrationAndLowDanger() {
     "right",
     "--cwd",
     process.cwd(),
-    "--focus",
+    "--no-focus",
   ]);
+  assert.equal(
+    h.execCalls.some(({ args }) => args.includes("--focus")),
+    false,
+    "operator_stage attempted to focus a Herdr surface",
+  );
   assert.deepEqual(h.execCalls[1].args, [
     "pane",
     "rename",
@@ -124,6 +152,15 @@ async function testRegistrationAndLowDanger() {
     requiredLine,
     "wM:p4Q",
   ]);
+  assert.deepEqual(h.execCalls[4].args, [
+    "notification",
+    "show",
+    "Operator action ready",
+    "--body",
+    "Navigate to pane wM:p4Q: verify release",
+    "--sound",
+    "request",
+  ]);
   assert.equal(h.execCalls.some(({ args }) => args[1] === "send-keys"), false);
   assert.equal(h.execCalls.some(({ args }) => args[1] === "close"), false);
   assert.equal(h.execCalls.some(({ args }) => args[1] === "read"), false);
@@ -132,11 +169,18 @@ async function testRegistrationAndLowDanger() {
   assert.equal(outcome.details.danger, "low");
   assert.equal(outcome.details.description, "verify release");
   assert.equal(outcome.details.staged_line, requiredLine);
+  assert.match(outcome.content[0].text, /request notification/i);
+  assert.match(outcome.content[0].text, /navigate to pane wM:p4Q/i);
   assert.match(outcome.content[0].text, /press Enter once/);
   assert.match(outcome.content[0].text, /herdr pane read wM:p4Q/);
   assert.match(outcome.content[0].text, /pane gone.*succeeded.*auto-closed/);
   assert.match(outcome.content[0].text, /pane present.*failure or abort/);
   assert.match(outcome.content[0].text, /agent never sends keys/i);
+  assert.equal(
+    h.listenerCalls,
+    0,
+    "operator_stage's nested pi.exec behavior was modeled as a bash tool call",
+  );
 }
 
 async function testHighDanger() {
@@ -150,7 +194,10 @@ async function testHighDanger() {
     undefined,
   );
 
-  assert.deepEqual(operationNames(h.execCalls), ["split", "rename", "send-text", "wait-output"]);
+  assert.deepEqual(
+    operationNames(h.execCalls),
+    ["split", "rename", "send-text", "wait-output", "show"],
+  );
   const line = h.execCalls[2].args[3];
   assert.equal(
     line,
@@ -348,6 +395,134 @@ async function testWaitOutputVerifiesStaging() {
   assert.equal(h.execCalls.some(({ args }) => args[1] === "send-keys"), false);
 }
 
+async function testNotificationFailureOwnsTeardown() {
+  setHerdrPane("source-pane");
+  const h = createHarness({
+    execReply(call) {
+      if (call.args[1] === "split") {
+        return { code: 0, stdout: "created wM:p6N", stderr: "" };
+      }
+      if (call.args[0] === "notification") {
+        return { code: 1, stdout: "", stderr: "notifications unavailable" };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    },
+  });
+  const outcome = await h.tool.execute(
+    "notification-failure",
+    { command: "printf ok", description: "notify failure", danger: "low" },
+    undefined,
+  );
+
+  assertErrorResult(outcome);
+  assert.match(outcome.content[0].text, /could not notify the operator/);
+  assert.match(outcome.content[0].text, /notifications unavailable/);
+  assert.doesNotMatch(outcome.content[0].text, /orphaned/);
+  assert.equal(outcome.details.teardown, "closed");
+  assert.deepEqual(
+    operationNames(h.execCalls),
+    ["split", "rename", "send-text", "wait-output", "show", "close"],
+  );
+  assert.deepEqual(h.execCalls[5].args, ["pane", "close", "wM:p6N"]);
+  assert.equal(h.execCalls.some(({ args }) => args[1] === "send-keys"), false);
+}
+
+async function testFocusDriftNet() {
+  const h = createHarness();
+  const previousChildRole = process.env.PI_SUBAGENT_CHILD_AGENT;
+  delete process.env.PI_SUBAGENT_CHILD_AGENT;
+
+  try {
+    const blocked = [
+      "herdr tab focus wM:t4D",
+      "herdr --session demo tab focus wM:t4D",
+      "bin/herdr --session demo tab focus wM:t4D",
+      "/opt/herdr/bin/herdr --session demo workspace focus wM",
+      "herdr agent focus wM:p1",
+      `"$HERDR" pane focus left`,
+      "herdr plugin pane focus wM:pPlugin",
+      "herdr pane split --direction right wM:p1",
+      "herdr --session demo pane split --direction right wM:p1",
+      "herdr pane split --no-focus --focus wM:p1",
+      "herdr tab create --workspace wM",
+      "herdr tab create --no-focus --focus --workspace wM",
+      "herdr workspace create --label uat",
+      "herdr worktree create --branch uat",
+      "herdr worktree open --no-focus --focus --path /repo",
+      "herdr plugin pane open --plugin demo --placement tab",
+      "herdr plugin pane open --plugin demo --no-focus --focus",
+      "herdr pane move wM:p1 --tab wM:t2 --focus",
+      "/usr/local/bin/qq-herdr-home focus-board --repo /repo",
+      "bin/qq-herdr-home focus-board --repo /repo",
+      "qq-herdr-home focus-architect --repo /repo",
+      "bin/qq-herdr-snap",
+      "qq-herdr-snap",
+      "bin/qq-herdr-pull next",
+      "./bin/qq-herdr-pull next",
+    ];
+
+    for (const command of blocked) {
+      const decision = await h.toolCall({ toolName: "bash", input: { command } });
+      assert.equal(decision?.block, true, `drift-net admitted: ${command}`);
+      assert.match(decision.reason, /no-focus rule/i);
+      assert.match(decision.reason, /notification/i);
+    }
+
+    const allowed = [
+      "herdr api snapshot",
+      "herdr agent list",
+      "herdr agent get wM:p1",
+      "herdr agent read wM:p1",
+      "herdr tab get wM:t1",
+      "herdr tab list",
+      "herdr pane read wM:p1",
+      "herdr workspace list",
+      "herdr notification show Ready --body done --sound request",
+      "herdr pane split --pane wM:p1 --no-focus --direction right",
+      "herdr --session demo pane split --no-focus --direction right wM:p1",
+      `"$HERDR" tab create --workspace wM --no-focus`,
+      "herdr workspace create --no-focus --label uat",
+      "herdr worktree create --no-focus --branch uat",
+      "herdr worktree open --no-focus --path /repo",
+      "herdr plugin pane open --plugin demo --placement tab --no-focus",
+      "herdr pane move wM:p1 --tab wM:t2 --no-focus",
+      "herdr pane swap --current --direction left",
+      "herdr workspace close wUat",
+      "herdr tab close wM:tUat",
+      "herdr pane close wM:pUat",
+      "herdr worktree remove --workspace wUat",
+      "herdr plugin pane close wM:pPlugin",
+      "qq-herdr-home inspect --repo /repo",
+      "bin/qq-herdr-home inspect --repo /repo",
+      "/repo/bin/qq-handoff --help",
+      "printf '%s\\n' 'herdr tab focus is forbidden'",
+    ];
+
+    for (const command of allowed) {
+      const decision = await h.toolCall({ toolName: "bash", input: { command } });
+      assert.equal(decision, undefined, `drift-net refused: ${command}`);
+    }
+
+    process.env.PI_SUBAGENT_CHILD_AGENT = "reviewer";
+    assert.equal(
+      await h.toolCall({ toolName: "bash", input: { command: "herdr tab focus wM:t1" } }),
+      undefined,
+      "drift-net applied root policy to an asserted delegated child",
+    );
+    delete process.env.PI_SUBAGENT_CHILD_AGENT;
+
+    assert.equal(
+      await h.toolCall({ toolName: "read", input: { command: "herdr tab focus wM:t1" } }),
+      undefined,
+    );
+    assert.equal(await h.toolCall({ toolName: "bash", input: { command: 42 } }), undefined);
+    assert.equal(await h.toolCall({ toolName: "bash", input: null }), undefined);
+  } finally {
+    if (previousChildRole === undefined) delete process.env.PI_SUBAGENT_CHILD_AGENT;
+    else process.env.PI_SUBAGENT_CHILD_AGENT = previousChildRole;
+  }
+}
+
 async function testCloseFailureReportsOrphan() {
   setHerdrPane("source-pane");
   const h = createHarness({
@@ -378,6 +553,7 @@ async function testCloseFailureReportsOrphan() {
   assert.deepEqual(operationNames(h.execCalls), ["split", "rename", "send-text", "close"]);
 }
 
+await testFocusDriftNet();
 await testRegistrationAndLowDanger();
 await testHighDanger();
 await testShellCompositionSafety();
@@ -386,6 +562,7 @@ await testSplitFailure();
 await testUnparseablePaneId();
 await testSendFailureOwnsTeardown();
 await testWaitOutputVerifiesStaging();
+await testNotificationFailureOwnsTeardown();
 await testCloseFailureReportsOrphan();
 setHerdrPane(undefined);
 
