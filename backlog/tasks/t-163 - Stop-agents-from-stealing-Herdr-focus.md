@@ -1,10 +1,10 @@
 ---
 id: T-163
 title: Stop agents from stealing Herdr focus
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-25 18:04'
-updated_date: '2026-07-26 16:55'
+updated_date: '2026-07-26 17:30'
 labels: []
 dependencies: []
 documentation:
@@ -30,11 +30,11 @@ Decision ledger:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Canonical orchestrator and architect roots cannot execute direct Herdr focus verbs, explicit --focus, or focus-purpose qq helpers through Pi bash; delegated child roles are excluded and refusals explain the no-focus/notification alternative.
-- [ ] #2 operator_stage resolves its live caller with pane split --current, creates with explicit --no-focus, and emits a Herdr request notification containing the owned pane location.
-- [ ] #3 The drift-net admits read-only Herdr inspection, notifications, explicit no-focus operations, and non-focus operations; it does not establish a separate policy against moving, closing, or removing surfaces, and operator keybindings/manual commands remain outside the tool path.
-- [ ] #4 No standing AGENTS.md focus rule or consent tool is added; no-focus guidance is limited to the relevant UAT/operator-input seams.
-- [ ] #5 The exact stale-focus reproducer and global-option variants fail before execution; focused regressions, all Repository Checks, diagnostics, base reconciliation, and fresh-context review are green.
+- [x] #1 Canonical orchestrator and architect roots cannot execute direct Herdr focus verbs, explicit --focus, or focus-purpose qq helpers through Pi bash; delegated child roles are excluded and refusals explain the no-focus/notification alternative.
+- [x] #2 operator_stage resolves its live caller with pane split --current, creates with explicit --no-focus, and emits a Herdr request notification containing the owned pane location.
+- [x] #3 The drift-net admits read-only Herdr inspection, notifications, explicit no-focus operations, and non-focus operations; it does not establish a separate policy against moving, closing, or removing surfaces, and operator keybindings/manual commands remain outside the tool path.
+- [x] #4 No standing AGENTS.md focus rule or consent tool is added; no-focus guidance is limited to the relevant UAT/operator-input seams.
+- [x] #5 The exact stale-focus reproducer and global-option variants fail before execution; focused regressions, all Repository Checks, diagnostics, base reconciliation, and fresh-context review are green.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -46,3 +46,11 @@ Decision ledger:
 4. Add focused regressions for the stale-focus reproducer, global-option syntax, root-versus-child scope, allowed read/non-focus/no-focus forms, and operator-stage behavior.
 5. Run focused tests, all Repository Checks, diagnostics, fresh review, base reconciliation, and GitHub Flow delivery.
 <!-- SECTION:PLAN:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Delivered implementation in PR #250 (merge commit `89c4b6ac5ea69eb50f7eae5cdf0c707dc989c346`). Canonical orchestrator and architect roots now refuse direct Herdr focus verbs, explicit `--focus`, focus-purpose qq helpers, and focus-capable create/open commands without `--no-focus` through Pi `bash`; asserted delegated children and non-focus commands remain outside the guard. `operator_stage` now splits its live caller with `--current --no-focus` and sends a request notification containing the owned pane ID. No standing `AGENTS.md` rule or consent tool was added.
+
+Evidence: the exact stale-focus and global-option/path variants are covered; all top-level Repository tests passed before and after base reconciliation; focused extension/mount tests, both Skill validators, ratchet at 7969, ShellCheck, diff checks, and TypeScript LSP passed; final fresh review `f5b613dd-23e2-4c53-9ccb-774f63b9401a` returned APPROVE with no residual risks. Mechanical counters: +58 production LOC / +17 decision points; retained same-fix-smaller pass removed 8 production LOC and 2 decision points. This record-only finalization follows separately because the accountable owner mistakenly handed off PR #250 before completing delivery step 6; the operator explicitly approved the repair.
+<!-- SECTION:FINAL_SUMMARY:END -->
