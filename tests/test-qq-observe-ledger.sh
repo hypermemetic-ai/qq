@@ -13,6 +13,17 @@ trap 'rm -rf "$tmp"' EXIT
 export HOME="$tmp/home"
 export XDG_STATE_HOME="$tmp/state"
 mkdir -p "$HOME"
+fake_gh="$tmp/gh"
+cat >"$fake_gh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "$1 $2" = "repo view" ]
+repository="${3#*github.com:}"; repository="${repository%.git}"
+printf '{"nameWithOwner":"%s"}\n' "$repository"
+SH
+chmod +x "$fake_gh"
+export QQ_GH_BIN="$fake_gh"
+
 runs="$XDG_STATE_HOME/qq/observer/runs"
 events="$XDG_STATE_HOME/qq/observer/ledger/events.jsonl"
 
@@ -31,14 +42,25 @@ make_episode() {
   }'
 }
 
+run_path() {
+  local name="$1" pr="$2" variant="$3" base repository=repo suffix=""
+  base="${name%-blind}"
+  case "$base" in *-a) repository=repo-a ;; *-b) repository=repo-b ;; esac
+  [ "$variant" = blind ] && suffix=-blind
+  printf '%s/by-repository/fixture/%s/pr-%s%s\n' "$runs" "$repository" "$pr" "$suffix"
+}
+
 make_run() {
   local name="$1" pr="$2" variant="$3" timestamp="$4" episodes="$5" dropped="${6:-[]}"
-  local run="$runs/$name"
+  local run repository
+  run="$(run_path "$name" "$pr" "$variant")"
+  repository=fixture/repo
+  case "${name%-blind}" in *-a) repository=fixture/repo-a ;; *-b) repository=fixture/repo-b ;; esac
   mkdir -p "$run"
   jq -cn --argjson pr "$pr" --arg variant "$variant" --arg ts "$timestamp" \
-    --arg repo "$ROOT" '{
-      schema:"qq-observer.package",schema_version:1,pr:$pr,variant:$variant,
-      assembled_at:$ts,repo:$repo,sessions:[]
+    --arg repo "$ROOT" --arg repository "$repository" '{
+      schema:"qq-observer.package",schema_version:2,repository:$repository,
+      pr:$pr,variant:$variant,assembled_at:$ts,repo:$repo,sessions:[]
     }' >"$run/package.json"
   jq -cn --argjson episodes "$episodes" --argjson dropped "$dropped" '{
     schema:"qq-observer.analysis",schema_version:1,
@@ -97,8 +119,9 @@ jq -s -e 'all(.[] | select(.type == "finding_seen"); .variant == "guided")' \
 jq -e '.findings == 2 and .promoted == 2' "$tmp/update-2.json" >/dev/null \
   || fail 'second distinct PR did not promote both recurrence keys'
 jq -s -e '
-  [.[] | select(.type == "promoted") | {key:.recurrence_key,prs}] == [
-    {key:"alpha",prs:[1,2]}, {key:"beta",prs:[1,2]}
+  [.[] | select(.type == "promoted") | {key:.recurrence_key,sources}] == [
+    {key:"alpha",sources:[{pr:1,repository:"fixture/repo"},{pr:2,repository:"fixture/repo"}]},
+    {key:"beta",sources:[{pr:1,repository:"fixture/repo"},{pr:2,repository:"fixture/repo"}]}
   ]
 ' "$events" >/dev/null || fail 'promotion events have the wrong distinct-PR evidence'
 
@@ -131,7 +154,7 @@ jq -s -e --argjson seq "$run_2_seq" '
 ' "$events" >/dev/null || fail 'recovered events lost their source marker sequence'
 
 # Successful finalize feeds the ledger without a separate ledger-update command.
-run_3="$runs/pr-3"
+run_3="$(run_path pr-3 3 guided)"
 mkdir -p "$run_3/sessions" "$run_3/facts"
 session_3="$run_3/sessions/fixture.jsonl"
 cat >"$session_3" <<'JSONL'
@@ -140,7 +163,7 @@ cat >"$session_3" <<'JSONL'
 JSONL
 "$OBSERVE" facts "$session_3" >"$run_3/facts/fixture.json"
 jq -cn --arg repo "$ROOT" --arg ts 2026-08-03T10:00:00Z '{
-  schema:"qq-observer.package",schema_version:1,pr:3,variant:"guided",
+  schema:"qq-observer.package",schema_version:2,repository:"fixture/repo",pr:3,variant:"guided",
   assembled_at:$ts,repo:$repo,
   sessions:[{label:"fixture",role:"accountable",evidence:"fixture"}]
 }' >"$run_3/package.json"
@@ -171,10 +194,12 @@ jq -s -e '[.[] | select(.type == "finding_seen" and .pr == 3 and .recurrence_key
 # A ledger failure leaves the analysis durable but not covered until repair.
 coverage_repo="$tmp/coverage-repo"
 git init -q -b main "$coverage_repo"
+git -C "$coverage_repo" remote add origin git@github.com:fixture/repo.git
+git -C "$coverage_repo" config branch.main.remote origin
 GIT_AUTHOR_DATE=2026-08-07T10:00:00Z GIT_COMMITTER_DATE=2026-08-07T10:00:00Z \
   git -C "$coverage_repo" -c user.name=test -c user.email=test@example.invalid \
     commit --allow-empty -qm 'Ledger failure fixture (#7)'
-run_7="$runs/pr-7"
+run_7="$(run_path pr-7 7 guided)"
 mkdir -p "$run_7/sessions" "$run_7/facts"
 session_7="$run_7/sessions/fixture.jsonl"
 cat >"$session_7" <<'JSONL'
@@ -183,7 +208,7 @@ cat >"$session_7" <<'JSONL'
 JSONL
 "$OBSERVE" facts "$session_7" >"$run_7/facts/fixture.json"
 jq -cn --arg repo "$coverage_repo" '{
-  schema:"qq-observer.package",schema_version:1,pr:7,variant:"guided",
+  schema:"qq-observer.package",schema_version:2,repository:"fixture/repo",pr:7,variant:"guided",
   assembled_at:"2026-08-03T11:00:00Z",repo:$repo,
   sessions:[{label:"fixture",role:"accountable",evidence:"fixture"}]
 }' >"$run_7/package.json"
@@ -273,10 +298,10 @@ jq -e '.ok == true and .covered == [7,8,9] and .uncovered == []' \
   "$tmp/covered-9.json" >/dev/null || fail 'empty analysis was not covered by zero findings'
 
 # Failed finalize is terminal coverage, but never a finding source.
-run_4="$runs/pr-4"
+run_4="$(run_path pr-4 4 guided)"
 mkdir -p "$run_4"
 jq -cn --arg repo "$ROOT" '{
-  schema:"qq-observer.package",schema_version:1,pr:4,variant:"guided",
+  schema:"qq-observer.package",schema_version:2,repository:"fixture/repo",pr:4,variant:"guided",
   assembled_at:"2026-08-04T10:00:00Z",repo:$repo,sessions:[]
 }' >"$run_4/package.json"
 "$OBSERVE" finalize --run "$run_4" --failed 'fixture failure' >"$tmp/failed-4.json"
@@ -285,18 +310,18 @@ jq -cn --arg repo "$ROOT" '{
 outcomes="$tmp/outcomes.json"
 cat >"$outcomes" <<'JSON'
 [
-  {"recurrence_key":"alpha","verdict":"accepted","task_refs":["T-201"],"note":"Keep it."},
-  {"recurrence_key":"beta","verdict":"rejected","task_refs":[],"note":"Do not pursue."}
+  {"recurrence_key":"alpha","verdict":"rejected","scope":"","note":"Do not pursue alpha."},
+  {"recurrence_key":"beta","verdict":"rejected","scope":"","note":"Do not pursue beta."}
 ]
 JSON
 # Simulate a crash after the discussed mark was fsynced but before its event.
 jq -cn --argjson outcomes "$(cat "$outcomes")" '{
-  schema:"qq-observer.ledger-event",schema_version:1,
-  ts:"2026-08-02T11:00:00Z",type:"disposition",pr:2,outcomes:$outcomes
+  schema:"qq-observer.ledger-event",schema_version:2,repository:"fixture/repo",
+  ts:"2026-08-02T11:00:00Z",type:"disposition",pr:2,variant:"guided",outcomes:$outcomes
 }' >"$run_2/discussed.json"
 disposition_before="$(jq -s '[.[] | select(.type == "disposition")] | length' "$events")"
 "$OBSERVE" mark-discussed --run "$run_2" --outcomes "$outcomes" >"$tmp/discussed.json"
-jq -e '.type == "disposition" and .pr == 2 and .outcomes[0].verdict == "accepted"' \
+jq -e '.type == "disposition" and .pr == 2 and .outcomes[0].verdict == "rejected"' \
   "$run_2/discussed.json" >/dev/null || fail 'discussed mark has the wrong shape'
 disposition_count="$(jq -s '[.[] | select(.type == "disposition")] | length' "$events")"
 assert_equal "$((disposition_before + 1))" "$disposition_count" \
@@ -334,13 +359,13 @@ jq -e '
   and (.[-1].pr == 2 and .[-1].discussed == true)
   and ([.[] | select(.discussed == false) | .ts] ==
        ([.[] | select(.discussed == false) | .ts] | sort | reverse))
-  and all(.[]; keys == ["analyzed","discussed","failed","pr","ts","variant"])
+  and all(.[]; keys == ["analyzed","discussed","failed","handoff","legacy","pr","repo","repository","resolved","resolved_task_ids","result","run_dir","task_ids","ts","variant"])
 ' "$tmp/rounds.json" >/dev/null || fail 'rounds were not undiscussed-first then newest-first'
 coverage_before="$(jq -c '{
   finalized: ([.[] | select(.analyzed)] | length),
   failed: ([.[] | select(.failed)] | length)
 }' "$tmp/rounds.json")"
-printf '[]\n' >"$tmp/empty-outcomes.json"
+printf '[{"recurrence_key":"recovery","verdict":"rejected","scope":"","note":"No recovery."}]\n' >"$tmp/empty-outcomes.json"
 "$OBSERVE" mark-discussed --run "$run_4" --outcomes "$tmp/empty-outcomes.json" \
   >"$tmp/discussed-failed.json"
 
@@ -348,7 +373,7 @@ printf '[]\n' >"$tmp/empty-outcomes.json"
   --twin "$run_1_blind" >"$tmp/discussed-twins.json"
 jq -e --argjson pr 1 '
   .type == "disposition" and .pr == $pr and .variant == "guided"
-  and .outcomes[0].verdict == "accepted" and (.note | not)
+  and .outcomes[0].verdict == "rejected" and (.note | not)
   and (.written_seq | type == "number")
 ' "$run_1/discussed.json" >/dev/null || fail 'guided twin discussed mark has the wrong shape'
 jq -e --argjson pr 1 '
@@ -397,7 +422,7 @@ run_5_blind="$(make_run pr-5-blind 5 blind 2026-08-05T10:01:00Z "$blind_episodes
 jq -e '.candidates == 3' "$tmp/comparison.json" >/dev/null \
   || fail 'comparison emitted the wrong candidate count'
 jq -e --arg guided "$run_5" --arg blind "$run_5_blind" '
-  .schema == "qq-observer.comparison" and .schema_version == 1
+  .schema == "qq-observer.comparison" and .schema_version == 2 and .repository == "fixture/repo"
   and .guided == $guided and .blind == $blind
   and (.written_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"))
   and (.written_seq | type == "number") and .written_seq > 0
@@ -489,14 +514,14 @@ jq -cn '{
 # Unknown event shapes are counted rather than silently interpreted.
 printf '{"schema":"qq-observer.future-event","schema_version":99}\n' >>"$events"
 "$OBSERVE" digest >"$tmp/digest.md"
-assert_file_contains "$tmp/digest.md" '| 13.5 | 3 | `alpha`' \
-  'accepted recurrence did not receive its 1.5 multiplier'
+assert_file_contains "$tmp/digest.md" '| 4.5 | 3 | `alpha`' \
+  'rejected recurrence did not receive its 0.5 multiplier'
 assert_file_contains "$tmp/digest.md" '| 4.5 | 3 | `beta`' \
   'rejected recurrence did not receive its 0.5 multiplier'
 assert_file_contains "$tmp/digest.md" '| 3 | 1 | `gamma`' \
   'open finding ranking is wrong'
 assert_file_contains "$tmp/digest.md" \
-  '| 3 | 2 | `tied` | Latest tied opportunity | `friction` | #10, #11 | low, high | rejected (×0.5) |' \
+  '| 3 | 2 | `tied` | Latest tied opportunity | `friction` | legacy-event#10, legacy-event#11 | low, high | rejected (×0.5) |' \
   'equal-timestamp finding or disposition did not resolve by ledger position'
 assert_file_contains "$tmp/digest.md" 'guided-only'
 assert_file_contains "$tmp/digest.md" 'blind-only'
@@ -534,7 +559,7 @@ digest_dir="$XDG_STATE_HOME/qq/observer/digests"
 [ -f "$digest_dir/2040-01-02T03:04:05.006Z-2.md" ] \
   || fail 'equal-millisecond digest suffix file is missing'
 assert_file_contains "$tmp/windowed-digest.md" \
-  '| 9 | 2 | `windowed` | Windowed opportunity | `waste` | #8, #9 | high, high | accepted (×1.5) |' \
+  '| 9 | 2 | `windowed` | Windowed opportunity | `waste` | legacy-event#8, legacy-event#9 | high, high | accepted (×1.5) |' \
   'windowed finding lost global recurrence or disposition state'
 awk '
   /^## Opportunities ledger$/ { opportunities = 1; next }
@@ -562,17 +587,19 @@ rebuild_failed="$(make_run pr-22 22 guided 2026-10-22T10:00:00Z '[]')"
 rm "$rebuild_failed/analysis.json"
 printf '%s\n' '{"schema":"qq-observer.analysis","schema_version":1,"status":"analysis_failed","reason":"fixture"}' \
   >"$rebuild_failed/analysis_failed.json"
-rebuild_missing="$runs/pr-23"
+rebuild_missing="$(run_path pr-23 23 guided)"
 mkdir -p "$rebuild_missing"
 jq -cn --arg repo "$ROOT" '{
-  schema:"qq-observer.package",schema_version:1,pr:23,variant:"guided",
+  schema:"qq-observer.package",schema_version:2,repository:"fixture/repo",pr:23,variant:"guided",
   assembled_at:"2026-10-23T10:00:00Z",repo:$repo,sessions:[]
 }' >"$rebuild_missing/package.json"
 rebuild_unmarked="$(make_run pr-24 24 guided 2026-10-24T10:00:00Z "$first_episodes")"
 
 "$OBSERVE" ledger-update --run "$rebuild_21" >"$tmp/rebuild-update-21.json"
 "$OBSERVE" ledger-update --run "$rebuild_20" >"$tmp/rebuild-update-20.json"
-"$OBSERVE" mark-discussed --run "$rebuild_21" --outcomes "$outcomes" \
+rebuild_outcomes="$tmp/rebuild-outcomes.json"
+printf '[{"recurrence_key":"alpha","verdict":"rejected","scope":"","note":"Keep it."},{"recurrence_key":"gamma","verdict":"rejected","scope":"","note":"No."}]\n' >"$rebuild_outcomes"
+"$OBSERVE" mark-discussed --run "$rebuild_21" --outcomes "$rebuild_outcomes" \
   >"$tmp/rebuild-discussed-21.json"
 "$OBSERVE" record-comparison --guided "$rebuild_20" --blind "$rebuild_20_blind" \
   >"$tmp/rebuild-comparison-20.json"
@@ -684,6 +711,8 @@ assert_equal 0 "$(jq -s '[.[] | select(.type == "promoted")] | length' "$events"
   'crash unexpectedly materialized promotion'
 promotion_repo="$tmp/promotion-coverage-repo"
 git init -q -b main "$promotion_repo"
+git -C "$promotion_repo" remote add origin git@github.com:fixture/repo.git
+git -C "$promotion_repo" config branch.main.remote origin
 GIT_AUTHOR_DATE=2026-10-30T10:01:00Z GIT_COMMITTER_DATE=2026-10-30T10:01:00Z \
   git -C "$promotion_repo" -c user.name=test -c user.email=test@example.invalid \
     commit --allow-empty -qm 'Promotion crash fixture (#71)'
@@ -700,8 +729,8 @@ jq -e '.covered == [] and .uncovered == [71]' \
 jq -s -e '
   ([.[] | select(.type == "finding_seen") | {pr,variant}] ==
     [{pr:70,variant:"guided"},{pr:71,variant:"guided"}])
-  and ([.[] | select(.type == "promoted") | {key:.recurrence_key,prs,written_seq}] ==
-    [{key:"crash-promotion",prs:[70,71],written_seq:2}])
+  and ([.[] | select(.type == "promoted") | {key:.recurrence_key,sources,written_seq}] ==
+    [{key:"crash-promotion",sources:[{pr:70,repository:"fixture/repo"},{pr:71,repository:"fixture/repo"}],written_seq:2}])
 ' "$events" >/dev/null || fail 'next write omitted crash-interleaved promotion'
 "$OBSERVE" verify-delivery --repo "$promotion_repo" --since 2026-01-01T00:00:00Z \
   >"$tmp/promotion-covered.json"
@@ -793,19 +822,19 @@ mv "$tmp/chronology-legacy-marker-3.json" "$chronology_3/.ledger-applied"
 touch -d '2099-01-01T00:00:00.000Z' "$chronology_3/.ledger-applied"
 accepted_outcome="$tmp/chronology-accepted.json"
 rejected_outcome="$tmp/chronology-rejected.json"
-jq -cn '[{recurrence_key:"chronology",verdict:"accepted",task_refs:[],note:"Older."}]' \
+jq -cn '[{recurrence_key:"chronology",verdict:"rejected",scope:"",note:"Older."}]' \
   >"$accepted_outcome"
-jq -cn '[{recurrence_key:"chronology",verdict:"rejected",task_refs:[],note:"Newer."}]' \
+jq -cn '[{recurrence_key:"chronology",verdict:"rejected",scope:"",note:"Newer."}]' \
   >"$rejected_outcome"
 jq -cn --argjson outcomes "$(cat "$accepted_outcome")" '{
-  schema:"qq-observer.ledger-event",schema_version:1,
-  ts:"2026-11-04T10:00:00.000Z",type:"disposition",pr:3,outcomes:$outcomes
+  schema:"qq-observer.ledger-event",schema_version:2,repository:"fixture/repo",
+  ts:"2026-11-04T10:00:00.000Z",type:"disposition",pr:3,variant:"guided",outcomes:$outcomes
 }' >"$chronology_3/discussed.json"
 "$OBSERVE" mark-discussed --run "$chronology_3" --outcomes "$accepted_outcome" \
   >"$tmp/chronology-discussed-3.json"
 jq -cn --argjson outcomes "$(cat "$rejected_outcome")" '{
-  schema:"qq-observer.ledger-event",schema_version:1,
-  ts:"2026-11-04T10:00:00.000Z",type:"disposition",pr:2,outcomes:$outcomes
+  schema:"qq-observer.ledger-event",schema_version:2,repository:"fixture/repo",
+  ts:"2026-11-04T10:00:00.000Z",type:"disposition",pr:2,variant:"guided",outcomes:$outcomes
 }' >"$chronology_2/discussed.json"
 "$OBSERVE" mark-discussed --run "$chronology_2" --outcomes "$rejected_outcome" \
   >"$tmp/chronology-discussed-2.json"
@@ -813,7 +842,7 @@ touch -d '2030-01-01T00:00:00.000000100Z' "$chronology_3/discussed.json"
 touch -d '2030-01-01T00:00:00.000000900Z' "$chronology_2/discussed.json"
 "$OBSERVE" digest >"$tmp/chronology-before-loss.md"
 assert_file_contains "$tmp/chronology-before-loss.md" \
-  '| 3 | 2 | `chronology` | Chronology opportunity | `waste` | #2, #3 | high, high | rejected (×0.5) |' \
+  '| 3 | 2 | `chronology` | Chronology opportunity | `waste` | fixture/repo#2, fixture/repo#3 | high, high | rejected (×0.5) |' \
   'original disposition chronology did not end with rejection'
 rm -rf "$(dirname "$events")"
 "$OBSERVE" ledger-rebuild >"$tmp/chronology-rebuild.json"
@@ -821,7 +850,7 @@ jq -e 'has("written_at") | not' "$chronology_3/.ledger-applied" >/dev/null \
   || fail 'legacy ledger marker was not replayed lawfully by mtime'
 "$OBSERVE" digest >"$tmp/chronology-after-loss.md"
 assert_file_contains "$tmp/chronology-after-loss.md" \
-  '| 3 | 2 | `chronology` | Chronology opportunity | `waste` | #2, #3 | high, high | rejected (×0.5) |' \
+  '| 3 | 2 | `chronology` | Chronology opportunity | `waste` | fixture/repo#2, fixture/repo#3 | high, high | rejected (×0.5) |' \
   'equal-mtime rebuild reversed internal disposition chronology'
 
 # A record-first comparison retry completes events after an interrupted first attempt.
@@ -879,7 +908,7 @@ jq -cS . "$events" >"$tmp/comparison-after-loss.jsonl"
 cmp "$tmp/comparison-before-loss.jsonl" "$tmp/comparison-after-loss.jsonl" >/dev/null \
   || fail 'comparison event set changed after rebuild from durable record'
 
-# Identical candidates in two durable comparison records are globally unique.
+# Identical same-PR candidates remain distinct across two Repositories.
 export XDG_STATE_HOME="$tmp/comparison-dedupe-state"
 runs="$XDG_STATE_HOME/qq/observer/runs"
 events="$XDG_STATE_HOME/qq/observer/ledger/events.jsonl"
@@ -898,16 +927,21 @@ dedupe_blind_2="$(make_run pr-40-b-blind 40 blind 2026-12-02T10:03:00Z "$dedupe_
 jq -s -e 'map(.written_seq) == [1,2]' \
   "$dedupe_guided_1/comparison.json" "$dedupe_guided_2/comparison.json" >/dev/null \
   || fail 'duplicate comparison records did not retain distinct source sequences'
-assert_equal 1 "$(jq -s '[.[] | select(.type == "signal_tune_candidate")] | length' "$events")" \
-  'duplicate comparison records emitted duplicate live candidates'
+assert_equal 2 "$(jq -s '[.[] | select(.type == "signal_tune_candidate")] | length' "$events")" \
+  'Repository-qualified comparison candidates were conflated'
+"$OBSERVE" digest >"$tmp/comparison-dedupe-digest.md"
+assert_file_contains "$tmp/comparison-dedupe-digest.md" 'fixture/repo-a#40' \
+  'first Repository comparison candidate was not digest-visible'
+assert_file_contains "$tmp/comparison-dedupe-digest.md" 'fixture/repo-b#40' \
+  'second Repository comparison candidate was not digest-visible'
 jq -cS . "$events" >"$tmp/comparison-dedupe-before-loss.jsonl"
 rm -rf "$(dirname "$events")"
 "$OBSERVE" ledger-rebuild >"$tmp/comparison-dedupe-rebuild.json"
-assert_equal 1 "$(jq -s '[.[] | select(.type == "signal_tune_candidate")] | length' "$events")" \
-  'duplicate comparison records emitted duplicate rebuilt candidates'
+assert_equal 2 "$(jq -s '[.[] | select(.type == "signal_tune_candidate")] | length' "$events")" \
+  'Repository-qualified comparison candidates were conflated during rebuild'
 jq -cS . "$events" >"$tmp/comparison-dedupe-after-loss.jsonl"
 cmp "$tmp/comparison-dedupe-before-loss.jsonl" "$tmp/comparison-dedupe-after-loss.jsonl" >/dev/null \
-  || fail 'globally deduplicated comparison rebuild was not byte-exact'
+  || fail 'Repository-qualified comparison rebuild was not byte-exact'
 
 # Logical written_seq, not physical append position, orders every ledger consumer.
 export XDG_STATE_HOME="$tmp/logical-order-state"
@@ -953,7 +987,7 @@ jq -cn '{
 chmod 600 "$events"
 "$OBSERVE" digest >"$tmp/logical-order-a.md"
 assert_file_contains "$tmp/logical-order-a.md" \
-  '| 9 | 2 | `logical` | Latest logical opportunity | `friction` | #51, #52 | low, high | accepted (×1.5) |' \
+  '| 9 | 2 | `logical` | Latest logical opportunity | `friction` | legacy-event#51, legacy-event#52 | low, high | accepted (×1.5) |' \
   'digest latest state followed physical append order instead of written_seq'
 first_candidate_line="$(grep -n 'First logical candidate' "$tmp/logical-order-a.md" | cut -d: -f1)"
 second_candidate_line="$(grep -n 'Second logical candidate' "$tmp/logical-order-a.md" | cut -d: -f1)"
@@ -979,12 +1013,12 @@ lock_only="$(make_episode serialized-only waste 'Serialized guided-only episode'
 lock_guided_episodes="$(jq -cn --argjson common "$lock_common" --argjson only "$lock_only" '[$common,$only]')"
 lock_blind_episodes="$(jq -cn --argjson common "$lock_common" '[$common]')"
 lock_update_run="$(make_run pr-61 61 guided 2026-12-04T10:00:00Z "$lock_episodes")"
-lock_discussed_run="$(make_run pr-62 62 guided 2026-12-04T10:01:00Z '[]')"
+lock_discussed_run="$(make_run pr-62 62 guided 2026-12-04T10:01:00Z "$lock_episodes")"
 lock_guided_run="$(make_run pr-63 63 guided 2026-12-04T10:02:00Z "$lock_guided_episodes")"
 lock_blind_run="$(make_run pr-63-blind 63 blind 2026-12-04T10:03:00Z "$lock_blind_episodes")"
 lock_outcomes="$tmp/lock-outcomes.json"
 jq -cn '[{
-  recurrence_key:"serialized",verdict:"accepted",task_refs:[],note:"Serialized."
+  recurrence_key:"serialized",verdict:"rejected",scope:"",note:"Serialized."
 }]' >"$lock_outcomes"
 
 # Release all four commands into the Python entry point together. This wrapper
@@ -1075,7 +1109,7 @@ assert_equal 65 "$status" 'ledger update proceeded without acquiring its writer 
   || fail 'failed writer-lock acquisition fabricated ledger state'
 rm -rf "$ledger_lock"
 
-# Empty guided and blind dispositions remain distinct and retain their metadata on rebuild.
+# Explicit failed-round and blind-twin dispositions remain distinct on rebuild.
 export XDG_STATE_HOME="$tmp/twin-disposition-rebuild-state"
 runs="$XDG_STATE_HOME/qq/observer/runs"
 events="$XDG_STATE_HOME/qq/observer/ledger/events.jsonl"
@@ -1087,19 +1121,20 @@ printf '%s\n' '{"schema":"qq-observer.analysis","schema_version":1,"status":"ana
 printf '%s\n' '{"schema":"qq-observer.analysis","schema_version":1,"status":"analysis_failed","reason":"fixture"}' \
   >"$twin_failed_blind/analysis_failed.json"
 jq -cn '{
-  schema:"qq-observer.ledger-event",schema_version:1,written_seq:1,
-  ts:"2026-12-05T11:00:00Z",type:"disposition",pr:97,outcomes:[],
-  note:"legacy guided discussion"
+  schema:"qq-observer.ledger-event",schema_version:2,repository:"fixture/repo",written_seq:1,
+  ts:"2026-12-05T11:00:00Z",type:"disposition",pr:97,variant:"guided",
+  outcomes:[{recurrence_key:"recovery",verdict:"rejected",scope:"",note:"No recovery."}],
+  note:"explicit guided discussion"
 }' >"$twin_failed_guided/discussed.json"
 jq -cn '{
-  schema:"qq-observer.ledger-event",schema_version:1,written_seq:2,
+  schema:"qq-observer.ledger-event",schema_version:2,repository:"fixture/repo",written_seq:2,
   ts:"2026-12-05T11:00:01Z",type:"disposition",pr:97,variant:"blind",outcomes:[],
   note:"discussed with guided twin"
 }' >"$twin_failed_blind/discussed.json"
 "$OBSERVE" ledger-rebuild >"$tmp/twin-disposition-rebuild.json"
 jq -s -e '
   [.[] | select(.type == "disposition" and .pr == 97) | {variant,note}] == [
-    {variant:"guided",note:"legacy guided discussion"},
+    {variant:"guided",note:"explicit guided discussion"},
     {variant:"blind",note:"discussed with guided twin"}
   ]
 ' "$events" >/dev/null \
@@ -1110,14 +1145,14 @@ runs="$primary_runs"
 events="$primary_events"
 
 # Refusal paths do not fabricate events or state.
-missing="$runs/pr-6"
-missing_blind="$runs/pr-6-blind"
+missing="$(run_path pr-6 6 guided)"
+missing_blind="$(run_path pr-6 6 blind)"
 mkdir -p "$missing" "$missing_blind"
 for spec in "$missing:guided" "$missing_blind:blind"; do
   path="${spec%:*}"
   variant="${spec##*:}"
   jq -cn --arg repo "$ROOT" --arg variant "$variant" '{
-    schema:"qq-observer.package",schema_version:1,pr:6,variant:$variant,
+    schema:"qq-observer.package",schema_version:2,repository:"fixture/repo",pr:6,variant:$variant,
     assembled_at:"2026-08-06T10:00:00Z",repo:$repo,sessions:[]
   }' >"$path/package.json"
 done

@@ -1,0 +1,320 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "qq observer accountable handoff",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "schema_version",
+        "handoff_id",
+        "kind",
+        "round",
+        "outcomes",
+        "evidence",
+        "created_at",
+        "source_hashes"
+      ],
+      "properties": {
+        "schema": {
+          "const": "qq-observer.handoff"
+        },
+        "schema_version": {
+          "const": 1
+        },
+        "handoff_id": {
+          "type": "string",
+          "pattern": "^handoff-[0-9a-f]{32}$"
+        },
+        "kind": {
+          "enum": [
+            "episode_batch",
+            "failed_round_recovery"
+          ]
+        },
+        "round": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "run_dir",
+            "repo",
+            "repository",
+            "legacy",
+            "pr",
+            "variant"
+          ],
+          "properties": {
+            "run_dir": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            },
+            "repository": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
+            },
+            "legacy": {
+              "type": "boolean"
+            },
+            "pr": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "variant": {
+              "enum": [
+                "guided",
+                "blind"
+              ]
+            }
+          }
+        },
+        "outcomes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "recurrence_key",
+              "verdict",
+              "scope",
+              "note"
+            ],
+            "properties": {
+              "recurrence_key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "verdict": {
+                "enum": [
+                  "accepted",
+                  "rejected",
+                  "reshaped"
+                ]
+              },
+              "scope": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object"
+          }
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "source_hashes": {
+          "type": "object",
+          "minProperties": 2,
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "schema_version",
+        "handoff_id",
+        "kind",
+        "batch_id",
+        "context_id",
+        "decisions",
+        "occurrences",
+        "created_at",
+        "source_hashes"
+      ],
+      "properties": {
+        "schema": {
+          "const": "qq-observer.handoff"
+        },
+        "schema_version": {
+          "const": 2
+        },
+        "handoff_id": {
+          "type": "string",
+          "pattern": "^handoff-[0-9a-f]{32}$"
+        },
+        "kind": {
+          "const": "global_decision_batch"
+        },
+        "batch_id": {
+          "type": "string",
+          "pattern": "^batch-[0-9a-f]{32}$"
+        },
+        "context_id": {
+          "type": "string",
+          "pattern": "^context-[0-9a-f]{32}$"
+        },
+        "decisions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "decision_id",
+              "recurrence_key",
+              "occurrence_ids",
+              "action",
+              "scope",
+              "note"
+            ],
+            "properties": {
+              "decision_id": {
+                "type": "string",
+                "pattern": "^decision-[0-9a-f]{32}$"
+              },
+              "recurrence_key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "occurrence_ids": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^occurrence-[0-9a-f]{32}$"
+                }
+              },
+              "action": {
+                "enum": [
+                  "route",
+                  "set_aside"
+                ]
+              },
+              "scope": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "occurrences": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "occurrence_id",
+              "recurrence_key",
+              "source",
+              "package_sha256",
+              "analysis_sha256",
+              "episode"
+            ],
+            "properties": {
+              "occurrence_id": {
+                "type": "string",
+                "pattern": "^occurrence-[0-9a-f]{32}$"
+              },
+              "recurrence_key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "run_dir",
+                  "repo",
+                  "repository",
+                  "legacy",
+                  "pr",
+                  "variant",
+                  "assembled_at"
+                ],
+                "properties": {
+                  "run_dir": {
+                    "type": "string"
+                  },
+                  "repo": {
+                    "type": "string"
+                  },
+                  "repository": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
+                  },
+                  "legacy": {
+                    "type": "boolean"
+                  },
+                  "pr": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "variant": {
+                    "const": "guided"
+                  },
+                  "assembled_at": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "package_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "analysis_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "episode": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "source_hashes": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "package_sha256",
+              "analysis_sha256"
+            ],
+            "properties": {
+              "package_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "analysis_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

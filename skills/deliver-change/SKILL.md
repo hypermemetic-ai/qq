@@ -48,11 +48,17 @@ qq engines unconditionally: they own containment, degradation, and rails.
 9. Never merge; the operator merges. Arm `qq_pr_watch`. Its wake is
    non-load-bearing: after a wake, resume, or operator message, call idempotent
    `qq-change land <pr> --repo <checkout>`.
-10. The land engine verifies merge and ancestry and safely fast-forwards the
+10. When this Change came from an Observer accountable-intake handoff, record
+    its verified merge after normal land with `qq-observe resolve-task --batch
+    <origin-batch-dir> --task <Task-ID> --repo <qq-root>`. A v1 compatibility
+    handoff instead uses `--run <origin-run-dir>`. This append-only receipt
+    affects Observer resolution only; `OPEN` or closed-unmerged evidence refuses
+    and never changes discussion or delivery state.
+11. The land engine verifies merge and ancestry and safely fast-forwards the
     sole primary `main` checkout. Exit 2 reports a rail refusal; exit 1 reports
     an error. Stop and retain the Change; repeating the call is safe. A closed
     or rejected Change follows step 7 without altering the completed Task.
-11. Launch the observer before retiring: `qq-observe assemble --pr <pr>
+12. Launch the observer before retiring: `qq-observe assemble --pr <pr>
     --repo <root>` while the worktree lives; dispatch the `observer` agent
     async (fresh-context, task = procedure and package paths, outputSchema
     `delegation/manifests/observer-analysis.schema.json`, acceptance none),
@@ -60,7 +66,7 @@ qq engines unconditionally: they own containment, degradation, and rails.
     `qq-observe finalize --analysis` with the analyst trace; any failure:
     `qq-observe finalize --failed`. Automatic, headless: no veto window, no
     UAT exception; `qq-observe verify-delivery` shows coverage.
-12. After landing succeeds, leave focus untouched. When the executing owner
+13. After landing succeeds, leave focus untouched. When the executing owner
     verifiably owns the Change delegate lifecycle (the default posture; Changes
     carry no work session), call `qq-change retire <change-id> --repo <checkout>
     --branch <branch> --checkout <path> --workspace-absent-owned`. The
@@ -70,5 +76,5 @@ qq engines unconditionally: they own containment, degradation, and rails.
     forces removal. On refusal or error, report state and leave every session,
     checkout, pane, and branch intact. Never force-delete, stash, clean, reset,
     switch, or repair delivery state.
-13. Keep the five gates with the accountable owner: intent alignment, plan
+14. Keep the five gates with the accountable owner: intent alignment, plan
     approval, review verdict, acceptance, and merge.
