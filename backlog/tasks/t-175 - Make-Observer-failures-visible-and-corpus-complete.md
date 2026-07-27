@@ -4,7 +4,7 @@ title: Make Observer failures visible and corpus complete
 status: In Progress
 assignee: []
 created_date: '2026-07-27 07:47'
-updated_date: '2026-07-27 07:48'
+updated_date: '2026-07-27 08:32'
 labels: []
 dependencies: []
 documentation:
@@ -45,10 +45,22 @@ Change only guided corpus assembly, delivery-health classification, bounded Arch
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Guided packages copy every tracked Markdown instruction manifest under delegation/manifests recursively from the exact merged Change snapshot, including agents/*.md.
-- [ ] #2 A deterministic fixture co-presents a shorter Skill timeout, exact timeout evidence, and the authoritative 2700000ms role manifest without requiring a particular LLM finding.
-- [ ] #3 verify-delivery distinguishes successfully covered, analysis_failed, and uncovered repository-qualified Changes; failed analysis is never covered and produces explicit unhealthy status.
-- [ ] #4 /architect context v3 exposes a bounded informational health surface for failed and pending repository-qualified guided rounds with safe reasons and coordinates, while health rows cannot enter dispositions or masquerade as findings.
-- [ ] #5 Repository qualification, immutable evidence, context byte/finding bounds, TOON ingress, occurrence identity, pending intake, and operator disposition authority remain intact.
+- [x] #1 Guided packages copy every tracked Markdown instruction manifest under delegation/manifests recursively from the exact merged Change snapshot, including agents/*.md.
+- [x] #2 A deterministic fixture co-presents a shorter Skill timeout, exact timeout evidence, and the authoritative 2700000ms role manifest without requiring a particular LLM finding.
+- [x] #3 verify-delivery distinguishes successfully covered, analysis_failed, and uncovered repository-qualified Changes; failed analysis is never covered and produces explicit unhealthy status.
+- [x] #4 /architect context v3 exposes a bounded informational health surface for failed and pending repository-qualified guided rounds with safe reasons and coordinates, while health rows cannot enter dispositions or masquerade as findings.
+- [x] #5 Repository qualification, immutable evidence, context byte/finding bounds, TOON ingress, occurrence identity, pending intake, and operator disposition authority remain intact.
 - [ ] #6 Focused regressions are reproduced before the fix; applicable Skill, shell, LSP, ratchet, diff, fresh-context review, and GitHub Checks pass in one unmerged PR.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implementation began with the required one-writer delegate, but the confined child edit tool returned EACCES before any project mutation; a second bounded retry confirmed the same substrate block. The accountable owner retained scope and implemented directly in the isolated Change.
+
+Reproduce-before-fix established all three intended failures in disposable fixtures. The initial green implementation measured net +126 production LOC / +28 decision-point lines. The required mechanical same-fix-smaller pass retained a strictly smaller green result at +121 / +26.
+
+Fresh review found one valid P2 Unicode mismatch: Python bounded reasons by code points while TypeScript used UTF-16 code units. The owner reproduced the 500-emoji failure, fixed it with code-point counting, reran affected Checks, and a fresh fix-delta review returned PASS.
+
+PR #262 is the sole delivery Change. No live Observer run or pending Architect batch was modified.
+<!-- SECTION:NOTES:END -->
