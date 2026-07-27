@@ -22,6 +22,7 @@ export HOME="$test_home"
 export TMPDIR="$parent_tmp"
 export XDG_CACHE_HOME="$tmp/xdg-cache"
 export XDG_DATA_HOME="$tmp/xdg-data"
+unset PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE
 
 # The adapter requires the dispatcher-side pi-subagents config to name the
 # session root (README Install); stage it for every dispatch in this suite.
@@ -826,13 +827,65 @@ assert_file_contains "$tmp/researcher-context7-key.stderr" \
   'researcher dispatch forbids inherited CONTEXT7_API_KEY'
 [ ! -s "$FAKE_PI_ARGS" ] || fail 'researcher Context7 key refusal launched Pi'
 
-unrelated_repository="$tmp/unrelated-repository"
-git init -q "$unrelated_repository"
-run_failure unrelated-repository "$unrelated_repository" \
-  env PI_SUBAGENT_CHILD_AGENT=reviewer \
-  "$fixture_primary/bin/qq-dispatch" --json
-assert_file_contains "$tmp/unrelated-repository.stderr" \
-  'child cwd belongs to an unrelated repository'
+# A canonical adapter serves a markerless external Git Repository and scopes
+# the implementer policy to that Repository rather than the adapter checkout.
+external_repository="$tmp/external-repository"
+git init -q "$external_repository"
+[ ! -e "$external_repository/AGENTS.md" ] \
+  || fail 'external Repository fixture unexpectedly has an AGENTS.md marker'
+external_common_dir="$(git -C "$external_repository" rev-parse --path-format=absolute --git-common-dir)"
+external_git_dir="$(git -C "$external_repository" rev-parse --path-format=absolute --git-dir)"
+external_common_dir="$(realpath -e "$external_common_dir")"
+external_git_dir="$(realpath -e "$external_git_dir")"
+external_runtime="$tmp/external-runtime"
+mkdir -p "$external_runtime"
+(
+  cd "$external_repository"
+  PI_SUBAGENT_CHILD_AGENT=implementer \
+  PI_SUBAGENT_RUN_ID=external-smoke \
+  QQ_DISPATCH_RUNTIME_ROOT="$external_runtime" \
+  FAKE_POLICY_SNAPSHOT="$tmp/external-policy.json" \
+    "$fixture_primary/bin/qq-dispatch" --json
+) >"$tmp/external.stdout" 2>"$tmp/external.stderr"
+assert_file_contains "$tmp/external.stdout" 'pi-live-event role=implementer'
+external_config_dir="$(sed -n 's/^PI_CODING_AGENT_DIR=//p' "$FAKE_PI_ENV")"
+external_run_dir="$(dirname -- "$external_config_dir")"
+grep -Fxq "QQ_DISPATCH_WORKTREE=$external_repository" "$FAKE_PI_ENV" \
+  || fail 'canonical adapter did not select the external Repository'
+grep -Fxq "QQ_DISPATCH_GIT_COMMON_DIR=$external_common_dir" "$FAKE_PI_ENV" \
+  || fail 'canonical adapter did not select the external Git common directory'
+grep -Fxq "QQ_DISPATCH_GIT_WORKTREE_DIR=$external_git_dir" "$FAKE_PI_ENV" \
+  || fail 'canonical adapter did not select the external Git worktree directory'
+jq -e \
+  --arg worktree "$external_repository" \
+  --arg common "$external_common_dir" \
+  --arg worktree_git "$external_git_dir" \
+  --arg run "$external_run_dir" \
+  --arg adapter "$fixture_primary" \
+  --arg temp "$pi_subagent_own_temp" --arg sess "$pi_subagent_sess" '
+    (.filesystem.allowWrite | sort) == (
+      [$run, $worktree, $common, $worktree_git, "/dev/null", $temp, $sess]
+      | unique | sort
+    )
+    and (.filesystem.allowWrite | index($adapter)) == null
+  ' "$tmp/external-policy.json" >/dev/null
+
+# A linked qq feature-worktree adapter may self-host its own Git common
+# directory, but must not become canonical authority for an external Repository.
+: >"$FAKE_PI_ARGS"
+set +e
+(
+  cd "$external_repository"
+  PI_SUBAGENT_CHILD_AGENT=implementer \
+    "$fixture_worktree/bin/qq-dispatch" --json
+) >"$tmp/feature-external.stdout" 2>"$tmp/feature-external.stderr"
+feature_external_status=$?
+set -e
+assert_equal 65 "$feature_external_status" \
+  'feature-worktree adapter external refusal did not exit 65'
+assert_file_contains "$tmp/feature-external.stderr" \
+  'non-primary adapter may not serve an external repository'
+[ ! -s "$FAKE_PI_ARGS" ] || fail 'feature-worktree adapter external refusal launched Pi'
 
 outside="$tmp/outside"
 mkdir -p "$outside"
@@ -847,18 +900,20 @@ fake_git="$tmp/git"
 cat >"$fake_git" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-case " $* " in
-  *' --git-common-dir '*) exit 1 ;;
-esac
+if [[ " $* " == *" --git-common-dir "* \
+  && " $* " == *" -C $FAKE_GIT_FAILURE_ROOT "* ]]; then
+  exit 1
+fi
 exec "$REAL_GIT_BIN" "$@"
 SH
 chmod +x "$fake_git"
 run_failure undiscoverable-git "$ROOT" \
   env \
     REAL_GIT_BIN="$real_git" \
+    FAKE_GIT_FAILURE_ROOT="$ROOT" \
     QQ_GIT_BIN="$fake_git" \
     PI_SUBAGENT_CHILD_AGENT=implementer \
-    "$DISPATCH" --json
+    "$fixture_primary/bin/qq-dispatch" --json
 assert_file_contains "$tmp/undiscoverable-git.stderr" \
   'cannot discover the Git common directory'
 

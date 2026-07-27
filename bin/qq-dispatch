@@ -49,12 +49,8 @@ fi
 [[ "$adapter_repository_root" == "$adapter_worktree" ]] \
   || fail 64 "adapter path does not resolve beneath its assigned worktree"
 
-if ! adapter_git_common_dir="$(git_query -C "$adapter_worktree" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
-  fail 67 "cannot discover the Git common directory"
-fi
-if ! adapter_git_common_dir="$(realpath -e -- "$adapter_git_common_dir" 2>/dev/null)"; then
-  fail 67 "cannot resolve the Git common directory"
-fi
+adapter_git_common_dir="$(realpath -e -- "$(git_query -C "$adapter_worktree" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" 2>/dev/null)" \
+  || fail 67 "cannot resolve the adapter Git common directory"
 
 invocation_cwd="$(pwd -P)" || fail 65 "cannot resolve the child cwd"
 if ! invocation_root="$(git_query -C "$invocation_cwd" rev-parse --show-toplevel 2>/dev/null)"; then
@@ -77,13 +73,13 @@ if ! git_worktree_dir="$(realpath -e -- "$git_worktree_dir" 2>/dev/null)"; then
   fail 67 "cannot resolve the worktree Git directory"
 fi
 
-if path_is_within "$self" "$invocation_root"; then
-  [[ "$invocation_root" == "$adapter_worktree" ]] \
-    || fail 65 "adapter path resolves beneath an unrelated repository worktree"
-else
-  [[ "$git_common_dir" == "$adapter_git_common_dir" ]] \
-    || fail 65 "child cwd belongs to an unrelated repository"
+if [[ "$git_common_dir" != "$adapter_git_common_dir" ]]; then
+  adapter_git_worktree_dir="$(realpath -e -- "$(git_query -C "$adapter_worktree" rev-parse --path-format=absolute --git-dir 2>/dev/null)" 2>/dev/null)" \
+    || fail 67 "cannot resolve the adapter Git worktree directory"
+  [[ "$adapter_git_worktree_dir" == "$adapter_git_common_dir" ]] \
+    || fail 65 "non-primary adapter may not serve an external repository"
 fi
+
 worktree="$invocation_root"
 
 role="${PI_SUBAGENT_CHILD_AGENT:-}"
