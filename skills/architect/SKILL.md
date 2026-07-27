@@ -29,7 +29,7 @@ Task mappings arrive. Retry only on an explicit interactive request naming its
 exact batch or handoff; reuse it without prepare or re-proposal.
 
 Resolve mapped Tasks with `qq-observe resolve-task --batch <batch-dir> --task
-T-N --repo <qq-root>` and exact merged PR/head proof. V1 round
+<Task-ID> --repo <qq-root>` and exact merged PR/head proof. V1 round
 handoffs and failed recovery are compatibility paths, not the normal interface.
 
 For the first five dual runs, record guided/blind comparison and tune signals

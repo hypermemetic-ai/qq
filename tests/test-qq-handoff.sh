@@ -43,13 +43,16 @@ def command(*argv, cwd=None, check=True):
 
 command("git", "init", "-q", "-b", "main", str(repo))
 (repo / "bin" / "lib").mkdir(parents=True)
+(repo / "backlog").mkdir()
+(repo / "backlog" / "config.yml").write_text('task_prefix: "t"\n', encoding="utf-8")
 engine = repo / "bin" / "qq-handoff"
 shutil.copy2(engine_source, engine)
 shutil.copy2(engine_source.parent / "lib" / "qq-bin.sh", repo / "bin" / "lib" / "qq-bin.sh")
 shutil.copy2(engine_source.parent / "lib" / "qq-handoff.py", repo / "bin" / "lib" / "qq-handoff.py")
+shutil.copy2(engine_source.parent / "lib" / "qq_task_identity.py", repo / "bin" / "lib" / "qq_task_identity.py")
 command("git", "-C", str(repo), "remote", "add", "origin", "git@github.com:fixture/repo.git")
 command("git", "-C", str(repo), "config", "branch.main.remote", "origin")
-command("git", "-C", str(repo), "add", "bin")
+command("git", "-C", str(repo), "add", "bin", "backlog")
 command("git", "-C", str(repo), "-c", "user.name=test", "-c", "user.email=test@example.com",
         "commit", "-qm", "initial")
 command("git", "-C", str(repo), "worktree", "add", "-qb", "feat/change", str(change))
@@ -283,6 +286,8 @@ for args, code in [
     (("other","T-155","--repo",main), 1), (("inspect","T-155","--other",main), 1),
     (("inspect","--help","--repo",main), 2), (("inspect","T-0","--repo",main), 2),
     (("inspect","t-155","--repo",main), 2), (("inspect","T-01","--repo",main), 2),
+    (("inspect","T-155.0","--repo",main), 2), (("inspect","T-155.2.3","--repo",main), 2),
+    (("inspect","T-155/child","--repo",main), 2), (("inspect","FEAT-155","--repo",main), 2),
     (("inspect","T-155","--repo","--bad"), 1),
 ]:
     reset(); invoke(code, *args); assert calls() == []
@@ -297,6 +302,27 @@ assert [rail["name"] for rail in receipt["rails"]] == ["repository_topology","ch
 caller_rail = next(rail for rail in receipt["rails"] if rail["name"] == "caller_identity")
 assert "focused" not in caller_rail["evidence"]
 assert_no_mutation()
+
+# A direct child resolves exactly, preserving its complete identity without a surrogate Task.
+reset()
+child_path = task_dir / "t-155.3 - Child.md"
+child_path.write_text(task_text().replace("id: T-155", "id: T-155.3"), encoding="utf-8")
+child_receipt = invoke(0, "inspect", "T-155.3", "--repo", main)
+assert child_receipt["task"]["id"] == "T-155.3"
+assert child_receipt["task"]["path"] == str(child_path.resolve())
+assert_no_mutation()
+
+# The Repository config, not source edits, selects a non-t parent/direct-child prefix.
+reset()
+(repo / "backlog" / "config.yml").write_text('task_prefix: "feat"\n', encoding="utf-8")
+task_path.unlink()
+feat_path = task_dir / "feat-12.3 - Fixture.md"
+feat_path.write_text(task_text().replace("id: T-155", "id: FEAT-12.3"), encoding="utf-8")
+feat_receipt = invoke(0, "inspect", "FEAT-12.3", "--repo", main)
+assert feat_receipt["task"]["id"] == "FEAT-12.3"
+assert feat_receipt["task"]["path"] == str(feat_path.resolve())
+assert_no_mutation()
+(repo / "backlog" / "config.yml").write_text('task_prefix: "t"\n', encoding="utf-8")
 
 # No candidate and primary-only evidence refuse without mutation.
 reset(); task_path.unlink(); invoke(2, "inspect", "T-155", "--repo", main); assert_no_mutation()
@@ -669,19 +695,34 @@ assert result_receipt["mapping"] == [{"item":"alpha","task_ids":["T-155"]}]
 assert result_receipt["tasks"][0]["checkout"] == checkout
 assert result_receipt["tasks"][0]["repository"] == "fixture/repo"
 assert result_receipt["tasks"][0]["plan_paths"] == [str(plan_path.resolve())]
+
+# Intake preserves direct children and sorts parent before child by numeric identity.
 reset()
+child_path = task_dir / "t-155.3 - Child.md"
+child_path.write_text(task_text().replace("id: T-155", "id: T-155.3"), encoding="utf-8")
+mapping.write_text('[{"item":"alpha","task_ids":["T-155.3","T-155"]}]\n')
+child_result = invoke(0, "intake-result", "--handoff", str(handoff_path),
+                      "--mapping", str(mapping), "--repo", main)
+assert [task["task_id"] for task in child_result["tasks"]] == ["T-155", "T-155.3"]
+assert child_result["mapping"] == [{"item":"alpha","task_ids":["T-155.3","T-155"]}]
+
+reset()
+mapping.write_text('[{"item":"alpha","task_ids":["T-155"]}]\n')
 foreign_result = invoke(2, "intake-result", "--handoff", str(handoff_path),
                         "--mapping", str(mapping), "--repo", str(foreign_repo))
 assert "running qq engine" in foreign_result["message"]
 assert_no_mutation()
 
 for bad in ([], [{"item":"other","task_ids":["T-155"]}], [{"item":"alpha","task_ids":[]}],
-            [{"item":"alpha","task_ids":["T-0"]}]):
+            [{"item":"alpha","task_ids":["T-0"]}],
+            [{"item":"alpha","task_ids":["T-155.2.3"]}],
+            [{"item":"alpha","task_ids":["FEAT-155.3"]}]):
     mapping.write_text(json.dumps(bad) + "\n")
     invoke(2, "intake-result", "--handoff", str(handoff_path),
            "--mapping", str(mapping), "--repo", main)
 
 implementation = Path(engine).parent / "lib" / "qq-handoff.py"
+sys.path.insert(0, str(implementation.parent))
 spec = importlib.util.spec_from_file_location("qq_handoff_test", implementation)
 assert spec is not None and spec.loader is not None
 module = importlib.util.module_from_spec(spec)

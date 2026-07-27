@@ -1,6 +1,6 @@
 // @ts-nocheck
 
-const TASK_ID = /^T-[1-9][0-9]*$/;
+const TASK_ID = /^[A-Za-z]+-[1-9][0-9]*(?:\.[1-9][0-9]*)?$/;
 
 function readableReceipt(stdout) {
 	if (typeof stdout !== "string" || stdout.trim() === "") return undefined;
@@ -44,10 +44,10 @@ export default function register(pi) {
 				);
 				return;
 			}
-			const taskId = typeof args === "string" ? args.trim() : "";
-			if (!TASK_ID.test(taskId) || taskId !== args) {
+			const taskId = typeof args === "string" ? args : "";
+			if (!TASK_ID.test(taskId)) {
 				ctx.ui.notify(
-					"Usage: /handoff <Task-ID> (for example, /handoff T-155)",
+					"Usage: /handoff <Task-ID> (for example, /handoff FEAT-12.3)",
 					"warning",
 				);
 				return;

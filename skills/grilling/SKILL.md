@@ -41,6 +41,22 @@ record in the Change checkout first encoding it, riding that pull request—neve
 primary `main`. Cite the asked-and-answered exchange until then; switch the
 ledger to its id before Task finalization.
 
+## Task decomposition
+
+Use an umbrella only when one outcome needs multiple independently deliverable
+Changes. Each child owns one coherent Change; plan and checklist steps remain
+below it. Support exactly one direct child level. A decimal suffix is a stable,
+non-ordinal identity, never execution order. Parentage records membership;
+`depends_on` records genuine prerequisites only.
+
+The ready frontier is incomplete children whose prerequisites are satisfied.
+It identifies candidates, not permission to overlap: the accountable owner
+checks Repository/worktree ownership, files, invariants, external resources,
+and integration order before concurrent dispatch. Do not create a durable
+`parallel_with` relation. A child whose Change belongs to another Repository
+stays there under its native Task identity; link it from the umbrella with a
+qualified `owner/repository:<Task-ID>` coordinate.
+
 New consequential decisions or crossings of the approved boundary stop work.
 The accountable owner re-enters alignment; a non-owning Actor follows the
 return path above.

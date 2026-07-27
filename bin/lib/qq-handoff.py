@@ -16,6 +16,13 @@ from subprocess import TimeoutExpired
 import sys
 from typing import Any
 
+sys.dont_write_bytecode = True
+from qq_task_identity import (
+    TaskIdentityConfig,
+    TaskIdentityError,
+    is_generic_task_id,
+)
+
 SCHEMA = "qq-handoff/v1"
 VERSION = 1
 READ_TIMEOUT = 15
@@ -23,7 +30,6 @@ START_TIMEOUT_MS = 60_000
 PROMPT_TIMEOUT_MS = 60_000
 PROCESS_GRACE_SECONDS = 10
 PI_STARTUP_ARGS = ("--approve",)
-TASK_ID_RE = re.compile(r"T-[1-9][0-9]*\Z")
 DOC_ID_RE = re.compile(r"doc-[1-9][0-9]*\Z")
 SAFE_STATE_RE = re.compile(r"[a-z][a-z0-9_-]*\Z")
 DESCRIPTION_BEGIN = "<!-- SECTION:DESCRIPTION:BEGIN -->"
@@ -53,9 +59,10 @@ class CommandResult:
 
 
 class Engine:
-    def __init__(self, action: str, task_id: str, repo_arg: str):
+    def __init__(self, action: str, task_id: str | None, repo_arg: str):
         self.action = action
         self.task_id = task_id
+        self.task_config: TaskIdentityConfig | None = None
         self.repo_arg = repo_arg
         self.rails: list[dict[str, Any]] = []
         self.git = resolve_tool("git")
@@ -94,7 +101,11 @@ class Engine:
         return parse_json_object(result.stdout, "Herdr returned malformed JSON.")
 
     def preflight(self) -> dict[str, Any]:
+        repo_text = self.git_read(["rev-parse", "--show-toplevel"], cwd=self.repo_arg)
+        repo_root = canonical_existing_directory(single_line(repo_text, "Repository root"))
+        self.bind_task_identity_at(repo_root)
         topology = self.resolve_topology()
+        self.bind_task_identity(topology)
         change = self.resolve_change(topology)
         task = self.resolve_task_and_plans(change)
         runtime = self.resolve_runtime(topology, change)
@@ -105,6 +116,20 @@ class Engine:
             "home": runtime,
         }
         return self.context
+
+    def bind_task_identity_at(self, repository: str) -> None:
+        if self.task_id is None:
+            raise Refusal("A Task identity is required for this action.")
+        try:
+            config = TaskIdentityConfig.from_repository(repository)
+            identity = config.parse_display(self.task_id)
+        except TaskIdentityError as error:
+            raise Refusal(str(error)) from error
+        self.task_config = config
+        self.task_id = identity.display_id
+
+    def bind_task_identity(self, topology: dict[str, Any]) -> None:
+        self.bind_task_identity_at(topology["primary_main"])
 
     def resolve_topology(self) -> dict[str, Any]:
         repo_text = self.git_read(["rev-parse", "--show-toplevel"], cwd=self.repo_arg)
@@ -251,8 +276,10 @@ class Engine:
     def resolve_change(self, topology: dict[str, Any]) -> dict[str, Any]:
         matches: list[dict[str, Any]] = []
         ineligible: list[dict[str, Any]] = []
+        if self.task_id is None or self.task_config is None:
+            raise Refusal("The configured Task identity was not established.")
         for worktree in topology["worktrees"]:
-            task_paths = find_task_records(worktree["path"], self.task_id)
+            task_paths = find_task_records(worktree["path"], self.task_id, self.task_config)
             if len(task_paths) > 1:
                 raise Refusal(
                     "A worktree contains duplicate Task records for the requested ID.",
@@ -1164,7 +1191,7 @@ def load_intake_handoff(path_value: str) -> dict[str, Any]:
 
 class IntakeEngine(Engine):
     def __init__(self, action: str, handoff_path: str, repo_arg: str):
-        super().__init__(action, "T-1", repo_arg)
+        super().__init__(action, None, repo_arg)
         self.handoff = load_intake_handoff(handoff_path)
         self.intake_agent_name = "intake-" + hashlib.sha256(
             self.handoff["handoff_id"].encode()
@@ -1288,13 +1315,6 @@ def github_repository(engine: Engine, repo: str) -> str:
     return value
 
 
-def task_number(task_id: str) -> int:
-    try:
-        return int(task_id.split("-", 1)[1])
-    except (IndexError, ValueError) as error:
-        raise Refusal("The intake mapping contains an invalid Task ID.") from error
-
-
 def intake_result_receipt(handoff_path: str, mapping_path: str, repo_arg: str) -> dict[str, Any]:
     handoff = load_intake_handoff(handoff_path)
     mapping_file = Path(mapping_path)
@@ -1315,8 +1335,7 @@ def intake_result_receipt(handoff_path: str, mapping_path: str, repo_arg: str) -
             not isinstance(row, dict) or set(row) != {"item", "task_ids"}
             or not isinstance(row.get("item"), str) or row["item"] in seen
             or not isinstance(row.get("task_ids"), list) or not row["task_ids"]
-            or any(not isinstance(task_id, str) or not TASK_ID_RE.fullmatch(task_id)
-                   for task_id in row["task_ids"])
+            or any(not is_generic_task_id(task_id) for task_id in row["task_ids"])
             or len(row["task_ids"]) != len(set(row["task_ids"]))
         ):
             raise Refusal("The intake mapping has a malformed or duplicate item.")
@@ -1325,12 +1344,20 @@ def intake_result_receipt(handoff_path: str, mapping_path: str, repo_arg: str) -
     if seen != set(handoff["routed_keys"]):
         raise Refusal("The intake mapping must cover every routed outcome exactly once.")
 
-    engine = Engine("intake-result", "T-1", repo_arg)
+    engine = Engine("intake-result", None, repo_arg)
     topology = engine.resolve_topology()
     repository = github_repository(engine, topology["primary_main"])
+    try:
+        task_config = TaskIdentityConfig.from_repository(topology["primary_main"])
+        identities = {
+            task_id: task_config.parse_display(task_id) for task_id in set(task_ids)
+        }
+    except TaskIdentityError as error:
+        raise Refusal(str(error)) from error
+    engine.task_config = task_config
     tasks = []
-    for task_id in sorted(set(task_ids), key=task_number):
-        engine.task_id = task_id
+    for task_id in sorted(identities, key=lambda value: identities[value].ordering_key):
+        engine.task_id = identities[task_id].display_id
         change = engine.resolve_change(topology)
         task = engine.resolve_task_and_plans(change)
         plan_records = [read_record(path, "plan") for path in task["plan_paths"]]
@@ -1627,7 +1654,9 @@ def probe_record_id(path: str) -> str | None:
     return identifiers[0] if identifiers else None
 
 
-def find_task_records(checkout: str, task_id: str) -> list[str]:
+def find_task_records(
+    checkout: str, task_id: str, task_config: TaskIdentityConfig,
+) -> list[str]:
     checkout_root = Path(checkout)
     tasks_path = checkout_root / "backlog" / "tasks"
     if not tasks_path.exists():
@@ -1644,6 +1673,12 @@ def find_task_records(checkout: str, task_id: str) -> list[str]:
         secure = secure_record(path, tasks_root, "Task")
         record_id = probe_record_id(secure)
         if record_id == task_id:
+            try:
+                filename_identity = task_config.parse_filename(path.name)
+            except TaskIdentityError as error:
+                raise Refusal("The requested Task filename is malformed.") from error
+            if filename_identity.display_id != task_id:
+                raise Refusal("The requested Task filename and identity disagree.")
             matches.append(secure)
     return matches
 
@@ -1933,9 +1968,13 @@ def main(argv: list[str]) -> int:
             return emit(intake_result_receipt(handoff_path, mapping_path, repo_arg), 0)
 
         task_id, repo_arg = argv[1], argv[3]
-        if not TASK_ID_RE.fullmatch(task_id) or task_id.startswith("-"):
+        if not is_generic_task_id(task_id) or task_id.startswith("-"):
             return emit(
-                receipt_base(action, "refused", "Task ID must match T-[1-9][0-9]*.", []), 2
+                receipt_base(
+                    action, "refused",
+                    "Task ID must be one letters-prefix parent or direct-child identity.", [],
+                ),
+                2,
             )
         if repo_arg == "" or repo_arg.startswith("-"):
             return emit(receipt_base(action, "error", "--repo requires a non-option path.", []), 1)
