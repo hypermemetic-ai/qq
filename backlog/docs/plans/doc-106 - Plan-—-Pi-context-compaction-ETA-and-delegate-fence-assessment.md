@@ -1,5 +1,5 @@
 ---
-id: doc-102
+id: doc-106
 title: 'Plan — Pi context, compaction, ETA, and delegate fence assessment'
 type: other
 created_date: '2026-07-27 03:36'
