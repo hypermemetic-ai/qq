@@ -1,10 +1,10 @@
 ---
 id: T-166
 title: Assess qq ecosystem updates — 2026-07-27
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-27 03:20'
-updated_date: '2026-07-27 04:01'
+updated_date: '2026-07-27 04:27'
 labels:
   - research
   - updates
@@ -32,17 +32,17 @@ Perform the 2026-07-27 complete decision-relevant qq ecosystem update assessment
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Report scope, live commands, notification reconciliation, generic-prerequisite exclusions, and evidence gaps at an explicit assessment time.
-- [ ] #2 Include one complete matrix row for Pi, every package reported by `pi list`, Herdr and its Pi integration, every source-derived first-class externally versioned owner, and each implicated commodity dependency, with all requested fields and exactly one allowed recommendation.
-- [ ] #3 Verify every meaningful delta from primary upstream evidence and separate observed fact, inference, confidence, gaps, compatibility, migration/risk, simplification/overlap, safe tests, rollback, and residual risk.
-- [ ] #4 Prioritize follow-up decisions and blocked experiments by value, dependency, urgency, and risk, including evidence needed to unblock them.
-- [ ] #5 No assessed ecosystem state is mutated; only governance-required assessment artifacts and Git/GitHub handoff lifecycle are changed, and the agent does not merge.
+- [x] #1 Report scope, live commands, notification reconciliation, generic-prerequisite exclusions, and evidence gaps at an explicit assessment time.
+- [x] #2 Include one complete matrix row for Pi, every package reported by `pi list`, Herdr and its Pi integration, every source-derived first-class externally versioned owner, and each implicated commodity dependency, with all requested fields and exactly one allowed recommendation.
+- [x] #3 Verify every meaningful delta from primary upstream evidence and separate observed fact, inference, confidence, gaps, compatibility, migration/risk, simplification/overlap, safe tests, rollback, and residual risk.
+- [x] #4 Prioritize follow-up decisions and blocked experiments by value, dependency, urgency, and risk, including evidence needed to unblock them.
+- [x] #5 No assessed ecosystem state is mutated; only governance-required assessment artifacts and Git/GitHub handoff lifecycle are changed, and the agent does not merge.
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Relevant fresh Checks pass and fresh-context review finds no unresolved in-scope defect.
-- [ ] #2 One green pull request is handed to the operator; the agent does not merge.
+- [x] #1 Relevant fresh Checks pass and fresh-context review finds no unresolved in-scope defect.
+- [x] #2 One green pull request is handed to the operator; the agent does not merge.
 <!-- DOD:END -->
 
 ## Implementation Plan
@@ -54,3 +54,13 @@ Perform the 2026-07-27 complete decision-relevant qq ecosystem update assessment
 4. Write exactly one Backlog research report with the required scope reconciliation, complete component matrix, candidate findings, and prioritized follow-ups; attach it and the approved plan to this Task.
 5. Run report-specific and Repository Checks, obtain fresh-context review, resolve only confirmed in-scope assessment defects, finalize the Task, and hand off one green pull request without merge or assessed-ecosystem mutation.
 <!-- SECTION:PLAN:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed the 2026-07-27 point-in-time assessment without implementing any recommendation. doc-103 reconciles current source, active intent, fresh live state, notification leads, aliases/duplicates, generic exclusions, and primary upstream evidence in a 34-row matrix with exactly one allowed recommendation per row. It recommends no bulk update; prioritizes a Node 22.23.1 security Change, an isolated browser-stack qualification, Landstrip carrier replacement while holding 0.17.38, immutable Actions pins, and separate Pi/pi-subagents tests; and records OpenWiki/Herdr release gates and smallest-system removals.
+
+Fresh local evidence is green: all tests/test-*.sh passed, including 21 Pi runtime tests and native delegate enforcement; backlog doctor passed; report structure/link assertions passed; git diff checks passed; and assessed-state hashes/identities remained unchanged from the post-Homebrew-query baseline. The report discloses that brew outdated unexpectedly refreshed tap metadata before that baseline while installing/changing no formula, cask, version, pin, channel, or qq configuration.
+
+Fresh review round 1 found three material defects: unsafe Landstrip test wording, a misclassified floating pi-landstrip range, and omitted Mariozechner 0.73.1 peer state. All were corrected. Fresh review round 2 accepted the complete staged Change with no findings or context gaps. PR #254 was opened and its initial head passed GitHub CI. Production LOC +0/-0; executable decision points +0/-0. The operator owns merge; this agent did not merge or mutate assessed ecosystem state.
+<!-- SECTION:FINAL_SUMMARY:END -->
