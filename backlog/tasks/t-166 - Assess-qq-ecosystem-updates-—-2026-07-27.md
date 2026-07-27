@@ -1,7 +1,7 @@
 ---
 id: T-166
 title: Assess qq ecosystem updates — 2026-07-27
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-27 03:20'
 updated_date: '2026-07-27 07:46'
@@ -40,13 +40,13 @@ Perform the 2026-07-27 complete decision-relevant qq ecosystem update assessment
 - [x] #5 No assessed ecosystem state is mutated; only governance-required assessment artifacts and Git/GitHub handoff lifecycle are changed, and the agent does not merge.
 - [x] #6 Present every meaningful delta sequentially with a complete decision card, refuse ambiguous/custom replies as dispositions, record each explicit operator disposition or clarification, and obtain explicit approval of the complete final ledger.
 - [x] #7 Capture the approved ledger in the smallest sensible bundled follow-up Tasks T-166.1 through T-166.5 while keeping every implementation plan unapproved and every package/runtime mutation out of this Change.
-- [ ] #8 Reconcile final evidence with current main, including T-171’s active local OpenWiki schedule and the doc-109 collision repair; rerun fresh Checks/review and publish the exact approved ledger to PR #254 without merge.
+- [x] #8 Reconcile final evidence with current main, including T-171’s active local OpenWiki schedule and the doc-109 collision repair; rerun fresh Checks/review and publish the exact approved ledger to PR #254 without merge.
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Relevant fresh post-disposition Checks pass and fresh-context review finds no unresolved in-scope defect.
-- [ ] #2 PR #254 contains the approved final ledger and follow-up Task boundaries, is current with main and green, and remains unmerged.
+- [x] #2 PR #254 contains the approved final ledger and follow-up Task boundaries, is current with main and green, and remains unmerged.
 <!-- DOD:END -->
 
 ## Implementation Plan
@@ -187,5 +187,11 @@ Final review — first fresh reviewer found two medium defects: ambiguous load-b
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Finalization pending fresh post-disposition Checks and review. The operator-approved ledger and five unimplemented bundled follow-up Task boundaries are being reconciled with current main; no assessed ecosystem mutation or implementation-plan approval has occurred.
+Completed the decision-ready 2026-07-27 assessment and published the operator-approved final ledger to PR #254 without implementing any recommendation. doc-103 preserves the 34-row point-in-time inventory and initial evidence-backed recommendations, then makes the sequential approved ledger authoritative where operator choices supersede them.
+
+The smallest sensible result is five unimplemented follow-up boundaries: T-166.1 owns Node 24/browser/Landstrip-carrier/Actions; T-166.2 owns patched Pi 0.82.1 and one-version convergence; T-166.3 owns pi-subagents 0.37; T-166.4 owns bundled maintenance/removals/docs/fzf; and T-166.5 owns OpenWiki 0.2.3 while preserving T-171’s active local schedule. All remain To Do with no approved implementation plan.
+
+Finalization synchronized current main, renumbered the collided assessment plan from doc-102 to unique doc-109, and cited pre-existing decision-13/doc-108 collisions by exact path/title. The first final reviewer found those ambiguous citations and the missing coherent browser rollback; both were fixed, and fresh fix-delta review returned ACCEPT with no material findings or context gaps.
+
+All 40 Repository shell tests, backlog doctor, structural ledger/matrix/Task identity assertions, staged diff checks, and the bounded pi-lens scan passed. Markdown primary LSP for doc-109 timed out/unconfirmed with no auxiliary finding. GitHub `shell-tests` passed at evidence head `08a8b329347aba6f2d5d16690c24afa1ea285b05`. Production LOC +0/-0; executable decision points +0/-0. No assessed package, runtime, integration, configuration, credential, pin, channel, or data changed. PR #254 remains open and unmerged; the operator owns merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
