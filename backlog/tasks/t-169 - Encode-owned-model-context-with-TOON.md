@@ -1,10 +1,10 @@
 ---
 id: T-169
 title: Encode owned model context with TOON
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-27 04:21'
-updated_date: '2026-07-27 04:53'
+updated_date: '2026-07-27 04:59'
 labels: []
 dependencies: []
 documentation:
@@ -38,11 +38,11 @@ Decision ledger:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The `/architect` command injects its current structured context as deterministic TOON rather than serialized JSON.
-- [ ] #2 Architect context parsing, freshness, exact identities, pending intake, proposal, confirmation, and retry behavior remain bound to canonical JSON state.
-- [ ] #3 One exact upstream TOON version is lock-pinned, installed by documented bootstrap and CI steps, and loaded by the mounted Pi extension set.
-- [ ] #4 Ordinary tests prove JSON-model round-trip conformance and the Architect prompt boundary; production performs no decode, comparison, agent inspection, or observation step.
-- [ ] #5 The current eligible boundary and measured savings are recorded honestly; Observer packages, transcripts, schemas, receipts, JSONL, and durable JSON remain unchanged.
+- [x] #1 The `/architect` command injects its current structured context as deterministic TOON rather than serialized JSON.
+- [x] #2 Architect context parsing, freshness, exact identities, pending intake, proposal, confirmation, and retry behavior remain bound to canonical JSON state.
+- [x] #3 One exact upstream TOON version is lock-pinned, installed by documented bootstrap and CI steps, and loaded by the mounted Pi extension set.
+- [x] #4 Ordinary tests prove JSON-model round-trip conformance and the Architect prompt boundary; production performs no decode, comparison, agent inspection, or observation step.
+- [x] #5 The current eligible boundary and measured savings are recorded honestly; Observer packages, transcripts, schemas, receipts, JSONL, and durable JSON remain unchanged.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -60,3 +60,11 @@ Fresh owner verification: npm lock install passed with lifecycle scripts disable
 
 Post-merge activation: after `qq-change land` updates the primary checkout, run `npm ci --ignore-scripts` from that checkout and reload/relaunch Pi so the mounted extension resolves the exact locked dependency. No live installation is mutated before merge.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Delivered decision-17 through merged PR #256. qq now keeps JSON canonical and uses lock-pinned `@toon-format/toon@4.1.0` only at the explicit `/architect` model-ingress boundary. Architect preserves canonical context/disposition identity, injects deterministic TOON, and refuses malformed Unicode before activation while accepting valid supplementary scalars. The dependency lock, mounted-extension bootstrap, CI install, README boundary, and focused round-trip/Architect regressions landed without changing Observer packages, JSONL, schemas, receipts, hashes, or structured output.
+
+Verification: every top-level shell test and native ratchet passed; changed TypeScript had zero primary LSP diagnostics; fresh-context review accepted the final fix delta with no findings; GitHub `shell-tests` passed; merge commit 95cc9a6b4d7454315ad688fbf5bde98d503b0abd is reachable from synchronized `origin/main`. Post-merge activation ran `npm ci --ignore-scripts` in primary main, verified exact package version/integrity, and passed an encode/decode smoke check.
+<!-- SECTION:FINAL_SUMMARY:END -->
