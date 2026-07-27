@@ -1,10 +1,10 @@
 ---
 id: T-176
 title: Own Architect intake extensions to T-164
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-27 08:20'
-updated_date: '2026-07-27 09:52'
+updated_date: '2026-07-27 09:59'
 labels: []
 dependencies: []
 references:
@@ -12,6 +12,7 @@ references:
   - handoff-861f1e8f2428e0025ff75a8ae27d5fc4
   - T-164
   - T-164.1
+  - 'https://github.com/hypermemetic-ai/qq/pull/269'
 documentation:
   - doc-112
 modified_files:
@@ -42,9 +43,9 @@ Retain the smallest resulting system: no additional implementation scope, state,
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Both routed Architect decision IDs are mapped to this born-in-worktree integer-ID Task by a verified `qq-handoff intake-result` receipt and recorded through `qq-observe record-handoff-result`.
-- [ ] #2 T-164.1 delivers the confined `$TMPDIR` work-order contract and warning-bearing Completion Envelope rule exactly as approved.
-- [ ] #3 This Task, T-164.1, and T-164 ship in one instruction-only Change with no additional runtime, state, tool, gate, schema, or policy scope.
+- [x] #1 Both routed Architect decision IDs are mapped to this born-in-worktree integer-ID Task by a verified `qq-handoff intake-result` receipt and recorded through `qq-observe record-handoff-result`.
+- [x] #2 T-164.1 delivers the confined `$TMPDIR` work-order contract and warning-bearing Completion Envelope rule exactly as approved.
+- [x] #3 This Task, T-164.1, and T-164 ship in one instruction-only Change with no additional runtime, state, tool, gate, schema, or policy scope.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -58,3 +59,9 @@ Fresh review `ea533aa8-e9b9-43ca-b897-05c7a2cf1ba0` found two material record/ca
 
 Concurrent doc-110 collision recovery follows the explicit operator disposition: approved landing plan doc-112 is attached and will land; receipt-bound local doc-110 remains byte-identical at SHA-256 `8184ad34db91b7a3b8688cd1cea4dfb3c5910d6644ba9d4583daea40c09ce4a2` and is excluded from every commit/PR. Automatic worktree retirement may therefore refuse and preserve the checkout after merge. Markdown-only implementation has zero production-LOC and decision-point delta.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed accountable intake for both routed decisions in PR #269. The verified intake-result maps both decision IDs to T-176 in `chore/t-164-delegate-rules`; `qq-observe record-handoff-result` returned `status: verified`. T-164.1 implements both rules in the same instruction-only Change as parent T-164. Approved landing plan doc-112 and the verbatim operator decision-record opt-out preserve every disposition without landing the receipt-bound local doc-110.
+<!-- SECTION:FINAL_SUMMARY:END -->

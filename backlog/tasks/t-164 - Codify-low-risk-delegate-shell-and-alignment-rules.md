@@ -1,16 +1,17 @@
 ---
 id: T-164
 title: Codify low-risk delegate-shell and alignment rules
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-25 18:08'
-updated_date: '2026-07-27 09:52'
+updated_date: '2026-07-27 09:59'
 labels: []
 dependencies: []
 references:
   - batch-861f1e8f2428e0025ff75a8ae27d5fc4
   - handoff-861f1e8f2428e0025ff75a8ae27d5fc4
   - T-176
+  - 'https://github.com/hypermemetic-ai/qq/pull/269'
 documentation:
   - doc-112
 modified_files:
@@ -45,11 +46,11 @@ Evidence: observer recurrence keys `delegate-confinement-no-writable-tmpdir`, `d
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Delegated confinement guidance requires scratch files, redirected logs, and generated helpers to live beneath confinement-provided `$TMPDIR`, never literal `/tmp`, without widening any role policy.
-- [ ] #2 After the first recognized `/dev/fd` process-substitution or nested-confinement failure, the child records that Check once as `inconclusive-under-substrate` and does not rerun it; the owner native rerun plus CI remains binding.
-- [ ] #3 Alignment governance states that generic continuation cannot select among consequential options; mutation waits for an explicit selected option or explicit approval of the named recommendation.
-- [ ] #4 Alignment governance restates a requested broad class before narrowing when the operator supplies an example.
-- [ ] #5 T-164 and T-164.1 ship in one instruction-only Change that adds no state, tool, gate, schema, or policy grant and passes applicable Skill validation, focused scenario checks, prose ratchet, Repository Checks, diff hygiene, and fresh-context review.
+- [x] #1 Delegated confinement guidance requires scratch files, redirected logs, and generated helpers to live beneath confinement-provided `$TMPDIR`, never literal `/tmp`, without widening any role policy.
+- [x] #2 After the first recognized `/dev/fd` process-substitution or nested-confinement failure, the child records that Check once as `inconclusive-under-substrate` and does not rerun it; the owner native rerun plus CI remains binding.
+- [x] #3 Alignment governance states that generic continuation cannot select among consequential options; mutation waits for an explicit selected option or explicit approval of the named recommendation.
+- [x] #4 Alignment governance restates a requested broad class before narrowing when the operator supplies an example.
+- [x] #5 T-164 and T-164.1 ship in one instruction-only Change that adds no state, tool, gate, schema, or policy grant and passes applicable Skill validation, focused scenario checks, prose ratchet, Repository Checks, diff hygiene, and fresh-context review.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -63,3 +64,9 @@ Fresh review `ea533aa8-e9b9-43ca-b897-05c7a2cf1ba0` found two material record/ca
 
 Concurrent doc-110 collision recovery follows the explicit operator disposition: approved landing plan doc-112 is attached and will land; receipt-bound local doc-110 remains byte-identical at SHA-256 `8184ad34db91b7a3b8688cd1cea4dfb3c5910d6644ba9d4583daea40c09ce4a2` and is excluded from every commit/PR. Automatic worktree retirement may therefore refuse and preserve the checkout after merge. Markdown-only implementation has zero production-LOC and decision-point delta.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Delivered the four previously approved delegate-substrate/alignment rules together with T-164.1/T-176 in PR #269. Delegate guidance now uses confinement-provided `$TMPDIR`, stops repeated recognized substrate failures, and preserves exact work-order evidence; grilling now refuses generic consequential continuation and restates broad classes before example narrowing. All three Skills validate, the prose ratchet remains exact, all 41 top-level suites pass, and fresh review plus both correction-delta reviews are green. The Change is instruction-only with zero production-LOC and decision-point delta.
+<!-- SECTION:FINAL_SUMMARY:END -->
