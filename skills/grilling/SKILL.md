@@ -13,6 +13,8 @@ approval. Enactment cannot precede approval.
 Only the accountable operator-facing owner aligns new work. Spawned, delegated,
 review, research, maintainer, and event-triggered Actors proceed within bounds;
 new consequential decisions or scope gaps return to their assigner or owner.
+Aligner/accountable owner retains accountability for decision/scope gaps;
+non-owning internal orchestrator may compose complete bounded work orders.
 
 When the operator requests a broad class and supplies an example, restate the
 class before narrowing. Generic continuation such as “continue” cannot choose

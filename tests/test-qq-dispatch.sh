@@ -17,13 +17,16 @@ test_home="$tmp/home"
 parent_tmp="$tmp/parent-tmp"
 pi_subagent_own_temp="$parent_tmp/pi-subagent-THIS"
 pi_subagent_sess="$parent_tmp/pi-subagent-sessions"
-mkdir -p "$test_home" "$pi_subagent_own_temp"
+mkdir -p "$test_home" "$pi_subagent_own_temp" "$test_home/.herdr/worktrees/qq" "$test_home/.herdr/worktrees/sibling"
 export HOME="$test_home"
 export TMPDIR="$parent_tmp"
 export XDG_CACHE_HOME="$tmp/xdg-cache"
 export XDG_DATA_HOME="$tmp/xdg-data"
 export PYTHONDONTWRITEBYTECODE=1
 unset PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA
+# Isolate this adapter suite from a parent pi-subagents child substrate.
+unset PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE PI_SUBAGENT_DEPTH \
+  PI_SUBAGENT_RUN_ID PI_SUBAGENT_CHILD_INDEX PI_SUBAGENT_CHILD_AGENT
 
 # The adapter requires the dispatcher-side pi-subagents config to name the
 # session root (README Install); stage it for every dispatch in this suite.
@@ -63,6 +66,10 @@ done
 assert_file_not_matches "$DISPATCH" 'qq-codex-fast|service_tier|priority'
 assert_file_contains "$DISPATCH" "pi_binary=\"\$bin_dir/pi\""
 assert_file_not_matches "$DISPATCH" 'qq_resolve_bin pi'
+assert_file_contains "$ROOT/bin/pi" 'export QQ_GOVERNED_PROJECT_HOME="$project_root"'
+assert_file_contains "$ROOT/bin/pi" 'export QQ_GOVERNED_GIT_COMMON_DIR="$project_common"'
+assert_file_contains "$ROOT/bin/pi" 'export QQ_GOVERNED_CHANGE_WORKTREE_ROOT="$change_root"'
+assert_file_contains "$DISPATCH" 'child cwd is an undeclared governed Repository worktree'
 jq -e '
   .schemaVersion == 1
   and .landstripVersion == "0.17.31"
@@ -167,13 +174,14 @@ export FAKE_PI_ENV="$tmp/pi.env"
 trusted_agent_paths() {
   jq -cn --arg root "$1/delegation/manifests/agents" '{
     implementer: ($root + "/implementer.md"), observer: ($root + "/observer.md"),
-    researcher: ($root + "/researcher.md"), reviewer: ($root + "/reviewer.md")
+    orchestrator: ($root + "/orchestrator.md"), researcher: ($root + "/researcher.md"),
+    reviewer: ($root + "/reviewer.md")
   }'
 }
 stage_agent_manifests() {
   local checkout="$1"
   local role
-  for role in implementer observer researcher reviewer; do
+  for role in implementer observer orchestrator researcher reviewer; do
     cp "$ROOT/delegation/manifests/agents/$role.md" \
       "$checkout/delegation/manifests/agents/$role.md"
   done
@@ -265,8 +273,12 @@ jq -s -e '
 declare -A role_policy_snapshots=()
 declare -A role_run_dirs=()
 
-for role in reviewer researcher implementer observer; do
+for role in reviewer researcher implementer observer orchestrator; do
   case "$role" in
+    orchestrator)
+      expected_policy=qq-orchestrator-change-runtime-write-v1
+      expected_scope=orchestrator-write
+      ;;
     observer)
       expected_policy=qq-observer-read-only-v1
       expected_scope=read-only
@@ -288,6 +300,8 @@ for role in reviewer researcher implementer observer; do
   policy_snapshot="$tmp/$role-policy.json"
   stdout_file="$tmp/$role.stdout"
   stderr_file="$tmp/$role.stderr"
+  timeout_env=(env)
+  [ "$role" != orchestrator ] || timeout_env=(env -u QQ_DISPATCH_TIMEOUT)
   (
     cd "$ROOT"
     PI_SUBAGENT_CHILD_AGENT="$role" \
@@ -296,13 +310,26 @@ for role in reviewer researcher implementer observer; do
     QQ_EXECUTION_PROFILE_LAUNCHER=/tmp/inherited-root-launcher \
     QQ_EXECUTION_PROFILE_LAUNCHER_ROLE=architect \
     FAKE_POLICY_SNAPSHOT="$policy_snapshot" \
-      "$DISPATCH" --json --model smoke/model
+      "${timeout_env[@]}" "$DISPATCH" --json --model smoke/model
   ) >"$stdout_file" 2>"$stderr_file"
 
   assert_file_contains "$stdout_file" "pi-live-event role=$role" \
     "$role did not retain the Pi events stream"
   assert_file_contains "$stderr_file" \
     "role=$role policy=$expected_policy scope=$expected_scope boundary=landstrip"
+  if [ "$role" = orchestrator ]; then
+    assert_file_contains "$stderr_file" 'timeout=86400s'
+    set +e
+    (
+      cd "$ROOT"
+      PI_SUBAGENT_CHILD_AGENT=orchestrator QQ_DISPATCH_TIMEOUT=2s "$DISPATCH" --json
+    ) >"$tmp/orchestrator-inherited-timeout.stdout" 2>"$tmp/orchestrator-inherited-timeout.stderr"
+    orchestrator_timeout_status=$?
+    set -e
+    assert_equal 71 "$orchestrator_timeout_status" 'orchestrator accepted inherited timeout override'
+    assert_file_contains "$tmp/orchestrator-inherited-timeout.stderr" \
+      'orchestrator dispatch forbids inherited QQ_DISPATCH_TIMEOUT'
+  fi
   python3 - "$FAKE_PI_ARGS" <<'PY'
 from pathlib import Path
 import sys
@@ -339,7 +366,34 @@ PY
   grep -Fxq "TMPDIR=$role_run_dir/tmp" "$FAKE_PI_ENV" \
     || fail "$role did not retain its run-local child TMPDIR"
 
-  if [ "$role" = implementer ]; then
+  if [ "$role" = orchestrator ]; then
+    jq -e \
+      --arg worktree "$ROOT" \
+      --arg common "$git_common_dir" \
+      --arg worktree_git "$git_worktree_dir" \
+      --arg run "$role_run_dir" \
+      --arg runtime "$runtime_root" \
+      --arg change_root "$test_home/.herdr/worktrees/qq" \
+      --arg future "$test_home/.herdr/worktrees/qq/future-change" \
+      --arg sibling "$test_home/.herdr/worktrees/sibling" \
+      --arg auth "$pi_config_dir/auth.json" \
+      --arg primary "$(dirname -- "$git_common_dir")" \
+      --arg primary_index "$git_common_dir/index" \
+      --arg temp "$pi_subagent_own_temp" --arg sess "$pi_subagent_sess" '
+        ([$run, $runtime, $change_root, $common, "/dev/null", $temp, $sess] - .filesystem.allowWrite | length) == 0
+        and (.filesystem.allowWrite | index($worktree)) == null
+        and (.filesystem.allowWrite | index($worktree_git)) == null
+        and (.filesystem.allowWrite | index($primary)) == null
+        and (.filesystem.allowWrite | index($sibling)) == null
+        and ($future | startswith($change_root + "/"))
+        and .filesystem.denyWrite == [
+          $auth, $primary_index, ($common + "/HEAD"), ($common + "/HEAD.lock"),
+          ($common + "/packed-refs"), ($common + "/packed-refs.lock"),
+          ($common + "/refs/heads/main"), ($common + "/refs/heads/main.lock"),
+          ($common + "/logs/refs/heads/main"), ($common + "/logs/refs/heads/main.lock")
+        ]
+      ' "$policy_snapshot" >/dev/null
+  elif [ "$role" = implementer ]; then
     jq -e \
       --arg worktree "$ROOT" \
       --arg common "$git_common_dir" \
@@ -564,7 +618,9 @@ stage_runtime_surface() {
 # Exercise distinct common/per-worktree Git metadata even when the checkout
 # running this suite is a primary checkout, as it is in ordinary CI clones.
 fixture_primary="$tmp/linked-fixture-primary"
-fixture_worktree="$tmp/linked-fixture-worktree"
+fixture_change_root="$test_home/.herdr/worktrees/linked-fixture-primary"
+fixture_worktree="$fixture_change_root/dispatch-linked"
+mkdir -p "$fixture_change_root"
 git init -q "$fixture_primary"
 git -C "$fixture_primary" \
   -c user.name='qq dispatch test' \
@@ -572,6 +628,7 @@ git -C "$fixture_primary" \
   -c commit.gpgSign=false \
   commit --allow-empty -qm 'dispatch test base'
 git -C "$fixture_primary" worktree add -q -b dispatch-linked "$fixture_worktree"
+mkdir -p "$test_home/.herdr/worktrees/$(basename -- "$fixture_primary")"
 for fixture_checkout in "$fixture_primary" "$fixture_worktree"; do
   mkdir -p \
     "$fixture_checkout/bin/lib" \
@@ -596,6 +653,46 @@ fixture_common_dir="$(realpath -e "$fixture_common_dir")"
 fixture_git_dir="$(realpath -e "$fixture_git_dir")"
 [ "$fixture_common_dir" != "$fixture_git_dir" ] \
   || fail 'linked-worktree fixture did not produce distinct Git directories'
+fixture_primary_common="$(git -C "$fixture_primary" rev-parse --path-format=absolute --git-common-dir)"
+fixture_primary_git="$(git -C "$fixture_primary" rev-parse --path-format=absolute --git-dir)"
+fixture_primary_common="$(realpath -e "$fixture_primary_common")"
+fixture_primary_git="$(realpath -e "$fixture_primary_git")"
+[ "$fixture_primary_common" = "$fixture_primary_git" ] \
+  || fail 'primary fixture did not use its common Git directory'
+primary_orchestrator_runtime="$tmp/primary-orchestrator-runtime"
+mkdir -p "$primary_orchestrator_runtime"
+(
+  cd "$fixture_primary"
+  unset QQ_DISPATCH_TIMEOUT
+  PI_SUBAGENT_CHILD_AGENT=orchestrator \
+  PI_SUBAGENT_RUN_ID=primary-orchestrator-smoke \
+  PI_SUBAGENT_TRUSTED_AGENT_PATHS="$(trusted_agent_paths "$fixture_primary")" \
+  QQ_DISPATCH_RUNTIME_ROOT="$primary_orchestrator_runtime" \
+  FAKE_POLICY_SNAPSHOT="$tmp/primary-orchestrator-policy.json" \
+    "$fixture_primary/bin/qq-dispatch" --json
+) >"$tmp/primary-orchestrator.stdout" 2>"$tmp/primary-orchestrator.stderr"
+primary_orchestrator_config="$(sed -n 's/^PI_CODING_AGENT_DIR=//p' "$FAKE_PI_ENV")"
+primary_orchestrator_run="$(dirname -- "$primary_orchestrator_config")"
+jq -e \
+  --arg primary "$fixture_primary" \
+  --arg common "$fixture_primary_common" \
+  --arg linked "$fixture_worktree" \
+  --arg change_root "$test_home/.herdr/worktrees/$(basename -- "$fixture_primary")" \
+  --arg runtime "$primary_orchestrator_runtime" \
+  --arg run "$primary_orchestrator_run" \
+  --arg auth "$primary_orchestrator_config/auth.json" \
+  --arg index "$fixture_primary_common/index" \
+  --arg temp "$pi_subagent_own_temp" --arg sess "$pi_subagent_sess" '
+    (.filesystem.allowWrite | index($primary)) == null
+    and (.filesystem.allowWrite | index($linked)) == null
+    and ([$run, $runtime, $common, $change_root, "/dev/null", $temp, $sess] - .filesystem.allowWrite | length) == 0
+    and .filesystem.denyWrite == [
+      $auth, $index, ($common + "/HEAD"), ($common + "/HEAD.lock"),
+      ($common + "/packed-refs"), ($common + "/packed-refs.lock"),
+      ($common + "/refs/heads/main"), ($common + "/refs/heads/main.lock"),
+      ($common + "/logs/refs/heads/main"), ($common + "/logs/refs/heads/main.lock")
+    ]
+  ' "$tmp/primary-orchestrator-policy.json" >/dev/null
 fixture_runtime="$tmp/linked-runtime"
 mkdir -p "$fixture_runtime"
 (
@@ -658,6 +755,9 @@ canonical_runtime="$tmp/canonical-runtime"
 mkdir -p "$canonical_runtime"
 (
   cd "$fixture_worktree"
+  QQ_GOVERNED_PROJECT_HOME="$fixture_primary" \
+  QQ_GOVERNED_GIT_COMMON_DIR="$fixture_common_dir" \
+  QQ_GOVERNED_CHANGE_WORKTREE_ROOT="$fixture_change_root" \
   PI_SUBAGENT_CHILD_AGENT=implementer \
   PI_SUBAGENT_RUN_ID=canonical-smoke \
   QQ_DISPATCH_RUNTIME_ROOT="$canonical_runtime" \
@@ -689,6 +789,9 @@ jq -e \
 canonical_capture_path="$fixture_capture_dir/canonical-envelope.json"
 (
   cd "$fixture_worktree"
+  QQ_GOVERNED_PROJECT_HOME="$fixture_primary" \
+  QQ_GOVERNED_GIT_COMMON_DIR="$fixture_common_dir" \
+  QQ_GOVERNED_CHANGE_WORKTREE_ROOT="$fixture_change_root" \
   PI_SUBAGENT_CHILD_AGENT=reviewer \
   PI_SUBAGENT_RUN_ID=canonical-capture-smoke \
   PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE="$canonical_capture_path" \
@@ -865,6 +968,18 @@ run_renderer_capture_refusal() {
 run_renderer_capture_refusal capture-directory "$capture_directory_target"
 run_renderer_capture_refusal capture-fifo "$capture_fifo_target"
 
+# Sharing the dispatcher's Git common directory is not authority. A linked
+# checkout outside the exact launcher-bound Change-worktree root is refused.
+fixture_undeclared="$tmp/linked-fixture-undeclared"
+git -C "$fixture_primary" worktree add -qb dispatch-undeclared "$fixture_undeclared"
+run_failure same-common-wrong-root "$fixture_undeclared" \
+  env QQ_GOVERNED_PROJECT_HOME="$fixture_primary" \
+  QQ_GOVERNED_GIT_COMMON_DIR="$fixture_common_dir" \
+  QQ_GOVERNED_CHANGE_WORKTREE_ROOT="$fixture_change_root" \
+  PI_SUBAGENT_CHILD_AGENT=reviewer "$fixture_primary/bin/qq-dispatch" --json
+assert_file_contains "$tmp/same-common-wrong-root.stderr" \
+  'child cwd is an undeclared governed Repository worktree'
+
 run_failure missing-role "$ROOT" \
   env -u PI_SUBAGENT_CHILD_AGENT "$DISPATCH" --json
 assert_file_contains "$tmp/missing-role.stderr" \
@@ -951,6 +1066,144 @@ assert_file_contains "$tmp/feature-external.stderr" \
   'non-primary adapter may not serve an external repository'
 [ ! -s "$FAKE_PI_ARGS" ] || fail 'feature-worktree adapter external refusal launched Pi'
 
+
+# The canonical qq dispatcher admits exactly the Repository selected by the
+# launcher when that external project is governed through the canonical
+# AGENTS.md. Only its explicit project home and declared Change-worktree root
+# are in scope; another linked worktree sharing Git common state is refused.
+governed_primary="$tmp/governed-primary"
+governed_change_root="$test_home/.herdr/worktrees/governed-primary"
+governed_change="$governed_change_root/change-one"
+governed_undeclared="$tmp/governed-undeclared"
+git init -q -b main "$governed_primary"
+ln -s "$ROOT/AGENTS.md" "$governed_primary/AGENTS.md"
+git -C "$governed_primary" add AGENTS.md
+git -C "$governed_primary" -c user.name=test -c user.email=test@example.invalid commit -qm governed-base
+git -C "$governed_primary" worktree add -qb governed-change "$governed_change" main
+git -C "$governed_primary" worktree add -qb governed-undeclared "$governed_undeclared" main
+governed_common="$(git -C "$governed_primary" rev-parse --path-format=absolute --git-common-dir)"
+governed_common="$(realpath -e "$governed_common")"
+governed_primary="$(realpath -e "$governed_primary")"
+governed_change_root="$(realpath -e "$governed_change_root")"
+
+# The root launcher mints governed authority only from the canonical primary
+# main checkout. Exercise its full success path with the pinned vendor identity,
+# then prove an undeclared linked checkout refuses before any binding export.
+launcher_vendor="$HOME/.pi/agent/git/github.com/hypermemetic-ai/pi-subagents"
+mkdir -p "$launcher_vendor"
+printf '// launcher identity fixture\n' >"$launcher_vendor/index.ts"
+launcher_git_bin="$tmp/launcher-git-bin"
+launcher_real_git="$(command -v git)"
+mkdir -p "$launcher_git_bin"
+cat >"$launcher_git_bin/git" <<SH
+#!/usr/bin/env bash
+if [[ "\${1:-}" == -C && "\${2:-}" == '$launcher_vendor' && "\${3:-}" == rev-parse && "\${4:-}" == HEAD && "\$#" == 4 ]]; then
+  printf '%s\n' f8f0ef71ef70606288e34e10b14949c730cf9dcf
+  exit 0
+fi
+exec '$launcher_real_git' "\$@"
+SH
+chmod +x "$launcher_git_bin/git"
+: >"$FAKE_PI_ARGS"
+(
+  cd "$governed_primary"
+  PATH="$launcher_git_bin:$PATH" "$ROOT/bin/pi" --print 'launcher primary proof'
+) >"$tmp/launcher-primary.stdout" 2>"$tmp/launcher-primary.stderr"
+assert_file_contains "$tmp/launcher-primary.stdout" 'pi-live-event role=missing'
+grep -Fxq "QQ_GOVERNED_PROJECT_HOME=$governed_primary" "$FAKE_PI_ENV" \
+  || fail 'primary main launcher did not export its exact project home'
+grep -Fxq "QQ_GOVERNED_GIT_COMMON_DIR=$governed_common" "$FAKE_PI_ENV" \
+  || fail 'primary main launcher did not export its exact Git common directory'
+grep -Fxq 'QQ_EXECUTION_PROFILE_LAUNCHER_ROLE=aligner' "$FAKE_PI_ENV" \
+  || fail 'primary main launcher did not select the Aligner execution profile'
+grep -Fxq "QQ_EXECUTION_PROFILE_LAUNCHER=$ROOT/bin/pi" "$FAKE_PI_ENV" \
+  || fail 'primary main launcher provenance drifted'
+python3 - "$FAKE_PI_ARGS" "$ROOT" <<'PY_ROOT_ARGS'
+from pathlib import Path
+import sys
+args = Path(sys.argv[1]).read_bytes().split(b"\0")
+root = sys.argv[2].encode()
+required = [
+    root + b"/extensions/qq-subagent-env.ts",
+    root + b"/extensions/qq-execution-profiles.ts",
+    root + b"/extensions/qq-aligner.ts",
+]
+assert all(value in args for value in required), args
+PY_ROOT_ARGS
+
+: >"$FAKE_PI_ARGS"
+(
+  cd "$governed_primary"
+  env -u PI_SUBAGENT_CHILD_AGENT -u PI_SUBAGENT_TRUSTED_EXECUTION_ROLE \
+    -u PI_SUBAGENT_EXECUTION_PROFILE_RECEIPT -u QQ_EXECUTION_PROFILE_LAUNCHER_ROLE \
+    -u QQ_EXECUTION_PROFILE_LAUNCHER "$ROOT/bin/qq-pi-role" architect --print 'architect root proof'
+) >"$tmp/launcher-architect.stdout" 2>"$tmp/launcher-architect.stderr"
+grep -Fxq 'QQ_EXECUTION_PROFILE_LAUNCHER_ROLE=architect' "$FAKE_PI_ENV" \
+  || fail 'Architect launcher did not select the Architect execution profile'
+grep -Fxq "QQ_EXECUTION_PROFILE_LAUNCHER=$ROOT/bin/qq-pi-role" "$FAKE_PI_ENV" \
+  || fail 'Architect launcher provenance drifted'
+python3 - "$FAKE_PI_ARGS" "$ROOT" <<'PY_ARCHITECT_ARGS'
+from pathlib import Path
+import sys
+args = Path(sys.argv[1]).read_bytes().split(b"\0")
+root = sys.argv[2].encode()
+assert root + b"/extensions/qq-execution-profiles.ts" in args, args
+assert root + b"/extensions/qq-architect-root.ts" in args, args
+assert root + b"/extensions/qq-aligner.ts" not in args, args
+PY_ARCHITECT_ARGS
+
+: >"$FAKE_PI_ARGS"
+rm -f "$FAKE_PI_ENV"
+set +e
+(
+  cd "$governed_undeclared"
+  PATH="$launcher_git_bin:$PATH" bash -x "$ROOT/bin/pi" --print 'launcher rogue proof'
+) >"$tmp/launcher-rogue.stdout" 2>"$tmp/launcher-rogue.stderr"
+launcher_rogue_status=$?
+set -e
+assert_equal 65 "$launcher_rogue_status" 'undeclared linked launcher did not refuse with worktree status'
+assert_file_contains "$tmp/launcher-rogue.stderr" 'canonical primary main Git project home'
+assert_file_not_matches "$tmp/launcher-rogue.stderr" 'export QQ_GOVERNED_(PROJECT_HOME|GIT_COMMON_DIR|CHANGE_WORKTREE_ROOT)='
+[ ! -s "$FAKE_PI_ARGS" ] || fail 'undeclared linked launcher reached the Pi runtime'
+(
+  cd "$governed_primary"
+  unset QQ_DISPATCH_TIMEOUT
+  QQ_GOVERNED_PROJECT_HOME="$governed_primary" \
+  QQ_GOVERNED_GIT_COMMON_DIR="$governed_common" \
+  QQ_GOVERNED_CHANGE_WORKTREE_ROOT="$governed_change_root" \
+  PI_SUBAGENT_CHILD_AGENT=orchestrator \
+  PI_SUBAGENT_RUN_ID=governed-project-home-smoke \
+    "$DISPATCH" --json
+) >"$tmp/governed-project-home.stdout" 2>"$tmp/governed-project-home.stderr"
+assert_file_contains "$tmp/governed-project-home.stdout" 'pi-live-event role=orchestrator'
+(
+  cd "$governed_change"
+  QQ_GOVERNED_PROJECT_HOME="$governed_primary" \
+  QQ_GOVERNED_GIT_COMMON_DIR="$governed_common" \
+  QQ_GOVERNED_CHANGE_WORKTREE_ROOT="$governed_change_root" \
+  PI_SUBAGENT_CHILD_AGENT=implementer \
+  PI_SUBAGENT_RUN_ID=governed-declared-change-smoke \
+    "$DISPATCH" --json
+) >"$tmp/governed-declared.stdout" 2>"$tmp/governed-declared.stderr"
+assert_file_contains "$tmp/governed-declared.stdout" 'pi-live-event role=implementer'
+run_failure governed-undeclared "$governed_undeclared" \
+  env QQ_GOVERNED_PROJECT_HOME="$governed_primary" \
+  QQ_GOVERNED_GIT_COMMON_DIR="$governed_common" \
+  QQ_GOVERNED_CHANGE_WORKTREE_ROOT="$governed_change_root" \
+  PI_SUBAGENT_CHILD_AGENT=implementer "$DISPATCH" --json
+assert_file_contains "$tmp/governed-undeclared.stderr" \
+  'child cwd is an undeclared governed Repository worktree'
+
+unrelated_repository="$tmp/unrelated-repository"
+git init -q "$unrelated_repository"
+run_failure unrelated-declared-binding "$unrelated_repository" \
+  env QQ_GOVERNED_PROJECT_HOME="$governed_primary" \
+  QQ_GOVERNED_GIT_COMMON_DIR="$governed_common" \
+  QQ_GOVERNED_CHANGE_WORKTREE_ROOT="$governed_change_root" \
+  PI_SUBAGENT_CHILD_AGENT=reviewer "$DISPATCH" --json
+assert_file_contains "$tmp/unrelated-declared-binding.stderr" \
+  'child cwd does not match the governed Repository Git identity'
+
 outside="$tmp/outside"
 mkdir -p "$outside"
 run_failure non-git-cwd "$outside" \
@@ -964,20 +1217,18 @@ fake_git="$tmp/git"
 cat >"$fake_git" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ " $* " == *" --git-common-dir "* \
-  && " $* " == *" -C $FAKE_GIT_FAILURE_ROOT "* ]]; then
-  exit 1
-fi
+case " $* " in
+  *' --git-common-dir '*) exit 1 ;;
+esac
 exec "$REAL_GIT_BIN" "$@"
 SH
 chmod +x "$fake_git"
 run_failure undiscoverable-git "$ROOT" \
   env \
     REAL_GIT_BIN="$real_git" \
-    FAKE_GIT_FAILURE_ROOT="$ROOT" \
     QQ_GIT_BIN="$fake_git" \
     PI_SUBAGENT_CHILD_AGENT=implementer \
-    "$fixture_primary/bin/qq-dispatch" --json
+    "$DISPATCH" --json
 assert_file_contains "$tmp/undiscoverable-git.stderr" \
   'cannot discover the Git common directory'
 

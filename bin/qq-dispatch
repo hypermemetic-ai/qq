@@ -49,8 +49,12 @@ fi
 [[ "$adapter_repository_root" == "$adapter_worktree" ]] \
   || fail 64 "adapter path does not resolve beneath its assigned worktree"
 
-adapter_git_common_dir="$(realpath -e -- "$(git_query -C "$adapter_worktree" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" 2>/dev/null)" \
-  || fail 67 "cannot resolve the adapter Git common directory"
+if ! adapter_git_common_dir="$(git_query -C "$adapter_worktree" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+  fail 67 "cannot discover the Git common directory"
+fi
+if ! adapter_git_common_dir="$(realpath -e -- "$adapter_git_common_dir" 2>/dev/null)"; then
+  fail 67 "cannot resolve the Git common directory"
+fi
 
 invocation_cwd="$(pwd -P)" || fail 65 "cannot resolve the child cwd"
 if ! invocation_root="$(git_query -C "$invocation_cwd" rev-parse --show-toplevel 2>/dev/null)"; then
@@ -73,13 +77,53 @@ if ! git_worktree_dir="$(realpath -e -- "$git_worktree_dir" 2>/dev/null)"; then
   fail 67 "cannot resolve the worktree Git directory"
 fi
 
-if [[ "$git_common_dir" != "$adapter_git_common_dir" ]]; then
+governed_project_input="${QQ_GOVERNED_PROJECT_HOME:-}"
+governed_common_input="${QQ_GOVERNED_GIT_COMMON_DIR:-}"
+governed_change_input="${QQ_GOVERNED_CHANGE_WORKTREE_ROOT:-}"
+governed_binding=false
+if [[ -n "$governed_project_input" || -n "$governed_common_input" || -n "$governed_change_input" ]]; then
+  governed_binding=true
+fi
+
+if path_is_within "$self" "$invocation_root"; then
+  [[ "$invocation_root" == "$adapter_worktree" ]] \
+    || fail 65 "adapter path resolves beneath an unrelated repository worktree"
+elif [[ "$governed_binding" != true && "$git_common_dir" != "$adapter_git_common_dir" ]]; then
   adapter_git_worktree_dir="$(realpath -e -- "$(git_query -C "$adapter_worktree" rev-parse --path-format=absolute --git-dir 2>/dev/null)" 2>/dev/null)" \
     || fail 67 "cannot resolve the adapter Git worktree directory"
   [[ "$adapter_git_worktree_dir" == "$adapter_git_common_dir" ]] \
     || fail 65 "non-primary adapter may not serve an external repository"
 fi
 
+if [[ "$governed_binding" == true ]]; then
+  [[ "$governed_project_input" == /* && "$governed_common_input" == /* && "$governed_change_input" == /* ]] \
+    || fail 65 "governed Repository binding is incomplete"
+  governed_project="$(realpath -e -- "$governed_project_input" 2>/dev/null || true)"
+  governed_common="$(realpath -e -- "$governed_common_input" 2>/dev/null || true)"
+  governed_change_root="$(realpath -e -- "$governed_change_input" 2>/dev/null || true)"
+  [[ "$governed_project" == "$governed_project_input" && "$governed_common" == "$governed_common_input"
+    && "$governed_change_root" == "$governed_change_input" ]] \
+    || fail 65 "governed Repository binding is not canonical"
+  [[ -d "$governed_change_root" && ! -L "$governed_change_root" && -O "$governed_change_root" ]] \
+    || fail 65 "governed Change-worktree root is not an operator-owned direct directory"
+  bound_project="$(git_query -C "$governed_project" rev-parse --show-toplevel 2>/dev/null || true)"
+  bound_common="$(git_query -C "$governed_project" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  bound_project="$(realpath -e -- "$bound_project" 2>/dev/null || true)"
+  bound_common="$(realpath -e -- "$bound_common" 2>/dev/null || true)"
+  [[ "$bound_project" == "$governed_project" && "$bound_common" == "$governed_common" && "$git_common_dir" == "$governed_common" ]] \
+    || fail 65 "child cwd does not match the governed Repository Git identity"
+  if [[ "$governed_common" == "$adapter_git_common_dir" ]]; then
+    [[ "$governed_project" == "$adapter_worktree" ]] \
+      || fail 65 "governed qq project home does not match the dispatcher worktree"
+  else
+    governed_agents="$governed_project/AGENTS.md"
+    [[ -L "$governed_agents" && "$(realpath -e -- "$governed_agents" 2>/dev/null || true)" == "$adapter_worktree/AGENTS.md" ]] \
+      || fail 65 "governed Repository does not resolve the canonical qq AGENTS.md"
+  fi
+  if [[ "$invocation_root" != "$governed_project" ]] && ! path_is_within "$invocation_root" "$governed_change_root"; then
+    fail 65 "child cwd is an undeclared governed Repository worktree"
+  fi
+fi
 worktree="$invocation_root"
 
 role="${PI_SUBAGENT_CHILD_AGENT:-}"
@@ -88,9 +132,20 @@ case "$role" in
   reviewer) observation_phase=review ;;
   researcher) observation_phase=research ;;
   observer) observation_phase=analysis ;;
+  orchestrator) observation_phase=orchestration ;;
   "") fail 66 "PI_SUBAGENT_CHILD_AGENT is required" ;;
   *) fail 66 "unsupported child role '$role'" ;;
 esac
+change_worktree_root=""
+if [[ "$role" == "orchestrator" ]]; then
+  [[ -n "${HOME:-}" ]] || fail 68 "HOME is required for the Repository Change-worktree root"
+  repository_name="$(basename -- "$(dirname -- "$git_common_dir")")"
+  change_worktree_input="${QQ_GOVERNED_CHANGE_WORKTREE_ROOT:-$HOME/.herdr/worktrees/$repository_name}"
+  [[ -d "$change_worktree_input" && ! -L "$change_worktree_input" && -O "$change_worktree_input" ]] \
+    || fail 68 "Repository Change-worktree root must be an operator-owned direct directory: $change_worktree_input"
+  change_worktree_root="$(realpath -e -- "$change_worktree_input")" \
+    || fail 68 "cannot resolve the Repository Change-worktree root"
+fi
 if [[ "$role" == "researcher" && -n "${CONTEXT7_API_KEY:-}" ]]; then
   fail 66 "researcher dispatch forbids inherited CONTEXT7_API_KEY"
 fi
@@ -273,6 +328,9 @@ if ! landstrip_version="$("$landstrip_binary" --version 2>&1)"; then
   fail 69 "Landstrip version probe failed: $landstrip_version"
 fi
 
+if [[ "$role" == orchestrator && -v QQ_DISPATCH_TIMEOUT ]]; then
+  fail 71 "orchestrator dispatch forbids inherited QQ_DISPATCH_TIMEOUT"
+fi
 if [[ -v QQ_DISPATCH_TIMEOUT ]]; then
   timeout_spec="$QQ_DISPATCH_TIMEOUT"
   [[ "$timeout_spec" =~ ^(0\.[0-9]+|[1-9][0-9]*(\.[0-9]+)?)([smhd])?$ ]] \
@@ -339,6 +397,7 @@ if ! metadata="$("$node_binary" "$policy_renderer" \
   --git-common-dir "$git_common_dir" \
   --git-worktree-dir "$git_worktree_dir" \
   --runtime-root "$runtime_root" \
+  --change-worktree-root "$change_worktree_root" \
   --pi-auth "$pi_auth_path" \
   --pi-subagent-temp-dir "$launcher_tmp" \
   --structured-output-capture "$structured_output_capture" \

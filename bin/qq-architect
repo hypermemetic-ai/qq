@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+bin_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+if [[ "${1:-}" == "--background" ]]; then
+  printf 'qq-architect: refusing: qq cannot create a background interactive Herdr tab without an owned no-focus API; run qq-architect in a separate operator-created terminal\n' >&2
+  exit 2
+fi
+exec "$bin_dir/qq-pi-role" architect "$@"

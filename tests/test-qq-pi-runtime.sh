@@ -8,9 +8,11 @@ ROOT="$(cd "$TESTS_DIR/.." && pwd -P)"
 [ -x "$ROOT/bin/pi" ]
 python3 "$TESTS_DIR/qq_pi_runtime_test.py"
 
-# Structural launch rails: the PATH command is a minimal relative wrapper and
-# delegated children select only the adapter worktree's exact wrapper.
-grep -Fq 'qq-pi-runtime" exec -- "$@"' "$ROOT/bin/pi"
+# Structural launch rails: the PATH command resolves only the verified runtime,
+# root sessions receive immutable profiles, and delegated children remain unchanged.
+grep -Fq 'runtime="$bin_dir/qq-pi-runtime"' "$ROOT/bin/pi"
+grep -Fq 'PI_SUBAGENT_CHILD_AGENT' "$ROOT/bin/pi"
+grep -Fq -- '--no-extensions --extension "$env_extension" --extension "$execution_profile_extension" --extension "$profile_extension" --extension "$vendor_extension"' "$ROOT/bin/pi"
 grep -Fq "pi_binary=\"\$bin_dir/pi\"" "$ROOT/bin/qq-dispatch"
 if grep -Fq 'qq_resolve_bin pi' "$ROOT/bin/qq-dispatch"; then
   printf 'test-qq-pi-runtime: generic Pi resolution remains in dispatch\n' >&2

@@ -5,8 +5,8 @@ description: Synthesize and selectively route or set aside unsettled Observer fi
 
 # Architect
 
-Findings are proposals. Synthesize with the operator; never apply source,
-create Tasks, approve scope, or force decisions.
+Observer findings are proposals. Synthesize with the operator; never apply
+source, create Tasks, approve scope, or force decisions.
 
 ## Conversation
 

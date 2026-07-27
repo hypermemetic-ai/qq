@@ -54,7 +54,9 @@ const indexSource = await readFile(indexPath, "utf8");
 const extensionFiles = (await readdir(dirname(indexPath)))
   .filter((filename) => filename.endsWith(".ts"))
   .sort();
-const excluded = new Set(["index.ts"]);
+// Immutable root profiles are loaded only by bin/pi exact launch flags; mounting
+// them globally would reintroduce prompt/tool drift.
+const excluded = new Set(["index.ts", "qq-aligner.ts", "qq-architect-root.ts"]);
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 for (const filename of extensionFiles) {

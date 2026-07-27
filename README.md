@@ -36,7 +36,8 @@ wiring needed to expose it.
 - herdr provides persistent `main` project homes, named agents, and direct
   agent-to-agent messaging.
 - `cockpit/` contains the operator's terminal configuration.
-- `delegation/` contains the production pi-subagents role manifests,
+- `delegation/` contains immutable aligner/architect roots, the trusted internal
+  orchestrator and work-role manifests, closed alignment schemas, the
   Completion Envelope schema, and Landstrip role policy map.
 - `bin/` holds the qq commands — mounted on `PATH` by the cockpit shell
   surface — for guarded local OpenWiki updates and Herdr project-home focus
@@ -421,10 +422,13 @@ For qq worktrees the extension resolves adapter and manifests from that
 checkout; every other Repository uses canonical qq primary `main`.
 Pi-subagents supplies a trusted child-role assertion only after exact canonical
 manifest validation, while its `cwd` selects the assigned Repository worktree.
-The canonical adapter serves any resolvable Git Repository, refuses non-Git
-child directories, clears an inherited accountable-root assertion, renders
-grants scoped to the invocation Repository and its exact Git metadata, and
-starts the real Pi child under bounded descendant cleanup. Canonical manifests
+The canonical adapter serves the exact governed project home and explicitly
+declared Change worktrees from that Repository, refuses unrelated or undeclared
+worktrees, clears an inherited accountable-root assertion, renders grants scoped
+to the invocation Repository and its exact Git metadata, and starts the real Pi
+child under bounded descendant cleanup. At the aligner root the trusted-seat map
+includes the one internal orchestrator; at depth 1 it contains only the four work
+roles, making recursive orchestrator occupancy unavailable. Canonical manifests
 carry no model or thinking authority; the retained fork locks each child to the
 central resolver snapshot and requires its matching execution-profile receipt.
 
@@ -438,7 +442,7 @@ and keep the file private:
 chmod 600 ~/.pi/agent/auth.json
 ```
 
-Install the exact six-role policy as one private, atomically replaced
+Install the exact seven-role policy as one private, atomically replaced
 operator-owned document, then verify it:
 
 ```bash
@@ -447,16 +451,17 @@ bin/qq-execution-profiles verify
 ```
 
 `delegation/policies/execution-profiles.json` assigns only Observer to
-`kimi-coding/k3:max`; Orchestrator, Architect, Implementer, Reviewer, and
-Researcher use `openai-codex/gpt-5.6-sol:xhigh`. All six request the provider
+`kimi-coding/k3:max`; Aligner, Orchestrator, Architect, Implementer, Reviewer,
+and Researcher use `openai-codex/gpt-5.6-sol:xhigh`. All seven request the provider
 default service class. Repository settings, Pi defaults, manifests, caller
 arguments, fallbacks, and inherited environment values cannot override this
 map. The resolver rereads it before each logical request and rejects invalid,
 unsupported, conflicting, or untrusted state before authentication or network
 activity.
 
-Start the dedicated Architect root through its role-binding launcher; ordinary
-Pi roots are Orchestrators:
+Start the dedicated Architect root through its role-binding launcher. Ordinary
+project-home `bin/pi` roots are Aligners; the Orchestrator is their one trusted
+internal child:
 
 ```bash
 bin/qq-pi-role architect
@@ -494,30 +499,51 @@ operator-only command, without executing it, in a no-focus guarded right-hand
 Herdr pane, then sends a Herdr request notification; low- or high-danger
 confirmation and pane-read-back outcome validation remain in the pane.
 
-The accountable Pi session stays in the Repository project home and owns
-alignment, Task and Change judgment, work orders, verdicts, UAT, and handoff.
-Bounded implementation, fresh review, and research run through pi-subagents;
-`qq-dispatch` is only its fail-closed Landstrip adapter.
+The accountable Pi session stays in the Repository project home as the
+privileged **aligner**, qq's seventh canonical role and sole operational
+interface. `bin/pi` starts root agent sessions with no discovered extensions,
+Skills, templates, context files, or tools, then loads only the exact aligner
+profile. Conflicting resource/tool/prompt flags refuse. The aligner exchanges
+closed packets with exactly one session-long trusted **orchestrator** through a
+mode-restricted broker; it can open only opaque evidence capabilities and create
+provenance-bearing temporary presentations. It cannot execute, dispatch, mutate,
+control delivery, inspect calibration, or decide for the operator.
 
-For an existing aligned Change, `/handoff <Task-ID>` is the standard transfer
-to a fresh accountable Pi tab. It resolves the Task's unique linked checkout,
-verifies its durable plan and ownership rails, and starts the receiver with
-no-focus semantics in the persistent project home. Caller authority is
-independent of global Herdr focus, which is neither inspected nor restored.
-This transfers accountable ownership; it is distinct from bounded child
-delegation through pi-subagents.
+The internal orchestrator owns Task/Change execution and fans out the existing
+implementer, reviewer, researcher, and observer roles at depth 2 through
+pi-subagents. `qq-dispatch` gives that trusted outer child the canonical Change-
+worktree root, shared Git, and private descendant runtime; primary-main path
+guards provide defense in depth for trusted Actors, and every worker retains its
+narrower policy and Completion Envelope. Channel records are untrusted
+proposals: the root broker validates evidence and promotes authority into
+root-only state before the aligner can open it. Each exact evidence object is
+capped at 4 MiB; digest/UTF-8 validation streams in fixed 64 KiB chunks and an
+open retains only its at-most-64-KiB granted subrange. Typed raw packets, exact
+dispositions, capabilities, trace/span ids, and worker ids are journaled under
+private XDG state and sealed for later audit. Calibration state is excluded.
+
+For an existing aligned Change outside the immutable aligner profile, `/handoff
+<Task-ID>` remains the typed transfer to a fresh accountable Pi tab. It resolves
+the Task's unique linked checkout, verifies its durable plan and ownership
+rails, and starts the receiver with no-focus semantics in the persistent project
+home. Caller authority is independent of global Herdr focus, which is neither
+inspected nor restored. This transfers accountable ownership; it is distinct
+from bounded child delegation through pi-subagents. The aligner profile does not
+load this command: Pi session replacement instead proves the old orchestrator
+lifecycle terminal or records a recovery receipt and never manipulates focus.
 
 Architect findings use a separate typed accountable-intake route. Observer v2
 runs are Repository-qualified beneath
 `observer/runs/by-repository/<owner>/<repo>/pr-<N>[-blind]`; legacy flat v1
-package evidence remains visibly legacy and is never rewritten. `/architect`
-directly opens one bounded global digest of new and still-unsettled finding
-occurrences across source rounds and Repositories. It carries slim provenance
-for at most 50 ranked findings; detailed evidence stays in cited analyses and
-an omitted count reveals the remaining working set. There is no round picker or
-fixed verdict form. The Architect records only choices settled in conversation:
-route with non-empty agreed scope or set aside current evidence. Untouched
-occurrences stay open, and a later same-key occurrence reopens automatically.
+package evidence remains visibly legacy and is never rewritten. In the
+independent Architect profile, `/architect` directly opens one bounded global
+digest of new and still-unsettled finding occurrences across source rounds and
+Repositories. It carries slim provenance for at most 50 ranked findings;
+detailed evidence stays in cited analyses and an omitted count reveals the
+remaining working set. There is no round picker or fixed verdict form. The
+Architect records only choices settled in conversation: route with non-empty
+agreed scope or set aside current evidence. Untouched occurrences stay open,
+and a later same-key occurrence reopens automatically.
 
 JSON remains the canonical format for machine interfaces, persistence, schemas,
 receipts, JSONL, and hashes. At an explicit qq-owned model-ingress boundary,
@@ -538,6 +564,14 @@ intake. An explicit interactive request naming its batch or handoff can retry
 the same handoff; it cannot re-propose scope or create another batch. Exact
 `MERGED` PR/head/Repository receipts later resolve mapped Tasks. Existing v1
 round handoffs remain recoverable through low-level compatibility commands.
+
+`qq-observe` opens and audits the raw frozen work and alignment traces. The
+separate `qq-architect` launcher starts the immutable Architect root in the
+current terminal; Architect receives only cited Observer findings and
+synthesizes/disposes them through `architect_disposition`, never opens the raw
+sealed package. `/architect` in an aligner never switches roles. qq currently
+refuses automatic background Herdr-tab creation because no owned no-focus API
+exists; the operator may create a separate terminal and run the launcher.
 
 ### Local latency observation
 

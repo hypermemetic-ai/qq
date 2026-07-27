@@ -60,6 +60,7 @@ const sessRoot = path.join(os.tmpdir(), `pi-subagent-envtest-${process.pid}`);
 fs.writeFileSync(path.join(cfgDir, "config.json"), JSON.stringify({ defaultSessionDir: sessRoot }));
 
 delete process.env.PI_SUBAGENT_PI_BINARY;
+delete process.env.PI_SUBAGENT_DEPTH;
 delete process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS;
 delete process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS;
 delete process.env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES;
@@ -76,6 +77,7 @@ assertEq(
 assertEq(
   process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS,
   JSON.stringify({
+    orchestrator: `${root}/delegation/manifests/agents/orchestrator.md`,
     implementer: `${root}/delegation/manifests/agents/implementer.md`,
     observer: `${root}/delegation/manifests/agents/observer.md`,
     researcher: `${root}/delegation/manifests/agents/researcher.md`,
@@ -104,8 +106,20 @@ const second = await import(pathToFileURL(ext).href + "?second");
 second.default(pi);
 assertEq(fs.statSync(sessRoot).mode & 0o777, 0o700, "session root tightened");
 
-// Caller environment cannot override delegated authority. Runtime-root
-// placement remains an explicit operator-owned override.
+// The trusted depth-1 orchestrator inherits the root map, then loses the
+// orchestrator seat by construction while retaining all four work roles.
+process.env.PI_SUBAGENT_DEPTH = "1";
+const inheritedRootMap = process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS;
+const nested = await import(pathToFileURL(ext).href + "?nested");
+nested.default(pi);
+const nestedMap = JSON.parse(process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS);
+if ("orchestrator" in nestedMap) die("depth-1 child retained recursive orchestrator authority");
+assertEq(Object.keys(nestedMap).sort().join(","), "implementer,observer,researcher,reviewer", "nested worker seats");
+process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS = inheritedRootMap;
+delete process.env.PI_SUBAGENT_DEPTH;
+
+// Caller environment cannot override delegated role or compute authority.
+// Runtime-root placement remains an explicit operator-owned override.
 process.env.PI_SUBAGENT_PI_BINARY = "/tmp/caller-override";
 process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS = "";
 process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS = "{}";
@@ -116,6 +130,7 @@ third.default(pi);
 assertEq(process.env.PI_SUBAGENT_PI_BINARY, `${root}/bin/qq-dispatch`, "dispatcher override rejected");
 assertEq(process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS, `${root}/delegation/manifests/agents`, "manifest override rejected");
 assertEq(process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS, JSON.stringify({
+  orchestrator: `${root}/delegation/manifests/agents/orchestrator.md`,
   implementer: `${root}/delegation/manifests/agents/implementer.md`,
   observer: `${root}/delegation/manifests/agents/observer.md`,
   researcher: `${root}/delegation/manifests/agents/researcher.md`,
@@ -151,9 +166,11 @@ const assertCanonicalEnv = (label) => {
   );
 };
 
-// A markerless external Git Repository receives canonical qq configuration.
+// An external Repository governed through the canonical AGENTS.md receives
+// canonical qq worker configuration from the canonical qq source checkout.
 const external = fs.mkdtempSync(path.join(os.tmpdir(), "qq-external-"));
 await import("node:child_process").then(({ execFileSync }) => execFileSync("git", ["init", "-q", "-b", "main", external]));
+fs.symlinkSync(path.join(root, "AGENTS.md"), path.join(external, "AGENTS.md"));
 process.chdir(external);
 clearDelegationEnv();
 const externalRoot = path.join(os.tmpdir(), `pi-subagent-external-${process.pid}`);
@@ -163,8 +180,16 @@ externalModule.default(pi);
 assertCanonicalEnv("external");
 if (!fs.existsSync(externalRoot)) die("external session root was not created");
 
-// A non-Git parent session is also configured so a delegated non-Git cwd
-// reaches qq-dispatch and its explicit fail-closed refusal.
+// Unrelated Git and non-Git sessions remain untouched rather than inheriting
+// forged delegation authority from the ambient process.
+const unrelated = fs.mkdtempSync(path.join(os.tmpdir(), "qq-unrelated-"));
+await import("node:child_process").then(({ execFileSync }) => execFileSync("git", ["init", "-q", unrelated]));
+process.chdir(unrelated);
+clearDelegationEnv();
+const unrelatedModule = await import(pathToFileURL(ext).href + "?unrelated");
+unrelatedModule.default(pi);
+assertEq(process.env.PI_SUBAGENT_PI_BINARY, undefined, "unrelated dispatcher");
+
 const nonGit = fs.mkdtempSync(path.join(os.tmpdir(), "qq-non-git-"));
 process.chdir(nonGit);
 clearDelegationEnv();
@@ -172,8 +197,8 @@ const nonGitRoot = path.join(os.tmpdir(), `pi-subagent-non-git-${process.pid}`);
 fs.writeFileSync(path.join(cfgDir, "config.json"), JSON.stringify({ defaultSessionDir: nonGitRoot }));
 const nonGitModule = await import(pathToFileURL(ext).href + "?non-git");
 nonGitModule.default(pi);
-assertCanonicalEnv("non-Git");
-if (!fs.existsSync(nonGitRoot)) die("non-Git session root was not created");
+assertEq(process.env.PI_SUBAGENT_PI_BINARY, undefined, "non-Git dispatcher");
+if (fs.existsSync(nonGitRoot)) die("non-Git session root was created");
 
 // A configured root outside the adapter-accepted set is left untouched.
 const outside = path.join(home, "outside-root");
@@ -184,6 +209,7 @@ if (fs.existsSync(outside)) die("extension created a root outside the accepted s
 
 fs.rmSync(sessRoot, { recursive: true, force: true });
 fs.rmSync(external, { recursive: true, force: true });
+fs.rmSync(unrelated, { recursive: true, force: true });
 fs.rmSync(nonGit, { recursive: true, force: true });
 fs.rmSync(externalRoot, { recursive: true, force: true });
 fs.rmSync(nonGitRoot, { recursive: true, force: true });
@@ -192,7 +218,7 @@ fs.rmSync(home, { recursive: true, force: true });
 
 # The targets the extension points at must exist in this checkout.
 [ -x "$ROOT/bin/qq-dispatch" ] || fail "extension target missing: bin/qq-dispatch"
-for role in implementer observer reviewer researcher; do
+for role in orchestrator implementer observer reviewer researcher; do
   [ -f "$ROOT/delegation/manifests/agents/$role.md" ] || fail "extension target missing: $role manifest"
 done
 

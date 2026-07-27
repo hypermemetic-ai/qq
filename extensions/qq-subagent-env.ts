@@ -4,8 +4,8 @@
 // qq's pi-subagents dispatch must run through bin/qq-dispatch (Landstrip
 // confinement) with canonical role manifests. pi-subagents reads the adapter,
 // manifest-directory, and trusted-seat variables at dispatch time. This globally
-// mounted extension configures every session; the adapter remains fail-closed for
-// delegated child directories that are not Git worktrees.
+// mounted extension sets them only after its exact qq-governance gate accepts the
+// current Repository; unrelated projects remain vanilla.
 //
 // It also carries QQ_DISPATCH_RUNTIME_ROOT (T-137): pi-subagents places the
 // structured-output capture file beneath its own temp root
@@ -15,9 +15,9 @@
 // Setting the runtime root to pi-subagents' temp root keeps the capture
 // path inside it by construction.
 //
-// Delegation authority is always restored from qq; caller or inherited compute
-// overrides do not win. Runtime-root placement is set only when truly absent.
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync } from "node:fs";
+// qq-owned dispatch, trusted-seat, and compute variables replace inherited
+// values; only runtime-root placement remains an operator-owned override.
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import os from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -25,7 +25,8 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 // This globally mounted extension lives at <qq>/extensions. qq worktrees use
-// their own dispatcher; every other cwd uses the canonical qq checkout.
+// their own dispatcher; linked Repositories whose root AGENTS.md resolves to
+// qq's canonical AGENTS.md use the canonical qq checkout.
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 function gitText(cwd: string, ...args: string[]): string | undefined {
@@ -36,25 +37,44 @@ function gitText(cwd: string, ...args: string[]): string | undefined {
   } catch { return undefined; }
 }
 
-function delegationRoot(): string {
+function governedRoot(): string | undefined {
   const current = gitText(process.cwd(), "rev-parse", "--show-toplevel");
-  if (!current) return QQ_ROOT;
+  if (!current) return undefined;
   const root = resolve(current);
   const qqCommon = gitText(QQ_ROOT, "rev-parse", "--path-format=absolute", "--git-common-dir");
   const currentCommon = gitText(root, "rev-parse", "--path-format=absolute", "--git-common-dir");
-  return qqCommon && currentCommon && resolve(qqCommon) === resolve(currentCommon) ? root : QQ_ROOT;
+  if (qqCommon && currentCommon && resolve(qqCommon) === resolve(currentCommon)) return root;
+  try {
+    const agents = join(root, "AGENTS.md");
+    if (lstatSync(agents).isSymbolicLink() && realpathSync(agents) === realpathSync(join(QQ_ROOT, "AGENTS.md"))) {
+      return QQ_ROOT;
+    }
+  } catch { /* unrelated or malformed governance link */ }
+  return undefined;
 }
 
 function applyEnv(repoRoot: string): void {
   const agentDir = join(repoRoot, "delegation", "manifests", "agents");
-  process.env.PI_SUBAGENT_PI_BINARY = join(repoRoot, "bin/qq-dispatch");
-  process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS = agentDir;
-  process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS = JSON.stringify({
+  const workerPaths = {
     implementer: join(agentDir, "implementer.md"),
     observer: join(agentDir, "observer.md"),
     researcher: join(agentDir, "researcher.md"),
     reviewer: join(agentDir, "reviewer.md"),
-  });
+  };
+  const rootPaths = { orchestrator: join(agentDir, "orchestrator.md"), ...workerPaths };
+  const qqCommon = gitText(QQ_ROOT, "rev-parse", "--path-format=absolute", "--git-common-dir");
+  const currentCommon = gitText(process.cwd(), "rev-parse", "--path-format=absolute", "--git-common-dir");
+  const isQqCheckout = qqCommon !== undefined && currentCommon !== undefined
+    && resolve(qqCommon) === resolve(currentCommon);
+  const rootTrustedPaths = isQqCheckout || process.env.QQ_PI_ROOT_PROFILE === "qq-root-aligner-v1";
+  const trustedPaths = Number(process.env.PI_SUBAGENT_DEPTH ?? "0") >= 1 || !rootTrustedPaths
+    ? workerPaths
+    : rootPaths;
+
+  // These values are qq role and compute authority, not caller preferences.
+  process.env.PI_SUBAGENT_PI_BINARY = join(repoRoot, "bin/qq-dispatch");
+  process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS = agentDir;
+  process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS = JSON.stringify(trustedPaths);
   // The resolver replaces this poison value with one complete policy snapshot
   // before any governed request. Inherited or caller-supplied compute never wins.
   process.env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES = "__qq_execution_profile_resolver_required__";
@@ -91,7 +111,8 @@ function ensureSessionRoot(): void {
 }
 
 function activate(): void {
-  const root = delegationRoot();
+  const root = governedRoot();
+  if (root === undefined) return;
   applyEnv(root);
   ensureSessionRoot();
 }

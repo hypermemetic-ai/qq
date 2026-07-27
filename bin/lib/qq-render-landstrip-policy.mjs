@@ -60,6 +60,14 @@ const worktree = canonicalDirectory(required(args, "--worktree"), "worktree");
 const gitCommonDir = canonicalDirectory(required(args, "--git-common-dir"), "Git common directory");
 const gitWorktreeDir = canonicalDirectory(required(args, "--git-worktree-dir"), "worktree Git directory");
 const runtimeRoot = canonicalDirectory(required(args, "--runtime-root"), "runtime root");
+const changeWorktreeInput = args.get("--change-worktree-root") ?? "";
+let changeWorktreeRoot = "";
+if (changeWorktreeInput) {
+  if (!path.isAbsolute(changeWorktreeInput)) fail("Change-worktree root must be absolute");
+  changeWorktreeRoot = canonicalDirectory(changeWorktreeInput, "Change-worktree root");
+  const info = fs.lstatSync(changeWorktreeInput);
+  if (info.isSymbolicLink() || info.uid !== process.geteuid()) fail("Change-worktree root must be an operator-owned direct directory");
+}
 const piAuthInput = required(args, "--pi-auth");
 if (!path.isAbsolute(piAuthInput)) fail("Pi auth path must be absolute");
 const piConfigDir = canonicalDirectory(path.dirname(piAuthInput), "Pi config directory");
@@ -118,17 +126,41 @@ if (landstripVersion !== expectedLandstripVersion) {
 }
 const definition = manifest?.roles?.[role];
 if (!definition || typeof definition !== "object") fail(`role '${role}' is not declared`);
-if (!["read-only", "workspace-write"].includes(definition.access)) fail(`role '${role}' has an invalid access scope`);
+if (!["read-only", "workspace-write", "orchestrator-write"].includes(definition.access)) fail(`role '${role}' has an invalid access scope`);
 if (typeof definition.policyIdentity !== "string" || !definition.policyIdentity) fail(`role '${role}' has no policy identity`);
 
 const allowWrite = [runDir];
 if (definition.access === "workspace-write") {
   allowWrite.push(worktree, gitCommonDir, gitWorktreeDir);
 }
+if (definition.access === "orchestrator-write") {
+  // The outer trusted orchestrator must admit nested workers' private runtime
+  // and shared Git writes. It may write the assigned Change checkout only
+  // when that checkout is linked; the primary checkout is never writable.
+  if (!changeWorktreeRoot) fail("orchestrator role requires the Repository Change-worktree root");
+  allowWrite.push(runtimeRoot, gitCommonDir, changeWorktreeRoot);
+  if (gitWorktreeDir !== gitCommonDir && pathIsStrictlyWithin(worktree, changeWorktreeRoot)) {
+    allowWrite.push(worktree, gitWorktreeDir);
+  }
+}
 if (structuredOutputCapture) {
   allowWrite.push(structuredOutputCapture);
 }
 allowWrite.push("/dev/null", ...piSubagentTempDirs);
+
+const orchestratorDenyWrite = definition.access === "orchestrator-write"
+  ? [
+      path.join(gitCommonDir, "index"),
+      path.join(gitCommonDir, "HEAD"),
+      path.join(gitCommonDir, "HEAD.lock"),
+      path.join(gitCommonDir, "packed-refs"),
+      path.join(gitCommonDir, "packed-refs.lock"),
+      path.join(gitCommonDir, "refs", "heads", "main"),
+      path.join(gitCommonDir, "refs", "heads", "main.lock"),
+      path.join(gitCommonDir, "logs", "refs", "heads", "main"),
+      path.join(gitCommonDir, "logs", "refs", "heads", "main.lock"),
+    ]
+  : [];
 
 const policy = {
   enabled: true,
@@ -142,7 +174,7 @@ const policy = {
   },
   filesystem: {
     allowWrite: [...new Set(allowWrite)],
-    denyWrite: [piAuthPath],
+    denyWrite: [piAuthPath, ...orchestratorDenyWrite],
   },
 };
 writePrivateJson(policyPath, policy);
@@ -161,6 +193,7 @@ fs.appendFileSync(eventLogPath, `${JSON.stringify({
   gitCommonDir,
   gitWorktreeDir,
   runtimeRoot,
+  changeWorktreeRoot: changeWorktreeRoot || null,
   structuredOutputCapture: structuredOutputCapture || null,
   timeout,
   landstripVersion,

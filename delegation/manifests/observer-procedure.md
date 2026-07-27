@@ -30,7 +30,12 @@ may still be appended beside a legacy package. A guided package declares `varian
 "guided"` in `package.json` and contains a
 `facts.json` and `signals.json` for every session, the corresponding session
 transcripts, the qq tool and skill inventory, and the live instruction corpus
-(including AGENTS.md, CONCEPTS.md, skills, and manifests). A blind package
+(including AGENTS.md, CONCEPTS.md, skills, and manifests). Its
+`alignment_traces` list names only frozen, run-relative `package` and `journal`
+paths below that Observer run. Audit those copies. Never follow the sealed
+package's original absolute `journal_path`, even when it still exists. A Change
+completed before alignment packaging legitimately has an empty
+`alignment_traces` list. A blind package
 declares `variant: "blind"` and is identical except that signal files and
 session signal pointers are deliberately absent. No other missing-signal shape
 is valid.
@@ -47,8 +52,12 @@ has produced candidates. Pass each facts file to validation as
 ### Phase 0 — Package integrity and reading mode
 
 Load every package member and verify its schema and session membership. Require
-`package.variant` to be exactly `guided` or `blind`. For guided packages,
-require one facts file and one signals file per session. For blind packages,
+`package.variant` to be exactly `guided` or `blind`. For each declared alignment
+trace, resolve only its run-relative `package` and `journal` members beneath the
+assigned run, verify the frozen journal digest, and read the frozen journal for
+the seam walk alongside its matching root/worker transcripts. Do not rediscover
+alignment state or open the source journal path. For guided packages, require
+one facts file and one signals file per session. For blind packages,
 require one facts file per session and tolerate signal absence only because the
 manifest declares the blind variant. Verify every available pre-pass citation
 resolves to a 1-based physical transcript entry. Integrity validation may inspect

@@ -17,6 +17,10 @@
     "observer": {
       "access": "read-only",
       "policyIdentity": "qq-observer-read-only-v1"
+    },
+    "orchestrator": {
+      "access": "orchestrator-write",
+      "policyIdentity": "qq-orchestrator-change-runtime-write-v1"
     }
   }
 }
