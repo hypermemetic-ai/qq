@@ -100,7 +100,7 @@ class NativeStore {
   }
 }
 class Events {
-  constructor() { this.handlers = new Map(); this.spawnCount = 0; this.spawnTasks = []; this.stopCount = 0; this.status = "stopped"; this.statusRunId = null; this.stopError = null; this.unavailable = false; }
+  constructor() { this.handlers = new Map(); this.spawnCount = 0; this.spawnTasks = []; this.stopCount = 0; this.status = "stopped"; this.statusRunId = null; this.listStatusText = null; this.stopError = null; this.unavailable = false; }
   on(name, fn) { const rows = this.handlers.get(name) ?? []; rows.push(fn); this.handlers.set(name, rows); return () => this.handlers.set(name, rows.filter((row) => row !== fn)); }
   emit(name, value) {
     if (name === "subagents:rpc:v1:request") {
@@ -114,7 +114,7 @@ class Events {
       if (value.method === "spawn") this.statusRunId = runId;
       const data = value.method === "spawn" ? { details: { runId } } : value.method === "stop" ? { runId, state: "stopping" }
         : value.params?.id ? { text: `Run: ${this.statusRunId}\nState: ${this.status}`, details: { mode: "management", results: [] } }
-        : { text: this.statusRunId !== null && this.status === "running" ? `Active async runs: 1\n\n- ${this.statusRunId} | running` : "No active async runs.", details: { mode: "single", results: [] } };
+        : { text: this.listStatusText ?? `Spawn budget: unlimited\n${this.statusRunId !== null && this.status === "running" ? `Active async runs: 1\n\n- ${this.statusRunId} | running` : "No active async runs."}`, details: { mode: "single", results: [] } };
       queueMicrotask(() => this.emit(`subagents:rpc:v1:reply:${value.requestId}`, { version: 1, requestId: value.requestId, success: true, data })); return;
     }
     for (const fn of this.handlers.get(name) ?? []) fn(value);
@@ -352,6 +352,25 @@ const responseBefore = protocolState(packetBroker); packetRecovery.store.failEve
 await assert.rejects(() => packetBroker.drainRecoveredResponses(), /append failed/); assert.deepEqual(protocolState(packetBroker), responseBefore); assert.equal((await lstat(responsePath)).isFile(), true);
 packetRecovery.store.failEvent = null; await packetBroker.drainRecoveredResponses(); assert.ok(packetBroker.projections.has(responsePacket.packet_id));
 packetRecovery.events.status = "stopped"; await packetBroker.shutdown("quit");
+
+// Empty-root proof accepts only the pinned vendor's exact unlimited or finite
+// spawn-budget prefix; malformed or CR-hidden active content refuses pre-spawn.
+for (const [index, statusText] of [
+  "Spawn budget: not-a-vendor-summary\nNo active async runs.",
+  "Spawn budget: unlimited\rActive async runs: 1\nNo active async runs.",
+  ["Spawn budget: unlimited\nNo active async runs."],
+].entries()) {
+  const invalidStatus = fixture(`invalid-status-${index}`); await invalidStatus.store.persist(); invalidStatus.events.listStatusText = statusText;
+  const invalidStatusBroker = new AlignmentBroker(invalidStatus.pi, { cwd: root, runtimeRoot: join(scratch, `invalid-status-runtime-${index}`), sessionId: `session-invalid-status-${index}`, traceId: trace,
+    piSessionFile: invalidStatus.file, sessionManager: invalidStatus.store.manager(), pollMs: 2, stopTimeoutMs: 20 });
+  await invalidStatusBroker.initialize(); await assert.rejects(() => invalidStatusBroker.startOrchestrator(), /active root session is not empty|status text is malformed/); assert.equal(invalidStatus.events.spawnCount, 0);
+}
+const finiteStatus = fixture("finite-status"); await finiteStatus.store.persist();
+finiteStatus.events.listStatusText = "Spawn budget: 0/10 used, 10 remaining (configured 10; granted 0; grant allowance 10)\nNo active async runs.";
+const finiteStatusBroker = new AlignmentBroker(finiteStatus.pi, { cwd: root, runtimeRoot: join(scratch, "finite-status-runtime"), sessionId: "session-finite-status", traceId: trace,
+  piSessionFile: finiteStatus.file, sessionManager: finiteStatus.store.manager(), pollMs: 2, stopTimeoutMs: 20 });
+await finiteStatusBroker.initialize(); await finiteStatusBroker.startOrchestrator(); assert.equal(finiteStatus.events.spawnCount, 1);
+finiteStatus.events.status = "stopped"; await finiteStatusBroker.shutdown("quit");
 
 // Spawn response without a durable start entry is ambiguous and never retried.
 const ambiguous = fixture("ambiguous"); await ambiguous.store.persist(); ambiguous.store.failEvent = "orchestrator-start";

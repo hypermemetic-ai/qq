@@ -3,7 +3,7 @@ id: doc-115
 title: Plan — privileged operator-alignment core
 type: other
 created_date: '2026-07-26 17:52'
-updated_date: '2026-07-27 18:53'
+updated_date: '2026-07-27 22:32'
 ---
 # Plan — privileged operator-alignment core, native-session state
 
@@ -108,3 +108,9 @@ The final implementation direction is therefore settled:
 6. **Strict state-space shrinkage.** One writer round must reduce both production LOC and lexical decision points relative to the current tree while preserving the settled topology and required Checks. If it cannot, implementation stops rather than adding another guard or fix loop.
 
 The installed vendor pin remains unchanged. No raw evidence capability, path opener, journal/replay package, seal, authorization service, database/daemon, Architect/Observer runtime integration, voice, calibration, focus behavior, or generic workflow engine returns.
+
+## Root-interface UAT proof realignment — 2026-07-27
+
+Actual no-focus root-interface UAT found that the pinned pi-subagents RPC prefixes an empty status with its spawn-budget summary. The reviewed broker expected the impossible unprefixed test-double string and therefore refused every real fresh aligner root before orchestrator spawn. Two bounded parser attempts then repeated the same fail-closed envelope class (first accepting arbitrary budget text, then accepting coercible non-string text), so the convergence breaker stopped further mutation.
+
+The operator explicitly selected “Approve parser (Recommended).” This authorizes one final broker-boundary correction only: pass the RPC result through the existing exact-object validator, require primitive-string `text`, and accept only the pinned vendor's exact unlimited-or-finite budget-summary grammar followed by the exact session-owned empty-run line. Active, missing, extra, non-string, CR-hidden, malformed, or foreign status remains ambiguous and spawns nothing. Tests cover the valid unlimited/finite forms and those refusal classes. The vendor pin, session scoping, pre-spawn proof, topology, and all exclusions remain unchanged. The correction must add zero net production LOC and zero lexical decision points against the pre-UAT-fix broker; another supported finding in this class stops the Change.

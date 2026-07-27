@@ -325,7 +325,7 @@ export class AlignmentBroker {
   async startOrchestrator() {
     await this.initialize(); reject(this.recoveredRunId !== null, "orchestrator recovery is required before replacement spawn");
     reject(!this.canStartOrchestrator(), "exactly one orchestrator is permitted in an alignment session");
-    const status = await this.rpc("status", {}); reject(status?.text !== "No active async runs.", "orchestrator spawn is ambiguous because the active root session is not empty");
+    const status = exact(await this.rpc("status", {}), ["text", "details"], "subagent status"); reject(typeof status.text !== "string", "subagent status text is malformed"); reject(!/^Spawn budget: (unlimited|[0-9]+\/[0-9]+ used, [0-9]+ remaining \(configured [0-9]+; granted [0-9]+; grant allowance [0-9]+\))\nNo active async runs\.$/u.test(status.text), "orchestrator spawn is ambiguous because the active root session is not empty");
     this.unsubscribeAsync = this.pi.events.on("subagent:async-complete", (event) => { this.handleAsyncComplete(event).catch(() => {}); });
     let task = ORCHESTRATOR_TASK;
     if (this.resumed) task += `\nThis root resumed only after exact terminal proof for its predecessor. Preserve this bounded native-session continuity before receiving the next request:\n${assertChildContinuityBound(this)}`;
