@@ -8,7 +8,7 @@ qq currently retains thirteen stateless Skills. A Skill is invoked when its desc
 | `code-review` | Fresh-context, Codex-native read-only review of a non-trivial Change against intent, scope, threat model, and evidence. | Skills are disabled and OS access is read-only; claimed failures need constructed failing scenarios, and repeated same-class findings trip a convergence circuit-breaker. |
 | `diagnosing-bugs` | Evidence-first investigation of difficult or unexplained failures. | Diagnosis does not authorize a fix; reproduce before fixing. |
 | `research` | Multi-source investigation supporting a decision through a fresh Codex-native read-only runner. | Skills are disabled; the owner retains judgment, verifies key citations, and process exit retires the researcher. |
-| `compound` | Capture a verified, non-obvious, reusable lesson. | Do not create ceremony for routine outcomes or unverified speculation. |
+| `architect` | Synthesize and selectively route or set aside unsettled Observer findings. | Findings remain proposals; never apply source, create Tasks, approve scope, or force decisions. |
 | `idea` | Append an explicitly triggered idea verbatim to the single Backlog `Ideas` document. | Discover and mutate it through Backlog commands; no interpretation, research, commit, staging, or push. |
 | `agent-messaging` | Coordinate already-live agents across runtimes and raise operator-visible notifications. | It does not start, own, or retire agents; resolve live identities after pane movement. |
 | `delegate-batch` | Dispatch an aligned bounded ticket batch through Codex-first isolated work sessions. | The accountable session retains judgment and delivery; coupled writes are one ticket, writing concurrency is capped at 3–5, and integration is serialized. |
@@ -20,7 +20,7 @@ qq currently retains thirteen stateless Skills. A Skill is invoked when its desc
 
 ## How Skills compose
 
-The accountable Pi session remains in project home. `grilling` produces the alignment brief and decision-ledger boundary; `research` or `diagnosing-bugs` may establish evidence; and `delegate-batch` or `deliver-change` dispatch bounded implementation while judgment, integration, review, acceptance, and delivery stay accountable and serialized. `qq-dispatch` owns Codex role execution: mounted profiles disable Skill injection and select workspace-write or read-only access, implementers default MCP off unless explicitly opted in, and reviewers/researchers retain configured MCP. `operator-input` minimizes unavoidable operator-only actions, `agent-messaging` coordinates already-live Actors, `uat-signoff` validates subjective behavior, `code-review` independently reviews the Change, and `compound` captures a durable lesson only after verification. OpenWiki procedure remains confined to its explicitly assigned Skill.
+The accountable Pi session remains in project home. `grilling` produces the alignment brief and decision-ledger boundary; `research` or `diagnosing-bugs` may establish evidence; and `delegate-batch` or `deliver-change` dispatch bounded implementation while judgment, integration, review, acceptance, and delivery stay accountable and serialized. `qq-dispatch` owns Codex role execution: mounted profiles disable Skill injection and select workspace-write or read-only access, implementers default MCP off unless explicitly opted in, and reviewers/researchers retain configured MCP. `operator-input` minimizes unavoidable operator-only actions, `agent-messaging` coordinates already-live Actors, `uat-signoff` validates subjective behavior, `code-review` independently reviews the Change, and `architect` synthesizes unsettled Observer findings for selective routing or set-aside without applying source or creating Tasks. OpenWiki procedure remains confined to its explicitly assigned Skill.
 
 There is no global skill phase machine. Follow each Skill’s current `SKILL.md` and the shared operating floor in root `AGENTS.md`.
 
@@ -41,7 +41,7 @@ Pi, Claude, and Codex mount the `skills/` root directly, so Skill membership and
 - `skills/code-review/SKILL.md`
 - `skills/diagnosing-bugs/SKILL.md`
 - `skills/research/SKILL.md`
-- `skills/compound/SKILL.md`
+- `skills/architect/SKILL.md`
 - `skills/idea/SKILL.md`
 - `skills/agent-messaging/SKILL.md`
 - `skills/delegate-batch/SKILL.md`
