@@ -32,6 +32,8 @@ function createHarness(options = {}) {
   const registrations = [];
   const listeners = [];
   const execCalls = [];
+  const currentInputByPane = new Map();
+  const historicalOutput = "shell initialized\n";
   let listenerCalls = 0;
   const pi = {
     registerTool(tool) {
@@ -51,6 +53,24 @@ function createHarness(options = {}) {
       return {
         code: 0,
         stdout: JSON.stringify({ result: { pane_id: "wM:p4Q" } }),
+        stderr: "",
+      };
+    }
+    if (args[1] === "send-text") {
+      currentInputByPane.set(args[2], args[3]);
+    }
+    if (args[1] === "wait-output") {
+      const [,, paneId, ...waitOptions] = args;
+      const sourceIndex = waitOptions.indexOf("--source");
+      const matchIndex = waitOptions.indexOf("--match");
+      const source = waitOptions[sourceIndex + 1];
+      const match = waitOptions[matchIndex + 1];
+      const snapshot =
+        historicalOutput +
+        (source === "recent-unwrapped" ? currentInputByPane.get(paneId) ?? "" : "");
+      return {
+        code: snapshot.includes(match) ? 0 : 1,
+        stdout: "",
         stderr: "",
       };
     }
@@ -144,13 +164,13 @@ async function testRegistrationAndLowDanger() {
   assert.deepEqual(h.execCalls[3].args, [
     "pane",
     "wait-output",
+    "wM:p4Q",
     "--source",
     "recent-unwrapped",
     "--timeout",
     "5000",
     "--match",
     requiredLine,
-    "wM:p4Q",
   ]);
   assert.deepEqual(h.execCalls[4].args, [
     "notification",
