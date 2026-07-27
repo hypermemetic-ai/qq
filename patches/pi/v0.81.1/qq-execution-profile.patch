@@ -1,5 +1,61 @@
+diff --git a/packages/ai/src/api/anthropic-messages.ts b/packages/ai/src/api/anthropic-messages.ts
+index 6c419bc..526fb1e 100644
+--- a/packages/ai/src/api/anthropic-messages.ts
++++ b/packages/ai/src/api/anthropic-messages.ts
+@@ -481,6 +481,19 @@ async function* iterateAnthropicEvents(
+ 	}
+ }
+ 
++function assertExecutionProfilePayloadUnchanged(
++	original: MessageCreateParamsStreaming,
++	updated: MessageCreateParamsStreaming,
++	options: AnthropicOptions | undefined,
++): void {
++	if (!options?.executionProfile) return;
++	for (const field of ["model", "thinking", "output_config"] as const) {
++		if (JSON.stringify(original[field]) !== JSON.stringify(updated[field])) {
++			throw new Error(`Execution profile conflict: before_provider_request changed "${field}".`);
++		}
++	}
++}
++
+ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
+ 	model: Model<"anthropic-messages">,
+ 	context: Context,
+@@ -495,6 +508,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
+ 			api: model.api as Api,
+ 			provider: model.provider,
+ 			model: model.id,
++			...(options?.executionProfile ? { executionProfile: options.executionProfile } : {}),
+ 			usage: {
+ 				input: 0,
+ 				output: 0,
+@@ -502,6 +516,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
+ 				cacheWrite: 0,
+ 				totalTokens: 0,
+ 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
++				...(options?.executionProfile ? { executionProfile: options.executionProfile } : {}),
+ 			},
+ 			stopReason: "stop",
+ 			timestamp: Date.now(),
+@@ -543,10 +558,15 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
+ 				isOAuth = created.isOAuthToken;
+ 			}
+ 			let params = buildParams(model, context, isOAuth, options);
++			const originalProfilePayload = options?.executionProfile ? structuredClone(params) : undefined;
+ 			const nextParams = await options?.onPayload?.(params, model);
+ 			if (nextParams !== undefined) {
+ 				params = nextParams as MessageCreateParamsStreaming;
+ 			}
++			if (originalProfilePayload) {
++				params = structuredClone(params);
++				assertExecutionProfilePayloadUnchanged(originalProfilePayload, params, options);
++			}
+ 			const requestOptions = {
+ 				...(options?.signal ? { signal: options.signal } : {}),
+ 				...(options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),
 diff --git a/packages/ai/src/api/openai-codex-responses.ts b/packages/ai/src/api/openai-codex-responses.ts
-index 955964fecc9ddb51576464a037627931396a5f63..a8796b4f1c0bd751705b2be9a1368c9762e8daa6 100644
+index 955964f..a8796b4 100644
 --- a/packages/ai/src/api/openai-codex-responses.ts
 +++ b/packages/ai/src/api/openai-codex-responses.ts
 @@ -110,6 +110,19 @@ interface RequestBody {
@@ -102,7 +158,7 @@ index 955964fecc9ddb51576464a037627931396a5f63..a8796b4f1c0bd751705b2be9a1368c97
  				applyServiceTierPricing: (usage, serviceTier) => applyServiceTierPricing(usage, serviceTier, model),
  			},
 diff --git a/packages/ai/src/api/openai-responses-shared.ts b/packages/ai/src/api/openai-responses-shared.ts
-index ddb3e7346118c55bc6c48622ec81d238e4d0285e..4a0682a1d0338b0cb90fa4dbba46015bad5291cf 100644
+index ddb3e73..4a0682a 100644
 --- a/packages/ai/src/api/openai-responses-shared.ts
 +++ b/packages/ai/src/api/openai-responses-shared.ts
 @@ -19,6 +19,7 @@ import type {
@@ -147,7 +203,7 @@ index ddb3e7346118c55bc6c48622ec81d238e4d0285e..4a0682a1d0338b0cb90fa4dbba46015b
  		// Map status to stop reason
  		output.stopReason = mapStopReason(response?.status);
 diff --git a/packages/ai/src/api/openai-responses.ts b/packages/ai/src/api/openai-responses.ts
-index 049e00ec750cde4c138b187ad2bc9d40eefe6dd0..aec2feacc3262b20ba82741e65e8b2a2dfd98e62 100644
+index 049e00e..aec2fea 100644
 --- a/packages/ai/src/api/openai-responses.ts
 +++ b/packages/ai/src/api/openai-responses.ts
 @@ -82,6 +82,19 @@ function formatOpenAIResponsesError(error: unknown): string {
@@ -229,7 +285,7 @@ index 049e00ec750cde4c138b187ad2bc9d40eefe6dd0..aec2feacc3262b20ba82741e65e8b2a2
  			const effort = options?.reasoningEffort
  				? (model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort)
 diff --git a/packages/ai/src/api/simple-options.ts b/packages/ai/src/api/simple-options.ts
-index 55bfe8df8e11cc4e154b22b3eed0ae0b6f313a54..2bd8795b6627ff1338a023034eaec97e7b79fab0 100644
+index 55bfe8d..2bd8795 100644
 --- a/packages/ai/src/api/simple-options.ts
 +++ b/packages/ai/src/api/simple-options.ts
 @@ -40,6 +40,9 @@ export function buildBaseOptions(
@@ -244,7 +300,7 @@ index 55bfe8df8e11cc4e154b22b3eed0ae0b6f313a54..2bd8795b6627ff1338a023034eaec97e
  }
 diff --git a/packages/ai/src/execution-profile.ts b/packages/ai/src/execution-profile.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..8309142a7976e11f49414d7a0046ccdb7b2ca505
+index 0000000..8309142
 --- /dev/null
 +++ b/packages/ai/src/execution-profile.ts
 @@ -0,0 +1,15 @@
@@ -264,7 +320,7 @@ index 0000000000000000000000000000000000000000..8309142a7976e11f49414d7a0046ccdb
 +	return authoritativeCapabilities.has(value as object);
 +}
 diff --git a/packages/ai/src/index.ts b/packages/ai/src/index.ts
-index 4ff678102d59bfdac19e329b0ff1cd51b08bf7e4..f000b2ca572bac72c4872e9657b1b8a7d8234b60 100644
+index 4ff6781..f000b2c 100644
 --- a/packages/ai/src/index.ts
 +++ b/packages/ai/src/index.ts
 @@ -30,6 +30,7 @@ export type {
@@ -276,7 +332,7 @@ index 4ff678102d59bfdac19e329b0ff1cd51b08bf7e4..f000b2ca572bac72c4872e9657b1b8a7
  export * from "./models.ts";
  export * from "./models-store.ts";
 diff --git a/packages/ai/src/providers/faux.ts b/packages/ai/src/providers/faux.ts
-index 4a26f1ad67b62150010fc51767a787560a1ad820..8242939262f5ee314c669ea75ece78ffc7a84cc2 100644
+index 4a26f1a..8242939 100644
 --- a/packages/ai/src/providers/faux.ts
 +++ b/packages/ai/src/providers/faux.ts
 @@ -1,8 +1,10 @@
@@ -320,8 +376,34 @@ index 4a26f1ad67b62150010fc51767a787560a1ad820..8242939262f5ee314c669ea75ece78ff
  				await streamWithDeltas(outer, message, minTokenSize, maxTokenSize, tokensPerSecond, streamOptions?.signal);
  			} catch (error) {
  				const message = createErrorMessage(error, api, provider, requestModel.id);
+diff --git a/packages/ai/src/providers/kimi-coding.ts b/packages/ai/src/providers/kimi-coding.ts
+index 865ae28..a817e31 100644
+--- a/packages/ai/src/providers/kimi-coding.ts
++++ b/packages/ai/src/providers/kimi-coding.ts
+@@ -1,15 +1,20 @@
+ import { anthropicMessagesApi } from "../api/anthropic-messages.lazy.ts";
+ import { envApiKeyAuth } from "../auth/helpers.ts";
++import { createExecutionProfileCapabilities } from "../execution-profile.ts";
+ import { createProvider, type Provider } from "../models.ts";
+ import { KIMI_CODING_MODELS } from "./kimi-coding.models.ts";
+ 
++const EXECUTION_PROFILE = createExecutionProfileCapabilities([]);
++
+ export function kimiCodingProvider(): Provider<"anthropic-messages"> {
+ 	return createProvider({
+ 		id: "kimi-coding",
+ 		name: "Kimi For Coding",
+ 		baseUrl: "https://api.kimi.com/coding",
+ 		auth: { apiKey: envApiKeyAuth("Kimi API key", ["KIMI_API_KEY"]) },
+-		models: Object.values(KIMI_CODING_MODELS),
++		models: Object.values(KIMI_CODING_MODELS).map((model) =>
++			model.id === "k3" ? { ...model, executionProfile: EXECUTION_PROFILE } : model,
++		),
+ 		api: anthropicMessagesApi(),
+ 	});
+ }
 diff --git a/packages/ai/src/providers/openai-codex.ts b/packages/ai/src/providers/openai-codex.ts
-index cbf9d7929a03e5b166ef3afc57282ac92e140ebd..006786353c439fcb75df58c93d38127a839a38a2 100644
+index cbf9d79..0067863 100644
 --- a/packages/ai/src/providers/openai-codex.ts
 +++ b/packages/ai/src/providers/openai-codex.ts
 @@ -1,9 +1,12 @@
@@ -347,7 +429,7 @@ index cbf9d7929a03e5b166ef3afc57282ac92e140ebd..006786353c439fcb75df58c93d38127a
  	});
  }
 diff --git a/packages/ai/src/providers/openai.ts b/packages/ai/src/providers/openai.ts
-index 43f6671f22a9d6e88bc96556afc4814b32e08032..7104e5435a11a7739b08f00fd2efcbaf65001475 100644
+index 43f6671..7104e54 100644
 --- a/packages/ai/src/providers/openai.ts
 +++ b/packages/ai/src/providers/openai.ts
 @@ -1,15 +1,18 @@
@@ -371,7 +453,7 @@ index 43f6671f22a9d6e88bc96556afc4814b32e08032..7104e5435a11a7739b08f00fd2efcbaf
  	});
  }
 diff --git a/packages/ai/src/types.ts b/packages/ai/src/types.ts
-index aeaf18c6765e2f9f9f5a774a335672c1a55009bb..e5b8e052dac133070d3d4ac6e8b92c58f9732dc5 100644
+index aeaf18c..e5b8e05 100644
 --- a/packages/ai/src/types.ts
 +++ b/packages/ai/src/types.ts
 @@ -79,6 +79,35 @@ export type ImagesProviderId = KnownImagesProvider | string;
@@ -449,9 +531,137 @@ index aeaf18c6765e2f9f9f5a774a335672c1a55009bb..e5b8e052dac133070d3d4ac6e8b92c58
  	input: ("text" | "image")[];
  	cost: ModelCost;
  	contextWindow: number;
+diff --git a/packages/ai/test/anthropic-sse-parsing.test.ts b/packages/ai/test/anthropic-sse-parsing.test.ts
+index 0cdd057..90f9b85 100644
+--- a/packages/ai/test/anthropic-sse-parsing.test.ts
++++ b/packages/ai/test/anthropic-sse-parsing.test.ts
+@@ -3,7 +3,9 @@ import { Type } from "typebox";
+ import { describe, expect, it } from "vitest";
+ import { stream as streamAnthropic } from "../src/api/anthropic-messages.ts";
+ import { getModel } from "../src/compat.ts";
+-import type { Context, ToolCall } from "../src/types.ts";
++import { isExecutionProfileCapabilities } from "../src/index.ts";
++import { kimiCodingProvider } from "../src/providers/kimi-coding.ts";
++import type { Context, ExecutionProfileSelection, ToolCall } from "../src/types.ts";
+ 
+ function createSseResponse(events: Array<{ event: string; data: string }>): Response {
+ 	const body = events.map(({ event, data }) => `event: ${event}\ndata: ${data}\n`).join("\n");
+@@ -79,6 +81,112 @@ function createFakeAnthropicClient(response: Response): Anthropic {
+ }
+ 
+ describe("Anthropic raw SSE parsing", () => {
++	it("marks Kimi K3 as authoritative for provider-default execution profiles", () => {
++		const model = kimiCodingProvider().getModels().find((candidate) => candidate.id === "k3")!;
++		expect(isExecutionProfileCapabilities(model.executionProfile)).toBe(true);
++		expect(model.executionProfile?.serviceClasses).toEqual([]);
++		for (const candidate of kimiCodingProvider().getModels().filter((entry) => entry.id !== "k3")) {
++			expect(candidate.executionProfile).toBeUndefined();
++		}
++	});
++
++	it("records Kimi execution-profile telemetry without inventing provider acknowledgement", async () => {
++		const model = kimiCodingProvider().getModels().find((candidate) => candidate.id === "k3")!;
++		const executionProfile: Readonly<ExecutionProfileSelection> = Object.freeze({
++			provider: "kimi-coding",
++			model: "k3",
++			effort: "max",
++			serviceClass: "provider-default",
++		});
++		const result = await streamAnthropic(model, { messages: [{ role: "user", content: "hi", timestamp: 1 }] }, {
++			client: createFakeAnthropicClient(createSseResponse(minimalAnthropicEvents)),
++			thinkingEnabled: true,
++			effort: "max",
++			executionProfile,
++		}).result();
++
++		expect(result.stopReason).toBe("stop");
++		expect(result.executionProfile).toEqual(executionProfile);
++		expect(result.usage.executionProfile).toEqual(executionProfile);
++	});
++
++	it.each([
++		["model", "other"],
++		["thinking", { type: "disabled" }],
++		["output_config", { effort: "low" }],
++	] as const)("rejects post-resolution Anthropic %s mutation before the provider", async (field, value) => {
++		let providerCalled = false;
++		const client = {
++			messages: {
++				create: () => {
++					providerCalled = true;
++					return { asResponse: async () => createSseResponse(minimalAnthropicEvents) };
++				},
++			},
++		} as unknown as Anthropic;
++		const executionProfile = {
++			provider: "kimi-coding",
++			model: "k3",
++			effort: "max",
++			serviceClass: "provider-default",
++		} as const;
++		const model = kimiCodingProvider().getModels().find((candidate) => candidate.id === "k3")!;
++		const result = await streamAnthropic(model, { messages: [{ role: "user", content: "hi", timestamp: 1 }] }, {
++			client,
++			thinkingEnabled: true,
++			effort: "max",
++			executionProfile,
++			onPayload: (payload) => ({ ...payload, [field]: value }),
++		}).result();
++
++		expect(result.stopReason).toBe("error");
++		expect(result.errorMessage).toContain(`Execution profile conflict: before_provider_request changed "${field}"`);
++		expect(providerCalled).toBe(false);
++	});
++
++	it.each([
++		["model", "other"],
++		["thinking", { type: "disabled" }],
++		["output_config", { effort: "low" }],
++	] as const)("transports one validated Anthropic snapshot for a changing %s accessor", async (field, later) => {
++		let transported: Record<string, unknown> | undefined;
++		const client = {
++			messages: {
++				create: (payload: Record<string, unknown>) => {
++					transported = payload;
++					return { asResponse: async () => createSseResponse(minimalAnthropicEvents) };
++				},
++			},
++		} as unknown as Anthropic;
++		const executionProfile = {
++			provider: "kimi-coding",
++			model: "k3",
++			effort: "max",
++			serviceClass: "provider-default",
++		} as const;
++		const model = kimiCodingProvider().getModels().find((candidate) => candidate.id === "k3")!;
++		let reads = 0;
++		const result = await streamAnthropic(model, { messages: [{ role: "user", content: "hi", timestamp: 1 }] }, {
++			client,
++			thinkingEnabled: true,
++			effort: "max",
++			executionProfile,
++			onPayload: (payload) => {
++				const first = structuredClone((payload as unknown as Record<string, unknown>)[field]);
++				const hooked = { ...payload };
++				Object.defineProperty(hooked, field, {
++					enumerable: true,
++					get: () => (++reads === 1 ? first : later),
++				});
++				return hooked;
++			},
++		}).result();
++
++		expect(result.stopReason).toBe("stop");
++		expect(reads).toBe(1);
++		expect(transported?.[field]).not.toEqual(later);
++	});
++
+ 	it("repairs malformed SSE JSON and malformed streamed tool JSON", async () => {
+ 		const model = getModel("anthropic", "claude-haiku-4-5");
+ 		const context: Context = {
 diff --git a/packages/ai/test/execution-profile-service-class.test.ts b/packages/ai/test/execution-profile-service-class.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..acae1171d53e7b0dccbaccc64804b915e60fde86
+index 0000000..acae117
 --- /dev/null
 +++ b/packages/ai/test/execution-profile-service-class.test.ts
 @@ -0,0 +1,380 @@
@@ -836,7 +1046,7 @@ index 0000000000000000000000000000000000000000..acae1171d53e7b0dccbaccc64804b915
 +	});
 +});
 diff --git a/packages/ai/test/openai-codex-stream.test.ts b/packages/ai/test/openai-codex-stream.test.ts
-index 793ccc2079508ab0218f6335eee86cd130151b92..3e6d640de100d6d35fc66dc5dc66222165b143f7 100644
+index 793ccc2..3e6d640 100644
 --- a/packages/ai/test/openai-codex-stream.test.ts
 +++ b/packages/ai/test/openai-codex-stream.test.ts
 @@ -11,7 +11,7 @@ import {
@@ -890,7 +1100,7 @@ index 793ccc2079508ab0218f6335eee86cd130151b92..3e6d640de100d6d35fc66dc5dc662221
  	);
  
 diff --git a/packages/coding-agent/package.json b/packages/coding-agent/package.json
-index e2e5427d389e2f3e3505e777fd0550aaafbe8fa0..36663153bf00da6840a4b4d5e722300bb1965e64 100644
+index e2e5427..8564a04 100644
 --- a/packages/coding-agent/package.json
 +++ b/packages/coding-agent/package.json
 @@ -4,7 +4,8 @@
@@ -899,12 +1109,12 @@ index e2e5427d389e2f3e3505e777fd0550aaafbe8fa0..36663153bf00da6840a4b4d5e722300b
  	"piConfig": {
 -		"configDir": ".pi"
 +		"configDir": ".pi",
-+		"buildIdentity": "qq.execution-profile.1"
++		"buildIdentity": "qq.execution-profile.2"
  	},
  	"bin": {
  		"pi": "dist/cli.js"
 diff --git a/packages/coding-agent/src/config.ts b/packages/coding-agent/src/config.ts
-index 38049f05c9a16af7fded81ce7a680a7ec2af3c88..e92dbbcf3d32e42f9067441309fc1f4225b488e7 100644
+index 38049f0..e92dbbc 100644
 --- a/packages/coding-agent/src/config.ts
 +++ b/packages/coding-agent/src/config.ts
 @@ -473,6 +473,7 @@ interface PackageJson {
@@ -925,7 +1135,7 @@ index 38049f05c9a16af7fded81ce7a680a7ec2af3c88..e92dbbcf3d32e42f9067441309fc1f42
  // e.g., PI_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
  export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;
 diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
-index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a65f1f0d59 100644
+index 4fdaaaa..5ec8cf2 100644
 --- a/packages/coding-agent/src/core/agent-session.ts
 +++ b/packages/coding-agent/src/core/agent-session.ts
 @@ -22,12 +22,14 @@ import type {
@@ -944,15 +1154,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  	ImageContent,
  	Model,
  	ProviderHeaders,
-@@ -39,6 +41,7 @@ import {
- 	cleanupSessionResources,
- 	getSupportedThinkingLevels,
- 	isContextOverflow,
-+	isExecutionProfileCapabilities,
- 	isRetryableAssistantError,
- 	modelsAreEqual,
- 	type RetryCallbacks,
-@@ -67,6 +70,7 @@ import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.
+@@ -67,6 +69,7 @@ import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.
  import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
  import {
  	type ContextUsage,
@@ -960,7 +1162,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  	type ExtensionCommandContextActions,
  	type ExtensionErrorListener,
  	type ExtensionMode,
-@@ -279,6 +283,32 @@ interface ToolDefinitionEntry {
+@@ -279,6 +282,32 @@ interface ToolDefinitionEntry {
  	sourceInfo: SourceInfo;
  }
  
@@ -993,7 +1195,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  function estimateMessagesTokens(messages: AgentMessage[]): number {
  	let tokens = 0;
  	for (const message of messages) {
-@@ -316,6 +346,8 @@ export class AgentSession {
+@@ -316,6 +345,8 @@ export class AgentSession {
  	private _steeringMessages: string[] = [];
  	/** Tracks pending follow-up messages for UI display. Removed when delivered. */
  	private _followUpMessages: string[] = [];
@@ -1002,7 +1204,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  	/** Messages queued to be included with the next user prompt as context ("asides"). */
  	private _pendingNextTurnMessages: CustomMessage[] = [];
  
-@@ -338,6 +370,7 @@ export class AgentSession {
+@@ -338,6 +369,7 @@ export class AgentSession {
  	// Extension system
  	private _extensionRunner!: ExtensionRunner;
  	private _turnIndex = 0;
@@ -1010,7 +1212,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  
  	private _resourceLoader: ResourceLoader;
  	private _customTools: ToolDefinition[];
-@@ -455,6 +488,273 @@ export class AgentSession {
+@@ -455,6 +487,243 @@ export class AgentSession {
  		}
  	}
  
@@ -1046,43 +1248,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
 +			throw new Error('Execution profile field "model" must be a non-empty string.');
 +		}
 +
-+		const model = this._modelRuntime.getModel(selection.provider, selection.model);
-+		if (!model) {
-+			throw new Error(`Execution profile model not found: ${selection.provider}/${selection.model}.`);
-+		}
-+
-+		const capabilities = model.executionProfile;
-+		if (!isExecutionProfileCapabilities(capabilities)) {
-+			throw new Error(`Execution profiles are unsupported for ${selection.provider}/${selection.model}.`);
-+		}
-+
-+		const supportedEfforts = getSupportedThinkingLevels(model) as ThinkingLevel[];
-+		let thinkingLevel: ThinkingLevel | undefined;
-+		if (selection.effort === "provider-default") {
-+			thinkingLevel = undefined;
-+		} else if (!supportedEfforts.includes(selection.effort)) {
-+			throw new Error(
-+				`Execution profile effort "${String(selection.effort)}" is unsupported for ${selection.provider}/${selection.model}.`,
-+			);
-+		} else {
-+			thinkingLevel = selection.effort;
-+		}
-+
-+		const explicitServiceClasses = ["auto", "default", "flex", "priority"] as const;
-+		if (
-+			selection.serviceClass !== "provider-default" &&
-+			!explicitServiceClasses.includes(selection.serviceClass as (typeof explicitServiceClasses)[number])
-+		) {
-+			throw new Error(`Execution profile service class "${String(selection.serviceClass)}" is invalid.`);
-+		}
-+		if (
-+			selection.serviceClass !== "provider-default" &&
-+			!capabilities.serviceClasses.includes(selection.serviceClass)
-+		) {
-+			throw new Error(
-+				`Execution profile service class "${selection.serviceClass}" is unsupported for ${selection.provider}/${selection.model}.`,
-+			);
-+		}
++		const { model, capabilities, thinkingLevel } = this._modelRuntime.validateExecutionProfile(selection);
 +
 +		return Object.freeze({
 +			selection,
@@ -1149,9 +1315,15 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
 +	): string | undefined {
 +		for (const transaction of this._executionProfileTransactions) {
 +			const { profile } = transaction;
++			let registeredModel: Model<any> | undefined;
++			try {
++				registeredModel = this._modelRuntime.validateExecutionProfile(profile.selection).model;
++			} catch {
++				registeredModel = undefined;
++			}
 +			if (
 +				(transaction === target && model ? model : profile.model) !== profile.model ||
-+				this._modelRuntime.getModel(profile.selection.provider, profile.selection.model) !== profile.model ||
++				registeredModel !== profile.model ||
 +				profile.model.executionProfile !== profile.capabilities ||
 +				executionProfileModelFingerprint(profile.model) !== profile.modelFingerprint
 +			) {
@@ -1284,7 +1456,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  	/**
  	 * Install tool hooks once on the Agent instance.
  	 *
-@@ -524,6 +824,22 @@ export class AgentSession {
+@@ -524,6 +793,22 @@ export class AgentSession {
  		this.agent.prepareNextTurnWithContext = async (turn, signal) => {
  			const previousSnapshot = await previousPrepareNextTurnWithContext?.(turn, signal);
  			const previousContext = previousSnapshot?.context ?? turn.context;
@@ -1307,7 +1479,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  
  			return {
  				...previousSnapshot,
-@@ -532,8 +848,8 @@ export class AgentSession {
+@@ -532,8 +817,8 @@ export class AgentSession {
  					systemPrompt: this._systemPromptOverride ?? this._baseSystemPrompt,
  					tools: this.agent.state.tools.slice(),
  				},
@@ -1318,7 +1490,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  			};
  		};
  	}
-@@ -591,6 +907,16 @@ export class AgentSession {
+@@ -591,6 +876,16 @@ export class AgentSession {
  
  	/** Internal handler for agent events - shared by subscribe and reconnect */
  	private _handleAgentEvent = async (event: AgentEvent): Promise<void> => {
@@ -1335,7 +1507,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  		// When a user message starts, check if it's from either queue and remove it BEFORE emitting
  		// This ensures the UI sees the updated queue state
  		if (event.type === "message_start" && event.message.role === "user") {
-@@ -1070,6 +1396,18 @@ export class AgentSession {
+@@ -1070,6 +1365,18 @@ export class AgentSession {
  		}
  	}
  
@@ -1354,7 +1526,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  	private async _handlePostAgentRun(): Promise<boolean> {
  		const msg = this._lastAssistantMessage;
  		this._lastAssistantMessage = undefined;
-@@ -1172,26 +1510,6 @@ export class AgentSession {
+@@ -1172,26 +1479,6 @@ export class AgentSession {
  			// Flush any pending bash messages before the new prompt
  			this._flushPendingBashMessages();
  
@@ -1381,7 +1553,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  			// Check if we need to compact before sending (catches aborted responses).
  			// The user's new prompt is sent below, so do not call agent.continue() here.
  			const lastAssistant = this._findLastAssistantMessage();
-@@ -1199,67 +1517,66 @@ export class AgentSession {
+@@ -1199,67 +1486,66 @@ export class AgentSession {
  				await this._checkCompaction(lastAssistant, false);
  			}
  
@@ -1502,7 +1674,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  	}
  
  	/**
-@@ -1390,11 +1707,15 @@ export class AgentSession {
+@@ -1390,11 +1676,15 @@ export class AgentSession {
  		if (images) {
  			content.push(...images);
  		}
@@ -1523,7 +1695,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  	}
  
  	/**
-@@ -1441,12 +1762,13 @@ export class AgentSession {
+@@ -1441,12 +1731,13 @@ export class AgentSession {
  			this._pendingNextTurnMessages.push(appMessage);
  		} else if (this.isStreaming) {
  			if (options?.deliverAs === "followUp") {
@@ -1539,7 +1711,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  		} else {
  			this.agent.state.messages.push(appMessage);
  			this.sessionManager.appendCustomMessageEntry(
-@@ -1510,6 +1832,7 @@ export class AgentSession {
+@@ -1510,6 +1801,7 @@ export class AgentSession {
  		const followUp = [...this._followUpMessages];
  		this._steeringMessages = [];
  		this._followUpMessages = [];
@@ -1547,7 +1719,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  		this.agent.clearAllQueues();
  		this._emitQueueUpdate();
  		return { steering, followUp };
-@@ -1574,6 +1897,11 @@ export class AgentSession {
+@@ -1574,6 +1866,11 @@ export class AgentSession {
  	 * @throws Error if no auth is configured for the model
  	 */
  	async setModel(model: Model<any>): Promise<void> {
@@ -1559,7 +1731,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  		if (!(await this._modelRuntime.checkAuth(model.provider))) {
  			throw new Error(`No API key for ${model.provider}/${model.id}`);
  		}
-@@ -1597,6 +1925,11 @@ export class AgentSession {
+@@ -1597,6 +1894,11 @@ export class AgentSession {
  	 * @returns The new model info, or undefined if only one model available
  	 */
  	async cycleModel(direction: "forward" | "backward" = "forward"): Promise<ModelCycleResult | undefined> {
@@ -1571,7 +1743,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  		if (this._scopedModels.length > 0) {
  			return this._cycleScopedModel(direction);
  		}
-@@ -1673,6 +2006,11 @@ export class AgentSession {
+@@ -1673,6 +1975,11 @@ export class AgentSession {
  	 * Saves to session and settings only if the level actually changes.
  	 */
  	setThinkingLevel(level: ThinkingLevel): void {
@@ -1583,7 +1755,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  		const availableLevels = this.getAvailableThinkingLevels();
  		const effectiveLevel = availableLevels.includes(level) ? level : this._clampThinkingLevel(level, availableLevels);
  
-@@ -1781,129 +2119,140 @@ export class AgentSession {
+@@ -1781,129 +2088,140 @@ export class AgentSession {
  	async compact(customInstructions?: string): Promise<CompactionResult> {
  		this._disconnectFromAgent();
  		await this.abort();
@@ -1669,7 +1841,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
 +					}
  				}
 -			}
--
+ 
 -			let summary: string;
 -			let firstKeptEntryId: string;
 -			let tokensBefore: number;
@@ -1704,7 +1876,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
 -				usage = result.usage;
 -				details = result.details;
 -			}
- 
+-
 -			if (this._compactionAbortController.signal.aborted) {
 -				throw new Error("Compaction cancelled");
 -			}
@@ -1828,7 +2000,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  		} catch (error) {
  			const message = error instanceof Error ? error.message : String(error);
  			const aborted = message === "Compaction cancelled" || (error instanceof Error && error.name === "AbortError");
-@@ -2044,52 +2393,107 @@ export class AgentSession {
+@@ -2044,52 +2362,107 @@ export class AgentSession {
  	 */
  	private async _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
  		const settings = this.settingsManager.getCompactionSettings();
@@ -1883,13 +2055,15 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
 +				this._emit({ type: "compaction_start", reason });
 +				this._autoCompactionAbortController = new AbortController();
 +				started = true;
-+
-+				let extensionCompaction: CompactionResult | undefined;
-+				let fromExtension = false;
  
 -			this._emit({ type: "compaction_start", reason });
 -			this._autoCompactionAbortController = new AbortController();
 -			started = true;
++				let extensionCompaction: CompactionResult | undefined;
++				let fromExtension = false;
+ 
+-			let extensionCompaction: CompactionResult | undefined;
+-			let fromExtension = false;
 +				if (this._extensionRunner.hasHandlers("session_before_compact")) {
 +					const extensionResult = (await this._extensionRunner.emit({
 +						type: "session_before_compact",
@@ -1913,14 +2087,6 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
 +						return false;
 +					}
  
--			let extensionCompaction: CompactionResult | undefined;
--			let fromExtension = false;
-+					if (extensionResult?.compaction) {
-+						extensionCompaction = extensionResult.compaction;
-+						fromExtension = true;
-+					}
-+				}
- 
 -			if (this._extensionRunner.hasHandlers("session_before_compact")) {
 -				const extensionResult = (await this._extensionRunner.emit({
 -					type: "session_before_compact",
@@ -1931,6 +2097,12 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
 -					willRetry,
 -					signal: this._autoCompactionAbortController.signal,
 -				})) as SessionBeforeCompactResult | undefined;
++					if (extensionResult?.compaction) {
++						extensionCompaction = extensionResult.compaction;
++						fromExtension = true;
++					}
++				}
++
 +				let summary: string;
 +				let firstKeptEntryId: string;
 +				let tokensBefore: number;
@@ -1972,7 +2144,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  					this._emit({
  						type: "compaction_end",
  						reason,
-@@ -2100,101 +2504,58 @@ export class AgentSession {
+@@ -2100,101 +2473,58 @@ export class AgentSession {
  					return false;
  				}
  
@@ -2121,7 +2293,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  		} catch (error) {
  			const errorMessage = error instanceof Error ? error.message : "compaction failed";
  			if (started) {
-@@ -2210,6 +2571,7 @@ export class AgentSession {
+@@ -2210,6 +2540,7 @@ export class AgentSession {
  							: `Auto-compaction failed: ${errorMessage}`,
  				});
  			}
@@ -2129,7 +2301,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  			return false;
  		} finally {
  			this._autoCompactionAbortController = undefined;
-@@ -2897,181 +3259,189 @@ export class AgentSession {
+@@ -2897,181 +3228,189 @@ export class AgentSession {
  			return { cancelled: false };
  		}
  
@@ -2476,7 +2648,7 @@ index 4fdaaaa67d7c629fc4130bad9007c2c60f84f8ce..ca50ac7c18ed2bc25a4eaadb553f28a6
  
  	/**
 diff --git a/packages/coding-agent/src/core/compaction/compaction.ts b/packages/coding-agent/src/core/compaction/compaction.ts
-index 0ae6deeb52a0714b791bca29f2237baa7e2780dd..e596f4b8068616a770e6d6140fed443bde65f44c 100644
+index 0ae6dee..e596f4b 100644
 --- a/packages/coding-agent/src/core/compaction/compaction.ts
 +++ b/packages/coding-agent/src/core/compaction/compaction.ts
 @@ -6,6 +6,7 @@
@@ -2551,7 +2723,7 @@ index 0ae6deeb52a0714b791bca29f2237baa7e2780dd..e596f4b8068616a770e6d6140fed443b
  }
  
 diff --git a/packages/coding-agent/src/core/extensions/index.ts b/packages/coding-agent/src/core/extensions/index.ts
-index 29847b63f790c06865af1a24e8c9349192f067a0..a5e4a8ed281ca98954ec571bafda3b2bdc71e24f 100644
+index 29847b6..a5e4a8e 100644
 --- a/packages/coding-agent/src/core/extensions/index.ts
 +++ b/packages/coding-agent/src/core/extensions/index.ts
 @@ -57,6 +57,12 @@ export type {
@@ -2568,7 +2740,7 @@ index 29847b63f790c06865af1a24e8c9349192f067a0..a5e4a8ed281ca98954ec571bafda3b2b
  	ExtensionActions,
  	// API
 diff --git a/packages/coding-agent/src/core/extensions/loader.ts b/packages/coding-agent/src/core/extensions/loader.ts
-index 89f59c03ad2123cf875db03ef19221005d8fa22b..a9e9f64a0da11fd47eba08724b73b3711ab46788 100644
+index 89f59c0..a9e9f64 100644
 --- a/packages/coding-agent/src/core/extensions/loader.ts
 +++ b/packages/coding-agent/src/core/extensions/loader.ts
 @@ -282,6 +282,14 @@ function createExtensionAPI(
@@ -2587,7 +2759,7 @@ index 89f59c03ad2123cf875db03ef19221005d8fa22b..a9e9f64a0da11fd47eba08724b73b371
  			runtime.assertActive();
  			extension.messageRenderers.set(customType, renderer as MessageRenderer);
 diff --git a/packages/coding-agent/src/core/extensions/runner.ts b/packages/coding-agent/src/core/extensions/runner.ts
-index 3c320e14f693c5522c60649f47d2cfabe805f00e..1951c3f0c731840bfc16db97885dab88e6d9c17d 100644
+index 3c320e1..1951c3f 100644
 --- a/packages/coding-agent/src/core/extensions/runner.ts
 +++ b/packages/coding-agent/src/core/extensions/runner.ts
 @@ -21,6 +21,8 @@ import type {
@@ -2635,7 +2807,7 @@ index 3c320e14f693c5522c60649f47d2cfabe805f00e..1951c3f0c731840bfc16db97885dab88
  	getAllRegisteredTools(): RegisteredTool[] {
  		const toolsByName = new Map<string, RegisteredTool>();
 diff --git a/packages/coding-agent/src/core/extensions/types.ts b/packages/coding-agent/src/core/extensions/types.ts
-index e8bf2627ce7aafe1c1c6f7402db11218fa0c428a..e78b4d06f6e932fc17c2a15a5ae8ff8e7eb8e3b9 100644
+index e8bf262..e78b4d0 100644
 --- a/packages/coding-agent/src/core/extensions/types.ts
 +++ b/packages/coding-agent/src/core/extensions/types.ts
 @@ -86,6 +86,31 @@ export type { BuildSystemPromptOptions } from "../system-prompt.ts";
@@ -2691,11 +2863,187 @@ index e8bf2627ce7aafe1c1c6f7402db11218fa0c428a..e78b4d06f6e932fc17c2a15a5ae8ff8e
  }
  
  /** Result of loading extensions. */
+diff --git a/packages/coding-agent/src/core/model-registry.ts b/packages/coding-agent/src/core/model-registry.ts
+index fad9c65..20e2525 100644
+--- a/packages/coding-agent/src/core/model-registry.ts
++++ b/packages/coding-agent/src/core/model-registry.ts
+@@ -1,4 +1,4 @@
+-import type { Api, AuthResult, Model, Provider } from "@earendil-works/pi-ai";
++import type { Api, AuthResult, ExecutionProfileSelection, Model, Provider } from "@earendil-works/pi-ai";
+ import type { ModelRuntime } from "./model-runtime.ts";
+ import type { AuthStatus, ProviderConfigInput } from "./provider-composer.ts";
+ 
+@@ -45,6 +45,10 @@ export class ModelRegistry {
+ 		return this.runtime.getModel(provider, modelId);
+ 	}
+ 
++	validateExecutionProfile(profile: Readonly<ExecutionProfileSelection>): void {
++		this.runtime.validateExecutionProfile(profile);
++	}
++
+ 	hasConfiguredAuth(model: Model<Api>): boolean {
+ 		return this.runtime.hasConfiguredAuth(model.provider);
+ 	}
 diff --git a/packages/coding-agent/src/core/model-runtime.ts b/packages/coding-agent/src/core/model-runtime.ts
-index 2cd85b8d69e5d24a72a5e0182b82de7cb1c4e7d5..34c7803decd579c65629a7921b1431e82c710f80 100644
+index 2cd85b8..7c50453 100644
 --- a/packages/coding-agent/src/core/model-runtime.ts
 +++ b/packages/coding-agent/src/core/model-runtime.ts
-@@ -497,6 +497,13 @@ export class ModelRuntime implements Models {
+@@ -13,6 +13,10 @@ import {
+ 	type CredentialInfo,
+ 	type CredentialStore,
+ 	createModels,
++	type ExecutionProfileCapabilities,
++	type ExecutionProfileSelection,
++	getSupportedThinkingLevels,
++	isExecutionProfileCapabilities,
+ 	lazyStream,
+ 	type Model,
+ 	type Models,
+@@ -28,6 +32,7 @@ import {
+ 	type ProviderHeaders,
+ 	type SimpleStreamOptions,
+ 	type StreamOptions,
++	type ThinkingLevel,
+ } from "@earendil-works/pi-ai";
+ import * as builtinProviderCatalog from "@earendil-works/pi-ai/providers/all";
+ import { getAgentDir } from "../config.ts";
+@@ -67,6 +72,14 @@ export interface CreateModelRuntimeOptions {
+ 	/** Timeout for the create-time network model refresh. */
+ 	modelRefreshTimeoutMs?: number;
+ 	catalogBaseUrl?: string;
++	/** @internal Exact model objects admitted only by the test harness. */
++	executionProfileTestModels?: readonly Model<Api>[];
++}
++
++export interface ValidatedExecutionProfile {
++	model: Model<Api>;
++	capabilities: Readonly<ExecutionProfileCapabilities>;
++	thinkingLevel: ThinkingLevel | undefined;
+ }
+ 
+ export interface ModelRuntimeAuthOverrides {
+@@ -99,6 +112,8 @@ export class ModelRuntime implements Models {
+ 	private readonly nativeExtensionProviders = new Map<string, Provider>();
+ 	private readonly extensionProviders = new Map<string, ProviderConfigInput>();
+ 	private readonly compositionErrors = new Map<string, string>();
++	private readonly executionProfileBuiltinModels = new Map<string, Map<string, Model<Api>>>();
++	private readonly executionProfileTestModels = new WeakSet<object>();
+ 	private readonly modelsPath: string | undefined;
+ 	private readonly modelNetworkEnabled: boolean;
+ 	private config: ModelConfig;
+@@ -118,12 +133,26 @@ export class ModelRuntime implements Models {
+ 		modelsPath: string | undefined,
+ 		modelsStore: ModelsStore,
+ 		providers: readonly Provider[],
++		executionProfileBuiltinModels: readonly Model<Api>[],
++		executionProfileTestModels: readonly Model<Api>[],
+ 		modelNetworkEnabled: boolean,
+ 	) {
+ 		this.credentials = credentials;
+ 		this.config = config;
+ 		this.modelsPath = modelsPath;
+ 		this.modelNetworkEnabled = modelNetworkEnabled;
++		for (const model of executionProfileBuiltinModels) {
++			let providerModels = this.executionProfileBuiltinModels.get(model.provider);
++			if (!providerModels) {
++				providerModels = new Map();
++				this.executionProfileBuiltinModels.set(model.provider, providerModels);
++			}
++			if (providerModels.has(model.id)) {
++				throw new Error(`Duplicate built-in model identity: ${model.provider}/${model.id}.`);
++			}
++			providerModels.set(model.id, model);
++		}
++		for (const model of executionProfileTestModels) this.executionProfileTestModels.add(model);
+ 		this.defaultBuiltins = new Map(providers.map((provider) => [provider.id, provider]));
+ 		for (const [providerId, provider] of this.defaultBuiltins) this.builtins.set(providerId, provider);
+ 		this.models = createModels({ credentials, modelsStore });
+@@ -140,9 +169,8 @@ export class ModelRuntime implements Models {
+ 			(modelsPath
+ 				? new FileModelsStore(options.modelsStorePath ?? join(dirname(modelsPath), "models-store.json"))
+ 				: new InMemoryCodingAgentModelsStore());
+-		const providers = builtinProviderCatalog
+-			.builtinProviders()
+-			.map((provider) =>
++		const executionProfileBuiltins = builtinProviderCatalog.builtinProviders();
++		const providers = executionProfileBuiltins.map((provider) =>
+ 				provider.id === "radius"
+ 					? provider
+ 					: withRemoteCatalog(
+@@ -159,6 +187,8 @@ export class ModelRuntime implements Models {
+ 			modelsPath,
+ 			modelsStore,
+ 			providers,
++			executionProfileBuiltins.flatMap((provider) => provider.getModels()),
++			options.executionProfileTestModels ?? [],
+ 			process.env.PI_OFFLINE === undefined,
+ 		);
+ 		runtime.configureRadiusProviders();
+@@ -311,6 +341,63 @@ export class ModelRuntime implements Models {
+ 		return this.models.getModel(providerId, modelId);
+ 	}
+ 
++	validateExecutionProfile(selection: Readonly<ExecutionProfileSelection>): ValidatedExecutionProfile {
++		const registeredModel = this.getModel(selection.provider, selection.model);
++		const testModel = registeredModel && this.executionProfileTestModels.has(registeredModel) ? registeredModel : undefined;
++		const builtinModel = this.executionProfileBuiltinModels.get(selection.provider)?.get(selection.model);
++		if (!testModel && !builtinModel && !registeredModel) {
++			throw new Error(`Execution profile model not found: ${selection.provider}/${selection.model}.`);
++		}
++		if (
++			!testModel
++			&& (
++				!builtinModel
++				|| this.config.getProvider(selection.provider) !== undefined
++				|| this.extensionProviders.has(selection.provider)
++				|| this.nativeExtensionProviders.has(selection.provider)
++			)
++		) {
++			throw new Error(`Execution profile provider provenance conflict for ${selection.provider}/${selection.model}.`);
++		}
++		const model = testModel ?? builtinModel;
++		if (!model) {
++			throw new Error(`Execution profile provider provenance conflict for ${selection.provider}/${selection.model}.`);
++		}
++		const capabilities = model.executionProfile;
++		if (!isExecutionProfileCapabilities(capabilities)) {
++			throw new Error(`Execution profiles are unsupported for ${selection.provider}/${selection.model}.`);
++		}
++
++		const supportedEfforts = getSupportedThinkingLevels(model) as ThinkingLevel[];
++		let thinkingLevel: ThinkingLevel | undefined;
++		if (selection.effort === "provider-default") {
++			thinkingLevel = undefined;
++		} else if (!supportedEfforts.includes(selection.effort as ThinkingLevel)) {
++			throw new Error(
++				`Execution profile effort "${String(selection.effort)}" is unsupported for ${selection.provider}/${selection.model}.`,
++			);
++		} else {
++			thinkingLevel = selection.effort as ThinkingLevel;
++		}
++
++		const explicitServiceClasses = ["auto", "default", "flex", "priority"] as const;
++		if (
++			selection.serviceClass !== "provider-default"
++			&& !explicitServiceClasses.includes(selection.serviceClass as (typeof explicitServiceClasses)[number])
++		) {
++			throw new Error(`Execution profile service class "${String(selection.serviceClass)}" is invalid.`);
++		}
++		if (
++			selection.serviceClass !== "provider-default"
++			&& !capabilities.serviceClasses.includes(selection.serviceClass)
++		) {
++			throw new Error(
++				`Execution profile service class "${selection.serviceClass}" is unsupported for ${selection.provider}/${selection.model}.`,
++			);
++		}
++		return { model, capabilities, thinkingLevel };
++	}
++
+ 	async checkAuth(providerId: string): Promise<AuthCheck | undefined> {
+ 		return this.models.checkAuth(providerId);
+ 	}
+@@ -497,6 +584,13 @@ export class ModelRuntime implements Models {
  	streamSimple(model: Model<Api>, context: Context, options?: ModelsSimpleStreamOptions): AssistantMessageEventStream {
  		return lazyStream(model, async () => {
  			const prepared = await this.prepareRequest(model, options);
@@ -2709,21 +3057,8 @@ index 2cd85b8d69e5d24a72a5e0182b82de7cb1c4e7d5..34c7803decd579c65629a7921b1431e8
  			return prepared.provider.streamSimple(prepared.model, context, prepared.options as SimpleStreamOptions);
  		});
  	}
-diff --git a/packages/coding-agent/src/core/remote-catalog-provider.ts b/packages/coding-agent/src/core/remote-catalog-provider.ts
-index b823cf7da5911f69eac9c4166cce016e12c2f253..686f7cf3d293b4d9433b0c57bdcc6198740079ac 100644
---- a/packages/coding-agent/src/core/remote-catalog-provider.ts
-+++ b/packages/coding-agent/src/core/remote-catalog-provider.ts
-@@ -10,7 +10,7 @@ function mergeModels(baseline: readonly Model<Api>[], dynamic: readonly Model<Ap
- 	const merged = [...baseline];
- 	for (const model of dynamic) {
- 		const index = merged.findIndex((entry) => entry.id === model.id);
--		if (index >= 0) merged[index] = model;
-+		if (index >= 0) merged[index] = { ...model, executionProfile: merged[index].executionProfile };
- 		else merged.push(model);
- 	}
- 	return merged;
 diff --git a/packages/coding-agent/src/index.ts b/packages/coding-agent/src/index.ts
-index e223d3144aafa962bedbbbbe4e3144bc7f21a27a..76bbcbea3f9d2cbf05ec49210b4b7cae829c2b3e 100644
+index e223d31..76bbcbe 100644
 --- a/packages/coding-agent/src/index.ts
 +++ b/packages/coding-agent/src/index.ts
 @@ -74,6 +74,12 @@ export type {
@@ -2740,7 +3075,7 @@ index e223d3144aafa962bedbbbbe4e3144bc7f21a27a..76bbcbea3f9d2cbf05ec49210b4b7cae
  	ExtensionActions,
  	ExtensionAPI,
 diff --git a/packages/coding-agent/test/compaction-summary-reasoning.test.ts b/packages/coding-agent/test/compaction-summary-reasoning.test.ts
-index 417662385fa8b97ea9e39914a021ad075ee88d8e..d885c5122b1d9a21bae43a22f43fac1b2f6143c7 100644
+index 4176623..d885c51 100644
 --- a/packages/coding-agent/test/compaction-summary-reasoning.test.ts
 +++ b/packages/coding-agent/test/compaction-summary-reasoning.test.ts
 @@ -1,5 +1,5 @@
@@ -2952,8 +3287,39 @@ index 417662385fa8b97ea9e39914a021ad075ee88d8e..d885c5122b1d9a21bae43a22f43fac1b
 +		).rejects.toThrow("Cannot combine usage from different execution profile selections");
 +	});
  });
+diff --git a/packages/coding-agent/test/model-runtime-test-utils.ts b/packages/coding-agent/test/model-runtime-test-utils.ts
+index 0265810..29d6cc8 100644
+--- a/packages/coding-agent/test/model-runtime-test-utils.ts
++++ b/packages/coding-agent/test/model-runtime-test-utils.ts
+@@ -1,4 +1,4 @@
+-import type { CredentialStore } from "@earendil-works/pi-ai";
++import type { Api, CredentialStore, Model } from "@earendil-works/pi-ai";
+ import { ModelRegistry } from "../src/core/model-registry.ts";
+ import { ModelRuntime } from "../src/core/model-runtime.ts";
+ 
+@@ -14,8 +14,18 @@ export async function createModelRegistry(credentials: CredentialStore, modelsPa
+ 	return wrap(await ModelRuntime.create({ credentials, modelsPath, allowModelNetwork: false }));
+ }
+ 
+-export async function createInMemoryModelRegistry(credentials: CredentialStore): Promise<ModelRegistry> {
+-	return wrap(await ModelRuntime.create({ credentials, modelsPath: null, allowModelNetwork: false }));
++export async function createInMemoryModelRegistry(
++	credentials: CredentialStore,
++	executionProfileTestModels: readonly Model<Api>[] = [],
++): Promise<ModelRegistry> {
++	return wrap(
++		await ModelRuntime.create({
++			credentials,
++			modelsPath: null,
++			allowModelNetwork: false,
++			executionProfileTestModels,
++		}),
++	);
+ }
+ 
+ export function getModelRuntime(modelRegistry: ModelRegistry): ModelRuntime {
 diff --git a/packages/coding-agent/test/suite/harness.ts b/packages/coding-agent/test/suite/harness.ts
-index 5f003241e8120d74213785039e2ec77c72e6564a..97893daf1c629ab6f63bf9f8ffeb12bb9c159e45 100644
+index 5f00324..f0b73fd 100644
 --- a/packages/coding-agent/test/suite/harness.ts
 +++ b/packages/coding-agent/test/suite/harness.ts
 @@ -62,6 +62,8 @@ export function getAssistantTexts(harness: Harness): string[] {
@@ -2974,10 +3340,12 @@ index 5f003241e8120d74213785039e2ec77c72e6564a..97893daf1c629ab6f63bf9f8ffeb12bb
  	});
  	fauxProvider.setResponses([]);
  	const model = fauxProvider.getModel();
-@@ -116,6 +120,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
+@@ -115,7 +119,8 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
+ 	if (withConfiguredAuth) {
  		await authStorage.modify(model.provider, async () => ({ type: "api_key", key: "faux-key" }));
  	}
- 	const modelRegistry = await createInMemoryModelRegistry(authStorage);
+-	const modelRegistry = await createInMemoryModelRegistry(authStorage);
++	const modelRegistry = await createInMemoryModelRegistry(authStorage, fauxProvider.models);
 +	const modelRuntime = getModelRuntime(modelRegistry);
  	if (withConfiguredAuth) {
  		modelRegistry.registerProvider(model.provider, {
@@ -3004,10 +3372,10 @@ index 5f003241e8120d74213785039e2ec77c72e6564a..97893daf1c629ab6f63bf9f8ffeb12bb
  		initialActiveToolNames: options.initialActiveToolNames,
 diff --git a/packages/coding-agent/test/suite/regressions/153-execution-profile.test.ts b/packages/coding-agent/test/suite/regressions/153-execution-profile.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..dfb4a6c7b333161ebf85adcc79dab666705fa5a9
+index 0000000..38b2917
 --- /dev/null
 +++ b/packages/coding-agent/test/suite/regressions/153-execution-profile.test.ts
-@@ -0,0 +1,1475 @@
+@@ -0,0 +1,1519 @@
 +import type { AgentTool, StreamFn } from "@earendil-works/pi-agent-core";
 +import * as aiRoot from "@earendil-works/pi-ai";
 +import {
@@ -3021,6 +3389,8 @@ index 0000000000000000000000000000000000000000..dfb4a6c7b333161ebf85adcc79dab666
 +import { Type } from "typebox";
 +import { afterEach, describe, expect, it, vi } from "vitest";
 +import { VERSION } from "../../../src/config.ts";
++import { ModelRuntime } from "../../../src/core/model-runtime.ts";
++import { InMemoryCodingAgentModelsStore } from "../../../src/core/models-store.ts";
 +import type { ExecutionProfile, ExecutionProfileResolver, ExtensionAPI } from "../../../src/index.ts";
 +import { createHarness, type Harness } from "../harness.ts";
 +
@@ -3190,7 +3560,7 @@ index 0000000000000000000000000000000000000000..dfb4a6c7b333161ebf85adcc79dab666
 +	});
 +
 +	it("exposes the patched build identity without exposing the capability creator", () => {
-+		expect(VERSION).toBe("0.81.1+qq.execution-profile.1");
++		expect(VERSION).toBe("0.81.1+qq.execution-profile.2");
 +		expect("createExecutionProfileCapabilities" in aiRoot).toBe(false);
 +		expect(typeof aiRoot.isExecutionProfileCapabilities).toBe("function");
 +	});
@@ -3359,6 +3729,48 @@ index 0000000000000000000000000000000000000000..dfb4a6c7b333161ebf85adcc79dab666
 +
 +		await expect(harness.session.prompt("hello")).rejects.toThrow(error);
 +		expect(harness.faux.state.callCount).toBe(0);
++	});
++
++	it("uses the canonical built-in model instead of a persisted remote-catalog replacement", async () => {
++		const baseline = await ModelRuntime.create({ modelsPath: null, allowModelNetwork: false });
++		const selection = {
++			provider: "kimi-coding",
++			model: "k3",
++			effort: "max",
++			serviceClass: "provider-default",
++		} as const;
++		const canonical = baseline.validateExecutionProfile(selection).model;
++		const modelsStore = new InMemoryCodingAgentModelsStore();
++		await modelsStore.write("kimi-coding", {
++			models: [{ ...canonical, baseUrl: "https://example.invalid", name: "Remote replacement" }],
++			lastModified: Date.now() + 1_000_000,
++		});
++		const runtime = await ModelRuntime.create({ modelsPath: null, modelsStore, allowModelNetwork: false });
++
++		expect(runtime.getModel("kimi-coding", "k3")?.baseUrl).toBe("https://example.invalid");
++		const validated = runtime.validateExecutionProfile(selection).model;
++		expect(validated.baseUrl).toBe(canonical.baseUrl);
++		expect(validated.name).toBe(canonical.name);
++		expect(validated.executionProfile).toBe(canonical.executionProfile);
++	});
++
++	it("rejects a supported provider overlay that retains built-in capability", async () => {
++		const runtime = await ModelRuntime.create({ modelsPath: null, allowModelNetwork: false });
++		const selection = {
++			provider: "kimi-coding",
++			model: "k3",
++			effort: "max",
++			serviceClass: "provider-default",
++		} as const;
++		expect(runtime.validateExecutionProfile(selection).model.id).toBe("k3");
++		runtime.registerProvider("kimi-coding", {
++			baseUrl: "https://example.invalid",
++			apiKey: "not-used",
++		});
++
++		expect(() => runtime.validateExecutionProfile(selection)).toThrow(
++			"Execution profile provider provenance conflict for kimi-coding/k3",
++		);
 +	});
 +
 +	it("rejects a custom OpenAI-compatible model without profile capability before the provider", async () => {

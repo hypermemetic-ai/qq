@@ -30,13 +30,13 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any, BinaryIO
 
 
-ENGINE_VERSION = 2
+ENGINE_VERSION = 3
 ARTIFACT_SCHEMA_VERSION = 1
 CACHE_SCHEMA_VERSION = 2
 ARTIFACT_WRAPPER = "qq-pi-runtime"
 BUILD_WORKSPACE_NAME = ".build-workspace-v1"
 MANIFEST_RELATIVE_PATH = Path("patches/pi/v0.81.1/manifest.json")
-EXPECTED_REPORTED_IDENTITY = "0.81.1+qq.execution-profile.1"
+EXPECTED_REPORTED_IDENTITY = "0.81.1+qq.execution-profile.2"
 EXPECTED_PLATFORM = "linux-x64"
 _SHA256_LENGTH = 64
 
@@ -145,6 +145,7 @@ def _validate_manifest(manifest: Mapping[str, Any], manifest_path: Path, reposit
             "supportedPlatforms",
             "offlineModelData",
             "buildToolchain",
+            "trustedPriorProvenanceSha256",
             "changedUpstreamPaths",
         },
     )
@@ -234,6 +235,12 @@ def _validate_manifest(manifest: Mapping[str, Any], manifest_path: Path, reposit
     _require_https_url(bun["url"], "Bun URL")
     _require_sha256(bun["sha256"], "Bun digest")
     _safe_leaf(bun["topLevelDirectory"], "Bun top-level directory")
+
+    prior_provenance = root["trustedPriorProvenanceSha256"]
+    if not isinstance(prior_provenance, list) or prior_provenance != sorted(set(prior_provenance)):
+        raise RuntimeFailure("trustedPriorProvenanceSha256 must be a sorted unique list")
+    for index, value in enumerate(prior_provenance):
+        _require_sha256(value, f"trusted prior provenance digest {index}")
 
     changed_paths = root["changedUpstreamPaths"]
     if not isinstance(changed_paths, list) or not changed_paths or changed_paths != sorted(set(changed_paths)):
@@ -1156,7 +1163,7 @@ class RuntimeEngine:
         if not bundle.is_dir() or bundle.is_symlink():
             raise RuntimeFailure("artifact bundle must be a real directory")
         _normalize_bundle_modes(bundle)
-        self._check_binary_identity(bundle / "pi", output.parent)
+        self._check_binary_identity(bundle / "pi", output.parent, self.manifest["patchedIdentity"]["reportedVersion"])
         artifact_manifest = {
             "schemaVersion": ARTIFACT_SCHEMA_VERSION,
             "provenance": self._provenance(),
@@ -1196,6 +1203,25 @@ class RuntimeEngine:
                 bundle = self._run_build_commands(source_root, node, npm_cli, bun, environment)
                 return self.create_artifact(bundle, output)
 
+    def _artifact_identity(self, provenance: Any) -> str:
+        provenance_root = _require_object(provenance, "artifact provenance", set(provenance) if isinstance(provenance, dict) else set())
+        current = self._provenance()
+        if provenance_root != current:
+            provenance_digest = _sha256_bytes(_canonical_json(provenance_root))
+            if provenance_digest not in self.manifest["trustedPriorProvenanceSha256"]:
+                raise RuntimeFailure("artifact provenance is neither current nor an exact trusted prior generation")
+        identity = _require_object(
+            provenance_root.get("patchedIdentity"),
+            "artifact patched identity",
+            {"packageVersion", "buildIdentity", "reportedVersion"},
+        )
+        package_version = _require_string(identity["packageVersion"], "artifact package version")
+        build_identity = _require_string(identity["buildIdentity"], "artifact build identity")
+        reported_version = _require_string(identity["reportedVersion"], "artifact reported version")
+        if reported_version != f"{package_version}+{build_identity}":
+            raise RuntimeFailure("artifact patched identity is inconsistent")
+        return reported_version
+
     def _load_artifact_manifest(self, wrapper: Path) -> tuple[dict[str, Any], bytes]:
         manifest_path = wrapper / "manifest.json"
         if manifest_path.is_symlink() or not manifest_path.is_file():
@@ -1214,8 +1240,7 @@ class RuntimeEngine:
         )
         if root["schemaVersion"] != ARTIFACT_SCHEMA_VERSION:
             raise RuntimeFailure("unsupported artifact schema")
-        if root["provenance"] != self._provenance():
-            raise RuntimeFailure("artifact provenance does not equal the current Repository manifest")
+        self._artifact_identity(root["provenance"])
         if not isinstance(root["inventory"], list):
             raise RuntimeFailure("artifact inventory must be a list")
         return dict(root), manifest_bytes
@@ -1235,7 +1260,7 @@ class RuntimeEngine:
         ):
             raise RuntimeFailure("artifact inventory does not contain one executable Pi binary")
 
-    def _check_binary_identity(self, binary: Path, temporary_parent: Path | None) -> None:
+    def _check_binary_identity(self, binary: Path, temporary_parent: Path | None, expected: str) -> None:
         if not binary.is_file() or binary.is_symlink() or not os.access(binary, os.X_OK):
             raise RuntimeFailure("Pi binary is absent, linked, or non-executable")
         if temporary_parent is not None:
@@ -1256,7 +1281,6 @@ class RuntimeEngine:
                 )
             except (OSError, subprocess.SubprocessError) as error:
                 raise RuntimeFailure(f"Pi binary identity probe failed: {error}") from error
-        expected = self.manifest["patchedIdentity"]["reportedVersion"]
         if result.stdout.strip() != expected:
             raise RuntimeFailure(f"Pi binary identity is not exactly {expected}")
 
@@ -1268,7 +1292,8 @@ class RuntimeEngine:
         artifact_manifest, manifest_bytes = self._load_artifact_manifest(wrapper)
         bundle = wrapper / "bundle"
         self._verify_inventory(bundle, artifact_manifest["inventory"])
-        self._check_binary_identity(bundle / "pi", extraction.parent)
+        identity = self._artifact_identity(artifact_manifest["provenance"])
+        self._check_binary_identity(bundle / "pi", extraction.parent, identity)
         return wrapper, artifact_manifest, manifest_bytes
 
     def _extract_and_inspect(self, artifact: Path, parent: Path) -> tuple[Path, Path, dict[str, Any], bytes]:
@@ -1289,7 +1314,7 @@ class RuntimeEngine:
                 "artifact": str(artifact.resolve()),
                 "artifactSha256": _sha256_file(artifact.resolve()),
                 "generation": _sha256_bytes(manifest_bytes),
-                "identity": self.manifest["patchedIdentity"]["reportedVersion"],
+                "identity": self._artifact_identity(_manifest["provenance"]),
                 "valid": True,
             }
 
@@ -1326,7 +1351,7 @@ class RuntimeEngine:
             if stat.S_IMODE(info.st_mode) & 0o022:
                 raise RuntimeFailure(f"active generation has group/world-writable path: {relative}")
 
-    def _verify_generation(self, generation: str, path: Path, identity_temporary_parent: Path | None) -> Path:
+    def _verify_generation(self, generation: str, path: Path, identity_temporary_parent: Path | None) -> tuple[Path, str]:
         if path.name != generation or not path.is_dir() or path.is_symlink():
             raise RuntimeFailure("generation target is not a real confined directory")
         self._verify_owner_modes(path)
@@ -1339,8 +1364,9 @@ class RuntimeEngine:
         bundle = path / "bundle"
         self._verify_inventory(bundle, artifact_manifest["inventory"])
         binary = bundle / "pi"
-        self._check_binary_identity(binary, identity_temporary_parent)
-        return binary.resolve(strict=True)
+        identity = self._artifact_identity(artifact_manifest["provenance"])
+        self._check_binary_identity(binary, identity_temporary_parent, identity)
+        return binary.resolve(strict=True), identity
 
     def _atomic_symlink(self, target: str, link: Path) -> None:
         temporary = self.spec.data_root / f".{link.name}.tmp-{uuid.uuid4().hex}"
@@ -1380,16 +1406,18 @@ class RuntimeEngine:
                     return {
                         "generation": generation,
                         "binary": str((target / "bundle" / "pi").resolve()),
+                        "identity": self._artifact_identity(_artifact_manifest["provenance"]),
                         "activated": False,
                         "idempotent": True,
                     }
                 if current is not None:
                     self._atomic_symlink(f"generations/{current[0]}", self.spec.data_root / "previous")
                 self._atomic_symlink(f"generations/{generation}", self.spec.data_root / "current")
-                binary = self._verify_generation(generation, target, self.spec.data_root)
+                binary, identity = self._verify_generation(generation, target, self.spec.data_root)
                 return {
                     "generation": generation,
                     "binary": str(binary),
+                    "identity": identity,
                     "activated": True,
                     "idempotent": False,
                 }
@@ -1401,11 +1429,11 @@ class RuntimeEngine:
         self._generation_root(create=False)
         current = self._read_generation_link("current", required=True)
         assert current is not None
-        binary = self._verify_generation(*current, identity_temporary_parent)
+        binary, identity = self._verify_generation(*current, identity_temporary_parent)
         return {
             "generation": current[0],
             "binary": str(binary),
-            "identity": self.manifest["patchedIdentity"]["reportedVersion"],
+            "identity": identity,
             "valid": True,
         }
 
@@ -1420,8 +1448,8 @@ class RuntimeEngine:
             current = self._read_generation_link("current", required=True)
             previous = self._read_generation_link("previous", required=True)
             assert current is not None and previous is not None
-            current_binary = self._verify_generation(*current, self.spec.data_root)
-            previous_binary = self._verify_generation(*previous, self.spec.data_root)
+            current_binary, _current_identity = self._verify_generation(*current, self.spec.data_root)
+            previous_binary, _previous_identity = self._verify_generation(*previous, self.spec.data_root)
             if current[0] == previous[0]:
                 raise RuntimeFailure("current and previous generations are identical")
             del current_binary, previous_binary

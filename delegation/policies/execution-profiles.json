@@ -1,0 +1,38 @@
+{
+  "architect": {
+    "provider": "openai-codex",
+    "model": "gpt-5.6-sol",
+    "effort": "xhigh",
+    "serviceClass": "provider-default"
+  },
+  "implementer": {
+    "provider": "openai-codex",
+    "model": "gpt-5.6-sol",
+    "effort": "xhigh",
+    "serviceClass": "provider-default"
+  },
+  "observer": {
+    "provider": "kimi-coding",
+    "model": "k3",
+    "effort": "max",
+    "serviceClass": "provider-default"
+  },
+  "orchestrator": {
+    "provider": "openai-codex",
+    "model": "gpt-5.6-sol",
+    "effort": "xhigh",
+    "serviceClass": "provider-default"
+  },
+  "researcher": {
+    "provider": "openai-codex",
+    "model": "gpt-5.6-sol",
+    "effort": "xhigh",
+    "serviceClass": "provider-default"
+  },
+  "reviewer": {
+    "provider": "openai-codex",
+    "model": "gpt-5.6-sol",
+    "effort": "xhigh",
+    "serviceClass": "provider-default"
+  }
+}

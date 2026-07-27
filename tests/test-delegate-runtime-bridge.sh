@@ -39,17 +39,17 @@ for skill in "$REVIEW_SKILL" "$DELEGATE_SKILL"; do
     "one-step chain syntax returned in $skill"
 done
 
-source_pin='git:github.com/hypermemetic-ai/pi-subagents@9e045ed75e09a163afa17271e55150ed1e8369df'
-base='e2a125ee09c2e9ec61b2f6e11f9c2fa887398a39'
-fork_commit='9e045ed75e09a163afa17271e55150ed1e8369df'
-rollback_commit='b7c531c238469e43866a1fe6697cb44279158c1c'
+source_pin='git:github.com/hypermemetic-ai/pi-subagents@f8f0ef71ef70606288e34e10b14949c730cf9dcf'
+base='9e045ed75e09a163afa17271e55150ed1e8369df'
+fork_commit='f8f0ef71ef70606288e34e10b14949c730cf9dcf'
+rollback_commit='9e045ed75e09a163afa17271e55150ed1e8369df'
 settings_filter='[(.packages // [])[] | (if type == "string" then . else .source? // empty end) | select(. == $source)] == [$source]'
 
 assert_file_contains "$README" "$source_pin"
 assert_file_contains "$README" "$base"
 assert_file_contains "$README" "$fork_commit"
-assert_file_contains "$README" 'The fork commit'
-assert_file_contains "$README" 'sole parent is the exact reviewed upstream'
+assert_file_contains "$README" 'The fork commit extends the previous exact reviewed fork pin'
+assert_file_contains "$README" 'whose parent is the exact'
 assert_file_contains "$README" 'https://github.com/hypermemetic-ai/pi-subagents'
 assert_file_contains "$README" "$rollback_commit"
 assert_file_contains "$README" 'PI_SUBAGENT_TRUSTED_AGENT_PATHS'
@@ -176,7 +176,9 @@ assert_file_contains "$README" 'test ! -e /var/tmp/.agents'
 assert_file_contains "$README" 'test ! -e /var/tmp/.pi'
 assert_file_contains "$README" 'mktemp -d /var/tmp/pi-subagents-test.XXXXXX'
 assert_file_contains "$README" 'env -u PI_SUBAGENT_PI_BINARY -u PI_SUBAGENT_EXTRA_AGENT_DIRS'
-assert_file_contains "$README" '-u PI_SUBAGENT_TRUSTED_AGENT_PATHS -u QQ_DISPATCH_RUNTIME_ROOT'
+assert_file_contains "$README" '-u PI_SUBAGENT_TRUSTED_AGENT_PATHS -u PI_SUBAGENT_TRUSTED_AGENT_KEYS'
+assert_file_contains "$README" '-u PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES -u PI_SUBAGENT_TRUSTED_EXECUTION_ROLE'
+assert_file_contains "$README" '-u PI_SUBAGENT_EXECUTION_PROFILE_RECEIPT -u QQ_DISPATCH_RUNTIME_ROOT'
 assert_file_contains "$README" '-u PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE'
 assert_file_contains "$README" '-u PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA TMPDIR="$test_root"'
 assert_file_contains "$README" 'Moving refs and `pi update` or other automatic'

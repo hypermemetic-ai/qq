@@ -37,6 +37,9 @@ function recordingPi() {
       registerCommand(command) {
         registrations.push(`command:${command}`);
       },
+      registerExecutionProfileResolver() {
+        registrations.push("execution-profile-resolver");
+      },
       on(eventName) {
         registrations.push(`listener:${eventName}`);
       },

@@ -12,15 +12,15 @@ EXT="$ROOT/extensions/qq-subagent-env.ts"
 
 [ -f "$EXT" ] || fail "missing extension: $EXT"
 
-# Structural guards: adapter and trusted-seat vars, set only when unset,
-# resolved from the checkout root via the extension's own location.
+# Structural guards: adapter and trusted-seat authority is overwritten from
+# the governed checkout; runtime-root placement remains operator-overridable.
 assert_file_contains "$EXT" 'PI_SUBAGENT_PI_BINARY'
 assert_file_contains "$EXT" 'PI_SUBAGENT_EXTRA_AGENT_DIRS'
 assert_file_contains "$EXT" 'PI_SUBAGENT_TRUSTED_AGENT_PATHS'
+assert_file_contains "$EXT" 'PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES'
 assert_file_contains "$EXT" 'QQ_DISPATCH_RUNTIME_ROOT'
-assert_file_contains "$EXT" 'process.env.PI_SUBAGENT_PI_BINARY === undefined'
-assert_file_contains "$EXT" 'process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS === undefined'
-assert_file_contains "$EXT" 'process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS === undefined'
+assert_file_not_matches "$EXT" 'process\.env\.PI_SUBAGENT_(PI_BINARY|EXTRA_AGENT_DIRS|TRUSTED_AGENT_PATHS) === undefined' \
+  'delegated authority became caller-overridable'
 assert_file_contains "$EXT" 'process.env.QQ_DISPATCH_RUNTIME_ROOT === undefined'
 assert_file_contains "$EXT" 'pi-subagents-uid-'
 assert_file_contains "$EXT" '"bin/qq-dispatch"'
@@ -62,6 +62,7 @@ fs.writeFileSync(path.join(cfgDir, "config.json"), JSON.stringify({ defaultSessi
 delete process.env.PI_SUBAGENT_PI_BINARY;
 delete process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS;
 delete process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS;
+delete process.env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES;
 delete process.env.QQ_DISPATCH_RUNTIME_ROOT;
 process.chdir(root);
 const mod = await import(pathToFileURL(ext).href);
@@ -82,6 +83,11 @@ assertEq(
   }),
   "PI_SUBAGENT_TRUSTED_AGENT_PATHS",
 );
+assertEq(
+  process.env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES,
+  "__qq_execution_profile_resolver_required__",
+  "trusted execution profiles start poisoned",
+);
 const uid = process.getuid?.() ?? process.geteuid?.();
 if (uid === undefined) die("test runtime has no uid source");
 assertEq(
@@ -98,16 +104,24 @@ const second = await import(pathToFileURL(ext).href + "?second");
 second.default(pi);
 assertEq(fs.statSync(sessRoot).mode & 0o777, 0o700, "session root tightened");
 
-// Explicit operator env wins, including an explicit empty value.
-process.env.PI_SUBAGENT_PI_BINARY = "/tmp/operator-override";
+// Caller environment cannot override delegated authority. Runtime-root
+// placement remains an explicit operator-owned override.
+process.env.PI_SUBAGENT_PI_BINARY = "/tmp/caller-override";
 process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS = "";
 process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS = "{}";
+process.env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES = "{}";
 process.env.QQ_DISPATCH_RUNTIME_ROOT = "/tmp/operator-runtime-override";
 const third = await import(pathToFileURL(ext).href + "?third");
 third.default(pi);
-assertEq(process.env.PI_SUBAGENT_PI_BINARY, "/tmp/operator-override", "operator override preserved");
-assertEq(process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS, "", "explicit empty override preserved");
-assertEq(process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS, "{}", "trusted-path override preserved");
+assertEq(process.env.PI_SUBAGENT_PI_BINARY, `${root}/bin/qq-dispatch`, "dispatcher override rejected");
+assertEq(process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS, `${root}/delegation/manifests/agents`, "manifest override rejected");
+assertEq(process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS, JSON.stringify({
+  implementer: `${root}/delegation/manifests/agents/implementer.md`,
+  observer: `${root}/delegation/manifests/agents/observer.md`,
+  researcher: `${root}/delegation/manifests/agents/researcher.md`,
+  reviewer: `${root}/delegation/manifests/agents/reviewer.md`,
+}), "trusted-path override rejected");
+assertEq(process.env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES, "__qq_execution_profile_resolver_required__", "profile override rejected");
 assertEq(
   process.env.QQ_DISPATCH_RUNTIME_ROOT,
   "/tmp/operator-runtime-override",
@@ -120,6 +134,7 @@ process.chdir(unrelated);
 delete process.env.PI_SUBAGENT_PI_BINARY;
 delete process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS;
 delete process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS;
+delete process.env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES;
 delete process.env.QQ_DISPATCH_RUNTIME_ROOT;
 const unrelatedRoot = path.join(os.tmpdir(), `pi-subagent-unrelated-${process.pid}`);
 fs.writeFileSync(path.join(cfgDir, "config.json"), JSON.stringify({ defaultSessionDir: unrelatedRoot }));
@@ -127,6 +142,7 @@ const unrelatedModule = await import(pathToFileURL(ext).href + "?unrelated");
 unrelatedModule.default(pi);
 if (process.env.PI_SUBAGENT_PI_BINARY !== undefined || process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS !== undefined
   || process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS !== undefined
+  || process.env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES !== undefined
   || process.env.QQ_DISPATCH_RUNTIME_ROOT !== undefined || fs.existsSync(unrelatedRoot)) {
   die("unrelated project did not remain vanilla");
 }
@@ -146,6 +162,7 @@ assertEq(process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS, JSON.stringify({
   researcher: `${root}/delegation/manifests/agents/researcher.md`,
   reviewer: `${root}/delegation/manifests/agents/reviewer.md`,
 }), "linked trusted manifests");
+assertEq(process.env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES, "__qq_execution_profile_resolver_required__", "linked profiles poisoned");
 
 // A configured root outside the adapter-accepted set is left untouched.
 const outside = path.join(home, "outside-root");
