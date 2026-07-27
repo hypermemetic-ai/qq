@@ -4,9 +4,11 @@ title: Restore operator-stage guarded-pane verification
 status: In Progress
 assignee: []
 created_date: '2026-07-27 11:34'
-updated_date: '2026-07-27 17:49'
+updated_date: '2026-07-27 17:50'
 labels: []
 dependencies: []
+references:
+  - 'https://github.com/hypermemetic-ai/qq/pull/272'
 modified_files:
   - extensions/qq-operator-stage.ts
   - tests/test-qq-operator-stage-extension.sh
@@ -48,5 +50,11 @@ author: qq
 created: 2026-07-27 17:49
 ---
 2026-07-27 implementation/review evidence — Live Herdr 0.7.5 diagnosis proved the pane-last wait-output invocation was rejected before matching; pane-first invocation observes the exact unsubmitted current input. The fix is one production-line argv reorder (+1/−1; zero decision-point change) plus a state-aware regression. Safe no-execution live probes matched exact staged text, left sentinel effects absent, and proved owned-pane cleanup. Fresh review run 7eb1c7c8-184a-485b-86ea-b5c68113964c returned VERDICT: PASS with no material introduced failures. Harness completion was marked failed only by the recurring missing execution-profile receipt/contradictory structured-output substrate after the verdict.
+---
+
+author: qq
+created: 2026-07-27 17:50
+---
+2026-07-27 delivery — Published reviewed unmerged PR #272 at commit 7d8281c. Merge and installed activation remain operator-owned; DecIQ TASK-65 must not retry operator_stage before activation is verified.
 ---
 <!-- COMMENTS:END -->
