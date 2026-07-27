@@ -44,8 +44,8 @@ use harness-native subagents only beyond plan-bound tools or judgment.
 Keep id/`details.asyncDir`. Inspect only at boundaries: fleet,
 `status.json`, `events.jsonl`, output, and subagent log. No start after ten
 minutes blocks with `no thread after 10m`; terminal nonzero or invalid/missing
-structured output fails. After infrastructure failure, resume with the source
-run's recorded `timeoutMs` and no contract override. Reconstruct from Tasks,
+structured output fails. After infrastructure failure, resume with the
+source run's recorded `timeoutMs` and no contract override. Reconstruct from Tasks,
 artifacts, transcripts, and worktrees.
 
 After the first recognized `/dev/fd` process-substitution or
