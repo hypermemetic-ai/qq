@@ -1156,6 +1156,9 @@ required = [
     root + b"/extensions/qq-aligner.ts",
 ]
 assert all(value in args for value in required), args
+assert b"--no-tools" not in args, args
+tools = args.index(b"--tools")
+assert args[tools + 1] == b"alignment_exchange,create_alignment_artifact,present_alignment,capture_operator_disposition,complete_alignment", args
 PY_ROOT_ARGS
 
 # Caller-selected child identity cannot turn project-home bin/pi into an

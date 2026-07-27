@@ -144,4 +144,5 @@ export QQ_PI_ROOT_PROFILE=qq-root-aligner-v1
 # handler has established the replacement runtime and RPC bridge.
 exec "$runtime" exec -- \
   --no-extensions --extension "$env_extension" --extension "$execution_profile_extension" --extension "$profile_extension" --extension "$vendor_extension" \
-  --no-skills --no-prompt-templates --no-context-files --no-tools "$@"
+  --no-skills --no-prompt-templates --no-context-files \
+  --tools alignment_exchange,create_alignment_artifact,present_alignment,capture_operator_disposition,complete_alignment "$@"

@@ -102,7 +102,7 @@ export default async function register(pi, deps = {}) {
         resumeFromSessionFile: event.previousSessionFile ?? (event.reason === "reload" ? piSessionFile : null),
         sessionReason: event.reason, ...(deps.brokerOptions ?? {}),
       });
-      await broker.initialize(); pi.setActiveTools(TOOLS);
+      await broker.initialize();
     } catch (error) {
       fatal = error instanceof Error ? error.message : String(error); ctx.ui.notify(`qq aligner fail-closed: ${fatal}`, "error"); ctx.shutdown();
     }

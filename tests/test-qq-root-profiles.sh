@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 const root = process.env.ROOT; const scratch = process.env.TMP;
 const alignerPath = join(root, "extensions/qq-aligner.ts"); const alignerPrompt = await readFile(join(root, "delegation/manifests/roots/aligner.md"), "utf8");
+const launcherTools = ["alignment_exchange", "create_alignment_artifact", "present_alignment", "capture_operator_disposition", "complete_alignment"];
 class Bus {
   constructor() { this.handlers = new Map(); this.spawnCount = 0; this.status = "stopped"; this.stopError = null; }
   on(name, fn) { const rows = this.handlers.get(name) ?? []; rows.push(fn); this.handlers.set(name, rows); return () => this.handlers.set(name, rows.filter((row) => row !== fn)); }
@@ -35,7 +36,7 @@ class Bus {
   }
 }
 function harness(label) {
-  const tools = new Map(); const commands = new Map(); const handlers = new Map(); const active = []; const bus = new Bus(); const notices = [];
+  const tools = new Map(); const commands = new Map(); const handlers = new Map(); const active = [...launcherTools]; const bus = new Bus(); const notices = [];
   let shutdowns = 0; let sessionFile = join(scratch, `${label}-root.jsonl`); const stores = new Map([[sessionFile, []]]); let next = 1;
   const entries = () => stores.get(sessionFile) ?? [];
   const pi = {
