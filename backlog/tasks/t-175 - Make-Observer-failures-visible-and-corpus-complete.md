@@ -1,10 +1,10 @@
 ---
 id: T-175
 title: Make Observer failures visible and corpus complete
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-27 07:47'
-updated_date: '2026-07-27 08:32'
+updated_date: '2026-07-27 08:35'
 labels: []
 dependencies: []
 documentation:
@@ -50,7 +50,7 @@ Change only guided corpus assembly, delivery-health classification, bounded Arch
 - [x] #3 verify-delivery distinguishes successfully covered, analysis_failed, and uncovered repository-qualified Changes; failed analysis is never covered and produces explicit unhealthy status.
 - [x] #4 /architect context v3 exposes a bounded informational health surface for failed and pending repository-qualified guided rounds with safe reasons and coordinates, while health rows cannot enter dispositions or masquerade as findings.
 - [x] #5 Repository qualification, immutable evidence, context byte/finding bounds, TOON ingress, occurrence identity, pending intake, and operator disposition authority remain intact.
-- [ ] #6 Focused regressions are reproduced before the fix; applicable Skill, shell, LSP, ratchet, diff, fresh-context review, and GitHub Checks pass in one unmerged PR.
+- [x] #6 Focused regressions are reproduced before the fix; applicable Skill, shell, LSP, ratchet, diff, fresh-context review, and GitHub Checks pass in one unmerged PR.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -64,3 +64,13 @@ Fresh review found one valid P2 Unicode mismatch: Python bounded reasons by code
 
 PR #262 is the sole delivery Change. No live Observer run or pending Architect batch was modified.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented trustworthy Observer corpus and health visibility in PR #262. Guided packages now include every tracked Markdown instruction manifest recursively from the exact merged snapshot, with deterministic evidence that conflicting timeout instruction/policy/runtime facts are co-present. Delivery verification now separates successfully covered, valid analysis-failed, and uncovered Changes and reports failures unhealthy. Architect context v3 carries a bounded, freshness-bound informational health surface for repository-qualified guided failed/pending rounds; health has no occurrence or disposition authority and remains non-vetoing.
+
+All 40 top-level shell suites, focused regressions, shell syntax, both Skill validators, ratchet, diff checks, TypeScript LSP, and PR #262 GitHub shell-tests passed. Fresh complete review found one Unicode boundary defect; it was reproduced, fixed, and the fix delta received fresh PASS. Final implementation commit production delta: net +121 LOC and +26 decision-point lines after the required strict-shrink pass.
+
+Explicitly excluded: T-134.1 timeout correction, T-164, pending batch retry/mutation, live artifact rewriting, ranking/cap changes, and auto-remediation.
+<!-- SECTION:FINAL_SUMMARY:END -->
