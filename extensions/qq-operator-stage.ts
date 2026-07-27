@@ -233,13 +233,13 @@ export default function register(pi, deps = {}) {
           [
             "pane",
             "wait-output",
+            paneId,
             "--source",
             "recent-unwrapped",
             "--timeout",
             "5000",
             "--match",
             line,
-            paneId,
           ],
           { signal },
         );
