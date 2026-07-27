@@ -26,6 +26,7 @@ assert_file_contains "$EXT" 'pi-subagents-uid-'
 assert_file_contains "$EXT" '"bin/qq-dispatch"'
 assert_file_contains "$EXT" '"delegation",'
 assert_file_contains "$EXT" 'fileURLToPath(import.meta.url)'
+assert_file_contains "$EXT" 'process.env.QQ_PI_ROOT_PROFILE === "qq-root-aligner-v1" ? QQ_ROOT : root'
 
 # The extension establishes the pi-subagents session root at session start
 # (created mode 700 when absent, tightened when operator-owned and loose) so

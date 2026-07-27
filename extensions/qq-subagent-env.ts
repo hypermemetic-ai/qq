@@ -43,7 +43,7 @@ function governedRoot(): string | undefined {
   const root = resolve(current);
   const qqCommon = gitText(QQ_ROOT, "rev-parse", "--path-format=absolute", "--git-common-dir");
   const currentCommon = gitText(root, "rev-parse", "--path-format=absolute", "--git-common-dir");
-  if (qqCommon && currentCommon && resolve(qqCommon) === resolve(currentCommon)) return root;
+  if (qqCommon && currentCommon && resolve(qqCommon) === resolve(currentCommon)) return process.env.QQ_PI_ROOT_PROFILE === "qq-root-aligner-v1" ? QQ_ROOT : root;
   try {
     const agents = join(root, "AGENTS.md");
     if (lstatSync(agents).isSymbolicLink() && realpathSync(agents) === realpathSync(join(QQ_ROOT, "AGENTS.md"))) {

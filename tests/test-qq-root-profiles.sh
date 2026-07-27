@@ -28,7 +28,7 @@ class Bus {
       }
       const data = value.method === "spawn" ? { details: { runId } } : value.method === "stop" ? { runId, state: "stopping" }
         : value.params?.id ? { text: `Run: ${runId}\nState: ${this.status}`, details: { mode: "management", results: [] } }
-        : { text: this.spawnCount > 0 && this.status === "running" ? `Active async runs: ${this.spawnCount}` : "No active async runs.", details: { mode: "single", results: [] } };
+        : { text: `Spawn budget: unlimited\n${this.spawnCount > 0 && this.status === "running" ? `Active async runs: ${this.spawnCount}` : "No active async runs."}`, details: { mode: "single", results: [] } };
       queueMicrotask(() => this.emit(`subagents:rpc:v1:reply:${value.requestId}`, { version: 1, requestId: value.requestId, success: true, data })); return;
     }
     for (const fn of this.handlers.get(name) ?? []) fn(value);
