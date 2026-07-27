@@ -7,6 +7,7 @@
 # qq-local runtime state
 .qq/
 .pi-subagents/
+/node_modules/
 
 # retired knowledge-layer plugin residue — the code graph now lives out-of-repo
 # (codebase-memory-mcp, ~/.cache); nothing under here is ever tracked again
