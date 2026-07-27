@@ -14,14 +14,16 @@ the Change and code without inheriting the author's conclusions.
    merge-base. Include committed, staged, unstaged, and untracked work.
 2. Compare the Change with reconciled intent, inclusions, ownership boundary,
    and non-goals. Conflicting intent or a crossed boundary returns to alignment.
-3. Write a complete temporary review brief with Repository path, base, head,
-   tree state, objective and layer; a categorized changed-path map; intent and
-   acceptance criteria; boundary and non-goals; the threat model beside its
-   declared trust boundaries, defended modes, and declined classes; unenforced
-   rules; consulted sources and facts; Check results; reviewer permissions; the
-   required file, line, failure-path, and evidence shape; and the context-gap
-   condition. Give coordinates and facts, never dumps, suspected findings,
-   author conclusions, or transcript. `REVIEW.md` supplies owned rules.
+3. Write a complete temporary review brief with Repository/base/head/tree;
+   objective/layer; changed-path map; intent/acceptance; boundary/non-goals;
+   threat model with trust boundaries, defended modes, and declined classes;
+   unenforced rules; sources/facts; Check results; permissions; required finding
+   evidence; and context-gap condition. Require reviewer-created temporary
+   files, redirected logs, generated helpers, caches (including npm), and
+   reviewer-runnable test scratch beneath confinement-provided `$TMPDIR`;
+   never literal `/tmp` or worktree-local scratch. Give coordinates and facts,
+   never dumps, suspected findings, author
+   conclusions, or transcript. `REVIEW.md` supplies owned rules.
 4. Dispatch env and dispatcher config: per README Install.
 
    Use primary-`main`; never Change copies. `cwd` selects same-Repository
