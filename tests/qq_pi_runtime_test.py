@@ -963,6 +963,10 @@ class RuntimeTests(unittest.TestCase):
             "QQ_LANDSTRIP_BIN": str(landstrip),
             "QQ_DISPATCH_RUNTIME_ROOT": str(runtime_root),
             "QQ_DISPATCH_TIMEOUT": "5s",
+            "PI_SUBAGENT_TRUSTED_AGENT_PATHS": json.dumps({
+                role: str(ROOT / "delegation/manifests/agents" / f"{role}.md")
+                for role in ("implementer", "observer", "researcher", "reviewer")
+            }),
             "PI_SUBAGENT_CHILD_AGENT": "reviewer",
             "PI_SUBAGENT_RUN_ID": "runtime-path-test",
             "PI_SUBAGENT_CHILD_INDEX": "0",

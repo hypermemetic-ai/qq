@@ -197,6 +197,57 @@ if ! qq_resolve_bin node; then
 fi
 node_binary="$QQ_BIN_RESULT"
 
+canonical_manifest="$adapter_worktree/delegation/manifests/agents/$role.md"
+if ! timeout_spec="$({ "$node_binary" - "$role" "$canonical_manifest" <<'NODE'
+const fs = require("node:fs");
+const role = process.argv[2];
+const expected = process.argv[3];
+const refuse = (message) => { process.stderr.write(message); process.exit(1); };
+
+const rawPaths = process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS;
+if (!rawPaths) refuse("PI_SUBAGENT_TRUSTED_AGENT_PATHS is required");
+let trustedPaths;
+try { trustedPaths = JSON.parse(rawPaths); }
+catch { refuse("PI_SUBAGENT_TRUSTED_AGENT_PATHS must be valid JSON"); }
+if (!trustedPaths || Array.isArray(trustedPaths) || typeof trustedPaths !== "object")
+  refuse("PI_SUBAGENT_TRUSTED_AGENT_PATHS must be a JSON object");
+if (!Object.prototype.hasOwnProperty.call(trustedPaths, role)
+    || typeof trustedPaths[role] !== "string" || !trustedPaths[role])
+  refuse(`trusted manifest path for ${role} is required`);
+const manifest = trustedPaths[role];
+if (manifest !== expected)
+  refuse(`trusted manifest path for ${role} does not match the canonical path`);
+
+let source;
+try {
+  const state = fs.lstatSync(manifest);
+  if (!state.isFile() || fs.realpathSync(manifest) !== manifest) throw new Error();
+  source = fs.readFileSync(manifest, "utf8");
+} catch { refuse(`trusted manifest path for ${role} is unsafe or unavailable`); }
+
+const lines = source.split("\n");
+const frontmatterEnd = lines.indexOf("---", 1);
+if (lines[0] !== "---" || frontmatterEnd < 0)
+  refuse(`trusted manifest for ${role} has malformed YAML frontmatter`);
+const declarations = lines.slice(1, frontmatterEnd)
+  .filter((line) => line.includes("timeoutMs"));
+if (declarations.length !== 1 || !/^timeoutMs:/.test(declarations[0]))
+  refuse(`trusted manifest for ${role} must contain exactly one timeoutMs declaration`);
+const match = /^timeoutMs:\s*([1-9][0-9]*)\s*$/.exec(declarations[0]);
+if (!match) refuse(`trusted manifest for ${role} timeoutMs must be a positive integer`);
+const milliseconds = Number(match[1]);
+if (!Number.isSafeInteger(milliseconds))
+  refuse(`trusted manifest for ${role} timeoutMs cannot be converted losslessly`);
+const wholeSeconds = Math.floor(milliseconds / 1000);
+const remainder = milliseconds % 1000;
+const fraction = remainder
+  ? `.${String(remainder).padStart(3, "0").replace(/0+$/, "")}` : "";
+process.stdout.write(`${wholeSeconds}${fraction}s`);
+NODE
+} 2>&1)"; then
+  fail 71 "$timeout_spec"
+fi
+
 if [[ -n "${QQ_LANDSTRIP_BIN:-}" ]]; then
   if ! qq_resolve_bin landstrip; then
     fail 69 "$QQ_BIN_ERROR"
@@ -222,9 +273,11 @@ if ! landstrip_version="$("$landstrip_binary" --version 2>&1)"; then
   fail 69 "Landstrip version probe failed: $landstrip_version"
 fi
 
-timeout_spec="${QQ_DISPATCH_TIMEOUT:-30m}"
-[[ "$timeout_spec" =~ ^(0\.[0-9]+|[1-9][0-9]*(\.[0-9]+)?)([smhd])?$ ]] \
-  || fail 71 "invalid QQ_DISPATCH_TIMEOUT '$timeout_spec'"
+if [[ -v QQ_DISPATCH_TIMEOUT ]]; then
+  timeout_spec="$QQ_DISPATCH_TIMEOUT"
+  [[ "$timeout_spec" =~ ^(0\.[0-9]+|[1-9][0-9]*(\.[0-9]+)?)([smhd])?$ ]] \
+    || fail 71 "invalid QQ_DISPATCH_TIMEOUT '$timeout_spec'"
+fi
 if ! qq_resolve_bin timeout; then
   fail 71 "$QQ_BIN_ERROR"
 fi

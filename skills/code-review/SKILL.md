@@ -30,7 +30,7 @@ the Change and code without inheriting the author's conclusions.
 
    ```ts
    const completionEnvelopeSchema=JSON.parse(readFileSync("<absolute-change-worktree>/delegation/manifests/completion-envelope.schema.json","utf8"))
-   subagent({agent:"reviewer",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema,acceptance:{level:"none",reason:"per the manifests"},cwd:"<absolute-change-worktree>",context:"fresh",async:true,timeoutMs:900000})
+   subagent({agent:"reviewer",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema,acceptance:{level:"none",reason:"per the manifests"},cwd:"<absolute-change-worktree>",context:"fresh",async:true})
    ```
 
    Paths absolute; brief temporary. Pi-subagents owns lifecycle/artifacts;
@@ -62,7 +62,7 @@ the Change and code without inheriting the author's conclusions.
    Rerun affected Checks and review the fix delta.
 3. A finding class fixed in two prior rounds trips the convergence breaker:
    halt at the last green state and ask which layer owns the invariant.
-4. Infrastructure failure (sandbox/API error or intact-session timeout): resume
-   with `timeoutMs:900000` and no other contract override. Formed findings,
-   invalid output, or context gap dispatch fresh. Never narrow scope or intent;
-   repeated failure blocks.
+4. On infrastructure failure, resume
+   with the source run's recorded `timeoutMs` and no other contract override.
+   Dispatch formed findings, invalid output, and context gaps fresh; repeated
+   failure blocks.

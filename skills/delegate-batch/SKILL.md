@@ -35,7 +35,7 @@ worktrees.
 
 ```ts
 const completionEnvelopeSchema=JSON.parse(readFileSync("<absolute-worktree>/delegation/manifests/completion-envelope.schema.json","utf8"))
-subagent({agent:"implementer",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema,acceptance:{level:"none",reason:"per the manifests"},cwd:"<absolute-worktree>",context:"fresh",async:true,timeoutMs:1800000})
+subagent({agent:"implementer",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema,acceptance:{level:"none",reason:"per the manifests"},cwd:"<absolute-worktree>",context:"fresh",async:true})
 ```
 
 Use only absolute paths: the task points to the work order, `cwd` to its
@@ -47,10 +47,10 @@ plan bound.
 Keep returned id/`details.asyncDir`. Inspect once at natural boundaries, never
 poll: id/fleet status, `status.json`, `events.jsonl`, live
 `output-<index>.log`, `subagent-log-<run-id>.md`. No start after ten minutes
-blocks with `no thread after 10m`. Terminal nonzero or missing/invalid
-structured output fails dispatch. Resume intact children after infrastructure
-failure with `timeoutMs:1800000` and no contract override. Reconstruct
-dispatcher loss from Tasks, native artifacts, transcripts, worktrees.
+blocks with `no thread after 10m`. Terminal nonzero or missing/invalid output
+fails dispatch. After infrastructure failure, resume with
+the source run's recorded `timeoutMs` and no contract override. Reconstruct
+from Tasks, artifacts, transcripts, worktrees.
 
 Confined child suite runs are best-effort: Landlock cannot pass
 `/dev/fd` process substitution; report those as `inconclusive-under-substrate`.

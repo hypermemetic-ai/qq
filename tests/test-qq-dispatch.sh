@@ -22,7 +22,8 @@ export HOME="$test_home"
 export TMPDIR="$parent_tmp"
 export XDG_CACHE_HOME="$tmp/xdg-cache"
 export XDG_DATA_HOME="$tmp/xdg-data"
-unset PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE
+export PYTHONDONTWRITEBYTECODE=1
+unset PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA
 
 # The adapter requires the dispatcher-side pi-subagents config to name the
 # session root (README Install); stage it for every dispatch in this suite.
@@ -50,6 +51,11 @@ for role in implementer observer reviewer researcher; do
   manifest="$ROOT/delegation/manifests/agents/$role.md"
   assert_file_not_matches "$manifest" '^(model|thinking):' \
     "$role manifest retained compute authority"
+done
+for role in implementer reviewer researcher observer; do
+  assert_equal 1 \
+    "$(grep -c '^timeoutMs: 2700000$' "$ROOT/delegation/manifests/agents/$role.md")" \
+    "$role does not have exactly one canonical 2700000ms timeout"
 done
 
 [ ! -e "$ROOT/extensions/qq-codex-fast.ts" ] \
@@ -158,6 +164,23 @@ export QQ_DISPATCH_TIMEOUT=2s
 export FAKE_PI_ARGS="$tmp/pi.args"
 export FAKE_PI_ENV="$tmp/pi.env"
 
+trusted_agent_paths() {
+  jq -cn --arg root "$1/delegation/manifests/agents" '{
+    implementer: ($root + "/implementer.md"), observer: ($root + "/observer.md"),
+    researcher: ($root + "/researcher.md"), reviewer: ($root + "/reviewer.md")
+  }'
+}
+stage_agent_manifests() {
+  local checkout="$1"
+  local role
+  for role in implementer observer researcher reviewer; do
+    cp "$ROOT/delegation/manifests/agents/$role.md" \
+      "$checkout/delegation/manifests/agents/$role.md"
+  done
+}
+PI_SUBAGENT_TRUSTED_AGENT_PATHS="$(trusted_agent_paths "$ROOT")"
+export PI_SUBAGENT_TRUSTED_AGENT_PATHS
+
 # Install an isolated fixture generation. Dispatch must reach it only through
 # this checkout's bin/pi wrapper, never through PATH or QQ_PI_BIN.
 python3 - "$ROOT" "$fake_pi" "$tmp" <<'PY_RUNTIME'
@@ -204,6 +227,40 @@ git_worktree_dir="$(
 )"
 git_common_dir="$(realpath -e "$git_common_dir")"
 git_worktree_dir="$(realpath -e "$git_worktree_dir")"
+
+# With no containment override, the exact trusted role manifest supplies the
+# duration that reaches GNU timeout and the policy event, without truncating ms.
+real_timeout="$(command -v timeout)"
+timeout_probe="$tmp/timeout-probe"
+cat >"$timeout_probe" <<'SH'
+#!/usr/bin/env bash
+printf '%s\0' "$@" >"$TIMEOUT_PROBE_ARGS"
+exec "$REAL_TIMEOUT_BIN" "$@"
+SH
+chmod +x "$timeout_probe"
+(
+  cd "$ROOT"
+  env -u QQ_DISPATCH_TIMEOUT \
+    QQ_TIMEOUT_BIN="$timeout_probe" \
+    REAL_TIMEOUT_BIN="$real_timeout" \
+    TIMEOUT_PROBE_ARGS="$tmp/timeout-probe.args" \
+    PI_SUBAGENT_CHILD_AGENT=reviewer \
+    PI_SUBAGENT_RUN_ID=manifest-timeout-smoke \
+      "$DISPATCH" --json
+) >"$tmp/manifest-timeout.stdout" 2>"$tmp/manifest-timeout.stderr"
+assert_file_contains "$tmp/manifest-timeout.stdout" 'pi-live-event role=reviewer'
+assert_file_contains "$tmp/manifest-timeout.stderr" 'timeout=2700s'
+python3 - "$tmp/timeout-probe.args" <<'PY'
+from pathlib import Path
+import sys
+
+args = Path(sys.argv[1]).read_bytes().split(b"\0")
+assert args[:4] == [b"-k", b"10", b"--signal=TERM", b"2700s"], args
+PY
+jq -s -e '
+  map(select(.runId == "manifest-timeout-smoke")) as $events
+  | ($events | length) == 1 and $events[0].timeout == "2700s"
+' "$runtime_root/wrapper-events.jsonl" >/dev/null
 
 declare -A role_policy_snapshots=()
 declare -A role_run_dirs=()
@@ -518,7 +575,8 @@ git -C "$fixture_primary" worktree add -q -b dispatch-linked "$fixture_worktree"
 for fixture_checkout in "$fixture_primary" "$fixture_worktree"; do
   mkdir -p \
     "$fixture_checkout/bin/lib" \
-    "$fixture_checkout/delegation/policies"
+    "$fixture_checkout/delegation/policies" \
+    "$fixture_checkout/delegation/manifests/agents"
   cp "$DISPATCH" "$fixture_checkout/bin/qq-dispatch"
   stage_runtime_surface "$fixture_checkout"
   cp "$ROOT/bin/lib/qq-bin.sh" "$fixture_checkout/bin/lib/qq-bin.sh"
@@ -526,6 +584,7 @@ for fixture_checkout in "$fixture_primary" "$fixture_worktree"; do
   cp "$SUPERVISOR" "$fixture_checkout/bin/lib/qq-process-tree-supervisor.py"
   cp "$ROOT/delegation/policies/roles.json" \
     "$fixture_checkout/delegation/policies/roles.json"
+  stage_agent_manifests "$fixture_checkout"
 done
 fixture_common_dir="$(
   git -C "$fixture_worktree" rev-parse --path-format=absolute --git-common-dir
@@ -544,6 +603,7 @@ mkdir -p "$fixture_runtime"
   PI_SUBAGENT_CHILD_AGENT=implementer \
   PI_SUBAGENT_RUN_ID=linked-smoke \
   QQ_DISPATCH_RUNTIME_ROOT="$fixture_runtime" \
+  PI_SUBAGENT_TRUSTED_AGENT_PATHS="$(trusted_agent_paths "$fixture_worktree")" \
   FAKE_POLICY_SNAPSHOT="$tmp/linked-policy.json" \
     "$fixture_worktree/bin/qq-dispatch" --json
 ) >"$tmp/linked.stdout" 2>"$tmp/linked.stderr"
@@ -575,6 +635,7 @@ mkdir -p "$fixture_capture_dir"
   PI_SUBAGENT_RUN_ID=linked-capture-smoke \
   PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE="$fixture_capture_path" \
   QQ_DISPATCH_RUNTIME_ROOT="$fixture_runtime" \
+  PI_SUBAGENT_TRUSTED_AGENT_PATHS="$(trusted_agent_paths "$fixture_worktree")" \
   FAKE_POLICY_SNAPSHOT="$tmp/linked-capture-policy.json" \
     "$fixture_worktree/bin/qq-dispatch" --json
 ) >"$tmp/linked-capture.stdout" 2>"$tmp/linked-capture.stderr"
@@ -600,6 +661,7 @@ mkdir -p "$canonical_runtime"
   PI_SUBAGENT_CHILD_AGENT=implementer \
   PI_SUBAGENT_RUN_ID=canonical-smoke \
   QQ_DISPATCH_RUNTIME_ROOT="$canonical_runtime" \
+  PI_SUBAGENT_TRUSTED_AGENT_PATHS="$(trusted_agent_paths "$fixture_primary")" \
   FAKE_POLICY_SNAPSHOT="$tmp/canonical-policy.json" \
     "$fixture_primary/bin/qq-dispatch" --json
 ) >"$tmp/canonical.stdout" 2>"$tmp/canonical.stderr"
@@ -631,6 +693,7 @@ canonical_capture_path="$fixture_capture_dir/canonical-envelope.json"
   PI_SUBAGENT_RUN_ID=canonical-capture-smoke \
   PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE="$canonical_capture_path" \
   QQ_DISPATCH_RUNTIME_ROOT="$canonical_runtime" \
+  PI_SUBAGENT_TRUSTED_AGENT_PATHS="$(trusted_agent_paths "$fixture_primary")" \
   FAKE_POLICY_SNAPSHOT="$tmp/canonical-capture-policy.json" \
     "$fixture_primary/bin/qq-dispatch" --json
 ) >"$tmp/canonical-capture.stdout" 2>"$tmp/canonical-capture.stderr"
@@ -843,6 +906,7 @@ mkdir -p "$external_runtime"
   cd "$external_repository"
   PI_SUBAGENT_CHILD_AGENT=implementer \
   PI_SUBAGENT_RUN_ID=external-smoke \
+  PI_SUBAGENT_TRUSTED_AGENT_PATHS="$(trusted_agent_paths "$fixture_primary")" \
   QQ_DISPATCH_RUNTIME_ROOT="$external_runtime" \
   FAKE_POLICY_SNAPSHOT="$tmp/external-policy.json" \
     "$fixture_primary/bin/qq-dispatch" --json
@@ -938,17 +1002,20 @@ assert_file_contains "$tmp/mismatched-landstrip-version.stderr" \
 [ ! -s "$FAKE_PI_ARGS" ] || fail 'mismatched Landstrip version launched Pi'
 
 policy_fixture="$tmp/policy-fixture"
-mkdir -p "$policy_fixture/bin/lib"
+mkdir -p "$policy_fixture/bin/lib" "$policy_fixture/delegation/manifests/agents"
 git init -q "$policy_fixture"
 cp "$DISPATCH" "$policy_fixture/bin/qq-dispatch"
 stage_runtime_surface "$policy_fixture"
 cp "$ROOT/bin/lib/qq-bin.sh" "$policy_fixture/bin/lib/qq-bin.sh"
 cp "$RENDERER" "$policy_fixture/bin/lib/qq-render-landstrip-policy.mjs"
 cp "$SUPERVISOR" "$policy_fixture/bin/lib/qq-process-tree-supervisor.py"
+stage_agent_manifests "$policy_fixture"
+policy_fixture_trusted="$(trusted_agent_paths "$policy_fixture")"
 
 : >"$FAKE_PI_ARGS"
 run_failure missing-policy "$policy_fixture" \
   env PI_SUBAGENT_CHILD_AGENT=reviewer \
+  PI_SUBAGENT_TRUSTED_AGENT_PATHS="$policy_fixture_trusted" \
   "$policy_fixture/bin/qq-dispatch" --json
 assert_file_contains "$tmp/missing-policy.stderr" \
   'Landstrip role policy is unavailable'
@@ -959,20 +1026,114 @@ printf '{ malformed\n' >"$policy_fixture/delegation/policies/roles.json"
 : >"$FAKE_PI_ARGS"
 run_failure malformed-policy "$policy_fixture" \
   env PI_SUBAGENT_CHILD_AGENT=reviewer \
+  PI_SUBAGENT_TRUSTED_AGENT_PATHS="$policy_fixture_trusted" \
   "$policy_fixture/bin/qq-dispatch" --json
 assert_file_contains "$tmp/malformed-policy.stderr" \
   'Landstrip policy rendering failed'
 [ ! -s "$FAKE_PI_ARGS" ] || fail 'malformed policy launched Pi'
+cp "$ROOT/delegation/policies/roles.json" \
+  "$policy_fixture/delegation/policies/roles.json"
+
+run_timeout_manifest_refusal() {
+  local label="$1"
+  local expected_message="$2"
+  shift 2
+  : >"$FAKE_PI_ARGS"
+  run_failure "$label" "$policy_fixture" "$@" \
+    "$policy_fixture/bin/qq-dispatch" --json
+  assert_file_contains "$tmp/$label.stderr" "$expected_message"
+  [ ! -s "$FAKE_PI_ARGS" ] || fail "$label launched Pi"
+}
+
+# The explicit 2s fixture override remains set throughout this matrix: it may
+# shorten containment for a test, but cannot bypass trusted-manifest validation.
+run_timeout_manifest_refusal timeout-map-missing \
+  'PI_SUBAGENT_TRUSTED_AGENT_PATHS is required' \
+  env -u PI_SUBAGENT_TRUSTED_AGENT_PATHS \
+    PI_SUBAGENT_CHILD_AGENT=reviewer QQ_DISPATCH_TIMEOUT=2s
+run_timeout_manifest_refusal timeout-role-path-missing \
+  'trusted manifest path for reviewer is required' \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer QQ_DISPATCH_TIMEOUT=2s \
+    PI_SUBAGENT_TRUSTED_AGENT_PATHS='{}'
+run_timeout_manifest_refusal timeout-path-mismatch \
+  'trusted manifest path for reviewer does not match the canonical path' \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer QQ_DISPATCH_TIMEOUT=2s \
+    PI_SUBAGENT_TRUSTED_AGENT_PATHS="$(trusted_agent_paths "$ROOT")"
+
+reviewer_manifest="$policy_fixture/delegation/manifests/agents/reviewer.md"
+rm "$reviewer_manifest"
+ln -s "$ROOT/delegation/manifests/agents/reviewer.md" "$reviewer_manifest"
+run_timeout_manifest_refusal timeout-path-unsafe \
+  'trusted manifest path for reviewer is unsafe or unavailable' \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer QQ_DISPATCH_TIMEOUT=2s \
+    PI_SUBAGENT_TRUSTED_AGENT_PATHS="$policy_fixture_trusted"
+rm "$reviewer_manifest"
+
+printf '%s\n' '---' 'name: reviewer' '---' >"$reviewer_manifest"
+run_timeout_manifest_refusal timeout-declaration-missing \
+  'must contain exactly one timeoutMs declaration' \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer QQ_DISPATCH_TIMEOUT=2s \
+    PI_SUBAGENT_TRUSTED_AGENT_PATHS="$policy_fixture_trusted"
+printf '%s\n' '---' 'defaults:' '  timeoutMs: 2700000' '---' >"$reviewer_manifest"
+run_timeout_manifest_refusal timeout-declaration-nested \
+  'must contain exactly one timeoutMs declaration' \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer QQ_DISPATCH_TIMEOUT=2s \
+    PI_SUBAGENT_TRUSTED_AGENT_PATHS="$policy_fixture_trusted"
+printf '%s\n' '---' 'timeoutMs: 2700000' 'defaults:' '  timeoutMs: 1' '---' >"$reviewer_manifest"
+run_timeout_manifest_refusal timeout-declaration-mixed-nested \
+  'must contain exactly one timeoutMs declaration' \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer QQ_DISPATCH_TIMEOUT=2s \
+    PI_SUBAGENT_TRUSTED_AGENT_PATHS="$policy_fixture_trusted"
+printf '%s\n' '---' 'timeoutMs: 2700000' 'defaults:' '  - timeoutMs: 1' '---' >"$reviewer_manifest"
+run_timeout_manifest_refusal timeout-declaration-mixed-list-item \
+  'must contain exactly one timeoutMs declaration' \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer QQ_DISPATCH_TIMEOUT=2s \
+    PI_SUBAGENT_TRUSTED_AGENT_PATHS="$policy_fixture_trusted"
+printf '%s\n' '---' 'timeoutMs: 2700000' 'defaults: { timeoutMs: 1 }' '---' >"$reviewer_manifest"
+run_timeout_manifest_refusal timeout-declaration-mixed-flow \
+  'must contain exactly one timeoutMs declaration' \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer QQ_DISPATCH_TIMEOUT=2s \
+    PI_SUBAGENT_TRUSTED_AGENT_PATHS="$policy_fixture_trusted"
+printf '%s\n' '---' 'timeoutMs: 2700000' 'defaults:' '  "timeoutMs": 1' '---' >"$reviewer_manifest"
+run_timeout_manifest_refusal timeout-declaration-mixed-quoted \
+  'must contain exactly one timeoutMs declaration' \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer QQ_DISPATCH_TIMEOUT=2s \
+    PI_SUBAGENT_TRUSTED_AGENT_PATHS="$policy_fixture_trusted"
+printf '%s\n' '---' 'timeoutMs: 1' 'timeoutMs: 2' '---' >"$reviewer_manifest"
+run_timeout_manifest_refusal timeout-declaration-duplicate \
+  'must contain exactly one timeoutMs declaration' \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer QQ_DISPATCH_TIMEOUT=2s \
+    PI_SUBAGENT_TRUSTED_AGENT_PATHS="$policy_fixture_trusted"
+printf '%s\n' '---' 'timeoutMs: no' '---' >"$reviewer_manifest"
+run_timeout_manifest_refusal timeout-declaration-malformed \
+  'timeoutMs must be a positive integer' \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer QQ_DISPATCH_TIMEOUT=2s \
+    PI_SUBAGENT_TRUSTED_AGENT_PATHS="$policy_fixture_trusted"
+printf '%s\n' '---' 'timeoutMs: 0' '---' >"$reviewer_manifest"
+run_timeout_manifest_refusal timeout-declaration-nonpositive \
+  'timeoutMs must be a positive integer' \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer QQ_DISPATCH_TIMEOUT=2s \
+    PI_SUBAGENT_TRUSTED_AGENT_PATHS="$policy_fixture_trusted"
+printf '%s\n' '---' 'timeoutMs: 9007199254740992' '---' >"$reviewer_manifest"
+run_timeout_manifest_refusal timeout-conversion-failure \
+  'timeoutMs cannot be converted losslessly' \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer QQ_DISPATCH_TIMEOUT=2s \
+    PI_SUBAGENT_TRUSTED_AGENT_PATHS="$policy_fixture_trusted"
+cp "$ROOT/delegation/manifests/agents/reviewer.md" "$reviewer_manifest"
 
 rm "$policy_fixture/bin/pi"
 ln -s "$ROOT/bin/pi" "$policy_fixture/bin/pi"
 run_failure linked-worktree-pi "$policy_fixture" \
-  env PI_SUBAGENT_CHILD_AGENT=reviewer "$policy_fixture/bin/qq-dispatch" --json
+  env PI_SUBAGENT_CHILD_AGENT=reviewer \
+  PI_SUBAGENT_TRUSTED_AGENT_PATHS="$policy_fixture_trusted" \
+  "$policy_fixture/bin/qq-dispatch" --json
 assert_file_contains "$tmp/linked-worktree-pi.stderr" \
   'worktree Pi wrapper is unavailable or linked'
 rm "$policy_fixture/bin/pi"
 run_failure missing-worktree-pi "$policy_fixture" \
-  env PI_SUBAGENT_CHILD_AGENT=reviewer "$policy_fixture/bin/qq-dispatch" --json
+  env PI_SUBAGENT_CHILD_AGENT=reviewer \
+  PI_SUBAGENT_TRUSTED_AGENT_PATHS="$policy_fixture_trusted" \
+  "$policy_fixture/bin/qq-dispatch" --json
 assert_file_contains "$tmp/missing-worktree-pi.stderr" \
   'worktree Pi wrapper is unavailable or linked'
 
