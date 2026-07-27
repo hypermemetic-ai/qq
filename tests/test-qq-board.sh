@@ -441,6 +441,49 @@ assert_contains "$help_output" 'qq-board watch --interval 3' \
 assert_contains "$help_output" 'Source records are never written' \
   'help omitted the source-record boundary'
 
+# A non-t Repository keeps a parent and direct child distinct and binds the
+# complete configured branch token to each identity.
+prefix_repo="$tmp/prefix-repo"
+prefix_worktree="$tmp/prefix-worktree"
+"$real_git" init -q -b main "$prefix_repo"
+mkdir -p "$prefix_repo/backlog/tasks"
+printf '%s\n' 'project_name: "prefix-fixture"' 'task_prefix: "feat"' \
+  >"$prefix_repo/backlog/config.yml"
+cat >"$prefix_repo/backlog/tasks/feat-12 - Parent.md" <<'TASK'
+---
+id: FEAT-12
+title: Configured parent
+status: To Do
+---
+TASK
+cat >"$prefix_repo/backlog/tasks/feat-12.3 - Child.md" <<'TASK'
+---
+id: FEAT-12.3
+title: Configured child
+status: To Do
+---
+TASK
+"$real_git" -C "$prefix_repo" add backlog
+"$real_git" -C "$prefix_repo" -c user.name=test -c user.email=test@example.com \
+  commit -qm 'configured Task records'
+"$real_git" -C "$prefix_repo" worktree add -qb feat/feat-12.3-child \
+  "$prefix_worktree" main >/dev/null
+"$real_git" -C "$prefix_repo" update-ref refs/remotes/origin/fix/feat-12-parent \
+  "$("$real_git" -C "$prefix_repo" rev-parse HEAD)"
+run_board 0 reconcile --repo "$prefix_repo"
+jq -e '
+  .state.task_count == 2
+  and ([.state.tasks[].id] | sort) == ["FEAT-12","FEAT-12.3"]
+  and (.state.tasks[] | select(.id == "FEAT-12")
+    | .branches == ["fix/feat-12-parent"] and .derived_status == "In Progress")
+  and (.state.tasks[] | select(.id == "FEAT-12.3")
+    | .branches == ["feat/feat-12.3-child"] and .derived_status == "In Progress")
+' "$tmp/result.json" >/dev/null || fail 'configured parent/child board identities collapsed or lost branches'
+prefix_scratch="$(jq -r '.state.scratch_root' "$tmp/result.json")"
+[ -f "$prefix_scratch/backlog/tasks/feat-12 - Parent.md" ] \
+  && [ -f "$prefix_scratch/backlog/tasks/feat-12.3 - Child.md" ] \
+  || fail 'configured parent/child records were not materialized distinctly'
+
 # Reconcile never accepts --interval, including its default value.
 run_board 1 reconcile --repo "$repo" --interval 3
 jq -e '

@@ -76,12 +76,12 @@ const indexSource = await readFile(indexPath, "utf8");
 assert.equal((indexSource.match(/from\s+["']\.\/qq-handoff\.ts["']/g) ?? []).length, 1);
 assert.equal((indexSource.match(/registerHandoff\s*\(/g) ?? []).length, 1);
 
-for (const args of ["", " ", "T-0", "t-155", "T-01", "--help", "-T-155", "T-155 extra", "T-155 ", " T-155", "T-155\nT-156"]) {
+for (const args of ["", " ", "T-0", "T-01", "T-1.0", "T-1.2.3", "--help", "-T-155", "T-155/child", "T-155 extra", "T-155 ", " T-155", "T-155\nT-156"]) {
   const h = harness({ code: 0, killed: false, stdout: receipt("done"), stderr: "" });
   await invoke(h, args);
   assert.equal(h.calls.length, 0, `engine ran for invalid args ${JSON.stringify(args)}`);
   assert.deepEqual(h.notifications, [{
-    message: "Usage: /handoff <Task-ID> (for example, /handoff T-155)",
+    message: "Usage: /handoff <Task-ID> (for example, /handoff FEAT-12.3)",
     level: "warning",
   }]);
 }
@@ -103,10 +103,10 @@ assert.deepEqual(missingContext.notifications, [{
 }]);
 
 const success = harness({ code: 0, killed: false, stdout: receipt("done", "working and focused"), stderr: "" });
-await invoke(success, "T-155");
+await invoke(success, "FEAT-12.3");
 assert.deepEqual(success.calls, [{
   command: "qq-handoff",
-  args: ["start", "T-155", "--repo", "/fixture/change"],
+  args: ["start", "FEAT-12.3", "--repo", "/fixture/change"],
   options: { cwd: "/fixture/change" },
 }]);
 assert.deepEqual(success.notifications, [{
