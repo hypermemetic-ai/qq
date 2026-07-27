@@ -5,30 +5,29 @@ description: Composes complete work orders and dispatches aligned bounded ticket
 
 # Delegate a bounded ticket batch
 
-Start only after intent and plan bounds settle. For aligned or board-driven
-work, the accountable session stays in the project home, owning judgment and
-delivery; each writing ticket gets its own worktree.
+Start after intent and plan bounds settle. The accountable session remains in
+project home, owning judgment and delivery; each writing ticket gets a
+worktree.
 
 ## Work orders
 
-Write one complete brief per ticket under the OS temporary directory. Include
-ticket and acceptance criteria, batch context, exact orientation paths and
-verified facts, hard constraints, commit protocol, exact Checks, required
-completion envelope. Writing delegates work locally, never push or open pull
-requests, never edit `backlog/`. Keep durable intent in the Task, whose record
-lives in its checkout. The `subagent` task is only the work-order file pointer.
+Write a complete temporary brief per ticket: ticket and acceptance criteria,
+context, exact orientation paths and verified facts, constraints, commit protocol,
+exact Checks, and completion envelope. Require every temporary file, redirected log,
+generated helper, cache (including npm), and runnable-test scratch beneath
+confinement-provided `$TMPDIR`; never literal `/tmp` or worktree-local scratch.
+Writers never push, open pull requests, or edit `backlog/`.
+Durable intent stays in the checkout's Task. The `subagent` task is the brief
+path.
 
-- Couple shared files or invariants and work them sequentially.
-- Fan out independent read-only work natively; give independent writers
-  disjoint branches, worktrees, and non-Git resources.
-- Run only a dependency chain's unblocked frontier. Keep at most 3–5 writing
-  tickets in flight; serialize integration.
+- Couple shared files or invariants; work sequentially.
+- Fan out independent reads; give writers disjoint branches, worktrees, and
+  non-Git resources.
+- Run only the unblocked frontier; cap writers at 3–5; serialize integration.
 
 ## Dispatch and status
 
-Pi-launch env (one-time; cockpit/Herdr config/shell-rc):
-
-Dispatch env and dispatcher config: per README Install.
+Dispatch environment and config: README Install.
 
 Use primary-`main`; never Change copies. `cwd` selects same-Repository
 worktrees.
@@ -38,30 +37,30 @@ const completionEnvelopeSchema=JSON.parse(readFileSync("<absolute-worktree>/dele
 subagent({agent:"implementer",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema,acceptance:{level:"none",reason:"per the manifests"},cwd:"<absolute-worktree>",context:"fresh",async:true})
 ```
 
-Use only absolute paths: the task points to the work order, `cwd` to its
-worktree. Pi-subagents owns role configuration, lifecycle, and artifacts; the
-adapter owns containment. Opt into external knowledge only when the brief
-requires it; harness-native subagents only for tools or judgment beyond the
-plan bound.
+Use absolute brief/worktree paths. Pi-subagents owns roles, lifecycle, and
+artifacts; the adapter owns containment. Add knowledge when required;
+use harness-native subagents only beyond plan-bound tools or judgment.
 
-Keep returned id/`details.asyncDir`. Inspect once at natural boundaries, never
-poll: id/fleet status, `status.json`, `events.jsonl`, live
-`output-<index>.log`, `subagent-log-<run-id>.md`. No start after ten minutes
-blocks with `no thread after 10m`. Terminal nonzero or missing/invalid output
-fails dispatch. After infrastructure failure, resume with
-the source run's recorded `timeoutMs` and no contract override. Reconstruct
-from Tasks, artifacts, transcripts, worktrees.
+Keep id/`details.asyncDir`. Inspect only at boundaries: fleet,
+`status.json`, `events.jsonl`, output, and subagent log. No start after ten
+minutes blocks with `no thread after 10m`; terminal nonzero or invalid/missing
+structured output fails. After infrastructure failure, resume with the
+source run's recorded `timeoutMs` and no contract override. Reconstruct from Tasks,
+artifacts, transcripts, and worktrees.
 
-Confined child suite runs are best-effort: Landlock cannot pass
-`/dev/fd` process substitution; report those as `inconclusive-under-substrate`.
-The owner's native rerun plus CI is binding green.
+After the first recognized `/dev/fd` process-substitution or
+nested-confinement failure, record the Check once as
+`inconclusive-under-substrate` and do not rerun it in the child. The owner's
+native rerun plus CI is binding green.
 
 ## Verify and close
 
-The envelope reports per-ticket status, commits, files, Check results,
-contestable decisions, open questions, risks, branch, worktree — plus parallel,
-never-blended net production-LOC and decision-point deltas per fix commit.
-Verify every claim against the tree before publishing `envelope-verified`.
+The envelope reports status, commits, files, Check results, decisions,
+questions, risks, branch, worktree, and separate production-LOC and
+decision-point deltas per fix commit. Read complete Check output; exit status
+alone is not the result. Resolve a warning naming an in-scope corrective action
+or list it in unresolved risks; never report it only as `pass`. Verify every
+claim against the tree before publishing `envelope-verified`.
 
 Growth in either counter spends one mechanical `same fix, smaller`
 regeneration: checks pass and strictly smaller takes it; otherwise the original

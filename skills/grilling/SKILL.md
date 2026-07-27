@@ -5,17 +5,19 @@ description: "Guides the operator-facing accountable owner aligning genuinely ne
 
 # Alignment governance
 
-This Skill supplies governance and the interaction: structured questions
-via the native question tool, plans under `.pi/plans/` presented inline,
-explicit operator approval the gate. Planning fails closed: enactment
-cannot precede approval.
+This Skill governs structured questions, inline plans, and explicit operator
+approval. Enactment cannot precede approval.
 
 ## Role gate
 
-Only the operator-facing accountable owner aligns genuinely new work. Spawned,
-delegated, review, research, maintainer, and event-triggered Actors treat
-bounded assignments as aligned. A new consequential decision or scope gap
-stops and returns them to their assigner or owner.
+Only the accountable operator-facing owner aligns new work. Spawned, delegated,
+review, research, maintainer, and event-triggered Actors proceed within bounds;
+new consequential decisions or scope gaps return to their assigner or owner.
+
+When the operator requests a broad class and supplies an example, restate the
+class before narrowing. Generic continuation such as “continue” cannot choose
+among consequential options; mutation requires an explicit option or approval
+of the named recommendation.
 
 ## Dispositions and ledger
 
