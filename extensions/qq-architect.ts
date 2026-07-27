@@ -42,11 +42,21 @@ function explicitRetryRequest(value, intake) {
 function parseContext(raw) {
   let value;
   try { value = JSON.parse(raw); } catch { throw new Error("output is not valid JSON"); }
-  if (!exactObject(value, ["schema", "schema_version", "context_id", "findings", "pending_intakes", "omitted_findings"]) ||
-    value.schema !== "qq-observer.architect-context" || value.schema_version !== 2 ||
+  if (!exactObject(value, ["schema", "schema_version", "context_id", "findings", "pending_intakes", "observer_health", "omitted_findings"]) ||
+    value.schema !== "qq-observer.architect-context" || value.schema_version !== 3 ||
     !/^context-[0-9a-f]{32}$/.test(value.context_id) || !Array.isArray(value.findings) || value.findings.length > 50 ||
-    !Array.isArray(value.pending_intakes) || !Number.isInteger(value.omitted_findings) || value.omitted_findings < 0) {
+    !Array.isArray(value.pending_intakes) || !Number.isInteger(value.omitted_findings) || value.omitted_findings < 0 ||
+    !exactObject(value.observer_health, ["rounds", "omitted_rounds"]) ||
+    !Array.isArray(value.observer_health.rounds) || value.observer_health.rounds.length > 20 ||
+    !Number.isInteger(value.observer_health.omitted_rounds) || value.observer_health.omitted_rounds < 0) {
     throw new Error("context has the wrong top-level shape");
+  }
+  for (const round of value.observer_health.rounds) {
+    if (!exactObject(round, ["status", "repository", "pr", "run_dir", "assembled_at", "reason", "reason_truncated"]) ||
+      !["analysis_failed", "pending"].includes(round.status) || !text(round.repository, true) ||
+      !Number.isInteger(round.pr) || round.pr <= 0 || !text(round.run_dir, true) ||
+      !text(round.assembled_at, true) || !text(round.reason, true) || [...round.reason].length > 500 ||
+      typeof round.reason_truncated !== "boolean") throw new Error("Observer health round has the wrong shape");
   }
   const occurrences = new Map(), occurrenceIds = new Set(), keys = new Set(), pendingIntakes = new Map();
   function parseOccurrence(occurrence, key, selectable) {
@@ -313,7 +323,7 @@ export default function register(pi, deps = {}) {
       currentContext = loaded;
       contextInteractiveSequence = interactiveSequence;
       pending = undefined;
-      pi.sendUserMessage(`Current global Observer Architect context (deterministic TOON):\n\n${encodeModelContext(loaded.value)}\n\nSynthesize what is new or still unsettled across these source occurrences. Connect related findings, recommend what matters, and hold an open-ended conversation; do not force decisions or fixed verdict labels. Read detailed analysis only from each cited source.run_dir/analysis.json behind the scenes. Pending intakes are already operator-settled: do not re-decide or re-propose them. Retry one only after an explicit operator request naming its exact batch_id or handoff_id, and pass its listed decisions unchanged. Only when the operator has explicitly settled a selective new batch, call architect_disposition action=propose with this exact context_id and exact occurrence IDs. Omit untouched findings. Present the tool's exact natural summary/question, and do not call action=confirm until a later clear affirmative operator reply.`);
+      pi.sendUserMessage(`Current global Observer Architect context (deterministic TOON):\n\n${encodeModelContext(loaded.value)}\n\nSynthesize what is new or still unsettled across these source occurrences. Connect related findings, recommend what matters, and hold an open-ended conversation; do not force decisions or fixed verdict labels. Read detailed analysis only from each cited source.run_dir/analysis.json behind the scenes. Observer health is informational only: report failed or pending observation honestly, but do not fabricate findings from health rows, route them, retry them, auto-remediate them, create Tasks from them, or treat them as a merge veto. Pending intakes are already operator-settled: do not re-decide or re-propose them. Retry one only after an explicit operator request naming its exact batch_id or handoff_id, and pass its listed decisions unchanged. Only when the operator has explicitly settled a selective new batch, call architect_disposition action=propose with this exact context_id and exact occurrence IDs. Omit untouched findings. Present the tool's exact natural summary/question, and do not call action=confirm until a later clear affirmative operator reply.`);
     },
   });
 }

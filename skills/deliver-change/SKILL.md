@@ -58,14 +58,14 @@ qq engines unconditionally: they own containment, degradation, and rails.
     sole primary `main` checkout. Exit 2 reports a rail refusal; exit 1 reports
     an error. Stop and retain the Change; repeating the call is safe. A closed
     or rejected Change follows step 7 without altering the completed Task.
-12. Launch the observer before retiring: `qq-observe assemble --pr <pr>
-    --repo <root>` while the worktree lives; dispatch the `observer` agent
-    async (fresh-context, task = procedure and package paths, outputSchema
-    `delegation/manifests/observer-analysis.schema.json`, acceptance none),
-    then continue. On its wake: `qq-observe validate-analysis`, then
-    `qq-observe finalize --analysis` with the analyst trace; any failure:
-    `qq-observe finalize --failed`. Automatic, headless: no veto window, no
-    UAT exception; `qq-observe verify-delivery` shows coverage.
+12. Before retiring, run `qq-observe assemble` while worktree lives; dispatch
+    `observer` async with procedure/package paths, analysis schema, no acceptance;
+    continue. On wake run `qq-observe validate-analysis`, then
+    `qq-observe finalize --analysis` with trace; failures use
+    `qq-observe finalize --failed`. Headless:
+    no veto/UAT exception. `qq-observe verify-delivery` reports analyzed, failed,
+    uncovered Changes; unhealthy output is advisory, never a merge, land, or
+    retirement gate.
 13. After landing succeeds, leave focus untouched. When the executing owner
     verifiably owns the Change delegate lifecycle (the default posture; Changes
     carry no work session), call `qq-change retire <change-id> --repo <checkout>

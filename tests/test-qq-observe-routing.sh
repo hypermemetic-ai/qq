@@ -28,6 +28,37 @@ cat >"$second/package.json" <<JSON
 JSON
 jq '.run.change="fixture/other#5" | .episodes[0].title="Route alpha again" | .episodes += [{"kind":"friction","title":"Leave beta untouched","sessions":["/fixture/session.jsonl"],"evidence":[{"session":"/fixture/session.jsonl","entries":[2],"quote":"beta evidence"}],"what_happened":"Beta.","root_cause":"Beta.","root_cause_location":"harness-design","cost":{"turns":1,"tokens":1,"duration_ms":1,"source":"facts:/fixture/session.jsonl"},"remedy":{"type":"process","smallest_change":"Route beta."},"confidence":"medium","confidence_why":"Fixture.","recurrence_key":"beta","rank":2,"no_signal":false}]' "$run/analysis.json" >"$second/analysis.json"
 "$OBSERVE" ledger-update --run "$second" >/dev/null
+
+# Architect health is a bounded, non-selectable view over Repository-qualified
+# guided rounds whose observation failed or has not completed.
+health_root="$XDG_STATE_HOME/qq/observer/runs/by-repository/health/repo"
+health_failed="$health_root/pr-11"
+health_pending="$health_root/pr-12"
+health_partial="$health_root/pr-13"
+health_blind="$health_root/pr-14-blind"
+mkdir -p "$health_failed" "$health_pending" "$health_blind"
+for spec in \
+  "$health_failed:11:guided:2026-08-11T00:00:00Z" \
+  "$health_pending:12:guided:2026-08-12T00:00:00Z" \
+  "$health_blind:14:blind:2026-08-14T00:00:00Z"; do
+  IFS=: read -r dir pr variant assembled <<<"$spec"
+  jq -cn --arg repo "$ROOT" --argjson pr "$pr" --arg variant "$variant" \
+    --arg assembled "$assembled" '{
+      assembled_at:$assembled,branch:"health",merge_commit:"abababab",
+      merged_at:$assembled,pr:$pr,repo:$repo,repository:"health/repo",
+      schema:"qq-observer.package",schema_version:2,sessions:[],
+      unknown_entries:[],variant:$variant,warnings:[]
+    }' >"$dir/package.json"
+done
+long_failure_reason="$(printf 'x%.0s' {1..600})"
+jq -cnS --arg reason "$long_failure_reason" '{
+  reason:$reason,schema:"qq-observer.analysis",schema_version:1,
+  status:"analysis_failed"
+}' >"$health_failed/analysis_failed.json"
+printf '%s\n' \
+  '{"reason":"blind failure","schema":"qq-observer.analysis","schema_version":1,"status":"analysis_failed"}' \
+  >"$health_blind/analysis_failed.json"
+
 # A stale ledger marker must not authorize replaced analysis bytes.
 cp "$second/analysis.json" "$tmp/second-analysis-applied.json"
 jq -cS '.episodes[0].title = "Replaced after ledger application"' "$second/analysis.json" >"$tmp/replaced-analysis.json"
@@ -38,13 +69,41 @@ status=$?
 set -e
 assert_equal 65 "$status" 'stale ledger marker authorized replaced analysis'
 mv "$tmp/second-analysis-applied.json" "$second/analysis.json"
-"$OBSERVE" architect-context >"$tmp/context-1.json"
+"$OBSERVE" architect-context >"$tmp/context-health-before.json"
 jq -e '
-  .schema == "qq-observer.architect-context" and .schema_version == 2 and (.context_id | test("^context-[0-9a-f]{32}$"))
+  .schema == "qq-observer.architect-context" and .schema_version == 3
+  and (.context_id | test("^context-[0-9a-f]{32}$"))
+  and .observer_health.omitted_rounds == 0
+  and [.observer_health.rounds[] | {status,pr}] == [
+    {status:"pending",pr:12},{status:"analysis_failed",pr:11}
+  ]
+  and (.observer_health.rounds[] | select(.pr == 11)
+    | (.reason | length) == 500 and .reason_truncated == true)
+  and all(.observer_health.rounds[]; .repository == "health/repo" and .pr != 14)
+' "$tmp/context-health-before.json" >/dev/null \
+  || fail 'Architect context did not expose bounded failed/pending guided health'
+health_context_before="$(jq -r .context_id "$tmp/context-health-before.json")"
+mkdir -p "$health_partial"
+jq -cn --arg repo "$ROOT" '{
+  assembled_at:"2026-08-13T00:00:00Z",branch:"health",merge_commit:"cdcdcdcd",
+  merged_at:"2026-08-13T00:00:00Z",pr:13,repo:$repo,repository:"health/repo",
+  schema:"qq-observer.package",schema_version:2,sessions:[],unknown_entries:[],
+  variant:"guided",warnings:[]
+}' >"$health_partial/package.json"
+cp "$second/analysis.json" "$health_partial/analysis.json"
+"$OBSERVE" architect-context >"$tmp/context-1.json"
+jq -e --arg before "$health_context_before" '
+  .schema == "qq-observer.architect-context" and .schema_version == 3
+  and .context_id != $before and (.context_id | test("^context-[0-9a-f]{32}$"))
   and .pending_intakes == [] and .omitted_findings == 0 and (.findings | length) == 2
+  and [.observer_health.rounds[] | {status,pr,reason}] == [
+    {status:"pending",pr:13,reason:"successful analysis is not ledger-applied"},
+    {status:"pending",pr:12,reason:"analysis is not finalized"},
+    {status:"analysis_failed",pr:11,reason:("x" * 500)}
+  ]
   and ([.findings[] | select(.recurrence_key == "alpha") | .occurrences[].source.repository] | sort) == ["fixture/other","fixture/source"]
   and ([.findings[].occurrences[].occurrence_id] | unique | length) == 3
-' "$tmp/context-1.json" >/dev/null || fail 'global context lost cross-Repository occurrence evidence'
+' "$tmp/context-1.json" >/dev/null || fail 'global context lost finding evidence or health freshness'
 context_id="$(jq -r .context_id "$tmp/context-1.json")"
 alpha_first="$(jq -r '.findings[] | select(.recurrence_key=="alpha") | .occurrences[] | select(.source.repository=="fixture/source") | .occurrence_id' "$tmp/context-1.json")"
 jq -cn --arg occurrence "$alpha_first" '[{recurrence_key:"alpha",occurrence_ids:[$occurrence],action:"set_aside",scope:"",note:"Current source evidence is set aside."}]' >"$tmp/set-aside.json"
@@ -299,8 +358,26 @@ analysis["run"]["change"]="large/repo#10"; analysis["episodes"]=episodes
 with open(sys.argv[2], "w") as target: json.dump(analysis,target,separators=(",",":"),sort_keys=True); target.write("\n")
 PYFIXTURE
 "$OBSERVE" ledger-update --run "$large" >/dev/null
+# More than the health cap remains deterministically summarized without raising
+# the finding cap or context byte bound.
+for pr in $(seq 20 41); do
+  dir="$health_root/pr-$pr"
+  mkdir -p "$dir"
+  jq -cn --arg repo "$ROOT" --argjson pr "$pr" --arg assembled \
+    "2026-09-01T00:$(printf '%02d' "$pr"):00Z" '{
+      assembled_at:$assembled,branch:"health",merge_commit:"efefefef",
+      merged_at:$assembled,pr:$pr,repo:$repo,repository:"health/repo",
+      schema:"qq-observer.package",schema_version:2,sessions:[],
+      unknown_entries:[],variant:"guided",warnings:[]
+    }' >"$dir/package.json"
+done
 "$OBSERVE" architect-context >"$tmp/bounded-context.json"
 [ "$(wc -c <"$tmp/bounded-context.json")" -le 131072 ] || fail 'Architect model context exceeded byte cap'
+jq -e '
+  (.observer_health.rounds | length) == 20
+  and .observer_health.omitted_rounds == 5
+  and [.observer_health.rounds[].pr] == ([.observer_health.rounds[].pr] | sort | reverse)
+' "$tmp/bounded-context.json" >/dev/null || fail 'Architect health did not enforce its independent bound'
 ! grep -q 'DO_NOT_INLINE_LARGE_EVIDENCE' "$tmp/bounded-context.json" || fail 'Architect model context inlined quoted evidence'
 ! grep -q 'analysis_sha256\|package_sha256\|"episode"\|authoritative_evidence' "$tmp/bounded-context.json" || fail 'Architect model context exposed internal evidence/hash payloads'
 jq -e --arg large "$large" '(.findings | length) <= 50 and .omitted_findings > 0 and any(.findings[].occurrences[]; .source.run_dir == $large)' "$tmp/bounded-context.json" >/dev/null \
