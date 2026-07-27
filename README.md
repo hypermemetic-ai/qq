@@ -51,9 +51,9 @@ operator merges.
 ## Install qq
 
 Installation is by construction: every runtime surface mounts this checkout
-directly, so day-to-day changes — adding, editing, or removing a Skill or a
-command — are live everywhere with no install step. A machine is bootstrapped
-once.
+directly, so day-to-day changes — adding, editing, or removing a Skill, command,
+or extension source file — are live everywhere with no install step. A machine
+is bootstrapped once.
 
 qq's accountable runtime is the exact patched Pi identity
 `0.81.1+qq.execution-profile.1` on Linux x64. `bin/qq-pi-runtime` is the sole
@@ -446,7 +446,14 @@ ln -sfn "$HOME/projects/qq/extensions" "$HOME/.pi/agent/extensions/qq"
 ```
 
 That one link mounts the Repository extension set, which is live in every Pi
-session from then on. `settings.json` no longer carries extension paths.
+session from then on. `settings.json` no longer carries extension paths. Source-
+only changes need no install step. On first bootstrap and after a reviewed
+extension dependency-lock change, install the exact root lock from the mounted
+checkout with lifecycle scripts disabled:
+
+```bash
+npm ci --ignore-scripts
+```
 
 The Repository extension gives local feedback when Pi's built-in `write` or
 `edit` targets the normalized `backlog/` path of the checkout containing
@@ -485,6 +492,15 @@ an omitted count reveals the remaining working set. There is no round picker or
 fixed verdict form. The Architect records only choices settled in conversation:
 route with non-empty agreed scope or set aside current evidence. Untouched
 occurrences stay open, and a later same-key occurrence reopens automatically.
+
+JSON remains the canonical format for machine interfaces, persistence, schemas,
+receipts, JSONL, and hashes. At an explicit qq-owned model-ingress boundary,
+a measured substantial structured value may instead be presented to the model
+with deterministic TOON encoding. `/architect` is the only current qualifying
+boundary: it keeps and validates canonical parsed JSON, then encodes that value
+once for its prompt. A representative 42-finding context measured about 5.7%
+fewer estimated o200k tokens than compact JSON with TOON 4.1.0; this is shape-
+specific evidence, not a promise of universal savings.
 
 `architect_disposition` first returns an exact natural summary and confirmation
 question without writing. Only an unchanged proposal plus a later exact clear

@@ -4,6 +4,8 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { encodeModelContext } from "./lib/model-context.ts";
+
 const OBSERVE = "bin/qq-observe";
 const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f]/;
 
@@ -311,7 +313,7 @@ export default function register(pi, deps = {}) {
       currentContext = loaded;
       contextInteractiveSequence = interactiveSequence;
       pending = undefined;
-      pi.sendUserMessage(`Current global Observer Architect context (strict machine JSON):\n\n${JSON.stringify(loaded.value)}\n\nSynthesize what is new or still unsettled across these source occurrences. Connect related findings, recommend what matters, and hold an open-ended conversation; do not force decisions or fixed verdict labels. Read detailed analysis only from each cited source.run_dir/analysis.json behind the scenes. Pending intakes are already operator-settled: do not re-decide or re-propose them. Retry one only after an explicit operator request naming its exact batch_id or handoff_id, and pass its listed decisions unchanged. Only when the operator has explicitly settled a selective new batch, call architect_disposition action=propose with this exact context_id and exact occurrence IDs. Omit untouched findings. Present the tool's exact natural summary/question, and do not call action=confirm until a later clear affirmative operator reply.`);
+      pi.sendUserMessage(`Current global Observer Architect context (deterministic TOON):\n\n${encodeModelContext(loaded.value)}\n\nSynthesize what is new or still unsettled across these source occurrences. Connect related findings, recommend what matters, and hold an open-ended conversation; do not force decisions or fixed verdict labels. Read detailed analysis only from each cited source.run_dir/analysis.json behind the scenes. Pending intakes are already operator-settled: do not re-decide or re-propose them. Retry one only after an explicit operator request naming its exact batch_id or handoff_id, and pass its listed decisions unchanged. Only when the operator has explicitly settled a selective new batch, call architect_disposition action=propose with this exact context_id and exact occurrence IDs. Omit untouched findings. Present the tool's exact natural summary/question, and do not call action=confirm until a later clear affirmative operator reply.`);
     },
   });
 }

@@ -7,12 +7,12 @@ source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd -- "$TESTS_DIR/.." && pwd -P)"
 TMP="$(mktemp -d "$ROOT/.test-qq-architect.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
-cp "$ROOT/extensions/qq-architect.ts" "$TMP/architect.mjs"
-node --input-type=module - "$TMP/architect.mjs" "$TMP" <<'JS'
+node --input-type=module - "$ROOT/extensions/qq-architect.ts" "$TMP" <<'JS'
 import assert from "node:assert/strict";
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { decode } from "@toon-format/toon";
 const [modulePath, scratch] = process.argv.slice(2);
 const { default: register } = await import(pathToFileURL(modulePath));
 const contextId = `context-${"b".repeat(32)}`;
@@ -32,6 +32,12 @@ function context(id = contextId, findings = [
 ], pending_intakes = []) { return { schema: "qq-observer.architect-context", schema_version: 2,
   context_id: id, findings, pending_intakes, omitted_findings: 0 }; }
 function result(body, code = 0, stderr = "") { return { stdout: typeof body === "string" ? body : JSON.stringify(body), stderr, code, killed: false }; }
+function injectedContext(message) {
+  const start = message.indexOf("\n\n") + 2;
+  const end = message.indexOf("\n\n", start);
+  assert.ok(start > 1 && end > start, "Architect context block is missing");
+  return decode(message.slice(start, end));
+}
 function harness(queue, options = {}) {
   const commands = new Map(), tools = new Map(), events = new Map(), calls = [], messages = [], notifications = [];
   let temp = 0;
@@ -65,10 +71,17 @@ const pendingContext = context(pendingContextId, [], [pendingIntake]);
 const pendingDecisions = pendingIntake.decisions.map(({ decision_id, ...decision }) => decision);
 
 // /architect directly loads one global context and invokes no selector/custom/editor.
-const h = harness([result(context())]);
+const openedContext = context();
+const h = harness([result(openedContext)]);
 await h.commands.get("architect").handler("", h.ctx);
 assert.equal(h.calls.length, 1); assert.deepEqual(h.calls[0].args, ["architect-context"]);
-assert.match(h.messages[0], /open-ended conversation/); assert.match(h.messages[0], /one\/repo/); assert.match(h.messages[0], /two\/repo/);
+assert.match(h.messages[0], /deterministic TOON/); assert.match(h.messages[0], /open-ended conversation/);
+assert.deepEqual(injectedContext(h.messages[0]), openedContext);
+assert.equal(injectedContext(h.messages[0]).context_id, contextId);
+assert.deepEqual(injectedContext(h.messages[0]).findings.flatMap((finding) => finding.occurrences.map(({ occurrence_id }) => occurrence_id)),
+  [a1.occurrence_id, a2.occurrence_id, b1.occurrence_id]);
+assert.equal(injectedContext(h.messages[0]).pending_intakes.length, 0);
+assert.equal(h.messages[0].includes(JSON.stringify(openedContext)), false, "Architect injected compact JSON instead of TOON");
 assert.equal(h.commands.has("architect-discussed"), false, "round compatibility command was advertised");
 assert.ok(h.tools.get("architect_disposition").parameters.required.includes("decisions"), "confirm could omit the proposed decisions");
 
@@ -112,13 +125,22 @@ assert.equal((await u.tool(params)).details.status, "proposed"); await u.input("
 u.queue.push(result(context()), result({ status: "confirmed", batch_dir: pendingIntake.batch_dir, handoff_path: pendingIntake.handoff_path,
   batch: { batch_id: batchId, context_id: contextId, handoff_id: handoffId } }), result(pendingContext), result("not-json", 70, "start uncertain"), result({ status: "recorded" }));
 assert.equal((await u.tool({ ...params, action: "confirm", operator_confirmation: "Yes" })).details.status, "pending");
-u.queue.push(result({ ...pendingContext, pending_intakes: [{ ...pendingIntake, status: "attempted_awaiting_result", attempt_statuses: ["error"], attempt_paths: [`${pendingIntake.batch_dir}/attempts/attempt-${"a".repeat(64)}.json`] }] }));
+const attemptedPendingContext = { ...pendingContext, pending_intakes: [{ ...pendingIntake, status: "attempted_awaiting_result", attempt_statuses: ["error"], attempt_paths: [`${pendingIntake.batch_dir}/attempts/attempt-${"a".repeat(64)}.json`] }] };
+u.queue.push(result(attemptedPendingContext));
 await u.commands.get("architect").handler("", u.ctx);
 assert.match(u.messages.at(-1), /already operator-settled/);
-u.queue.push(result({ ...pendingContext, pending_intakes: [{ ...pendingIntake, status: "attempted_awaiting_result", attempt_statuses: ["error"], attempt_paths: [`${pendingIntake.batch_dir}/attempts/attempt-${"a".repeat(64)}.json`] }] }));
+const injectedPending = injectedContext(u.messages.at(-1));
+assert.deepEqual(injectedPending, attemptedPendingContext);
+assert.equal(injectedPending.context_id, pendingContextId);
+assert.equal(injectedPending.pending_intakes[0].status, "attempted_awaiting_result");
+assert.equal(injectedPending.pending_intakes[0].batch_id, batchId);
+assert.equal(injectedPending.pending_intakes[0].handoff_id, handoffId);
+assert.deepEqual(injectedPending.pending_intakes[0].occurrences.map(({ occurrence_id }) => occurrence_id),
+  [a1.occurrence_id, a2.occurrence_id, b1.occurrence_id]);
+u.queue.push(result(attemptedPendingContext));
 assert.equal((await u.tool({ action: "propose", context_id: pendingContextId, decisions })).details.status, "refused", "pending decisions were re-proposable");
 await u.input(`retry ${batchId}`);
-u.queue.push(result({ ...pendingContext, pending_intakes: [{ ...pendingIntake, status: "attempted_awaiting_result", attempt_statuses: ["error"], attempt_paths: [`${pendingIntake.batch_dir}/attempts/attempt-${"a".repeat(64)}.json`] }] }),
+u.queue.push(result(attemptedPendingContext),
   result({ schema: "qq-handoff/v1", version: 1, engine: "qq-handoff", action: "intake-start", status: "refused", message: "live recipient", handoff_id: handoffId }), result({ status: "recorded" }));
 const retried = await u.tool({ action: "retry", context_id: pendingContextId, decisions: pendingDecisions,
   batch_id: batchId, handoff_id: handoffId, operator_request: `retry ${batchId}` });
@@ -128,7 +150,7 @@ assert.equal(u.calls.filter((call) => call.command === "qq-handoff" && call.args
 // A verified result removes pending state on the next context.
 u.queue.push(result(context(`context-${"9".repeat(32)}`, [])));
 await u.commands.get("architect").handler("", u.ctx);
-assert.equal(JSON.parse(u.messages.at(-1).split("\n\n")[1]).pending_intakes.length, 0);
+assert.equal(injectedContext(u.messages.at(-1)).pending_intakes.length, 0);
 
 // Set-aside-only confirmation records selective state but starts no intake.
 const s = harness([result(context()), result(context())]);
