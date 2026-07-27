@@ -403,13 +403,9 @@ class Engine:
             )
         self.rail("duplicate_owner", {"duplicate_owners": []})
 
-        caller_hint = os.environ.get("HERDR_PANE_ID", "")
-        if caller_hint:
-            caller_pane = caller_hint
-        else:
-            current = self.herdr_read(["pane", "current"])
-            current_pane = result_object(current, "pane")
-            caller_pane = required_string(current_pane, "pane_id", "current Herdr pane")
+        caller_pane = os.environ.get("HERDR_PANE_ID", "")
+        if not caller_pane:
+            raise Refusal("The invoking root Pi pane identity is unavailable.")
         if not safe_identifier(caller_pane):
             raise Refusal("The invoking pane identity is malformed.")
 
@@ -436,31 +432,12 @@ class Engine:
         ):
             raise Refusal("Caller pane, tab, and agent evidence disagree.")
 
-        snapshot_doc = self.herdr_read(["api", "snapshot"])
-        snapshot = result_object(snapshot_doc, "snapshot")
-        focused = {
-            "workspace_id": required_string(snapshot, "focused_workspace_id", "Herdr snapshot"),
-            "tab_id": required_string(snapshot, "focused_tab_id", "Herdr snapshot"),
-            "pane_id": required_string(snapshot, "focused_pane_id", "Herdr snapshot"),
-        }
-        expected_focus = {
-            "workspace_id": caller_workspace,
-            "tab_id": caller_tab,
-            "pane_id": caller_pane,
-        }
-        if focused != expected_focus:
-            raise Refusal(
-                "The invoking root Pi is not the exact focused project-home pane.",
-                {"expected": expected_focus, "observed": focused},
-            )
-        snapshot_tabs = snapshot.get("tabs")
-        snapshot_panes = snapshot.get("panes")
-        if not isinstance(snapshot_tabs, list) or not isinstance(snapshot_panes, list):
-            raise Refusal("Herdr snapshot tab or pane evidence is malformed.")
-        tab_ids = unique_snapshot_ids(snapshot_tabs, "tab_id", "tab")
-        pane_ids = unique_snapshot_ids(snapshot_panes, "pane_id", "pane")
+        tabs_doc = self.herdr_read(["tab", "list", "--workspace", caller_workspace])
+        panes_doc = self.herdr_read(["pane", "list", "--workspace", caller_workspace])
+        tab_ids = unique_resource_ids(result_array(tabs_doc, "tabs"), "tab_id", "tab")
+        pane_ids = unique_resource_ids(result_array(panes_doc, "panes"), "pane_id", "pane")
         if caller_tab not in tab_ids or caller_pane not in pane_ids:
-            raise Refusal("The caller is missing from the Herdr snapshot.")
+            raise Refusal("The caller is missing from the project-home resource listings.")
 
         session = caller_agent.get("agent_session")
         if session is not None and (
@@ -482,7 +459,6 @@ class Engine:
                 "tab_id": caller_tab,
                 "pane_id": caller_pane,
                 "interactive_root_pi": True,
-                "focused": True,
             },
         )
         return runtime
@@ -523,7 +499,6 @@ class Engine:
         created = self.herdr_call(create_args)
         if created.code != 0 or created.timed_out:
             transaction["cleanup"] = "no_created_identifier; possible tab preserved"
-            transaction["focus_restoration"] = self.restore_focus(home)
             evidence = self.discover_new_resources(home)
             transaction.update(evidence)
             return self.error_receipt(
@@ -557,7 +532,6 @@ class Engine:
                 raise ValueError("created resources do not match the requested fresh tab")
         except (ValueError, Refusal, OperationalError):
             transaction["cleanup"] = "possible tab preserved; creation response was not authoritative"
-            transaction["focus_restoration"] = self.restore_focus(home)
             transaction.update(self.discover_new_resources(home))
             return self.error_receipt(
                 "Tab creation returned uncertain evidence; no resource was closed.",
@@ -608,14 +582,12 @@ class Engine:
             present = live_evidence.get("present")
             if explicit_pre_agent_failure and isinstance(present, bool) and not present:
                 transaction["cleanup"] = self.cleanup_created_tab(created_tab, home)
-                transaction["focus_restoration"] = self.restore_focus(home)
                 return self.error_receipt(
                     f"Pi startup was proven to fail before a live agent existed; cleanup outcome: {transaction['cleanup']}.",
                     context,
                     transaction,
                 ), 1
             transaction["cleanup"] = "created tab preserved; Pi may be live"
-            transaction["focus_restoration"] = self.restore_focus(home)
             return self.error_receipt(
                 "Pi startup is uncertain or may be live; the created tab was preserved.",
                 context,
@@ -624,7 +596,6 @@ class Engine:
 
         if start_doc is None:
             transaction["cleanup"] = "created tab preserved; Pi may be live"
-            transaction["focus_restoration"] = self.restore_focus(home)
             return self.error_receipt(
                 "Pi startup succeeded without a readable receipt; the created tab was preserved.",
                 context,
@@ -663,7 +634,6 @@ class Engine:
         }
         if not prompt_ok:
             transaction["cleanup"] = "created tab preserved; prompt may have been accepted"
-            transaction["focus_restoration"] = self.restore_focus(home)
             transaction["agent_reinspection"] = self.inspect_created_agent(context, transaction)
             return self.error_receipt(
                 "Prompt submission failed or is uncertain; the possibly live Pi tab was preserved.",
@@ -671,17 +641,9 @@ class Engine:
                 transaction,
             ), 1
 
-        focus = self.restore_focus(home)
-        transaction["focus_restoration"] = focus
         transaction["agent_reinspection"] = self.inspect_created_agent(context, transaction)
         transaction["observed_state"] = "working"
         transaction["cleanup"] = "not_needed"
-        if not focus.get("verified"):
-            return self.error_receipt(
-                "The new Pi reached working state, but exact caller focus restoration was not verified.",
-                context,
-                transaction,
-            ), 1
         if not transaction["agent_reinspection"].get("verified", False):
             return self.error_receipt(
                 "The prompt reached working state, but final Pi reinspection was inconclusive.",
@@ -691,7 +653,7 @@ class Engine:
         result = receipt_base(
             self.action,
             "done",
-            "Accountability transferred to a fresh working Pi tab; caller focus was restored.",
+            "Accountability transferred to a fresh working Pi tab.",
             self.rails,
             context,
         )
@@ -757,50 +719,6 @@ class Engine:
             "kind": agent.get("agent"),
         }
 
-    def restore_focus(self, home: dict[str, Any]) -> dict[str, Any]:
-        evidence: dict[str, Any] = {
-            "attempted": True,
-            "workspace_id": home["workspace_id"],
-            "tab_id": home["caller_tab_id"],
-            "pane_id": home["caller_pane_id"],
-            "verified": False,
-        }
-        focused = self.herdr_call(["agent", "focus", home["caller_pane_id"]])
-        if focused.code != 0 or focused.timed_out:
-            evidence["reason"] = "agent focus failed or timed out"
-            return evidence
-        tab = self.herdr_call(["tab", "get", home["caller_tab_id"]])
-        pane = self.herdr_call(["pane", "get", home["caller_pane_id"]])
-        snapshot_result = self.herdr_call(["api", "snapshot"])
-        if any(item.code != 0 or item.timed_out for item in (tab, pane, snapshot_result)):
-            evidence["reason"] = "focus verification read failed"
-            return evidence
-        try:
-            tab_object = result_object(parse_json_object(tab.stdout, "tab JSON malformed"), "tab")
-            pane_object = result_object(parse_json_object(pane.stdout, "pane JSON malformed"), "pane")
-            snapshot = result_object(
-                parse_json_object(snapshot_result.stdout, "snapshot JSON malformed"), "snapshot"
-            )
-            verified = (
-                tab_object.get("tab_id") == home["caller_tab_id"]
-                and tab_object.get("workspace_id") == home["workspace_id"]
-                and isinstance(tab_object.get("focused"), bool)
-                and bool(tab_object.get("focused"))
-                and pane_object.get("pane_id") == home["caller_pane_id"]
-                and pane_object.get("tab_id") == home["caller_tab_id"]
-                and pane_object.get("workspace_id") == home["workspace_id"]
-                and pane_object.get("agent") == "pi"
-                and snapshot.get("focused_workspace_id") == home["workspace_id"]
-                and snapshot.get("focused_tab_id") == home["caller_tab_id"]
-                and snapshot.get("focused_pane_id") == home["caller_pane_id"]
-            )
-        except (OperationalError, Refusal):
-            verified = False
-        evidence["verified"] = verified
-        if not verified:
-            evidence["reason"] = "focused workspace/tab/pane did not match the caller"
-        return evidence
-
     def cleanup_created_tab(self, tab_id: str, home: dict[str, Any]) -> str:
         closed = self.herdr_call(["tab", "close", tab_id])
         if closed.code != 0 or closed.timed_out:
@@ -810,7 +728,7 @@ class Engine:
             return "close returned success but absence verification failed"
         try:
             tabs = result_array(parse_json_object(listed.stdout, "tab list malformed"), "tabs")
-            ids = unique_snapshot_ids(tabs, "tab_id", "tab")
+            ids = unique_resource_ids(tabs, "tab_id", "tab")
         except (OperationalError, Refusal):
             return "close returned success but absence verification was malformed"
         if tab_id in ids:
@@ -825,10 +743,10 @@ class Engine:
             tabs = result_array(parse_json_object(tabs_result.stdout, "tab list malformed"), "tabs")
             panes = result_array(parse_json_object(panes_result.stdout, "pane list malformed"), "panes")
             new_tabs = sorted(
-                unique_snapshot_ids(tabs, "tab_id", "tab") - set(home["preexisting_tab_ids"])
+                unique_resource_ids(tabs, "tab_id", "tab") - set(home["preexisting_tab_ids"])
             )
             new_panes = sorted(
-                unique_snapshot_ids(panes, "pane_id", "pane") - set(home["preexisting_pane_ids"])
+                unique_resource_ids(panes, "pane_id", "pane") - set(home["preexisting_pane_ids"])
             )
             evidence["possible_new_tab_ids"] = new_tabs
             evidence["possible_new_pane_ids"] = new_panes
@@ -1813,14 +1731,14 @@ def is_pi_agent(agent: dict[str, Any]) -> bool:
     return agent.get("agent") == "pi"
 
 
-def unique_snapshot_ids(rows: list[Any], key: str, label: str) -> set[str]:
+def unique_resource_ids(rows: list[Any], key: str, label: str) -> set[str]:
     identifiers: set[str] = set()
     for row in rows:
         if not isinstance(row, dict):
-            raise Refusal(f"Herdr snapshot {label} evidence is malformed.")
-        identity = required_string(row, key, f"Herdr snapshot {label}")
+            raise Refusal(f"Herdr resource-list {label} evidence is malformed.")
+        identity = required_string(row, key, f"Herdr resource-list {label}")
         if not safe_identifier(identity) or identity in identifiers:
-            raise Refusal(f"Herdr snapshot {label} identities are malformed or duplicated.")
+            raise Refusal(f"Herdr resource-list {label} identities are malformed or duplicated.")
         identifiers.add(identity)
     return identifiers
 
@@ -1932,7 +1850,6 @@ def transaction_state() -> dict[str, Any]:
             "wait_until": "working",
             "working_transition_observed": False,
         },
-        "focus_restoration": {"attempted": False, "verified": False},
         "cleanup": "not_started",
     }
 

@@ -122,7 +122,7 @@ with log.open("a", encoding="utf-8") as stream:
 try:
     current = json.loads(state_path.read_text())
 except Exception:
-    current = {"tab": False, "live": False, "focused": True}
+    current = {"tab": False, "live": False}
 
 def save(): state_path.write_text(json.dumps(current))
 def emit(value, code=0):
@@ -158,7 +158,7 @@ if key == ["agent", "list"]:
                      "foreground_cwd":os.environ["FAKE_CHANGE"],"pane_id":"w:pOther",
                      "tab_id":"w:tNew","workspace_id":"w"})
     if current.get("live"):
-        target = current.get("target", os.environ["FAKE_CHANGE"])
+        target = os.environ["FAKE_MAIN"] if mode == "final_reinspection_mismatch" else current.get("target", os.environ["FAKE_CHANGE"])
         rows.append(agent("w:pNew", target, target, current.get("name"), "working"))
     emit({"result":{"type":"agent_list","agents":rows}})
 if key == ["pane", "current"]:
@@ -166,19 +166,21 @@ if key == ["pane", "current"]:
 if key == ["pane", "get"]:
     pane = argv[2]
     if pane == "w:pCaller":
-        emit({"result":{"pane":{"pane_id":pane,"tab_id":"w:tCaller","workspace_id":"w","agent":"pi","focused":current.get("focused", True)}}})
-    emit({"result":{"pane":{"pane_id":pane,"tab_id":"w:tNew","workspace_id":"w","agent":"pi","focused":False}}})
+        emit({"result":{"pane":{"pane_id":pane,"tab_id":"w:tCaller","workspace_id":"w","agent":"pi"}}})
+    emit({"result":{"pane":{"pane_id":pane,"tab_id":"w:tNew","workspace_id":"w","agent":"pi"}}})
 if key == ["api", "snapshot"]:
-    focused_pane = "w:pOther" if mode == "focus_mismatch" else "w:pCaller"
-    focused_tab = "w:tOther" if mode == "focus_mismatch" else "w:tCaller"
+    focus_elsewhere = mode == "focus_elsewhere"
+    focused_workspace = "other" if focus_elsewhere else "w"
+    focused_pane = "other:pFocused" if focus_elsewhere else "w:pCaller"
+    focused_tab = "other:tFocused" if focus_elsewhere else "w:tCaller"
     panes = [{"pane_id":"w:pCaller"}]
     tabs = [{"tab_id":"w:tCaller"}]
     if current.get("tab"):
         panes.append({"pane_id":"w:pNew"}); tabs.append({"tab_id":"w:tNew"})
-    emit({"result":{"type":"session_snapshot","snapshot":{"focused_workspace_id":"w",
+    emit({"result":{"type":"session_snapshot","snapshot":{"focused_workspace_id":focused_workspace,
          "focused_tab_id":focused_tab,"focused_pane_id":focused_pane,"panes":panes,"tabs":tabs}}})
 if key == ["tab", "create"]:
-    current["tab"] = True; current["focused"] = False
+    current["tab"] = True
     current["target"] = argv[argv.index("--cwd") + 1]; save()
     if mode == "create_malformed": print("{not-json"); raise SystemExit(0)
     created_cwd = os.environ["FAKE_REL_CHANGE"] if mode == "create_relative_cwd" else current["target"]
@@ -206,11 +208,10 @@ if key == ["agent", "prompt"]:
     prompt_state = "idle" if mode == "prompt_idle" else "working"
     emit({"result":{"type":"agent_prompted","agent":{"agent":"pi","pane_id":"w:pNew","agent_status":prompt_state}}})
 if key == ["agent", "focus"]:
-    if mode == "focus_restore_failed": emit({"error":{"code":"focus_failed"}}, 1)
-    current["focused"] = True; save(); emit({"result":{"type":"agent_focused","agent":argv[2]}})
+    emit({"result":{"type":"agent_focused","agent":argv[2]}})
 if key == ["tab", "get"]:
     label = "general" if mode == "wrong_architect_tab" else "architect"
-    emit({"result":{"tab":{"tab_id":argv[2],"workspace_id":"w","label":label,"focused":current.get("focused", False)}}})
+    emit({"result":{"tab":{"tab_id":argv[2],"workspace_id":"w","label":label}}})
 if key == ["tab", "close"]:
     if argv[2] != "w:tNew": emit({"result":{"type":"wrong_tab"}}, 3)
     if mode == "startup_failed_close_failed": emit({"error":{"code":"close_failed"}}, 1)
@@ -247,7 +248,7 @@ env.update({"QQ_HERDR_BIN":str(fake), "FAKE_LOG":str(log), "FAKE_STATE":str(stat
 def reset(mode="success"):
     restore_records()
     log.write_text("")
-    state.write_text('{"tab":false,"live":false,"focused":true}')
+    state.write_text('{"tab":false,"live":false}')
     env["FAKE_MODE"] = mode
 
 
@@ -270,6 +271,11 @@ def assert_no_mutation():
     mutating = {("tab","create"),("tab","close"),("agent","start"),("agent","prompt"),("agent","focus")}
     assert not any(tuple(call[:2]) in mutating for call in calls()), calls()
 
+
+def assert_no_focus_commands():
+    forbidden = {("agent","focus"),("api","snapshot"),("pane","current")}
+    assert not any(tuple(call[:2]) in forbidden for call in calls()), calls()
+
 # Exact argument grammar and strict IDs stop before lifecycle inspection.
 for args, code in [
     ((), 1), (("inspect",), 1), (("inspect","T-155"), 1),
@@ -288,6 +294,8 @@ assert receipt["status"] == "done" and receipt["task"]["title"] == "Fixture acco
 assert receipt["branch"] == "feat/change" and receipt["checkout"] == checkout
 assert receipt["plans"] == [str(plan_path.resolve())]
 assert [rail["name"] for rail in receipt["rails"]] == ["repository_topology","change_checkout","task_and_plan_evidence","duplicate_owner","caller_identity"]
+caller_rail = next(rail for rail in receipt["rails"] if rail["name"] == "caller_identity")
+assert "focused" not in caller_rail["evidence"]
 assert_no_mutation()
 
 # No candidate and primary-only evidence refuse without mutation.
@@ -330,7 +338,7 @@ reset(); outside.write_text(plan_text()); plan_path.unlink(); plan_path.symlink_
 reset(); outside.write_text(task_text()); task_path.unlink(); task_path.symlink_to(outside); invoke(2,"inspect","T-155","--repo",main); assert_no_mutation()
 
 # Home/caller ambiguity, owner matching by either cwd field, and malformed evidence.
-for mode in ("no_home","multi_home","relative_home","no_caller","ambiguous_caller","focus_mismatch","owner_cwd","owner_foreground","owner_subdir","malformed_agent"):
+for mode in ("no_home","multi_home","relative_home","no_caller","ambiguous_caller","owner_cwd","owner_foreground","owner_subdir","malformed_agent"):
     reset(mode); invoke(2,"inspect","T-155","--repo",main); assert_no_mutation()
 reset("owner_cwd"); invoke(2,"start","T-155","--repo",main); assert_no_mutation()
 
@@ -341,27 +349,30 @@ old_fake = env["QQ_HERDR_BIN"]; env["QQ_HERDR_BIN"] = str(malformed)
 reset(); invoke(1,"inspect","T-155","--repo",main)
 env["QQ_HERDR_BIN"] = old_fake
 
-# Success observes exact argv/order, bounded identifiers, fixed prompt, and receipt.
-reset()
+# Success is independent of foreign global focus and observes exact argv/order,
+# bounded identifiers, fixed prompt, and receipt.
+reset("focus_elsewhere")
 hostile_marker = scratch / "TITLE_INJECTION_RAN"
 task_path.write_text(task_text(ledger="- INHERITED_SECRET_SENTINEL", title=f'Hostile "; touch {hostile_marker}; echo title'))
 receipt = invoke(0,"start","T-155","--repo",main)
 assert not hostile_marker.exists()
 assert not (scratch / "PATH_INJECTION_RAN").exists()
 assert receipt["status"] == "done" and receipt["transaction"]["observed_state"] == "working"
+assert "focus" not in receipt["message"].lower()
 transaction = receipt["transaction"]
 assert transaction["created_tab_id"] == "w:tNew" and transaction["created_pane_id"] == "w:pNew"
 assert transaction["prompt_submission"]["working_transition_observed"] is True
-assert transaction["focus_restoration"]["verified"] is True
+assert "focus_restoration" not in transaction
 assert transaction["agent_reinspection"]["present"] is True
 assert transaction["agent_reinspection"]["verified"] is True
 assert transaction["cleanup"] == "not_needed"
 actual = calls()
 sequence = [tuple(call[:2]) for call in actual]
-expected = [("workspace","list"),("agent","list"),("pane","get"),("api","snapshot"),
-            ("tab","create"),("agent","start"),("agent","prompt"),("agent","focus"),
-            ("tab","get"),("pane","get"),("api","snapshot"),("agent","list")]
+expected = [("workspace","list"),("agent","list"),("pane","get"),
+            ("tab","list"),("pane","list"),("tab","create"),("agent","start"),
+            ("agent","prompt"),("agent","list")]
 assert sequence == expected, sequence
+assert_no_focus_commands()
 create = next(call for call in actual if call[:2] == ["tab","create"])
 assert create == ["tab","create","--workspace","w","--cwd",checkout,"--label",create[7],"--no-focus"]
 assert len(create[7]) <= 48 and hostile_marker.name not in create[7]
@@ -379,12 +390,24 @@ assert "INHERITED_SECRET_SENTINEL" not in prompt
 assert prompt_call[4:] == ["--wait","--until","working","--timeout","60000"]
 assert hashlib.sha256(prompt.encode()).hexdigest() == transaction["prompt_submission"]["prompt_sha256"]
 
+# A working prompt with mismatched final agent evidence stays an error and preserves the tab.
+reset("final_reinspection_mismatch")
+receipt = invoke(1,"start","T-155","--repo",main)
+assert "final Pi reinspection was inconclusive" in receipt["message"]
+assert receipt["transaction"]["observed_state"] == "working"
+assert receipt["transaction"]["agent_reinspection"]["present"] is True
+assert receipt["transaction"]["agent_reinspection"]["verified"] is False
+assert receipt["transaction"]["cleanup"] == "not_needed"
+assert_no_focus_commands()
+assert not any(call[:2] == ["tab","close"] for call in calls())
+
 # Proven pre-agent startup failure closes only the exact created tab and verifies absence.
 reset("startup_failed")
 receipt = invoke(1,"start","T-155","--repo",main)
 assert receipt["transaction"]["cleanup"] == "closed_created_tab_verified_absent"
 assert receipt["message"].endswith("cleanup outcome: closed_created_tab_verified_absent.")
-assert receipt["transaction"]["focus_restoration"]["verified"] is True
+assert "focus_restoration" not in receipt["transaction"]
+assert_no_focus_commands()
 close_calls = [call for call in calls() if call[:2] == ["tab","close"]]
 assert close_calls == [["tab","close","w:tNew"]]
 
@@ -394,7 +417,7 @@ assert receipt["transaction"]["cleanup"] == "close attempted but not confirmed; 
 assert receipt["message"].endswith(f"cleanup outcome: {receipt['transaction']['cleanup']}.")
 assert "closed_created_tab_verified_absent" not in receipt["message"]
 assert json.loads(state.read_text())["tab"] is True
-assert receipt["transaction"]["focus_restoration"]["verified"] is True
+assert_no_focus_commands()
 
 reset("startup_failed_other_agent")
 receipt = invoke(1,"start","T-155","--repo",main)
@@ -402,7 +425,7 @@ assert receipt["transaction"]["cleanup"] == "created tab preserved; Pi may be li
 assert receipt["transaction"]["agent_reinspection"]["kind"] == "codex"
 assert receipt["transaction"]["agent_reinspection"]["verified"] is False
 assert json.loads(state.read_text())["tab"] is True
-assert receipt["transaction"]["focus_restoration"]["verified"] is True
+assert_no_focus_commands()
 assert not any(call[:2] == ["tab","close"] for call in calls())
 
 # A code-zero prompt receipt without the correlated working transition remains uncertain.
@@ -411,33 +434,29 @@ receipt = invoke(1,"start","T-155","--repo",main)
 assert receipt["transaction"]["prompt_submission"]["submitted"] is False
 assert receipt["transaction"]["prompt_submission"]["working_transition_observed"] is False
 assert receipt["transaction"]["cleanup"] == "created tab preserved; prompt may have been accepted"
-assert receipt["transaction"]["focus_restoration"]["verified"] is True
+assert_no_focus_commands()
 assert not any(call[:2] == ["tab","close"] for call in calls())
 
-# Timeout, malformed startup evidence, and prompt uncertainty preserve identifiers and restore focus.
+# Timeout, malformed startup evidence, and prompt uncertainty preserve identifiers.
 for mode in ("startup_uncertain","start_malformed","start_invalid_utf8","start_relative_cwd","start_wrong_argv","prompt_failed","prompt_malformed"):
     reset(mode); receipt = invoke(1,"start","T-155","--repo",main)
     assert receipt["transaction"]["created_tab_id"] == "w:tNew"
     assert "preserved" in receipt["transaction"]["cleanup"]
-    assert receipt["transaction"]["focus_restoration"]["verified"] is True
+    assert_no_focus_commands()
     assert not any(call[:2] == ["tab","close"] for call in calls())
 
 for mode in ("create_malformed", "create_relative_cwd"):
     reset(mode); receipt = invoke(1,"start","T-155","--repo",main)
     assert receipt["transaction"]["created_tab_id"] is None
     assert receipt["transaction"]["possible_new_tab_ids"] == ["w:tNew"]
-    assert receipt["transaction"]["focus_restoration"]["verified"] is True
+    assert_no_focus_commands()
     assert not any(call[:2] == ["tab","close"] for call in calls())
 
-reset("focus_restore_failed"); receipt = invoke(1,"start","T-155","--repo",main)
-assert receipt["transaction"]["created_tab_id"] == "w:tNew"
-assert receipt["transaction"]["observed_state"] == "working"
-assert receipt["transaction"]["focus_restoration"]["verified"] is False
-assert receipt["transaction"]["cleanup"] == "not_needed"
-assert not any(call[:2] == ["tab","close"] for call in calls())
-
-# Without an environment hint, the documented pane-current read remains non-mutating.
-reset(); env.pop("HERDR_PANE_ID"); invoke(0,"inspect","T-155","--repo",main); assert ["pane","current"] in calls(); assert_no_mutation()
+# Without the invoking Pi's injected identity, global current focus is not a fallback.
+reset(); env.pop("HERDR_PANE_ID")
+missing_identity = invoke(2,"inspect","T-155","--repo",main)
+assert "pane identity is unavailable" in missing_identity["message"]
+assert_no_focus_commands(); assert_no_mutation()
 env["HERDR_PANE_ID"] = "w:pCaller"
 
 # Typed Architect intake reuses the same transaction while targeting primary main.
@@ -539,6 +558,14 @@ reset("wrong_architect_tab")
 wrong_tab_receipt = invoke(2, "intake-start", "--handoff", str(handoff_path), "--repo", main)
 assert "dedicated architect tab" in wrong_tab_receipt["message"]
 assert_no_mutation()
+
+# Architect intake authority is the live root Pi in qq's project home and dedicated
+# architect tab even while another workspace, tab, and pane are globally focused.
+reset("focus_elsewhere")
+focus_independent_receipt = invoke(0, "intake-start", "--handoff", str(handoff_path), "--repo", main)
+assert focus_independent_receipt["status"] == "done"
+assert_no_focus_commands()
+
 reset()
 receipt = invoke(0, "intake-start", "--handoff", str(handoff_path), "--repo", main)
 assert receipt["action"] == "intake-start" and receipt["handoff_id"] == handoff_id

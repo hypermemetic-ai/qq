@@ -477,9 +477,11 @@ Bounded implementation, fresh review, and research run through pi-subagents;
 
 For an existing aligned Change, `/handoff <Task-ID>` is the standard transfer
 to a fresh accountable Pi tab. It resolves the Task's unique linked checkout,
-verifies its durable plan and ownership rails, starts the receiver in the
-persistent project home, and restores caller focus. This transfers accountable
-ownership; it is distinct from bounded child delegation through pi-subagents.
+verifies its durable plan and ownership rails, and starts the receiver with
+no-focus semantics in the persistent project home. Caller authority is
+independent of global Herdr focus, which is neither inspected nor restored.
+This transfers accountable ownership; it is distinct from bounded child
+delegation through pi-subagents.
 
 Architect findings use a separate typed accountable-intake route. Observer v2
 runs are Repository-qualified beneath
