@@ -224,14 +224,14 @@ fi
 [ ! -e "$unrelated/qq" ] || fail 'rejected symlinked policy parent was mutated'
 
 # The dedicated launcher owns the Architect assertion and rejects conflicts.
-launcher_root="$(mktemp -d "$ROOT/.test-qq-execution-profiles.XXXXXX")"
+launcher_root="$(mktemp -d "${TMPDIR:?TMPDIR is required}/qq-execution-profiles.XXXXXX")"
 mkdir -p "$launcher_root/bin"
 cp "$ROOT/bin/qq-pi-role" "$launcher_root/bin/qq-pi-role"
-cat >"$launcher_root/bin/pi" <<'FAKE_PI'
+cat >"$launcher_root/bin/qq-pi-runtime" <<'FAKE_PI_RUNTIME'
 #!/usr/bin/env bash
 printf '%s\n' "${QQ_EXECUTION_PROFILE_LAUNCHER-}" "${QQ_EXECUTION_PROFILE_LAUNCHER_ROLE-}" "$*"
-FAKE_PI
-chmod 755 "$launcher_root/bin/pi" "$launcher_root/bin/qq-pi-role"
+FAKE_PI_RUNTIME
+chmod 755 "$launcher_root/bin/qq-pi-runtime" "$launcher_root/bin/qq-pi-role"
 launcher_output="$launcher_root/launch.out"
 env -u PI_SUBAGENT_CHILD_AGENT -u PI_SUBAGENT_TRUSTED_EXECUTION_ROLE \
   -u PI_SUBAGENT_EXECUTION_PROFILE_RECEIPT -u QQ_EXECUTION_PROFILE_LAUNCHER_ROLE \
@@ -239,7 +239,7 @@ env -u PI_SUBAGENT_CHILD_AGENT -u PI_SUBAGENT_TRUSTED_EXECUTION_ROLE \
 mapfile -t launched <"$launcher_output"
 assert_equal "$launcher_root/bin/qq-pi-role" "${launched[0]}" 'launcher path assertion mismatch'
 assert_equal architect "${launched[1]}" 'launcher role assertion mismatch'
-assert_equal '--qq-architect-profile --version' "${launched[2]}" 'launcher argument forwarding mismatch'
+assert_equal 'exec -- --version' "${launched[2]}" 'launcher argument forwarding mismatch'
 if "$launcher_root/bin/qq-pi-role" observer >/dev/null 2>&1; then
   fail 'launcher accepted a delegated role'
 fi

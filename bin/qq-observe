@@ -130,9 +130,6 @@ PR_MERGE = re.compile(r"^Merge pull request #(\d+)\b")
 PR_SQUASH = re.compile(r"(?:^|\s)\(#(\d+)\)$")
 STATUS_CAP = 1024 * 1024
 FIRST_LINE_CAP = 1024 * 1024
-ALIGNMENT_PACKAGE_CAP = 1024 * 1024
-ALIGNMENT_JOURNAL_CAP = 4 * 1024 * 1024
-ALIGNMENT_SCAN_CAP = 4096
 
 
 def fail(message, status=64):
@@ -713,246 +710,6 @@ def clone_input_tree(source, destination, runs_root):
             fail(f"guided package input is not a regular file or directory: {entry}", 65)
 
 
-def alignment_state_root():
-    state_home = os.environ.get("XDG_STATE_HOME")
-    if state_home is not None:
-        if not os.path.isabs(state_home):
-            fail("XDG_STATE_HOME must be absolute for alignment evidence", 65)
-        return Path(state_home) / "qq" / "alignment"
-    home = os.environ.get("HOME")
-    if not home or not os.path.isabs(home):
-        fail("absolute HOME is required for alignment evidence", 65)
-    return Path(home) / ".local" / "state" / "qq" / "alignment"
-
-
-def alignment_package_files(root):
-    packages = root / "sealed" / "packages"
-    try:
-        groups = sorted(os.scandir(packages), key=lambda entry: entry.name)
-    except FileNotFoundError:
-        return []
-    except OSError as error:
-        fail(f"cannot enumerate sealed alignment packages: {error}", 65)
-    result = []
-    for group in groups:
-        try:
-            group_info = group.stat(follow_symlinks=False)
-        except OSError as error:
-            fail(f"cannot inspect sealed alignment package group {group.path}: {error}", 65)
-        if not stat.S_ISDIR(group_info.st_mode) or not re.fullmatch(r"[0-9a-f]{64}", group.name):
-            fail(f"sealed alignment package group is malformed: {group.path}", 65)
-        try:
-            entries = sorted(os.scandir(group.path), key=lambda entry: entry.name)
-        except OSError as error:
-            fail(f"cannot enumerate sealed alignment package group {group.path}: {error}", 65)
-        for entry in entries:
-            try:
-                info = entry.stat(follow_symlinks=False)
-            except OSError as error:
-                fail(f"cannot inspect sealed alignment package {entry.path}: {error}", 65)
-            if not stat.S_ISREG(info.st_mode) or not entry.name.endswith(".json") or info.st_size > ALIGNMENT_PACKAGE_CAP:
-                fail(f"sealed alignment package is malformed or oversized: {entry.path}", 65)
-            result.append(Path(entry.path))
-            if len(result) > ALIGNMENT_SCAN_CAP:
-                fail("sealed alignment package scan exceeds its bound", 65)
-    return result
-
-
-def validate_alignment_package(value, path):
-    required = {
-        "version", "package_id", "change_id", "trace_id", "session_id", "sealed_at", "reason",
-        "journal_sha256", "journal_path", "root_session_files", "exchange_ids", "disposition_receipt_ids",
-        "evidence_capability_ids", "worker_run_ids", "trace_references", "orchestrator_lifecycle",
-    }
-    identifier = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
-    if not isinstance(value, dict) or set(value) != required or value.get("version") != 1:
-        fail(f"sealed alignment package has the wrong shape: {path}", 65)
-    for field in ("package_id", "change_id", "session_id"):
-        if not isinstance(value.get(field), str) or not identifier.fullmatch(value[field]):
-            fail(f"sealed alignment package has malformed {field}: {path}", 65)
-    if path.parent.name != hashlib.sha256(value["change_id"].encode()).hexdigest() or path.name != f"{value['session_id']}.json":
-        fail(f"sealed alignment package storage identity is malformed: {path}", 65)
-    if not isinstance(value.get("trace_id"), str) or not re.fullmatch(r"[0-9a-f]{32}", value["trace_id"]):
-        fail(f"sealed alignment package has malformed trace_id: {path}", 65)
-    try:
-        time_value(value.get("sealed_at"))
-    except ValueError as error:
-        fail(f"sealed alignment package has malformed sealed_at ({error}): {path}", 65)
-    if value.get("reason") not in ("finalized", "quit", "reload", "new", "resume", "fork", "orchestrator-failure", "recovery"):
-        fail(f"sealed alignment package has malformed reason: {path}", 65)
-    if not isinstance(value.get("journal_sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", value["journal_sha256"]):
-        fail(f"sealed alignment package has malformed journal digest: {path}", 65)
-    if not isinstance(value.get("journal_path"), str) or not os.path.isabs(value["journal_path"]):
-        fail(f"sealed alignment package has non-absolute journal path: {path}", 65)
-    roots = value.get("root_session_files")
-    if not isinstance(roots, list) or not roots or any(not isinstance(item, str) or not os.path.isabs(item) for item in roots) or len(set(roots)) != len(roots):
-        fail(f"sealed alignment package has malformed root session files: {path}", 65)
-    for field in ("exchange_ids", "disposition_receipt_ids", "evidence_capability_ids", "worker_run_ids"):
-        items = value.get(field)
-        if not isinstance(items, list) or any(not isinstance(item, str) or not identifier.fullmatch(item) for item in items) or len(set(items)) != len(items):
-            fail(f"sealed alignment package has malformed {field}: {path}", 65)
-    references = value.get("trace_references")
-    if not isinstance(references, list):
-        fail(f"sealed alignment package has malformed trace_references: {path}", 65)
-    for reference in references:
-        if (
-            not isinstance(reference, dict)
-            or set(reference) != {"trace_id", "span_id", "journal_entry_id"}
-            or reference.get("trace_id") != value["trace_id"]
-            or not isinstance(reference.get("span_id"), str)
-            or not re.fullmatch(r"[0-9a-f]{16}", reference["span_id"])
-            or not isinstance(reference.get("journal_entry_id"), str)
-            or not identifier.fullmatch(reference["journal_entry_id"])
-        ):
-            fail(f"sealed alignment package has malformed trace reference: {path}", 65)
-    if value.get("orchestrator_lifecycle") not in ("complete", "failed", "stopped"):
-        fail(f"sealed alignment package lacks proven terminal lifecycle: {path}", 65)
-    return value
-
-
-def validate_alignment_terminal(entries, package, journal_path):
-    starts = []
-    seals = []
-    for index, entry in enumerate(entries):
-        if entry["type"] == "orchestrator-start":
-            payload = entry["payload"]
-            if (
-                set(payload) != {"run_id", "trace_id", "resumed"}
-                or not isinstance(payload.get("run_id"), str)
-                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", payload["run_id"])
-                or payload.get("trace_id") != package["trace_id"]
-                or not isinstance(payload.get("resumed"), bool)
-            ):
-                fail(f"sealed alignment journal has malformed orchestrator start: {journal_path}", 65)
-            starts.append((index, payload["run_id"]))
-        elif entry["type"] == "sealed":
-            payload = entry["payload"]
-            if set(payload) != {"package_id", "change_id", "final"} or payload != {
-                "package_id": package["package_id"],
-                "change_id": package["change_id"],
-                "final": True,
-            }:
-                fail(f"sealed alignment journal has malformed final seal: {journal_path}", 65)
-            seals.append(index)
-    if not starts:
-        fail(f"sealed alignment journal lacks exact-run terminal proof: {journal_path}", 65)
-    if seals != [len(entries) - 1]:
-        fail(f"sealed alignment journal final seal is absent or reordered: {journal_path}", 65)
-    start_index, run_id = starts[-1]
-    seal_index = seals[0]
-    proofs = []
-    for index, entry in enumerate(entries):
-        if entry["type"] not in ("orchestrator-stop", "orchestrator-async-complete"):
-            continue
-        payload = entry["payload"]
-        if entry["type"] == "orchestrator-stop":
-            valid = (
-                set(payload) == {"run_id", "reason", "proven", "terminal"}
-                and isinstance(payload.get("reason"), str)
-                and payload.get("proven") is True
-                and payload.get("terminal") in ("complete", "failed", "stopped")
-            )
-            terminal = payload.get("terminal")
-        else:
-            valid = (
-                set(payload) == {"run_id", "state"}
-                and payload.get("state") in ("complete", "failed", "stopped")
-            )
-            terminal = payload.get("state")
-        if not valid:
-            fail(f"sealed alignment journal has malformed terminal proof: {journal_path}", 65)
-        if start_index < index < seal_index:
-            if payload.get("run_id") != run_id:
-                fail(f"sealed alignment journal terminal proof is foreign to the final run: {journal_path}", 65)
-            proofs.append((index, terminal))
-    if not proofs:
-        fail(f"sealed alignment journal lacks later exact-run terminal proof: {journal_path}", 65)
-    states = {state for _, state in proofs}
-    if len(states) != 1:
-        fail(f"sealed alignment journal has conflicting terminal proof: {journal_path}", 65)
-    proven = next(iter(states))
-    if proven != package["orchestrator_lifecycle"]:
-        fail(f"sealed alignment package lifecycle mismatches journal terminal proof: {journal_path}", 65)
-
-
-def package_alignment_traces(run_dir, packaged_sessions):
-    selected_sessions = {
-        row["source_path"] for row in packaged_sessions
-        if row.get("role") == "accountable"
-    }
-    traces = []
-    seen = set()
-    for package_path in alignment_package_files(alignment_state_root()):
-        package_bytes = read_regular(package_path, "sealed alignment package")
-        package = validate_alignment_package(
-            json_document(package_bytes, f"sealed alignment package {package_path}"),
-            package_path,
-        )
-        if not selected_sessions.intersection(package["root_session_files"]):
-            continue
-        package_id = package["package_id"]
-        if package_id in seen or not SAFE_COMPONENT.fullmatch(package_id):
-            fail(f"sealed alignment package identity is duplicated or unsafe: {package_id}", 65)
-        seen.add(package_id)
-        journal_path = Path(package["journal_path"])
-        try:
-            journal_info = os.lstat(journal_path)
-        except OSError as error:
-            fail(f"cannot inspect sealed alignment journal {journal_path}: {error}", 65)
-        if not stat.S_ISREG(journal_info.st_mode) or journal_info.st_size > ALIGNMENT_JOURNAL_CAP:
-            fail(f"sealed alignment journal is malformed or oversized: {journal_path}", 65)
-        journal_bytes = read_regular(journal_path, "sealed alignment journal")
-        if hashlib.sha256(journal_bytes).hexdigest() != package["journal_sha256"]:
-            fail(f"sealed alignment journal digest drifted: {journal_path}", 65)
-        try:
-            journal_text = journal_bytes.decode("utf-8")
-        except UnicodeDecodeError as error:
-            fail(f"sealed alignment journal is not UTF-8: {error}", 65)
-        journal_entry_ids = set()
-        journal_entries = []
-        for line_number, line in enumerate(journal_text.splitlines(), 1):
-            try:
-                entry = json.loads(line)
-            except (ValueError, RecursionError) as error:
-                fail(f"sealed alignment journal line {line_number} is malformed: {error}", 65)
-            entry_id = entry.get("journal_entry_id") if isinstance(entry, dict) else None
-            if (
-                not isinstance(entry, dict)
-                or set(entry) != {"version", "journal_entry_id", "at", "type", "payload"}
-                or entry.get("version") != 1
-                or not isinstance(entry_id, str)
-                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", entry_id)
-                or entry_id in journal_entry_ids
-                or not isinstance(entry.get("type"), str) or not entry["type"]
-                or not isinstance(entry.get("payload"), dict)
-            ):
-                fail(f"sealed alignment journal line {line_number} has the wrong shape", 65)
-            try:
-                time_value(entry.get("at"))
-            except ValueError as error:
-                fail(f"sealed alignment journal line {line_number} has malformed time ({error})", 65)
-            journal_entry_ids.add(entry_id)
-            journal_entries.append(entry)
-        if not journal_entry_ids:
-            fail("sealed alignment journal is empty", 65)
-        if any(reference["journal_entry_id"] not in journal_entry_ids for reference in package["trace_references"]):
-            fail(f"sealed alignment trace reference does not resolve in its journal: {journal_path}", 65)
-        validate_alignment_terminal(journal_entries, package, journal_path)
-        package_relative = f"alignment/packages/{package_id}.json"
-        journal_relative = f"alignment/journals/{package_id}.jsonl"
-        atomic_append(run_dir / package_relative, package_bytes)
-        atomic_append(run_dir / journal_relative, journal_bytes)
-        traces.append({
-            "package_id": package_id,
-            "change_id": package["change_id"],
-            "trace_id": package["trace_id"],
-            "package": package_relative,
-            "journal": journal_relative,
-            "journal_sha256": package["journal_sha256"],
-        })
-    return traces
-
-
 def assemble_blind(pr, repo, repository, runs_root):
     guided_name = f"pr-{pr}"
     repository_root = qualified_runs_root(runs_root, repository, create=True)
@@ -1016,8 +773,6 @@ def assemble_blind(pr, repo, repository, runs_root):
         read_regular(guided_dir / "inventory.json", "guided package inventory"),
     )
     clone_input_tree(guided_dir / "corpus", run_dir / "corpus", runs_root)
-    if blind.get("alignment_traces"):
-        clone_input_tree(guided_dir / "alignment", run_dir / "alignment", runs_root)
     atomic_append(package_path, package_data)
     emit({
         "status": "assembled", "run_dir": os.fspath(run_dir),
@@ -1481,8 +1236,6 @@ def assemble(values):
             package_row["run_id"] = row["run_id"]
         packaged_sessions.append(package_row)
 
-    alignment_traces = package_alignment_traces(run_dir, packaged_sessions)
-
     all_paths = git_paths(repo, merge_commit, "bin", "extensions", "skills", "delegation/manifests")
     bin_names = sorted(
         PurePosixPath(path).name for path in all_paths
@@ -1552,7 +1305,6 @@ def assemble(values):
         "variant": variant,
         "repo": os.fspath(repo),
         "sessions": packaged_sessions,
-        "alignment_traces": alignment_traces,
         "warnings": warnings,
         "unknown_entries": unknown,
     }

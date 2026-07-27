@@ -48,31 +48,22 @@ approval question. All context that bears on each decision precedes the
 options; a full grilling interview follows only when a decision is genuinely
 open.
 
-**aligner** — qq's privileged visible root role and sole operational
-conversational interface during a Change. It translates exact operator intent
-and dispositions over closed contracts, resolves only capability-granted
-evidence, and presents provenance-bearing explanations; it cannot execute,
-dispatch work roles, mutate state, choose for the operator, or inspect
-calibration state.
+**aligner** — qq's privileged visible root and sole operational Change
+interface. It translates exact intent/dispositions through closed contracts and
+explains only bounded, source-referenced material; it cannot execute, dispatch,
+mutate, decide, or inspect calibration.
 
-**alignment episode** — One initial alignment, acceptance exchange, or
-criteria-triggered realignment, with complementary spoken and visual material
-and a `ready`, `needs-data`, or clarification outcome.
-
-**evidence capability** — An opaque, Change/session-bound grant to one exact
-canonical evidence object and byte range, fixed by media type, digest, issuing
-exchange/trace, and retention. It grants no path lookup, search, traversal, or
-neighbor access.
+**alignment episode** — An initial, acceptance, or criteria-triggered
+realignment exchange with complementary spoken/visual material and a `ready`,
+`needs-data`, or clarification outcome.
 
 **GitHub Flow** — The delivery path from branch through pull request and final
 Checks to operator merge and automatic branch deletion.
 
-**project home** — A Repository's persistent Herdr workspace bound to its sole
-primary `main` checkout. Its dedicated Backlog-board tab, operator-created
-general tabs, and each accountable aligner remain here. Its session-long
-internal orchestrator executes with depth-2 work-role fanout. Change checkouts
-are plain linked worktrees without Herdr workspaces; delegates are headless
-children in the Change worktree.
+**project home** — A Repository's persistent Herdr workspace for its sole
+primary `main` checkout. Its Backlog tab, operator-created tabs, and accountable
+aligner remain here; one session-long orchestrator owns depth-2 fanout. Changes
+are plain linked worktrees with headless delegates.
 
 **green** — A unit of work whose applicable Checks pass with evidence that they
 observed the intended subject.

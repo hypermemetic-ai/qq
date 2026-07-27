@@ -236,16 +236,17 @@ if [[ -n "${HOME:-}" ]]; then
   fi
 fi
 
-# Delegates may execute only this verified worktree's qq Pi wrapper; PATH and
-# QQ_PI_BIN are not child-runtime authorities.
-pi_binary="$bin_dir/pi"
-[[ -f "$pi_binary" && -x "$pi_binary" && ! -L "$pi_binary" ]] \
-  || fail 70 "the worktree Pi wrapper is unavailable or linked"
-if [[ "$(realpath -e -- "$pi_binary" 2>/dev/null)" != "$pi_binary" ]]; then
-  fail 70 "the worktree Pi wrapper does not resolve exactly"
+# Delegates invoke the pinned runtime adapter directly; project-home bin/pi is
+# exclusively the aligner root entry point. PATH and QQ_PI_BIN are not child
+# runtime authorities.
+pi_runtime="$bin_dir/qq-pi-runtime"
+[[ -f "$pi_runtime" && -x "$pi_runtime" && ! -L "$pi_runtime" ]] \
+  || fail 70 "the worktree Pi runtime adapter is unavailable or linked"
+if [[ "$(realpath -e -- "$pi_runtime" 2>/dev/null)" != "$pi_runtime" ]]; then
+  fail 70 "the worktree Pi runtime adapter does not resolve exactly"
 fi
-[[ "$pi_binary" != "$self" ]] \
-  || fail 70 "Pi target cannot recurse into the adapter"
+[[ "$pi_runtime" != "$self" ]] \
+  || fail 70 "Pi runtime target cannot recurse into the dispatch adapter"
 
 if ! qq_resolve_bin node; then
   fail 69 "$QQ_BIN_ERROR"
@@ -477,7 +478,7 @@ set +e
 "$timeout_binary" -k 10 --signal=TERM "$timeout_spec" \
   "$python_binary" "$tree_supervisor" -- \
   "$landstrip_binary" -p "$policy_path" \
-  "$pi_binary" --approve --offline "$@" &
+  "$pi_runtime" exec -- --approve --offline "$@" &
 dispatch_pid=$!
 [[ -z "$termination_signal" ]] || forward_termination "$termination_signal"
 while true; do

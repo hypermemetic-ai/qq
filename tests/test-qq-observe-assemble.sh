@@ -254,61 +254,6 @@ jq -e --arg uuid "$parent_uuid" --arg session_file \
 ' "$runtime/async-subagent-runs/strong-run/status.json" >/dev/null \
   || fail 'true-single status fixture has the wrong shape'
 
-alignment_root="$XDG_STATE_HOME/qq/alignment"
-make_alignment_package() {
-  local change_id="$1" session_id="$2" root_session="$3" worker_run="$4" package_id="$5"
-  local trace_id="${6:-11111111111111111111111111111111}"
-  local lifecycle="${7:-stopped}"
-  local identity_hash package_dir journal_dir journal_path package_path journal_sha
-  identity_hash="$(printf '%s' "$change_id" | sha256sum | cut -d' ' -f1)"
-  package_dir="$alignment_root/sealed/packages/$identity_hash"
-  journal_dir="$alignment_root/sessions/$session_id"
-  journal_path="$journal_dir/journal.jsonl"
-  package_path="$package_dir/$session_id.json"
-  mkdir -p "$package_dir" "$journal_dir"
-  jq -cn --arg trace "$trace_id" --arg run "orchestrator-$session_id" \
-    --arg lifecycle "$lifecycle" --arg package "$package_id" --arg change "$change_id" '
-    {version:1,journal_entry_id:"journal-fixture",at:"2026-07-20T10:00:00Z",
-      type:"operator-input",payload:{verbatim:"frozen alignment fixture",trace_id:$trace}},
-    {version:1,journal_entry_id:"journal-start",at:"2026-07-20T10:00:10Z",
-      type:"orchestrator-start",payload:{run_id:$run,trace_id:$trace,resumed:false}},
-    {version:1,journal_entry_id:"journal-terminal",at:"2026-07-20T10:00:20Z",
-      type:"orchestrator-stop",payload:{run_id:$run,reason:"finalized",proven:true,terminal:$lifecycle}},
-    {version:1,journal_entry_id:"journal-seal",at:"2026-07-20T10:00:30Z",
-      type:"sealed",payload:{package_id:$package,change_id:$change,final:true}}
-  ' >"$journal_path"
-  journal_sha="$(sha256sum "$journal_path" | cut -d' ' -f1)"
-  jq -cn --arg package_id "$package_id" --arg change_id "$change_id" \
-    --arg trace_id "$trace_id" --arg session_id "$session_id" \
-    --arg journal_sha "$journal_sha" --arg journal_path "$journal_path" \
-    --arg root_session "$root_session" --arg worker_run "$worker_run" \
-    --arg lifecycle "$lifecycle" '{
-      version:1,package_id:$package_id,change_id:$change_id,trace_id:$trace_id,
-      session_id:$session_id,sealed_at:"2026-07-20T10:01:00Z",reason:"finalized",
-      journal_sha256:$journal_sha,journal_path:$journal_path,
-      root_session_files:[$root_session],exchange_ids:["exchange-fixture"],
-      disposition_receipt_ids:[],evidence_capability_ids:[],worker_run_ids:[$worker_run],
-      trace_references:[{trace_id:$trace_id,span_id:"2222222222222222",journal_entry_id:"journal-fixture"}],
-      orchestrator_lifecycle:$lifecycle
-    }' >"$package_path"
-  printf '%s\n%s\n' "$package_path" "$journal_path"
-}
-make_alignment_package \
-  T-165.1 alignment-match "$parent_strong" strong-run package-guided-match >"$tmp/matching-alignment-paths"
-mapfile -t matching_alignment <"$tmp/matching-alignment-paths"
-make_alignment_package \
-  T-unrelated alignment-unrelated "$tmp/unrelated-root.jsonl" unrelated-run package-unrelated \
-  33333333333333333333333333333333 >"$tmp/unrelated-alignment-paths"
-mapfile -t unrelated_alignment <"$tmp/unrelated-alignment-paths"
-# A fallible worker id that collides with the selected PR cannot select a
-# package whose exact root Pi-session paths do not match.
-make_alignment_package \
-  T-worker-collision alignment-worker-collision \
-  "$TMPDIR/pi-subagent-sessions/strong-hash/run-0/session.jsonl" strong-run package-worker-collision \
-  55555555555555555555555555555555 >"$tmp/worker-collision-alignment-paths"
-matching_alignment_package="${matching_alignment[0]}"
-matching_alignment_journal="${matching_alignment[1]}"
-
 set +e
 "$OBSERVE" assemble --pr 43 --repo "$repo" \
   >"$tmp/outside-main.stdout" 2>"$tmp/outside-main.stderr"
@@ -383,26 +328,6 @@ jq -e --arg repo "$(realpath "$repo")" --arg missing "$missing_session_file" \
   and ([.warnings[] | select(contains($zero_uuid))] | length) == 1
   and ([.warnings[] | select(contains($weak_invalid_uuid))] | length) == 1
 ' "$run_41/package.json" >/dev/null || fail 'external delegate sessions were not assembled defensively'
-jq -e '
-  (.alignment_traces | length) == 1
-  and .alignment_traces[0].package_id == "package-guided-match"
-  and .alignment_traces[0].package == "alignment/packages/package-guided-match.json"
-  and .alignment_traces[0].journal == "alignment/journals/package-guided-match.jsonl"
-  and (.alignment_traces[0].package | startswith("/") | not)
-  and (.alignment_traces[0].journal | startswith("/") | not)
-  and (.alignment_traces[0].package | contains("..") | not)
-  and (.alignment_traces[0].journal | contains("..") | not)
-' "$run_41/package.json" >/dev/null || fail 'guided package did not expose one safe matching frozen alignment trace'
-cmp "$matching_alignment_package" "$run_41/alignment/packages/package-guided-match.json" \
-  || fail 'guided assembly did not freeze the exact sealed alignment package'
-cmp "$matching_alignment_journal" "$run_41/alignment/journals/package-guided-match.jsonl" \
-  || fail 'guided assembly did not freeze the exact sealed alignment journal'
-[ ! -e "$run_41/alignment/packages/package-unrelated.json" ] \
-  || fail 'guided assembly copied unrelated alignment evidence'
-[ ! -e "$run_41/alignment/packages/package-worker-collision.json" ] \
-  || fail 'guided assembly let a worker-only collision select alignment evidence'
-assert_file_contains "$ROOT/delegation/manifests/observer-procedure.md" 'Never follow the sealed'
-assert_file_contains "$ROOT/delegation/manifests/observer-procedure.md" 'Do not rediscover'
 [ -f "$run_41/inventory.json" ] || fail 'inventory was not written'
 [ -f "$run_41/corpus/skills/fixture/SKILL.md" ] || fail 'merge-time corpus was not snapshotted'
 [ -f "$run_41/corpus/delegation/manifests/agents/implementer.md" ] \
@@ -451,12 +376,6 @@ assert_equal 10 "$(find "$blind_run_41/sessions" -type f | wc -l)" \
 assert_equal 10 "$(find "$blind_run_41/facts" -type f | wc -l)" \
   'blind facts count is wrong'
 [ ! -e "$blind_run_41/signals" ] || fail 'blind package wrote a signals directory'
-cmp "$run_41/alignment/packages/package-guided-match.json" \
-  "$blind_run_41/alignment/packages/package-guided-match.json" \
-  || fail 'blind package changed the guided frozen alignment package'
-cmp "$run_41/alignment/journals/package-guided-match.jsonl" \
-  "$blind_run_41/alignment/journals/package-guided-match.jsonl" \
-  || fail 'blind package changed the guided frozen alignment journal'
 [ "$blind_run_41" != "$run_41" ] || fail 'guided and blind variants shared a run directory'
 "$OBSERVE" assemble --pr 41 --repo "$repo" --variant blind \
   >"$tmp/reassembled-41-blind.json"
@@ -516,137 +435,13 @@ cat >"$solo_session" <<'JSONL'
 {"type":"message","timestamp":"2026-07-20T11:00:01Z","message":{"role":"user","content":"please implement solo"}}
 JSONL
 printf '{"schema":"not-a-session"}\n' >"$repo_sessions/not-session.jsonl"
-
-# Matching sealed evidence is admitted only after strict shape, terminal,
-# direct-path, package/journal-size, digest, and UTF-8 validation. Repeated
-# refusal may leave only byte-identical frozen inputs; it never writes package.json.
-make_alignment_package \
-  T-shape alignment-shape "$solo_session" shape-worker package-shape \
-  44444444444444444444444444444444 running >"$tmp/shape-alignment-paths"
-mapfile -t shape_alignment <"$tmp/shape-alignment-paths"
-shape_package="${shape_alignment[0]}"
-shape_journal="${shape_alignment[1]}"
-set +e
-"$OBSERVE" assemble --pr 42 --repo "$repo" >"$tmp/shape-lifecycle.stdout" 2>"$tmp/shape-lifecycle.stderr"
-status=$?
-set -e
-assert_equal 65 "$status" 'guided assembly accepted an unproven alignment lifecycle'
-assert_file_contains "$tmp/shape-lifecycle.stderr" 'lacks proven terminal lifecycle'
-[ ! -e "$qualified_runs/pr-42/package.json" ] || fail 'terminal refusal wrote package.json'
-
-update_shape_digest() {
-  local digest
-  digest="$(sha256sum "$shape_journal" | cut -d' ' -f1)"
-  jq --arg digest "$digest" '.journal_sha256 = $digest' "$shape_package" >"$tmp/shape-package.json"
-  mv "$tmp/shape-package.json" "$shape_package"
-}
-run_terminal_refusal() {
-  local label="$1" expected="$2"
-  set +e
-  "$OBSERVE" assemble --pr 42 --repo "$repo" >"$tmp/$label.stdout" 2>"$tmp/$label.stderr"
-  status=$?
-  set -e
-  assert_equal 65 "$status" "guided assembly accepted $label terminal history"
-  assert_file_contains "$tmp/$label.stderr" "$expected"
-  [ ! -e "$qualified_runs/pr-42/package.json" ] || fail "$label terminal refusal wrote package.json"
-}
-
-# A terminal enum is never proof by itself: exact final-run journal evidence
-# must be present, correlated, consistent, ordered before the final seal, and
-# equal to the packaged lifecycle.
-make_alignment_package T-shape alignment-shape "$solo_session" shape-worker package-shape \
-  44444444444444444444444444444444 stopped >"$tmp/shape-alignment-paths"
-mapfile -t shape_alignment <"$tmp/shape-alignment-paths"; shape_package="${shape_alignment[0]}"; shape_journal="${shape_alignment[1]}"
-jq -c 'select(.type != "orchestrator-stop")' "$shape_journal" >"$tmp/shape-journal.jsonl"; mv "$tmp/shape-journal.jsonl" "$shape_journal"; update_shape_digest
-run_terminal_refusal shape-terminal-absent 'lacks later exact-run terminal proof'
-
-make_alignment_package T-shape alignment-shape "$solo_session" shape-worker package-shape \
-  44444444444444444444444444444444 stopped >"$tmp/shape-alignment-paths"
-mapfile -t shape_alignment <"$tmp/shape-alignment-paths"; shape_package="${shape_alignment[0]}"; shape_journal="${shape_alignment[1]}"
-jq -c 'if .type == "orchestrator-stop" then .payload.run_id = "foreign-run" else . end' "$shape_journal" >"$tmp/shape-journal.jsonl"; mv "$tmp/shape-journal.jsonl" "$shape_journal"; update_shape_digest
-run_terminal_refusal shape-terminal-foreign 'terminal proof is foreign'
-
-make_alignment_package T-shape alignment-shape "$solo_session" shape-worker package-shape \
-  44444444444444444444444444444444 stopped >"$tmp/shape-alignment-paths"
-mapfile -t shape_alignment <"$tmp/shape-alignment-paths"; shape_package="${shape_alignment[0]}"; shape_journal="${shape_alignment[1]}"
-jq -c 'if .type == "sealed" then {version:1,journal_entry_id:"journal-conflict",at:"2026-07-20T10:00:25Z",type:"orchestrator-async-complete",payload:{run_id:"orchestrator-alignment-shape",state:"failed"}}, . else . end' "$shape_journal" >"$tmp/shape-journal.jsonl"; mv "$tmp/shape-journal.jsonl" "$shape_journal"; update_shape_digest
-run_terminal_refusal shape-terminal-conflicting 'conflicting terminal proof'
-
-make_alignment_package T-shape alignment-shape "$solo_session" shape-worker package-shape \
-  44444444444444444444444444444444 stopped >"$tmp/shape-alignment-paths"
-mapfile -t shape_alignment <"$tmp/shape-alignment-paths"; shape_package="${shape_alignment[0]}"; shape_journal="${shape_alignment[1]}"
-jq -cs '.[0], .[2], .[1], .[3]' "$shape_journal" >"$tmp/shape-journal.jsonl"; mv "$tmp/shape-journal.jsonl" "$shape_journal"; update_shape_digest
-run_terminal_refusal shape-terminal-reordered 'lacks later exact-run terminal proof'
-
-make_alignment_package T-shape alignment-shape "$solo_session" shape-worker package-shape \
-  44444444444444444444444444444444 stopped >"$tmp/shape-alignment-paths"
-mapfile -t shape_alignment <"$tmp/shape-alignment-paths"; shape_package="${shape_alignment[0]}"; shape_journal="${shape_alignment[1]}"
-jq '.orchestrator_lifecycle = "failed"' "$shape_package" >"$tmp/shape-package.json"; mv "$tmp/shape-package.json" "$shape_package"
-run_terminal_refusal shape-terminal-mismatched 'lifecycle mismatches journal terminal proof'
-
-make_alignment_package T-shape alignment-shape "$solo_session" shape-worker package-shape \
-  44444444444444444444444444444444 stopped >"$tmp/shape-alignment-paths"
-mapfile -t shape_alignment <"$tmp/shape-alignment-paths"; shape_package="${shape_alignment[0]}"; shape_journal="${shape_alignment[1]}"
-jq '.orchestrator_lifecycle = "stopped"' "$shape_package" >"$tmp/shape-package.json"
-mv "$tmp/shape-package.json" "$shape_package"
-shape_target="$tmp/shape-journal-target"
-mv "$shape_journal" "$shape_target"
-ln -s "$shape_target" "$shape_journal"
-set +e
-"$OBSERVE" assemble --pr 42 --repo "$repo" >"$tmp/shape-path.stdout" 2>"$tmp/shape-path.stderr"
-status=$?
-set -e
-assert_equal 65 "$status" 'guided assembly followed a linked alignment journal'
-assert_file_contains "$tmp/shape-path.stderr" 'malformed or oversized'
-rm "$shape_journal"
-mv "$shape_target" "$shape_journal"
-
-truncate -s $((4 * 1024 * 1024 + 1)) "$shape_journal"
-shape_sha="$(sha256sum "$shape_journal" | cut -d' ' -f1)"
-jq --arg digest "$shape_sha" '.journal_sha256 = $digest' "$shape_package" >"$tmp/shape-package.json"
-mv "$tmp/shape-package.json" "$shape_package"
-set +e
-"$OBSERVE" assemble --pr 42 --repo "$repo" >"$tmp/shape-journal-size.stdout" 2>"$tmp/shape-journal-size.stderr"
-status=$?
-set -e
-assert_equal 65 "$status" 'guided assembly accepted an oversized alignment journal'
-assert_file_contains "$tmp/shape-journal-size.stderr" 'malformed or oversized'
-
-make_alignment_package \
-  T-shape alignment-shape "$solo_session" shape-worker package-shape \
-  44444444444444444444444444444444 stopped >"$tmp/shape-alignment-paths"
-mapfile -t shape_alignment <"$tmp/shape-alignment-paths"
-shape_package="${shape_alignment[0]}"; shape_journal="${shape_alignment[1]}"
-truncate -s $((1024 * 1024 + 1)) "$shape_package"
-set +e
-"$OBSERVE" assemble --pr 42 --repo "$repo" >"$tmp/shape-package-size.stdout" 2>"$tmp/shape-package-size.stderr"
-status=$?
-set -e
-assert_equal 65 "$status" 'guided assembly accepted an oversized alignment package'
-assert_file_contains "$tmp/shape-package-size.stderr" 'package is malformed or oversized'
-
-make_alignment_package \
-  T-shape alignment-shape "$solo_session" shape-worker package-shape \
-  44444444444444444444444444444444 stopped >"$tmp/shape-alignment-paths"
-mapfile -t shape_alignment <"$tmp/shape-alignment-paths"
-shape_package="${shape_alignment[0]}"; shape_journal="${shape_alignment[1]}"
-printf 'digest drift\n' >>"$shape_journal"
-set +e
-"$OBSERVE" assemble --pr 42 --repo "$repo" >"$tmp/shape-digest.stdout" 2>"$tmp/shape-digest.stderr"
-status=$?
-set -e
-assert_equal 65 "$status" 'guided assembly accepted alignment journal digest drift'
-assert_file_contains "$tmp/shape-digest.stderr" 'digest drifted'
-rm -f "$shape_package" "$shape_journal"
-
 "$OBSERVE" assemble --pr 42 --repo "$repo" >"$tmp/assembled-42.json"
 run_42="$qualified_runs/pr-42"
 jq -e '
   ([.sessions[] | select(.role == "accountable" and .evidence == "content-search")] | length) == 1
   and ([.unknown_entries[] | select(.path | endswith("not-session.jsonl"))] | length) == 1
-  and (.alignment_traces == [])
   and (.warnings | length) >= 1
-' "$run_42/package.json" >/dev/null || fail 'accountable-only pre-alignment package did not preserve valid empty evidence'
+' "$run_42/package.json" >/dev/null || fail 'accountable-only content search did not preserve evidence'
 
 # Run-scoped commands may act only beneath the observer runs store.
 outside_finalize="$tmp/outside-finalize"
