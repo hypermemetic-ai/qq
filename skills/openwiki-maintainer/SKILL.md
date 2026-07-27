@@ -1,32 +1,35 @@
 ---
 name: openwiki-maintainer
-description: Dedicated OpenWiki maintainer Actor only. Invoke only when that Actor is explicitly assigned an on-demand or scheduled wiki refresh, or explicit first setup. Never invoke by observing merges or for source Changes; source Changes never invoke it.
+description: Dedicated OpenWiki maintainer. Invoke for an explicit refresh or first setup, never from a merge or source Change.
 ---
 
 # Maintain OpenWiki
 
-This Skill is only for the dedicated OpenWiki maintainer Actor. Source Changes
-never invoke it. Begin only from an explicit on-demand or scheduled refresh
-assignment; a merge or observed `main` advance is not a trigger.
+Begin only from the assignment; observing `main` advance is not a trigger.
 
 ## Refresh
 
-1. Work in the Repository's long-lived `openwiki/update` worktree. Fetch
-   `origin`, require no unrelated local state, and reset the branch and worktree
-   to freshly fetched `origin/main`. Keep provider credentials outside the
+1. In the long-lived `openwiki/update` worktree, fetch `origin`, refuse unrelated
+   state, and reset to fresh `origin/main`. Keep credentials outside the
    Repository.
-2. Run `qq-openwiki --update`. Use `qq-openwiki --init` only for explicit first
-   setup. Read the complete generator output and require a documentation-only
-   diff.
+2. Run `qq-openwiki --update` (`--init` only for first setup). Read output;
+   require a docs-only diff. After no-change, scheduled runs
+   call `qq-openwiki-daily-finish no-change`.
 3. Run applicable documentation Checks and `git diff --check`, then invoke
-   `code-review` on the complete generated diff. Verify each finding and resolve
-   only in-scope defects; rerun affected Checks and review any correction delta.
+   `code-review` on the complete diff. Verify findings, correct only supported
+   in-scope defects, rerun affected Checks, and review each correction delta.
 
 ## Deliver
 
-Commit and push only the reviewed generated documentation on
-`openwiki/update`, then open or refresh an ordinary docs-only pull request to
-`main`. The operator reviews and merges it through the normal GitHub Flow.
+Commit and push only reviewed generated documentation on `openwiki/update`,
+then open or refresh its docs-only PR. The operator merges on-demand refreshes.
 
-Never self-merge, construct a merge commit, publish directly to `main`, use
-activation markers, or run an activation retry protocol.
+Only qq's daily service sets `QQ_OPENWIKI_SCHEDULED=1`. After fresh review and
+exact-head `shell-tests` success, pass the reviewed 40-hex head to
+`qq-openwiki-merge`. It revalidates Repository, PR, base, head, generated paths,
+Checks, threads, mergeability, and `qqp-bot`. Its marker and reviewed-head claim
+are procedural drift-nets, not credential or cryptographic boundaries.
+
+Never merge another way, enable native auto-merge, construct a merge locally,
+publish directly to `main`, invent an on-demand marker, or retry before the next
+assigned run.

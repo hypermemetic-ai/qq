@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Attest one successful scheduled semantic no-change assessment.
+set -euo pipefail
+umask 077
+
+die() {
+  printf 'qq-openwiki-daily-finish: %s\n' "$*" >&2
+  exit 1
+}
+
+[ "${QQ_OPENWIKI_SCHEDULED:-}" = 1 ] \
+  || die 'refusing outside the scheduled OpenWiki service environment'
+if [ "$#" -ne 1 ] || [ "$1" != no-change ]; then
+  die 'usage: qq-openwiki-daily-finish no-change'
+fi
+receipt="${QQ_OPENWIKI_COMPLETION_RECEIPT:-}"
+[ -n "$receipt" ] || die 'scheduled completion receipt is unavailable'
+[ "$(basename -- "$receipt")" = completion ] \
+  || die 'scheduled completion receipt has an invalid name'
+run_dir="$(dirname -- "$receipt")"
+lock_root="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/qq-openwiki-daily"
+canonical_lock="$(readlink -m -- "$lock_root")"
+canonical_run="$(readlink -m -- "$run_dir")"
+case "$canonical_run" in
+  "$canonical_lock"/run.*) ;;
+  *) die 'scheduled completion receipt escapes private run state' ;;
+esac
+if [ ! -d "$canonical_run" ] || [ -L "$canonical_run" ]; then
+  die 'private scheduled-run state is unavailable'
+fi
+if [ -e "$receipt" ] || [ -L "$receipt" ]; then
+  die 'scheduled completion receipt already exists'
+fi
+
+self="$(readlink -f -- "${BASH_SOURCE[0]}")"
+root="$(cd -- "$(dirname -- "$self")/.." && pwd -P)"
+# shellcheck source=bin/lib/qq-bin.sh
+# shellcheck disable=SC1091
+source "$root/bin/lib/qq-bin.sh"
+qq_resolve_bin git || die "$QQ_BIN_ERROR"
+git_bin="$QQ_BIN_RESULT"
+repo_root="$($git_bin rev-parse --show-toplevel 2>/dev/null)" \
+  || die 'not inside the OpenWiki worktree'
+branch="$($git_bin -C "$repo_root" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+[ "$branch" = openwiki/update ] \
+  || die 'no-change completion requires the openwiki/update branch'
+"$git_bin" -C "$repo_root" fetch --no-tags origin \
+  +refs/heads/main:refs/remotes/origin/main >/dev/null 2>&1 \
+  || die 'could not freshly fetch origin/main'
+head="$($git_bin -C "$repo_root" rev-parse HEAD 2>/dev/null)" \
+  || die 'OpenWiki worktree HEAD is unavailable'
+main="$($git_bin -C "$repo_root" rev-parse origin/main 2>/dev/null)" \
+  || die 'fresh origin/main is unavailable'
+[ "$head" = "$main" ] || die 'no-change worktree is not based on fresh origin/main'
+[ -z "$($git_bin -C "$repo_root" status --porcelain --untracked-files=all)" ] \
+  || die 'no-change worktree contains generated or unrelated changes'
+printf 'qq-openwiki-daily-finish: recording semantic no-change at %s\n' "$head"
+temporary="$canonical_run/completion.tmp.$$"
+printf 'no-change:%s\n' "$head" >"$temporary"
+chmod 0600 "$temporary"
+mv -- "$temporary" "$receipt"

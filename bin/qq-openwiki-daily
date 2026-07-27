@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# Launch the explicitly scheduled OpenWiki maintainer in a fresh Pi session.
+set -euo pipefail
+
+die() {
+  printf 'qq-openwiki-daily: %s\n' "$*" >&2
+  exit 1
+}
+
+[ "${QQ_OPENWIKI_SCHEDULED:-}" = 1 ] \
+  || die 'refusing outside the scheduled OpenWiki service environment'
+[ "$#" -eq 0 ] || die 'usage: qq-openwiki-daily'
+
+self="$(readlink -f -- "${BASH_SOURCE[0]}")"
+root="$(cd -- "$(dirname -- "$self")/.." && pwd -P)"
+# shellcheck source=bin/lib/qq-bin.sh
+# shellcheck disable=SC1091
+source "$root/bin/lib/qq-bin.sh"
+
+qq_resolve_bin git || die "$QQ_BIN_ERROR"
+git_bin="$QQ_BIN_RESULT"
+qq_resolve_bin flock || die "$QQ_BIN_ERROR"
+flock_bin="$QQ_BIN_RESULT"
+qq_resolve_bin sha256sum || die "$QQ_BIN_ERROR"
+sha256_bin="$QQ_BIN_RESULT"
+
+if [ -n "${QQ_PI_BIN:-}" ]; then
+  qq_resolve_bin pi || die "$QQ_BIN_ERROR"
+  pi_bin="$QQ_BIN_RESULT"
+else
+  pi_bin="$root/bin/pi"
+  if [ ! -f "$pi_bin" ] || [ ! -x "$pi_bin" ]; then
+    die "repository Pi wrapper is not executable: $pi_bin"
+  fi
+fi
+
+actual_root="$($git_bin -C "$root" rev-parse --show-toplevel 2>/dev/null)" \
+  || die 'qq checkout is not a Git worktree'
+actual_root="$(cd "$actual_root" && pwd -P)" \
+  || die 'cannot canonicalize the Repository root'
+[ "$actual_root" = "$root" ] || die 'runner does not resolve inside the qq Repository root'
+remote="$($git_bin -C "$root" remote get-url origin 2>/dev/null)" \
+  || die 'origin remote is unavailable'
+case "$remote" in
+  https://github.com/hypermemetic-ai/qq | https://github.com/hypermemetic-ai/qq.git | \
+  git@github.com:hypermemetic-ai/qq | git@github.com:hypermemetic-ai/qq.git | \
+  ssh://git@github.com/hypermemetic-ai/qq | ssh://git@github.com/hypermemetic-ai/qq.git) ;;
+  *) die 'origin does not resolve to hypermemetic-ai/qq' ;;
+esac
+common_dir="$($git_bin -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+  || die 'cannot resolve the Repository common directory'
+lock_key="$(printf '%s' "$common_dir" | "$sha256_bin" | cut -d' ' -f1)"
+lock_root="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/qq-openwiki-daily"
+umask 077
+mkdir -p "$lock_root"
+exec 9>"$lock_root/$lock_key.lock"
+"$flock_bin" -n 9 || die 'another scheduled OpenWiki assessment is active for this Repository'
+
+run_dir="$(mktemp -d "$lock_root/run.XXXXXX")" \
+  || die 'could not allocate private scheduled-run state'
+completion_receipt="$run_dir/completion"
+trap 'rm -rf -- "$run_dir"' EXIT
+
+read -r -d '' assignment <<'ASSIGNMENT' || true
+You are the dedicated openwiki-maintainer Actor for qq. Perform one explicitly scheduled daily OpenWiki assessment. Read and follow skills/openwiki-maintainer/SKILL.md and the Repository instructions. Do not modify Backlog.
+
+Use the existing long-lived openwiki/update worktree. Freshly fetch origin, require it has no unrelated local state, and reset its branch and worktree exactly to fresh origin/main. Run the worktree's bin/qq-openwiki --update and inspect the complete generator output. If it succeeds with no semantic documentation change and leaves the worktree clean, call bin/qq-openwiki-daily-finish no-change; leave no pull request candidate. Never call the finisher after any failure. Never treat a plausible prose success marker as evidence; command failures must remain failures.
+
+If generated documentation changed, require a nonempty diff confined to generated openwiki/**, excluding openwiki/INSTRUCTIONS.md and every non-regular or symlink entry. Run all applicable deterministic documentation Checks and git diff --check. Invoke a fresh independent code-review over the complete generated diff. Verify and correct only supported in-scope findings, rerun affected Checks, and independently review every correction delta. Produce exactly one candidate commit whose sole parent is the current origin/main.
+
+Push that exact commit to the fixed openwiki/update branch and open or refresh its same-repository pull request to main. Wait for the shell-tests Check for that exact head; pending, skipped, missing, stale, contradictory, or unsuccessful results are not success. Reinspect the exact candidate and then invoke bin/qq-openwiki-merge <pull-request-number-or-url> --reviewed-head <exact-40-hex-reviewed-head>. That guarded command is the only scheduled merge path. Propagate every Pi, tool, maintainer, review, push, pull-request, Check, or merge failure as a nonzero run.
+ASSIGNMENT
+
+cd "$root"
+set +e
+QQ_OPENWIKI_SCHEDULED=1 \
+QQ_OPENWIKI_COMPLETION_RECEIPT="$completion_receipt" \
+  "$pi_bin" \
+    --print --no-session --approve \
+    --skill "$root/skills/openwiki-maintainer/SKILL.md" \
+    "$assignment"
+pi_status=$?
+set -e
+[ "$pi_status" -eq 0 ] || exit "$pi_status"
+if [ ! -f "$completion_receipt" ] || [ -L "$completion_receipt" ]; then
+  die 'maintainer completed without a machine-verifiable workflow receipt'
+fi
+receipt_mode="$(stat -c '%a' -- "$completion_receipt" 2>/dev/null)" \
+  || die 'could not inspect the workflow receipt'
+[ "$receipt_mode" = 600 ] || die 'workflow receipt permissions are not private'
+completion="$(cat -- "$completion_receipt")" \
+  || die 'could not read the workflow receipt'
+case "$completion" in
+  no-change:[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]* | \
+  merged:[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*:[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ;;
+  *) die 'workflow receipt has an unsupported disposition' ;;
+esac
+IFS=: read -r disposition first_oid second_oid extra <<<"$completion"
+[[ "$first_oid" =~ ^[0-9a-f]{40}$ ]] \
+  || die 'workflow receipt has an invalid candidate object id'
+if [ "$disposition" = merged ]; then
+  [[ "${second_oid:-}" =~ ^[0-9a-f]{40}$ ]] \
+    || die 'workflow receipt has an invalid merge object id'
+else
+  [ -z "${second_oid:-}" ] || die 'no-change receipt has unexpected fields'
+fi
+[ -z "${extra:-}" ] || die 'workflow receipt has unexpected fields'
+printf 'qq-openwiki-daily: %s\n' "$completion"

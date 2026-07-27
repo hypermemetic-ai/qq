@@ -657,7 +657,48 @@ Keep one long-lived `openwiki/update` worktree per linked Repository. For an
 assigned refresh, fetch `origin`, reset that worktree to the fresh `origin/main`,
 and run `qq-openwiki --update` (`--init` only for first setup). Review the
 complete generated diff through `code-review`, and open an ordinary
-documentation-only pull request. The operator reviews and merges it.
+documentation-only pull request. The operator reviews and merges on-demand
+refreshes.
+
+qq also owns an optional systemd user timer for this Repository. It starts a
+fresh, ephemeral, explicitly approved headless Pi maintainer assignment every
+day at 03:00 machine-local time. `Persistent=false` means a powered-off run is
+skipped with no boot catch-up or retry. A six-hour service timeout turns a
+wedged attempt into a journal-visible failure before the next daily window. The
+unit supplies the Repository and Linuxbrew command paths explicitly. The runner
+accepts success only from a private machine-readable receipt written by the
+no-change finisher or guarded merger; a normal Pi exit after a reported tool
+failure remains a failed service. Separate nonblocking locks prevent overlapping
+scheduled assessments and writers.
+Install only after the Change has landed:
+
+```bash
+bin/qq-openwiki-schedule install
+bin/qq-openwiki-schedule inspect
+journalctl --user-unit qq-openwiki-daily.service
+```
+
+A semantic no-change is success and opens no pull request. A changed run must
+produce one generated-`openwiki/**` commit, pass deterministic Checks and
+fresh-context review, and wait for the exact `shell-tests` Check. Only the
+scheduled marker may invoke `qq-openwiki-merge`; that command revalidates the
+fresh base, fixed branch and PR, exact reviewed head, regular generated paths,
+Checks, review threads, mergeability, and `qqp-bot` identity before and after
+credential loading, then merges with the expected head through GitHub's API.
+It never enables native auto-merge or switches the active `gh` account. The
+marker and guard are drift-nets against well-meaning automation, not security
+boundaries around the local bot credential, and the reviewed-head assertion is
+procedural rather than cryptographic evidence. A final-interval `main` advance
+is reported after merge and repaired by the next 03:00 assessment.
+
+Disable and unlink the units without deleting journals or credentials:
+
+```bash
+bin/qq-openwiki-schedule disable
+```
+
+Source Changes still neither trigger nor perform OpenWiki maintenance. They and
+ordinary/on-demand refreshes retain operator merge authority.
 
 Temporary debt (2026-07-10): upstream code mode unconditionally writes a
 scheduled GitHub Actions workflow and scheduled-workflow agent guidance.

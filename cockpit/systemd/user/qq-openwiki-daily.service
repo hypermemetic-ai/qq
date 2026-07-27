@@ -1,0 +1,11 @@
+[Unit]
+Description=qq scheduled OpenWiki assessment
+Documentation=file:%h/projects/qq/README.md
+
+[Service]
+Type=oneshot
+TimeoutStartSec=6h
+WorkingDirectory=%h/projects/qq
+Environment=QQ_OPENWIKI_SCHEDULED=1
+Environment=PATH=%h/projects/qq/bin:%h/.local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/projects/qq/bin/qq-openwiki-daily

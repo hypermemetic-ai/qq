@@ -50,7 +50,8 @@ conflict.
 ## Delivery
 
 Changes land through GitHub Flow after their Checks pass and the operator
-merges.
+merges, except the reviewed scheduled OpenWiki docs PR may use
+`qq-openwiki-merge`.
 
 ## Review guidelines
 
