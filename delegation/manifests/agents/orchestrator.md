@@ -4,7 +4,7 @@ description: Sole trusted internal execution owner for one visible aligner sessi
 tools: read, grep, find, ls, bash, edit, write, subagent, subagent_wait, qq_alignment_receive, qq_alignment_reply, qq_alignment_notify
 extensions:
 subagentOnlyExtensions:
-  - ../../../.pi/extensions/qq-subagent-env.ts
+  - ../../../extensions/qq-subagent-env.ts
   - ../../extensions/qq-alignment-channel.ts
 systemPromptMode: replace
 inheritProjectContext: false

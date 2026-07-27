@@ -73,6 +73,7 @@ assert_file_contains "$ROOT/bin/pi" 'export QQ_GOVERNED_PROJECT_HOME="$project_r
 assert_file_contains "$ROOT/bin/pi" 'export QQ_GOVERNED_GIT_COMMON_DIR="$project_common"'
 assert_file_contains "$ROOT/bin/pi" 'export QQ_GOVERNED_CHANGE_WORKTREE_ROOT="$change_root"'
 assert_file_contains "$DISPATCH" 'child cwd is an undeclared governed Repository worktree'
+assert_file_not_matches "$DISPATCH" 'QQ_PI_ROOT_PROFILE|qq-root-aligner'
 jq -e '
   .schemaVersion == 1
   and .landstripVersion == "0.17.31"
@@ -191,6 +192,13 @@ stage_agent_manifests() {
 }
 PI_SUBAGENT_TRUSTED_AGENT_PATHS="$(trusted_agent_paths "$ROOT")"
 export PI_SUBAGENT_TRUSTED_AGENT_PATHS
+
+fanout_root="$HOME/.pi/agent/git/github.com/hypermemetic-ai/pi-subagents"
+fanout_extension="$fanout_root/src/extension/fanout-child.ts"
+fanout_yaml="$fanout_root/node_modules/yaml/dist/index.js"
+mkdir -p "$(dirname -- "$fanout_extension")" "$(dirname -- "$fanout_yaml")"
+printf '// fanout fixture\n' >"$fanout_extension"
+printf 'module.exports = {}\n' >"$fanout_yaml"
 
 # Install an isolated fixture generation. Dispatch must reach it only through
 # this checkout's pinned runtime adapter, never through bin/pi, PATH, or QQ_PI_BIN.
@@ -445,6 +453,33 @@ PY
   fi
 done
 [ ! -e "$stock_counter" ] || fail 'stock-first PATH or QQ_PI_BIN displaced the worktree Pi runtime adapter'
+
+(
+  cd "$ROOT"
+  unset QQ_DISPATCH_TIMEOUT
+  PI_SUBAGENT_CHILD_AGENT=orchestrator \
+  PI_SUBAGENT_RUN_ID=orchestrator-extension-smoke \
+    "$DISPATCH" \
+      --extension "$fanout_extension" \
+      --extension ../../../extensions/qq-subagent-env.ts \
+      --extension ../../extensions/qq-alignment-channel.ts
+) >"$tmp/orchestrator-extension.stdout" 2>"$tmp/orchestrator-extension.stderr"
+python3 - "$FAKE_PI_ARGS" "$fanout_extension" "$ROOT" <<'PY'
+from pathlib import Path
+import sys
+
+args = Path(sys.argv[1]).read_bytes().split(b"\0")
+fanout, root = map(str.encode, sys.argv[2:])
+assert args == [
+    b"--approve", b"--offline",
+    b"--extension", fanout,
+    b"--extension", root + b"/extensions/qq-subagent-env.ts",
+    b"--extension", root + b"/delegation/extensions/qq-alignment-channel.ts",
+    b"",
+], args
+PY
+grep -Fxq "JITI_ALIAS={\"yaml\":\"$fanout_yaml\"}" "$FAKE_PI_ENV" \
+  || fail 'fanout child did not receive its exact source-bound YAML alias'
 
 # Correlation propagation experiment: qq-dispatch receives accountable-side
 # context and the stubbed child records the environment that crosses the policy.
