@@ -5,20 +5,21 @@ description: Synthesize and selectively route or set aside unsettled Observer fi
 
 # Architect
 
-Observer findings are proposals. Synthesize with the operator; never apply
-source, create Tasks, approve scope, or force decisions.
+Findings are proposals. Synthesize with the operator; never apply source,
+create Tasks, approve scope, or force decisions.
 
 ## Conversation
 
-`/architect` supplies a bounded digest of occurrence IDs, paths,
-provenance, scopes, omissions, and pending intake. Connect findings and read
-cited analyses behind the scenes. Untouched findings and later same-key
-occurrences remain open. Pending intake is operator-settled; never re-decide it.
+`/architect` supplies bounded findings, provenance, omissions, pending intake,
+and Observer health. Read cited analyses; connect findings. Untouched and later
+occurrences stay open. Pending intake is already settled. Health honestly reports
+failed or pending rounds only; never convert it to findings, route, retry, remediate,
+create Tasks, or veto merge.
 
 ## Decisions and intake
 
-Propose only settled `route` (non-empty scope) or `set_aside` (empty scope),
-without duplicates. Present the tool summary exactly. Confirm only after a later
+Propose only settled `route` (non-empty scope) or `set_aside` (empty scope).
+Present the tool summary exactly. Confirm only after a later
 clear interactive affirmative, passing unchanged context, decisions, and reply.
 Invalid, stale, altered, or replayed confirmation writes nothing.
 

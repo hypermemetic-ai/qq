@@ -1285,8 +1285,7 @@ def assemble(values):
     corpus_paths.extend(skill_paths)
     corpus_paths.extend(sorted(
         path for path in all_paths
-        if len(PurePosixPath(path).parts) == 3
-        and path.startswith("delegation/manifests/") and path.endswith(".md")
+        if path.startswith("delegation/manifests/") and path.endswith(".md")
     ))
     for path in dict.fromkeys(corpus_paths):
         atomic_append(run_dir / "corpus" / Path(*PurePosixPath(path).parts),
@@ -1318,6 +1317,32 @@ def assemble(values):
         "sessions": len(packaged_sessions), "warnings": len(warnings),
         "unknown_entries": len(unknown), "variant": variant,
     })
+
+
+def canonical_analysis_failure_reason(path):
+    if not regular_file(path):
+        return None
+    raw = read_regular(path, "finalized failed analysis")
+    try:
+        item = json.loads(
+            raw.decode("utf-8"),
+            parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
+        )
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        return None
+    if (
+        not isinstance(item, dict)
+        or set(item) != {"schema", "schema_version", "status", "reason"}
+        or item.get("schema") != "qq-observer.analysis"
+        or isinstance(item.get("schema_version"), bool)
+        or item.get("schema_version") != 1
+        or item.get("status") != "analysis_failed"
+        or not isinstance(item.get("reason"), str)
+        or not item["reason"]
+        or raw != canonical_json_bytes(item)
+    ):
+        return None
+    return item["reason"]
 
 
 def verify_delivery(values):
@@ -1380,12 +1405,17 @@ def verify_delivery(values):
                 identity = (repository, event["pr"], event["variant"])
                 finding_counts[identity] = finding_counts.get(identity, 0) + 1
     covered = []
+    analysis_failed = []
     uncovered = []
     for pr in prs:
         run = repository_run_dir(runs_root, repository, pr)
         analyzed = False
         analysis_path = run / "analysis.json"
+        failure_path = run / "analysis_failed.json"
         marker_path = run / ".ledger-applied"
+        analysis_present = os.path.lexists(analysis_path)
+        failure_present = os.path.lexists(failure_path)
+        marker_present = os.path.lexists(marker_path)
         if regular_file(analysis_path) and regular_file(marker_path):
             raw = read_regular(analysis_path, "finalized analysis")
             marker = json_document(
@@ -1398,19 +1428,30 @@ def verify_delivery(values):
                 and "episode_count" in marker
                 and finding_counts.get((repository, pr, "guided"), 0) == marker["episode_count"]
             )
-        if analyzed or regular_file(run / "analysis_failed.json"):
+        failure_reason = canonical_analysis_failure_reason(failure_path)
+        if analyzed and not failure_present:
             covered.append(pr)
+        elif (
+            failure_reason is not None
+            and not analysis_present
+            and not marker_present
+        ):
+            analysis_failed.append(pr)
         else:
             uncovered.append(pr)
     if unresolved:
         status = "unparseable history present"
+    elif uncovered and analysis_failed:
+        status = "uncovered Changes and analysis failures present"
     elif uncovered:
         status = "uncovered Changes present"
+    elif analysis_failed:
+        status = "analysis failures present"
     elif not commits:
         status = "no landed Changes in window"
     else:
         status = "covered"
-    ok = not uncovered and not unresolved
+    ok = not analysis_failed and not uncovered and not unresolved
     report = {
         "ok": ok,
         "status": status,
@@ -1418,6 +1459,7 @@ def verify_delivery(values):
         "repository": repository,
         "prs": prs,
         "covered": covered,
+        "analysis_failed": analysis_failed,
         "uncovered": uncovered,
         "unresolved_commits": unresolved,
     }
@@ -2662,6 +2704,8 @@ def ledger_rebuild(values):
 ARCHITECT_CONTEXT_SCHEMA = "qq-observer.architect-context"
 ARCHITECT_BATCH_SCHEMA = "qq-observer.architect-batch"
 ARCHITECT_FINDING_LIMIT = 50
+ARCHITECT_HEALTH_LIMIT = 20
+ARCHITECT_HEALTH_REASON_LIMIT = 500
 ARCHITECT_CONTEXT_BYTE_LIMIT = 131072
 
 
@@ -2983,8 +3027,72 @@ def slim_architect_occurrence(occurrence):
     }
 
 
+def bounded_architect_health_reason(reason):
+    if not display_text(reason, nonempty=True):
+        return "analysis failure reason is unsafe to display; inspect analysis_failed.json", True
+    if len(reason) > ARCHITECT_HEALTH_REASON_LIMIT:
+        return reason[:ARCHITECT_HEALTH_REASON_LIMIT], True
+    return reason, False
+
+
+def architect_health_state():
+    rows = []
+    for run_dir in observer_run_directories():
+        identity = package_metadata(run_dir, require_timestamp=True)
+        if identity["legacy"] or identity["variant"] != "guided":
+            continue
+        analysis_path = run_dir / "analysis.json"
+        failure_path = run_dir / "analysis_failed.json"
+        marker_path = run_dir / ".ledger-applied"
+        analysis_present = os.path.lexists(analysis_path)
+        failure_present = os.path.lexists(failure_path)
+        marker_present = os.path.lexists(marker_path)
+        if analysis_present and failure_present:
+            fail(f"observer run has both terminal analysis records: {run_dir}", 65)
+        if failure_present and marker_present:
+            fail(f"failed observer run has a ledger-applied marker: {run_dir}", 65)
+
+        status = "pending"
+        reason = "analysis is not finalized"
+        reason_truncated = False
+        failure_reason = canonical_analysis_failure_reason(failure_path)
+        if failure_reason is not None:
+            status = "analysis_failed"
+            reason, reason_truncated = bounded_architect_health_reason(failure_reason)
+        elif failure_present:
+            reason = "analysis failure record is invalid; inspect analysis_failed.json"
+            reason_truncated = True
+        elif regular_file(analysis_path) and regular_file(marker_path):
+            # all_architect_occurrences has already validated the exact marker and
+            # analysis identity. A certified zero-episode analysis is healthy too.
+            continue
+        elif regular_file(analysis_path):
+            reason = "successful analysis is not ledger-applied"
+        elif marker_present:
+            reason = "analysis ledger marker has no finalized analysis"
+
+        rows.append({
+            "status": status,
+            "repository": identity["repository"],
+            "pr": identity["pr"],
+            "run_dir": os.fspath(run_dir),
+            "assembled_at": identity["timestamp"],
+            "reason": reason,
+            "reason_truncated": reason_truncated,
+        })
+    rows.sort(key=lambda row: (
+        -time_value(row["assembled_at"]).timestamp(), row["repository"],
+        row["pr"], row["run_dir"],
+    ))
+    return {
+        "rounds": rows[:ARCHITECT_HEALTH_LIMIT],
+        "omitted_rounds": max(0, len(rows) - ARCHITECT_HEALTH_LIMIT),
+    }
+
+
 def architect_context_state():
     occurrences, historically_covered = all_architect_occurrences()
+    observer_health = architect_health_state()
     covered, pending_ids, pending, batch_state = set(historically_covered), set(), [], []
     for batch_dir in architect_batch_directories():
         batch, batch_path = load_global_batch(batch_dir)
@@ -3040,22 +3148,24 @@ def architect_context_state():
         "occurrences": occurrences,
         "historically_covered": sorted(historically_covered),
         "batches": batch_state,
+        "observer_health": observer_health,
     }
     context_id = "context-" + hashlib.sha256(canonical_json_bytes(authoritative)).hexdigest()[:32]
     findings = []
     for _, finding in ranked[:ARCHITECT_FINDING_LIMIT]:
         candidate = {
-            "schema": ARCHITECT_CONTEXT_SCHEMA, "schema_version": 2,
+            "schema": ARCHITECT_CONTEXT_SCHEMA, "schema_version": 3,
             "context_id": context_id, "findings": findings + [finding],
-            "pending_intakes": pending,
+            "pending_intakes": pending, "observer_health": observer_health,
             "omitted_findings": len(ranked) - len(findings) - 1,
         }
         if len(canonical_json_bytes(candidate)) > ARCHITECT_CONTEXT_BYTE_LIMIT:
             break
         findings.append(finding)
     document = {
-        "schema": ARCHITECT_CONTEXT_SCHEMA, "schema_version": 2,
+        "schema": ARCHITECT_CONTEXT_SCHEMA, "schema_version": 3,
         "context_id": context_id, "findings": findings, "pending_intakes": pending,
+        "observer_health": observer_health,
         "omitted_findings": len(ranked) - len(findings),
     }
     if len(canonical_json_bytes(document)) > ARCHITECT_CONTEXT_BYTE_LIMIT:

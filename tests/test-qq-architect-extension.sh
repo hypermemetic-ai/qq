@@ -24,13 +24,22 @@ function occurrence(id, key, repository, pr) {
 const a1 = occurrence("1", "same-key", "one/repo", 1);
 const a2 = occurrence("2", "same-key", "two/repo", 2);
 const b1 = occurrence("3", "other-key", "two/repo", 3);
+const observerHealth = { rounds: [
+  { status: "analysis_failed", repository: "health/repo", pr: 4,
+    run_dir: "/state/runs/health/repo/pr-4", assembled_at: "2026-08-04T00:00:00Z",
+    reason: "😀".repeat(500), reason_truncated: false },
+  { status: "pending", repository: "health/repo", pr: 5,
+    run_dir: "/state/runs/health/repo/pr-5", assembled_at: "2026-08-05T00:00:00Z",
+    reason: "analysis is not finalized", reason_truncated: false },
+], omitted_rounds: 0 };
 function context(id = contextId, findings = [
   { recurrence_key: "same-key", title: "Cross source 😀", kind: "friction", confidence: "high",
     suggested_scope: "Suggested", occurrences: [a1, a2] },
   { recurrence_key: "other-key", title: "Other", kind: "waste", confidence: "medium",
     suggested_scope: "Other suggestion", occurrences: [b1] },
-], pending_intakes = []) { return { schema: "qq-observer.architect-context", schema_version: 2,
-  context_id: id, findings, pending_intakes, omitted_findings: 0 }; }
+], pending_intakes = [], observer_health = observerHealth) { return {
+  schema: "qq-observer.architect-context", schema_version: 3,
+  context_id: id, findings, pending_intakes, observer_health, omitted_findings: 0 }; }
 function result(body, code = 0, stderr = "") { return { stdout: typeof body === "string" ? body : JSON.stringify(body), stderr, code, killed: false }; }
 function injectedContext(message) {
   const start = message.indexOf("\n\n") + 2;
@@ -76,12 +85,14 @@ const h = harness([result(openedContext)]);
 await h.commands.get("architect").handler("", h.ctx);
 assert.equal(h.calls.length, 1); assert.deepEqual(h.calls[0].args, ["architect-context"]);
 assert.match(h.messages[0], /deterministic TOON/); assert.match(h.messages[0], /open-ended conversation/);
+assert.match(h.messages[0], /Observer health is informational only/);
 assert.deepEqual(injectedContext(h.messages[0]), openedContext);
 assert.equal(injectedContext(h.messages[0]).findings[0].title, "Cross source 😀");
 assert.equal(injectedContext(h.messages[0]).context_id, contextId);
 assert.deepEqual(injectedContext(h.messages[0]).findings.flatMap((finding) => finding.occurrences.map(({ occurrence_id }) => occurrence_id)),
   [a1.occurrence_id, a2.occurrence_id, b1.occurrence_id]);
 assert.equal(injectedContext(h.messages[0]).pending_intakes.length, 0);
+assert.deepEqual(injectedContext(h.messages[0]).observer_health, observerHealth);
 assert.equal(h.messages[0].includes(JSON.stringify(openedContext)), false, "Architect injected compact JSON instead of TOON");
 assert.equal(h.commands.has("architect-discussed"), false, "round compatibility command was advertised");
 assert.ok(h.tools.get("architect_disposition").parameters.required.includes("decisions"), "confirm could omit the proposed decisions");
@@ -182,7 +193,9 @@ assert.equal((await wrong.tool({ ...params, context_id: `context-${"f".repeat(32
 
 const unpairedSurrogateContext = structuredClone(context());
 unpairedSurrogateContext.findings[0].title = JSON.parse('"\\ud800"');
-for (const bad of [result("not-json"), result("", 65, "bad store"), result(unpairedSurrogateContext)]) {
+const malformedHealthContext = structuredClone(context());
+malformedHealthContext.observer_health.rounds[0].status = "covered";
+for (const bad of [result("not-json"), result("", 65, "bad store"), result(unpairedSurrogateContext), result(malformedHealthContext)]) {
   const x = harness([bad]); await x.commands.get("architect").handler("", x.ctx);
   assert.equal(x.messages.length, 0); assert.match(x.notifications[0].message, /Cannot load Architect context/);
   assert.equal(x.notifications[0].level, "error");

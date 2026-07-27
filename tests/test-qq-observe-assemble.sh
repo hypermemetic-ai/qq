@@ -24,7 +24,8 @@ git -C "$repo" remote add origin git@github.com:fixture/repo.git
 git -C "$repo" config branch.main.remote origin
 repository=fixture/repo
 qualified_runs="$XDG_STATE_HOME/qq/observer/runs/by-repository/fixture/repo"
-mkdir -p "$repo/bin" "$repo/extensions" "$repo/skills/fixture" "$repo/delegation/manifests"
+mkdir -p "$repo/bin" "$repo/extensions" "$repo/skills/fixture" \
+  "$repo/delegation/manifests/agents"
 printf '# agents\n' >"$repo/AGENTS.md"
 printf '# concepts\n' >"$repo/CONCEPTS.md"
 printf '# review\n' >"$repo/REVIEW.md"
@@ -36,8 +37,17 @@ name: fixture
 description: Fixture skill at merge time.
 ---
 # Fixture
+
+Dispatch with `timeoutMs:1800000`.
 EOF
 printf '# fixture manifest\n' >"$repo/delegation/manifests/fixture.md"
+cat >"$repo/delegation/manifests/agents/implementer.md" <<'EOF'
+---
+name: implementer
+timeoutMs: 2700000
+---
+# Canonical implementer policy at merge time
+EOF
 git -C "$repo" add .
 GIT_AUTHOR_DATE=2020-01-01T00:00:00Z GIT_COMMITTER_DATE=2020-01-01T00:00:00Z \
   git -C "$repo" -c user.name=test -c user.email=test@example.invalid commit -qm base
@@ -54,7 +64,12 @@ merge_41="$(git -C "$repo" rev-parse HEAD)"
 git -C "$repo" switch -qc solo
 git -C "$repo" switch -q main
 printf 'solo\n' >"$repo/solo.txt"
-git -C "$repo" add solo.txt
+printf '%s\n' '---' 'name: fixture' 'description: Later fixture skill.' '---' \
+  '# Later fixture' 'Dispatch with `timeoutMs:600000`.' >"$repo/skills/fixture/SKILL.md"
+printf '%s\n' '---' 'name: implementer' 'timeoutMs: 600000' '---' \
+  '# Later canonical implementer policy' >"$repo/delegation/manifests/agents/implementer.md"
+git -C "$repo" add solo.txt skills/fixture/SKILL.md \
+  delegation/manifests/agents/implementer.md
 GIT_AUTHOR_DATE=2020-01-03T00:00:00Z GIT_COMMITTER_DATE=2020-01-03T00:00:00Z \
   git -C "$repo" -c user.name=test -c user.email=test@example.invalid commit -qm solo
 solo_commit="$(git -C "$repo" rev-parse HEAD)"
@@ -162,8 +177,8 @@ make_run() {
   ' >"$session_file"
 }
 strong_session_dir="$TMPDIR/pi-subagent-sessions/strong-hash/async-strong-run"
-make_run strong-run "$strong_worktree" "$parent_uuid" strong-hash 'delegate strong-run' \
-  "$strong_session_dir" single
+make_run strong-run "$strong_worktree" "$parent_uuid" strong-hash \
+  'delegate strong-run was killed at exactly 1800000ms' "$strong_session_dir" single
 make_run collision-a-run "$strong_worktree" "$collision_parent_a" collision-a-hash \
   'delegate collision-a-run'
 make_run collision-b-run "$strong_worktree" "$collision_parent_b" collision-b-hash \
@@ -315,6 +330,19 @@ jq -e --arg repo "$(realpath "$repo")" --arg missing "$missing_session_file" \
 ' "$run_41/package.json" >/dev/null || fail 'external delegate sessions were not assembled defensively'
 [ -f "$run_41/inventory.json" ] || fail 'inventory was not written'
 [ -f "$run_41/corpus/skills/fixture/SKILL.md" ] || fail 'merge-time corpus was not snapshotted'
+[ -f "$run_41/corpus/delegation/manifests/agents/implementer.md" ] \
+  || fail 'nested canonical agent manifest was omitted from the corpus'
+assert_file_contains "$run_41/corpus/skills/fixture/SKILL.md" 'timeoutMs:1800000' \
+  'package corpus lost the shorter Skill timeout from the exact Change snapshot'
+assert_file_contains \
+  "$run_41/corpus/delegation/manifests/agents/implementer.md" \
+  'timeoutMs: 2700000' \
+  'package corpus lost the authoritative role timeout from the exact Change snapshot'
+assert_file_contains "$run_41/sessions/delegate-strong-run-primary.jsonl" \
+  'killed at exactly 1800000ms' \
+  'package transcript lost exact runtime timeout evidence'
+assert_file_not_matches "$run_41/corpus/skills/fixture/SKILL.md" 'timeoutMs:600000' \
+  'package corpus read the later working tree instead of the Change snapshot'
 jq -e '.skills == [{name:"fixture",description:"Fixture skill at merge time."}]' \
   "$run_41/inventory.json" >/dev/null || fail 'skill inventory did not preserve the merge-time description'
 assert_equal 10 "$(find "$run_41/sessions" -type f | wc -l)" 'session transcript count is wrong'
@@ -526,9 +554,16 @@ jq -e '
   .schema == "qq-observer.analysis" and .schema_version == 1
   and .status == "analysis_failed" and .reason == "observer fixture failed"
 ' "$run_42/analysis_failed.json" >/dev/null || fail 'analysis_failed marker has the wrong shape'
+set +e
 "$OBSERVE" verify-delivery --repo "$repo" --since 2026-07-01T00:00:00Z \
   >"$tmp/covered.json"
-jq -e '.ok == true and .uncovered == [] and .covered == [41,42]' \
-  "$tmp/covered.json" >/dev/null || fail 'covered delivery window did not pass'
+status=$?
+set -e
+assert_equal 1 "$status" 'analysis failure reported healthy delivery'
+jq -e '
+  .ok == false and .status == "analysis failures present"
+  and .covered == [41] and .analysis_failed == [42] and .uncovered == []
+' "$tmp/covered.json" >/dev/null \
+  || fail 'failed analysis masqueraded as successful coverage'
 
 printf 'test-qq-observe-assemble: pass\n'
