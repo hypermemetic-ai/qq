@@ -11,9 +11,11 @@ tags:
 ---
 # Kimi K3 relative role quality for T-170
 
-**Owning Task:** T-170  
-**Research date:** 2026-07-27  
-**Overall confidence:** **MEDIUM-HIGH**  
+**Owning Task:** T-170
+
+**Research date:** 2026-07-27
+
+**Overall confidence:** **MEDIUM-HIGH**
 **Settles:** Of qq's four currently GPT-5.6 delegated roles, assign Kimi K3 at max effort to **Observer** and retain GPT-5.6 Sol for implementer, reviewer, and researcher. A local paired trial is useful calibration, not required before the initial assignment.
 
 Method: a fresh read-only researcher characterized all four role contracts from current Repository source, opened current provider and independent benchmark sources, separated direct evidence from role-mapping inference, and returned a strict Completion Envelope. The accountable owner spot-checked the load-bearing Artificial Analysis analytical/rubric scores, Semgrep review precision, and Moonshot limitation claims against the opened sources. No Repository or machine settings were changed and no live model call was made.

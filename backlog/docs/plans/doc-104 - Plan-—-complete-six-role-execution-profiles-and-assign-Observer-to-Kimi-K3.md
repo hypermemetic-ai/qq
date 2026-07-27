@@ -11,8 +11,9 @@ tags:
 ---
 # Plan — complete six-role execution profiles and assign Observer to Kimi K3
 
-**Owning Task:** T-170  
-**Status:** Approved by the operator in the project-home accountable session on 2026-07-27 (“Finish router first”; “Either way, I believe you can proceed.”).  
+**Owning Task:** T-170
+
+**Status:** Approved by the operator in the project-home accountable session on 2026-07-27 (“Finish router first”; “Either way, I believe you can proceed.”).
 **Inherited contract:** T-152, doc-87, doc-88, decision-13, and doc-91.
 
 ## Intended outcome
