@@ -25,7 +25,7 @@ const a1 = occurrence("1", "same-key", "one/repo", 1);
 const a2 = occurrence("2", "same-key", "two/repo", 2);
 const b1 = occurrence("3", "other-key", "two/repo", 3);
 function context(id = contextId, findings = [
-  { recurrence_key: "same-key", title: "Cross source", kind: "friction", confidence: "high",
+  { recurrence_key: "same-key", title: "Cross source 😀", kind: "friction", confidence: "high",
     suggested_scope: "Suggested", occurrences: [a1, a2] },
   { recurrence_key: "other-key", title: "Other", kind: "waste", confidence: "medium",
     suggested_scope: "Other suggestion", occurrences: [b1] },
@@ -77,6 +77,7 @@ await h.commands.get("architect").handler("", h.ctx);
 assert.equal(h.calls.length, 1); assert.deepEqual(h.calls[0].args, ["architect-context"]);
 assert.match(h.messages[0], /deterministic TOON/); assert.match(h.messages[0], /open-ended conversation/);
 assert.deepEqual(injectedContext(h.messages[0]), openedContext);
+assert.equal(injectedContext(h.messages[0]).findings[0].title, "Cross source 😀");
 assert.equal(injectedContext(h.messages[0]).context_id, contextId);
 assert.deepEqual(injectedContext(h.messages[0]).findings.flatMap((finding) => finding.occurrences.map(({ occurrence_id }) => occurrence_id)),
   [a1.occurrence_id, a2.occurrence_id, b1.occurrence_id]);
@@ -179,9 +180,12 @@ assert.equal((await stale.tool(params)).details.status, "refused");
 const wrong = harness([result(context())]); await wrong.commands.get("architect").handler("", wrong.ctx);
 assert.equal((await wrong.tool({ ...params, context_id: `context-${"f".repeat(32)}` })).details.status, "refused"); assert.equal(wrong.calls.length, 1);
 
-for (const bad of [result("not-json"), result("", 65, "bad store")]) {
+const unpairedSurrogateContext = structuredClone(context());
+unpairedSurrogateContext.findings[0].title = JSON.parse('"\\ud800"');
+for (const bad of [result("not-json"), result("", 65, "bad store"), result(unpairedSurrogateContext)]) {
   const x = harness([bad]); await x.commands.get("architect").handler("", x.ctx);
   assert.equal(x.messages.length, 0); assert.match(x.notifications[0].message, /Cannot load Architect context/);
+  assert.equal(x.notifications[0].level, "error");
 }
 const headless = harness([], { hasUI: false }); await headless.commands.get("architect").handler("", headless.ctx); assert.equal(headless.calls.length, 0);
 console.log("test-qq-architect-extension: pass");

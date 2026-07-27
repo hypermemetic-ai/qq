@@ -10,7 +10,7 @@ const OBSERVE = "bin/qq-observe";
 const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f]/;
 
 function text(value, nonempty = false) {
-  return typeof value === "string" && value.length <= 20000 && !CONTROL.test(value) && (!nonempty || !!value.trim());
+  return typeof value === "string" && value.isWellFormed() && value.length <= 20000 && !CONTROL.test(value) && (!nonempty || !!value.trim());
 }
 function exactObject(value, keys) {
   return value !== null && typeof value === "object" && !Array.isArray(value) &&
