@@ -49,9 +49,9 @@ Use `research` for multi-source, decision-grade questions. Launch `qq-dispatch r
 
 Use `uat-signoff` after autonomous verification when behavior is visible or subjective. Present one observable check at a time and require explicit owner confirmation. Destructive, monetary, irreversible, or outbound actions still require separate just-in-time authorization.
 
-### Knowledge capture
+### Observer Architect
 
-Use `compound` only after a verified, non-obvious solve with reusable reasoning. Update an existing lesson or create a concise solution record with Symptom, Root cause, Resolution, and Verification. Update `CONCEPTS.md` only for genuinely stable vocabulary.
+Use `architect` to synthesize unsettled Observer findings with the operator and selectively route or set them aside. Findings remain proposals: it never applies source, creates Tasks, approves scope, or forces decisions.
 
 Use `idea` only for messages beginning with `idea:` or explicit `$idea`; append the supplied text verbatim with a timestamp to the single Backlog `Ideas` document, without interpretation or side effects.
 
