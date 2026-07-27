@@ -17,6 +17,17 @@ and delivery state.
 **Task** — Backlog.md's durable record of operator intent, acceptance criteria,
 dependencies, and work status.
 
+**Task umbrella** — A parent Task grouping one outcome. Its direct children are
+membership, not sequence or prerequisite claims.
+
+**Task child** — One independently deliverable, coherent Change under an
+umbrella. qq supports one direct child level only; smaller steps stay in that
+child's plan or checklist.
+
+**ready frontier** — Incomplete Task children whose genuine prerequisites are
+satisfied. Frontier membership permits consideration for overlap; accountable
+ownership and conflict review determines actual concurrency.
+
 **Change** — A branch, its commits, and its pull request considered as one unit
 of delivery.
 

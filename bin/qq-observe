@@ -35,7 +35,7 @@ usage:
   qq-observe record-handoff-attempt (--batch DIR | --run DIR) --receipt FILE.json
   qq-observe record-handoff-result (--batch DIR | --run DIR) --receipt FILE.json
   qq-observe mark-discussed --run DIR --outcomes FILE.json [--twin DIR]
-  qq-observe resolve-task (--batch DIR | --run DIR) --task T-N --repo ROOT
+  qq-observe resolve-task (--batch DIR | --run DIR) --task <Task-ID> --repo ROOT
   qq-observe rounds
   qq-observe record-comparison --guided DIR --blind DIR
 
@@ -124,6 +124,16 @@ import sys
 from urllib.parse import quote
 
 self_path, command, git_binary, gh_binary, *args = sys.argv[1:]
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.fspath(Path(self_path).resolve().parent / "lib"))
+from qq_task_identity import (  # noqa: E402
+    TaskIdentityConfig,
+    TaskIdentityError,
+    generic_task_ordering_key,
+    is_generic_task_id,
+    task_artifact_filename,
+)
+
 SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9._-]+$")
 SESSION_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 PR_MERGE = re.compile(r"^Merge pull request #(\d+)\b")
@@ -1829,8 +1839,7 @@ def validate_handoff_result_item(item, handoff, raw):
         plan_hashes = task.get("plan_sha256") if isinstance(task, dict) else None
         if (
             not isinstance(task, dict) or set(task) != task_fields
-            or not isinstance(task.get("task_id"), str)
-            or not re.fullmatch(r"T-[1-9][0-9]*", task["task_id"])
+            or not is_generic_task_id(task.get("task_id"))
             or task["task_id"] in known_tasks
             or task.get("status") not in ("To Do", "In Progress")
             or task.get("decision_ledger") != "present"
@@ -1852,8 +1861,7 @@ def validate_handoff_result_item(item, handoff, raw):
             or not isinstance(row.get("item"), str) or row["item"] in mapped
             or not isinstance(row.get("task_ids"), list) or not row["task_ids"]
             or len(row["task_ids"]) != len(set(row["task_ids"]))
-            or any(not isinstance(task, str) or not re.fullmatch(r"T-[1-9][0-9]*", task)
-                   for task in row["task_ids"])
+            or any(not is_generic_task_id(task) for task in row["task_ids"])
             or not set(row["task_ids"]).issubset(known_tasks)
         ):
             fail("observer handoff result has an invalid mapping", 65)
@@ -3439,6 +3447,12 @@ def verify_result_task_evidence(receipt, require_hashes=True):
         ):
             fail("verified intake result Task identity is malformed", 65)
         checkout, common = git_root(checkout_value)
+        try:
+            identity = TaskIdentityConfig.from_repository(checkout).parse_display(task_id)
+        except TaskIdentityError as error:
+            fail(f"verified intake result Task identity does not match Repository config: {error}", 65)
+        if identity.display_id != task_id:
+            fail("verified intake result Task identity is not canonical", 65)
         recorded_common = canonical_directory(task["common_dir"], "recorded Task common directory")
         if common != recorded_common:
             fail("verified intake result Task common-directory changed", 65)
@@ -3709,8 +3723,14 @@ def resolve_task(values):
     if "--task" not in options or "--repo" not in options or len(options) != 3:
         fail("resolve-task requires --task, --repo, and exactly one of --batch/--run")
     task_id = options["--task"]
-    if not re.fullmatch(r"T-[1-9][0-9]*", task_id):
-        fail("--task must match T-[1-9][0-9]*", 65)
+    if not is_generic_task_id(task_id):
+        fail("--task must be one letters-prefix parent or direct-child identity", 65)
+    repo, _ = git_root(options["--repo"])
+    try:
+        task_identity = TaskIdentityConfig.from_repository(repo).parse_display(task_id)
+    except TaskIdentityError as error:
+        fail(f"--task does not match Repository config: {error}", 65)
+    task_id = task_identity.display_id
     subject, handoff, routing_path, subject_key = handoff_subject(options)
     result_path = routing_path / "result.json"
     result_raw = read_regular(result_path, "observer handoff result")
@@ -3743,7 +3763,6 @@ def resolve_task(values):
             or not regular_file(plan_path)
         ):
             fail("verified approved-plan identity is unavailable", 65)
-    repo, _ = git_root(options["--repo"])
     repository = canonical_repository(repo)
     recorded_repository = task.get("repository")
     if recorded_repository != repository:
@@ -3794,7 +3813,7 @@ def resolve_task(values):
     }
     receipt_data = canonical_json_bytes(receipt)
     validate_resolution_receipt(receipt, receipt_data, handoff, task)
-    path = routing_path / "resolutions" / f"{task_id}.json"
+    path = routing_path / "resolutions" / task_artifact_filename(task_id)
     old = existing_bytes(path)
     if old is not None:
         current = json_document(old, "Task resolution receipt")
@@ -3844,9 +3863,9 @@ def observer_run_rows(since=None):
                 result = load_handoff_result(run_dir, handoff)
                 task_ids = sorted({
                     task_id for mapping in result["mapping"] for task_id in mapping["task_ids"]
-                })
+                }, key=generic_task_ordering_key)
                 for task_id in task_ids:
-                    resolution_path = routing_path / "resolutions" / f"{task_id}.json"
+                    resolution_path = routing_path / "resolutions" / task_artifact_filename(task_id)
                     if os.path.lexists(resolution_path) and not regular_file(resolution_path):
                         fail(f"invalid Task resolution receipt at {resolution_path}", 65)
                     if regular_file(resolution_path):

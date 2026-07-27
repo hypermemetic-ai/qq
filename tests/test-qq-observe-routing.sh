@@ -240,19 +240,21 @@ assert_equal 1 "$(find "$run/routing/attempts" -type f | wc -l)" 'attempt retry 
 # Build current born-in-worktree Task evidence for result and resolution.
 repo="$tmp/tasks-repo"; checkout="$tmp/task-change"
 git init -q -b main "$repo"
-mkdir -p "$repo/bin/lib"
+mkdir -p "$repo/bin/lib" "$repo/backlog"
+printf '%s\n' 'task_prefix: "feat"' >"$repo/backlog/config.yml"
 cp "$OBSERVE" "$repo/bin/qq-observe"
 cp "$ROOT/bin/lib/qq-bin.sh" "$repo/bin/lib/qq-bin.sh"
+cp "$ROOT/bin/lib/qq_task_identity.py" "$repo/bin/lib/qq_task_identity.py"
 fixture_observe="$repo/bin/qq-observe"
 git -C "$repo" remote add origin git@github.com:fixture/tasks.git
 git -C "$repo" config branch.main.remote origin
-git -C "$repo" add bin
+git -C "$repo" add bin backlog
 git -C "$repo" -c user.name=test -c user.email=test@example.invalid commit -qm base
 git -C "$repo" worktree add -qb feature/task "$checkout" main >/dev/null
 mkdir -p "$checkout/backlog/tasks" "$checkout/backlog/docs/plans"
-task_path="$checkout/backlog/tasks/t-201 - Fixture.md"
+task_path="$checkout/backlog/tasks/feat-201.3 - Fixture.md"
 plan_path="$checkout/backlog/docs/plans/doc-201 - Fixture.md"
-printf '%s\n' '---' 'id: T-201' 'status: In Progress' 'modified_files:' '  - tests/a-valid-list-scalar-that-Backlog-wraps' '    across-lines.sh' 'documentation:' '  - doc-201' '---' '<!-- SECTION:DESCRIPTION:BEGIN -->' '## Decision ledger' '- approved' '<!-- SECTION:DESCRIPTION:END -->' >"$task_path"
+printf '%s\n' '---' 'id: FEAT-201.3' 'status: In Progress' 'modified_files:' '  - tests/a-valid-list-scalar-that-Backlog-wraps' '    across-lines.sh' 'documentation:' '  - doc-201' '---' '<!-- SECTION:DESCRIPTION:BEGIN -->' '## Decision ledger' '- approved' '<!-- SECTION:DESCRIPTION:END -->' >"$task_path"
 printf '%s\n' '---' 'id: doc-201' '---' '**Status:** APPROVED' >"$plan_path"
 task_sha="$(sha256sum "$task_path" | awk '{print $1}')"
 plan_sha="$(sha256sum "$plan_path" | awk '{print $1}')"
@@ -260,8 +262,8 @@ result="$tmp/result.json"
 jq -cn --arg id "$handoff_id" --arg checkout "$(realpath "$checkout")" \
   --arg task "$task_path" --arg plan "$plan_path" --arg common "$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)" --arg tsha "$task_sha" --arg psha "$plan_sha" '{
   schema:"qq-handoff/intake-result-v1",version:1,status:"done",handoff_id:$id,
-  mapping:[{item:"alpha",task_ids:["T-201"]}],
-  tasks:[{task_id:"T-201",task_path:$task,status:"In Progress",decision_ledger:"present",
+  mapping:[{item:"alpha",task_ids:["FEAT-201.3"]}],
+  tasks:[{task_id:"FEAT-201.3",task_path:$task,status:"In Progress",decision_ledger:"present",
     plan_paths:[$plan],branch:"feature/task",checkout:$checkout,common_dir:$common,
     repository:"fixture/tasks",task_sha256:$tsha,plan_sha256:{($plan):$psha}}],
   verified_at:"2026-08-02T00:00:00.000Z"
@@ -284,10 +286,22 @@ assert_equal 65 "$status" 'orphan frontmatter list continuation was accepted'
 assert_file_contains "$tmp/malformed-list.err" 'malformed frontmatter list'
 [ ! -e "$run/routing/result.json" ] || fail 'malformed frontmatter list mutated the Observer run'
 rm "$malformed_task"
+# Generic intake shape is not authority to use another Repository prefix.
+jq '(.mapping[].task_ids[], .tasks[].task_id) = "T-201.3"' "$result" \
+  >"$tmp/mismatched-prefix-result.json"
+set +e
+"$fixture_observe" record-handoff-result --run "$run" \
+  --receipt "$tmp/mismatched-prefix-result.json" \
+  >"$tmp/mismatched-prefix.out" 2>"$tmp/mismatched-prefix.err"
+status=$?
+set -e
+assert_equal 65 "$status" 'mismatched configured Task prefix was accepted by Observer intake'
+[ ! -e "$run/routing/result.json" ] \
+  || fail 'mismatched configured Task prefix mutated the Observer run'
 "$fixture_observe" record-handoff-result --run "$run" --receipt "$result" >/dev/null
 # Global results map every routed decision ID (set-aside decisions remain Task-free).
 global_decision_id="$(jq -r '.decisions[] | select(.action=="route") | .decision_id' "$global_handoff")"
-jq --arg id "$global_handoff_id" --arg item "$global_decision_id" '.handoff_id=$id | .mapping=[{item:$item,task_ids:["T-201"]}]' "$result" >"$tmp/global-result.json"
+jq --arg id "$global_handoff_id" --arg item "$global_decision_id" '.handoff_id=$id | .mapping=[{item:$item,task_ids:["FEAT-201.3"]}]' "$result" >"$tmp/global-result.json"
 "$fixture_observe" record-handoff-result --batch "$global_batch" --receipt "$tmp/global-result.json" >/dev/null
 [ -f "$global_batch/result.json" ] || fail 'verified global intake result was not recorded beside its batch'
 "$OBSERVE" architect-context >"$tmp/completed-global-context.json"
@@ -304,7 +318,7 @@ set -e
 assert_equal 65 "$status" 'incomplete global decision mapping was accepted'
 cp "$task_path" "$tmp/task-before-stale-check"
 cp "$plan_path" "$tmp/plan-before-stale-check"
-printf '%s\n' '---' 'id: T-201' 'status: In Progress' 'documentation: []' '---' >"$task_path"
+printf '%s\n' '---' 'id: FEAT-201.3' 'status: In Progress' 'documentation: []' '---' >"$task_path"
 printf '%s\n' '---' 'id: doc-201' '---' 'not approved' >"$plan_path"
 set +e
 "$OBSERVE" mark-discussed --run "$run" --outcomes "$accepted" >"$tmp/stale-mark.out" 2>"$tmp/stale-mark.err"
@@ -318,7 +332,7 @@ printf '\n## Implementation Notes\n\nWork started after verified intake.\n' >>"$
 "$OBSERVE" mark-discussed --run "$run" --outcomes "$accepted" >/dev/null
 [ -f "$run/discussed.json" ] || fail 'verified routed result did not permit explicit discussion mark'
 "$OBSERVE" rounds >"$tmp/rounds.json"
-jq -e --arg run "$run" 'any(.[]; .run_dir == $run and .task_ids == ["T-201"] and .resolved == false)' "$tmp/rounds.json" >/dev/null \
+jq -e --arg run "$run" 'any(.[]; .run_dir == $run and .task_ids == ["FEAT-201.3"] and .resolved == false)' "$tmp/rounds.json" >/dev/null \
   || fail 'rounds omitted routed unresolved Task identity'
 
 # A valid historical guided disposition covers only that round's exact occurrence;
@@ -415,39 +429,39 @@ export GH_HEAD_OWNER=fixture GH_HEAD_REPOSITORY=tasks
 for state in OPEN CLOSED; do
   export GH_PR_STATE="$state"
   set +e
-  "$OBSERVE" resolve-task --run "$run" --task T-201 --repo "$repo" >"$tmp/$state.out" 2>"$tmp/$state.err"
+  "$OBSERVE" resolve-task --run "$run" --task FEAT-201.3 --repo "$repo" >"$tmp/$state.out" 2>"$tmp/$state.err"
   status=$?
   set -e
   assert_equal 65 "$status" "$state pull request was recorded resolved"
 done
 export GH_PR_STATE=MERGED GH_HEAD_OID=0000000000000000000000000000000000000000
 set +e
-"$OBSERVE" resolve-task --run "$run" --task T-201 --repo "$repo" >"$tmp/wrong-oid.out" 2>"$tmp/wrong-oid.err"
+"$OBSERVE" resolve-task --run "$run" --task FEAT-201.3 --repo "$repo" >"$tmp/wrong-oid.out" 2>"$tmp/wrong-oid.err"
 status=$?
 set -e
 assert_equal 65 "$status" 'same-branch pull request with a different head OID was recorded resolved'
 export GH_HEAD_OID="$local_head" GH_HEAD_OWNER=foreign
 set +e
-"$OBSERVE" resolve-task --run "$run" --task T-201 --repo "$repo" >"$tmp/foreign-head.out" 2>"$tmp/foreign-head.err"
+"$OBSERVE" resolve-task --run "$run" --task FEAT-201.3 --repo "$repo" >"$tmp/foreign-head.out" 2>"$tmp/foreign-head.err"
 status=$?
 set -e
 assert_equal 65 "$status" 'foreign-head pull request was recorded resolved'
 export GH_HEAD_OWNER=fixture GH_HEAD_REPOSITORY=tasks
-"$OBSERVE" resolve-task --run "$run" --task T-201 --repo "$repo" >"$tmp/resolved.json"
+"$OBSERVE" resolve-task --run "$run" --task FEAT-201.3 --repo "$repo" >"$tmp/resolved.json"
 jq -e --arg head "$local_head" '
   .status == "resolved" and .receipt.state == "MERGED"
   and .receipt.repository == "fixture/tasks" and .receipt.head_oid == $head
 ' "$tmp/resolved.json" >/dev/null
 assert_file_contains "$gh_log" 'pr view feature/task --repo fixture/tasks --json number,state,headRefOid,headRefName,headRepository,headRepositoryOwner,url'
-"$OBSERVE" resolve-task --run "$run" --task T-201 --repo "$repo" >"$tmp/resolved-again.json"
+"$OBSERVE" resolve-task --run "$run" --task FEAT-201.3 --repo "$repo" >"$tmp/resolved-again.json"
 jq -e '.status == "already resolved"' "$tmp/resolved-again.json" >/dev/null
-"$OBSERVE" resolve-task --batch "$global_batch" --task T-201 --repo "$repo" >"$tmp/global-resolved.json"
+"$OBSERVE" resolve-task --batch "$global_batch" --task FEAT-201.3 --repo "$repo" >"$tmp/global-resolved.json"
 jq -e --arg id "$global_handoff_id" '.status == "resolved" and .receipt.handoff_id == $id and .receipt.state == "MERGED"' "$tmp/global-resolved.json" >/dev/null \
   || fail 'exact MERGED proof did not resolve the global routed Task'
 "$OBSERVE" rounds >"$tmp/resolved-rounds.json"
-jq -e --arg run "$run" 'any(.[]; .run_dir == $run and .resolved and .resolved_task_ids == ["T-201"])' "$tmp/resolved-rounds.json" >/dev/null
+jq -e --arg run "$run" 'any(.[]; .run_dir == $run and .resolved and .resolved_task_ids == ["FEAT-201.3"])' "$tmp/resolved-rounds.json" >/dev/null
 
-resolution="$run/routing/resolutions/T-201.json"
+resolution="$run/routing/resolutions/FEAT-201.3.json"
 cp "$resolution" "$tmp/valid-resolution.json"
 assert_bad_resolution() {
   local label="$1" filter="$2"
@@ -463,7 +477,7 @@ assert_bad_resolution truncated 'del(.url)'
 # Retry reads use the same strict validator rather than accepting a partial receipt.
 jq -cS 'del(.url)' "$tmp/valid-resolution.json" >"$resolution"
 set +e
-"$OBSERVE" resolve-task --run "$run" --task T-201 --repo "$repo"   >"$tmp/truncated-retry.out" 2>"$tmp/truncated-retry.err"
+"$OBSERVE" resolve-task --run "$run" --task FEAT-201.3 --repo "$repo"   >"$tmp/truncated-retry.out" 2>"$tmp/truncated-retry.err"
 status=$?
 set -e
 assert_equal 65 "$status" 'resolution retry accepted a truncated existing receipt'
@@ -473,7 +487,7 @@ cp "$tmp/valid-resolution.json" "$resolution"
 jq -cS '.head_oid = "1111111111111111111111111111111111111111"' \
   "$tmp/valid-resolution.json" >"$resolution"
 set +e
-"$OBSERVE" resolve-task --run "$run" --task T-201 --repo "$repo" \
+"$OBSERVE" resolve-task --run "$run" --task FEAT-201.3 --repo "$repo" \
   >"$tmp/forged-head-retry.out" 2>"$tmp/forged-head-retry.err"
 status=$?
 set -e
@@ -499,7 +513,7 @@ git -C "$repo" worktree remove --force "$checkout"
 git -C "$repo" branch -D feature/task >/dev/null
 "$OBSERVE" rounds >"$tmp/retired-resolution-rounds.json"
 jq -e --arg run "$run" '
-  any(.[]; .run_dir == $run and .resolved and .resolved_task_ids == ["T-201"])
+  any(.[]; .run_dir == $run and .resolved and .resolved_task_ids == ["FEAT-201.3"])
 ' "$tmp/retired-resolution-rounds.json" >/dev/null \
   || fail 'retiring the resolved Task checkout made append-only resolution unreadable'
 # Reconstitute fixture evidence needed by the independent legacy recovery case below.
@@ -538,8 +552,8 @@ legacy_id="$(jq -r .handoff_id "$legacy_handoff")"
 jq -cn --arg id "$legacy_id" --arg checkout "$(realpath "$checkout")" \
   --arg task "$task_path" --arg plan "$plan_path" --arg common "$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)" --arg tsha "$task_sha" --arg psha "$plan_sha" '{
   schema:"qq-handoff/intake-result-v1",version:1,status:"done",handoff_id:$id,
-  mapping:[{item:"recovery",task_ids:["T-201"]}],
-  tasks:[{task_id:"T-201",task_path:$task,status:"In Progress",decision_ledger:"present",
+  mapping:[{item:"recovery",task_ids:["FEAT-201.3"]}],
+  tasks:[{task_id:"FEAT-201.3",task_path:$task,status:"In Progress",decision_ledger:"present",
     plan_paths:[$plan],branch:"feature/task",checkout:$checkout,common_dir:$common,
     repository:"fixture/tasks",task_sha256:$tsha,plan_sha256:{($plan):$psha}}],
   verified_at:"2026-08-02T00:00:00.000Z"

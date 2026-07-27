@@ -23,7 +23,10 @@ path.
 - Couple shared files or invariants; work sequentially.
 - Fan out independent reads; give writers disjoint branches, worktrees, and
   non-Git resources.
-- Run only the unblocked frontier; cap writers at 3–5; serialize integration.
+- Run only the dependency-derived ready frontier. Frontier membership alone
+  never authorizes overlap: check accountable ownership and conflicts first.
+  Child suffixes are non-ordinal, and no durable `parallel_with` relation exists.
+- Cap writers at 3–5; serialize integration.
 
 ## Dispatch and status
 

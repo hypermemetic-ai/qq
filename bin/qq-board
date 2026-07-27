@@ -148,6 +148,20 @@ primary_config="$repo_root/backlog/config.yml"
 [ -f "$primary_config" ] \
   || qq_engine_error "Backlog config is missing: $primary_config"
 
+if ! qq_resolve_bin python3; then
+  qq_engine_error "$QQ_BIN_ERROR"
+fi
+python_bin="$QQ_BIN_RESULT"
+task_identity_helper="$(dirname "$self")/lib/qq_task_identity.py"
+[ -f "$task_identity_helper" ] \
+  || qq_engine_error "Task identity helper is missing: $task_identity_helper"
+if ! task_config="$({
+  "$python_bin" "$task_identity_helper" config --repo "$repo_root" 2>&1
+})"; then
+  state="$("$QQ_ENGINE_JQ" -cn --arg detail "$task_config" '{detail:$detail}')"
+  qq_engine_error 'Backlog Task prefix configuration is invalid.' "$state"
+fi
+
 if ! qq_resolve_bin sha256sum; then
   qq_engine_error "$QQ_BIN_ERROR"
 fi
@@ -229,29 +243,20 @@ fi
 
 declare -A branch_seen=()
 declare -A branches_by_task=()
+branch_names=()
 
 record_branch_ref() {
   local ref="$1"
-  local branch task_number
+  local branch
 
   case "$ref" in
     refs/heads/*) branch="${ref#refs/heads/}" ;;
     refs/remotes/origin/*) branch="${ref#refs/remotes/origin/}" ;;
     *) return 0 ;;
   esac
-  if [[ ! "$branch" =~ ^[^/]+/t-([0-9]+)-[^/]+$ ]]; then
-    return 0
-  fi
-  if [ -n "${branch_seen[$branch]+present}" ]; then
-    return 0
-  fi
-
-  branch_seen["$branch"]=true
-  task_number="${BASH_REMATCH[1]}"
-  if [ -n "${branches_by_task[$task_number]+present}" ]; then
-    branches_by_task["$task_number"]+=$'\n'"$branch"
-  else
-    branches_by_task["$task_number"]="$branch"
+  if [ -z "${branch_seen[$branch]+present}" ]; then
+    branch_seen["$branch"]=true
+    branch_names+=("$branch")
   fi
 }
 
@@ -263,6 +268,29 @@ done <<<"$worktrees"
 while IFS= read -r ref; do
   [ -n "$ref" ] && record_branch_ref "$ref"
 done <<<"$refs"
+
+if ! branch_identities="$(
+  "$python_bin" "$task_identity_helper" branches --repo "$repo_root" \
+    "${branch_names[@]}" 2>&1
+)"; then
+  state="$("$QQ_ENGINE_JQ" -cn --arg detail "$branch_identities" '{detail:$detail}')"
+  qq_engine_error 'Could not interpret branch Task identities.' "$state"
+fi
+if ! branch_records="$("$QQ_ENGINE_JQ" -r '
+  if (.identities | type) == "array" then
+    .identities[] | [.input, .display_id] | @tsv
+  else error("invalid identities") end
+' <<<"$branch_identities")"; then
+  qq_engine_error 'Task identity helper returned malformed branch data.'
+fi
+while IFS=$'\t' read -r branch task_id; do
+  [ -n "$branch" ] || continue
+  if [ -n "${branches_by_task[$task_id]+present}" ]; then
+    branches_by_task["$task_id"]+=$'\n'"$branch"
+  else
+    branches_by_task["$task_id"]="$branch"
+  fi
+done <<<"$branch_records"
 
 read_task_metadata() {
   local path="$1"
@@ -304,7 +332,6 @@ append_note() {
 
 declare -A task_path_by_id=()
 declare -A task_name_by_id=()
-declare -A task_number_by_id=()
 declare -A task_status_by_id=()
 declare -A task_hash_by_id=()
 declare -A task_source_by_id=()
@@ -316,25 +343,43 @@ aggregate_tree() {
   local tree="$1"
   local source_kind="$2"
   local tasks_dir="$tree/backlog/tasks"
-  local task_file task_name task_stem task_number metadata task_id stored_status
+  local task_file task_name identity_json identity_records expected_id metadata task_id stored_status
   local task_hash
-  local -a tree_task_files=()
-  local -A tree_task_seen=()
+  local -a tree_task_files=() task_names=()
+  local -A expected_id_by_name=() tree_task_seen=()
 
   [ -d "$tasks_dir" ] || return 0
   shopt -s nullglob
   tree_task_files=("$tasks_dir"/*.md)
   shopt -u nullglob
+  for task_file in "${tree_task_files[@]}"; do
+    task_names+=("${task_file##*/}")
+  done
+  if ! identity_json="$(
+    "$python_bin" "$task_identity_helper" filenames --repo "$repo_root" \
+      "${task_names[@]}" 2>&1
+  )"; then
+    state="$("$QQ_ENGINE_JQ" -cn --arg worktree "$tree" \
+      --arg detail "$identity_json" '{worktree:$worktree, detail:$detail}')"
+    qq_engine_error \
+      'A Task filename does not expose a configured parent or direct-child identity.' "$state"
+  fi
+  if ! identity_records="$("$QQ_ENGINE_JQ" -r '
+    if (.identities | type) == "array" then
+      .identities[] | [.input, .display_id] | @tsv
+    else error("invalid identities") end
+  ' <<<"$identity_json")"; then
+    qq_engine_error 'Task identity helper returned malformed filename data.'
+  fi
+  while IFS=$'\t' read -r task_name task_id; do
+    [ -n "$task_name" ] && expected_id_by_name["$task_name"]="$task_id"
+  done <<<"$identity_records"
 
   for task_file in "${tree_task_files[@]}"; do
     task_name="${task_file##*/}"
-    task_stem="${task_name%.md}"
-    if [[ ! "$task_stem" =~ ^t-([0-9]+)([[:space:]]|-|$) ]]; then
-      state="$("$QQ_ENGINE_JQ" -cn --arg task_file "$task_file" \
-        '{task_file:$task_file}')"
-      qq_engine_error 'Task filename does not expose a numeric Task id.' "$state"
-    fi
-    task_number="${BASH_REMATCH[1]}"
+    task_id="${expected_id_by_name[$task_name]-}"
+    [ -n "$task_id" ] \
+      || qq_engine_error "Task identity helper omitted a Task filename: $task_file"
     # Participation is decided by Git history, never by byte-inequality with
     # primary: only records the Change itself touched (committed against the
     # merge-base or dirty/untracked in the worktree) can overlay. A clean
@@ -349,10 +394,11 @@ aggregate_tree() {
       qq_engine_error \
         'Task record has unreadable id or status frontmatter.' "$state"
     fi
+    expected_id="$task_id"
     IFS=$'\t' read -r task_id stored_status <<<"$metadata"
-    if [ "$task_id" != "T-$task_number" ]; then
+    if [ "$task_id" != "$expected_id" ]; then
       state="$("$QQ_ENGINE_JQ" -cn --arg task_file "$task_file" \
-        --arg expected_id "T-$task_number" --arg stored_id "$task_id" \
+        --arg expected_id "$expected_id" --arg stored_id "$task_id" \
         '{task_file:$task_file, expected_id:$expected_id, stored_id:$stored_id}')"
       qq_engine_error 'Task filename and frontmatter id disagree.' "$state"
     fi
@@ -394,7 +440,6 @@ aggregate_tree() {
 
     task_path_by_id["$task_id"]="$task_file"
     task_name_by_id["$task_id"]="$task_name"
-    task_number_by_id["$task_id"]="$task_number"
     task_status_by_id["$task_id"]="$stored_status"
     task_hash_by_id["$task_id"]="$task_hash"
     task_source_by_id["$task_id"]="$tree"
@@ -555,9 +600,8 @@ task_branches_json=()
 changed_count=0
 
 for task_id in "${task_ids[@]}"; do
-  task_number="${task_number_by_id[$task_id]}"
   stored_status="${task_status_by_id[$task_id]}"
-  branches="${branches_by_task[$task_number]-}"
+  branches="${branches_by_task[$task_id]-}"
   branches_json="$(printf '%s\n' "$branches" \
     | "$QQ_ENGINE_JQ" -Rsc \
       'split("\n") | map(select(length > 0)) | unique | sort')"
