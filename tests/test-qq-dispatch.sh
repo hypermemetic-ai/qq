@@ -1029,6 +1029,21 @@ run_timeout_manifest_refusal timeout-declaration-mixed-nested \
   'must contain exactly one timeoutMs declaration' \
   env PI_SUBAGENT_CHILD_AGENT=reviewer QQ_DISPATCH_TIMEOUT=2s \
     PI_SUBAGENT_TRUSTED_AGENT_PATHS="$policy_fixture_trusted"
+printf '%s\n' '---' 'timeoutMs: 2700000' 'defaults:' '  - timeoutMs: 1' '---' >"$reviewer_manifest"
+run_timeout_manifest_refusal timeout-declaration-mixed-list-item \
+  'must contain exactly one timeoutMs declaration' \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer QQ_DISPATCH_TIMEOUT=2s \
+    PI_SUBAGENT_TRUSTED_AGENT_PATHS="$policy_fixture_trusted"
+printf '%s\n' '---' 'timeoutMs: 2700000' 'defaults: { timeoutMs: 1 }' '---' >"$reviewer_manifest"
+run_timeout_manifest_refusal timeout-declaration-mixed-flow \
+  'must contain exactly one timeoutMs declaration' \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer QQ_DISPATCH_TIMEOUT=2s \
+    PI_SUBAGENT_TRUSTED_AGENT_PATHS="$policy_fixture_trusted"
+printf '%s\n' '---' 'timeoutMs: 2700000' 'defaults:' '  "timeoutMs": 1' '---' >"$reviewer_manifest"
+run_timeout_manifest_refusal timeout-declaration-mixed-quoted \
+  'must contain exactly one timeoutMs declaration' \
+  env PI_SUBAGENT_CHILD_AGENT=reviewer QQ_DISPATCH_TIMEOUT=2s \
+    PI_SUBAGENT_TRUSTED_AGENT_PATHS="$policy_fixture_trusted"
 printf '%s\n' '---' 'timeoutMs: 1' 'timeoutMs: 2' '---' >"$reviewer_manifest"
 run_timeout_manifest_refusal timeout-declaration-duplicate \
   'must contain exactly one timeoutMs declaration' \
