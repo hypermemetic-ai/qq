@@ -17,4 +17,8 @@ qq_resolve_bin git || engine_dependency_error
 export QQ_GIT_BIN="$QQ_BIN_RESULT"
 qq_resolve_bin herdr || engine_dependency_error
 export QQ_HERDR_BIN="$QQ_BIN_RESULT"
+if [[ "${1:-}" == intake-result ]]; then
+  qq_resolve_bin gh || engine_dependency_error
+  export QQ_GH_BIN="$QQ_BIN_RESULT"
+fi
 exec "$python_bin" "$(dirname "$self")/lib/qq-handoff.py" "$@"

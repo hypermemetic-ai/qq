@@ -360,21 +360,24 @@ mkdir -p ~/.pi/agent
 ln -sT "$HOME/projects/qq/skills" "$HOME/.pi/agent/skills"
 ```
 
-The project-local pi extension `.pi/extensions/qq-subagent-env.ts` sets the
-adapter, canonical agent directory, exact trusted-seat map, and
-structured-output runtime root in-process for any pi session in this repository (and its
-worktrees), resolved from the checkout the session runs against:
+The globally mounted `extensions/qq-subagent-env.ts` sets the delegation
+adapter, canonical agent directory, exact trusted-seat map, and structured-
+output runtime root only in qq-governed Repositories. qq and its worktrees are
+recognized by Git common-directory identity and use the active checkout. A
+linked Repository is governed only when its root `AGENTS.md` symlink resolves
+to qq's canonical `AGENTS.md`; it uses qq's canonical checkout. Unrelated Pi
+projects remain vanilla:
 
 - `PI_SUBAGENT_PI_BINARY=<checkout>/bin/qq-dispatch`
 - `PI_SUBAGENT_EXTRA_AGENT_DIRS=<checkout>/delegation/manifests/agents`
 - `PI_SUBAGENT_TRUSTED_AGENT_PATHS={...exact canonical manifest paths...}`
 - `QQ_DISPATCH_RUNTIME_ROOT=<temporary-directory>/pi-subagents-uid-<uid>`
 
-Pi auto-discovers the extension once the project is trusted, so delegates
-dispatch confined by construction — no shell exports or launcher wrappers to
-remember. Variables already set in the environment are left untouched, and
-sessions in other projects never load the extension and keep the vanilla
-dispatcher. Relaunch pi (or `/reload`) after install or upgrade.
+The existing global qq extension mount loads the gate everywhere, but policy is
+activated only after that structured Repository check. Delegates dispatch
+confined by construction without shell exports. Variables already set in the
+environment win, including explicit empty strings. Relaunch Pi (or `/reload`)
+after install or upgrade.
 
 Set the dispatcher-side pi-subagents config at
 `~/.pi/agent/extensions/subagent/config.json` to include:
@@ -395,17 +398,16 @@ temp root; without it, pi-subagents nests child sessions inside the parent
 session tree, which the confinement policy deliberately does not grant. The
 config is required: the adapter refuses dispatch when it is missing or
 malformed. The configured path must be a direct `pi-subagent-*` child of the
-launcher temp directory (`$TMPDIR` or `/tmp`). The project extension
+launcher temp directory (`$TMPDIR` or `/tmp`). The governed extension
 pre-creates the root (mode 700) at session start and tightens an
 operator-owned loose root; at dispatch the adapter enforces the contract and
 fails closed on a symlink, foreign ownership, or any mode other than 700
 rather than widening the grant.
 
-The extension resolves the adapter and manifests from the checkout the
-session runs in — a session in a Change worktree uses that worktree's
-copies, which travel with the branch. Explicit environment variables always
-win, including empty values (pi-subagents reads those as its vanilla
-fallback); when overriding manually, point at the primary `main` checkout.
+For qq worktrees the extension resolves adapter and manifests from that
+checkout; governed linked Repositories use canonical qq primary `main`.
+Explicit environment variables always win, including empty values
+(pi-subagents reads those as its vanilla fallback).
 Pi-subagents inherits the one-time setup for every spawn and supplies the child
 role, while its `cwd` selects the assigned worktree. The canonical adapter
 serves any worktree from that Repository, refuses unrelated repositories,
@@ -471,6 +473,29 @@ to a fresh accountable Pi tab. It resolves the Task's unique linked checkout,
 verifies its durable plan and ownership rails, starts the receiver in the
 persistent project home, and restores caller focus. This transfers accountable
 ownership; it is distinct from bounded child delegation through pi-subagents.
+
+Architect findings use a separate typed accountable-intake route. Observer v2
+runs are Repository-qualified beneath
+`observer/runs/by-repository/<owner>/<repo>/pr-<N>[-blind]`; legacy flat v1
+package evidence remains visibly legacy and is never rewritten. `/architect`
+directly opens one bounded global digest of new and still-unsettled finding
+occurrences across source rounds and Repositories. It carries slim provenance
+for at most 50 ranked findings; detailed evidence stays in cited analyses and
+an omitted count reveals the remaining working set. There is no round picker or
+fixed verdict form. The Architect records only choices settled in conversation:
+route with non-empty agreed scope or set aside current evidence. Untouched
+occurrences stay open, and a later same-key occurrence reopens automatically.
+
+`architect_disposition` first returns an exact natural summary and confirmation
+question without writing. Only an unchanged proposal plus a later exact clear
+affirmative interactive reply confirms. A set-aside-only batch is Task-free; a
+routed multi-source batch writes one content-addressed Observer handoff and
+starts one fresh qq-home accountable recipient. Until complete verified Task
+mappings arrive, that exact batch remains visible as operator-settled pending
+intake. An explicit interactive request naming its batch or handoff can retry
+the same handoff; it cannot re-propose scope or create another batch. Exact
+`MERGED` PR/head/Repository receipts later resolve mapped Tasks. Existing v1
+round handoffs remain recoverable through low-level compatibility commands.
 
 ### Local latency observation
 

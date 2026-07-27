@@ -16,7 +16,7 @@ if grep -Fq 'qq_resolve_bin pi' "$ROOT/bin/qq-dispatch"; then
   printf 'test-qq-pi-runtime: generic Pi resolution remains in dispatch\n' >&2
   exit 1
 fi
-grep -Fq '"bin/qq-dispatch"' "$ROOT/.pi/extensions/qq-subagent-env.ts"
+grep -Fq '"bin/qq-dispatch"' "$ROOT/extensions/qq-subagent-env.ts"
 if grep -Eq 'QQ_PI_RUNTIME_BIN|--binary|PI_RUNTIME_BINARY' "$ROOT/bin/qq-pi-runtime" "$ROOT/bin/pi"; then
   printf 'test-qq-pi-runtime: raw runtime binary override found\n' >&2
   exit 1

@@ -21,7 +21,13 @@ FULL_READ_MAX_BYTES = 400000
 
 ## Input package
 
-A guided package declares `variant: "guided"` in `package.json` and contains a
+A new guided package uses `qq-observer.package` v2, carries both its canonical
+local `repo` root and explicit GitHub `repository` (`owner/name`), and lives at
+`runs/by-repository/<owner>/<repo>/pr-<N>/`. Legacy v1 flat packages are
+read-only evidence: inspect them in place, label them legacy, and never infer a
+GitHub Repository or rewrite/copy them. Separate discussion and routing records
+may still be appended beside a legacy package. A guided package declares `variant:
+"guided"` in `package.json` and contains a
 `facts.json` and `signals.json` for every session, the corresponding session
 transcripts, the qq tool and skill inventory, and the live instruction corpus
 (including AGENTS.md, CONCEPTS.md, skills, and manifests). A blind package

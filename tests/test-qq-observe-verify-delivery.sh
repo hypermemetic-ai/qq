@@ -14,6 +14,19 @@ export HOME="$tmp/home"
 export XDG_STATE_HOME="$tmp/state"
 mkdir -p "$HOME"
 
+fake_gh="$tmp/gh"
+cat >"$fake_gh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "$1 $2" = "repo view" ]
+repository="${3#*github.com:}"
+repository="${repository#https://github.com/}"
+repository="${repository%.git}"
+printf '{"nameWithOwner":"%s"}\n' "$repository"
+SH
+chmod +x "$fake_gh"
+export QQ_GH_BIN="$fake_gh"
+
 old_date=2020-01-01T00:00:00Z
 window_date=2026-01-01T00:00:00Z
 since=2025-01-01T00:00:00Z
@@ -28,6 +41,9 @@ commit_empty() {
 init_repo() {
   local repo="$1"
   git init -q -b main "$repo"
+  current_repository="fixture/$(basename "$repo")"
+  git -C "$repo" remote add origin "git@github.com:${current_repository}.git"
+  git -C "$repo" config branch.main.remote origin
   commit_empty "$repo" base "$old_date"
 }
 
@@ -42,10 +58,10 @@ merge_subject() {
 }
 
 cover_pr() {
-  local pr="$1"
-  mkdir -p "$XDG_STATE_HOME/qq/observer/runs/pr-$pr"
-  printf '{"status":"analysis_failed"}\n' \
-    >"$XDG_STATE_HOME/qq/observer/runs/pr-$pr/analysis_failed.json"
+  local pr="$1" owner="${current_repository%%/*}" name="${current_repository#*/}"
+  local run="$XDG_STATE_HOME/qq/observer/runs/by-repository/$owner/$name/pr-$pr"
+  mkdir -p "$run"
+  printf '{"status":"analysis_failed"}\n' >"$run/analysis_failed.json"
 }
 
 standard_repo="$tmp/standard"
@@ -94,7 +110,8 @@ jq -e '
 ledger_repo="$tmp/ledger"
 init_repo "$ledger_repo"
 commit_empty "$ledger_repo" 'Ledger marker fixture (#13)' "$window_date"
-ledger_run="$XDG_STATE_HOME/qq/observer/runs/pr-13"
+ledger_runs="$XDG_STATE_HOME/qq/observer/runs/by-repository/fixture/ledger"
+ledger_run="$ledger_runs/pr-13"
 mkdir -p "$ledger_run"
 printf '%s\n' '{"schema":"qq-observer.analysis","schema_version":1,"run":{"change":"fixture","sessions":["/fixture/session.jsonl"]},"episodes":[],"dropped_signals":[],"limitations":"Fixture."}' \
   >"$ledger_run/analysis.json"
@@ -134,7 +151,7 @@ commit_empty "$ledger_repo" 'Blind-only coverage fixture (#14)' "$window_date"
 commit_empty "$ledger_repo" 'Zero guided coverage fixture (#15)' "$window_date"
 commit_empty "$ledger_repo" 'Legacy marker fixture (#16)' "$window_date"
 for pr in 14 15 16; do
-  run="$XDG_STATE_HOME/qq/observer/runs/pr-$pr"
+  run="$ledger_runs/pr-$pr"
   mkdir -p "$run"
   if [ "$pr" -eq 14 ]; then
     printf '%s\n' '{"episodes":[{}]}' >"$run/analysis.json"

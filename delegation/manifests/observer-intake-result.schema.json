@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "qq observer verified intake result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "status", "handoff_id", "mapping", "tasks", "verified_at"],
+  "properties": {
+    "schema": {"const": "qq-handoff/intake-result-v1"}, "version": {"const": 1},
+    "status": {"const": "done"},
+    "handoff_id": {"type": "string", "pattern": "^handoff-[0-9a-f]{32}$"},
+    "mapping": {"type": "array", "minItems": 1, "items": {"type": "object"}},
+    "tasks": {"type": "array", "minItems": 1, "items": {"type": "object"}},
+    "verified_at": {"type": "string"}
+  }
+}

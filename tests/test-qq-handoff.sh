@@ -25,7 +25,8 @@ import shutil
 import subprocess
 import sys
 
-engine, scratch_text = sys.argv[1:]
+engine_source_text, scratch_text = sys.argv[1:]
+engine_source = Path(engine_source_text)
 scratch = Path(scratch_text)
 repo = scratch / "repo"
 change = scratch / "change ; touch PATH_INJECTION_RAN"
@@ -41,8 +42,16 @@ def command(*argv, cwd=None, check=True):
 
 
 command("git", "init", "-q", "-b", "main", str(repo))
+(repo / "bin" / "lib").mkdir(parents=True)
+engine = repo / "bin" / "qq-handoff"
+shutil.copy2(engine_source, engine)
+shutil.copy2(engine_source.parent / "lib" / "qq-bin.sh", repo / "bin" / "lib" / "qq-bin.sh")
+shutil.copy2(engine_source.parent / "lib" / "qq-handoff.py", repo / "bin" / "lib" / "qq-handoff.py")
+command("git", "-C", str(repo), "remote", "add", "origin", "git@github.com:fixture/repo.git")
+command("git", "-C", str(repo), "config", "branch.main.remote", "origin")
+command("git", "-C", str(repo), "add", "bin")
 command("git", "-C", str(repo), "-c", "user.name=test", "-c", "user.email=test@example.com",
-        "commit", "--allow-empty", "-qm", "initial")
+        "commit", "-qm", "initial")
 command("git", "-C", str(repo), "worktree", "add", "-qb", "feat/change", str(change))
 main = str(repo.resolve())
 checkout = str(change.resolve())
@@ -82,6 +91,7 @@ id: {identity}
 title: Approved fixture plan
 type: specification
 ---
+**Status:** APPROVED
 # Plan
 '''
 
@@ -148,7 +158,8 @@ if key == ["agent", "list"]:
                      "foreground_cwd":os.environ["FAKE_CHANGE"],"pane_id":"w:pOther",
                      "tab_id":"w:tNew","workspace_id":"w"})
     if current.get("live"):
-        rows.append(agent("w:pNew", os.environ["FAKE_CHANGE"], os.environ["FAKE_CHANGE"], current.get("name"), "working"))
+        target = current.get("target", os.environ["FAKE_CHANGE"])
+        rows.append(agent("w:pNew", target, target, current.get("name"), "working"))
     emit({"result":{"type":"agent_list","agents":rows}})
 if key == ["pane", "current"]:
     emit({"result":{"type":"pane_current","pane":{"pane_id":"w:pCaller"}}})
@@ -167,9 +178,10 @@ if key == ["api", "snapshot"]:
     emit({"result":{"type":"session_snapshot","snapshot":{"focused_workspace_id":"w",
          "focused_tab_id":focused_tab,"focused_pane_id":focused_pane,"panes":panes,"tabs":tabs}}})
 if key == ["tab", "create"]:
-    current["tab"] = True; current["focused"] = False; save()
+    current["tab"] = True; current["focused"] = False
+    current["target"] = argv[argv.index("--cwd") + 1]; save()
     if mode == "create_malformed": print("{not-json"); raise SystemExit(0)
-    created_cwd = os.environ["FAKE_REL_CHANGE"] if mode == "create_relative_cwd" else os.environ["FAKE_CHANGE"]
+    created_cwd = os.environ["FAKE_REL_CHANGE"] if mode == "create_relative_cwd" else current["target"]
     emit({"result":{"type":"tab_created",
          "tab":{"tab_id":"w:tNew","workspace_id":"w","focused":False,"pane_count":1},
          "root_pane":{"pane_id":"w:pNew","tab_id":"w:tNew","workspace_id":"w",
@@ -182,7 +194,7 @@ if key == ["agent", "start"]:
     if mode == "start_malformed": print("{not-json"); raise SystemExit(0)
     if mode == "start_invalid_utf8": sys.stdout.buffer.write(b"\xff"); raise SystemExit(0)
     if mode == "startup_uncertain": emit({"result":{"type":"timeout"}}, 124)
-    started_cwd = os.environ["FAKE_REL_CHANGE"] if mode == "start_relative_cwd" else os.environ["FAKE_CHANGE"]
+    started_cwd = os.environ["FAKE_REL_CHANGE"] if mode == "start_relative_cwd" else current.get("target", os.environ["FAKE_CHANGE"])
     started_argv = ["pi"] if mode == "start_wrong_argv" else ["pi", "--approve"]
     emit({"result":{"type":"agent_started","agent":{"agent":"pi","name":argv[2],
          "pane_id":"w:pNew","workspace_id":"w","cwd":started_cwd,
@@ -197,7 +209,8 @@ if key == ["agent", "focus"]:
     if mode == "focus_restore_failed": emit({"error":{"code":"focus_failed"}}, 1)
     current["focused"] = True; save(); emit({"result":{"type":"agent_focused","agent":argv[2]}})
 if key == ["tab", "get"]:
-    emit({"result":{"tab":{"tab_id":argv[2],"workspace_id":"w","focused":current.get("focused", False)}}})
+    label = "general" if mode == "wrong_architect_tab" else "architect"
+    emit({"result":{"tab":{"tab_id":argv[2],"workspace_id":"w","label":label,"focused":current.get("focused", False)}}})
 if key == ["tab", "close"]:
     if argv[2] != "w:tNew": emit({"result":{"type":"wrong_tab"}}, 3)
     if mode == "startup_failed_close_failed": emit({"error":{"code":"close_failed"}}, 1)
@@ -214,13 +227,21 @@ print("unexpected fake herdr argv", argv, file=sys.stderr)
 raise SystemExit(64)
 ''', encoding="utf-8")
 fake.chmod(0o755)
+fake_gh = scratch / "gh"
+fake_gh.write_text("""#!/usr/bin/env bash
+set -euo pipefail
+[ "$1 $2" = "repo view" ]
+printf '{"nameWithOwner":"fixture/repo"}\n'
+""", encoding="utf-8")
+fake_gh.chmod(0o755)
 
 env = os.environ.copy()
 env.update({"QQ_HERDR_BIN":str(fake), "FAKE_LOG":str(log), "FAKE_STATE":str(state),
             "FAKE_MAIN":main, "FAKE_CHANGE":checkout, "FAKE_COMMON":common,
             "FAKE_REL_MAIN":os.path.relpath(main), "FAKE_REL_CHANGE":os.path.relpath(checkout),
             "FAKE_REL_COMMON":os.path.relpath(common),
-            "HERDR_PANE_ID":"w:pCaller"})
+            "HERDR_PANE_ID":"w:pCaller", "QQ_GH_BIN":str(fake_gh),
+            "XDG_STATE_HOME":str(scratch / "xdg-state")})
 
 
 def reset(mode="success"):
@@ -418,6 +439,220 @@ assert not any(call[:2] == ["tab","close"] for call in calls())
 # Without an environment hint, the documented pane-current read remains non-mutating.
 reset(); env.pop("HERDR_PANE_ID"); invoke(0,"inspect","T-155","--repo",main); assert ["pane","current"] in calls(); assert_no_mutation()
 env["HERDR_PANE_ID"] = "w:pCaller"
+
+# Typed Architect intake reuses the same transaction while targeting primary main.
+reset()
+run_dir = scratch / "xdg-state/qq/observer/runs/by-repository/fixture/source/pr-4"
+routing = run_dir / "routing"; routing.mkdir(parents=True, exist_ok=True)
+def canonical_write(path, value):
+    path.write_text(json.dumps(value, separators=(",", ":"), sort_keys=True) + "\n")
+
+
+def install_handoff(path, immutable_value):
+    identity = "handoff-" + hashlib.sha256(
+        json.dumps(immutable_value, separators=(",", ":"), sort_keys=True).encode()
+    ).hexdigest()[:32]
+    canonical_write(path, {
+        "schema":"qq-observer.handoff","schema_version":1,"handoff_id":identity,
+        **immutable_value,"created_at":"2026-08-01T00:00:00.000Z",
+    })
+    return identity
+
+
+package_path = run_dir / "package.json"
+analysis_path = run_dir / "analysis.json"
+package = {
+    "schema":"qq-observer.package","schema_version":2,"repo":"/fixture/source",
+    "repository":"fixture/source","pr":4,"variant":"guided",
+}
+episode = {
+    "recurrence_key":"alpha",
+    "evidence":[{"session":"/fixture/session","entries":[1],"quote":"fixture"}],
+}
+analysis = {
+    "schema":"qq-observer.analysis","schema_version":1,"episodes":[episode],
+}
+canonical_write(package_path, package)
+canonical_write(analysis_path, analysis)
+immutable = {
+    "kind":"episode_batch",
+    "round":{"run_dir":str(run_dir.resolve()),"repo":"/fixture/source","repository":"fixture/source","legacy":False,"pr":4,"variant":"guided"},
+    "outcomes":[{"recurrence_key":"alpha","verdict":"accepted","scope":"Approved intake scope","note":""}],
+    "evidence":[{"recurrence_key":"alpha","episode":episode}],
+    "source_hashes":{
+        "package.json":hashlib.sha256(package_path.read_bytes()).hexdigest(),
+        "analysis.json":hashlib.sha256(analysis_path.read_bytes()).hexdigest(),
+    },
+}
+handoff_path = routing / "handoff.json"
+handoff_id = install_handoff(handoff_path, immutable)
+original_package = package_path.read_bytes()
+original_analysis = analysis_path.read_bytes()
+
+def restore_episode_handoff():
+    package_path.unlink(missing_ok=True)
+    analysis_path.unlink(missing_ok=True)
+    package_path.write_bytes(original_package)
+    analysis_path.write_bytes(original_analysis)
+    return install_handoff(handoff_path, immutable)
+
+
+# Every cited source is validated before any Herdr lifecycle mutation.
+analysis_path.unlink()
+reset(); invoke(2, "intake-start", "--handoff", str(handoff_path), "--repo", main); assert_no_mutation()
+restore_episode_handoff()
+analysis_path.write_bytes(original_analysis + b" ")
+reset(); invoke(2, "intake-start", "--handoff", str(handoff_path), "--repo", main); assert_no_mutation()
+restore_episode_handoff()
+outside_analysis = scratch / "outside-analysis.json"
+outside_analysis.write_bytes(original_analysis)
+analysis_path.unlink(); analysis_path.symlink_to(outside_analysis)
+reset(); invoke(2, "intake-start", "--handoff", str(handoff_path), "--repo", main); assert_no_mutation()
+restore_episode_handoff()
+wrong_kind = {"schema":"qq-observer.analysis","schema_version":1,
+              "status":"analysis_failed","reason":"wrong kind"}
+canonical_write(analysis_path, wrong_kind)
+wrong_kind_handoff = json.loads(json.dumps(immutable))
+wrong_kind_handoff["source_hashes"]["analysis.json"] = hashlib.sha256(analysis_path.read_bytes()).hexdigest()
+install_handoff(handoff_path, wrong_kind_handoff)
+reset(); invoke(2, "intake-start", "--handoff", str(handoff_path), "--repo", main); assert_no_mutation()
+restore_episode_handoff()
+mismatched_package = {**package, "repository":"fixture/other"}
+canonical_write(package_path, mismatched_package)
+mismatched_handoff = json.loads(json.dumps(immutable))
+mismatched_handoff["source_hashes"]["package.json"] = hashlib.sha256(package_path.read_bytes()).hexdigest()
+install_handoff(handoff_path, mismatched_handoff)
+reset(); invoke(2, "intake-start", "--handoff", str(handoff_path), "--repo", main); assert_no_mutation()
+handoff_id = restore_episode_handoff()
+
+foreign_repo = scratch / "foreign-intake"
+command("git", "init", "-q", "-b", "main", str(foreign_repo))
+command("git", "-C", str(foreign_repo), "-c", "user.name=test", "-c", "user.email=test@example.com",
+        "commit", "--allow-empty", "-qm", "initial")
+reset()
+foreign_receipt = invoke(2, "intake-start", "--handoff", str(handoff_path),
+                         "--repo", str(foreign_repo))
+assert "running qq engine" in foreign_receipt["message"]
+assert_no_mutation()
+
+reset("wrong_architect_tab")
+wrong_tab_receipt = invoke(2, "intake-start", "--handoff", str(handoff_path), "--repo", main)
+assert "dedicated architect tab" in wrong_tab_receipt["message"]
+assert_no_mutation()
+reset()
+receipt = invoke(0, "intake-start", "--handoff", str(handoff_path), "--repo", main)
+assert receipt["action"] == "intake-start" and receipt["handoff_id"] == handoff_id
+assert receipt["checkout"] == main and receipt["transaction"]["observed_state"] == "working"
+intake_prompt = next(call[3] for call in calls() if call[:2] == ["agent","prompt"])
+for phrase in ("genuinely new Architect intake", "not approved implementation", "normal grilling",
+               "born-in-worktree Task", "record-handoff-result", "No originating conversation"):
+    assert phrase in intake_prompt, phrase
+# The deterministic handoff agent name prevents a second live recipient.
+second_receipt = invoke(2, "intake-start", "--handoff", str(handoff_path), "--repo", main)
+assert "already owns" in second_receipt["message"]
+assert len([call for call in calls() if call[:2] == ["tab","create"]]) == 1
+
+# A strict global multi-source handoff uses the same one-recipient lifecycle and decision-ID mapping.
+def global_content_bytes(value):
+    return (json.dumps(value,separators=(",",":"),sort_keys=True)+"\n").encode()
+global_run = scratch / "xdg-state/qq/observer/runs/by-repository/fixture/global/pr-7"
+global_run.mkdir(parents=True)
+global_package_path = global_run / "package.json"
+global_analysis_path = global_run / "analysis.json"
+global_package = {"schema":"qq-observer.package","schema_version":2,"repo":"/fixture/global","repository":"fixture/global","pr":7,"variant":"guided","assembled_at":"2026-08-07T00:00:00Z"}
+global_episode = {"rank":1,"recurrence_key":"global-alpha","evidence":[{"session":"/fixture/session","entries":[1],"quote":"global evidence"}]}
+global_analysis = {"schema":"qq-observer.analysis","schema_version":1,"episodes":[global_episode]}
+canonical_write(global_package_path, global_package); canonical_write(global_analysis_path, global_analysis)
+source = {"run_dir":str(global_run.resolve()),"repo":"/fixture/global","repository":"fixture/global","legacy":False,"pr":7,"variant":"guided","assembled_at":"2026-08-07T00:00:00Z"}
+package_sha = hashlib.sha256(global_package_path.read_bytes()).hexdigest(); analysis_sha = hashlib.sha256(global_analysis_path.read_bytes()).hexdigest()
+occurrence_immutable = {"source":source,"package_sha256":package_sha,"analysis_sha256":analysis_sha,"rank":1,"recurrence_key":"global-alpha"}
+occurrence_id = "occurrence-" + hashlib.sha256(global_content_bytes(occurrence_immutable)).hexdigest()[:32]
+occurrence = {"occurrence_id":occurrence_id,"recurrence_key":"global-alpha","source":source,"package_sha256":package_sha,"analysis_sha256":analysis_sha,"episode":global_episode}
+decision_input = {"recurrence_key":"global-alpha","occurrence_ids":[occurrence_id],"action":"route","scope":"Agreed global scope","note":""}
+decision_id = "decision-" + hashlib.sha256(global_content_bytes(decision_input)).hexdigest()[:32]
+decision = {"decision_id":decision_id,**decision_input}
+global_immutable = {"context_id":"context-" + "a"*32,"decisions":[decision],"occurrences":[occurrence],"source_hashes":{occurrence_id:{"package_sha256":package_sha,"analysis_sha256":analysis_sha}}}
+global_digest = hashlib.sha256(global_content_bytes(global_immutable)).hexdigest()[:32]
+global_batch = scratch / f"xdg-state/qq/observer/architect/batches/batch-{global_digest}"
+global_batch.mkdir(parents=True)
+global_path = global_batch / "handoff.json"
+canonical_write(global_path,{"schema":"qq-observer.handoff","schema_version":2,"handoff_id":f"handoff-{global_digest}","kind":"global_decision_batch","batch_id":global_batch.name,**global_immutable,"created_at":"2026-08-07T00:00:00.000Z"})
+reset()
+global_receipt = invoke(0, "intake-start", "--handoff", str(global_path), "--repo", main)
+assert global_receipt["handoff_id"] == f"handoff-{global_digest}"
+global_prompt = next(call[3] for call in calls() if call[:2] == ["agent","prompt"])
+assert "global confirmed batch" not in global_prompt  # prose stays natural, identity stays data
+assert f"record-handoff-result --batch {global_batch}" in global_prompt
+assert occurrence_id in global_prompt and "No originating conversation" in global_prompt
+reset()
+global_mapping = scratch / "global-mapping.json"
+global_mapping.write_text(json.dumps([{"item":decision_id,"task_ids":["T-155"]}]) + "\n")
+global_result = invoke(0, "intake-result", "--handoff", str(global_path), "--mapping", str(global_mapping), "--repo", main)
+assert global_result["mapping"] == [{"item":decision_id,"task_ids":["T-155"]}]
+# Changed source bytes and noncanonical/symlinked handoffs fail before lifecycle mutation.
+original_global_analysis = global_analysis_path.read_bytes(); global_analysis_path.write_bytes(original_global_analysis + b" ")
+reset(); invoke(2, "intake-start", "--handoff", str(global_path), "--repo", main); assert_no_mutation()
+global_analysis_path.write_bytes(original_global_analysis)
+outside_global = scratch / "outside-global-handoff.json"; outside_global.write_bytes(global_path.read_bytes())
+global_path.unlink(); global_path.symlink_to(outside_global)
+reset(); invoke(2, "intake-start", "--handoff", str(global_path), "--repo", main); assert_no_mutation()
+global_path.unlink(); global_path.write_bytes(outside_global.read_bytes())
+
+# Failed legacy rounds retain explicit local identity and use the same intake lifecycle.
+legacy_run = scratch / "xdg-state/qq/observer/runs/pr-9"
+legacy_routing = legacy_run / "routing"
+legacy_routing.mkdir(parents=True, exist_ok=True)
+legacy_package_path = legacy_run / "package.json"
+legacy_failure_path = legacy_run / "analysis_failed.json"
+canonical_write(legacy_package_path, {
+    "schema":"qq-observer.package","schema_version":1,"repo":"/legacy/source",
+    "pr":9,"variant":"guided",
+})
+canonical_write(legacy_failure_path, {
+    "schema":"qq-observer.analysis","schema_version":1,
+    "status":"analysis_failed","reason":"fixture failure",
+})
+legacy_immutable = {
+    "kind":"failed_round_recovery",
+    "round":{"run_dir":str(legacy_run.resolve()),"repo":"/legacy/source","repository":None,"legacy":True,"pr":9,"variant":"guided"},
+    "outcomes":[{"recurrence_key":"recovery","verdict":"accepted","scope":"Recover the failed run","note":""}],
+    "evidence":[{"recurrence_key":"recovery","reason":"fixture failure","artifacts":[str(legacy_package_path),str(legacy_failure_path)]}],
+    "source_hashes":{
+        "package.json":hashlib.sha256(legacy_package_path.read_bytes()).hexdigest(),
+        "analysis_failed.json":hashlib.sha256(legacy_failure_path.read_bytes()).hexdigest(),
+    },
+}
+legacy_path = legacy_routing / "handoff.json"
+legacy_id = install_handoff(legacy_path, legacy_immutable)
+reset()
+legacy_receipt = invoke(0, "intake-start", "--handoff", str(legacy_path), "--repo", main)
+assert legacy_receipt["handoff_id"] == legacy_id and legacy_receipt["transaction"]["observed_state"] == "working"
+legacy_create = next(call for call in calls() if call[:2] == ["tab","create"])
+assert legacy_create[legacy_create.index("--label") + 1] == "architect-legacy-source-9"
+
+# Verified result covers every routed key with current linked Task/plan/ledger evidence.
+reset()
+mapping = scratch / "mapping.json"
+mapping.write_text('[{"item":"alpha","task_ids":["T-155"]}]\n')
+result_receipt = invoke(0, "intake-result", "--handoff", str(handoff_path),
+                        "--mapping", str(mapping), "--repo", main)
+assert result_receipt["schema"] == "qq-handoff/intake-result-v1"
+assert result_receipt["handoff_id"] == handoff_id
+assert result_receipt["mapping"] == [{"item":"alpha","task_ids":["T-155"]}]
+assert result_receipt["tasks"][0]["checkout"] == checkout
+assert result_receipt["tasks"][0]["repository"] == "fixture/repo"
+assert result_receipt["tasks"][0]["plan_paths"] == [str(plan_path.resolve())]
+reset()
+foreign_result = invoke(2, "intake-result", "--handoff", str(handoff_path),
+                        "--mapping", str(mapping), "--repo", str(foreign_repo))
+assert "running qq engine" in foreign_result["message"]
+assert_no_mutation()
+
+for bad in ([], [{"item":"other","task_ids":["T-155"]}], [{"item":"alpha","task_ids":[]}],
+            [{"item":"alpha","task_ids":["T-0"]}]):
+    mapping.write_text(json.dumps(bad) + "\n")
+    invoke(2, "intake-result", "--handoff", str(handoff_path),
+           "--mapping", str(mapping), "--repo", main)
 
 implementation = Path(engine).parent / "lib" / "qq-handoff.py"
 spec = importlib.util.spec_from_file_location("qq_handoff_test", implementation)
