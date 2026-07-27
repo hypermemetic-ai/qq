@@ -195,10 +195,15 @@ def parse_generic_task_id(value: str) -> GenericTaskIdentity:
             "Task ID must be one letters-prefix parent or direct-child identity."
         )
     child = match.group("child")
+    try:
+        parent_number = int(match.group("parent"))
+        child_number = int(child) if child is not None else None
+    except ValueError as error:
+        raise TaskIdentityError("Task ID numeric segment is too large.") from error
     return GenericTaskIdentity(
         prefix=match.group("prefix"),
-        parent_number=int(match.group("parent")),
-        child_number=int(child) if child is not None else None,
+        parent_number=parent_number,
+        child_number=child_number,
     )
 
 

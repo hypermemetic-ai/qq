@@ -51,9 +51,10 @@ config.write_text('task_prefix: feat\n', encoding="utf-8")
 identity = module.TaskIdentityConfig.from_repository(repo)
 assert identity.parse_display("FEAT-12").token == "feat-12"
 assert identity.parse_display("FEAT-12.3").parent_number == 12
+oversized = f"FEAT-{'9' * 5000}"
 for value in ("T-12", "feat-12", "FEAT-0", "FEAT-01", "FEAT-12.0",
               "FEAT-12.03", "FEAT-12.3.4", " FEAT-12", "FEAT-12 ",
-              "FEAT-12 other", "FEAT/12", "FEAT-12/child"):
+              "FEAT-12 other", "FEAT/12", "FEAT-12/child", oversized):
     try:
         identity.parse_display(value)
     except module.TaskIdentityError:
@@ -63,7 +64,8 @@ for value in ("T-12", "feat-12", "FEAT-0", "FEAT-01", "FEAT-12.0",
 
 for value in ("T-1", "FEAT-12.3", "x-999"):
     assert module.is_generic_task_id(value)
-for value in ("", "T-0", "T-01", "T-1.0", "T-1.2.3", "T-1 T-2", "T/1"):
+for value in ("", "T-0", "T-01", "T-1.0", "T-1.2.3", "T-1 T-2", "T/1",
+              oversized):
     assert not module.is_generic_task_id(value)
 assert module.task_artifact_filename("FEAT-12.3") == "FEAT-12.3.json"
 
