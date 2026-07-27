@@ -6,7 +6,7 @@ description: Composes complete work orders and dispatches aligned bounded ticket
 # Delegate a bounded ticket batch
 
 Start after intent and plan bounds settle. The accountable session remains in
-project home and owns judgment and delivery; each writing ticket gets a
+project home, owning judgment and delivery; each writing ticket gets a
 worktree.
 
 ## Work orders
@@ -37,16 +37,16 @@ const completionEnvelopeSchema=JSON.parse(readFileSync("<absolute-worktree>/dele
 subagent({agent:"implementer",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema,acceptance:{level:"none",reason:"per the manifests"},cwd:"<absolute-worktree>",context:"fresh",async:true})
 ```
 
-Use absolute brief and worktree paths. Pi-subagents owns roles, lifecycle, and
-artifacts; the adapter owns containment. Add external knowledge when required;
+Use absolute brief/worktree paths. Pi-subagents owns roles, lifecycle, and
+artifacts; the adapter owns containment. Add knowledge when required;
 use harness-native subagents only beyond plan-bound tools or judgment.
 
-Keep id/`details.asyncDir`. Inspect at boundaries, never poll: fleet,
+Keep id/`details.asyncDir`. Inspect only at boundaries: fleet,
 `status.json`, `events.jsonl`, output, and subagent log. No start after ten
 minutes blocks with `no thread after 10m`; terminal nonzero or invalid/missing
 structured output fails. After infrastructure failure, resume with the source
-run's recorded `timeoutMs` and no contract override. Reconstruct loss from
-Tasks, artifacts, transcripts, and worktrees.
+run's recorded `timeoutMs` and no contract override. Reconstruct from Tasks,
+artifacts, transcripts, and worktrees.
 
 After the first recognized `/dev/fd` process-substitution or
 nested-confinement failure, record the Check once as
