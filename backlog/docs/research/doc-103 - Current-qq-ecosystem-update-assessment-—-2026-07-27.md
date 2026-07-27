@@ -3,7 +3,7 @@ id: doc-103
 title: Current qq ecosystem update assessment — 2026-07-27
 type: other
 created_date: '2026-07-27 03:58'
-updated_date: '2026-07-27 04:17'
+updated_date: '2026-07-27 07:20'
 tags:
   - research
   - updates
@@ -15,20 +15,22 @@ tags:
 
 **Owning Task:** T-166
 **Assessment window:** 2026-07-27T03:20–03:53Z
+**Final disposition/reconciliation window:** through 2026-07-27T07:20Z
 **Operator context:** No additional context; assess the full currently discoverable ecosystem.
 **Overall confidence:** **HIGH** for installed/source identity and the high-priority deltas; **MEDIUM** where upstream has no package-specific changelog, no immutable service version, or no safe runtime exercise.
-**Settles:** the point-in-time inventory, notification reconciliation, update/hold/test/replace/remove/no-action disposition, and safe follow-up order. It authorizes no recommendation.
+**Settles:** the point-in-time inventory and recommendations plus the sequential operator-approved final disposition ledger in Section 5. It authorizes no implementation plan or ecosystem mutation.
 
 ## Executive verdict
 
-qq should **not** run a bulk updater. Four decisions are urgent or high-value:
+qq should **not** run a bulk updater. The operator approved five separately planned Change boundaries:
 
-1. **Update Node 22.22.3 to 22.23.1** on the existing LTS line. Node 22.23.0 is an official security release covering two High, six Medium, and three Low CVEs; 22.23.1 fixes its regression. This affects qq's live Node scripts and exact Pi-build toolchain pin, so one separately approved Change must update live/toolchain identities together and re-prove reproducibility ([Node 22.23.0][node-22230], [22.23.1][node-22231]). **HIGH.**
-2. **Repair the browser stack through one isolated test, not an extension-only update.** The installed wrapper 0.2.71's read-only doctor fails: it expects `agent-browser` 0.32.2 but PATH provides 0.27.0. Current wrapper 0.2.72 targets runtime 0.33.0, whose package requires Node >=24.0.0. Browser profiles and credentials make this a runtime/privacy boundary; qualify wrapper, runtime, Node closure, profile isolation, and teardown together ([wrapper 0.2.72][browser-wrapper-0272], [runtime 0.33.0][agent-browser-033]). **HIGH.**
-3. **Hold Landstrip at 0.17.31.** Version 0.17.38 adds executable-policy discovery after explicit `-p` inputs; later scalar values replace and arrays merge. Because `qq-dispatch` runs `landstrip -p <qq-policy> <checkout>/bin/pi`, ambient `sandbox.pi.{json,yaml,yml}` files under tool, worktree, `/etc`, or HOME locations can change the effective policy outside qq's rendered policy identity. The 0.17.38 CLI exposes no opt-out. Its binary schema still has no domain list, so decision-8's reconsideration trigger is also absent ([0.17.31→0.17.38][landstrip-compare], [tagged config][landstrip-config], [tagged CLI][landstrip-cli], `bin/qq-dispatch:348-368`). **HIGH.**
-4. **Test a Pi 0.82.1 patch rebase and pi-subagents 0.37.0 qualification, separately.** Pi adds security/provider/runtime fixes and now ships generated model data in release source, which could delete qq's special `@earendil-works/pi-ai` hydration path; the qq patch touches the same provider/runtime surfaces, so direct promotion is unsafe. pi-subagents 0.37.0 may subsume part of qq's fork through preflight digests, capability ceilings, process-terminal proof, and corrected structured-output recovery, but exact fork semantics still need full promotion evidence ([Pi 0.82.0][pi-0820], [0.82.1][pi-0821], [pi-subagents 0.36.0][subagents-036], [0.37.0][subagents-037]). **HIGH.**
+1. **T-166.1 — Node/browser/runtime closure:** global Node 24.18.0, browser wrapper 0.2.72/runtime 0.33.0, direct exact Landstrip platform carrier at unchanged 0.17.31, and immutable current Actions v6 SHAs.
+2. **T-166.2 — one updated Pi:** patched Pi 0.82.1, generated-model-payload qualification, removal of dormant stock/CI/peer-family divergence, and convergence of loaded Pi runtime libraries on exact Earendil 0.82.1.
+3. **T-166.3 — pi-subagents 0.37.0:** rebase separately and delete qq/vendor overlap only where exact behavioral equivalence proves upstream ownership.
+4. **T-166.4 — bundled maintenance:** Ask 2.1.0, Context7 Pi 0.1.2, Btw 2.1.0, green-gated pi-lens 3.8.72, removal of pi-github-pr/prompt-template-model/Slopchop/the unselected npm pi-subagents copy, truthful Herdr-config docs, and upstream fzf 0.74.1 with an independent package-channel rollback.
+5. **T-166.5 — OpenWiki 0.2.3:** update despite the known #365/#457 release gap while preserving qq safeguards and the now-active T-171 local daily reviewed/guarded workflow.
 
-The smallest-resulting-system opportunities are concrete: remove dormant `pi-prompt-template-model`, retired `pi-slopchop`, and the unused npm `pi-subagents` duplicate; replace the unregistered `pi-landstrip` carrier with the direct exact platform binary at the still-qualified 0.17.31; pin the two current GitHub Actions v6 refs to their already-resolved immutable commits; and remove stale source-control claims about Herdr's intentionally operator-local config.
+The operator held Landstrip enforcement at exact 0.17.31 and Herdr at stable 0.7.5/integration v6. Components without a meaningful selected-channel delta remain no action. These are approved assessment dispositions only: every Task is unimplemented and requires a separately presented, explicitly approved plan.
 
 ## 1. Scope and reconciliation
 
@@ -39,7 +41,7 @@ Current source, fresh live observations, `CONCEPTS.md`, `AGENTS.md`, triggered S
 Current direction and retained seams are source-verified:
 
 - **smallest resulting system:** compose owner surfaces, do not rebuild a workflow platform; delete obsolete state and adapters when an owner fully subsumes them (`CONCEPTS.md`, decisions 5, 9, 14);
-- **patched Pi authority:** exact active identity `0.81.1+qq.execution-profile.1`; `bin/pi` refuses stock/global fallback; each Pi upgrade rebases the qq execution-profile patch (`README.md:58-107`, `patches/pi/v0.81.1/manifest.json`, decision-13, T-153);
+- **patched Pi authority:** exact active identity `0.81.1+qq.execution-profile.1`; `bin/pi` refuses stock/global fallback; each Pi upgrade rebases the qq execution-profile patch (`README.md:58-107`, `patches/pi/v0.81.1/manifest.json`, `backlog/decisions/decision-13 - qq-owns-the-patched-Pi-execution-profile-seam.md`, T-153);
 - **delegation:** exact fork `9e045ed75e09a163afa17271e55150ed1e8369df`, upstream parent `e2a125ee09c2e9ec61b2f6e11f9c2fa887398a39`, rollback `b7c531c238469e43866a1fe6697cb44279158c1c`; qq retains trusted roles/models, Completion Envelopes, confinement, observation, review, and delivery (decision-14, T-154);
 - **Context7:** exact unregistered `@upstash/context7-pi@0.1.1`, researcher-child-only, no key/MCP/global registration (decision-15, T-160);
 - **observation:** persisted session JSONL is the sole content seam; the old trace/span rig remains source debt pending a separate aligned retirement, not current authority (decisions 10-11, T-142, current `qq-observe`/trace source);
@@ -48,6 +50,12 @@ Current direction and retained seams are source-verified:
 Derived OpenWiki is materially stale: it still describes per-Change Herdr work sessions, yazi/broot, Claude rollback, Pi 0.80.10+ bootstrap, and Repository-owned Herdr config. Source/decisions 7 and 9, current cockpit files, and current Tasks contradict those claims. It was consulted only to identify drift; this assessment does not invoke the OpenWiki maintainer.
 
 Current README also conflicts with live/current records in three places: it still presents Kimi `k3:max` as the accountable default while safe live settings and all delegate manifests select `openai-codex/gpt-5.6-sol:xhigh`; it retains old OpenWiki source-build/PR-151 debt although live npm-global OpenWiki is 0.1.2; and it/cockpit docs call Herdr config Repository-owned even though commit `95dd46c` intentionally made the still-existing live target ignored operator-local state. These are evidence gaps or later documentation work, never permission to choose credentials or configuration.
+
+### Finalization source reconciliation
+
+The original inventory remains a timestamped observation from `main` at `6eca0ad…`. Before final publication, the branch was reconciled with current `main` at `6ef76fc…`. T-171 had meanwhile landed and activated a non-persistent local 03:00 OpenWiki maintainer with machine-verifiable receipts, independent generated-doc review, and a guarded exact-candidate qqp-bot merge. The operator explicitly directed T-166.5 to preserve and qualify that existing local workflow under OpenWiki 0.2.3. This does not authorize T-157’s GitHub-hosted generation design or any expansion of T-171. The report’s initial OpenWiki hold recommendation remains historical evidence; Section 5’s `update` disposition and T-171 preservation condition are authoritative.
+
+Current `main` also took doc-102 for T-169 after this assessment PR had reserved that ID. The assessment procedure record was therefore renumbered to collision-free doc-109; doc-103 remains unchanged.
 
 ### Live observations and commands
 
@@ -73,7 +81,7 @@ Node, Bun, Ghostty, Glow, and fzf are not excluded because qq names them in a ma
 
 ### Evidence disagreements and gaps
 
-The fresh researcher returned useful primary release evidence but also conflicted with direct live evidence on several package names/versions, the selected fork hash, Glow, and Pi peer state. This report preserves the conflict and resolves it in favor of fresh `pi list`, installed manifests/locks, `qq-pi-runtime verify`, current source, and independent official `npm view`/release spot-checks. Consequently, installed identity is **HIGH**; package-specific behavior without a changelog or runtime trial is **MEDIUM**. No provider call, package promotion, browser launch, UI interaction, fetched-code execution, credential inspection, or live configuration write occurred. All compatibility dispositions remain proposed tests.
+The fresh researcher returned useful primary release evidence but also conflicted with direct live evidence on several package names/versions, the selected fork hash, Glow, and Pi peer state. This report preserves the conflict and resolves it in favor of fresh `pi list`, installed manifests/locks, `qq-pi-runtime verify`, current source, and independent official `npm view`/release spot-checks. Consequently, installed identity is **HIGH**; package-specific behavior without a changelog or runtime trial is **MEDIUM**. No provider call, package promotion, browser launch, UI interaction, fetched-code execution, credential inspection, or live configuration write occurred. The operator’s Section 5 dispositions are decisions, not behavior evidence; every compatibility and promotion claim remains subject to the listed future Checks.
 
 ## 2. Complete component matrix
 
@@ -81,7 +89,7 @@ The fresh researcher returned useful primary release evidence but also conflicte
 
 | # | Identity / category | Observed installed state/source | qq pin/constraint and owner | Selected channel | Current channel | Latest relevant state/channel | Delta and primary evidence | Gap / confidence | Recommendation |
 |---:|---|---|---|---|---|---|---|---|---|
-| 1 | Pi core / accountable runtime | Patched immutable generation `0.81.1+qq.execution-profile.1`; dormant global stock 0.81.1; CI stock test 0.80.10 | Manifest/source/patch hashes owned by `patches/pi/v0.81.1`, `qq-pi-runtime`, decision-13 | upstream stable + qq exact patch | 0.82.1 upstream; qq selected remains 0.81.1 | 0.82.1 stable | Security/provider/retry changes; 0.82 source includes generated model data, potentially deleting special hydration ([0.82.0][pi-0820], [0.82.1][pi-0821]) | Patch rebase and package composition untested; **HIGH** fact, **MEDIUM** compatibility | `test` |
+| 1 | Pi core / accountable runtime | Patched immutable generation `0.81.1+qq.execution-profile.1`; dormant global stock 0.81.1; CI stock test 0.80.10 | Manifest/source/patch hashes owned by `patches/pi/v0.81.1`, `qq-pi-runtime`, and `backlog/decisions/decision-13 - qq-owns-the-patched-Pi-execution-profile-seam.md` | upstream stable + qq exact patch | 0.82.1 upstream; qq selected remains 0.81.1 | 0.82.1 stable | Security/provider/retry changes; 0.82 source includes generated model data, potentially deleting special hydration ([0.82.0][pi-0820], [0.82.1][pi-0821]) | Patch rebase and package composition untested; **HIGH** fact, **MEDIUM** compatibility | `test` |
 | 2 | `pi-intercom` / Pi package | `npm:pi-intercom`, 0.6.0 | Unpinned npm source in Pi settings; agent-messaging owner | npm stable | 0.6.0 | 0.6.0 stable | No release delta; manifest still names old `@mariozechner/*` wildcard peers ([registry][npm-intercom]) | Loaded, but no fresh message exchange; weak repository metadata; **MEDIUM** | `no action` |
 | 3 | `@tmustier/pi-files-widget` / Pi package | 0.2.0 | Unpinned npm; named sole in-Pi browsing owner after decision-7 | npm stable | 0.2.0 | 0.2.0 stable | None ([registry][npm-files]) | No interactive smoke this cycle; **HIGH** identity | `no action` |
 | 4 | `@ff-labs/pi-fff` / Pi package | 0.10.1 | Unpinned npm; additive search owner | npm stable | 0.10.1 | 0.10.2 nightly, not selected | Stable current; nightly is not an appropriate automatic target ([registry][npm-fff]) | No runtime smoke; **HIGH** | `no action` |
@@ -116,7 +124,9 @@ The fresh researcher returned useful primary release evidence but also conflicte
 | 33 | OpenAI Codex route / model service | Safe live defaults and all delegates: `openai-codex/gpt-5.6-sol:xhigh`, standard/default tier | manifests + decision-16; credentials operator-owned and uninspected | rolling provider service | model ID available through current Pi | no immutable dated snapshot/lifecycle | No decision-relevant newer target established; priority remains explicitly retired ([official model page][openai-sol]) | Service release/support window inaccessible; **MEDIUM** | `no action` |
 | 34 | Herdr config ownership / qq tenancy adapter | Live symlink target exists as ignored operator-local file; Herdr works | commit `95dd46c` says Repository no longer ships it; README/cockpit docs conflict | n/a, follows Herdr 0.7.5 | n/a | n/a | Documentation/source-ownership drift only; do not restore/remove operator config without alignment | Exact intended bootstrap wording open; **HIGH** fact | `update` |
 
-## 3. Candidate findings
+## 3. Initial candidate findings
+
+These findings preserve the evidence-backed recommendations before operator disposition. Where they conflict, the operator-approved Section 5 ledger supersedes them; no historical evidence is rewritten.
 
 ### A. Node 22.23.1 — `update` (P0 security)
 
@@ -132,7 +142,7 @@ The fresh researcher returned useful primary release evidence but also conflicte
 
 **Inference — HIGH.** An extension-only update preserves incoherence. Browser is the correct owner for rendered/stateful interaction; `rpiv-web-tools` remains the separate text search/fetch owner. Neither replaces the other. The smallest system is one wrapper, one matching runtime, one documented Node closure, and no shadow binary.
 
-**Compatibility, privacy, migration.** Profiles contain cookies/credentials and runtime downloads add supply-chain exposure. Test only with a fresh credential-free profile and public/local fixture. Require both doctors green, navigate/snapshot/click/a11y/HAR/domain-policy/teardown/process-leak checks, Pi tool registration, and explicit artifact verification. Test Node 22 and an isolated Node 24 runtime; select Node 24 only if the package requirement is enforced. Roll back the complete tested pair, not today's broken pair. Residual risk: no current browser launch was authorized, so host Chromium/library compatibility is unknown.
+**Compatibility, privacy, migration.** Profiles contain cookies/credentials and runtime downloads add supply-chain exposure. Test only with a fresh credential-free profile and public/local fixture. Require both doctors green, navigate/snapshot/click/a11y/HAR/domain-policy/teardown/process-leak checks, Pi tool registration, and explicit artifact verification. Test Node 22 and an isolated Node 24 runtime; select Node 24 only if the package requirement is enforced. The browser-only rollback is exact wrapper 0.2.71/runtime 0.32.2 on Node 24 after a green doctor; today's broken 0.2.71/0.27.0 pair is not a functional rollback. A full Node rollback to 22.22.3 disables/unregisters the browser wrapper until a coherent supported pair is restored. Residual risk: no current browser launch was authorized, so host Chromium/library compatibility is unknown.
 
 ### C. Pi 0.82.1 patched-runtime rebase — `test` (P1 core)
 
@@ -210,7 +220,9 @@ The fresh researcher returned useful primary release evidence but also conflicte
 
 **Inference — HIGH.** The smallest correction is documentation/ownership truth: say this config is operator-local ignored state and preserve current live file/link. Restoring a tracked operator preference or deleting live config would cross the Repository/operator boundary and needs a separate decision. Check rendered docs and bootstrap-path consistency; rollback is prose-only. Residual risk: intended portability of this preference remains open.
 
-## 4. Prioritized follow-ups
+## 4. Initial prioritized follow-ups
+
+This queue records the pre-disposition recommendation order. Section 5 replaces it with the approved bundled boundaries.
 
 | Priority | Decision or experiment | Value / urgency / dependency | Blocking evidence and safe exit |
 |---:|---|---|---|
@@ -230,11 +242,49 @@ The fresh researcher returned useful primary release evidence but also conflicte
 | Blocked | **Herdr integration v7** | Relevant to focus/lifecycle only after stable publication | Immutable release, protocol/client/server/Pi integration/no-focus/status test and exact rollback |
 | Hold | **Btw 2.1, fzf upstream, Actions v7, Node 24 global, model replacement** | No current solved problem; novelty alone is not value | New observed failure or operator intent required |
 
+## 5. Operator-approved final disposition ledger
+
+The operator reviewed one complete candidate card at a time. Clarification requests and custom replies were not treated as dispositions. On 2026-07-27 the operator explicitly approved the complete ledger below as the final T-166 assessment record. After current-source reconciliation exposed T-171’s newly active local OpenWiki workflow, the operator explicitly amended the OpenWiki boundary to **preserve and qualify** T-171. Ledger approval authorizes final assessment evidence publication only; it approves no implementation plan, package/runtime mutation, acceptance, or merge.
+
+| Candidate | Approved disposition | Bounded result / condition |
+|---|---|---|
+| Global Node | `update` to exact 24.18.0 LTS | T-166.1; live runtime and exact Pi build manifest move together. This supersedes the initial 22.23.1 recommendation. |
+| Browser wrapper/runtime | `update` and bundle 0.2.72 + 0.33.0 | T-166.1; fresh credential-free profile, both doctors, navigation/a11y/HAR/domain/teardown qualification; verify exact 0.2.71/0.32.2 on Node 24 as coherent browser rollback, while full Node rollback disables the browser rather than restoring today’s broken pair. |
+| Landstrip carrier | `replace` `pi-landstrip:^0.17.31` with direct exact platform 0.17.31 | T-166.1; no Landstrip version movement; exact binary/policy equivalence and complete prune inspection. |
+| GitHub Actions v6 refs | `replace` with exact current official SHAs | T-166.1; checkout `d23441a48e516b6c34aea4fa41551a30e30af803`, setup-node `249970729cb0ef3589644e2896645e5dc5ba9c38`, readable comments, official lineage and GitHub execution proof. |
+| Patched Pi | `update` separately to exact 0.82.1 | T-166.2; retain qq’s fail-closed execution-profile authority unless exact equivalence proves an intentionally aligned upstream replacement. |
+| Pi-family copies | converge to one selected Pi version | T-166.2; active host, CI Pi, and loaded runtime libraries converge on Earendil 0.82.1; remove dormant stock and old 0.73.1/0.80.10/0.82.0 families. Update/migrate or remove incompatible extensions; stop if pi-intercom needs an unapproved fork or substantive redesign. |
+| Generated Pi model payload | `test` with Pi update | T-166.2; delete separate hydration only after archive/build equivalence and reproducibility proof. |
+| pi-subagents selected fork | `update` separately to 0.37.0 | T-166.3; retire qq/vendor overlap only where black-box equivalence proves upstream ownership; qq retains role/profile/Landstrip/trust-seat/delivery authority otherwise. |
+| Landstrip enforcement binary | `hold` exact 0.17.31 | No version-movement Task. Reconsider normally in future assessments; not gated on a named feature. |
+| Ask UI | `update` exact 2.1.0 | T-166.4; Ghostty/Kitty, notes/custom-answer/blocked-event, long-session, and operator UAT gates. |
+| Context7 Pi | `update` exact 0.1.2 | T-166.4; exact integrity and researcher-child-only scope. |
+| Btw | `update` exact 2.1.0 | T-166.4 despite documentation/tarball-only delta; preserve independent rollback. |
+| pi-lens | `test`; update exact 3.8.72 only if green | T-166.4; isolated mutation/state/LSP/analyzer/full-suite gate. Failure retains 3.8.71 without blocking smaller maintenance. |
+| pi-github-pr | `remove` | T-166.4; authoritative `gh` delivery and `qq_pr_watch` remain. |
+| pi-prompt-template-model | `remove` after final consumer scan | T-166.4; native prompts and pi-subagents remain. |
+| residual pi-slopchop | `remove` | T-166.4; complete the prior retirement without rewriting historical evidence. |
+| unselected npm pi-subagents 0.35.1 | `remove` | T-166.4; retain the governed Git fork until T-166.3 updates it. |
+| Herdr config ownership docs | `update` in bundle | T-166.4; correct ignored operator-local ownership without reading or changing the live file. |
+| fzf | `update` upstream to exact 0.74.1 | T-166.4; direct official `.deb`, retained `qqcd <pattern>`, separate Ubuntu downgrade/re-promotion and package-channel ownership. |
+| OpenWiki | `update` separately to exact 0.2.3 | T-166.5; explicitly accepted despite missing #365/#457. Disable telemetry; preserve credentials/root restoration/local safeguards and T-171’s active schedule/review/receipt/guard/rollback behavior; do not expand T-171 or adopt T-157 remote generation. |
+| Herdr client/server + Pi integration | `hold` stable 0.7.5/v6 | Wait for an immutable stable release; do not adopt moving master/integration v7. |
+
+The following inventoried components have no meaningful selected-channel candidate and remain `no action`: Files Widget 0.2.0, FFF 0.10.1 stable (nightly excluded), Todo 2.1.0, Web Tools 2.1.0, Backlog.md 1.48.0, Bun 1.3.14, Ghostty 1.3.1 stable, Glow 2.1.2, and the current Codex route. pi-intercom 0.6.0 has no newer release, but its legacy Pi runtime namespace is explicitly handled by T-166.2’s one-version outcome.
+
+### Residual evidence gaps
+
+- No recommendation has been implemented or qualified.
+- OpenWiki 0.2.3 knowingly lacks the two previously accepted upstream completeness guards; T-171 preservation must be proven against that release.
+- Strict one-Pi-version convergence may require a larger pi-intercom migration and must stop for realignment if it requires an unapproved fork or redesign.
+- Browser host/profile/artifact behavior, pi-lens promotion, npm prune/reachability, Ask terminal UAT, and direct-upstream fzf channel ownership remain untested.
+- Herdr has no immutable forward candidate.
+
 ## Sources
 
 ### qq and live primary evidence
 
-- Current source: `CONCEPTS.md`, `AGENTS.md`, `README.md`, `.github/workflows/ci.yml`, `patches/pi/v0.81.1/manifest.json`, `delegation/**`, `bin/qq-pi-runtime`, `bin/qq-dispatch`, `bin/qq-openwiki`, `cockpit/**`, decisions 7–16, Tasks T-118/T-142/T-152–T-164.
+- Initial source: `CONCEPTS.md`, `AGENTS.md`, `README.md`, `.github/workflows/ci.yml`, `patches/pi/v0.81.1/manifest.json`, `delegation/**`, `bin/qq-pi-runtime`, `bin/qq-dispatch`, `bin/qq-openwiki`, `cockpit/**`, the exact named decision files cited above, and Tasks T-118/T-142/T-152–T-164. Finalization also inspected landed T-171, `backlog/docs/plans/doc-108 - T-171-daily-local-OpenWiki-refresh-and-guarded-auto-merge-plan.md`, `bin/qq-openwiki-{daily,daily-finish,merge,schedule}`, and its systemd/test surfaces.
 - Fresh command evidence was captured under `/tmp/qq-update-2026-07-27-*.txt` during this cycle; its durable conclusions are restated above rather than treating temp files as future system truth.
 
 ### Primary upstream links
