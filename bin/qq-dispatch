@@ -234,8 +234,8 @@ const frontmatterEnd = lines.indexOf("---", 1);
 if (lines[0] !== "---" || frontmatterEnd < 0)
   refuse(`trusted manifest for ${role} has malformed YAML frontmatter`);
 const declarations = lines.slice(1, frontmatterEnd)
-  .filter((line) => /^timeoutMs:/.test(line));
-if (declarations.length !== 1)
+  .filter((line) => /^\s*timeoutMs\s*:/.test(line));
+if (declarations.length !== 1 || !/^timeoutMs:/.test(declarations[0]))
   refuse(`trusted manifest for ${role} must contain exactly one timeoutMs declaration`);
 const match = /^timeoutMs:\s*([1-9][0-9]*)\s*$/.exec(declarations[0]);
 if (!match) refuse(`trusted manifest for ${role} timeoutMs must be a positive integer`);

@@ -1,9 +1,9 @@
 ---
-id: doc-110
+id: doc-116
 title: Plan — Restore canonical delegate timeout policy precedence
 type: specification
-created_date: '2026-07-27 07:45'
-updated_date: '2026-07-27 08:20'
+created_date: '2026-07-27 09:26'
+updated_date: '2026-07-27 09:26'
 ---
 # T-134.1 — Restore canonical delegate timeout policy precedence
 
