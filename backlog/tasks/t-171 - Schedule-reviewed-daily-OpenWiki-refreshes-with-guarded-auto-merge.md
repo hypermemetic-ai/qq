@@ -1,10 +1,10 @@
 ---
 id: T-171
 title: Schedule reviewed daily OpenWiki refreshes with guarded auto-merge
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-27 05:20'
-updated_date: '2026-07-27 06:44'
+updated_date: '2026-07-27 06:56'
 labels: []
 dependencies: []
 documentation:
@@ -32,12 +32,12 @@ Decision ledger:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 An enabled non-persistent systemd user timer starts no more than one OpenWiki maintainer assessment at 03:00 in the machine’s configured local timezone against freshly fetched origin/main; a powered-off machine skips that run without catch-up
-- [ ] #2 A semantic no-change completes successfully without opening a pull request; generated documentation changes pass applicable deterministic Checks and independent fresh-context review of the exact candidate
-- [ ] #3 Using the existing qqp-bot identity, only the exact expected, green, generated-documentation-only pull request can merge automatically; wrong identity, branch, known-stale base, head, paths, missing review attestation, or failing/pending Checks refuse merge, while a rare final-interval base race is detected and repaired by the next daily assessment
-- [ ] #4 Routine success requires no operator merge action; attempted-run failures exit nonzero and remain inspectable through the systemd user service journal, with no automatic retry before the next daily schedule
-- [ ] #5 OpenWiki and GitHub credentials remain outside the Repository; the merge guard is documented as a drift-net rather than a security boundary, and source Changes still neither trigger nor perform OpenWiki maintenance
-- [ ] #6 Fresh Checks demonstrate timer semantics, single-writer behavior, semantic no-change, reviewed auto-merge, each refusal class, final-race detection, failure visibility, and no catch-up; the maintainer Skill and operator-owned guidance match the landed behavior without hand-editing generated openwiki/ pages
+- [x] #1 An enabled non-persistent systemd user timer starts no more than one OpenWiki maintainer assessment at 03:00 in the machine’s configured local timezone against freshly fetched origin/main; a powered-off machine skips that run without catch-up
+- [x] #2 A semantic no-change completes successfully without opening a pull request; generated documentation changes pass applicable deterministic Checks and independent fresh-context review of the exact candidate
+- [x] #3 Using the existing qqp-bot identity, only the exact expected, green, generated-documentation-only pull request can merge automatically; wrong identity, branch, known-stale base, head, paths, missing review attestation, or failing/pending Checks refuse merge, while a rare final-interval base race is detected and repaired by the next daily assessment
+- [x] #4 Routine success requires no operator merge action; attempted-run failures exit nonzero and remain inspectable through the systemd user service journal, with no automatic retry before the next daily schedule
+- [x] #5 OpenWiki and GitHub credentials remain outside the Repository; the merge guard is documented as a drift-net rather than a security boundary, and source Changes still neither trigger nor perform OpenWiki maintenance
+- [x] #6 Fresh Checks demonstrate timer semantics, single-writer behavior, semantic no-change, reviewed auto-merge, each refusal class, final-race detection, failure visibility, and no catch-up; the maintainer Skill and operator-owned guidance match the landed behavior without hand-editing generated openwiki/ pages
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -52,4 +52,21 @@ Fresh owner Checks: npm ci; focused daily/merge tests; bash syntax and shellchec
 Activation is deliberately post-merge because the linked user units and fixed ExecStart must resolve from the landed primary main checkout. T-171 remains In Progress until qqp-bot is added to the existing main restriction, the long-lived openwiki/update worktree exists, the timer is linked/enabled from main, and inspect proves the next 03:00 activation.
 
 Mechanical same-fix-smaller pass: the delegated pass identified a behavior-preserving one-line reduction in `qq-openwiki-schedule` but correctly rejected it when the child substrate could not run the ratchet. The owner reran the exact candidate natively; focused tests, syntax, shellcheck, ratchet, and diff checks passed, production scripts/units shrank 490→489 physical lines with no decision-proxy increase, so the strict smaller candidate was adopted.
+
+2026-07-27 post-merge activation: PR #259 merged as ecd5d0d29cc0d4f197e6ba047f4a6c86f4f8d5b6 and `qq-change land` fast-forwarded primary main. The existing `qqp-bot` credential was verified without switching global auth, then the bot was added to the existing main push restriction (current allowed users: hypermemetic, qqp-bot, qqp-dev, sshmendez). A clean long-lived `openwiki/update` worktree was created at `/home/qqp/.local/share/qq/worktrees/qq/openwiki-update` exactly at fresh `origin/main`.
+
+`bin/qq-openwiki-schedule install` linked both repository-owned units from landed primary main, reloaded the user manager, and enabled the timer without starting generation. Fresh inspection proves service ExecStart `/home/qqp/projects/qq/bin/qq-openwiki-daily`, expanded Repository/Linuxbrew PATH, inactive service with no prior invocation, active/enabled timer, no previous trigger, and next elapse Monday 2026-07-27 03:00:00 CDT. All three unit symlinks resolve to landed Repository files and `systemd-analyze calendar` agrees.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Delivered and activated the local daily OpenWiki freshness baseline.
+
+- PR #259 landed the 03:00 machine-local non-persistent systemd timer, bounded scheduled maintainer, private machine-readable success receipts, semantic no-change finisher, guarded qqp-bot merge path, methodology guidance, and refusal-focused tests.
+- The exact candidate must be reviewed, one commit on fresh main, generated Markdown/metadata only, regular and non-executable, CI-green, thread-clean, mergeable, and unchanged through the final recheck. Known drift refuses; a rare final GitHub race is detected for repair at the next 03:00 assessment.
+- Fresh review blockers for silent internal failure and missing scheduled PATH were fixed; receipt publication ordering received a second regression fix and final PASS. The full shell suite, focused tests, shellcheck, systemd verification, ratchet, Backlog parse, diff checks, and CI passed.
+- Post-merge activation added qqp-bot to the existing main restriction, established the clean long-lived openwiki/update worktree, linked the units from primary main, and verified the timer active/enabled for 03:00 CDT with no immediate run or catch-up.
+
+Task Done records the agreed implementation and activation complete. The first production assessment remains intentionally scheduled rather than manually triggered.
+<!-- SECTION:FINAL_SUMMARY:END -->
