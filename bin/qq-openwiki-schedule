@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Link, inspect, or disable qq's repository-owned OpenWiki user timer.
+set -euo pipefail
+
+die() {
+  printf 'qq-openwiki-schedule: %s\n' "$*" >&2
+  exit 1
+}
+
+[ "$#" -eq 1 ] || die 'usage: qq-openwiki-schedule {install|inspect|disable}'
+case "$1" in install | inspect | disable) ;; *) die 'usage: qq-openwiki-schedule {install|inspect|disable}' ;; esac
+
+self="$(readlink -f -- "${BASH_SOURCE[0]}")"
+root="$(cd -- "$(dirname -- "$self")/.." && pwd -P)"
+# shellcheck source=bin/lib/qq-bin.sh
+# shellcheck disable=SC1091
+source "$root/bin/lib/qq-bin.sh"
+qq_resolve_bin systemctl || die "$QQ_BIN_ERROR"
+systemctl_bin="$QQ_BIN_RESULT"
+service="$root/cockpit/systemd/user/qq-openwiki-daily.service"
+timer="$root/cockpit/systemd/user/qq-openwiki-daily.timer"
+if [ ! -f "$service" ] || [ -L "$service" ] || [ ! -f "$timer" ] || [ -L "$timer" ]; then
+  die 'repository-owned OpenWiki unit files are unavailable'
+fi
+
+case "$1" in
+  install)
+    "$systemctl_bin" --user link "$service" "$timer"
+    "$systemctl_bin" --user daemon-reload
+    "$systemctl_bin" --user enable --now qq-openwiki-daily.timer
+    ;;
+  inspect)
+    "$systemctl_bin" --user show qq-openwiki-daily.timer \
+      --property=LoadState,UnitFileState,ActiveState,NextElapseUSecRealtime,LastTriggerUSec
+    "$systemctl_bin" --user show qq-openwiki-daily.service \
+      --property=LoadState,ActiveState,Result,ExecMainStatus
+    ;;
+  disable)
+    "$systemctl_bin" --user disable --now \
+      qq-openwiki-daily.timer qq-openwiki-daily.service
+    "$systemctl_bin" --user daemon-reload
+    ;;
+esac

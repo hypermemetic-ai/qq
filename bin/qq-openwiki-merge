@@ -1,0 +1,254 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2016
+# Merge one exact reviewed OpenWiki candidate through the qqp-bot drift-net.
+set -euo pipefail
+umask 077
+
+die() {
+  printf 'qq-openwiki-merge: %s\n' "$*" >&2
+  exit 1
+}
+
+[ "${QQ_OPENWIKI_SCHEDULED:-}" = 1 ] \
+  || die 'refusing outside the scheduled OpenWiki service environment'
+
+pr_input="${1:-}"
+[ -n "$pr_input" ] || die 'usage: qq-openwiki-merge <pull-request-number-or-url> --reviewed-head <40-hex-object-id>'
+shift
+if [ "${1:-}" != --reviewed-head ] || [ "$#" -ne 2 ]; then
+  die 'usage: qq-openwiki-merge <pull-request-number-or-url> --reviewed-head <40-hex-object-id>'
+fi
+reviewed_head="$2"
+[[ "$reviewed_head" =~ ^[0-9a-f]{40}$ ]] \
+  || die 'reviewed head must be an exact lowercase 40-hex object id'
+case "$pr_input" in
+  *[!0-9]* )
+    if [[ "$pr_input" =~ ^https://github\.com/hypermemetic-ai/qq/pull/([1-9][0-9]*)$ ]]; then
+      pr_number="${BASH_REMATCH[1]}"
+    else
+      die 'pull request must be a positive number or exact hypermemetic-ai/qq URL'
+    fi
+    ;;
+  0 | 0* | '') die 'pull request number must be a positive canonical integer' ;;
+  *) pr_number="$pr_input" ;;
+esac
+
+completion_receipt="${QQ_OPENWIKI_COMPLETION_RECEIPT:-}"
+[ -n "$completion_receipt" ] || die 'scheduled completion receipt is unavailable'
+[ "$(basename -- "$completion_receipt")" = completion ] \
+  || die 'scheduled completion receipt has an invalid name'
+run_dir="$(dirname -- "$completion_receipt")"
+lock_root="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/qq-openwiki-daily"
+canonical_lock="$(readlink -m -- "$lock_root")"
+canonical_run="$(readlink -m -- "$run_dir")"
+case "$canonical_run" in
+  "$canonical_lock"/run.*) ;;
+  *) die 'scheduled completion receipt escapes private run state' ;;
+esac
+if [ ! -d "$canonical_run" ] || [ -L "$canonical_run" ]; then
+  die 'private scheduled-run state is unavailable'
+fi
+if [ -e "$completion_receipt" ] || [ -L "$completion_receipt" ]; then
+  die 'scheduled completion receipt already exists'
+fi
+
+write_completion_receipt() {
+  local candidate="$1" merge="$2" temporary
+  temporary="$canonical_run/completion.tmp.$$"
+  printf 'merged:%s:%s\n' "$candidate" "$merge" >"$temporary"
+  chmod 0600 "$temporary"
+  mv -- "$temporary" "$completion_receipt"
+}
+
+self="$(readlink -f -- "${BASH_SOURCE[0]}")"
+root="$(cd -- "$(dirname -- "$self")/.." && pwd -P)"
+# shellcheck source=bin/lib/qq-bin.sh
+# shellcheck disable=SC1091,SC2016
+source "$root/bin/lib/qq-bin.sh"
+qq_resolve_bin git || die "$QQ_BIN_ERROR"
+git_bin="$QQ_BIN_RESULT"
+qq_resolve_bin gh || die "$QQ_BIN_ERROR"
+gh_bin="$QQ_BIN_RESULT"
+qq_resolve_bin jq || die "$QQ_BIN_ERROR"
+jq_bin="$QQ_BIN_RESULT"
+
+repo_root="$($git_bin rev-parse --show-toplevel 2>/dev/null)" \
+  || die 'not inside a Git worktree'
+repo_root="$(cd "$repo_root" && pwd -P)" || die 'cannot canonicalize the Repository root'
+remote="$($git_bin -C "$repo_root" remote get-url origin 2>/dev/null)" \
+  || die 'origin remote is unavailable'
+case "$remote" in
+  https://github.com/hypermemetic-ai/qq | https://github.com/hypermemetic-ai/qq.git | \
+  git@github.com:hypermemetic-ai/qq | git@github.com:hypermemetic-ai/qq.git | \
+  ssh://git@github.com/hypermemetic-ai/qq | ssh://git@github.com:hypermemetic-ai/qq.git) ;;
+  *) die 'origin does not resolve to hypermemetic-ai/qq' ;;
+esac
+
+graphql_query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){nameWithOwner pullRequest(number:$number){number state isDraft isCrossRepository baseRefName baseRefOid headRefName headRefOid headRepository{nameWithOwner} mergeable mergeStateStatus files(first:100){totalCount pageInfo{hasNextPage} nodes{path}} reviewThreads(first:100){totalCount pageInfo{hasNextPage} nodes{isResolved}} commits(first:2){totalCount pageInfo{hasNextPage} nodes{commit{oid statusCheckRollup{state contexts(first:100){totalCount pageInfo{hasNextPage} nodes{__typename ... on CheckRun{name status conclusion} ... on StatusContext{context state}}}}}}}}}}}'
+
+fetch_candidate() {
+  "$git_bin" -C "$repo_root" fetch --no-tags origin \
+    +refs/heads/main:refs/remotes/origin/main \
+    +refs/heads/openwiki/update:refs/remotes/origin/openwiki/update \
+    >/dev/null 2>&1 || die 'failed to freshly fetch main and openwiki/update'
+}
+
+inspect_github() {
+  local credential="${1:-}" response
+  if [ -n "$credential" ]; then
+    response="$(GH_TOKEN="$credential" "$gh_bin" api graphql \
+      -f owner=hypermemetic-ai -f name=qq -F number="$pr_number" \
+      -f query="$graphql_query" 2>/dev/null)" \
+      || die 'GitHub pull-request inspection failed'
+  else
+    response="$("$gh_bin" api graphql \
+      -f owner=hypermemetic-ai -f name=qq -F number="$pr_number" \
+      -f query="$graphql_query" 2>/dev/null)" \
+      || die 'GitHub pull-request inspection failed'
+  fi
+  "$jq_bin" -e . >/dev/null 2>&1 <<<"$response" \
+    || die 'GitHub returned malformed pull-request evidence'
+  printf '%s\n' "$response"
+}
+
+validate_candidate() {
+  local evidence="$1" base remote_head parents parent extra status path entry mode type listed
+  local paths_file diff_file api_paths local_paths
+
+  "$jq_bin" -e --arg head "$reviewed_head" --argjson number "$pr_number" '
+    .data.repository as $r
+    | $r.nameWithOwner == "hypermemetic-ai/qq"
+      and ($r.pullRequest | type == "object")
+      and ($r.pullRequest.number == $number)
+      and ($r.pullRequest.state == "OPEN")
+      and ($r.pullRequest.isDraft == false)
+      and ($r.pullRequest.isCrossRepository == false)
+      and ($r.pullRequest.baseRefName == "main")
+      and ($r.pullRequest.headRefName == "openwiki/update")
+      and ($r.pullRequest.headRepository.nameWithOwner == "hypermemetic-ai/qq")
+      and ($r.pullRequest.headRefOid == $head)
+      and ($r.pullRequest.mergeable == "MERGEABLE")
+      and ($r.pullRequest.mergeStateStatus == "CLEAN")
+      and ($r.pullRequest.commits.totalCount == 1)
+      and ($r.pullRequest.commits.pageInfo.hasNextPage == false)
+      and (($r.pullRequest.commits.nodes | length) == 1)
+      and ($r.pullRequest.commits.nodes[0].commit.oid == $head)
+      and ($r.pullRequest.files.totalCount > 0)
+      and ($r.pullRequest.files.pageInfo.hasNextPage == false)
+      and (($r.pullRequest.files.nodes | length) == $r.pullRequest.files.totalCount)
+      and ([$r.pullRequest.files.nodes[].path
+        | select(
+            type != "string"
+            or (
+              (. != "openwiki/.last-update.json")
+              and (test("^openwiki/([A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+\\.md$") | not)
+            )
+            or test("(^|/)\\.{1,2}(/|$)")
+          )] | length == 0)
+      and ([$r.pullRequest.files.nodes[].path | select(. == "openwiki/INSTRUCTIONS.md")] | length == 0)
+      and ($r.pullRequest.reviewThreads.pageInfo.hasNextPage == false)
+      and ([$r.pullRequest.reviewThreads.nodes[] | select(.isResolved != true)] | length == 0)
+      and ($r.pullRequest.commits.nodes[0].commit.statusCheckRollup.state == "SUCCESS")
+      and ($r.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.pageInfo.hasNextPage == false)
+      and ($r.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.totalCount > 0)
+      and (($r.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes | length)
+        == $r.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.totalCount)
+      and ([$r.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]
+        | select(
+            (.__typename == "CheckRun" and (.status != "COMPLETED" or .conclusion != "SUCCESS"))
+            or (.__typename == "StatusContext" and .state != "SUCCESS")
+            or (.__typename != "CheckRun" and .__typename != "StatusContext")
+          )] | length == 0)
+      and ([$r.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]
+        | select(.__typename == "CheckRun" and .name == "shell-tests")] | length == 1)
+  ' >/dev/null 2>&1 <<<"$evidence" \
+    || die 'pull request metadata, review threads, or exact-head Checks did not pass the merge policy'
+
+  base="$($git_bin -C "$repo_root" rev-parse --verify origin/main 2>/dev/null)" \
+    || die 'fresh origin/main is unavailable'
+  remote_head="$($git_bin -C "$repo_root" rev-parse --verify origin/openwiki/update 2>/dev/null)" \
+    || die 'fresh origin/openwiki/update is unavailable'
+  [ "$remote_head" = "$reviewed_head" ] || die 'remote candidate no longer equals the reviewed head'
+  [ "$("$jq_bin" -r '.data.repository.pullRequest.baseRefOid' <<<"$evidence")" = "$base" ] \
+    || die 'pull request base is not fresh origin/main'
+  "$git_bin" -C "$repo_root" cat-file -e "$reviewed_head^{commit}" 2>/dev/null \
+    || die 'reviewed head is not an available commit'
+  parents="$("$git_bin" -C "$repo_root" rev-list --parents -n 1 "$reviewed_head")" \
+    || die 'could not inspect candidate parents'
+  read -r listed parent extra <<<"$parents"
+  if [ "$listed" != "$reviewed_head" ] || [ "$parent" != "$base" ] || [ -n "${extra:-}" ]; then
+    die 'candidate must be one commit whose sole parent is fresh origin/main'
+  fi
+
+  paths_file="$(mktemp "${TMPDIR:-/tmp}/qq-openwiki-paths.XXXXXX")" \
+    || die 'cannot allocate path inspection state'
+  diff_file="$(mktemp "${TMPDIR:-/tmp}/qq-openwiki-diff.XXXXXX")" \
+    || die 'cannot allocate diff inspection state'
+  "$git_bin" -C "$repo_root" diff-tree --no-commit-id --name-status -r -z \
+    "$base" "$reviewed_head" >"$diff_file" \
+    || die 'could not inspect candidate path changes'
+  while IFS= read -r -d '' status && IFS= read -r -d '' path; do
+    case "$status" in A | M | D) ;; *) die "unsupported generated path change type: $status" ;; esac
+    case "$path" in
+      openwiki/INSTRUCTIONS.md) die 'refusing generated instruction mutation' ;;
+      openwiki/.last-update.json) ;;
+      openwiki/*.md) ;;
+      openwiki/*) die "changed path is not generated OpenWiki Markdown or metadata: $path" ;;
+      *) die "changed path is outside generated openwiki/: $path" ;;
+    esac
+    [[ "$path" =~ ^openwiki/([A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+\.(md|json)$ ]] \
+      || die 'changed path contains unsupported or ambiguous characters'
+    [[ "$path" != */../* && "$path" != */./* ]] \
+      || die 'changed path contains an ambiguous component'
+    printf '%s\n' "$path" >>"$paths_file"
+    if [ "$status" != D ]; then
+      entry="$($git_bin -C "$repo_root" ls-tree "$reviewed_head" -- "$path")"
+      read -r mode type _ listed <<<"$entry"
+      if [ "$type" != blob ] || [ "$mode" != 100644 ]; then
+        die "changed entry is not a non-executable regular file: $path"
+      fi
+    fi
+  done <"$diff_file"
+  [ -s "$paths_file" ] || die 'candidate has no generated path changes'
+  local_paths="$(LC_ALL=C sort -u "$paths_file" | "$jq_bin" -Rsc 'split("\n")[:-1]')"
+  api_paths="$("$jq_bin" -c '[.data.repository.pullRequest.files.nodes[].path] | sort | unique' <<<"$evidence")"
+  [ "$local_paths" = "$api_paths" ] || die 'GitHub and Git changed-path evidence disagree'
+  rm -f -- "$paths_file" "$diff_file"
+}
+
+fetch_candidate
+first_evidence="$(inspect_github)"
+validate_candidate "$first_evidence"
+
+bot_token="$("$gh_bin" auth token --hostname github.com --user qqp-bot 2>/dev/null)" \
+  || die 'could not obtain the qqp-bot credential'
+[ -n "$bot_token" ] || die 'qqp-bot returned an empty credential'
+bot_login="$(GH_TOKEN="$bot_token" "$gh_bin" api user --jq .login 2>/dev/null)" \
+  || die 'could not verify the merge credential identity'
+[ "$bot_login" = qqp-bot ] || die 'merge credential identity is not exactly qqp-bot'
+
+fetch_candidate
+second_evidence="$(inspect_github "$bot_token")"
+[ "$second_evidence" = "$first_evidence" ] \
+  || die 'pull-request evidence changed after credential selection'
+validate_candidate "$second_evidence"
+
+merge_response="$(GH_TOKEN="$bot_token" "$gh_bin" api --method PUT \
+  "repos/hypermemetic-ai/qq/pulls/$pr_number/merge" \
+  -f sha="$reviewed_head" -f merge_method=merge 2>/dev/null)" \
+  || die 'GitHub merge request failed'
+merge_sha="$("$jq_bin" -er 'select(.merged == true and (.sha | type == "string" and test("^[0-9a-f]{40}$"))) | .sha' \
+  <<<"$merge_response" 2>/dev/null)" || die 'GitHub did not attest a successful merge with an exact object id'
+"$git_bin" -C "$repo_root" fetch --no-tags origin \
+  +refs/heads/main:refs/remotes/origin/main >/dev/null 2>&1 \
+  || die 'could not refetch main after the merge response'
+[ "$($git_bin -C "$repo_root" rev-parse origin/main)" = "$merge_sha" ] \
+  || die 'post-merge main advanced; the next daily assessment must repair freshness'
+"$git_bin" -C "$repo_root" merge-base --is-ancestor "$reviewed_head" origin/main 2>/dev/null \
+  || die 'reviewed candidate is not reachable from merged origin/main'
+[ "$($git_bin -C "$repo_root" rev-parse "$reviewed_head^{tree}")" = \
+  "$($git_bin -C "$repo_root" rev-parse "origin/main^{tree}")" ] \
+  || die 'post-merge main tree differs; the next daily assessment must repair freshness'
+printf 'qq-openwiki-merge: recording merged pull request %s at %s\n' \
+  "$pr_number" "$merge_sha"
+write_completion_receipt "$reviewed_head" "$merge_sha"

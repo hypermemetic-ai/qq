@@ -20,6 +20,10 @@ worktree_root="$HOME/.herdr/worktrees/repo"
 strong_worktree="$worktree_root/strong"
 mkdir -p "$worktree_root"
 git init -q -b main "$repo"
+git -C "$repo" remote add origin git@github.com:fixture/repo.git
+git -C "$repo" config branch.main.remote origin
+repository=fixture/repo
+qualified_runs="$XDG_STATE_HOME/qq/observer/runs/by-repository/fixture/repo"
 mkdir -p "$repo/bin" "$repo/extensions" "$repo/skills/fixture" "$repo/delegation/manifests"
 printf '# agents\n' >"$repo/AGENTS.md"
 printf '# concepts\n' >"$repo/CONCEPTS.md"
@@ -72,12 +76,27 @@ fake_gh="$tmp/gh"
 cat >"$fake_gh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+printf '%s\n' "$*" >>"$GH_LOG"
+if [ "$1 $2" = "repo view" ]; then
+  [ "$4 $5" = "--json nameWithOwner" ]
+  case "$3" in
+    git@github.com:fixture/repo.git) repository=fixture/repo ;;
+    git@github.com:fixture/other.git) repository=fixture/other ;;
+    *) exit 98 ;;
+  esac
+  printf '{"nameWithOwner":"%s"}\n' "$repository"
+  exit 0
+fi
 if [ -n "${GH_MUST_NOT_RUN:-}" ]; then
   : >"$GH_MUST_NOT_RUN"
   exit 99
 fi
 [ "$1 $2" = "pr view" ]
 pr="$3"
+[ "$4" = "--repo" ]
+case "$5" in fixture/repo|fixture/other) ;; *) exit 97 ;; esac
+[ "$6" = "--json" ]
+[ "$7" = "headRefName,mergeCommit,mergedAt,state" ]
 case "$pr" in
   41) oid="$MERGE_41"; branch=feature ;;
   42) oid="$MERGE_42"; branch=solo ;;
@@ -90,6 +109,8 @@ jq -cn --arg oid "$oid" --arg branch "$branch" '{
 SH
 chmod +x "$fake_gh"
 export QQ_GH_BIN="$fake_gh"
+export GH_LOG="$tmp/gh.log"
+: >"$GH_LOG"
 export MERGE_41="$merge_41" MERGE_42="$merge_42" OUTSIDE_MAIN="$outside_main"
 
 runtime="$TMPDIR/pi-subagents-uid-$(id -u)"
@@ -225,11 +246,11 @@ status=$?
 set -e
 assert_equal 65 "$status" 'assemble accepted a merge commit outside local main'
 assert_file_contains "$tmp/outside-main.stderr" 'not an ancestor of local main'
-[ ! -e "$XDG_STATE_HOME/qq/observer/runs/pr-43" ] \
+[ ! -e "$qualified_runs/pr-43" ] \
   || fail 'outside-main refusal left a run directory'
 
 "$OBSERVE" assemble --pr 41 --repo "$repo" >"$tmp/assembled-41.json"
-run_41="$XDG_STATE_HOME/qq/observer/runs/pr-41"
+run_41="$qualified_runs/pr-41"
 jq -e --arg repo "$(realpath "$repo")" --arg missing "$missing_session_file" \
   --arg parent_strong "$parent_strong" --arg collision_parent_a "$collision_parent_a" \
   --arg collision_parent_b "$collision_parent_b" \
@@ -240,7 +261,8 @@ jq -e --arg repo "$(realpath "$repo")" --arg missing "$missing_session_file" \
   --arg weak_invalid_delegate "$weak_invalid_delegate" \
   --arg weak_other "$TMPDIR/pi-subagent-sessions/weak-other-hash/run-0/session.jsonl" \
   --arg weak_missing "$weak_missing_session_file" '
-  .schema == "qq-observer.package" and .schema_version == 1
+  .schema == "qq-observer.package" and .schema_version == 2
+  and .repository == "fixture/repo"
   and .pr == 41 and .branch == "feature" and .repo == $repo
   and .variant == "guided"
   and ([.sessions[] | select(.role == "delegate" and .evidence == "live-worktree-branch")] | length) == 5
@@ -308,10 +330,10 @@ export GH_MUST_NOT_RUN="$tmp/blind-touched-gh"
   >"$tmp/assembled-41-blind.json"
 unset GH_MUST_NOT_RUN
 [ ! -e "$tmp/blind-touched-gh" ] || fail 'blind assembly touched gh instead of deriving from guided'
-blind_run_41="$XDG_STATE_HOME/qq/observer/runs/pr-41-blind"
+blind_run_41="$qualified_runs/pr-41-blind"
 jq -e '
-  .schema == "qq-observer.package" and .schema_version == 1
-  and .variant == "blind" and .derived_from == "pr-41"
+  .schema == "qq-observer.package" and .schema_version == 2
+  and .repository == "fixture/repo" and .variant == "blind" and .derived_from == "pr-41"
   and ([.sessions[] | has("signals")] | all | not)
 ' "$blind_run_41/package.json" >/dev/null \
   || fail 'blind package manifest did not derive from guided without signal pointers'
@@ -332,6 +354,28 @@ assert_equal 10 "$(find "$blind_run_41/facts" -type f | wc -l)" \
 jq -e '.status == "already assembled"' "$tmp/reassembled-41-blind.json" >/dev/null \
   || fail 'blind reassembly was not idempotent'
 
+# Equal PR numbers in another multi-remote Repository remain distinct and every
+# GitHub lookup carries the canonical primary-main tracking Repository.
+repo_other="$tmp/repo-other"
+git clone -q "$repo" "$repo_other"
+git -C "$repo_other" remote set-url origin git@github.com:fixture/other.git
+git -C "$repo_other" remote add upstream https://github.com/upstream/other.git
+git -C "$repo_other" config branch.main.remote origin
+"$OBSERVE" assemble --pr 41 --repo "$repo_other" >"$tmp/assembled-other-41.json"
+other_run="$XDG_STATE_HOME/qq/observer/runs/by-repository/fixture/other/pr-41"
+jq -e --arg repo "$(realpath "$repo_other")" '
+  .schema_version == 2 and .repository == "fixture/other" and .repo == $repo and .pr == 41
+' "$other_run/package.json" >/dev/null || fail 'second Repository package identity was conflated'
+"$OBSERVE" assemble --pr 41 --repo "$repo_other" --variant blind >"$tmp/assembled-other-41-blind.json"
+[ -f "$XDG_STATE_HOME/qq/observer/runs/by-repository/fixture/other/pr-41-blind/package.json" ] \
+  || fail 'second Repository blind run did not use its qualified namespace'
+[ "$other_run" != "$run_41" ] || fail 'equal PR numbers shared one run identity'
+assert_file_contains "$GH_LOG" 'pr view 41 --repo fixture/repo --json'
+assert_file_contains "$GH_LOG" 'pr view 41 --repo fixture/other --json'
+if grep -E '^pr view 41 --json|^pr view 41$' "$GH_LOG"; then
+  fail 'assembly performed a cwd-only GitHub PR lookup'
+fi
+
 export GH_MUST_NOT_RUN="$tmp/absent-guided-touched-gh"
 set +e
 "$OBSERVE" assemble --pr 99 --repo "$repo" --variant blind \
@@ -343,7 +387,7 @@ assert_equal 65 "$status" 'blind assembly without guided package was accepted'
 [ ! -e "$tmp/absent-guided-touched-gh" ] \
   || fail 'blind assembly consulted gh when guided package was absent'
 assert_file_contains "$tmp/absent-guided.stderr" 'guided package is required'
-[ ! -e "$XDG_STATE_HOME/qq/observer/runs/pr-99-blind" ] \
+[ ! -e "$qualified_runs/pr-99-blind" ] \
   || fail 'absent guided package left a blind run directory'
 
 "$OBSERVE" assemble --pr 41 --repo "$repo" >"$tmp/reassembled-41.json"
@@ -364,7 +408,7 @@ cat >"$solo_session" <<'JSONL'
 JSONL
 printf '{"schema":"not-a-session"}\n' >"$repo_sessions/not-session.jsonl"
 "$OBSERVE" assemble --pr 42 --repo "$repo" >"$tmp/assembled-42.json"
-run_42="$XDG_STATE_HOME/qq/observer/runs/pr-42"
+run_42="$qualified_runs/pr-42"
 jq -e '
   ([.sessions[] | select(.role == "accountable" and .evidence == "content-search")] | length) == 1
   and ([.unknown_entries[] | select(.path | endswith("not-session.jsonl"))] | length) == 1

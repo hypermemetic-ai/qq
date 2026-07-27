@@ -51,9 +51,9 @@ operator merges.
 ## Install qq
 
 Installation is by construction: every runtime surface mounts this checkout
-directly, so day-to-day changes — adding, editing, or removing a Skill or a
-command — are live everywhere with no install step. A machine is bootstrapped
-once.
+directly, so day-to-day changes — adding, editing, or removing a Skill, command,
+or extension source file — are live everywhere with no install step. A machine
+is bootstrapped once.
 
 qq's accountable runtime is the exact patched Pi identity
 `0.81.1+qq.execution-profile.1` on Linux x64. `bin/qq-pi-runtime` is the sole
@@ -360,21 +360,24 @@ mkdir -p ~/.pi/agent
 ln -sT "$HOME/projects/qq/skills" "$HOME/.pi/agent/skills"
 ```
 
-The project-local pi extension `.pi/extensions/qq-subagent-env.ts` sets the
-adapter, canonical agent directory, exact trusted-seat map, and
-structured-output runtime root in-process for any pi session in this repository (and its
-worktrees), resolved from the checkout the session runs against:
+The globally mounted `extensions/qq-subagent-env.ts` sets the delegation
+adapter, canonical agent directory, exact trusted-seat map, and structured-
+output runtime root only in qq-governed Repositories. qq and its worktrees are
+recognized by Git common-directory identity and use the active checkout. A
+linked Repository is governed only when its root `AGENTS.md` symlink resolves
+to qq's canonical `AGENTS.md`; it uses qq's canonical checkout. Unrelated Pi
+projects remain vanilla:
 
 - `PI_SUBAGENT_PI_BINARY=<checkout>/bin/qq-dispatch`
 - `PI_SUBAGENT_EXTRA_AGENT_DIRS=<checkout>/delegation/manifests/agents`
 - `PI_SUBAGENT_TRUSTED_AGENT_PATHS={...exact canonical manifest paths...}`
 - `QQ_DISPATCH_RUNTIME_ROOT=<temporary-directory>/pi-subagents-uid-<uid>`
 
-Pi auto-discovers the extension once the project is trusted, so delegates
-dispatch confined by construction — no shell exports or launcher wrappers to
-remember. Variables already set in the environment are left untouched, and
-sessions in other projects never load the extension and keep the vanilla
-dispatcher. Relaunch pi (or `/reload`) after install or upgrade.
+The existing global qq extension mount loads the gate everywhere, but policy is
+activated only after that structured Repository check. Delegates dispatch
+confined by construction without shell exports. Variables already set in the
+environment win, including explicit empty strings. Relaunch Pi (or `/reload`)
+after install or upgrade.
 
 Set the dispatcher-side pi-subagents config at
 `~/.pi/agent/extensions/subagent/config.json` to include:
@@ -395,17 +398,16 @@ temp root; without it, pi-subagents nests child sessions inside the parent
 session tree, which the confinement policy deliberately does not grant. The
 config is required: the adapter refuses dispatch when it is missing or
 malformed. The configured path must be a direct `pi-subagent-*` child of the
-launcher temp directory (`$TMPDIR` or `/tmp`). The project extension
+launcher temp directory (`$TMPDIR` or `/tmp`). The governed extension
 pre-creates the root (mode 700) at session start and tightens an
 operator-owned loose root; at dispatch the adapter enforces the contract and
 fails closed on a symlink, foreign ownership, or any mode other than 700
 rather than widening the grant.
 
-The extension resolves the adapter and manifests from the checkout the
-session runs in — a session in a Change worktree uses that worktree's
-copies, which travel with the branch. Explicit environment variables always
-win, including empty values (pi-subagents reads those as its vanilla
-fallback); when overriding manually, point at the primary `main` checkout.
+For qq worktrees the extension resolves adapter and manifests from that
+checkout; governed linked Repositories use canonical qq primary `main`.
+Explicit environment variables always win, including empty values
+(pi-subagents reads those as its vanilla fallback).
 Pi-subagents inherits the one-time setup for every spawn and supplies the child
 role, while its `cwd` selects the assigned worktree. The canonical adapter
 serves any worktree from that Repository, refuses unrelated repositories,
@@ -444,7 +446,14 @@ ln -sfn "$HOME/projects/qq/extensions" "$HOME/.pi/agent/extensions/qq"
 ```
 
 That one link mounts the Repository extension set, which is live in every Pi
-session from then on. `settings.json` no longer carries extension paths.
+session from then on. `settings.json` no longer carries extension paths. Source-
+only changes need no install step. On first bootstrap and after a reviewed
+extension dependency-lock change, install the exact root lock from the mounted
+checkout with lifecycle scripts disabled:
+
+```bash
+npm ci --ignore-scripts
+```
 
 The Repository extension gives local feedback when Pi's built-in `write` or
 `edit` targets the normalized `backlog/` path of the checkout containing
@@ -471,6 +480,38 @@ to a fresh accountable Pi tab. It resolves the Task's unique linked checkout,
 verifies its durable plan and ownership rails, starts the receiver in the
 persistent project home, and restores caller focus. This transfers accountable
 ownership; it is distinct from bounded child delegation through pi-subagents.
+
+Architect findings use a separate typed accountable-intake route. Observer v2
+runs are Repository-qualified beneath
+`observer/runs/by-repository/<owner>/<repo>/pr-<N>[-blind]`; legacy flat v1
+package evidence remains visibly legacy and is never rewritten. `/architect`
+directly opens one bounded global digest of new and still-unsettled finding
+occurrences across source rounds and Repositories. It carries slim provenance
+for at most 50 ranked findings; detailed evidence stays in cited analyses and
+an omitted count reveals the remaining working set. There is no round picker or
+fixed verdict form. The Architect records only choices settled in conversation:
+route with non-empty agreed scope or set aside current evidence. Untouched
+occurrences stay open, and a later same-key occurrence reopens automatically.
+
+JSON remains the canonical format for machine interfaces, persistence, schemas,
+receipts, JSONL, and hashes. At an explicit qq-owned model-ingress boundary,
+a measured substantial structured value may instead be presented to the model
+with deterministic TOON encoding. `/architect` is the only current qualifying
+boundary: it keeps and validates canonical parsed JSON, then encodes that value
+once for its prompt. A representative 42-finding context measured about 5.7%
+fewer estimated o200k tokens than compact JSON with TOON 4.1.0; this is shape-
+specific evidence, not a promise of universal savings.
+
+`architect_disposition` first returns an exact natural summary and confirmation
+question without writing. Only an unchanged proposal plus a later exact clear
+affirmative interactive reply confirms. A set-aside-only batch is Task-free; a
+routed multi-source batch writes one content-addressed Observer handoff and
+starts one fresh qq-home accountable recipient. Until complete verified Task
+mappings arrive, that exact batch remains visible as operator-settled pending
+intake. An explicit interactive request naming its batch or handoff can retry
+the same handoff; it cannot re-propose scope or create another batch. Exact
+`MERGED` PR/head/Repository receipts later resolve mapped Tasks. Existing v1
+round handoffs remain recoverable through low-level compatibility commands.
 
 ### Local latency observation
 
@@ -616,7 +657,48 @@ Keep one long-lived `openwiki/update` worktree per linked Repository. For an
 assigned refresh, fetch `origin`, reset that worktree to the fresh `origin/main`,
 and run `qq-openwiki --update` (`--init` only for first setup). Review the
 complete generated diff through `code-review`, and open an ordinary
-documentation-only pull request. The operator reviews and merges it.
+documentation-only pull request. The operator reviews and merges on-demand
+refreshes.
+
+qq also owns an optional systemd user timer for this Repository. It starts a
+fresh, ephemeral, explicitly approved headless Pi maintainer assignment every
+day at 03:00 machine-local time. `Persistent=false` means a powered-off run is
+skipped with no boot catch-up or retry. A six-hour service timeout turns a
+wedged attempt into a journal-visible failure before the next daily window. The
+unit supplies the Repository and Linuxbrew command paths explicitly. The runner
+accepts success only from a private machine-readable receipt written by the
+no-change finisher or guarded merger; a normal Pi exit after a reported tool
+failure remains a failed service. Separate nonblocking locks prevent overlapping
+scheduled assessments and writers.
+Install only after the Change has landed:
+
+```bash
+bin/qq-openwiki-schedule install
+bin/qq-openwiki-schedule inspect
+journalctl --user-unit qq-openwiki-daily.service
+```
+
+A semantic no-change is success and opens no pull request. A changed run must
+produce one generated-`openwiki/**` commit, pass deterministic Checks and
+fresh-context review, and wait for the exact `shell-tests` Check. Only the
+scheduled marker may invoke `qq-openwiki-merge`; that command revalidates the
+fresh base, fixed branch and PR, exact reviewed head, regular generated paths,
+Checks, review threads, mergeability, and `qqp-bot` identity before and after
+credential loading, then merges with the expected head through GitHub's API.
+It never enables native auto-merge or switches the active `gh` account. The
+marker and guard are drift-nets against well-meaning automation, not security
+boundaries around the local bot credential, and the reviewed-head assertion is
+procedural rather than cryptographic evidence. A final-interval `main` advance
+is reported after merge and repaired by the next 03:00 assessment.
+
+Disable and unlink the units without deleting journals or credentials:
+
+```bash
+bin/qq-openwiki-schedule disable
+```
+
+Source Changes still neither trigger nor perform OpenWiki maintenance. They and
+ordinary/on-demand refreshes retain operator merge authority.
 
 Temporary debt (2026-07-10): upstream code mode unconditionally writes a
 scheduled GitHub Actions workflow and scheduled-workflow agent guidance.

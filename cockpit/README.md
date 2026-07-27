@@ -20,6 +20,8 @@ same file; the shell surface is sourced straight from this checkout.
   (doc-43), direct navigation, agent-pull, and project-home snap bindings.
 - `shell/file-navigation.bash` — `QQ_HOME`, `qqroot`, focused-worktree lookup
   through `qq_space_dir`, and shell directory changes through `qqcd`.
+- `systemd/user/qq-openwiki-daily.{service,timer}` — repository-owned user
+  units for the non-persistent 03:00 local OpenWiki assessment.
 
 The Ghostty profile expects the locally installed `BigBlue TerminalPlus` font,
 with `MxPlus IBM VGA 8x16` as its fallback. Font binaries remain external
@@ -69,3 +71,14 @@ inspection, and operator focus is left untouched. `qq-herdr-home focus-board
 --repo <root>` remains an operator-invocable validator, not part of the
 disposition flow: it validates the persistent home and its unique dedicated
 Backlog-board tab, then focuses that tab.
+
+
+## OpenWiki timer
+
+`bin/qq-openwiki-schedule install` links the two repository files into the
+systemd user manager, reloads it, and enables the timer; it never copies unit
+content. `inspect` reports timer/service state, and `disable` stops the timer,
+unlinks both files, and reloads the manager. The timer has no randomized delay,
+boot catch-up, or retry. Attempt output and failure status remain in
+`journalctl --user-unit qq-openwiki-daily.service`. Activation is an explicit
+post-merge owner action; source Changes and tests do not enable live units.

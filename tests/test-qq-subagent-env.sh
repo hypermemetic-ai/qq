@@ -8,7 +8,7 @@ TEST_NAME="test-qq-subagent-env"
 # shellcheck disable=SC1091
 source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd "$TESTS_DIR/.." && pwd -P)"
-EXT="$ROOT/.pi/extensions/qq-subagent-env.ts"
+EXT="$ROOT/extensions/qq-subagent-env.ts"
 
 [ -f "$EXT" ] || fail "missing extension: $EXT"
 
@@ -63,6 +63,7 @@ delete process.env.PI_SUBAGENT_PI_BINARY;
 delete process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS;
 delete process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS;
 delete process.env.QQ_DISPATCH_RUNTIME_ROOT;
+process.chdir(root);
 const mod = await import(pathToFileURL(ext).href);
 mod.default(pi);
 assertEq(process.env.PI_SUBAGENT_PI_BINARY, `${root}/bin/qq-dispatch`, "PI_SUBAGENT_PI_BINARY");
@@ -113,6 +114,39 @@ assertEq(
   "runtime-root override preserved",
 );
 
+// An unrelated project stays vanilla and does not touch its configured root.
+const unrelated = fs.mkdtempSync(path.join(os.tmpdir(), "qq-unrelated-"));
+process.chdir(unrelated);
+delete process.env.PI_SUBAGENT_PI_BINARY;
+delete process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS;
+delete process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS;
+delete process.env.QQ_DISPATCH_RUNTIME_ROOT;
+const unrelatedRoot = path.join(os.tmpdir(), `pi-subagent-unrelated-${process.pid}`);
+fs.writeFileSync(path.join(cfgDir, "config.json"), JSON.stringify({ defaultSessionDir: unrelatedRoot }));
+const unrelatedModule = await import(pathToFileURL(ext).href + "?unrelated");
+unrelatedModule.default(pi);
+if (process.env.PI_SUBAGENT_PI_BINARY !== undefined || process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS !== undefined
+  || process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS !== undefined
+  || process.env.QQ_DISPATCH_RUNTIME_ROOT !== undefined || fs.existsSync(unrelatedRoot)) {
+  die("unrelated project did not remain vanilla");
+}
+
+// A governed linked Repository selects canonical qq through its AGENTS link.
+const linked = fs.mkdtempSync(path.join(os.tmpdir(), "qq-linked-"));
+fs.symlinkSync(path.join(root, "AGENTS.md"), path.join(linked, "AGENTS.md"));
+await import("node:child_process").then(({ execFileSync }) => execFileSync("git", ["init", "-q", "-b", "main", linked]));
+process.chdir(linked);
+const linkedModule = await import(pathToFileURL(ext).href + "?linked");
+linkedModule.default(pi);
+assertEq(process.env.PI_SUBAGENT_PI_BINARY, `${root}/bin/qq-dispatch`, "linked dispatcher");
+assertEq(process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS, `${root}/delegation/manifests/agents`, "linked manifests");
+assertEq(process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS, JSON.stringify({
+  implementer: `${root}/delegation/manifests/agents/implementer.md`,
+  observer: `${root}/delegation/manifests/agents/observer.md`,
+  researcher: `${root}/delegation/manifests/agents/researcher.md`,
+  reviewer: `${root}/delegation/manifests/agents/reviewer.md`,
+}), "linked trusted manifests");
+
 // A configured root outside the adapter-accepted set is left untouched.
 const outside = path.join(home, "outside-root");
 fs.writeFileSync(path.join(cfgDir, "config.json"), JSON.stringify({ defaultSessionDir: outside }));
@@ -121,6 +155,8 @@ fourth.default(pi);
 if (fs.existsSync(outside)) die("extension created a root outside the accepted set");
 
 fs.rmSync(sessRoot, { recursive: true, force: true });
+fs.rmSync(unrelated, { recursive: true, force: true });
+fs.rmSync(linked, { recursive: true, force: true });
 fs.rmSync(home, { recursive: true, force: true });
 ' || fail "extension behavior mismatch"
 
@@ -131,11 +167,11 @@ for role in implementer observer reviewer researcher; do
 done
 
 # README Install documents the extension as the by-construction mechanism.
-assert_file_contains "$ROOT/README.md" '.pi/extensions/qq-subagent-env.ts'
+assert_file_contains "$ROOT/README.md" 'extensions/qq-subagent-env.ts'
 
 # Pivot tripwire: the shell surface must not re-introduce shell-level exports.
 if grep -q 'export PI_SUBAGENT' "$ROOT/cockpit/shell/file-navigation.bash"; then
-  fail "file-navigation.bash re-exports PI_SUBAGENT_* (mechanism moved to .pi/extensions/qq-subagent-env.ts)"
+  fail "file-navigation.bash re-exports PI_SUBAGENT_* (mechanism moved to extensions/qq-subagent-env.ts)"
 fi
 
 printf 'test-qq-subagent-env: pass\n'
