@@ -3397,15 +3397,20 @@ def backlog_frontmatter(path, label):
         if key in fields:
             fail(f"{label} duplicates frontmatter field {key}", 65)
         if raw == "":
-            values = []
+            values, item_indent = [], math.inf
             index += 1
             while index < end and (lines[index].startswith(" ") or lines[index] == ""):
                 child = lines[index].strip()
                 if child:
+                    indent = len(lines[index]) - len(lines[index].lstrip())
                     item = re.fullmatch(r"-[ \t]+(.+)", child)
-                    if not item:
+                    if item:
+                        item_indent = indent
+                        values.append(item.group(1).strip("'\\\""))
+                    elif indent <= item_indent:
                         fail(f"{label} has malformed frontmatter list", 65)
-                    values.append(item.group(1).strip("'\\\""))
+                    else:
+                        values[-1] += f" {child}"
                 index += 1
             fields[key] = values
             continue
