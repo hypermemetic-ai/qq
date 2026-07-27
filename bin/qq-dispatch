@@ -113,8 +113,11 @@ if [[ "$governed_binding" == true ]]; then
   [[ "$bound_project" == "$governed_project" && "$bound_common" == "$governed_common" && "$git_common_dir" == "$governed_common" ]] \
     || fail 65 "child cwd does not match the governed Repository Git identity"
   if [[ "$governed_common" == "$adapter_git_common_dir" ]]; then
-    [[ "$governed_project" == "$adapter_worktree" ]] \
-      || fail 65 "governed qq project home does not match the dispatcher worktree"
+    if [[ "$governed_project" != "$adapter_worktree" ]]; then
+      [[ "$PI_SUBAGENT_CHILD_AGENT" == orchestrator && "$invocation_root" == "$governed_project" ]] \
+        && path_is_within "$adapter_worktree" "$governed_change_root" \
+        || fail 65 "governed qq project home does not match the dispatcher worktree"
+    fi
   else
     governed_agents="$governed_project/AGENTS.md"
     [[ -L "$governed_agents" && "$(realpath -e -- "$governed_agents" 2>/dev/null || true)" == "$adapter_worktree/AGENTS.md" ]] \

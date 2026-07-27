@@ -365,10 +365,16 @@ export class AlignmentBroker {
     try {
       const request = structuredClone(value); reject(request?.operator_text !== this.lastOperatorText, "operator_text is not the current immutable verbatim operator input");
       await this.record("request", { packet: request }); await atomicJson(join(this.channelRoot, "requests", `${request.exchange_id}.json`), request);
-      const responsePath = join(this.channelRoot, "responses", `${request.exchange_id}.json`); const deadline = this.exchangeTimeoutMs === null ? null : Date.now() + this.exchangeTimeoutMs; let projection;
+      const responsePath = join(this.channelRoot, "responses", `${request.exchange_id}.json`); const deadline = this.exchangeTimeoutMs === null ? null : Date.now() + this.exchangeTimeoutMs; let nextStatusAt = 0; let projection;
       while (deadline === null || Date.now() < deadline) {
-        reject(signal?.aborted, "orchestrator exchange was cancelled"); reject(this.orchestratorLifecycle !== "running", `orchestrator ended during exchange (${this.orchestratorLifecycle})`);
+        reject(signal?.aborted, "orchestrator exchange was cancelled");
         try { projection = await readJsonDirect(responsePath, "orchestrator response"); break; } catch (error) { if (!String(error?.message).includes("ENOENT")) throw error; }
+        if (Date.now() >= nextStatusAt) {
+          const terminal = terminalStateFromStatus(await this.rpc("status", { id: this.orchestratorRunId }, Math.min(2000, this.stopTimeoutMs)), this.orchestratorRunId);
+          if (terminal !== null && !TERMINAL.has(this.orchestratorLifecycle)) await this.record("orchestrator-terminal", { run_id: this.orchestratorRunId, state: terminal, proof: "status" });
+          nextStatusAt = Date.now() + 250;
+        }
+        reject(this.orchestratorLifecycle !== "running", `orchestrator ended during exchange (${this.orchestratorLifecycle})`);
         await new Promise((resolve) => setTimeout(resolve, this.pollMs));
       }
       reject(projection === undefined, "orchestrator exchange timed out without a correlated projection"); return await this.acceptProjection(projection, "direct");

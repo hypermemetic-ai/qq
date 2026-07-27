@@ -59,6 +59,11 @@ for (const reason of ["startup", "resume", "fork"]) {
     brokerOptions: { runtimeRoot: join(scratch, `${reason}-runtime`), traceId: "a".repeat(32), pollMs: 5, exchangeTimeoutMs: 1000, stopTimeoutMs: 100 } });
   assert.deepEqual([...h.tools.keys()].sort(), [...qqAlignerProfile.tools].sort()); assert.equal(h.tools.has("subagent"), false);
   assert.equal(h.tools.has("open_alignment_evidence"), false); assert.equal(h.tools.has("complete_alignment"), true);
+  assert.deepEqual(h.tools.get("alignment_exchange").parameters.properties.request.required,
+    ["version", "change_id", "exchange_id", "trace_id", "request_id", "reply_to", "kind", "operator_text", "interpretation", "payload"]);
+  assert.deepEqual(h.tools.get("present_alignment").parameters.properties.episode.required,
+    ["version", "change_id", "exchange_id", "trace_id", "episode", "outcome", "criteria_trigger", "presentation"]);
+  assert.equal(h.tools.get("alignment_exchange").parameters.$defs.traceId.pattern, "^[0-9a-f]{32}$");
   await h.fire("session_start", { reason }); assert.equal(h.bus.spawnCount, 0);
   await h.fire("resources_discover", { reason: "startup" }); assert.equal(h.bus.spawnCount, 1); assert.deepEqual([...h.active].sort(), [...qqAlignerProfile.tools].sort());
   await h.fire("input", { source: "interactive", text: `operator ${reason}` });

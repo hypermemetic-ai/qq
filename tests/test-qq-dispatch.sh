@@ -1076,10 +1076,15 @@ assert_file_contains "$tmp/feature-external.stderr" \
 # are in scope; another linked worktree sharing Git common state is refused.
 launcher_source="$tmp/launcher-source"
 launcher_resources=(
-  bin/pi bin/qq-pi-runtime patches/pi/v0.81.1/manifest.json patches/pi/v0.81.1/qq-execution-profile.patch
+  bin/pi bin/qq-dispatch bin/qq-pi-runtime bin/lib/qq-bin.sh
+  bin/lib/qq-render-landstrip-policy.mjs bin/lib/qq-process-tree-supervisor.py
+  delegation/policies/roles.json
+  patches/pi/v0.81.1/manifest.json patches/pi/v0.81.1/qq-execution-profile.patch
   extensions/qq-subagent-env.ts extensions/qq-execution-profiles.ts extensions/qq-aligner.ts
   extensions/lib/qq-alignment-broker.ts extensions/lib/qq-alignment-contracts.ts
-  delegation/extensions/qq-alignment-channel.ts delegation/manifests/roots/aligner.md delegation/manifests/agents/orchestrator.md
+  delegation/extensions/qq-alignment-channel.ts
+  delegation/manifests/aligner-request.v1.schema.json delegation/manifests/alignment-episode.v1.schema.json
+  delegation/manifests/roots/aligner.md delegation/manifests/agents/orchestrator.md
 )
 for resource in "${launcher_resources[@]}"; do
   mkdir -p "$launcher_source/$(dirname -- "$resource")"; cp "$ROOT/$resource" "$launcher_source/$resource"
@@ -1097,6 +1102,13 @@ git init -q -b main "$launcher_source"
 git -C "$launcher_source" add .
 git -C "$launcher_source" -c user.name=test -c user.email=test@example.invalid commit -qm launcher-source
 export FAKE_PINNED_PI="$fake_pi"
+launcher_change_root="$test_home/.herdr/worktrees/launcher-source"
+launcher_change="$launcher_change_root/alignment-source"
+mkdir -p "$launcher_change_root"
+git -C "$launcher_source" worktree add -qb launcher-alignment-source "$launcher_change" main
+launcher_common="$(realpath -e "$(git -C "$launcher_source" rev-parse --path-format=absolute --git-common-dir)")"
+launcher_source="$(realpath -e "$launcher_source")"
+launcher_change_root="$(realpath -e "$launcher_change_root")"
 
 governed_primary="$tmp/governed-primary"
 governed_change_root="$test_home/.herdr/worktrees/governed-primary"
@@ -1315,6 +1327,36 @@ done
     "$DISPATCH" --json
 ) >"$tmp/governed-project-home.stdout" 2>"$tmp/governed-project-home.stderr"
 assert_file_contains "$tmp/governed-project-home.stdout" 'pi-live-event role=orchestrator'
+launcher_alignment_runtime="$tmp/launcher-alignment-runtime"
+mkdir -p "$launcher_alignment_runtime"
+(
+  cd "$launcher_source"
+  QQ_GOVERNED_PROJECT_HOME="$launcher_source" \
+  QQ_GOVERNED_GIT_COMMON_DIR="$launcher_common" \
+  QQ_GOVERNED_CHANGE_WORKTREE_ROOT="$launcher_change_root" \
+  PI_SUBAGENT_CHILD_AGENT=orchestrator \
+  PI_SUBAGENT_RUN_ID=orchestrator-source-smoke \
+  QQ_DISPATCH_RUNTIME_ROOT="$launcher_alignment_runtime" \
+  PI_SUBAGENT_TRUSTED_AGENT_PATHS="$(trusted_agent_paths "$launcher_change")" \
+    env -u QQ_DISPATCH_TIMEOUT "$launcher_change/bin/qq-dispatch" --json
+) >"$tmp/orchestrator-source.stdout" 2>"$tmp/orchestrator-source.stderr"
+assert_file_contains "$tmp/orchestrator-source.stdout" 'pi-live-event role=orchestrator'
+set +e
+(
+  cd "$launcher_source"
+  QQ_GOVERNED_PROJECT_HOME="$launcher_source" \
+  QQ_GOVERNED_GIT_COMMON_DIR="$launcher_common" \
+  QQ_GOVERNED_CHANGE_WORKTREE_ROOT="$launcher_change_root" \
+  PI_SUBAGENT_CHILD_AGENT=reviewer \
+  PI_SUBAGENT_RUN_ID=reviewer-source-smoke \
+  QQ_DISPATCH_RUNTIME_ROOT="$launcher_alignment_runtime" \
+  PI_SUBAGENT_TRUSTED_AGENT_PATHS="$(trusted_agent_paths "$launcher_change")" \
+    env -u QQ_DISPATCH_TIMEOUT "$launcher_change/bin/qq-dispatch" --json
+) >"$tmp/reviewer-source.stdout" 2>"$tmp/reviewer-source.stderr"
+reviewer_source_status=$?
+set -e
+assert_equal 65 "$reviewer_source_status" 'non-primary qq adapter served project home for a non-orchestrator child'
+assert_file_contains "$tmp/reviewer-source.stderr" 'governed qq project home does not match the dispatcher worktree'
 (
   cd "$governed_change"
   QQ_GOVERNED_PROJECT_HOME="$governed_primary" \

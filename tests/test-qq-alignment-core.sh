@@ -111,7 +111,7 @@ class Events {
         queueMicrotask(() => this.emit(`subagents:rpc:v1:reply:${value.requestId}`, { version: 1, requestId: value.requestId, success: false, error: { code: this.stopError, message: "fixture stop refusal" } })); return;
       }
       const runId = value.method === "spawn" ? `orchestrator-run-${this.spawnCount}` : value.params?.id;
-      if (value.method === "spawn") this.statusRunId = runId;
+      if (value.method === "spawn") { this.statusRunId = runId; this.status = "running"; }
       const data = value.method === "spawn" ? { details: { runId } } : value.method === "stop" ? { runId, state: "stopping" }
         : value.params?.id ? { text: `Run: ${this.statusRunId}\nState: ${this.status}`, details: { mode: "management", results: [] } }
         : { text: this.listStatusText ?? `Spawn budget: unlimited\n${this.statusRunId !== null && this.status === "running" ? `Active async runs: 1\n\n- ${this.statusRunId} | running` : "No active async runs."}`, details: { mode: "single", results: [] } };
@@ -221,6 +221,19 @@ const completed = await replacement.finalize();
 assert.equal(completed.change_id, change); assert.equal(completed.orchestrator_lifecycle, "stopped");
 assert.equal(replacementStore.entries.at(-1).data.event, "completion");
 assert.equal((await readdir(scratch)).some((name) => /sealed|package|journal/.test(name)), false);
+
+// A missing async-complete event cannot leave a request hanging after the
+// exact run status proves that the orchestrator failed.
+const failedExchange = fixture("failed-exchange"); await failedExchange.store.persist();
+const failedBroker = new AlignmentBroker(failedExchange.pi, { cwd: root, runtimeRoot: join(scratch, "failed-exchange-runtime"), sessionId: "session-failed-exchange", traceId: trace,
+  piSessionFile: failedExchange.file, sessionManager: failedExchange.store.manager(), pollMs: 2, exchangeTimeoutMs: 1000, stopTimeoutMs: 20 });
+await failedBroker.initialize(); await failedBroker.startOrchestrator(); failedExchange.events.status = "failed";
+failedBroker.recordOperatorInput("failed child");
+const failedRequest = request("status_request", "failed-exchange", "failed-request", trace, "failed child", { scope: "change" });
+await assert.rejects(() => failedBroker.exchange(failedRequest), /orchestrator ended during exchange \(failed\)/);
+assert.deepEqual(failedExchange.store.entries.at(-1).data, { version: 1, alignment_session_id: failedBroker.sessionId, trace_id: trace,
+  event: "orchestrator-terminal", payload: { run_id: failedBroker.orchestratorRunId, state: "failed", proof: "status" } });
+assert.equal(failedBroker.pendingExchanges, 0); await failedBroker.shutdown("quit");
 
 // One reducer admits live and replayed native state transactionally.
 function bareBroker(label, events = new Events()) {
@@ -424,7 +437,8 @@ assert.ok(recoveryEvents.lastIndexOf("orchestrator-terminal") < recoveryEvents.l
 const terminalCrash = fixture("terminal-crash"); await terminalCrash.store.persist();
 const terminalBroker = new AlignmentBroker(terminalCrash.pi, { cwd: root, runtimeRoot: join(scratch, "terminal-runtime"), sessionId: "session-terminal", traceId: trace,
   piSessionFile: terminalCrash.file, sessionManager: terminalCrash.store.manager(), pollMs: 2, stopTimeoutMs: 20 });
-await terminalBroker.initialize(); await terminalBroker.startOrchestrator(); await terminalBroker.record("orchestrator-terminal", { run_id: terminalBroker.orchestratorRunId, state: "stopped", proof: "async-complete" }); await terminalCrash.store.persist();
+await terminalBroker.initialize(); await terminalBroker.startOrchestrator(); await terminalBroker.record("orchestrator-terminal", { run_id: terminalBroker.orchestratorRunId, state: "stopped", proof: "async-complete" });
+terminalCrash.events.status = "stopped"; await terminalCrash.store.persist();
 const terminalRestart = new AlignmentBroker(terminalCrash.pi, { cwd: root, runtimeRoot: join(scratch, "terminal-runtime"), piSessionFile: terminalCrash.file,
   sessionManager: terminalCrash.store.manager(), pollMs: 2, stopTimeoutMs: 20 });
 await terminalRestart.initialize(); assert.equal(terminalRestart.orchestratorLifecycle, "stopped"); await terminalRestart.startOrchestrator(); assert.equal(terminalCrash.events.spawnCount, 2);

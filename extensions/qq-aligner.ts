@@ -16,18 +16,20 @@ function toolResult(value) { return { content: [{ type: "text", text: JSON.strin
 function toolFailure(error) { const message = error instanceof Error ? error.message : String(error); return { content: [{ type: "text", text: `qq aligner refused: ${message}` }], isError: true }; }
 function digest(value) { return createHash("sha256").update(value).digest("hex"); }
 function sameSet(left, right) { return left.length === right.length && [...left].sort().every((value, index) => value === [...right].sort()[index]); }
+function wrappedSchema(name, document) { const { $schema: _schema, $id: _id, $defs, ...schema } = document; return { type: "object", additionalProperties: false, required: [name], properties: { [name]: schema }, $defs }; }
 
 export default async function register(pi, deps = {}) {
   if (process.env.QQ_PI_ROOT_PROFILE !== PROFILE) throw new Error("qq aligner extension loaded without the immutable aligner profile marker");
   const loadPrompt = deps.readFile ?? readFile; const prompt = await loadPrompt(PROMPT_PATH, "utf8");
   if (typeof prompt !== "string" || prompt.length === 0) throw new Error("qq aligner prompt is missing");
+  const [requestSchema, episodeSchema] = await Promise.all(["aligner-request.v1", "alignment-episode.v1"].map((name) => readFile(resolve(ROOT, `delegation/manifests/${name}.schema.json`), "utf8").then(JSON.parse)));
   const promptDigest = digest(prompt); const BrokerClass = deps.Broker ?? AlignmentBroker;
   let broker = null; let fatal = null; let pendingPresentation = null;
 
   pi.registerTool({
     name: "alignment_exchange", label: "Exchange with internal orchestrator",
     description: "Send one strict typed alignment request and receive one correlated typed projection with bounded inline supplied material.",
-    parameters: { type: "object", additionalProperties: false, required: ["request"], properties: { request: { type: "object" } } },
+    parameters: wrappedSchema("request", requestSchema),
     async execute(_id, params, signal) { try { return toolResult(await broker.exchange(params.request, signal)); } catch (error) { return toolFailure(error); } },
   });
   pi.registerTool({
@@ -41,7 +43,7 @@ export default async function register(pi, deps = {}) {
   pi.registerTool({
     name: "present_alignment", label: "Validate alignment presentation",
     description: "Validate complementary spoken/visual initial, realignment, or acceptance material before presenting it.",
-    parameters: { type: "object", additionalProperties: false, required: ["episode"], properties: { episode: { type: "object" } } },
+    parameters: wrappedSchema("episode", episodeSchema),
     async execute(_id, params) {
       try {
         const episode = validateAlignmentEpisode(structuredClone(params.episode));

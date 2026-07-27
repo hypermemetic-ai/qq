@@ -115,7 +115,7 @@ execution_profile_extension="$repo_root/extensions/qq-execution-profiles.ts"
 vendor_root="${HOME:?HOME is required for the exact pi-subagents source}/.pi/agent/git/github.com/hypermemetic-ai/pi-subagents"
 vendor_extension="$vendor_root/index.ts"
 profile_extension="$repo_root/extensions/qq-aligner.ts"
-qq_resource_relatives=(extensions/qq-subagent-env.ts extensions/qq-execution-profiles.ts extensions/qq-aligner.ts extensions/lib/qq-alignment-broker.ts extensions/lib/qq-alignment-contracts.ts delegation/extensions/qq-alignment-channel.ts delegation/manifests/roots/aligner.md delegation/manifests/agents/orchestrator.md)
+qq_resource_relatives=(extensions/qq-subagent-env.ts extensions/qq-execution-profiles.ts extensions/qq-aligner.ts extensions/lib/qq-alignment-broker.ts extensions/lib/qq-alignment-contracts.ts delegation/extensions/qq-alignment-channel.ts delegation/manifests/aligner-request.v1.schema.json delegation/manifests/alignment-episode.v1.schema.json delegation/manifests/roots/aligner.md delegation/manifests/agents/orchestrator.md)
 for relative_path in "${qq_resource_relatives[@]}"; do
   resource="$repo_root/$relative_path"
   [[ -f "$resource" && -r "$resource" && ! -L "$resource" ]] || {
