@@ -55,20 +55,17 @@ function governedRoot(): string | undefined {
 
 function applyEnv(repoRoot: string): void {
   const agentDir = join(repoRoot, "delegation", "manifests", "agents");
-  if (process.env.PI_SUBAGENT_PI_BINARY === undefined) {
-    process.env.PI_SUBAGENT_PI_BINARY = join(repoRoot, "bin/qq-dispatch");
-  }
-  if (process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS === undefined) {
-    process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS = agentDir;
-  }
-  if (process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS === undefined) {
-    process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS = JSON.stringify({
-      implementer: join(agentDir, "implementer.md"),
-      observer: join(agentDir, "observer.md"),
-      researcher: join(agentDir, "researcher.md"),
-      reviewer: join(agentDir, "reviewer.md"),
-    });
-  }
+  process.env.PI_SUBAGENT_PI_BINARY = join(repoRoot, "bin/qq-dispatch");
+  process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS = agentDir;
+  process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS = JSON.stringify({
+    implementer: join(agentDir, "implementer.md"),
+    observer: join(agentDir, "observer.md"),
+    researcher: join(agentDir, "researcher.md"),
+    reviewer: join(agentDir, "reviewer.md"),
+  });
+  // The resolver replaces this poison value with one complete policy snapshot
+  // before any governed request. Inherited or caller-supplied compute never wins.
+  process.env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES = "__qq_execution_profile_resolver_required__";
   if (process.env.QQ_DISPATCH_RUNTIME_ROOT === undefined) {
     const uid = process.getuid?.() ?? process.geteuid?.();
     if (uid !== undefined) {

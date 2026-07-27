@@ -14,12 +14,12 @@
   "stockPiVersion": "0.81.1",
   "patchedIdentity": {
     "packageVersion": "0.81.1",
-    "buildIdentity": "qq.execution-profile.1",
-    "reportedVersion": "0.81.1+qq.execution-profile.1"
+    "buildIdentity": "qq.execution-profile.2",
+    "reportedVersion": "0.81.1+qq.execution-profile.2"
   },
   "patch": {
     "path": "qq-execution-profile.patch",
-    "sha256": "5578086c363145aada2c5c10b27bce304f1795ec0d79bc483b736727da7bc57c",
+    "sha256": "2f5b3a854f9bf18f9e18a365191f07d1be13e5ed51961478d4099239a21ebd4d",
     "stripComponents": 1
   },
   "supportedPlatforms": [
@@ -49,7 +49,11 @@
       "topLevelDirectory": "bun-linux-x64"
     }
   },
+  "trustedPriorProvenanceSha256": [
+    "c3ee16be24b495e31e1ad312c7c0a72ef6b241ea33fa6748543566672fc6af49"
+  ],
   "changedUpstreamPaths": [
+    "packages/ai/src/api/anthropic-messages.ts",
     "packages/ai/src/api/openai-codex-responses.ts",
     "packages/ai/src/api/openai-responses-shared.ts",
     "packages/ai/src/api/openai-responses.ts",
@@ -57,9 +61,11 @@
     "packages/ai/src/execution-profile.ts",
     "packages/ai/src/index.ts",
     "packages/ai/src/providers/faux.ts",
+    "packages/ai/src/providers/kimi-coding.ts",
     "packages/ai/src/providers/openai-codex.ts",
     "packages/ai/src/providers/openai.ts",
     "packages/ai/src/types.ts",
+    "packages/ai/test/anthropic-sse-parsing.test.ts",
     "packages/ai/test/execution-profile-service-class.test.ts",
     "packages/ai/test/openai-codex-stream.test.ts",
     "packages/coding-agent/package.json",
@@ -70,10 +76,11 @@
     "packages/coding-agent/src/core/extensions/loader.ts",
     "packages/coding-agent/src/core/extensions/runner.ts",
     "packages/coding-agent/src/core/extensions/types.ts",
+    "packages/coding-agent/src/core/model-registry.ts",
     "packages/coding-agent/src/core/model-runtime.ts",
-    "packages/coding-agent/src/core/remote-catalog-provider.ts",
     "packages/coding-agent/src/index.ts",
     "packages/coding-agent/test/compaction-summary-reasoning.test.ts",
+    "packages/coding-agent/test/model-runtime-test-utils.ts",
     "packages/coding-agent/test/suite/harness.ts",
     "packages/coding-agent/test/suite/regressions/153-execution-profile.test.ts"
   ]

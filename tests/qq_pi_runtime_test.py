@@ -32,7 +32,7 @@ assert spec is not None
 runtime = importlib.util.module_from_spec(spec)
 sys.modules[loader.name] = runtime
 loader.exec_module(runtime)
-IDENTITY = "0.81.1+qq.execution-profile.1"
+IDENTITY = "0.81.1+qq.execution-profile.2"
 
 
 def digest(value: bytes) -> str:
@@ -81,14 +81,14 @@ class RuntimeFixture:
             )
         )
 
-    def bundle(self, parent: Path, marker: str = "one") -> Path:
+    def bundle(self, parent: Path, marker: str = "one", identity: str = IDENTITY) -> Path:
         bundle = parent / f"bundle-{marker}"
         bundle.mkdir()
         binary = bundle / "pi"
         binary.write_text(
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
-            f"if [ \"${{1:-}}\" = --version ]; then printf '%s\\n' '{IDENTITY}'; exit 0; fi\n"
+            f"if [ \"${{1:-}}\" = --version ]; then printf '%s\\n' '{identity}'; exit 0; fi\n"
             "if [ -n \"${QQ_TEST_PI_LOG:-}\" ]; then printf '%s\\0' \"$@\" >>\"$QQ_TEST_PI_LOG\"; fi\n"
             "printf 'fixture-pi\\n'\n",
             encoding="utf-8",
@@ -423,7 +423,7 @@ class RuntimeTests(unittest.TestCase):
         package = source / "packages" / "coding-agent"
         package.mkdir(parents=True)
         (package / "package.json").write_text(
-            json.dumps({"version": "0.81.1", "piConfig": {"buildIdentity": "qq.execution-profile.1"}}),
+            json.dumps({"version": "0.81.1", "piConfig": {"buildIdentity": "qq.execution-profile.2"}}),
             encoding="utf-8",
         )
         engine._apply_patch(source)
@@ -544,6 +544,56 @@ class RuntimeTests(unittest.TestCase):
         active_asset.write_text("tampered\n", encoding="utf-8")
         self.assert_refuses(lambda: self.fixture.engine.install(first), "inventory")
         self.assertEqual(os.readlink(self.fixture.spec.data_root / "current"), current_before)
+
+    def test_exact_trusted_prior_generation_upgrades_rolls_back_and_rolls_forward(self) -> None:
+        prior_identity = "0.81.1+qq.execution-profile.1"
+        prior_provenance = copy.deepcopy(self.fixture.engine._provenance())
+        prior_provenance["buildEngineVersion"] = 2
+        prior_provenance["patchSha256"] = "5" * 64
+        prior_provenance["patchedIdentity"] = {
+            "packageVersion": "0.81.1",
+            "buildIdentity": "qq.execution-profile.1",
+            "reportedVersion": prior_identity,
+        }
+        prior_digest = runtime._sha256_bytes(runtime._canonical_json(prior_provenance))
+        self.fixture.manifest["trustedPriorProvenanceSha256"] = [prior_digest]
+        self.fixture.write_manifest()
+        engine = self.fixture.new_engine()
+
+        prior_bundle = self.fixture.bundle(self.temp, "trusted-prior", prior_identity)
+        runtime._normalize_bundle_modes(prior_bundle)
+        prior_manifest = {
+            "schemaVersion": runtime.ARTIFACT_SCHEMA_VERSION,
+            "provenance": prior_provenance,
+            "inventory": runtime._inventory(prior_bundle),
+        }
+        prior_bytes = runtime._canonical_json(prior_manifest)
+        prior_artifact = self.temp / "trusted-prior.tar.gz"
+        runtime._write_deterministic_artifact(prior_artifact, prior_bytes, prior_bundle)
+
+        installed_prior = engine.install(prior_artifact)
+        self.assertEqual(installed_prior["identity"], prior_identity)
+        self.assertEqual(engine.verify_active()["identity"], prior_identity)
+        current_artifact = self.fixture.artifact(self.temp, "current-after-prior")
+        installed_current = engine.install(current_artifact)
+        self.assertEqual(installed_current["identity"], IDENTITY)
+        self.assertEqual(engine.verify_active()["identity"], IDENTITY)
+        rolled_back = engine.rollback()
+        self.assertEqual(rolled_back["identity"], prior_identity)
+        self.assertEqual(rolled_back["generation"], installed_prior["generation"])
+        rolled_forward = engine.rollback()
+        self.assertEqual(rolled_forward["identity"], IDENTITY)
+        self.assertEqual(rolled_forward["generation"], installed_current["generation"])
+
+        unknown_manifest = copy.deepcopy(prior_manifest)
+        unknown_manifest["provenance"]["buildEngineVersion"] = 1
+        unknown_artifact = self.temp / "unknown-prior.tar.gz"
+        runtime._write_deterministic_artifact(
+            unknown_artifact,
+            runtime._canonical_json(unknown_manifest),
+            prior_bundle,
+        )
+        self.assert_refuses(lambda: engine.inspect_artifact(unknown_artifact), "neither current nor an exact trusted prior")
 
     def test_active_verify_and_execute_do_not_write_installed_runtime(self) -> None:
         artifact = self.fixture.artifact(self.temp, "read-only-active")

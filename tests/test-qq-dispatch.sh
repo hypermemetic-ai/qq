@@ -47,13 +47,10 @@ for retired in \
   [ ! -e "$retired" ] || fail "retired delegation machinery remains: $retired"
 done
 
-for role in implementer reviewer researcher; do
+for role in implementer observer reviewer researcher; do
   manifest="$ROOT/delegation/manifests/agents/$role.md"
-  assert_equal 1 \
-    "$(grep -c '^model: openai-codex/gpt-5\.6-sol:xhigh$' "$manifest")" \
-    "$role does not have exactly one GPT-5.6 Sol xhigh model pin"
-  assert_file_contains "$manifest" \
-    '# Runtime model-identity verification is assigned to T-95 ticket 3.'
+  assert_file_not_matches "$manifest" '^(model|thinking):' \
+    "$role manifest retained compute authority"
 done
 for role in implementer reviewer researcher observer; do
   assert_equal 1 \
@@ -134,7 +131,7 @@ cat >"$fake_pi" <<'SH'
 set -euo pipefail
 
 if [ "${1:-}" = --version ]; then
-  printf '0.81.1+qq.execution-profile.1\n'
+  printf '0.81.1+qq.execution-profile.2\n'
   exit 0
 fi
 printf '%s\0' "$@" >"$FAKE_PI_ARGS"
@@ -296,6 +293,8 @@ for role in reviewer researcher implementer observer; do
     PI_SUBAGENT_CHILD_AGENT="$role" \
     PI_SUBAGENT_RUN_ID="$role-smoke" \
     PI_SUBAGENT_CHILD_INDEX=2 \
+    QQ_EXECUTION_PROFILE_LAUNCHER=/tmp/inherited-root-launcher \
+    QQ_EXECUTION_PROFILE_LAUNCHER_ROLE=architect \
     FAKE_POLICY_SNAPSHOT="$policy_snapshot" \
       "$DISPATCH" --json --model smoke/model
   ) >"$stdout_file" 2>"$stderr_file"
@@ -328,6 +327,9 @@ PY
     || fail "$role did not receive its policy identity"
   grep -Fxq "QQ_DISPATCH_POLICY_SCOPE=$expected_scope" "$FAKE_PI_ENV" \
     || fail "$role did not receive its policy scope"
+  if grep -Eq '^QQ_EXECUTION_PROFILE_LAUNCHER(_ROLE)?=' "$FAKE_PI_ENV"; then
+    fail "$role inherited the accountable root assertion"
+  fi
   pi_config_dir="$(sed -n 's/^PI_CODING_AGENT_DIR=//p' "$FAKE_PI_ENV")"
   role_run_dir="$(dirname -- "$pi_config_dir")"
   role_policy_snapshots["$role"]="$policy_snapshot"

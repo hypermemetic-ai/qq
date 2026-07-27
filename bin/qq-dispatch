@@ -398,6 +398,10 @@ else
   fi
 fi
 
+# A delegated process may inherit the accountable Architect launcher's root
+# assertion. The retained fork supplies its separate trusted child assertion.
+unset QQ_EXECUTION_PROFILE_LAUNCHER QQ_EXECUTION_PROFILE_LAUNCHER_ROLE
+
 printf '[qq-dispatch] role=%s policy=%s scope=%s boundary=landstrip landstrip=%s timeout=%s\n' \
   "$role" "$policy_identity" "$access_scope" "$landstrip_version" "$timeout_spec" >&2
 
