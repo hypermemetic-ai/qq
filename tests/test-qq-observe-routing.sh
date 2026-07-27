@@ -252,7 +252,7 @@ git -C "$repo" worktree add -qb feature/task "$checkout" main >/dev/null
 mkdir -p "$checkout/backlog/tasks" "$checkout/backlog/docs/plans"
 task_path="$checkout/backlog/tasks/t-201 - Fixture.md"
 plan_path="$checkout/backlog/docs/plans/doc-201 - Fixture.md"
-printf '%s\n' '---' 'id: T-201' 'status: In Progress' 'documentation:' '  - doc-201' '---' '<!-- SECTION:DESCRIPTION:BEGIN -->' '## Decision ledger' '- approved' '<!-- SECTION:DESCRIPTION:END -->' >"$task_path"
+printf '%s\n' '---' 'id: T-201' 'status: In Progress' 'modified_files:' '  - tests/a-valid-list-scalar-that-Backlog-wraps' '    across-lines.sh' 'documentation:' '  - doc-201' '---' '<!-- SECTION:DESCRIPTION:BEGIN -->' '## Decision ledger' '- approved' '<!-- SECTION:DESCRIPTION:END -->' >"$task_path"
 printf '%s\n' '---' 'id: doc-201' '---' '**Status:** APPROVED' >"$plan_path"
 task_sha="$(sha256sum "$task_path" | awk '{print $1}')"
 plan_sha="$(sha256sum "$plan_path" | awk '{print $1}')"
@@ -273,6 +273,17 @@ set -e
 assert_equal 65 "$status" 'foreign Repository Task result was accepted by the qq Observer'
 assert_file_contains "$tmp/foreign-result.err" 'running qq topology'
 [ ! -e "$run/routing/result.json" ] || fail 'foreign Task result mutated the Observer run'
+mkdir -p "$repo/backlog/tasks"
+malformed_task="$repo/backlog/tasks/t-202 - Malformed.md"
+printf '%s\n' '---' 'id: T-202' 'references:' '    orphan continuation' '---' >"$malformed_task"
+set +e
+"$fixture_observe" record-handoff-result --run "$run" --receipt "$result" >"$tmp/malformed-list.out" 2>"$tmp/malformed-list.err"
+status=$?
+set -e
+assert_equal 65 "$status" 'orphan frontmatter list continuation was accepted'
+assert_file_contains "$tmp/malformed-list.err" 'malformed frontmatter list'
+[ ! -e "$run/routing/result.json" ] || fail 'malformed frontmatter list mutated the Observer run'
+rm "$malformed_task"
 "$fixture_observe" record-handoff-result --run "$run" --receipt "$result" >/dev/null
 # Global results map every routed decision ID (set-aside decisions remain Task-free).
 global_decision_id="$(jq -r '.decisions[] | select(.action=="route") | .decision_id' "$global_handoff")"
