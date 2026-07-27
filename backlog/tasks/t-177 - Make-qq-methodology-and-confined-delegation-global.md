@@ -1,10 +1,10 @@
 ---
 id: T-177
 title: Make qq methodology and confined delegation global
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-27 09:00'
-updated_date: '2026-07-27 09:44'
+updated_date: '2026-07-27 09:56'
 labels: []
 dependencies: []
 documentation:
@@ -43,11 +43,11 @@ Outcome: make qq methodology and confined delegation global for every Git Reposi
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A separate Git Repository with no qq AGENTS.md marker receives canonical qq role manifests from primary authority and launches a confined delegate whose policy is scoped to that Repository.
-- [ ] #2 qq linked worktrees continue using checkout-local adapter and manifests for their own Git common directory, refuse external Repositories before child launch, and a non-Git child cwd still refuses.
-- [ ] #3 Pi project trust, trusted role and execution-profile authority, authentication staging, structured-output, timeout, signal, and process-tree confinement behavior remain unchanged and green.
-- [ ] #4 The documented bootstrap mounts canonical qq AGENTS.md through Pi's global context path without requiring per-Repository activation.
-- [ ] #5 Canonical-primary markerless external dispatch and feature-worktree cross-authority refusal are proven before merge; the actual DecIQ supported-role retry remains explicit post-merge land follow-through without config/package changes or unconstrained fallback.
+- [x] #1 A separate Git Repository with no qq AGENTS.md marker receives canonical qq role manifests from primary authority and launches a confined delegate whose policy is scoped to that Repository.
+- [x] #2 qq linked worktrees continue using checkout-local adapter and manifests for their own Git common directory, refuse external Repositories before child launch, and a non-Git child cwd still refuses.
+- [x] #3 Pi project trust, trusted role and execution-profile authority, authentication staging, structured-output, timeout, signal, and process-tree confinement behavior remain unchanged and green.
+- [x] #4 The documented bootstrap mounts canonical qq AGENTS.md through Pi's global context path without requiring per-Repository activation.
+- [x] #5 Canonical-primary markerless external dispatch and feature-worktree cross-authority refusal are proven before merge; the actual DecIQ supported-role retry remains explicit post-merge land follow-through without config/package changes or unconstrained fallback.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -59,3 +59,15 @@ Outcome: make qq methodology and confined delegation global for every Git Reposi
 4. Run focused confinement Checks and fresh-context review, publish one green PR, and leave merge to the operator.
 5. After merge, activate the global context mount and signal DecIQ to retry the unchanged assignment.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Verification: markerless external Repository reaches the fake child only through canonical primary authority with Repository-scoped Landstrip grants; a linked qq feature adapter refuses that external Repository before child launch; non-Git cwd refuses. Focused extension/dispatcher tests, shellcheck, TypeScript and Bash syntax, LSP, diff checks, full native ratchet, final fresh review, and GitHub CI shell/native-enforcement job pass. Initial CI exceeded prose_words by four; commit 9e000af tightened only the newly changed glossary prose to the exact 7470 budget and received independent PASS review. Post-merge global AGENTS activation and unchanged supported-role DecIQ retry remain the accountable land follow-through.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Made qq methodology and confined delegation global for every Git Repository without an AGENTS activation marker. Canonical primary qq now serves markerless external Repositories under exact Repository-scoped policy; non-primary qq worktree adapters can self-host their own Git common directory but refuse external Repositories, and non-Git delegation still fails closed. Preserved Pi project trust and trusted execution-profile authority, documented the native global AGENTS mount, and bound decision-19. Verified through focused tests, exact DecIQ no-provider boundary probe, native ratchet at budget, two independent PASS reviews, and green PR #268 CI including native delegate enforcement. Merge, activation, and the unchanged DecIQ supported-role retry remain operator/land follow-through.
+<!-- SECTION:FINAL_SUMMARY:END -->
