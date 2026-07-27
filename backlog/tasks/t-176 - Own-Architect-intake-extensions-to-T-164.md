@@ -1,41 +1,38 @@
 ---
-id: T-164
-title: Codify low-risk delegate-shell and alignment rules
+id: T-176
+title: Own Architect intake extensions to T-164
 status: In Progress
 assignee: []
-created_date: '2026-07-25 18:08'
+created_date: '2026-07-27 08:20'
 updated_date: '2026-07-27 09:52'
 labels: []
 dependencies: []
 references:
   - batch-861f1e8f2428e0025ff75a8ae27d5fc4
   - handoff-861f1e8f2428e0025ff75a8ae27d5fc4
-  - T-176
+  - T-164
+  - T-164.1
 documentation:
   - doc-112
 modified_files:
   - skills/delegate-batch/SKILL.md
-  - skills/grilling/SKILL.md
+  - skills/code-review/SKILL.md
 priority: high
 type: enhancement
-ordinal: 78000
+ordinal: 86000
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Encode the four instruction-only observer quick wins approved in the 2026-07-25 architect digest exchange:
+Own the two routed decisions from Architect batch `batch-861f1e8f2428e0025ff75a8ae27d5fc4` through their verified structured intake-result seam and the joint T-164 Change:
 
-- delegated shells use the confinement-provided `$TMPDIR` for scratch, logs, and helpers and never literal `/tmp`;
-- after the first recognized `/dev/fd` process-substitution or nested-confinement failure, record it once as `inconclusive-under-substrate` and do not rerun it in the child;
-- generic continuation such as “continue” cannot select among consequential options;
-- when the operator asks about a broad class and supplies an example, restate the full class before narrowing.
+- `decision-c57b48e36e9bd16bc2f340abf13ce406`: every delegate and reviewer work order requires temporary files, redirected logs, generated helpers, npm caches, and reviewer-runnable test scratch beneath confinement-provided `$TMPDIR`, never literal `/tmp` or worktree-local scratch;
+- `decision-45d8a6f24d19be579a4323daf59f654b`: a Check warning naming an in-scope corrective action must be resolved or reported in the Completion Envelope as an unresolved risk and cannot be represented only as `pass`.
 
-T-164.1 implements the two confirmed 2026-07-27 Architect-intake extensions; T-176 owns their structured intake mapping. All three Tasks share approved landing plan doc-112 and one instruction-only Change. The earlier local doc-110 remains untouched only as exact receipt evidence and is excluded from delivery.
+T-164.1 implements these rules; T-164 owns four previously approved rules. The exact intake-result receipt maps both decisions to this Task, and `qq-observe record-handoff-result` returned `status: verified`. All three Tasks share approved landing plan doc-112 and one instruction-only Change. The earlier local doc-110 remains untouched only as exact receipt evidence and is excluded from delivery.
 
-Retain the smallest resulting system: instruction changes only. Do not add state, tools, gates, confinement-policy widening, observer-provenance machinery, convergence mechanics, browser/target verification, review redesign, package-inventory capability, or unrelated cleanup.
-
-Evidence: observer recurrence keys `delegate-confinement-no-writable-tmpdir`, `delegated-check-known-substrate-rerun`, `generic-continuation-used-as-consequential-disposition`, and `alignment-example-mistaken-for-class-boundary`.
+Retain the smallest resulting system: no additional implementation scope, state, tool, gate, schema, policy grant, confinement widening, or unrelated cleanup.
 
 ## Decision ledger
 
@@ -45,11 +42,9 @@ Evidence: observer recurrence keys `delegate-confinement-no-writable-tmpdir`, `d
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Delegated confinement guidance requires scratch files, redirected logs, and generated helpers to live beneath confinement-provided `$TMPDIR`, never literal `/tmp`, without widening any role policy.
-- [ ] #2 After the first recognized `/dev/fd` process-substitution or nested-confinement failure, the child records that Check once as `inconclusive-under-substrate` and does not rerun it; the owner native rerun plus CI remains binding.
-- [ ] #3 Alignment governance states that generic continuation cannot select among consequential options; mutation waits for an explicit selected option or explicit approval of the named recommendation.
-- [ ] #4 Alignment governance restates a requested broad class before narrowing when the operator supplies an example.
-- [ ] #5 T-164 and T-164.1 ship in one instruction-only Change that adds no state, tool, gate, schema, or policy grant and passes applicable Skill validation, focused scenario checks, prose ratchet, Repository Checks, diff hygiene, and fresh-context review.
+- [ ] #1 Both routed Architect decision IDs are mapped to this born-in-worktree integer-ID Task by a verified `qq-handoff intake-result` receipt and recorded through `qq-observe record-handoff-result`.
+- [ ] #2 T-164.1 delivers the confined `$TMPDIR` work-order contract and warning-bearing Completion Envelope rule exactly as approved.
+- [ ] #3 This Task, T-164.1, and T-164 ship in one instruction-only Change with no additional runtime, state, tool, gate, schema, or policy scope.
 <!-- AC:END -->
 
 ## Implementation Notes
