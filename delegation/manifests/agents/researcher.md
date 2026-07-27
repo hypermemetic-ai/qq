@@ -1,8 +1,6 @@
 ---
 name: researcher
 description: Research the assigned question without modifying the Repository.
-# Runtime model-identity verification is assigned to T-95 ticket 3.
-model: openai-codex/gpt-5.6-sol:xhigh
 tools: read, grep, find, ls, bash, resolve-library-id, query-docs
 extensions:
 subagentOnlyExtensions: ~/.pi/agent/npm/node_modules/@upstash/context7-pi/extensions/context7.ts

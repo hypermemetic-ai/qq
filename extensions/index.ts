@@ -9,6 +9,7 @@ import registerContinue from "./qq-continue.ts";
 import registerSplitFork from "./qq-split-fork.ts";
 import registerOperatorStage from "./qq-operator-stage.ts";
 import registerBacklogGuard from "./qq-backlog-guard.ts";
+import registerExecutionProfiles from "./qq-execution-profiles.ts";
 import registerQqFooter from "./qq-footer.ts";
 import registerArchitect from "./qq-architect.ts";
 import registerHandoff from "./qq-handoff.ts";
@@ -20,6 +21,7 @@ export default function register(pi) {
   registerSplitFork(pi);
   registerOperatorStage(pi);
   registerBacklogGuard(pi);
+  registerExecutionProfiles(pi);
   registerQqFooter(pi);
   registerArchitect(pi);
   registerHandoff(pi);

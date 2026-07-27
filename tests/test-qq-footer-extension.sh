@@ -16,9 +16,10 @@ command -v node >/dev/null 2>&1 || fail 'node is required to test the Pi extensi
 
 module="$TMP/qq-footer.mjs"
 cp -- "$EXTENSION" "$module"
+cp -- "$ROOT/extensions/qq-execution-profiles.ts" "$TMP/qq-execution-profiles.ts"
 printf '{}\n' >"$TMP/no-auth.json"
 
-if ! node --input-type=module - "$module" "$AUTH_FIXTURE" "$TMP/no-auth.json" <<'JS'
+if ! node --experimental-strip-types --input-type=module - "$module" "$AUTH_FIXTURE" "$TMP/no-auth.json" <<'JS'
 import assert from "node:assert/strict";
 import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";

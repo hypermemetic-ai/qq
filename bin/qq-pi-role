@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Launch one dedicated accountable Pi root with an immutable qq role assertion.
+set -euo pipefail
+
+fail() {
+  printf 'qq-pi-role: %s\n' "$*" >&2
+  exit 64
+}
+
+[[ $# -ge 1 ]] || fail 'usage: qq-pi-role architect [pi-args...]'
+role="$1"
+shift
+[[ "$role" == architect ]] || fail "unsupported accountable role: $role"
+
+for variable in \
+  PI_SUBAGENT_CHILD_AGENT \
+  PI_SUBAGENT_TRUSTED_EXECUTION_ROLE \
+  PI_SUBAGENT_EXECUTION_PROFILE_RECEIPT \
+  QQ_EXECUTION_PROFILE_LAUNCHER_ROLE \
+  QQ_EXECUTION_PROFILE_LAUNCHER; do
+  [[ ! -v "$variable" ]] || fail "conflicting inherited role assertion: $variable"
+done
+
+self="$(readlink -f -- "${BASH_SOURCE[0]}")" || true
+[[ -n "$self" && -f "$self" ]] || fail 'cannot resolve launcher path'
+root="$(cd -- "$(dirname -- "$self")/.." && pwd -P)" || fail 'cannot resolve qq root'
+[[ -x "$root/bin/pi" ]] || fail 'verified qq Pi wrapper is unavailable'
+
+export QQ_EXECUTION_PROFILE_LAUNCHER="$self"
+export QQ_EXECUTION_PROFILE_LAUNCHER_ROLE=architect
+exec "$root/bin/pi" "$@"

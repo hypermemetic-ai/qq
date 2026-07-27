@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { acceptExecutionProfileTelemetry, getExecutionProfileDisplay } from "./qq-execution-profiles.ts";
 
 const AUTH_PATH = join(homedir(), ".pi", "agent", "auth.json");
 const POLL_INTERVAL_MS = 5 * 60 * 1000;
@@ -291,7 +292,17 @@ function contextText(ctx) {
     : `${percent.toFixed(1)}%/${windowText}`;
 }
 
+export function executionProfileText(profile) {
+  const acknowledged = singleLine(profile.acknowledgedServiceClass) || "n/a";
+  const accounted = singleLine(profile.accountedServiceClass);
+  const accountedText = accounted !== "" && accounted !== acknowledged ? ` • accounted ${accounted}` : "";
+  return `(${singleLine(profile.provider)}) ${singleLine(profile.model)} • ${singleLine(profile.effort)} • class ${singleLine(profile.serviceClass)} • ack ${acknowledged}${accountedText}`;
+}
+
 function rightText(pi, ctx, footerData) {
+  const profile = getExecutionProfileDisplay();
+  if (profile) return executionProfileText(profile);
+
   const modelId = singleLine(ctx.model?.id);
   if (modelId === "") return "";
   let text = modelId;
@@ -526,6 +537,11 @@ export default function register(pi, deps = {}) {
       if (inFlight === flight) inFlight = undefined;
     }
   }
+
+  pi.on("message_end", (event) => {
+    acceptExecutionProfileTelemetry(event.message);
+    repaint();
+  });
 
   pi.registerCommand("qq-footer-refresh", {
     description: REFRESH_DESCRIPTION,
