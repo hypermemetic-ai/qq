@@ -1,10 +1,10 @@
 ---
 id: T-167
 title: 'Evaluate Pi context, compaction, ETA, and delegate fence options'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-27 03:35'
-updated_date: '2026-07-27 04:19'
+updated_date: '2026-07-27 04:42'
 labels: []
 dependencies: []
 documentation:
@@ -32,14 +32,22 @@ Decision ledger:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 pi-context-view, pi-blackhole/state-of-the-art Pi compaction, and pi-eta receive source-audited, compatibility-aware recommendations grounded in opened primary sources and isolated probes where practical
-- [ ] #2 ZeroBoot, Gondolin, and Microsandbox are compared with current Landstrip against qq's declared threat model, platform and lifecycle constraints, worktree and credential needs, and integration cost
-- [ ] #3 The ETA measurement transition is reconciled with the concurrent voice-design Change and stated as an observable triggering and closing rule with research-before-implementation, time-to-PR, scope-change, parallel-work, and post-merge examples
-- [ ] #4 Exactly one cited, confidence-tagged research report is attached and gives explicit adopt / isolated-trial / hold / reject recommendations, dependencies, gaps, and smallest follow-up checks
+- [x] #1 pi-context-view, pi-blackhole/state-of-the-art Pi compaction, and pi-eta receive source-audited, compatibility-aware recommendations grounded in opened primary sources and isolated probes where practical
+- [x] #2 ZeroBoot, Gondolin, and Microsandbox are compared with current Landstrip against qq's declared threat model, platform and lifecycle constraints, worktree and credential needs, and integration cost
+- [x] #3 The ETA measurement transition is reconciled with the concurrent voice-design Change and stated as an observable triggering and closing rule with research-before-implementation, time-to-PR, scope-change, parallel-work, and post-merge examples
+- [x] #4 Exactly one cited, confidence-tagged research report is attached and gives explicit adopt / isolated-trial / hold / reject recommendations, dependencies, gaps, and smallest follow-up checks
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
 Research completed 2026-07-27. Source audit: recovered researcher run d6df7808 (original run 8868479c timed out during synthesis); accountable owner reopened recommendation-controlling sources. Final report: doc-103. Live installation, compaction, and VM probes remained outside the approved boundary.
+
+Fresh review 1f43c21a reported three P2s: scope-replacement ETA continuity, duplicated T-123 proxy work, and missing compaction privacy comparison. All were fixed. Fix review 78503792 closed them and found one pending-summary persistence overstatement; corrected against source. Second fix review 48866f81 passed with no findings. Mechanical fix deltas: production LOC +0; runtime decision points +0.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Delivered doc-103, the sole T-167 research report. Recommendations: isolated trial for pi-context-view after a real turn and for Microsandbox as a whole-delegate candidate; reject pi-blackhole as qq default and ZeroBoot for delegates; hold automatic compaction replacement, pi-eta, and Gondolin; retain current Landstrip and the operator-declined T-123 proxy-trial disposition. Defined operator actionable wait from accepted input to planned alignment:operator-turn-opened, with critical-path dispatch latency as a diagnostic. No runtime, confinement, or host state changed.
+<!-- SECTION:FINAL_SUMMARY:END -->
