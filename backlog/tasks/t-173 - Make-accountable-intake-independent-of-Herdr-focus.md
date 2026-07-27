@@ -1,14 +1,20 @@
 ---
 id: T-173
 title: Make accountable intake independent of Herdr focus
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-27 06:54'
-updated_date: '2026-07-27 06:55'
+updated_date: '2026-07-27 07:24'
 labels: []
 dependencies: []
+references:
+  - 'https://github.com/hypermemetic-ai/qq/pull/261'
 documentation:
   - doc-109
+modified_files:
+  - README.md
+  - bin/lib/qq-handoff.py
+  - tests/test-qq-handoff.sh
 priority: high
 type: bug
 ordinal: 82000
@@ -34,11 +40,11 @@ Ownership boundary: qq owns `qq-handoff`, its deterministic tests, and current R
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Architect intake succeeds from the valid live root Pi in qq's dedicated architect tab while another workspace/tab/pane is globally focused; ordinary handoff authority likewise does not depend on focus.
-- [ ] #2 Recipients are created with tab create --no-focus in the project home, and success, error, and proven-cleanup paths issue no focus command and consume no current-focus state.
-- [ ] #3 Repository topology, dedicated Architect-tab, duplicate owner, immutable handoff, bounded cleanup/preservation, startup/prompt, final agent reinspection, and receipt rails remain enforced.
-- [ ] #4 Current README wording matches focus-independent behavior; historical records, Herdr substrate, pending batch/handoff, T-164, and unrelated lifecycle surfaces are unchanged.
-- [ ] #5 The focused regression fails on the unfixed behavior and passes after the fix; focused harnesses, all top-level Repository Checks, diagnostics, diff checks, and fresh-context review are green.
+- [x] #1 Architect intake succeeds from the valid live root Pi in qq's dedicated architect tab while another workspace/tab/pane is globally focused; ordinary handoff authority likewise does not depend on focus.
+- [x] #2 Recipients are created with tab create --no-focus in the project home, and success, error, and proven-cleanup paths issue no focus command and consume no current-focus state.
+- [x] #3 Repository topology, dedicated Architect-tab, duplicate owner, immutable handoff, bounded cleanup/preservation, startup/prompt, final agent reinspection, and receipt rails remain enforced.
+- [x] #4 Current README wording matches focus-independent behavior; historical records, Herdr substrate, pending batch/handoff, T-164, and unrelated lifecycle surfaces are unchanged.
+- [x] #5 The focused regression fails on the unfixed behavior and passes after the fix; focused harnesses, all top-level Repository Checks, diagnostics, diff checks, and fresh-context review are green.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -50,3 +56,11 @@ Ownership boundary: qq owns `qq-handoff`, its deterministic tests, and current R
 4. Update deterministic tests for another-Repository focus and no-focus-command/no-focus-read behavior across success, error, and cleanup; reconcile current README wording only.
 5. Run focused harnesses, all top-level Repository Checks, diagnostics, diff hygiene, fresh-context review, acceptance finalization, and one-PR GitHub Flow delivery.
 <!-- SECTION:PLAN:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Delivered focus-independent accountable handoff and typed Architect intake in PR #261. Authority now comes from the injected live root Pi identity cross-checked against the Repository project home; Architect intake retains its dedicated `architect` tab rail. Runtime accounting uses workspace-scoped tab/pane listings, recipients remain explicit `tab create --no-focus`, and all focus snapshot/current-pane fallback, restoration commands/state, success/error gates, and receipt claims are removed. Topology, duplicate-owner, immutable-handoff, startup/prompt, cleanup/preservation, and final-reinspection rails remain.
+
+Evidence: the adapted regression failed before the production change with focus-mismatch exit 2 and passes after it; Python compilation, focused handoff and extension harnesses, all 40 top-level Repository tests, Python LSP (0 diagnostics), diff hygiene, and reconciled-base checks passed. Fresh-context review `f22a2e1c-cc9e-4e53-98b7-c70d5adcf367` returned APPROVE with no findings. Mechanical production delta is −83 LOC and −21 decision points. The settled pending batch/handoff remains immutable and untouched; no retry, T-164 work, Herdr substrate change, new runtime state, or historical-record rewrite occurred.
+<!-- SECTION:FINAL_SUMMARY:END -->
