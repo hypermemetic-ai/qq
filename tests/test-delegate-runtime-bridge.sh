@@ -10,6 +10,8 @@ source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd "$TESTS_DIR/.." && pwd -P)"
 REVIEW_SKILL="$ROOT/skills/code-review/SKILL.md"
 DELEGATE_SKILL="$ROOT/skills/delegate-batch/SKILL.md"
+RESEARCH_SKILL="$ROOT/skills/research/SKILL.md"
+MANIFESTS_DIR="$ROOT/delegation/manifests/agents"
 README="$ROOT/README.md"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -23,20 +25,33 @@ assert_one_literal() {
   assert_equal 1 "$count" "$label"
 }
 
-review_call='subagent({agent:"reviewer",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema,acceptance:{level:"none",reason:"per the manifests"},cwd:"<absolute-change-worktree>",context:"fresh",async:true,timeoutMs:900000})'
-delegate_call='subagent({agent:"implementer",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema,acceptance:{level:"none",reason:"per the manifests"},cwd:"<absolute-worktree>",context:"fresh",async:true,timeoutMs:1800000})'
+review_call='subagent({agent:"reviewer",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema,acceptance:{level:"none",reason:"per the manifests"},cwd:"<absolute-change-worktree>",context:"fresh",async:true})'
+delegate_call='subagent({agent:"implementer",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema,acceptance:{level:"none",reason:"per the manifests"},cwd:"<absolute-worktree>",context:"fresh",async:true})'
+research_call='subagent({agent:"researcher",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema,acceptance:{level:"none",reason:"per the manifests"},cwd:"<absolute-working-root>",context:"fresh",async:true})'
 
 assert_one_literal "$REVIEW_SKILL" "$review_call" \
   'code-review does not contain exactly one approved top-level single run'
 assert_one_literal "$DELEGATE_SKILL" "$delegate_call" \
   'delegate-batch does not contain exactly one approved top-level single run'
-assert_file_contains "$REVIEW_SKILL" \
-  '`timeoutMs:900000` and no other contract override'
-assert_file_contains "$DELEGATE_SKILL" \
-  '`timeoutMs:1800000` and no contract override'
-for skill in "$REVIEW_SKILL" "$DELEGATE_SKILL"; do
+assert_one_literal "$RESEARCH_SKILL" "$research_call" \
+  'research does not contain exactly one approved top-level single run'
+for skill in "$REVIEW_SKILL" "$DELEGATE_SKILL" "$RESEARCH_SKILL"; do
   assert_file_not_matches "$skill" 'subagent\(\{[[:space:]]*chain[[:space:]]*:' \
     "one-step chain syntax returned in $skill"
+  assert_file_not_matches "$skill" 'timeoutMs[[:space:]]*:[[:space:]]*[0-9]+' \
+    "numeric timeoutMs policy literal returned in $skill"
+  assert_file_contains "$skill" "source run's recorded \`timeoutMs\`" \
+    "source-run recorded-timeout recovery wording missing from $skill"
+done
+assert_file_contains "$REVIEW_SKILL" \
+  "source run's recorded \`timeoutMs\` and no other contract override"
+assert_file_contains "$DELEGATE_SKILL" \
+  "source run's recorded \`timeoutMs\` and no contract override"
+for manifest in "$MANIFESTS_DIR"/{implementer,reviewer,researcher,observer}.md; do
+  assert_equal 1 "$(grep -Fxc -- 'timeoutMs: 2700000' "$manifest")" \
+    "$manifest does not contain exactly one canonical 45-minute timeout"
+  assert_equal 1 "$(grep -Ec '^[[:space:]]*timeoutMs[[:space:]]*:' "$manifest")" \
+    "$manifest does not contain exactly one timeoutMs declaration"
 done
 
 source_pin='git:github.com/hypermemetic-ai/pi-subagents@9e045ed75e09a163afa17271e55150ed1e8369df'

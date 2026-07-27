@@ -15,17 +15,17 @@ worktrees:
 
 ```ts
 const completionEnvelopeSchema=JSON.parse(readFileSync("<absolute-working-root>/delegation/manifests/completion-envelope.schema.json","utf8"))
-subagent({chain:[{agent:"researcher",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema,acceptance:{level:"none",reason:"per the manifests"}}],cwd:"<absolute-working-root>",context:"fresh",async:true,timeoutMs:900000})
+subagent({agent:"researcher",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema,acceptance:{level:"none",reason:"per the manifests"},cwd:"<absolute-working-root>",context:"fresh",async:true})
 ```
 
 Paths absolute; task only the brief pointer. Pi-subagents owns
 lifecycle/artifacts; adapter containment. Inspect id/`details.asyncDir` once:
 run/fleet status, `status.json`, `events.jsonl`,
-`output-<index>.log`, and `subagent-log-<run-id>.md`. Terminal validated envelope
-`summary` carries cited, confidence-tagged findings; nonzero/missing/invalid
-fails. Infrastructure failure: resume; conclusions: relaunch fresh. Owner
-spot-checks load-bearing citations, decides what the findings mean, and writes
-the Repository artifact.
+`output-<index>.log`, and `subagent-log-<run-id>.md`. Validated `summary` carries
+cited, confidence-tagged findings; nonzero/missing/invalid fails. After
+infrastructure failure, resume with the source run's recorded `timeoutMs`;
+relaunch conclusions fresh. Owner spot-checks load-bearing citations, judges
+findings, and writes the Repository artifact.
 
 ## Method
 
