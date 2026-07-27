@@ -128,41 +128,52 @@ assertEq(
   "runtime-root override preserved",
 );
 
-// An unrelated project stays vanilla and does not touch its configured root.
-const unrelated = fs.mkdtempSync(path.join(os.tmpdir(), "qq-unrelated-"));
-process.chdir(unrelated);
-delete process.env.PI_SUBAGENT_PI_BINARY;
-delete process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS;
-delete process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS;
-delete process.env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES;
-delete process.env.QQ_DISPATCH_RUNTIME_ROOT;
-const unrelatedRoot = path.join(os.tmpdir(), `pi-subagent-unrelated-${process.pid}`);
-fs.writeFileSync(path.join(cfgDir, "config.json"), JSON.stringify({ defaultSessionDir: unrelatedRoot }));
-const unrelatedModule = await import(pathToFileURL(ext).href + "?unrelated");
-unrelatedModule.default(pi);
-if (process.env.PI_SUBAGENT_PI_BINARY !== undefined || process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS !== undefined
-  || process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS !== undefined
-  || process.env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES !== undefined
-  || process.env.QQ_DISPATCH_RUNTIME_ROOT !== undefined || fs.existsSync(unrelatedRoot)) {
-  die("unrelated project did not remain vanilla");
-}
+const clearDelegationEnv = () => {
+  delete process.env.PI_SUBAGENT_PI_BINARY;
+  delete process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS;
+  delete process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS;
+  delete process.env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES;
+  delete process.env.QQ_DISPATCH_RUNTIME_ROOT;
+};
+const assertCanonicalEnv = (label) => {
+  assertEq(process.env.PI_SUBAGENT_PI_BINARY, `${root}/bin/qq-dispatch`, `${label} dispatcher`);
+  assertEq(process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS, `${root}/delegation/manifests/agents`, `${label} manifests`);
+  assertEq(process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS, JSON.stringify({
+    implementer: `${root}/delegation/manifests/agents/implementer.md`,
+    observer: `${root}/delegation/manifests/agents/observer.md`,
+    researcher: `${root}/delegation/manifests/agents/researcher.md`,
+    reviewer: `${root}/delegation/manifests/agents/reviewer.md`,
+  }), `${label} trusted manifests`);
+  assertEq(
+    process.env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES,
+    "__qq_execution_profile_resolver_required__",
+    `${label} profiles poisoned`,
+  );
+};
 
-// A governed linked Repository selects canonical qq through its AGENTS link.
-const linked = fs.mkdtempSync(path.join(os.tmpdir(), "qq-linked-"));
-fs.symlinkSync(path.join(root, "AGENTS.md"), path.join(linked, "AGENTS.md"));
-await import("node:child_process").then(({ execFileSync }) => execFileSync("git", ["init", "-q", "-b", "main", linked]));
-process.chdir(linked);
-const linkedModule = await import(pathToFileURL(ext).href + "?linked");
-linkedModule.default(pi);
-assertEq(process.env.PI_SUBAGENT_PI_BINARY, `${root}/bin/qq-dispatch`, "linked dispatcher");
-assertEq(process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS, `${root}/delegation/manifests/agents`, "linked manifests");
-assertEq(process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS, JSON.stringify({
-  implementer: `${root}/delegation/manifests/agents/implementer.md`,
-  observer: `${root}/delegation/manifests/agents/observer.md`,
-  researcher: `${root}/delegation/manifests/agents/researcher.md`,
-  reviewer: `${root}/delegation/manifests/agents/reviewer.md`,
-}), "linked trusted manifests");
-assertEq(process.env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES, "__qq_execution_profile_resolver_required__", "linked profiles poisoned");
+// A markerless external Git Repository receives canonical qq configuration.
+const external = fs.mkdtempSync(path.join(os.tmpdir(), "qq-external-"));
+await import("node:child_process").then(({ execFileSync }) => execFileSync("git", ["init", "-q", "-b", "main", external]));
+process.chdir(external);
+clearDelegationEnv();
+const externalRoot = path.join(os.tmpdir(), `pi-subagent-external-${process.pid}`);
+fs.writeFileSync(path.join(cfgDir, "config.json"), JSON.stringify({ defaultSessionDir: externalRoot }));
+const externalModule = await import(pathToFileURL(ext).href + "?external");
+externalModule.default(pi);
+assertCanonicalEnv("external");
+if (!fs.existsSync(externalRoot)) die("external session root was not created");
+
+// A non-Git parent session is also configured so a delegated non-Git cwd
+// reaches qq-dispatch and its explicit fail-closed refusal.
+const nonGit = fs.mkdtempSync(path.join(os.tmpdir(), "qq-non-git-"));
+process.chdir(nonGit);
+clearDelegationEnv();
+const nonGitRoot = path.join(os.tmpdir(), `pi-subagent-non-git-${process.pid}`);
+fs.writeFileSync(path.join(cfgDir, "config.json"), JSON.stringify({ defaultSessionDir: nonGitRoot }));
+const nonGitModule = await import(pathToFileURL(ext).href + "?non-git");
+nonGitModule.default(pi);
+assertCanonicalEnv("non-Git");
+if (!fs.existsSync(nonGitRoot)) die("non-Git session root was not created");
 
 // A configured root outside the adapter-accepted set is left untouched.
 const outside = path.join(home, "outside-root");
@@ -172,8 +183,10 @@ fourth.default(pi);
 if (fs.existsSync(outside)) die("extension created a root outside the accepted set");
 
 fs.rmSync(sessRoot, { recursive: true, force: true });
-fs.rmSync(unrelated, { recursive: true, force: true });
-fs.rmSync(linked, { recursive: true, force: true });
+fs.rmSync(external, { recursive: true, force: true });
+fs.rmSync(nonGit, { recursive: true, force: true });
+fs.rmSync(externalRoot, { recursive: true, force: true });
+fs.rmSync(nonGitRoot, { recursive: true, force: true });
 fs.rmSync(home, { recursive: true, force: true });
 ' || fail "extension behavior mismatch"
 
@@ -185,6 +198,8 @@ done
 
 # README Install documents the extension as the by-construction mechanism.
 assert_file_contains "$ROOT/README.md" 'extensions/qq-subagent-env.ts'
+assert_file_contains "$ROOT/README.md" 'ln -sT "$HOME/projects/qq/AGENTS.md" "$HOME/.pi/agent/AGENTS.md"'
+assert_file_contains "$ROOT/README.md" 'project-trust mechanism remains authoritative'
 
 # Pivot tripwire: the shell surface must not re-introduce shell-level exports.
 if grep -q 'export PI_SUBAGENT' "$ROOT/cockpit/shell/file-navigation.bash"; then

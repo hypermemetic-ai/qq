@@ -23,8 +23,8 @@ wiring needed to expose it.
 
 ## Repository surfaces
 
-- [`AGENTS.md`](./AGENTS.md) is the shared operating guidance. Linked
-  Repositories can inherit the same file through a root-level symlink.
+- [`AGENTS.md`](./AGENTS.md) is the shared operating guidance mounted through
+  Pi's global context path. Repository-local guidance is optional additive context.
 - `skills/` contains stateless capabilities discovered through each agent
   runtime's native skill surface.
 - `backlog/` holds Tasks, authored documents, and decisions managed through the
@@ -361,21 +361,22 @@ A failed or rolled-back adoption leaves Context7 absent. Restore `.mcp.json`
 only after a new explicit operator decision; never silently fall back to the
 retired `npx @latest` route.
 
-Mount the qq Skill root directly into Pi. This is one root mount, so Skill
-membership stays live by construction:
+Mount qq's global context and Skill roots directly into Pi. These root mounts
+keep methodology and Skill membership live by construction without per-Repository
+activation:
 
 ```bash
 mkdir -p ~/.pi/agent
+ln -sT "$HOME/projects/qq/AGENTS.md" "$HOME/.pi/agent/AGENTS.md"
 ln -sT "$HOME/projects/qq/skills" "$HOME/.pi/agent/skills"
 ```
 
 The globally mounted `extensions/qq-subagent-env.ts` sets the delegation
 adapter, canonical agent directory, exact trusted-seat map, and structured-
-output runtime root only in qq-governed Repositories. qq and its worktrees are
-recognized by Git common-directory identity and use the active checkout. A
-linked Repository is governed only when its root `AGENTS.md` symlink resolves
-to qq's canonical `AGENTS.md`; it uses qq's canonical checkout. Unrelated Pi
-projects keep vanilla delegation:
+output runtime root in every Pi session. qq and its worktrees are recognized by
+Git common-directory identity and use the active checkout. Every other cwd uses
+qq's canonical primary checkout, including a non-Git parent session so a
+non-Git delegated cwd reaches the adapter's explicit refusal:
 
 - `PI_SUBAGENT_PI_BINARY=<checkout>/bin/qq-dispatch`
 - `PI_SUBAGENT_EXTRA_AGENT_DIRS=<checkout>/delegation/manifests/agents`
@@ -386,10 +387,11 @@ projects keep vanilla delegation:
 The trusted binary, manifest, path, and profile variables are qq authority and
 replace caller or inherited values; environment compute overrides do not win.
 `QQ_DISPATCH_RUNTIME_ROOT` remains operator-overridable placement only. The
-existing global qq extension mount loads the resolver everywhere, while the
-delegation variables activate only after the structured Repository check.
-Delegates dispatch confined by construction without shell exports. Relaunch Pi
-(or `/reload`) after install or upgrade.
+global qq extension loads the resolver and delegation configuration everywhere.
+Pi's project-trust mechanism remains authoritative for Repository-supplied
+settings, extensions, packages, and executable code; global qq delegation does
+not grant that trust. Delegates dispatch confined by construction without shell
+exports. Relaunch Pi (or `/reload`) after install or upgrade.
 
 Set the dispatcher-side pi-subagents config at
 `~/.pi/agent/extensions/subagent/config.json` to include:
@@ -410,22 +412,21 @@ temp root; without it, pi-subagents nests child sessions inside the parent
 session tree, which the confinement policy deliberately does not grant. The
 config is required: the adapter refuses dispatch when it is missing or
 malformed. The configured path must be a direct `pi-subagent-*` child of the
-launcher temp directory (`$TMPDIR` or `/tmp`). The governed extension
-pre-creates the root (mode 700) at session start and tightens an
-operator-owned loose root; at dispatch the adapter enforces the contract and
+launcher temp directory (`$TMPDIR` or `/tmp`). The global extension pre-creates
+the root (mode 700) at session start and tightens an operator-owned loose root; at dispatch the adapter enforces the contract and
 fails closed on a symlink, foreign ownership, or any mode other than 700
 rather than widening the grant.
 
 For qq worktrees the extension resolves adapter and manifests from that
-checkout; governed linked Repositories use canonical qq primary `main`.
+checkout; every other Repository uses canonical qq primary `main`.
 Pi-subagents supplies a trusted child-role assertion only after exact canonical
-manifest validation, while its `cwd` selects the assigned worktree. The
-canonical adapter serves any worktree from that Repository, refuses unrelated
-repositories, clears an inherited accountable-root assertion, renders that
-worktree's Landstrip grants, and starts the real Pi child under bounded
-descendant cleanup. Canonical manifests carry no model or thinking authority;
-the retained fork locks each child to the central resolver snapshot and
-requires its matching execution-profile receipt.
+manifest validation, while its `cwd` selects the assigned Repository worktree.
+The canonical adapter serves any resolvable Git Repository, refuses non-Git
+child directories, clears an inherited accountable-root assertion, renders
+grants scoped to the invocation Repository and its exact Git metadata, and
+starts the real Pi child under bounded descendant cleanup. Canonical manifests
+carry no model or thinking authority; the retained fork locks each child to the
+central resolver snapshot and requires its matching execution-profile receipt.
 
 Start Pi and use `/login` to configure both providers: select Kimi For Coding
 for the accountable session's dedicated `pi-qq` credential, then select
@@ -623,9 +624,9 @@ These file links are day-0 bootstrap, not a sync surface: content is live
 through each link, and the set changes only when a new cockpit tool is
 adopted. Nothing needs re-running when Skills or commands change.
 
-Bootstrap does not manage repository instructions. A linked Repository can
-point its root `AGENTS.md` symlink directly to qq's `AGENTS.md`, keeping one
-source of truth without adding global guidance to unrelated Repositories.
+Bootstrap mounts canonical qq guidance globally through
+`~/.pi/agent/AGENTS.md`. A Repository may add its own local `AGENTS.md` as
+additional project context; that file is not a qq activation marker.
 
 ## Knowledge runtime
 
