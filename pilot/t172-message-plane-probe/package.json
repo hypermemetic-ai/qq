@@ -1,0 +1,13 @@
+{
+  "name": "qq-t172-message-plane-probe",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "probe": "node probe.mjs"
+  },
+  "dependencies": {
+    "bullmq": "5.81.2",
+    "ioredis": "5.11.1"
+  }
+}
