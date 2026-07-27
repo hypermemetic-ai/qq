@@ -870,6 +870,23 @@ jq -e \
     and (.filesystem.allowWrite | index($adapter)) == null
   ' "$tmp/external-policy.json" >/dev/null
 
+# A linked qq feature-worktree adapter may self-host its own Git common
+# directory, but must not become canonical authority for an external Repository.
+: >"$FAKE_PI_ARGS"
+set +e
+(
+  cd "$external_repository"
+  PI_SUBAGENT_CHILD_AGENT=implementer \
+    "$fixture_worktree/bin/qq-dispatch" --json
+) >"$tmp/feature-external.stdout" 2>"$tmp/feature-external.stderr"
+feature_external_status=$?
+set -e
+assert_equal 65 "$feature_external_status" \
+  'feature-worktree adapter external refusal did not exit 65'
+assert_file_contains "$tmp/feature-external.stderr" \
+  'non-primary adapter may not serve an external repository'
+[ ! -s "$FAKE_PI_ARGS" ] || fail 'feature-worktree adapter external refusal launched Pi'
+
 outside="$tmp/outside"
 mkdir -p "$outside"
 run_failure non-git-cwd "$outside" \
@@ -883,18 +900,20 @@ fake_git="$tmp/git"
 cat >"$fake_git" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-case " $* " in
-  *' --git-common-dir '*) exit 1 ;;
-esac
+if [[ " $* " == *" --git-common-dir "* \
+  && " $* " == *" -C $FAKE_GIT_FAILURE_ROOT "* ]]; then
+  exit 1
+fi
 exec "$REAL_GIT_BIN" "$@"
 SH
 chmod +x "$fake_git"
 run_failure undiscoverable-git "$ROOT" \
   env \
     REAL_GIT_BIN="$real_git" \
+    FAKE_GIT_FAILURE_ROOT="$ROOT" \
     QQ_GIT_BIN="$fake_git" \
     PI_SUBAGENT_CHILD_AGENT=implementer \
-    "$DISPATCH" --json
+    "$fixture_primary/bin/qq-dispatch" --json
 assert_file_contains "$tmp/undiscoverable-git.stderr" \
   'cannot discover the Git common directory'
 
