@@ -1,0 +1,215 @@
+#!/usr/bin/env python3
+"""Emit Pi's configured package inventory from structured settings and manifests."""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path, PurePosixPath
+import re
+import sys
+from typing import Any, NoReturn
+from urllib.parse import urlparse
+
+
+NPM_NAME = re.compile(r"(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*", re.IGNORECASE)
+GIT_COMPONENT = re.compile(r"[A-Za-z0-9._-]+")
+
+
+class InventoryError(Exception):
+    pass
+
+
+def fail(message: str, code: int = 2) -> NoReturn:
+    print(f"qq-pi-inventory: {message}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def load_settings(path: Path, required: bool) -> list[str | dict[str, Any]]:
+    if not path.exists():
+        if required:
+            raise InventoryError(f"settings file is absent: {path}")
+        return []
+    if path.is_symlink() or not path.is_file():
+        raise InventoryError(f"settings path is not a regular file: {path}")
+    try:
+        document = json.loads(path.read_bytes())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise InventoryError(f"invalid settings JSON at {path}: {error}") from error
+    if not isinstance(document, dict):
+        raise InventoryError(f"settings document is not an object: {path}")
+    packages = document.get("packages", [])
+    if not isinstance(packages, list):
+        raise InventoryError(f"settings packages is not an array: {path}")
+    validated: list[str | dict[str, Any]] = []
+    for index, entry in enumerate(packages):
+        if isinstance(entry, str):
+            source = entry
+        elif isinstance(entry, dict):
+            source = entry.get("source")
+        else:
+            raise InventoryError(f"package entry {index} in {path} is neither a string nor an object")
+        if (
+            not isinstance(source, str)
+            or not source
+            or source != source.strip()
+            or not source.isprintable()
+            or source.endswith(" (filtered)")
+        ):
+            raise InventoryError(f"package entry {index} in {path} has an ambiguous source")
+        validated.append(entry)
+    return validated
+
+
+def npm_package_name(source: str) -> str:
+    spec = source.removeprefix("npm:")
+    if not spec:
+        raise InventoryError(f"empty npm package source: {source}")
+    if spec.startswith("@"):
+        slash = spec.find("/")
+        if slash < 2:
+            raise InventoryError(f"invalid scoped npm package source: {source}")
+        version_at = spec.rfind("@")
+        name = spec[:version_at] if version_at > slash else spec
+    else:
+        name = spec.split("@", 1)[0]
+    if not NPM_NAME.fullmatch(name):
+        raise InventoryError(f"invalid npm package name in source: {source}")
+    return name
+
+
+def git_host_path(source: str) -> tuple[str, tuple[str, ...]]:
+    value = source.removeprefix("git:")
+    if not value:
+        raise InventoryError(f"empty git package source: {source}")
+    ref_at = value.rfind("@")
+    if ref_at > max(value.rfind("/"), value.rfind(":")):
+        value = value[:ref_at]
+    if "://" in value:
+        parsed = urlparse(value)
+        host = parsed.hostname or ""
+        path_value = parsed.path
+    elif re.match(r"[^/@]+@[^:]+:.+", value):
+        authority, path_value = value.split(":", 1)
+        host = authority.split("@", 1)[1]
+    else:
+        host, separator, path_value = value.partition("/")
+        if not separator:
+            raise InventoryError(f"git package source lacks a host and path: {source}")
+    path_value = path_value.strip("/")
+    if path_value.endswith(".git"):
+        path_value = path_value[:-4]
+    parts = tuple(PurePosixPath(path_value).parts)
+    if (
+        not GIT_COMPONENT.fullmatch(host)
+        or not parts
+        or any(part in ("", ".", "..") or not GIT_COMPONENT.fullmatch(part) for part in parts)
+    ):
+        raise InventoryError(f"unsafe git package source: {source}")
+    return host, parts
+
+
+def installed_path(home: Path, cwd: Path, source: str, scope: str) -> Path:
+    base = home / ".pi" / "agent" if scope == "global" else cwd / ".pi"
+    if source.startswith("npm:"):
+        name = npm_package_name(source)
+        return base / "npm" / "node_modules" / Path(*name.split("/"))
+    if source.startswith("git:"):
+        host, parts = git_host_path(source)
+        return base / "git" / host / Path(*parts)
+    raise InventoryError(f"unsupported Pi package source: {source}")
+
+
+def manifest_identity(path: Path, source: str) -> tuple[str, dict[str, str]]:
+    if path.is_symlink() or not path.is_dir():
+        raise InventoryError(f"configured package is not installed as a real directory: {source} -> {path}")
+    manifest = path / "package.json"
+    if manifest.is_symlink() or not manifest.is_file():
+        raise InventoryError(f"installed package lacks a regular package.json: {source} -> {manifest}")
+    try:
+        document = json.loads(manifest.read_bytes())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise InventoryError(f"invalid installed package manifest for {source}: {error}") from error
+    if not isinstance(document, dict):
+        raise InventoryError(f"installed package manifest is not an object: {manifest}")
+    name = document.get("name")
+    version = document.get("version")
+    if not isinstance(name, str) or not name.strip() or name != name.strip() or not name.isprintable():
+        raise InventoryError(f"installed package manifest has no valid name: {manifest}")
+    if not isinstance(version, str) or not version.strip() or version != version.strip() or not version.isprintable():
+        raise InventoryError(f"installed package manifest has no valid version: {manifest}")
+    if source.startswith("npm:") and name != npm_package_name(source):
+        raise InventoryError(f"npm source and installed manifest name disagree: {source} -> {name}")
+    return name, {"name": name, "version": version}
+
+
+def records() -> list[dict[str, Any]]:
+    home_value = os.environ.get("HOME")
+    if not home_value or not os.path.isabs(home_value):
+        raise InventoryError("HOME must be an absolute path")
+    home = Path(home_value)
+    cwd = Path.cwd().resolve()
+    settings = (
+        ("global", home / ".pi" / "agent" / "settings.json", True),
+        ("project", cwd / ".pi" / "settings.json", False),
+    )
+    result: list[dict[str, Any]] = []
+    for scope, settings_path, required in settings:
+        for entry in load_settings(settings_path, required):
+            source = entry if isinstance(entry, str) else entry["source"]
+            path = installed_path(home, cwd, source, scope)
+            name, identity = manifest_identity(path, source)
+            result.append(
+                {
+                    "name": name,
+                    "source": source,
+                    "scope": scope,
+                    "filtered": isinstance(entry, dict),
+                    "installed_path": os.fspath(path.absolute()),
+                    "manifest_identity": identity,
+                }
+            )
+    scope_order = {"global": 0, "project": 1}
+    result.sort(key=lambda item: (scope_order[item["scope"]], item["source"], item["name"]))
+    return result
+
+
+def print_table(items: list[dict[str, Any]]) -> None:
+    columns = (
+        ("NAME", [item["name"] for item in items]),
+        ("SCOPE", [item["scope"] for item in items]),
+        ("FILTERED", ["yes" if item["filtered"] else "no" for item in items]),
+        ("SOURCE", [item["source"] for item in items]),
+        ("MANIFEST", [f"{item['manifest_identity']['name']}@{item['manifest_identity']['version']}" for item in items]),
+        ("INSTALLED PATH", [item["installed_path"] for item in items]),
+    )
+    widths = [max(len(heading), *(len(str(value)) for value in values)) for heading, values in columns]
+    print("  ".join(heading.ljust(width) for (heading, _values), width in zip(columns, widths)))
+    print("  ".join("-" * width for width in widths))
+    for index in range(len(items)):
+        print("  ".join(str(values[index]).ljust(width) for (_heading, values), width in zip(columns, widths)))
+
+
+def main(argv: list[str]) -> None:
+    if argv == []:
+        mode, source = "table", None
+    elif argv == ["--json"]:
+        mode, source = "json", None
+    elif len(argv) == 2 and argv[0] == "--check" and argv[1]:
+        mode, source = "check", argv[1]
+    else:
+        fail("usage: qq-pi-inventory [--json | --check <source>]", 2)
+    try:
+        items = records()
+    except InventoryError as error:
+        fail(str(error))
+    if mode == "check":
+        raise SystemExit(0 if any(item["source"] == source for item in items) else 1)
+    if mode == "json":
+        print(json.dumps(items, ensure_ascii=False, indent=2, separators=(",", ": ")))
+    else:
+        print_table(items)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
