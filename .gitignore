@@ -24,3 +24,4 @@
 
 # machine-managed codex system skills — local installs, never tracked
 /skills/.system/
+__pycache__/
