@@ -172,18 +172,15 @@ mkdir -p -- "$runtime_root_input" \
 if ! runtime_root="$(realpath -e -- "$runtime_root_input" 2>/dev/null)"; then
   fail 68 "cannot resolve the dispatch runtime root"
 fi
-if ! system_tmp="$(realpath -e -- /tmp 2>/dev/null)"; then
-  fail 68 "cannot resolve /tmp"
-fi
 if ! launcher_tmp="$(realpath -e -- "$launcher_tmp_input" 2>/dev/null)"; then
   fail 68 "cannot resolve the launcher temporary directory"
 fi
 [[ -d "$launcher_tmp" ]] \
   || fail 68 "launcher temporary path is not a directory"
-path_is_within "$runtime_root" "$system_tmp" \
-  || fail 68 "runtime root must stay beneath /tmp"
-[[ "$runtime_root" != "$system_tmp" ]] \
-  || fail 68 "runtime root may not be all of /tmp"
+path_is_within "$runtime_root" "$launcher_tmp" \
+  || fail 68 "runtime root must stay beneath the launcher temporary directory"
+[[ "$runtime_root" != "$launcher_tmp" ]] \
+  || fail 68 "runtime root may not be the launcher temporary directory"
 
 structured_output_capture=""
 if [[ -n "${PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE:-}" ]]; then

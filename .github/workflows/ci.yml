@@ -29,6 +29,8 @@ jobs:
           echo "$RUNNER_TEMP/qq-pi/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Run shell tests
         shell: bash
+        env:
+          TMPDIR: ${{ runner.temp }}
         run: |
           set -euo pipefail
           for test_script in tests/test-*.sh; do

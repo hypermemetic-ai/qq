@@ -168,7 +168,7 @@ esac
 SH
 chmod +x "$fake_pi"
 
-runtime_root="$tmp/runtime"
+runtime_root="$parent_tmp/runtime"
 mkdir -p "$runtime_root"
 export QQ_LANDSTRIP_BIN="$fake_landstrip"
 export QQ_DISPATCH_RUNTIME_ROOT="$runtime_root"
@@ -463,7 +463,7 @@ grep -Fxq "JITI_ALIAS={\"yaml\":\"$fanout_yaml\"}" "$FAKE_PI_ENV" \
 
 # Correlation propagation experiment: qq-dispatch receives accountable-side
 # context and the stubbed child records the environment that crosses the policy.
-propagation_runtime="$tmp/propagation-runtime"
+propagation_runtime="$parent_tmp/propagation-runtime"
 mkdir -p "$propagation_runtime"
 (
   cd "$ROOT"
@@ -540,7 +540,7 @@ for role in reviewer researcher implementer; do
 done
 
 auth_source="$HOME/.pi/agent/auth.json"
-auth_runtime="$tmp/auth-runtime"
+auth_runtime="$parent_tmp/auth-runtime"
 mkdir -p "$(dirname -- "$auth_source")" "$auth_runtime"
 printf '%s\n' '{"credential":"test-only-auth-sentinel"}' >"$auth_source"
 chmod 644 "$auth_source"
@@ -677,7 +677,7 @@ fixture_primary_common="$(realpath -e "$fixture_primary_common")"
 fixture_primary_git="$(realpath -e "$fixture_primary_git")"
 [ "$fixture_primary_common" = "$fixture_primary_git" ] \
   || fail 'primary fixture did not use its common Git directory'
-primary_orchestrator_runtime="$tmp/primary-orchestrator-runtime"
+primary_orchestrator_runtime="$parent_tmp/primary-orchestrator-runtime"
 mkdir -p "$primary_orchestrator_runtime"
 (
   cd "$fixture_primary"
@@ -694,7 +694,7 @@ primary_orchestrator_config="$(sed -n 's/^PI_CODING_AGENT_DIR=//p' "$FAKE_PI_ENV
   || fail 'primary trusted orchestrator unexpectedly invoked Landstrip'
 assert_file_contains "$tmp/primary-orchestrator.stderr" \
   'role=orchestrator policy=qq-orchestrator-trusted-process-v1 scope=trusted-process boundary=trusted-process'
-fixture_runtime="$tmp/linked-runtime"
+fixture_runtime="$parent_tmp/linked-runtime"
 mkdir -p "$fixture_runtime"
 (
   cd "$fixture_worktree"
@@ -752,7 +752,7 @@ jq -e \
 # remain in the primary checkout while pi-subagents starts the child in a
 # linked worktree from the same Repository.
 rm "$fixture_worktree/delegation/policies/roles.json"
-canonical_runtime="$tmp/canonical-runtime"
+canonical_runtime="$parent_tmp/canonical-runtime"
 mkdir -p "$canonical_runtime"
 (
   cd "$fixture_worktree"
@@ -893,6 +893,16 @@ run_failure() {
   [ "$status" -ne 0 ] || fail "$label unexpectedly succeeded"
 }
 
+: >"$FAKE_PI_ARGS"
+run_failure runtime-root-outside-launcher "$ROOT" \
+  env \
+    QQ_DISPATCH_RUNTIME_ROOT="$tmp/outside-launcher-runtime" \
+    PI_SUBAGENT_CHILD_AGENT=reviewer \
+    "$DISPATCH" --json
+assert_file_contains "$tmp/runtime-root-outside-launcher.stderr" \
+  'runtime root must stay beneath the launcher temporary directory'
+[ ! -s "$FAKE_PI_ARGS" ] || fail 'outside-launcher runtime root launched Pi'
+
 run_capture_refusal() {
   local label="$1"
   local capture="$2"
@@ -920,7 +930,7 @@ run_capture_refusal home-capture-refusal \
   "$home_capture_dir/envelope.json" \
   'structured-output capture path must stay beneath the runtime root or assigned worktree'
 
-escape_capture_dir="$tmp/escaped-capture"
+escape_capture_dir="$parent_tmp/escaped-capture"
 mkdir -p "$escape_capture_dir"
 run_capture_refusal capture-dotdot-refusal \
   "$capture_dir/../../escaped-capture/envelope.json" \
@@ -1016,7 +1026,7 @@ external_common_dir="$(git -C "$external_repository" rev-parse --path-format=abs
 external_git_dir="$(git -C "$external_repository" rev-parse --path-format=absolute --git-dir)"
 external_common_dir="$(realpath -e "$external_common_dir")"
 external_git_dir="$(realpath -e "$external_git_dir")"
-external_runtime="$tmp/external-runtime"
+external_runtime="$parent_tmp/external-runtime"
 mkdir -p "$external_runtime"
 (
   cd "$external_repository"
@@ -1327,7 +1337,7 @@ done
     "$DISPATCH" --json
 ) >"$tmp/governed-project-home.stdout" 2>"$tmp/governed-project-home.stderr"
 assert_file_contains "$tmp/governed-project-home.stdout" 'pi-live-event role=orchestrator'
-launcher_alignment_runtime="$tmp/launcher-alignment-runtime"
+launcher_alignment_runtime="$parent_tmp/launcher-alignment-runtime"
 mkdir -p "$launcher_alignment_runtime"
 (
   cd "$launcher_source"
