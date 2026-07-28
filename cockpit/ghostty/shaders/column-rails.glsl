@@ -1,17 +1,17 @@
 // Herdr surface normalization for Ghostty.
-// The current mode draws no decorative outer rails; it only neutralizes
-// Herdr's inconsistent session-only right edge across all terminal surfaces.
+// The current mode draws no decorative outer rails; on the exact 4K reference
+// surface it only neutralizes Herdr's inconsistent session-only right edge.
+// Other window and display sizes pass through unchanged.
 
-// Coordinates are authored for 3840px output and scale with the display mode.
+// Coordinates are authored for 3840px fullscreen output.
 //
 // KNOWN-GOOD PRESET — "Herdr inset":
 //   reference_left_edge  = 628.5;  // pixels 627-629
 //   reference_right_edge = 3171.5; // pixels 3170-3172
 // This repeats Herdr's native 10px gap at both ends of its content.
 //
-// SAVED ALTERNATE — "Ghostty boundary":
-// Place the rails at Ghostty's mirrored 480px padding boundaries, giving the
-// application a deliberately wide outer field.
+// SAVED ALTERNATE — "Former 4K Ghostty boundary":
+// Place the rails at the former mirrored 480px padding boundaries.
 const float reference_width = 3840.0;
 const float reference_left_edge = 480.5;
 const float reference_right_edge = 3359.5;
@@ -32,6 +32,7 @@ const vec3 background_color = vec3(0.0003035);
 void mainImage(out vec4 fragColor, in vec2 fragCoord)
 {
     vec4 color = texture(iChannel0, fragCoord.xy / iResolution.xy);
+    bool reference_layout = abs(iResolution.x - reference_width) < 0.5;
     float output_scale = iResolution.x / reference_width;
     float left_edge = reference_left_edge * output_scale;
     float right_edge = reference_right_edge * output_scale;
@@ -43,9 +44,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     bool on_session_edge =
         abs(fragCoord.x - session_edge) < session_edge_width * 0.5;
 
-    if (on_session_edge) {
+    if (reference_layout && on_session_edge) {
         color = vec4(background_color, 1.0);
-    } else if (draw_rails && (on_left || on_right)) {
+    } else if (reference_layout && draw_rails && (on_left || on_right)) {
         color = vec4(rail_color, 1.0);
     }
 

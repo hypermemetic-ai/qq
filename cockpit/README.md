@@ -7,12 +7,13 @@ same file; the shell surface is sourced straight from this checkout.
 
 ## Files
 
-- `ghostty/config` — the living-room terminal profile: console-derived palette,
-  IBM-derived 3× glyphs, 480-pixel horizontal field, block cursor, and static
-  Herdr surface normalization.
-- `ghostty/shaders/column-rails.glsl` — masks Herdr's session-only right edge
-  while drawing no decorative bars; the two rejected rail placements remain
-  documented as recoverable presets.
+- `ghostty/config` — the portable terminal profile: console-derived palette,
+  laptop-sized IBM glyphs and margins by default, exact laptop/4K font presets,
+  block cursor, and static Herdr surface normalization.
+- `ghostty/shaders/column-rails.glsl` — on the exact 3840-pixel-wide reference
+  surface, masks Herdr's session-only right edge while drawing no decorative
+  bars; other sizes pass through unchanged and the two rejected rail placements
+  remain documented as recoverable presets.
 - `glow/glow.yml` — fixed-width, no-pager Glow defaults for pane rendering.
 - `glow/tuned.json` — the hand-tuned Markdown theme used by Glow.
 - `herdr/config.toml` — tokyo-night, onboarding suppressed, priority-sorted
@@ -23,9 +24,14 @@ same file; the shell surface is sourced straight from this checkout.
 - `systemd/user/qq-openwiki-daily.{service,timer}` — repository-owned user
   units for the non-persistent 03:00 local OpenWiki assessment.
 
-The Ghostty profile expects the locally installed `BigBlue TerminalPlus` font,
-with `MxPlus IBM VGA 8x16` as its fallback. Font binaries remain external
+The Ghostty profile expects the locally installed `MxPlus IBM VGA 8x16` font,
+with `BigBlue TerminalPlus` as its fallback. Font binaries remain external
 dependencies rather than Repository-owned assets.
+
+The default 12-point size uses MxPlus IBM VGA 8x16's native 16-pixel laptop
+grid. `ctrl+shift+f12` selects the exact 24-point/32-pixel 2× 4K fullscreen
+couch preset; `ctrl+shift+f11` returns to the laptop preset. The 12-unit
+horizontal margin remains usable in ordinary windows at either font size.
 
 ## Flow
 
