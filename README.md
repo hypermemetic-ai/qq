@@ -373,8 +373,9 @@ refusal:
 The first four values are restored from qq and caller or inherited compute does
 not win. The extension sets `QQ_DISPATCH_RUNTIME_ROOT` only when it is absent,
 so an operator-supplied absolute placement remains authoritative. Pi's
-project-trust mechanism still owns Repository-supplied settings, extensions,
-packages, and executable code; global qq delegation grants no Repository trust.
+project-trust mechanism remains authoritative for Repository-supplied settings,
+extensions, packages, and executable code; global qq delegation grants no
+Repository trust.
 Relaunch Pi or run `/reload` after install or upgrade.
 
 qq methodology is global through the mounted context and Skill roots.
