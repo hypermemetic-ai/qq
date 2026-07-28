@@ -40,11 +40,11 @@ Dispatch environment and config: README Install. The globally mounted
 extension selects the active qq checkout for qq worktrees and canonical qq
 primary `main` elsewhere; `cwd` selects the assigned Git worktree.
 
-Pass the ticket's absolute run directory as `QQ_DISPATCH_RUN_DIR` for its
-exact dispatch:
+The work-order reference is the transport: the adapter derives the ticket's
+run directory from the task's `Read-and-perform:<absolute-run-dir>/BRIEF.md`
+path (no environment variable is passed):
 
 ```ts
-// QQ_DISPATCH_RUN_DIR=<absolute-run-dir>
 subagent({agent:"implementer",task:"Read-and-perform:<absolute-run-dir>/BRIEF.md",acceptance:{level:"none",reason:"per the manifests"},cwd:"<absolute-worktree>",context:"fresh",async:true})
 ```
 

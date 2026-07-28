@@ -131,32 +131,69 @@ child_index="${PI_SUBAGENT_CHILD_INDEX:-0}"
 [[ "$child_index" =~ ^[0-9]+$ ]] \
   || fail 68 "PI_SUBAGENT_CHILD_INDEX must be a non-negative integer"
 
-if [[ -v QQ_DISPATCH_RUN_DIR ]]; then
-  run_dir_input="$QQ_DISPATCH_RUN_DIR"
-  [[ "$run_dir_input" == /* ]] \
-    || fail 68 "QQ_DISPATCH_RUN_DIR must be absolute"
+# The work-order reference is the only per-dispatch transport: the child argv
+# carries `Task: Read-and-perform:<absolute-run-dir>/BRIEF.md` inline, or in a
+# `@file` spill for long tasks. The brief's directory is the run dir by
+# construction. QQ_DISPATCH_RUN_DIR is an adapter->child export only; any
+# inherited value is ignored here.
+brief_path=""
+for arg in "$@"; do
+  case "$arg" in
+    "Task: Read-and-perform:"*)
+      [[ -z "$brief_path" ]] \
+        || fail 68 "dispatch carries two work-order references"
+      brief_path="${arg#Task: Read-and-perform:}"
+      ;;
+    @*)
+      spill="${arg#@}"
+      if [[ -f "$spill" && ! -L "$spill" ]]; then
+        spill_ref="$(grep -m1 -oE 'Read-and-perform:[^[:space:]]+' -- "$spill" 2>/dev/null || true)"
+        if [[ -n "$spill_ref" ]]; then
+          [[ -z "$brief_path" ]] \
+            || fail 68 "dispatch carries two work-order references"
+          brief_path="${spill_ref#Read-and-perform:}"
+        fi
+      fi
+      ;;
+  esac
+done
+
+if [[ -n "$brief_path" ]]; then
+  [[ "$brief_path" == /* ]] \
+    || fail 68 "work-order brief path must be absolute: $brief_path"
+  [[ "${brief_path##*/}" == "BRIEF.md" ]] \
+    || fail 68 "work-order reference must name BRIEF.md: $brief_path"
+  [[ ! -L "$brief_path" ]] \
+    || fail 68 "work-order brief may not be a symlink"
+  [[ -f "$brief_path" ]] \
+    || fail 68 "work-order brief must exist at dispatch: $brief_path"
+  run_dir_input="$(dirname -- "$brief_path")"
   [[ ! -L "$run_dir_input" ]] \
     || fail 68 "dispatch run directory may not be a symlink"
-  [[ -d "$run_dir_input" ]] \
-    || fail 68 "dispatch run directory must be an existing directory"
   if ! run_dir="$(realpath -e -- "$run_dir_input" 2>/dev/null)"; then
     fail 68 "cannot resolve the dispatch run directory"
   fi
-  path_is_within "$run_dir" "$runtime_root" \
-    || fail 68 "dispatch run directory must stay beneath the runtime root"
-  [[ "$run_dir" != "$runtime_root" ]] \
-    || fail 68 "dispatch run directory may not be the runtime root"
+  path_is_within "$run_dir" "$runtime_root" || path_is_within "$run_dir" "$worktree" \
+    || fail 68 "dispatch run directory must stay beneath the runtime root or the assigned worktree"
+  [[ "$run_dir" != "$runtime_root" && "$run_dir" != "$worktree" ]] \
+    || fail 68 "dispatch run directory may not be the runtime root or the worktree itself"
   [[ -O "$run_dir" ]] \
     || fail 68 "dispatch run directory is not owned by the operator"
   run_dir_mode="$(stat -c %a "$run_dir")"
   [[ "$run_dir_mode" == "700" ]] \
     || fail 68 "dispatch run directory must be mode 700 (found $run_dir_mode): $run_dir"
+  [[ ! -f "$run_dir/TERMINAL" ]] \
+    || fail 68 "dispatch run directory is sealed by TERMINAL: $run_dir"
+  # A fresh dir holds only BRIEF.md; an unsealed dir with the standard
+  # structure is a continuation after a mid-flight adapter death.
   shopt -s nullglob dotglob
   run_entries=("$run_dir"/*)
   shopt -u nullglob dotglob
   for run_entry in "${run_entries[@]}"; do
-    [[ "${run_entry##*/}" == "BRIEF.md" ]] \
-      || fail 68 "dispatch run directory contains unexpected entry: $run_entry"
+    case "${run_entry##*/}" in
+      BRIEF.md|ENVELOPE.md|cache|pi-config|sessions) ;;
+      *) fail 68 "dispatch run directory contains unexpected entry: $run_entry" ;;
+    esac
   done
 else
   run_dir="$runtime_root/runs/$run_token/${role}-${child_index}-$$"
@@ -166,7 +203,7 @@ else
     || fail 68 "cannot create the dispatch run directory"
 fi
 
-mkdir -m 700 -- "$run_dir/cache" "$run_dir/pi-config" "$run_dir/sessions" \
+install -d -m 700 -- "$run_dir/cache" "$run_dir/pi-config" "$run_dir/sessions" \
   || fail 68 "cannot create the dispatch run directories"
 if ! pi_config_dir="$(realpath -e -- "$run_dir/pi-config" 2>/dev/null)"; then
   fail 68 "cannot resolve the dispatch Pi config directory"

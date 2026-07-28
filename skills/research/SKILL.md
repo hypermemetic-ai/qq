@@ -13,10 +13,11 @@ directory. Dispatch env and dispatcher config: per README Install. The globally
 mounted extension selects the active qq checkout for qq worktrees and canonical
 qq primary `main` elsewhere; `cwd` selects the assigned Git worktree.
 
-Pass the absolute run directory as `QQ_DISPATCH_RUN_DIR` for this dispatch:
+The work-order reference is the transport: the adapter derives the run
+directory from the task's `Read-and-perform:<absolute-run-dir>/BRIEF.md` path
+(no environment variable is passed):
 
 ```ts
-// QQ_DISPATCH_RUN_DIR=<absolute-run-dir>
 subagent({agent:"researcher",task:"Read-and-perform:<absolute-run-dir>/BRIEF.md",acceptance:{level:"none",reason:"per the manifests"},cwd:"<absolute-working-root>",context:"fresh",async:true})
 ```
 

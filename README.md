@@ -337,10 +337,12 @@ Relaunch Pi or run `/reload` after install or upgrade.
 qq methodology is global through the mounted context and Skill roots.
 Delegation launches plain headless role children with open network egress; the
 assigned Git worktree is their only boundary. At delegated-ticket creation, the
-owner creates one mode-700 run directory beneath `QQ_DISPATCH_RUNTIME_ROOT`,
-writes its complete `BRIEF.md`, and passes the directory as
-`QQ_DISPATCH_RUN_DIR`. When that variable is absent, the adapter mints a private
-run directory. It validates the worktree, run directory, canonical role
+owner creates one mode-700 run directory beneath `QQ_DISPATCH_RUNTIME_ROOT` or
+the assigned worktree and writes its complete `BRIEF.md`; the task's
+`Read-and-perform:<absolute-run-dir>/BRIEF.md` reference is the transport, and
+the adapter derives the run directory from it fail-closed. Without a reference
+the adapter mints a private run directory. It validates the worktree, run
+directory, canonical role
 manifest, timeout, and declared role tools before launch, then places child
 cache, Pi configuration, and session state beneath the run directory. The child
 writes `ENVELOPE.md` there as its only result; the adapter atomically writes

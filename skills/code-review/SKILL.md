@@ -25,11 +25,12 @@ the Change and code without inheriting the author's conclusions.
    conclusions, or transcript. `REVIEW.md` supplies owned rules.
 4. Dispatch env and dispatcher config: per README Install. The globally mounted
    extension selects the active qq checkout for qq worktrees and canonical qq
-   primary `main` elsewhere; `cwd` selects the assigned Git worktree. Pass the
-   absolute run directory as `QQ_DISPATCH_RUN_DIR`:
+   primary `main` elsewhere; `cwd` selects the assigned Git worktree. The
+   work-order reference is the transport: the adapter derives the run directory
+   from the task's `Read-and-perform:<absolute-run-dir>/BRIEF.md` path (no
+   environment variable is passed):
 
    ```ts
-   // QQ_DISPATCH_RUN_DIR=<absolute-run-dir>
    subagent({agent:"reviewer",task:"Read-and-perform:<absolute-run-dir>/BRIEF.md",acceptance:{level:"none",reason:"per the manifests"},cwd:"<absolute-change-worktree>",context:"fresh",async:true})
    ```
 

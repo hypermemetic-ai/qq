@@ -147,8 +147,14 @@ dispatch_case() {
   local adapter="$3"
   local role="$4"
   local run_id="$5"
+  local task_arg=""
+  if [ "$#" -ge 6 ] && [[ "$6" == "Task: "* || "$6" == "@"* ]]; then
+    task_arg="$6"
+    shift 6
+  else
+    shift 5
+  fi
   local adapter_root
-  shift 5
   adapter_root="$(cd "$(dirname "$adapter")/.." && pwd -P)"
   rm -f "$FAKE_PI_ARGS" "$FAKE_PI_ENV" "$FAKE_PI_MARKER"
   DISPATCH_STDOUT="$tmp/$label.stdout"
@@ -161,7 +167,7 @@ dispatch_case() {
       PI_SUBAGENT_RUN_ID="$run_id" \
       PI_SUBAGENT_CHILD_INDEX=2 \
       PI_SUBAGENT_TRUSTED_AGENT_PATHS="$(trusted_paths "$adapter_root")" \
-      "$@" "$adapter" --json --model smoke/model
+      "$@" "$adapter" --json --model smoke/model ${task_arg:+"$task_arg"}
   ) >"$DISPATCH_STDOUT" 2>"$DISPATCH_STDERR"
   DISPATCH_STATUS=$?
   set -e
@@ -179,7 +185,7 @@ printf '# bounded work order\n' >"$owner_run/BRIEF.md"
 mkdir -p "$test_home/.pi/agent"
 printf '{"token":"test-only"}\n' >"$test_home/.pi/agent/auth.json"
 dispatch_case owner-success "$primary" "$primary_dispatch" implementer owner-success \
-  QQ_DISPATCH_RUN_DIR="$owner_run" FAKE_WRITE_ENVELOPE=1
+  "Task: Read-and-perform:$owner_run/BRIEF.md" FAKE_WRITE_ENVELOPE=1
 [[ "$DISPATCH_STATUS" -eq 0 ]] || cat "$DISPATCH_STDERR" >&2
 assert_equal 0 "$DISPATCH_STATUS" "owner-created run dispatch failed"
 assert_file_contains "$DISPATCH_STDOUT" 'pi-live-event role=implementer'
@@ -194,11 +200,13 @@ grep -Fxq "TMPDIR=$launcher_tmp" "$FAKE_PI_ENV" || fail "child did not inherit i
 if grep -q '^QQ_DISPATCH_POLICY' "$FAKE_PI_ENV"; then
   fail "child inherited a retired policy identity"
 fi
-python3 - "$FAKE_PI_ARGS" <<'PY'
+OWNER_RUN="$owner_run" python3 - "$FAKE_PI_ARGS" <<'PY'
+import os
 from pathlib import Path
 import sys
 args = Path(sys.argv[1]).read_bytes().split(b"\0")
-assert args == [b"--approve", b"--offline", b"--json", b"--model", b"smoke/model", b""], args
+task = f"Task: Read-and-perform:{os.environ['OWNER_RUN']}/BRIEF.md".encode()
+assert args == [b"--approve", b"--offline", b"--json", b"--model", b"smoke/model", task, b""], args
 PY
 jq -e '
   .schema == "qq-run-terminal" and .version == 1
@@ -216,8 +224,9 @@ jq -e '.run_id == "minted-run" and .exit_code == 0' "$minted_run/TERMINAL" >/dev
 
 # A nonzero child status is preserved and receives the same durable terminal record.
 failure_run="$(new_run_dir child-failure)"
+printf '# bounded work order\n' >"$failure_run/BRIEF.md"
 dispatch_case child-failure "$primary" "$primary_dispatch" reviewer child-failure \
-  QQ_DISPATCH_RUN_DIR="$failure_run" FAKE_PI_EXIT=23
+  "Task: Read-and-perform:$failure_run/BRIEF.md" FAKE_PI_EXIT=23
 assert_equal 23 "$DISPATCH_STATUS" "child failure status was not preserved"
 jq -e '.agent == "reviewer" and .exit_code == 23' "$failure_run/TERMINAL" >/dev/null
 
@@ -225,16 +234,74 @@ jq -e '.agent == "reviewer" and .exit_code == 23' "$failure_run/TERMINAL" >/dev/
 capture_var=PI_SUBAGENT_STRUCTURED
 capture_var+=_OUTPUT_CAPTURE
 ignored_run="$(new_run_dir ignored-channel)"
+printf '# bounded work order\n' >"$ignored_run/BRIEF.md"
 dispatch_case ignored-channel "$primary" "$primary_dispatch" observer ignored-channel \
-  QQ_DISPATCH_RUN_DIR="$ignored_run" "$capture_var=$tmp/does-not-exist/result"
+  "Task: Read-and-perform:$ignored_run/BRIEF.md" "$capture_var=$tmp/does-not-exist/result"
 assert_equal 0 "$DISPATCH_STATUS" "ignored result channel affected dispatch"
+
+# An inherited QQ_DISPATCH_RUN_DIR is not a transport: without a work-order
+# reference the adapter mints its own run directory.
+(
+  cd "$primary"
+  env QQ_DISPATCH_RUN_DIR="$runtime_root/inherited-env" \
+    PI_SUBAGENT_CHILD_AGENT=reviewer \
+    PI_SUBAGENT_RUN_ID=inherited-env \
+    PI_SUBAGENT_TRUSTED_AGENT_PATHS="$(trusted_paths "$primary")" \
+    "$primary_dispatch" --json --model smoke/model >/dev/null 2>&1
+)
+[ ! -e "$runtime_root/inherited-env" ] || fail "inherited QQ_DISPATCH_RUN_DIR was honored as a transport"
+grep -Fxq "QQ_DISPATCH_RUN_DIR=$runtime_root/runs/inherited-env/reviewer-0-$$" "$FAKE_PI_ENV" 2>/dev/null \
+  || grep -Eq "^QQ_DISPATCH_RUN_DIR=$runtime_root/runs/inherited-env/reviewer-" "$FAKE_PI_ENV" \
+  || fail "adapter did not mint its own run directory"
+
+# A run directory sealed by TERMINAL refuses; an unsealed one continues.
+sealed_run="$(new_run_dir sealed-run)"
+printf '# bounded work order\n' >"$sealed_run/BRIEF.md"
+printf '{"schema":"qq-run-terminal","version":1}\n' >"$sealed_run/TERMINAL"
+dispatch_case sealed "$primary" "$primary_dispatch" reviewer sealed \
+  "Task: Read-and-perform:$sealed_run/BRIEF.md"
+assert_equal 68 "$DISPATCH_STATUS" "sealed run directory did not exit 68"
+assert_file_contains "$DISPATCH_STDERR" "sealed by TERMINAL"
+continuation_run="$(new_run_dir continuation-run)"
+printf '# bounded work order\n' >"$continuation_run/BRIEF.md"
+mkdir -m 700 "$continuation_run/cache" "$continuation_run/pi-config" "$continuation_run/sessions"
+dispatch_case continuation "$primary" "$primary_dispatch" reviewer continuation \
+  "Task: Read-and-perform:$continuation_run/BRIEF.md"
+assert_equal 0 "$DISPATCH_STATUS" "unsealed continuation run directory refused"
+
+# Two work-order references in one dispatch refuse.
+set +e
+(
+  cd "$primary"
+  env -u QQ_DISPATCH_RUN_DIR \
+    PI_SUBAGENT_CHILD_AGENT=reviewer \
+    PI_SUBAGENT_RUN_ID=two-refs \
+    PI_SUBAGENT_TRUSTED_AGENT_PATHS="$(trusted_paths "$primary")" \
+    "$primary_dispatch" --json --model smoke/model \
+    "Task: Read-and-perform:$continuation_run/BRIEF.md" \
+    "Task: Read-and-perform:$continuation_run/BRIEF.md" \
+    >"$tmp/two-refs.stdout" 2>"$tmp/two-refs.stderr"
+)
+two_refs_status=$?
+set -e
+assert_equal 68 "$two_refs_status" "two work-order references did not exit 68"
+assert_file_contains "$tmp/two-refs.stderr" "two work-order references"
+
+# A reference naming a missing brief refuses.
+missing_run="$runtime_root/missing-brief"
+mkdir -m 700 "$missing_run"
+dispatch_case missing-brief "$primary" "$primary_dispatch" reviewer missing-brief \
+  "Task: Read-and-perform:$missing_run/BRIEF.md"
+assert_equal 68 "$DISPATCH_STATUS" "missing brief did not exit 68"
+assert_file_contains "$DISPATCH_STDERR" "must exist at dispatch"
 
 assert_owner_refusal() {
   local label="$1"
   local path="$2"
   local message="$3"
+  printf '# bounded work order\n' >"$path/BRIEF.md"
   dispatch_case "$label" "$primary" "$primary_dispatch" reviewer "$label" \
-    QQ_DISPATCH_RUN_DIR="$path"
+    "Task: Read-and-perform:$path/BRIEF.md"
   assert_equal 68 "$DISPATCH_STATUS" "$label did not exit 68"
   assert_file_contains "$DISPATCH_STDERR" "$message"
   [ ! -e "$FAKE_PI_MARKER" ] || fail "$label launched Pi"
@@ -249,7 +316,7 @@ chmod 755 "$loose_run"
 assert_owner_refusal run-loose "$loose_run" 'must be mode 700'
 foreign_run="$launcher_tmp/foreign-run"
 mkdir -m 700 "$foreign_run"
-assert_owner_refusal run-foreign "$foreign_run" 'must stay beneath the runtime root'
+assert_owner_refusal run-foreign "$foreign_run" 'must stay beneath the runtime root or the assigned worktree'
 unexpected_run="$(new_run_dir unexpected-run)"
 : >"$unexpected_run/extra"
 assert_owner_refusal run-unexpected "$unexpected_run" 'contains unexpected entry'
@@ -333,22 +400,25 @@ mkdir "$fail_bin"
 printf '#!/usr/bin/env bash\nexit 1\n' >"$fail_bin/cp"
 chmod +x "$fail_bin/cp"
 auth_refusal_run="$(new_run_dir auth-refusal)"
+printf '# bounded work order\n' >"$auth_refusal_run/BRIEF.md"
 dispatch_case auth-refusal "$primary" "$primary_dispatch" reviewer auth-refusal \
-  QQ_DISPATCH_RUN_DIR="$auth_refusal_run" PATH="$fail_bin:$PATH"
+  "Task: Read-and-perform:$auth_refusal_run/BRIEF.md" PATH="$fail_bin:$PATH"
 assert_equal 68 "$DISPATCH_STATUS" "auth staging failure did not exit 68"
 assert_file_contains "$DISPATCH_STDERR" 'cannot stage Pi authentication'
 [ ! -e "$FAKE_PI_MARKER" ] || fail "auth staging failure launched Pi"
 chmod 755 "$session_root"
 session_mode_run="$(new_run_dir session-mode)"
+printf '# bounded work order\n' >"$session_mode_run/BRIEF.md"
 dispatch_case session-mode "$primary" "$primary_dispatch" reviewer session-mode \
-  QQ_DISPATCH_RUN_DIR="$session_mode_run"
+  "Task: Read-and-perform:$session_mode_run/BRIEF.md"
 assert_equal 68 "$DISPATCH_STATUS" "loose session root did not exit 68"
 assert_file_contains "$DISPATCH_STDERR" 'must be mode 700'
 chmod 700 "$session_root"
 rm "$test_home/.pi/agent/extensions/subagent/config.json"
 session_config_run="$(new_run_dir session-config)"
+printf '# bounded work order\n' >"$session_config_run/BRIEF.md"
 dispatch_case session-config "$primary" "$primary_dispatch" reviewer session-config \
-  QQ_DISPATCH_RUN_DIR="$session_config_run"
+  "Task: Read-and-perform:$session_config_run/BRIEF.md"
 assert_equal 68 "$DISPATCH_STATUS" "missing session config did not exit 68"
 assert_file_contains "$DISPATCH_STDERR" 'defaultSessionDir is not configured'
 printf '{"defaultSessionDir":"%s"}\n' "$session_root" \
@@ -375,8 +445,9 @@ assert_file_contains "$DISPATCH_STDERR" 'child cwd is not a Git worktree'
 
 # Trace context and a complete invocation span cross the adapter seam.
 trace_run="$(new_run_dir trace-run)"
+printf '# bounded work order\n' >"$trace_run/BRIEF.md"
 dispatch_case trace "$primary" "$primary_dispatch" reviewer trace-run \
-  QQ_DISPATCH_RUN_DIR="$trace_run" \
+  "Task: Read-and-perform:$trace_run/BRIEF.md" \
   QQ_TRACE_ID=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
   PI_ROOT_SPAN_ID=bbbbbbbbbbbbbbbb PI_PARENT_SPAN_ID=cccccccccccccccc
 assert_equal 0 "$DISPATCH_STATUS" "traced dispatch failed"
@@ -385,16 +456,18 @@ grep -F -- '--name invoke_agent' "$FAKE_OBSERVE_LOG" >/dev/null || fail "invocat
 grep -F -- '--phase review' "$FAKE_OBSERVE_LOG" >/dev/null || fail "span phase was not recorded"
 grep -F -- 'run.id=trace-run' "$FAKE_OBSERVE_LOG" >/dev/null || fail "span run ID was not recorded"
 observe_failure_run="$(new_run_dir observe-failure)"
+printf '# bounded work order\n' >"$observe_failure_run/BRIEF.md"
 dispatch_case observe-failure "$primary" "$primary_dispatch" reviewer observe-failure \
-  QQ_DISPATCH_RUN_DIR="$observe_failure_run" FAKE_OBSERVE_FAIL=1
+  "Task: Read-and-perform:$observe_failure_run/BRIEF.md" FAKE_OBSERVE_FAIL=1
 assert_equal 0 "$DISPATCH_STATUS" "observation failure changed child success"
 assert_file_contains "$DISPATCH_STDERR" 'observation write failed; dispatch result preserved'
 
 # Timeout preserves status, records terminal state, and reaps the wedged tree.
 timeout_run="$(new_run_dir timeout-run)"
+printf '# bounded work order\n' >"$timeout_run/BRIEF.md"
 child_pid_file="$tmp/wedged-child.pid"
 dispatch_case timeout-tree "$primary" "$primary_dispatch" implementer timeout-tree \
-  QQ_DISPATCH_RUN_DIR="$timeout_run" QQ_DISPATCH_TIMEOUT=0.3s \
+  "Task: Read-and-perform:$timeout_run/BRIEF.md" QQ_DISPATCH_TIMEOUT=0.3s \
   FAKE_PI_MODE=wedge FAKE_CHILD_PID="$child_pid_file"
 assert_equal 124 "$DISPATCH_STATUS" "timeout status was not preserved"
 [ -s "$child_pid_file" ] || fail "wedged child was not announced"
