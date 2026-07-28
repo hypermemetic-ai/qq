@@ -151,10 +151,13 @@ if [[ -v QQ_DISPATCH_RUN_DIR ]]; then
   run_dir_mode="$(stat -c %a "$run_dir")"
   [[ "$run_dir_mode" == "700" ]] \
     || fail 68 "dispatch run directory must be mode 700 (found $run_dir_mode): $run_dir"
-  while IFS= read -r -d '' run_entry; do
-    [[ "$(basename -- "$run_entry")" == "BRIEF.md" ]] \
+  shopt -s nullglob dotglob
+  run_entries=("$run_dir"/*)
+  shopt -u nullglob dotglob
+  for run_entry in "${run_entries[@]}"; do
+    [[ "${run_entry##*/}" == "BRIEF.md" ]] \
       || fail 68 "dispatch run directory contains unexpected entry: $run_entry"
-  done < <(find "$run_dir" -mindepth 1 -maxdepth 1 -print0)
+  done
 else
   run_dir="$runtime_root/runs/$run_token/${role}-${child_index}-$$"
   mkdir -p -- "$(dirname -- "$run_dir")" \
@@ -327,6 +330,7 @@ else
     || fail 68 "cannot create the pi-subagents session root: $session_root"
 fi
 
+unset QQ_DISPATCH_POLICY_IDENTITY QQ_DISPATCH_POLICY_SCOPE QQ_DISPATCH_WRAPPER_EVENT_LOG
 export QQ_DISPATCH_WORKTREE="$worktree"
 export QQ_DISPATCH_GIT_COMMON_DIR="$git_common_dir"
 export QQ_DISPATCH_GIT_WORKTREE_DIR="$git_worktree_dir"

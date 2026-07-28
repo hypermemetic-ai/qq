@@ -26,6 +26,9 @@ assert_file_contains "$EXT" 'pi-subagents-uid-'
 assert_file_contains "$EXT" '"bin/qq-dispatch"'
 assert_file_contains "$EXT" '"delegation",'
 assert_file_contains "$EXT" 'fileURLToPath(import.meta.url)'
+assert_file_contains "$EXT" 'delegation dispatch environment'
+assert_file_contains "$EXT" 'Git worktree is the only delegate boundary'
+assert_file_not_matches "$EXT" 'confined-delegate dispatch env'
 
 # The extension establishes the pi-subagents session root at session start
 # (created mode 700 when absent, tightened when operator-owned and loose) so
@@ -38,6 +41,7 @@ assert_file_contains "$EXT" 'defaultSessionDir'
 
 # Functional: import the extension with a mock pi under an ISOLATED HOME and
 # observe process.env and the session-root filesystem behavior.
+# shellcheck disable=SC2016
 EXT="$EXT" ROOT="$ROOT" node --experimental-strip-types --input-type=module -e '
 import { pathToFileURL } from "node:url";
 import fs from "node:fs";
@@ -198,6 +202,7 @@ done
 
 # README Install documents the extension as the by-construction mechanism.
 assert_file_contains "$ROOT/README.md" 'extensions/qq-subagent-env.ts'
+# shellcheck disable=SC2016
 assert_file_contains "$ROOT/README.md" 'ln -sT "$HOME/projects/qq/AGENTS.md" "$HOME/.pi/agent/AGENTS.md"'
 assert_file_contains "$ROOT/README.md" 'project-trust mechanism remains authoritative'
 

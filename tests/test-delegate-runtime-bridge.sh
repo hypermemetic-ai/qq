@@ -194,8 +194,6 @@ assert_file_contains "$README" 'env -u PI_SUBAGENT_PI_BINARY -u PI_SUBAGENT_EXTR
 assert_file_contains "$README" '-u PI_SUBAGENT_TRUSTED_AGENT_PATHS -u PI_SUBAGENT_TRUSTED_AGENT_KEYS'
 assert_file_contains "$README" '-u PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES -u PI_SUBAGENT_TRUSTED_EXECUTION_ROLE'
 assert_file_contains "$README" '-u PI_SUBAGENT_EXECUTION_PROFILE_RECEIPT -u QQ_DISPATCH_RUNTIME_ROOT'
-assert_file_contains "$README" '-u PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE'
-assert_file_contains "$README" '-u PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA TMPDIR="$test_root"'
 assert_file_contains "$README" 'Moving refs and `pi update` or other automatic'
 assert_file_contains "$README" 'One-command rollback removes the retained pin'
 assert_file_contains "$README" 'tests/vendor-runtime-contract.sh <absolute-pi-subagents-checkout>'
