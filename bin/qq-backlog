@@ -1,0 +1,414 @@
+#!/usr/bin/env python3
+"""Narrow noninteractive repairs over the installed Backlog CLI."""
+
+from __future__ import annotations
+
+import datetime as dt
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+from typing import NoReturn
+
+
+SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]*")
+DOC_ID = re.compile(r"doc-([1-9][0-9]*)")
+DOC_FILE = re.compile(r"doc-([1-9][0-9]*) - .+\.md")
+
+
+class Refusal(Exception):
+    pass
+
+
+def fail(message: str, code: int = 1) -> NoReturn:
+    print(f"qq-backlog: {message}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def resolve_tool(name: str) -> str:
+    env_name = f"QQ_{name.upper().replace('-', '_')}_BIN"
+    override = os.environ.get(env_name)
+    if override:
+        path = Path(override)
+        if not path.is_absolute() or not path.is_file() or not os.access(path, os.X_OK):
+            raise Refusal(f"{env_name} must be an absolute executable file")
+        return os.fspath(path)
+    found = shutil.which(name)
+    if found and Path(found).is_file() and os.access(found, os.X_OK):
+        return found
+    for directory in ("/home/linuxbrew/.linuxbrew/bin", "/opt/homebrew/bin"):
+        candidate = Path(directory, name)
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return os.fspath(candidate)
+    raise Refusal(f"{name} not found; set {env_name} to its absolute path")
+
+
+def run_git(git: str, cwd: Path, *args: str, binary: bool = False) -> str | bytes:
+    result = subprocess.run(
+        [git, "-C", os.fspath(cwd), *args],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", "replace").strip()
+        raise Refusal(f"git {' '.join(args)} failed{': ' + detail if detail else ''}")
+    if binary:
+        return result.stdout
+    try:
+        return result.stdout.decode("utf-8").strip()
+    except UnicodeDecodeError as error:
+        raise Refusal(f"git {' '.join(args)} returned non-UTF-8 output") from error
+
+
+def repository_root(git: str) -> Path:
+    value = run_git(git, Path.cwd(), "rev-parse", "--show-toplevel")
+    assert isinstance(value, str)
+    root = Path(value)
+    try:
+        resolved = root.resolve(strict=True)
+    except OSError as error:
+        raise Refusal(f"cannot resolve Repository root: {error}") from error
+    if not resolved.is_dir():
+        raise Refusal("Git top level is not a directory")
+    return resolved
+
+
+def frontmatter(data: bytes, label: str) -> tuple[bytes, bytes, list[tuple[int, int, bytes]]]:
+    lines = data.splitlines(keepends=True)
+    if not lines or lines[0].rstrip(b"\r\n") != b"---":
+        raise Refusal(f"{label} lacks opening frontmatter")
+    offset = len(lines[0])
+    records: list[tuple[int, int, bytes]] = []
+    for line in lines[1:]:
+        start = offset
+        offset += len(line)
+        records.append((start, offset, line))
+        if line.rstrip(b"\r\n") == b"---":
+            return data[:offset], data[offset:], records[:-1]
+    raise Refusal(f"{label} lacks closing frontmatter")
+
+
+def read_regular(path: Path, label: str) -> tuple[bytes, int]:
+    if path.is_symlink() or not path.is_file():
+        raise Refusal(f"{label} is not a regular file: {path}")
+    try:
+        metadata = path.stat()
+        return path.read_bytes(), stat.S_IMODE(metadata.st_mode)
+    except OSError as error:
+        raise Refusal(f"cannot read {label} {path}: {error}") from error
+
+
+def stage(path: Path, data: bytes, mode: int) -> Path:
+    descriptor, name = tempfile.mkstemp(prefix=f".{path.name}.qq-", dir=path.parent)
+    temporary = Path(name)
+    try:
+        os.fchmod(descriptor, mode)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        return temporary
+    except BaseException:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def atomic_write(path: Path, data: bytes, mode: int) -> None:
+    temporary = stage(path, data, mode)
+    try:
+        os.replace(temporary, path)
+        fsync_directory(path.parent)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def decision_update(root: Path, decision_id: str, content: str) -> None:
+    if not SAFE_ID.fullmatch(decision_id):
+        raise Refusal(f"invalid decision id: {decision_id}")
+    matches = sorted((root / "backlog" / "decisions").glob(f"decision-{decision_id} - *.md"))
+    if len(matches) != 1:
+        raise Refusal(
+            f"decision-{decision_id} must match exactly one file beneath backlog/decisions; found {len(matches)}"
+        )
+    path = matches[0]
+    original, mode = read_regular(path, "decision")
+    header, _body, _records = frontmatter(original, os.fspath(path.relative_to(root)))
+    body = content.encode("utf-8")
+    if not body.endswith(b"\n"):
+        body += b"\n"
+    atomic_write(path, header + body, mode)
+    print(path.relative_to(root))
+
+
+def field_id(data: bytes, label: str) -> str:
+    _header, _body, records = frontmatter(data, label)
+    values: list[str] = []
+    for _start, _end, line in records:
+        raw = line.rstrip(b"\r\n")
+        if raw.startswith(b"id:"):
+            try:
+                values.append(raw[3:].strip().decode("utf-8"))
+            except UnicodeDecodeError as error:
+                raise Refusal(f"{label} has a non-UTF-8 id") from error
+    if len(values) != 1 or not DOC_ID.fullmatch(values[0]):
+        raise Refusal(f"{label} must contain exactly one numeric doc id in frontmatter")
+    return values[0]
+
+
+def rewrite_doc_id(data: bytes, old_id: str, new_id: str, label: str) -> bytes:
+    _header, _body, records = frontmatter(data, label)
+    matches: list[tuple[int, int, bytes]] = []
+    pattern = re.compile(rb"^(id:\s*)" + re.escape(old_id.encode()) + rb"(\s*)(\r?\n)?$")
+    for start, end, line in records:
+        if pattern.fullmatch(line):
+            matches.append((start, end, line))
+    if len(matches) != 1:
+        raise Refusal(f"{label} must contain exactly one canonical id: {old_id} line")
+    start, end, line = matches[0]
+    match = pattern.fullmatch(line)
+    assert match is not None
+    replacement = match.group(1) + new_id.encode() + match.group(2) + (match.group(3) or b"")
+    return data[:start] + replacement + data[end:]
+
+
+def rewrite_task_reference(data: bytes, old_id: str, new_id: str, label: str) -> bytes:
+    header, body, records = frontmatter(data, label)
+    documentation_start: int | None = None
+    documentation_end = len(header)
+    for start, _end, line in records:
+        raw = line.rstrip(b"\r\n")
+        if documentation_start is None:
+            if raw == b"documentation:":
+                documentation_start = start
+            continue
+        if raw and not raw.startswith((b" ", b"\t")):
+            documentation_end = start
+            break
+    if documentation_start is None:
+        return data
+    section = header[documentation_start:documentation_end]
+    token = re.compile(
+        rb"(?<![A-Za-z0-9.-])" + re.escape(old_id.encode()) + rb"(?![A-Za-z0-9.-])"
+    )
+    replaced = token.sub(new_id.encode(), section)
+    if replaced == section:
+        return data
+    return header[:documentation_start] + replaced + header[documentation_end:] + body
+
+
+def ids_on_main(git: str, root: Path, merge_base: str) -> set[str]:
+    output = run_git(
+        git,
+        root,
+        "ls-tree",
+        "-rz",
+        "--name-only",
+        merge_base,
+        "--",
+        "backlog/docs",
+        binary=True,
+    )
+    assert isinstance(output, bytes)
+    ids: set[str] = set()
+    for raw_path in output.split(b"\0"):
+        if not raw_path or not raw_path.endswith(b".md"):
+            continue
+        try:
+            relative = raw_path.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise Refusal("main's backlog/docs tree contains a non-UTF-8 path") from error
+        blob = run_git(git, root, "show", f"{merge_base}:{relative}", binary=True)
+        assert isinstance(blob, bytes)
+        ids.add(field_id(blob, f"main:{relative}"))
+    return ids
+
+
+def validate_receipts(data: bytes, path: Path, old_id: str, old_path: str) -> None:
+    if data and not data.endswith(b"\n"):
+        raise Refusal(f"receipt ledger must end with a newline before append: {path}")
+    for number, line in enumerate(data.splitlines(), 1):
+        try:
+            receipt = json.loads(line)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise Refusal(f"invalid receipt JSON at {path}:{number}") from error
+        if not isinstance(receipt, dict):
+            raise Refusal(f"receipt at {path}:{number} is not an object")
+        if receipt.get("old_id") == old_id and receipt.get("old_path") == old_path:
+            raise Refusal(f"document supersede was already receipted for {old_id}: {old_path}")
+
+
+def doc_supersede(root: Path, git: str, requested_id: str) -> None:
+    if not DOC_ID.fullmatch(requested_id):
+        raise Refusal(f"doc id must have the form doc-<positive-integer>: {requested_id}")
+    docs_root = root / "backlog" / "docs"
+    candidates = sorted(
+        path for path in docs_root.rglob("*.md") if path.name.startswith(f"{requested_id} - ")
+    )
+    if len(candidates) != 1:
+        raise Refusal(f"{requested_id} must match exactly one document; found {len(candidates)}")
+    old_path = candidates[0]
+    old_data, old_mode = read_regular(old_path, "document")
+    if field_id(old_data, os.fspath(old_path.relative_to(root))) != requested_id:
+        raise Refusal(f"document filename and frontmatter id disagree: {old_path.relative_to(root)}")
+
+    main_ref = run_git(git, root, "rev-parse", "--verify", "refs/heads/main")
+    head = run_git(git, root, "rev-parse", "--verify", "HEAD")
+    assert isinstance(main_ref, str) and isinstance(head, str)
+    merge_base = run_git(git, root, "merge-base", head, main_ref)
+    assert isinstance(merge_base, str)
+    if requested_id in ids_on_main(git, root, merge_base):
+        raise Refusal(f"{requested_id} is present on main's merge-base tree and is not an unmerged document")
+
+    all_ids: set[int] = set()
+    for path in sorted(docs_root.rglob("*.md")):
+        data, _mode = read_regular(path, "document")
+        value = field_id(data, os.fspath(path.relative_to(root)))
+        match = DOC_ID.fullmatch(value)
+        assert match is not None
+        all_ids.add(int(match.group(1)))
+    next_number = max(all_ids, default=0) + 1
+    while next_number in all_ids:
+        next_number += 1
+    new_id = f"doc-{next_number}"
+    if not DOC_FILE.fullmatch(old_path.name):
+        raise Refusal(f"document filename does not use Backlog's managed form: {old_path.relative_to(root)}")
+    suffix = old_path.name.split(" - ", 1)[1]
+    new_path = old_path.with_name(f"{new_id} - {suffix}")
+    if os.path.lexists(new_path):
+        raise Refusal(f"allocated document path already exists: {new_path.relative_to(root)}")
+    new_doc = rewrite_doc_id(
+        old_data, requested_id, new_id, os.fspath(old_path.relative_to(root))
+    )
+
+    changes: dict[Path, tuple[bytes, bytes, int]] = {}
+    for task in sorted((root / "backlog" / "tasks").glob("*.md")):
+        original, mode = read_regular(task, "Task")
+        updated = rewrite_task_reference(
+            original, requested_id, new_id, os.fspath(task.relative_to(root))
+        )
+        if updated != original:
+            changes[task] = (original, updated, mode)
+
+    receipt_path = docs_root / ".supersede-receipts.jsonl"
+    if os.path.lexists(receipt_path):
+        receipt_original, receipt_mode = read_regular(receipt_path, "receipt ledger")
+    else:
+        receipt_original, receipt_mode = b"", 0o644
+    old_relative = os.fspath(old_path.relative_to(root))
+    new_relative = os.fspath(new_path.relative_to(root))
+    validate_receipts(receipt_original, receipt_path, requested_id, old_relative)
+    receipt = {
+        "schema": "qq-backlog.supersede",
+        "version": 1,
+        "old_id": requested_id,
+        "new_id": new_id,
+        "old_path": old_relative,
+        "new_path": new_relative,
+        "old_sha256": hashlib.sha256(old_data).hexdigest(),
+        "at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+    }
+    receipt_line = json.dumps(receipt, ensure_ascii=False, separators=(",", ":")) + "\n"
+    receipt_updated = receipt_original + receipt_line.encode("utf-8")
+
+    staged: dict[Path, Path] = {}
+    installed: list[Path] = []
+    try:
+        for path, (_original, updated, mode) in changes.items():
+            staged[path] = stage(path, updated, mode)
+        staged[receipt_path] = stage(receipt_path, receipt_updated, receipt_mode)
+        staged[new_path] = stage(new_path, new_doc, old_mode)
+        for path in changes:
+            os.replace(staged[path], path)
+            installed.append(path)
+        os.replace(staged[receipt_path], receipt_path)
+        installed.append(receipt_path)
+        os.replace(staged[new_path], new_path)
+        installed.append(new_path)
+        old_path.unlink()
+        fsync_directory(old_path.parent)
+        for directory in {path.parent for path in installed}:
+            fsync_directory(directory)
+    except BaseException as error:
+        rollback_errors: list[str] = []
+        for path, (original, _updated, mode) in changes.items():
+            if path in installed:
+                try:
+                    atomic_write(path, original, mode)
+                except OSError as rollback_error:
+                    rollback_errors.append(f"{path}: {rollback_error}")
+        if receipt_path in installed:
+            try:
+                if receipt_original:
+                    atomic_write(receipt_path, receipt_original, receipt_mode)
+                else:
+                    receipt_path.unlink(missing_ok=True)
+            except OSError as rollback_error:
+                rollback_errors.append(f"{receipt_path}: {rollback_error}")
+        if new_path in installed:
+            try:
+                new_path.unlink(missing_ok=True)
+            except OSError as rollback_error:
+                rollback_errors.append(f"{new_path}: {rollback_error}")
+        if not old_path.exists():
+            try:
+                atomic_write(old_path, old_data, old_mode)
+            except OSError as rollback_error:
+                rollback_errors.append(f"{old_path}: {rollback_error}")
+        if rollback_errors:
+            raise Refusal("supersede failed and rollback was incomplete: " + "; ".join(rollback_errors)) from error
+        raise Refusal(f"supersede failed; original paths and bytes were restored: {error}") from error
+    finally:
+        for temporary in staged.values():
+            temporary.unlink(missing_ok=True)
+
+    print(new_path.relative_to(root))
+
+
+def usage() -> NoReturn:
+    fail(
+        "usage: qq-backlog decision update <decision-id> --content <complete-body> | "
+        "qq-backlog doc supersede <doc-id>",
+        2,
+    )
+
+
+def main(argv: list[str]) -> None:
+    if len(argv) == 5 and argv[:2] == ["decision", "update"] and argv[3] == "--content":
+        command = ("decision", argv[2], argv[4])
+    elif len(argv) == 3 and argv[:2] == ["doc", "supersede"]:
+        command = ("doc", argv[2])
+    else:
+        usage()
+    resolve_tool("backlog")
+    git = resolve_tool("git")
+    root = repository_root(git)
+    if command[0] == "decision":
+        decision_update(root, command[1], command[2])
+    else:
+        doc_supersede(root, git, command[1])
+
+
+if __name__ == "__main__":
+    try:
+        main(sys.argv[1:])
+    except Refusal as error:
+        fail(str(error))
