@@ -16,6 +16,9 @@ import { decode } from "@toon-format/toon";
 const [modulePath, scratch] = process.argv.slice(2);
 const { default: register } = await import(pathToFileURL(modulePath));
 const contextId = `context-${"b".repeat(32)}`;
+const pendingContextId = `context-${"d".repeat(32)}`;
+const batchId = `batch-${"c".repeat(32)}`;
+const handoffId = `handoff-${"c".repeat(32)}`;
 function occurrence(id, key, repository, pr) {
   return { occurrence_id: `occurrence-${id.repeat(32)}`, recurrence_key: key,
     source: { run_dir: `/state/runs/${repository}/pr-${pr}`, repository, legacy: false,
@@ -27,7 +30,7 @@ const b1 = occurrence("3", "other-key", "two/repo", 3);
 const observerHealth = { rounds: [
   { status: "analysis_failed", repository: "health/repo", pr: 4,
     run_dir: "/state/runs/health/repo/pr-4", assembled_at: "2026-08-04T00:00:00Z",
-    reason: "😀".repeat(500), reason_truncated: false },
+    reason: "😀".repeat(250), reason_truncated: false },
   { status: "pending", repository: "health/repo", pr: 5,
     run_dir: "/state/runs/health/repo/pr-5", assembled_at: "2026-08-05T00:00:00Z",
     reason: "analysis is not finalized", reason_truncated: false },
@@ -69,136 +72,128 @@ const decisions = [
   { recurrence_key: "same-key", occurrence_ids: [a1.occurrence_id, a2.occurrence_id].sort(), action: "route", scope: "Agreed cross-Repository scope.", note: "" },
   { recurrence_key: "other-key", occurrence_ids: [b1.occurrence_id], action: "set_aside", scope: "", note: "Current evidence is not actionable." },
 ];
-const params = { action: "propose", context_id: contextId, decisions };
-const batchId = `batch-${"c".repeat(32)}`, handoffId = `handoff-${"c".repeat(32)}`;
-const pendingIntake = { batch_id: batchId, handoff_id: handoffId, status: "prepared", attempt_statuses: [],
+const proposalParams = { action: "propose", context_id: contextId, decisions };
+const pendingIntake = { batch_id: batchId, context_id: contextId, handoff_id: handoffId, status: "prepared", attempt_statuses: [],
   decisions: decisions.map((decision, index) => ({ decision_id: `decision-${String(index + 1).repeat(32)}`, ...decision })),
   occurrences: [a1, a2, b1], batch_dir: `/state/architect/batches/${batchId}`,
   handoff_path: `/state/architect/batches/${batchId}/handoff.json`, result_path: `/state/architect/batches/${batchId}/result.json`, attempt_paths: [] };
-const pendingContextId = `context-${"d".repeat(32)}`;
 const pendingContext = context(pendingContextId, [], [pendingIntake]);
-const pendingDecisions = pendingIntake.decisions.map(({ decision_id, ...decision }) => decision);
 
-// /architect directly loads one global context and invokes no selector/custom/editor.
+// /architect reads one global durable context and advertises identity-only confirmation.
 const openedContext = context();
 const h = harness([result(openedContext)]);
 await h.commands.get("architect").handler("", h.ctx);
 assert.equal(h.calls.length, 1); assert.deepEqual(h.calls[0].args, ["architect-context"]);
 assert.match(h.messages[0], /deterministic TOON/); assert.match(h.messages[0], /open-ended conversation/);
-assert.match(h.messages[0], /Observer health is informational only/);
+assert.match(h.messages[0], /confirm it with only that batch_id and its context_id/);
 assert.deepEqual(injectedContext(h.messages[0]), openedContext);
 assert.equal(injectedContext(h.messages[0]).findings[0].title, "Cross source 😀");
-assert.equal(injectedContext(h.messages[0]).context_id, contextId);
-assert.deepEqual(injectedContext(h.messages[0]).findings.flatMap((finding) => finding.occurrences.map(({ occurrence_id }) => occurrence_id)),
-  [a1.occurrence_id, a2.occurrence_id, b1.occurrence_id]);
-assert.equal(injectedContext(h.messages[0]).pending_intakes.length, 0);
-assert.deepEqual(injectedContext(h.messages[0]).observer_health, observerHealth);
-assert.equal(h.messages[0].includes(JSON.stringify(openedContext)), false, "Architect injected compact JSON instead of TOON");
-assert.equal(h.commands.has("architect-discussed"), false, "round compatibility command was advertised");
-assert.ok(h.tools.get("architect_disposition").parameters.required.includes("decisions"), "confirm could omit the proposed decisions");
+const toolSchema = h.tools.get("architect_disposition").parameters;
+assert.deepEqual(toolSchema.properties.action.enum, ["propose", "confirm"]);
+assert.equal(Object.hasOwn(toolSchema.properties, "operator_confirmation"), false);
+assert.equal(Object.hasOwn(toolSchema.properties, "operator_request"), false);
+assert.equal(toolSchema.required.includes("decisions"), false, "confirm still required decision replay");
 
-// Proposal reloads current evidence and remains read-only.
-h.queue.push(result(context()));
-const proposed = await h.tool(params);
-assert.equal(proposed.details.status, "proposed"); assert.match(proposed.content[0].text, /Confirm this exact batch\?/);
-assert.match(proposed.content[0].text, /Agreed cross-Repository scope/);
-assert.equal(h.calls.filter((call) => call.args[0] !== "architect-context").length, 0);
-
-// Same-turn, negative, unrelated, mismatched text, and altered decisions all refuse without mutation and retain proposal.
-h.queue.push(result(context()));
-assert.equal((await h.tool({ ...params, action: "confirm" })).details.status, "refused");
-await h.input("No, hold this."); h.queue.push(result(context()));
-assert.equal((await h.tool({ ...params, action: "confirm", operator_confirmation: "No, hold this." })).details.status, "refused");
-await h.input("What about another issue?"); h.queue.push(result(context()));
-assert.equal((await h.tool({ ...params, action: "confirm", operator_confirmation: "What about another issue?" })).details.status, "refused");
-await h.input("Yes"); h.queue.push(result(context()));
-assert.equal((await h.tool({ ...params, action: "confirm", operator_confirmation: "Okay" })).details.status, "refused");
-const altered = structuredClone(params); altered.decisions[0].scope = "Altered scope";
-h.queue.push(result(context()));
-assert.equal((await h.tool({ ...altered, action: "confirm", operator_confirmation: "Yes" })).details.status, "refused");
-assert.equal(h.calls.filter((call) => call.args[0] === "prepare-handoff").length, 0);
-
-// One later exact affirmative confirms, prepares immutably, then starts exactly one recipient and records one attempt.
+// Propose validates current occurrence identity, then durably prepares and presents the batch once.
 let writtenDecisions;
-h.queue.push(result(context()), async (call) => { writtenDecisions = JSON.parse(await readFile(call.args[4], "utf8")); return result({ status: "confirmed", batch_dir: `/state/architect/batches/${batchId}`, handoff_path: `/state/architect/batches/${batchId}/handoff.json`, batch: { batch_id: batchId, context_id: contextId, handoff_id: handoffId } }); },
-  result(pendingContext), result({ schema: "qq-handoff/v1", version: 1, engine: "qq-handoff", action: "intake-start", status: "done", transaction: { created_tab_id: "w:t" }, handoff_id: handoffId }), result({ status: "recorded" }));
-const confirmed = await h.tool({ ...params, action: "confirm", operator_confirmation: "Yes" });
-assert.equal(confirmed.details.status, "routed"); assert.deepEqual(writtenDecisions, decisions);
-assert.equal(h.calls.filter((call) => call.command === "qq-handoff").length, 1);
-assert.deepEqual(h.calls.at(-1).args.slice(0, 3), ["record-handoff-attempt", "--batch", `/state/architect/batches/${batchId}`]);
-const beforeReplay = h.calls.length;
-assert.equal((await h.tool({ ...params, action: "confirm", operator_confirmation: "Yes" })).details.status, "refused");
-assert.equal(h.calls.length, beforeReplay, "replay reloaded or wrote state after pending proposal was consumed");
+h.queue.push(result(context()), async (call) => {
+  writtenDecisions = JSON.parse(await readFile(call.args[4], "utf8"));
+  return result({ status: "confirmed", batch_dir: pendingIntake.batch_dir, handoff_path: pendingIntake.handoff_path,
+    batch: { batch_id: batchId, context_id: contextId, handoff_id: handoffId } });
+});
+const proposed = await h.tool(proposalParams);
+assert.equal(proposed.details.status, "proposed"); assert.equal(proposed.details.batch_id, batchId);
+assert.match(proposed.content[0].text, new RegExp(batchId));
+assert.match(proposed.content[0].text, /clear affirmative/);
+assert.equal(proposed.content[0].text.includes("Confirm this exact batch?"), false);
+assert.deepEqual(writtenDecisions, decisions);
+assert.equal(h.calls.filter((call) => call.args[0] === "prepare-handoff").length, 1);
 
-// An uncertain start is recorded, remains pending on the next /architect, and exact explicit retry reuses the handoff without preparing a new batch.
-const u = harness([result(context()), result(context())]);
-await u.commands.get("architect").handler("", u.ctx);
-assert.equal((await u.tool(params)).details.status, "proposed"); await u.input("Yes");
-u.queue.push(result(context()), result({ status: "confirmed", batch_dir: pendingIntake.batch_dir, handoff_path: pendingIntake.handoff_path,
-  batch: { batch_id: batchId, context_id: contextId, handoff_id: handoffId } }), result(pendingContext), result("not-json", 70, "start uncertain"), result({ status: "recorded" }));
-assert.equal((await u.tool({ ...params, action: "confirm", operator_confirmation: "Yes" })).details.status, "pending");
-const attemptedPendingContext = { ...pendingContext, pending_intakes: [{ ...pendingIntake, status: "attempted_awaiting_result", attempt_statuses: ["error"], attempt_paths: [`${pendingIntake.batch_dir}/attempts/attempt-${"a".repeat(64)}.json`] }] };
-u.queue.push(result(attemptedPendingContext));
-await u.commands.get("architect").handler("", u.ctx);
-assert.match(u.messages.at(-1), /already operator-settled/);
-const injectedPending = injectedContext(u.messages.at(-1));
-assert.deepEqual(injectedPending, attemptedPendingContext);
-assert.equal(injectedPending.context_id, pendingContextId);
-assert.equal(injectedPending.pending_intakes[0].status, "attempted_awaiting_result");
-assert.equal(injectedPending.pending_intakes[0].batch_id, batchId);
-assert.equal(injectedPending.pending_intakes[0].handoff_id, handoffId);
-assert.deepEqual(injectedPending.pending_intakes[0].occurrences.map(({ occurrence_id }) => occurrence_id),
-  [a1.occurrence_id, a2.occurrence_id, b1.occurrence_id]);
-u.queue.push(result(attemptedPendingContext));
-assert.equal((await u.tool({ action: "propose", context_id: pendingContextId, decisions })).details.status, "refused", "pending decisions were re-proposable");
-await u.input(`retry ${batchId}`);
-u.queue.push(result(attemptedPendingContext),
-  result({ schema: "qq-handoff/v1", version: 1, engine: "qq-handoff", action: "intake-start", status: "refused", message: "live recipient", handoff_id: handoffId }), result({ status: "recorded" }));
-const retried = await u.tool({ action: "retry", context_id: pendingContextId, decisions: pendingDecisions,
-  batch_id: batchId, handoff_id: handoffId, operator_request: `retry ${batchId}` });
+// Plain-language affirmative plus batch identity re-reads durable state and starts one recipient.
+await h.input(`Yes, please proceed with ${batchId}; this looks good.`);
+h.queue.push(result(pendingContext), result({ schema: "qq-handoff/v1", version: 1, engine: "qq-handoff", action: "intake-start", status: "done", transaction: { created_tab_id: "w:t" }, handoff_id: handoffId }));
+const confirmed = await h.tool({ action: "confirm", context_id: contextId, batch_id: batchId });
+assert.equal(confirmed.details.status, "routed");
+assert.deepEqual(h.calls.at(-1).args, ["intake-start", "--handoff", pendingIntake.handoff_path, "--repo", "/qq"]);
+
+// Confirmation is independent of an in-memory proposal or /architect context and tolerates a changed top-level context id.
+const durable = harness([]);
+await durable.input(`I approve ${batchId}; go ahead.`);
+durable.queue.push(result(pendingContext), result({ schema: "qq-handoff/v1", version: 1, engine: "qq-handoff", action: "intake-start", status: "refused", message: "live recipient", handoff_id: handoffId }));
+const retried = await durable.tool({ action: "confirm", context_id: contextId, batch_id: batchId });
 assert.equal(retried.details.status, "pending");
-assert.equal(u.calls.filter((call) => call.args[0] === "prepare-handoff").length, 1, "retry prepared another batch");
-assert.equal(u.calls.filter((call) => call.command === "qq-handoff" && call.args[2] === pendingIntake.handoff_path).length, 2, "retry changed the immutable handoff");
-// A verified result removes pending state on the next context.
-u.queue.push(result(context(`context-${"9".repeat(32)}`, [])));
-await u.commands.get("architect").handler("", u.ctx);
-assert.equal(injectedContext(u.messages.at(-1)).pending_intakes.length, 0);
+assert.equal(durable.calls.filter((call) => call.args[0] === "prepare-handoff").length, 0);
+assert.equal(durable.calls.filter((call) => call.command === "qq-handoff").length, 1);
 
-// Set-aside-only confirmation records selective state but starts no intake.
-const s = harness([result(context()), result(context())]);
-await s.commands.get("architect").handler("", s.ctx);
+// Authority must be a clear affirmative referencing the batch; no operator prose is replayed through the tool.
+const authority = harness([]);
+await authority.input("Yes, please proceed."); authority.queue.push(result(pendingContext));
+let refusal = await authority.tool({ action: "confirm", context_id: contextId, batch_id: batchId });
+assert.equal(refusal.details.status, "refused"); assert.match(refusal.content[0].text, /references batch-/);
+await authority.input(`Do not confirm ${batchId}.`); authority.queue.push(result(pendingContext));
+refusal = await authority.tool({ action: "confirm", context_id: contextId, batch_id: batchId });
+assert.equal(refusal.details.status, "refused"); assert.match(refusal.content[0].text, /clear affirmative/);
+const beforeExtra = authority.calls.length;
+refusal = await authority.tool({ action: "confirm", context_id: contextId, batch_id: batchId, decisions });
+assert.equal(refusal.details.status, "refused"); assert.match(refusal.content[0].text, /pass only action, context_id, and batch_id/);
+assert.equal(authority.calls.length, beforeExtra, "invalid confirmation touched durable state");
+
+// Wrong durable identity gives an invariant-specific correction.
+const wrongIdentity = harness([result(pendingContext)]);
+await wrongIdentity.input(`Approve batch-${"f".repeat(32)}.`);
+refusal = await wrongIdentity.tool({ action: "confirm", context_id: contextId, batch_id: `batch-${"f".repeat(32)}` });
+assert.equal(refusal.details.status, "refused"); assert.match(refusal.content[0].text, /not in durable pending_intakes/);
+const wrongContext = harness([result(pendingContext)]);
+await wrongContext.input(`Approve ${batchId}.`);
+refusal = await wrongContext.tool({ action: "confirm", context_id: `context-${"f".repeat(32)}`, batch_id: batchId });
+assert.equal(refusal.details.status, "refused"); assert.match(refusal.content[0].text, /belongs to context-/);
+
+// A Task-free proposal is durably settled without creating recipient ceremony.
 const setAside = [{ recurrence_key: "other-key", occurrence_ids: [b1.occurrence_id], action: "set_aside", scope: "", note: "Explicitly settled." }];
-const sp = { action: "propose", context_id: contextId, decisions: setAside };
-assert.equal((await s.tool(sp)).details.status, "proposed"); await s.input("Okay");
-s.queue.push(result(context()), result({ status: "confirmed", batch_dir: "/state/architect/batches/batch-dddddddddddddddddddddddddddddddd", handoff_path: null,
-  batch: { batch_id: "batch-dddddddddddddddddddddddddddddddd", context_id: contextId } }));
-assert.equal((await s.tool({ ...sp, action: "confirm", operator_confirmation: "Okay" })).details.status, "settled");
+const s = harness([result(context()), result({ status: "confirmed", batch_dir: `/state/architect/batches/batch-${"e".repeat(32)}`, handoff_path: null,
+  batch: { batch_id: `batch-${"e".repeat(32)}`, context_id: contextId } })]);
+const settled = await s.tool({ action: "propose", context_id: contextId, decisions: setAside });
+assert.equal(settled.details.status, "settled"); assert.match(settled.content[0].text, /no Task or recipient/);
 assert.equal(s.calls.some((call) => call.command === "qq-handoff"), false);
 
-// Changed context, wrong context, duplicate key/occurrence, and malformed scope refuse.
-for (const bad of [
-  [{ ...decisions[0], action: "set_aside", scope: "still scoped" }],
-  [decisions[0], { ...decisions[0], occurrence_ids: [b1.occurrence_id] }],
-  [{ ...decisions[0], occurrence_ids: [a1.occurrence_id, a1.occurrence_id] }],
+// Trust-bearing proposal rejections identify the invariant and correction.
+for (const [bad, message] of [
+  [[{ ...decisions[1], scope: "not empty" }], /set_aside scope invariant.*set scope to an empty string/],
+  [[decisions[0], { ...decisions[0], occurrence_ids: [b1.occurrence_id] }], /recurrence invariant.*merge duplicate-key/],
+  [[{ ...decisions[0], occurrence_ids: [a1.occurrence_id, a1.occurrence_id] }], /occurrence uniqueness invariant.*remove duplicates/],
 ]) {
-  const x = harness([result(context()), result(context())]); await x.commands.get("architect").handler("", x.ctx);
-  assert.equal((await x.tool({ action: "propose", context_id: contextId, decisions: bad })).details.status, "refused");
-  assert.equal(x.calls.length, 2);
+  const x = harness([result(context())]);
+  const rejected = await x.tool({ action: "propose", context_id: contextId, decisions: bad });
+  assert.equal(rejected.details.status, "refused"); assert.match(rejected.content[0].text, message);
+  assert.equal(x.calls.length, 1, "invalid decisions reached prepare-handoff");
 }
-const stale = harness([result(context()), result(context(`context-${"e".repeat(32)}`))]);
-await stale.commands.get("architect").handler("", stale.ctx);
-assert.equal((await stale.tool(params)).details.status, "refused");
-const wrong = harness([result(context())]); await wrong.commands.get("architect").handler("", wrong.ctx);
-assert.equal((await wrong.tool({ ...params, context_id: `context-${"f".repeat(32)}` })).details.status, "refused"); assert.equal(wrong.calls.length, 1);
+const stale = harness([result(context(`context-${"e".repeat(32)}`))]);
+refusal = await stale.tool(proposalParams);
+assert.equal(refusal.details.status, "refused"); assert.match(refusal.content[0].text, /run \/architect and rebuild/);
 
-const unpairedSurrogateContext = structuredClone(context());
-unpairedSurrogateContext.findings[0].title = JSON.parse('"\\ud800"');
+// Existing attempt files remain readable history but cause no attempt writes.
+const historical = structuredClone(pendingContext);
+historical.pending_intakes[0].status = "attempted_awaiting_result";
+historical.pending_intakes[0].attempt_statuses = ["error"];
+historical.pending_intakes[0].attempt_paths = [`${pendingIntake.batch_dir}/attempts/attempt-${"a".repeat(64)}.json`];
+const history = harness([result(historical)]);
+await history.commands.get("architect").handler("", history.ctx);
+assert.deepEqual(injectedContext(history.messages[0]), historical);
+
+// Malformed engine context reports the exact failed invariant and corrective reader.
 const malformedHealthContext = structuredClone(context());
 malformedHealthContext.observer_health.rounds[0].status = "covered";
-for (const bad of [result("not-json"), result("", 65, "bad store"), result(unpairedSurrogateContext), result(malformedHealthContext)]) {
+const badFieldsContext = structuredClone(context()); delete badFieldsContext.omitted_findings;
+for (const [bad, invariant] of [
+  [result("not-json"), /Architect context JSON invariant failed/],
+  [result(badFieldsContext), /Architect context top-level invariant failed/],
+  [result(malformedHealthContext), /Observer health round 0 invariant failed/],
+  [result("", 65, "bad store"), /bad store/],
+]) {
   const x = harness([bad]); await x.commands.get("architect").handler("", x.ctx);
-  assert.equal(x.messages.length, 0); assert.match(x.notifications[0].message, /Cannot load Architect context/);
+  assert.equal(x.messages.length, 0); assert.match(x.notifications[0].message, invariant);
   assert.equal(x.notifications[0].level, "error");
+  assert.equal(x.notifications[0].message.includes("wrong shape"), false);
 }
 const headless = harness([], { hasUI: false }); await headless.commands.get("architect").handler("", headless.ctx); assert.equal(headless.calls.length, 0);
 console.log("test-qq-architect-extension: pass");

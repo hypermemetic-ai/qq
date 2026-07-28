@@ -163,24 +163,34 @@ cp "$global_handoff" "$tmp/global-handoff-before.json"
 "$OBSERVE" prepare-handoff --context "$context_id" --decisions "$tmp/global-route.json" >"$tmp/global-again.json"
 jq -e '.status == "already confirmed"' "$tmp/global-again.json" >/dev/null
 cmp "$tmp/global-handoff-before.json" "$global_handoff" || fail 'idempotent global retry rewrote immutable handoff'
-# Attempt receipts bind to the global batch and remain content-idempotent.
 global_handoff_id="$(jq -r .handoff_id "$global_handoff")"
-jq -cn --arg id "$global_handoff_id" '{schema:"qq-handoff/v1",version:1,engine:"qq-handoff",action:"intake-start",status:"error",message:"retryable",handoff_id:$id,rails:[]}' >"$tmp/global-attempt.json"
-"$OBSERVE" record-handoff-attempt --batch "$global_batch" --receipt "$tmp/global-attempt.json" >"$tmp/global-attempt-1.json"
-"$OBSERVE" record-handoff-attempt --batch "$global_batch" --receipt "$tmp/global-attempt.json" >"$tmp/global-attempt-2.json"
-jq -e '.status == "recorded"' "$tmp/global-attempt-1.json" >/dev/null
-jq -e '.status == "already recorded"' "$tmp/global-attempt-2.json" >/dev/null
-# Prepared/failed routed intake is explicit, exact, and not offered for re-decision.
+# Prepared routed intake is explicit, exact, and not offered for re-decision.
 "$OBSERVE" architect-context >"$tmp/pending-context.json"
 jq -e --arg batch "$global_batch" --arg handoff "$global_handoff" '
   (.pending_intakes | length) == 1
   and .pending_intakes[0].batch_dir == $batch and .pending_intakes[0].handoff_path == $handoff
-  and .pending_intakes[0].status == "attempted_awaiting_result"
-  and .pending_intakes[0].attempt_statuses == ["error"]
+  and .pending_intakes[0].status == "prepared"
+  and .pending_intakes[0].attempt_statuses == []
   and ([.pending_intakes[0].decisions[] | select(.action == "route") | .scope] == ["Route current alpha evidence across both Repositories."])
   and ([.pending_intakes[0].occurrences[].occurrence_id] | length) == 3
   and all(.findings[]; .recurrence_key != "alpha" and .recurrence_key != "beta")
 ' "$tmp/pending-context.json" >/dev/null || fail 'pending routed intake was hidden, inexact, or re-exposed as a finding'
+# Existing attempt files remain validated read-only history; no command authors new ones.
+mkdir -p "$global_batch/attempts"
+jq -cnS --arg id "$global_handoff_id" '{
+  schema:"qq-handoff/v1",version:1,engine:"qq-handoff",action:"intake-start",
+  status:"error",message:"historical fixture",handoff_id:$id,rails:[]
+}' >"$tmp/historical-attempt.json"
+historical_attempt_hash="$(sha256sum "$tmp/historical-attempt.json" | awk '{print $1}')"
+cp "$tmp/historical-attempt.json" \
+  "$global_batch/attempts/attempt-$historical_attempt_hash.json"
+"$OBSERVE" architect-context >"$tmp/historical-attempt-context.json"
+jq -e '
+  .pending_intakes[0].status == "attempted_awaiting_result"
+  and .pending_intakes[0].attempt_statuses == ["error"]
+  and (.pending_intakes[0].attempt_paths | length) == 1
+' "$tmp/historical-attempt-context.json" >/dev/null \
+  || fail 'existing intake attempt history was not preserved read-only'
 # A new same-key occurrence remains independently unsettled while the older immutable batch stays pending.
 fourth="$XDG_STATE_HOME/qq/observer/runs/by-repository/fourth/repo/pr-7"
 mkdir -p "$fourth"
@@ -243,14 +253,6 @@ assert_equal 64 "$status" 'routed round was discussed before a verified result'
 [ ! -e "$run/discussed.json" ] || fail 'premature discussion wrote a mark'
 
 handoff_id="$(jq -r .handoff_id "$handoff")"
-attempt="$tmp/attempt.json"
-jq -cn --arg id "$handoff_id" '{schema:"qq-handoff/v1",version:1,engine:"qq-handoff",action:"intake-start",status:"error",message:"retryable fixture",handoff_id:$id,rails:[]}' >"$attempt"
-"$OBSERVE" record-handoff-attempt --run "$run" --receipt "$attempt" >"$tmp/attempt-1.json"
-"$OBSERVE" record-handoff-attempt --run "$run" --receipt "$attempt" >"$tmp/attempt-2.json"
-jq -e '.status == "recorded"' "$tmp/attempt-1.json" >/dev/null
-jq -e '.status == "already recorded"' "$tmp/attempt-2.json" >/dev/null
-assert_equal 1 "$(find "$run/routing/attempts" -type f | wc -l)" 'attempt retry was not content-idempotent'
-
 # Build current born-in-worktree Task evidence for result and resolution.
 repo="$tmp/tasks-repo"; checkout="$tmp/task-change"
 git init -q -b main "$repo"

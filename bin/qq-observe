@@ -32,7 +32,6 @@ usage:
   qq-observe architect-context
   qq-observe prepare-handoff --context CONTEXT-ID --decisions FILE.json
   qq-observe prepare-handoff --run DIR --outcomes FILE.json  # v1 compatibility
-  qq-observe record-handoff-attempt (--batch DIR | --run DIR) --receipt FILE.json
   qq-observe record-handoff-result (--batch DIR | --run DIR) --receipt FILE.json
   qq-observe mark-discussed --run DIR --outcomes FILE.json [--twin DIR]
   qq-observe resolve-task (--batch DIR | --run DIR) --task <Task-ID> --repo ROOT
@@ -75,7 +74,7 @@ case "${1:-}" in
     ;;
   record | read-session | summarize | facts | signals | validate-analysis | \
   assemble | verify-delivery | render-doc | finalize | ledger-update | ledger-rebuild | \
-  digest | architect-context | prepare-handoff | record-handoff-attempt | record-handoff-result | \
+  digest | architect-context | prepare-handoff | record-handoff-result | \
   mark-discussed | resolve-task | rounds | record-comparison) command="$1"; shift ;;
   *) usage ;;
 esac
@@ -91,7 +90,7 @@ python_binary="$QQ_BIN_RESULT"
 # and --run subjects remain authoritative.
 case "$command" in
   assemble | verify-delivery | render-doc | finalize | ledger-update | ledger-rebuild | \
-  digest | architect-context | prepare-handoff | record-handoff-attempt | record-handoff-result | \
+  digest | architect-context | prepare-handoff | record-handoff-result | \
   mark-discussed | resolve-task | rounds | record-comparison)
     observer_git=""
     observer_gh=""
@@ -2950,7 +2949,8 @@ def architect_context_state():
         if batch_path.name == "handoff.json" and result is None:
             statuses = sorted({receipt["status"] for _, receipt in attempts})
             pending.append({
-                "batch_id": batch["batch_id"], "handoff_id": batch["handoff_id"],
+                "batch_id": batch["batch_id"], "context_id": batch["context_id"],
+                "handoff_id": batch["handoff_id"],
                 "status": "prepared" if not attempts else "attempted_awaiting_result",
                 "attempt_statuses": statuses,
                 "decisions": batch["decisions"],
@@ -3189,28 +3189,6 @@ def handoff_subject(options):
             fail("Task-free Architect batch has no accountable handoff", 65)
         return subject, handoff, subject, "batch_dir"
     fail("exactly one of --batch or --run is required", 65)
-
-
-def record_handoff_attempt(values):
-    options = parse_flags(values, {"--run", "--batch", "--receipt"})
-    if "--receipt" not in options or len(options) != 2:
-        fail("record-handoff-attempt requires --receipt and exactly one of --batch/--run")
-    subject, handoff, routing_path, subject_key = handoff_subject(options)
-    receipt_path = canonical_existing(options["--receipt"], "handoff attempt receipt")
-    receipt = json_document(read_regular(receipt_path, "handoff attempt receipt"), "handoff attempt receipt")
-    if (
-        not isinstance(receipt, dict)
-        or receipt.get("schema") != "qq-handoff/v1" or receipt.get("version") != 1
-        or receipt.get("engine") != "qq-handoff" or receipt.get("action") != "intake-start"
-        or receipt.get("handoff_id") != handoff["handoff_id"]
-        or receipt.get("status") not in ("done", "error", "refused")
-    ):
-        fail("handoff attempt receipt has the wrong shape or identity", 65)
-    data = canonical_json_bytes(receipt)
-    attempt_id = hashlib.sha256(data).hexdigest()
-    path = routing_path / "attempts" / f"attempt-{attempt_id}.json"
-    written = atomic_append(path, data)
-    emit({"status": "recorded" if written else "already recorded", "attempt_id": attempt_id, subject_key: os.fspath(subject)})
 
 
 def backlog_frontmatter(path, label):
@@ -4229,7 +4207,7 @@ ledger_writer = None
 try:
     if command in {
         "finalize", "ledger-update", "ledger-rebuild", "architect-context", "prepare-handoff",
-        "record-handoff-attempt", "record-handoff-result", "mark-discussed",
+        "record-handoff-result", "mark-discussed",
         "resolve-task", "record-comparison",
     }:
         ledger_writer = open_ledger_writer_lock()
@@ -4251,8 +4229,6 @@ try:
         architect_context(args)
     elif command == "prepare-handoff":
         prepare_handoff(args)
-    elif command == "record-handoff-attempt":
-        record_handoff_attempt(args)
     elif command == "record-handoff-result":
         record_handoff_result(args)
     elif command == "mark-discussed":
