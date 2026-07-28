@@ -270,6 +270,16 @@ assert_file_contains "$DISPATCH_STDERR" "declares unavailable tool 'unavailable-
 [ ! -e "$FAKE_PI_MARKER" ] || fail "unavailable tool launched Pi"
 cp "$tmp/reviewer.manifest" "$reviewer_manifest"
 
+# An extension-provided tool without its providing extension refuses at startup.
+researcher_manifest="$primary/delegation/manifests/agents/researcher.md"
+cp "$researcher_manifest" "$tmp/researcher.manifest"
+sed -i '/^subagentOnlyExtensions:/d' "$researcher_manifest"
+dispatch_case unpaired-context7 "$primary" "$primary_dispatch" researcher unpaired-context7
+assert_equal 66 "$DISPATCH_STATUS" "unpaired Context7 tool did not exit 66"
+assert_file_contains "$DISPATCH_STDERR" "declares unavailable tool 'resolve-library-id'"
+[ ! -e "$FAKE_PI_MARKER" ] || fail "unpaired Context7 tool launched Pi"
+cp "$tmp/researcher.manifest" "$researcher_manifest"
+
 # Trusted role selection remains exact and fail closed.
 dispatch_case trusted-missing "$primary" "$primary_dispatch" reviewer trusted-missing \
   PI_SUBAGENT_TRUSTED_AGENT_PATHS=

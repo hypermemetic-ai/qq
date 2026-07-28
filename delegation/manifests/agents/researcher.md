@@ -1,7 +1,7 @@
 ---
 name: researcher
 description: Research the assigned question without modifying the Repository.
-tools: read, grep, find, ls, bash, web_search, web_fetch
+tools: read, grep, find, ls, bash, resolve-library-id, query-docs
 extensions:
 subagentOnlyExtensions: ~/.pi/agent/npm/node_modules/@upstash/context7-pi/extensions/context7.ts
 systemPromptMode: replace

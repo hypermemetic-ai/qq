@@ -259,8 +259,20 @@ const knownTools = new Set([
   "read_enclosing", "pi_lens_activate_tools", "operator_stage", "qq_pr_watch",
   "architect_disposition",
 ]);
+// Extension-provided tools validate only for a role that loads the providing
+// extension through subagentOnlyExtensions (decision-15: researcher-only Context7).
+const extensionTools = new Map([
+  ["~/.pi/agent/npm/node_modules/@upstash/context7-pi/extensions/context7.ts",
+    ["resolve-library-id", "query-docs"]],
+]);
+const childExtensionLines = frontmatter.filter((line) => line.startsWith("subagentOnlyExtensions:"));
+const childTools = new Set();
+for (const [extensionPath, provided] of extensionTools) {
+  if (childExtensionLines.some((line) => line.slice("subagentOnlyExtensions:".length).trim() === extensionPath))
+    for (const tool of provided) childTools.add(tool);
+}
 for (const tool of tools) {
-  if (!knownTools.has(tool))
+  if (!knownTools.has(tool) && !childTools.has(tool))
     refuse(`trusted manifest for ${role} declares unavailable tool '${tool}'`, 66);
 }
 

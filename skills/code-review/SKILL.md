@@ -60,6 +60,7 @@ the Change and code without inheriting the author's conclusions.
 3. A finding class fixed in two prior rounds is convergence and trips the
    breaker: halt at the last green state, put the owning-layer question to the
    operator, and never invoke further loop machinery.
-4. On review-infrastructure failure, resume once with the source run's recorded
-   `timeoutMs`; a second failure is `inconclusive-under-substrate`, never an
+4. On review-infrastructure failure, resume once with the
+   source run's recorded `timeoutMs`; a second failure is
+   `inconclusive-under-substrate`, never an
    operator restatement. Dispatch formed findings and context gaps fresh.
