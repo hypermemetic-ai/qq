@@ -237,9 +237,9 @@ grep -Fq -- 'herdr notification show "<title>" --body "<body>" --sound <sound>' 
 tr '\n\t' '  ' <"$ROOT/CONCEPTS.md" | \
   grep -qE '\*\*agent messaging\*\* — Direct live-agent coordination through pi-intercom plus operator-visible herdr notifications outside transcripts\. It does not start, own, or retire agents\.'
 tr '\n\t' '  ' <"$ROOT/CONCEPTS.md" | \
-  grep -qE "\\*\\*work order\\*\\* — One complete work-order brief per delegated ticket: the delegate's complete orientation and the plan bound, carrying .*the required completion envelope\\."
+  grep -qE '\*\*work order\*\* — One complete `BRIEF.md` per delegated ticket.*durable run directory at creation\..*required completion envelope\.'
 tr '\n\t' '  ' <"$ROOT/CONCEPTS.md" | \
-  grep -qE "\\*\\*completion envelope\\*\\* — Every delegate's final message must report per-ticket status, commits, files changed, Checks run with results, .*The owner must verify every claim against the tree; an envelope claim is not yet evidence\\."
+  grep -qE '\*\*completion envelope\*\* — The delegate'\''s run-directory `ENVELOPE.md` is its only result surface\..*The owner verifies every claim against the tree; an envelope claim is not yet evidence\.'
 tr '\n\t' '  ' <"$ROOT/CONCEPTS.md" | \
   grep -qE '\*\*decision ledger\*\* —'
 tr '\n\t' '  ' <"$ROOT/CONCEPTS.md" | \
