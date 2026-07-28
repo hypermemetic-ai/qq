@@ -514,11 +514,10 @@ operator.
 
 The internal orchestrator owns Task/Change execution and fans out the existing
 implementer, reviewer, researcher, and observer roles at depth 2 through
-pi-subagents. `qq-dispatch` gives that trusted outer child the canonical Change-
-worktree root, shared Git, and private descendant runtime; primary-main path
-guards provide defense in depth for trusted Actors, and every worker retains its
-narrower policy and Completion Envelope. Root and child Pi session JSONL remain
-the sole content/observation seam. Typed tool-result details and
+pi-subagents. `qq-dispatch` validates and launches the orchestrator as a trusted
+internal process without an outer Landstrip boundary. Each work-role child
+retains its narrower Landstrip policy and Completion Envelope. Root and child Pi
+session JSONL remain the sole content/observation seam. Typed tool-result details and
 `qq-alignment-state-v1` custom entries on the active native Pi branch retain
 correlation, packet snapshots, exact dispositions, source references, worker
 ids, lifecycle receipts, replacement continuity, and final completion state.

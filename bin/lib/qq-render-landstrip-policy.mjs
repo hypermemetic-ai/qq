@@ -126,41 +126,17 @@ if (landstripVersion !== expectedLandstripVersion) {
 }
 const definition = manifest?.roles?.[role];
 if (!definition || typeof definition !== "object") fail(`role '${role}' is not declared`);
-if (!["read-only", "workspace-write", "orchestrator-write"].includes(definition.access)) fail(`role '${role}' has an invalid access scope`);
+if (!["read-only", "workspace-write"].includes(definition.access)) fail(`role '${role}' has an invalid access scope`);
 if (typeof definition.policyIdentity !== "string" || !definition.policyIdentity) fail(`role '${role}' has no policy identity`);
 
 const allowWrite = [runDir];
 if (definition.access === "workspace-write") {
   allowWrite.push(worktree, gitCommonDir, gitWorktreeDir);
 }
-if (definition.access === "orchestrator-write") {
-  // The outer trusted orchestrator must admit nested workers' private runtime
-  // and shared Git writes. It may write the assigned Change checkout only
-  // when that checkout is linked; the primary checkout is never writable.
-  if (!changeWorktreeRoot) fail("orchestrator role requires the Repository Change-worktree root");
-  allowWrite.push(runtimeRoot, gitCommonDir, changeWorktreeRoot);
-  if (gitWorktreeDir !== gitCommonDir && pathIsStrictlyWithin(worktree, changeWorktreeRoot)) {
-    allowWrite.push(worktree, gitWorktreeDir);
-  }
-}
 if (structuredOutputCapture) {
   allowWrite.push(structuredOutputCapture);
 }
 allowWrite.push("/dev/null", ...piSubagentTempDirs);
-
-const orchestratorDenyWrite = definition.access === "orchestrator-write"
-  ? [
-      path.join(gitCommonDir, "index"),
-      path.join(gitCommonDir, "HEAD"),
-      path.join(gitCommonDir, "HEAD.lock"),
-      path.join(gitCommonDir, "packed-refs"),
-      path.join(gitCommonDir, "packed-refs.lock"),
-      path.join(gitCommonDir, "refs", "heads", "main"),
-      path.join(gitCommonDir, "refs", "heads", "main.lock"),
-      path.join(gitCommonDir, "logs", "refs", "heads", "main"),
-      path.join(gitCommonDir, "logs", "refs", "heads", "main.lock"),
-    ]
-  : [];
 
 const policy = {
   enabled: true,
@@ -174,7 +150,7 @@ const policy = {
   },
   filesystem: {
     allowWrite: [...new Set(allowWrite)],
-    denyWrite: [piAuthPath, ...orchestratorDenyWrite],
+    denyWrite: [piAuthPath],
   },
 };
 writePrivateJson(policyPath, policy);

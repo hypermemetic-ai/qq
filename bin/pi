@@ -115,7 +115,8 @@ execution_profile_extension="$repo_root/extensions/qq-execution-profiles.ts"
 vendor_root="${HOME:?HOME is required for the exact pi-subagents source}/.pi/agent/git/github.com/hypermemetic-ai/pi-subagents"
 vendor_extension="$vendor_root/index.ts"
 profile_extension="$repo_root/extensions/qq-aligner.ts"
-qq_resource_relatives=(extensions/qq-subagent-env.ts extensions/qq-execution-profiles.ts extensions/qq-aligner.ts extensions/lib/qq-alignment-broker.ts extensions/lib/qq-alignment-contracts.ts delegation/extensions/qq-alignment-channel.ts delegation/manifests/aligner-request.v1.schema.json delegation/manifests/alignment-episode.v1.schema.json delegation/manifests/roots/aligner.md delegation/manifests/agents/orchestrator.md)
+bridge_extension="$repo_root/extensions/qq-alignment-subagents.ts"
+qq_resource_relatives=(extensions/qq-subagent-env.ts extensions/qq-execution-profiles.ts extensions/qq-aligner.ts extensions/qq-alignment-subagents.ts extensions/lib/qq-alignment-broker.ts extensions/lib/qq-alignment-contracts.ts delegation/extensions/qq-alignment-channel.ts delegation/manifests/aligner-request.v1.schema.json delegation/manifests/alignment-episode.v1.schema.json delegation/manifests/roots/aligner.md delegation/manifests/agents/orchestrator.md)
 for relative_path in "${qq_resource_relatives[@]}"; do
   resource="$repo_root/$relative_path"
   [[ -f "$resource" && -r "$resource" && ! -L "$resource" ]] || {
@@ -143,6 +144,6 @@ export QQ_PI_ROOT_PROFILE=qq-root-aligner-v1
 # The profile defers spawn until resources_discover, after every session_start
 # handler has established the replacement runtime and RPC bridge.
 exec "$runtime" exec -- \
-  --no-extensions --extension "$env_extension" --extension "$execution_profile_extension" --extension "$profile_extension" --extension "$vendor_extension" \
+  --no-extensions --extension "$env_extension" --extension "$execution_profile_extension" --extension "$profile_extension" --extension "$bridge_extension" \
   --no-skills --no-prompt-templates --no-context-files \
   --tools alignment_exchange,create_alignment_artifact,present_alignment,capture_operator_disposition,complete_alignment "$@"

@@ -56,7 +56,7 @@ const extensionFiles = (await readdir(dirname(indexPath)))
   .sort();
 // Immutable root profiles are loaded only by bin/pi exact launch flags; mounting
 // them globally would reintroduce prompt/tool drift.
-const excluded = new Set(["index.ts", "qq-aligner.ts"]);
+const excluded = new Set(["index.ts", "qq-aligner.ts", "qq-alignment-subagents.ts"]);
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 for (const filename of extensionFiles) {

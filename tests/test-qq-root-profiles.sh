@@ -17,6 +17,19 @@ import { pathToFileURL } from "node:url";
 const root = process.env.ROOT; const scratch = process.env.TMP;
 const alignerPath = join(root, "extensions/qq-aligner.ts"); const alignerPrompt = await readFile(join(root, "delegation/manifests/roots/aligner.md"), "utf8");
 const launcherTools = ["alignment_exchange", "create_alignment_artifact", "present_alignment", "capture_operator_disposition", "complete_alignment"];
+const { registerBrokerOnlySubagents } = await import(pathToFileURL(join(root, "extensions/qq-alignment-subagents.ts")).href);
+const exposed = []; const forwardedEvents = {};
+await registerBrokerOnlySubagents({
+  registerCommand: (name) => exposed.push(`command:${name}`),
+  registerShortcut: (name) => exposed.push(`shortcut:${name}`),
+  registerTool: (tool) => exposed.push(`tool:${tool.name}`),
+  events: forwardedEvents,
+}, (pi) => {
+  pi.registerCommand("run", {}); pi.registerCommand("subagents-stop", {});
+  pi.registerShortcut("ctrl+x", {}); pi.registerTool({ name: "subagent" });
+  assert.equal(pi.events, forwardedEvents);
+});
+assert.deepEqual(exposed, []);
 class Bus {
   constructor() { this.handlers = new Map(); this.spawnCount = 0; this.status = "stopped"; this.stopError = null; }
   on(name, fn) { const rows = this.handlers.get(name) ?? []; rows.push(fn); this.handlers.set(name, rows); return () => this.handlers.set(name, rows.filter((row) => row !== fn)); }

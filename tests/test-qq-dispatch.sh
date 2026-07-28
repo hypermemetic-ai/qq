@@ -89,6 +89,7 @@ jq -e '
     access: "workspace-write",
     policyIdentity: "qq-implementer-workspace-write-v1"
   }
+  and (.roles | has("orchestrator") | not)
 ' "$ROOT/delegation/policies/roles.json" >/dev/null
 jq -e '
   .additionalProperties == false
@@ -287,8 +288,8 @@ declare -A role_run_dirs=()
 for role in reviewer researcher implementer observer orchestrator; do
   case "$role" in
     orchestrator)
-      expected_policy=qq-orchestrator-change-runtime-write-v1
-      expected_scope=orchestrator-write
+      expected_policy=qq-orchestrator-trusted-process-v1
+      expected_scope=trusted-process
       ;;
     observer)
       expected_policy=qq-observer-read-only-v1
@@ -326,9 +327,9 @@ for role in reviewer researcher implementer observer orchestrator; do
 
   assert_file_contains "$stdout_file" "pi-live-event role=$role" \
     "$role did not retain the Pi events stream"
-  assert_file_contains "$stderr_file" \
-    "role=$role policy=$expected_policy scope=$expected_scope boundary=landstrip"
   if [ "$role" = orchestrator ]; then
+    assert_file_contains "$stderr_file" \
+      "role=$role policy=$expected_policy scope=$expected_scope boundary=trusted-process"
     assert_file_contains "$stderr_file" 'timeout=86400s'
     set +e
     (
@@ -340,6 +341,9 @@ for role in reviewer researcher implementer observer orchestrator; do
     assert_equal 71 "$orchestrator_timeout_status" 'orchestrator accepted inherited timeout override'
     assert_file_contains "$tmp/orchestrator-inherited-timeout.stderr" \
       'orchestrator dispatch forbids inherited QQ_DISPATCH_TIMEOUT'
+  else
+    assert_file_contains "$stderr_file" \
+      "role=$role policy=$expected_policy scope=$expected_scope boundary=landstrip"
   fi
   python3 - "$FAKE_PI_ARGS" <<'PY'
 from pathlib import Path
@@ -370,7 +374,7 @@ PY
   fi
   pi_config_dir="$(sed -n 's/^PI_CODING_AGENT_DIR=//p' "$FAKE_PI_ENV")"
   role_run_dir="$(dirname -- "$pi_config_dir")"
-  role_policy_snapshots["$role"]="$policy_snapshot"
+  [ "$role" = orchestrator ] || role_policy_snapshots["$role"]="$policy_snapshot"
   role_run_dirs["$role"]="$role_run_dir"
   [ ! -e "$pi_config_dir/auth.json" ] \
     || fail "$role staged an absent launcher auth file"
@@ -378,32 +382,8 @@ PY
     || fail "$role did not retain its run-local child TMPDIR"
 
   if [ "$role" = orchestrator ]; then
-    jq -e \
-      --arg worktree "$ROOT" \
-      --arg common "$git_common_dir" \
-      --arg worktree_git "$git_worktree_dir" \
-      --arg run "$role_run_dir" \
-      --arg runtime "$runtime_root" \
-      --arg change_root "$test_home/.herdr/worktrees/qq" \
-      --arg future "$test_home/.herdr/worktrees/qq/future-change" \
-      --arg sibling "$test_home/.herdr/worktrees/sibling" \
-      --arg auth "$pi_config_dir/auth.json" \
-      --arg primary "$(dirname -- "$git_common_dir")" \
-      --arg primary_index "$git_common_dir/index" \
-      --arg temp "$pi_subagent_own_temp" --arg sess "$pi_subagent_sess" '
-        ([$run, $runtime, $change_root, $common, "/dev/null", $temp, $sess] - .filesystem.allowWrite | length) == 0
-        and (.filesystem.allowWrite | index($worktree)) == null
-        and (.filesystem.allowWrite | index($worktree_git)) == null
-        and (.filesystem.allowWrite | index($primary)) == null
-        and (.filesystem.allowWrite | index($sibling)) == null
-        and ($future | startswith($change_root + "/"))
-        and .filesystem.denyWrite == [
-          $auth, $primary_index, ($common + "/HEAD"), ($common + "/HEAD.lock"),
-          ($common + "/packed-refs"), ($common + "/packed-refs.lock"),
-          ($common + "/refs/heads/main"), ($common + "/refs/heads/main.lock"),
-          ($common + "/logs/refs/heads/main"), ($common + "/logs/refs/heads/main.lock")
-        ]
-      ' "$policy_snapshot" >/dev/null
+    [ ! -e "$policy_snapshot" ] \
+      || fail 'trusted orchestrator unexpectedly invoked Landstrip'
   elif [ "$role" = implementer ]; then
     jq -e \
       --arg worktree "$ROOT" \
@@ -710,27 +690,10 @@ mkdir -p "$primary_orchestrator_runtime"
     "$fixture_primary/bin/qq-dispatch" --json
 ) >"$tmp/primary-orchestrator.stdout" 2>"$tmp/primary-orchestrator.stderr"
 primary_orchestrator_config="$(sed -n 's/^PI_CODING_AGENT_DIR=//p' "$FAKE_PI_ENV")"
-primary_orchestrator_run="$(dirname -- "$primary_orchestrator_config")"
-jq -e \
-  --arg primary "$fixture_primary" \
-  --arg common "$fixture_primary_common" \
-  --arg linked "$fixture_worktree" \
-  --arg change_root "$test_home/.herdr/worktrees/$(basename -- "$fixture_primary")" \
-  --arg runtime "$primary_orchestrator_runtime" \
-  --arg run "$primary_orchestrator_run" \
-  --arg auth "$primary_orchestrator_config/auth.json" \
-  --arg index "$fixture_primary_common/index" \
-  --arg temp "$pi_subagent_own_temp" --arg sess "$pi_subagent_sess" '
-    (.filesystem.allowWrite | index($primary)) == null
-    and (.filesystem.allowWrite | index($linked)) == null
-    and ([$run, $runtime, $common, $change_root, "/dev/null", $temp, $sess] - .filesystem.allowWrite | length) == 0
-    and .filesystem.denyWrite == [
-      $auth, $index, ($common + "/HEAD"), ($common + "/HEAD.lock"),
-      ($common + "/packed-refs"), ($common + "/packed-refs.lock"),
-      ($common + "/refs/heads/main"), ($common + "/refs/heads/main.lock"),
-      ($common + "/logs/refs/heads/main"), ($common + "/logs/refs/heads/main.lock")
-    ]
-  ' "$tmp/primary-orchestrator-policy.json" >/dev/null
+[ ! -e "$tmp/primary-orchestrator-policy.json" ] \
+  || fail 'primary trusted orchestrator unexpectedly invoked Landstrip'
+assert_file_contains "$tmp/primary-orchestrator.stderr" \
+  'role=orchestrator policy=qq-orchestrator-trusted-process-v1 scope=trusted-process boundary=trusted-process'
 fixture_runtime="$tmp/linked-runtime"
 mkdir -p "$fixture_runtime"
 (
@@ -1115,7 +1078,7 @@ launcher_resources=(
   bin/lib/qq-render-landstrip-policy.mjs bin/lib/qq-process-tree-supervisor.py
   delegation/policies/roles.json
   patches/pi/v0.81.1/manifest.json patches/pi/v0.81.1/qq-execution-profile.patch
-  extensions/qq-subagent-env.ts extensions/qq-execution-profiles.ts extensions/qq-aligner.ts
+  extensions/qq-subagent-env.ts extensions/qq-execution-profiles.ts extensions/qq-aligner.ts extensions/qq-alignment-subagents.ts
   extensions/lib/qq-alignment-broker.ts extensions/lib/qq-alignment-contracts.ts
   delegation/extensions/qq-alignment-channel.ts
   delegation/manifests/aligner-request.v1.schema.json delegation/manifests/alignment-episode.v1.schema.json
@@ -1201,8 +1164,10 @@ required = [
     root + b"/extensions/qq-subagent-env.ts",
     root + b"/extensions/qq-execution-profiles.ts",
     root + b"/extensions/qq-aligner.ts",
+    root + b"/extensions/qq-alignment-subagents.ts",
 ]
 assert all(value in args for value in required), args
+assert not any(b"pi-subagents/index.ts" in value for value in args), args
 assert b"--no-tools" not in args, args
 tools = args.index(b"--tools")
 assert args[tools + 1] == b"alignment_exchange,create_alignment_artifact,present_alignment,capture_operator_disposition,complete_alignment", args

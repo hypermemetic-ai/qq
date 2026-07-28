@@ -16,7 +16,7 @@ export const MAX_SUPPLIED_MATERIAL_ITEMS = 16;
 export const MAX_SUPPLIED_ITEM_TEXT_BYTES = 16 * 1024;
 export const MAX_SUPPLIED_TEXT_BYTES = 64 * 1024;
 export const MAX_SOURCE_REFERENCE_BYTES = 4096;
-export const MAX_ALIGNMENT_PACKET_BYTES = 1024 * 1024;
+export const MAX_ALIGNMENT_PACKET_BYTES = 1024 * 1024 - 4096;
 // Six-byte JSON escaping still leaves 32 KiB for receipt/snapshot envelopes.
 export const MAX_DISPOSITION_OPERATOR_RESPONSE_BYTES = 16 * 1024;
 

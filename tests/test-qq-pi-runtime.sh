@@ -13,7 +13,7 @@ python3 "$TESTS_DIR/qq_pi_runtime_test.py"
 # governed children and Architect invoke the pinned runtime adapter directly.
 grep -Fq 'runtime="$bin_dir/qq-pi-runtime"' "$ROOT/bin/pi"
 grep -Fq 'inherited child execution assertion' "$ROOT/bin/pi"
-grep -Fq -- '--no-extensions --extension "$env_extension" --extension "$execution_profile_extension" --extension "$profile_extension" --extension "$vendor_extension"' "$ROOT/bin/pi"
+grep -Fq -- '--no-extensions --extension "$env_extension" --extension "$execution_profile_extension" --extension "$profile_extension" --extension "$bridge_extension"' "$ROOT/bin/pi"
 grep -Fq "pi_runtime=\"\$bin_dir/qq-pi-runtime\"" "$ROOT/bin/qq-dispatch"
 grep -Fq '"$pi_runtime" exec -- --approve --offline' "$ROOT/bin/qq-dispatch"
 grep -Fq 'exec "$runtime" exec -- "$@"' "$ROOT/bin/qq-pi-role"

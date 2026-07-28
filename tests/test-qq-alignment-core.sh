@@ -73,6 +73,17 @@ const finalFactBytes = contracts.MAX_ALIGNMENT_PACKET_BYTES - Buffer.byteLength(
 assert.ok(finalFactBytes > 0 && finalFactBytes <= 20000); exactBound.material.facts[exactBound.material.facts.length - 1] = "x".repeat(finalFactBytes);
 assert.equal(Buffer.byteLength(JSON.stringify(exactBound), "utf8"), contracts.MAX_ALIGNMENT_PACKET_BYTES);
 contracts.validateOrchestratorProjection(exactBound);
+const exactNative = {
+  type: "custom", id: `e${"x".repeat(127)}`, parentId: `p${"x".repeat(127)}`, timestamp: new Date().toISOString(),
+  customType: alignmentBrokerConstants.CUSTOM_TYPE,
+  data: { version: 1, alignment_session_id: `s${"x".repeat(127)}`, trace_id: trace, event: "projection", payload: exactBound },
+};
+const exactNativeLine = JSON.stringify(exactNative);
+assert.ok(Buffer.byteLength(exactNativeLine, "utf8") <= alignmentBrokerConstants.MAX_NATIVE_SESSION_LINE_BYTES);
+const exactNativePath = join(scratch, "exact-native-packet.jsonl");
+const exactNativeParent = { type: "custom", id: exactNative.parentId, parentId: null, customType: "fixture", data: {} };
+await writeFile(exactNativePath, `${JSON.stringify({ type: "session", version: 3 })}\n${JSON.stringify(exactNativeParent)}\n${exactNativeLine}\n`);
+assert.equal((await readNativeSessionBranch(exactNativePath)).at(-1).data.payload.packet_id, exactBound.packet_id);
 const overBound = structuredClone(exactBound); overBound.material.facts[overBound.material.facts.length - 1] += "x";
 assert.equal(Buffer.byteLength(JSON.stringify(overBound), "utf8"), contracts.MAX_ALIGNMENT_PACKET_BYTES + 1);
 assert.throws(() => contracts.validateOrchestratorProjection(overBound), /serialized packet bound/);
