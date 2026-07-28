@@ -17,12 +17,12 @@ POLICY="$ROOT/delegation/policies/execution-profiles.json"
 [ -x "$ROOT/bin/qq-pi-role" ] || fail 'missing accountable-role launcher'
 
 jq -e '
-  (keys == ["aligner", "architect", "implementer", "observer", "orchestrator", "researcher", "reviewer"])
+  (keys == ["architect", "implementer", "observer", "orchestrator", "researcher", "reviewer"])
   and .observer == {provider:"kimi-coding", model:"k3", effort:"max", serviceClass:"provider-default"}
-  and ([.aligner, .architect, .implementer, .orchestrator, .researcher, .reviewer] | all(
+  and ([.architect, .implementer, .orchestrator, .researcher, .reviewer] | all(
     . == {provider:"openai-codex", model:"gpt-5.6-sol", effort:"xhigh", serviceClass:"provider-default"}
   ))
-' "$POLICY" >/dev/null || fail 'seven-role policy does not match the operator-settled map'
+' "$POLICY" >/dev/null || fail 'six-role policy does not match the operator-settled map'
 
 for manifest in "$ROOT"/delegation/manifests/agents/{implementer,observer,researcher,reviewer}.md; do
   assert_file_not_matches "$manifest" '^(model|thinking):' 'canonical manifest retained compute authority'
@@ -70,10 +70,7 @@ const pi = {
   registerExecutionProfileResolver(next) { resolver = (request) => next(request, ctx); },
   on(name, handler) { handlers.set(name, handler); },
 };
-const env = {
-  QQ_EXECUTION_PROFILE_LAUNCHER: `${process.env.ROOT}/bin/pi`,
-  QQ_EXECUTION_PROFILE_LAUNCHER_ROLE: "aligner",
-};
+const env = {};
 ext.default(pi, { profilePath: policyPath, env });
 assert(typeof resolver === "function", "resolver was not registered");
 assert(handlers.has("session_start") && handlers.has("tool_call") && handlers.has("message_end"), "profile lifecycle handlers missing");
@@ -81,17 +78,15 @@ await handlers.get("session_start")({}, ctx);
 
 const parsed = JSON.parse(canonical);
 let profile = await resolver({ purpose: "agent" }, {});
-assert(JSON.stringify(profile) === JSON.stringify(parsed.aligner), "launcher-bound root did not resolve Aligner");
+assert(JSON.stringify(profile) === JSON.stringify(parsed.orchestrator), "plain root did not resolve orchestrator");
 assert(Object.keys(profile).sort().join(",") === "effort,model,provider,serviceClass", "resolver returned extra fields");
 let delegated = JSON.parse(env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES);
-assert(JSON.stringify(Object.keys(delegated).sort()) === JSON.stringify(["implementer", "observer", "orchestrator", "researcher", "reviewer"]), "delegated snapshot keys drifted");
+assert(JSON.stringify(Object.keys(delegated).sort()) === JSON.stringify(["implementer", "observer", "researcher", "reviewer"]), "delegated snapshot keys drifted");
 assert(JSON.stringify(delegated.observer) === JSON.stringify(parsed.observer), "observer snapshot drifted");
 
 const receiptDirectory = path.join(temp, "receipt");
 fs.mkdirSync(receiptDirectory, { mode: 0o700 });
 const receiptPath = path.join(receiptDirectory, "execution-profile-receipt.json");
-delete env.QQ_EXECUTION_PROFILE_LAUNCHER;
-delete env.QQ_EXECUTION_PROFILE_LAUNCHER_ROLE;
 env.PI_SUBAGENT_CHILD_AGENT = "observer";
 env.PI_SUBAGENT_TRUSTED_EXECUTION_ROLE = "observer";
 env.PI_SUBAGENT_EXECUTION_PROFILE_RECEIPT = receiptPath;
@@ -113,11 +108,6 @@ await expectReject(() => handlers.get("message_end")({ message: {
 assert(fs.lstatSync(receiptPath).isSymbolicLink(), "receipt writer replaced a conflicting symlink");
 fs.unlinkSync(receiptPath);
 
-env.PI_SUBAGENT_CHILD_AGENT = "orchestrator";
-env.PI_SUBAGENT_TRUSTED_EXECUTION_ROLE = "orchestrator";
-profile = await resolver({ purpose: "agent" }, {});
-assert(JSON.stringify(profile) === JSON.stringify(parsed.orchestrator), "trusted internal Orchestrator did not resolve Orchestrator");
-env.PI_SUBAGENT_CHILD_AGENT = "observer";
 env.PI_SUBAGENT_TRUSTED_EXECUTION_ROLE = "reviewer";
 await expectReject(() => resolver({ purpose: "agent" }, {}), "must agree");
 env.PI_SUBAGENT_TRUSTED_EXECUTION_ROLE = "observer";
@@ -132,26 +122,18 @@ env.QQ_EXECUTION_PROFILE_LAUNCHER_ROLE = "architect";
 profile = await resolver({ purpose: "agent" }, {});
 assert(JSON.stringify(profile) === JSON.stringify(parsed.architect), "launcher-bound Architect did not resolve Architect");
 env.QQ_EXECUTION_PROFILE_LAUNCHER = "/tmp/forged";
-await expectReject(() => resolver({ purpose: "agent" }, {}), "invalid root launcher assertion");
+await expectReject(() => resolver({ purpose: "agent" }, {}), "invalid architect launcher assertion");
 delete env.QQ_EXECUTION_PROFILE_LAUNCHER;
 delete env.QQ_EXECUTION_PROFILE_LAUNCHER_ROLE;
 env.PI_SUBAGENT_CHILD_AGENT = "reviewer";
 await expectReject(() => resolver({ purpose: "agent" }, {}), "missing its trusted execution-role assertion");
 delete env.PI_SUBAGENT_CHILD_AGENT;
-await expectReject(() => resolver({ purpose: "agent" }, {}), "missing its trusted launcher assertion");
-env.QQ_EXECUTION_PROFILE_LAUNCHER = `${process.env.ROOT}/bin/pi`;
-env.QQ_EXECUTION_PROFILE_LAUNCHER_ROLE = "aligner";
-profile = await resolver({ purpose: "agent" }, {});
-assert(JSON.stringify(profile) === JSON.stringify(parsed.aligner), "exact Aligner launcher did not resolve Aligner");
-env.QQ_EXECUTION_PROFILE_LAUNCHER = "/tmp/forged";
-await expectReject(() => resolver({ purpose: "agent" }, {}), "invalid root launcher assertion");
-env.QQ_EXECUTION_PROFILE_LAUNCHER = `${process.env.ROOT}/bin/pi`;
 
 const changed = structuredClone(parsed);
 changed.observer = structuredClone(parsed.reviewer);
 writePolicy(changed);
 profile = await resolver({ purpose: "agent" }, {});
-assert(JSON.stringify(profile) === JSON.stringify(changed.aligner), "valid update did not apply on next resolution");
+assert(JSON.stringify(profile) === JSON.stringify(changed.orchestrator), "valid update did not apply on next resolution");
 const pinnedBeforeEdit = env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES;
 writePolicy(parsed);
 env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES = "caller-conflict";
@@ -175,14 +157,14 @@ await expectReject(() => resolver({ purpose: "agent" }, {}), "mode-600 regular f
 fs.chmodSync(policyPath, 0o600);
 fs.renameSync(policyPath, `${policyPath}.real`);
 fs.symlinkSync(`${policyPath}.real`, policyPath);
-await expectReject(() => resolver({ purpose: "agent" }, {}), "must not be a symlink");
+await expectReject(() => resolver({ purpose: "agent" }, {}), "ELOOP");
 fs.unlinkSync(policyPath);
 fs.renameSync(`${policyPath}.real`, policyPath);
 await resolver({ purpose: "agent" }, {});
 
 ext.acceptExecutionProfileTelemetry({
   role: "assistant",
-  executionProfile: { ...parsed.aligner, acknowledgedServiceClass: "default", accountedServiceClass: "default" },
+  executionProfile: { ...parsed.orchestrator, acknowledgedServiceClass: "default", accountedServiceClass: "default" },
 });
 const display = ext.getExecutionProfileDisplay();
 assert(display?.acknowledgedServiceClass === "default", "acknowledged telemetry was not retained");
@@ -224,22 +206,18 @@ fi
 [ ! -e "$unrelated/qq" ] || fail 'rejected symlinked policy parent was mutated'
 
 # The dedicated launcher owns the Architect assertion and rejects conflicts.
-launcher_root="$(mktemp -d "${TMPDIR:?TMPDIR is required}/qq-execution-profiles.XXXXXX")"
+launcher_root="$(mktemp -d)"
 mkdir -p "$launcher_root/bin"
 cp "$ROOT/bin/qq-pi-role" "$launcher_root/bin/qq-pi-role"
-cat >"$launcher_root/bin/qq-pi-runtime" <<'FAKE_PI_RUNTIME'
+cat >"$launcher_root/bin/pi" <<'FAKE_PI'
 #!/usr/bin/env bash
 printf '%s\n' "${QQ_EXECUTION_PROFILE_LAUNCHER-}" "${QQ_EXECUTION_PROFILE_LAUNCHER_ROLE-}" "$*"
-FAKE_PI_RUNTIME
-chmod 755 "$launcher_root/bin/qq-pi-runtime" "$launcher_root/bin/qq-pi-role"
-launcher_output="$launcher_root/launch.out"
-env -u PI_SUBAGENT_CHILD_AGENT -u PI_SUBAGENT_TRUSTED_EXECUTION_ROLE \
-  -u PI_SUBAGENT_EXECUTION_PROFILE_RECEIPT -u QQ_EXECUTION_PROFILE_LAUNCHER_ROLE \
-  -u QQ_EXECUTION_PROFILE_LAUNCHER "$launcher_root/bin/qq-pi-role" architect --version >"$launcher_output"
-mapfile -t launched <"$launcher_output"
+FAKE_PI
+chmod 755 "$launcher_root/bin/pi" "$launcher_root/bin/qq-pi-role"
+mapfile -t launched < <("$launcher_root/bin/qq-pi-role" architect --version)
 assert_equal "$launcher_root/bin/qq-pi-role" "${launched[0]}" 'launcher path assertion mismatch'
 assert_equal architect "${launched[1]}" 'launcher role assertion mismatch'
-assert_equal 'exec -- --version' "${launched[2]}" 'launcher argument forwarding mismatch'
+assert_equal --version "${launched[2]}" 'launcher argument forwarding mismatch'
 if "$launcher_root/bin/qq-pi-role" observer >/dev/null 2>&1; then
   fail 'launcher accepted a delegated role'
 fi

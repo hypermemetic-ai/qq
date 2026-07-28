@@ -59,22 +59,14 @@ approval question. All context that bears on each decision precedes the
 options; a full grilling interview follows only when a decision is genuinely
 open.
 
-**aligner** — qq's privileged visible root and sole operational Change
-interface. It translates exact intent/dispositions through closed contracts and
-explains only bounded, source-referenced material; it cannot execute, dispatch,
-mutate, decide, or inspect calibration.
-
-**alignment episode** — An initial, acceptance, or criteria-triggered
-realignment exchange with complementary spoken/visual material and a `ready`,
-`needs-data`, or clarification outcome.
-
 **GitHub Flow** — The delivery path from branch through pull request and final
 Checks to operator merge and automatic branch deletion.
 
-**project home** — A Repository's persistent Herdr workspace for its sole
-primary `main` checkout. Its Backlog tab, operator-created tabs, and accountable
-aligner remain here; one session-long orchestrator owns depth-2 fanout. Changes
-are plain linked worktrees with headless delegates.
+**project home** — A Repository's persistent Herdr workspace bound to its sole
+primary `main` checkout. Its dedicated Backlog-board tab, operator-created
+general tabs, and the accountable session dispatching every Change remain at
+this level. Change checkouts are plain linked worktrees with no Herdr workspace,
+and delegated agents run as headless child processes in the Change worktree.
 
 **green** — A unit of work whose applicable Checks pass with evidence that they
 observed the intended subject.

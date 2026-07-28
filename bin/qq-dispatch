@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run one pi-subagents child with the confinement declared for its role.
+# Run one pi-subagents child beneath its role-selected Landstrip policy.
 # shellcheck disable=SC1091
 set -euo pipefail
 
@@ -49,12 +49,8 @@ fi
 [[ "$adapter_repository_root" == "$adapter_worktree" ]] \
   || fail 64 "adapter path does not resolve beneath its assigned worktree"
 
-if ! adapter_git_common_dir="$(git_query -C "$adapter_worktree" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
-  fail 67 "cannot discover the Git common directory"
-fi
-if ! adapter_git_common_dir="$(realpath -e -- "$adapter_git_common_dir" 2>/dev/null)"; then
-  fail 67 "cannot resolve the Git common directory"
-fi
+adapter_git_common_dir="$(realpath -e -- "$(git_query -C "$adapter_worktree" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" 2>/dev/null)" \
+  || fail 67 "cannot resolve the adapter Git common directory"
 
 invocation_cwd="$(pwd -P)" || fail 65 "cannot resolve the child cwd"
 if ! invocation_root="$(git_query -C "$invocation_cwd" rev-parse --show-toplevel 2>/dev/null)"; then
@@ -77,56 +73,13 @@ if ! git_worktree_dir="$(realpath -e -- "$git_worktree_dir" 2>/dev/null)"; then
   fail 67 "cannot resolve the worktree Git directory"
 fi
 
-governed_project_input="${QQ_GOVERNED_PROJECT_HOME:-}"
-governed_common_input="${QQ_GOVERNED_GIT_COMMON_DIR:-}"
-governed_change_input="${QQ_GOVERNED_CHANGE_WORKTREE_ROOT:-}"
-governed_binding=false
-if [[ -n "$governed_project_input" || -n "$governed_common_input" || -n "$governed_change_input" ]]; then
-  governed_binding=true
-fi
-
-if path_is_within "$self" "$invocation_root"; then
-  [[ "$invocation_root" == "$adapter_worktree" ]] \
-    || fail 65 "adapter path resolves beneath an unrelated repository worktree"
-elif [[ "$governed_binding" != true && "$git_common_dir" != "$adapter_git_common_dir" ]]; then
+if [[ "$git_common_dir" != "$adapter_git_common_dir" ]]; then
   adapter_git_worktree_dir="$(realpath -e -- "$(git_query -C "$adapter_worktree" rev-parse --path-format=absolute --git-dir 2>/dev/null)" 2>/dev/null)" \
     || fail 67 "cannot resolve the adapter Git worktree directory"
   [[ "$adapter_git_worktree_dir" == "$adapter_git_common_dir" ]] \
     || fail 65 "non-primary adapter may not serve an external repository"
 fi
 
-if [[ "$governed_binding" == true ]]; then
-  [[ "$governed_project_input" == /* && "$governed_common_input" == /* && "$governed_change_input" == /* ]] \
-    || fail 65 "governed Repository binding is incomplete"
-  governed_project="$(realpath -e -- "$governed_project_input" 2>/dev/null || true)"
-  governed_common="$(realpath -e -- "$governed_common_input" 2>/dev/null || true)"
-  governed_change_root="$(realpath -e -- "$governed_change_input" 2>/dev/null || true)"
-  [[ "$governed_project" == "$governed_project_input" && "$governed_common" == "$governed_common_input"
-    && "$governed_change_root" == "$governed_change_input" ]] \
-    || fail 65 "governed Repository binding is not canonical"
-  [[ -d "$governed_change_root" && ! -L "$governed_change_root" && -O "$governed_change_root" ]] \
-    || fail 65 "governed Change-worktree root is not an operator-owned direct directory"
-  bound_project="$(git_query -C "$governed_project" rev-parse --show-toplevel 2>/dev/null || true)"
-  bound_common="$(git_query -C "$governed_project" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
-  bound_project="$(realpath -e -- "$bound_project" 2>/dev/null || true)"
-  bound_common="$(realpath -e -- "$bound_common" 2>/dev/null || true)"
-  [[ "$bound_project" == "$governed_project" && "$bound_common" == "$governed_common" && "$git_common_dir" == "$governed_common" ]] \
-    || fail 65 "child cwd does not match the governed Repository Git identity"
-  if [[ "$governed_common" == "$adapter_git_common_dir" ]]; then
-    if [[ "$governed_project" != "$adapter_worktree" ]]; then
-      [[ "$PI_SUBAGENT_CHILD_AGENT" == orchestrator && "$invocation_root" == "$governed_project" ]] \
-        && path_is_within "$adapter_worktree" "$governed_change_root" \
-        || fail 65 "governed qq project home does not match the dispatcher worktree"
-    fi
-  else
-    governed_agents="$governed_project/AGENTS.md"
-    [[ -L "$governed_agents" && "$(realpath -e -- "$governed_agents" 2>/dev/null || true)" == "$adapter_worktree/AGENTS.md" ]] \
-      || fail 65 "governed Repository does not resolve the canonical qq AGENTS.md"
-  fi
-  if [[ "$invocation_root" != "$governed_project" ]] && ! path_is_within "$invocation_root" "$governed_change_root"; then
-    fail 65 "child cwd is an undeclared governed Repository worktree"
-  fi
-fi
 worktree="$invocation_root"
 
 role="${PI_SUBAGENT_CHILD_AGENT:-}"
@@ -135,20 +88,9 @@ case "$role" in
   reviewer) observation_phase=review ;;
   researcher) observation_phase=research ;;
   observer) observation_phase=analysis ;;
-  orchestrator) observation_phase=alignment ;;
   "") fail 66 "PI_SUBAGENT_CHILD_AGENT is required" ;;
   *) fail 66 "unsupported child role '$role'" ;;
 esac
-change_worktree_root=""
-if [[ "$role" == "orchestrator" ]]; then
-  [[ -n "${HOME:-}" ]] || fail 68 "HOME is required for the Repository Change-worktree root"
-  repository_name="$(basename -- "$(dirname -- "$git_common_dir")")"
-  change_worktree_input="${QQ_GOVERNED_CHANGE_WORKTREE_ROOT:-$HOME/.herdr/worktrees/$repository_name}"
-  [[ -d "$change_worktree_input" && ! -L "$change_worktree_input" && -O "$change_worktree_input" ]] \
-    || fail 68 "Repository Change-worktree root must be an operator-owned direct directory: $change_worktree_input"
-  change_worktree_root="$(realpath -e -- "$change_worktree_input")" \
-    || fail 68 "cannot resolve the Repository Change-worktree root"
-fi
 if [[ "$role" == "researcher" && -n "${CONTEXT7_API_KEY:-}" ]]; then
   fail 66 "researcher dispatch forbids inherited CONTEXT7_API_KEY"
 fi
@@ -172,15 +114,18 @@ mkdir -p -- "$runtime_root_input" \
 if ! runtime_root="$(realpath -e -- "$runtime_root_input" 2>/dev/null)"; then
   fail 68 "cannot resolve the dispatch runtime root"
 fi
+if ! system_tmp="$(realpath -e -- /tmp 2>/dev/null)"; then
+  fail 68 "cannot resolve /tmp"
+fi
 if ! launcher_tmp="$(realpath -e -- "$launcher_tmp_input" 2>/dev/null)"; then
   fail 68 "cannot resolve the launcher temporary directory"
 fi
 [[ -d "$launcher_tmp" ]] \
   || fail 68 "launcher temporary path is not a directory"
-path_is_within "$runtime_root" "$launcher_tmp" \
-  || fail 68 "runtime root must stay beneath the launcher temporary directory"
-[[ "$runtime_root" != "$launcher_tmp" ]] \
-  || fail 68 "runtime root may not be the launcher temporary directory"
+path_is_within "$runtime_root" "$system_tmp" \
+  || fail 68 "runtime root must stay beneath /tmp"
+[[ "$runtime_root" != "$system_tmp" ]] \
+  || fail 68 "runtime root may not be all of /tmp"
 
 structured_output_capture=""
 if [[ -n "${PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE:-}" ]]; then
@@ -236,16 +181,16 @@ if [[ -n "${HOME:-}" ]]; then
   fi
 fi
 
-# Delegates invoke the pinned runtime adapter directly; the project-home root
-# launcher is not a child runtime authority. Neither are PATH and QQ_PI_BIN.
-pi_runtime="$bin_dir/qq-pi-runtime"
-[[ -f "$pi_runtime" && -x "$pi_runtime" && ! -L "$pi_runtime" ]] \
-  || fail 70 "the worktree Pi runtime adapter is unavailable or linked"
-if [[ "$(realpath -e -- "$pi_runtime" 2>/dev/null)" != "$pi_runtime" ]]; then
-  fail 70 "the worktree Pi runtime adapter does not resolve exactly"
+# Delegates may execute only this verified worktree's qq Pi wrapper; PATH and
+# QQ_PI_BIN are not child-runtime authorities.
+pi_binary="$bin_dir/pi"
+[[ -f "$pi_binary" && -x "$pi_binary" && ! -L "$pi_binary" ]] \
+  || fail 70 "the worktree Pi wrapper is unavailable or linked"
+if [[ "$(realpath -e -- "$pi_binary" 2>/dev/null)" != "$pi_binary" ]]; then
+  fail 70 "the worktree Pi wrapper does not resolve exactly"
 fi
-[[ "$pi_runtime" != "$self" ]] \
-  || fail 70 "Pi runtime target cannot recurse into the dispatch adapter"
+[[ "$pi_binary" != "$self" ]] \
+  || fail 70 "Pi target cannot recurse into the adapter"
 
 if ! qq_resolve_bin node; then
   fail 69 "$QQ_BIN_ERROR"
@@ -303,53 +248,31 @@ NODE
   fail 71 "$timeout_spec"
 fi
 
-child_args=("$@")
-fanout_extension="${HOME:-}/.pi/agent/git/github.com/hypermemetic-ai/pi-subagents/src/extension/fanout-child.ts"
-yaml_extension=
-for index in "${!child_args[@]}"; do
-  case "${child_args[index]}" in
-    ../../../extensions/qq-subagent-env.ts) child_args[index]="$adapter_worktree/extensions/qq-subagent-env.ts" ;;
-    ../../extensions/qq-alignment-channel.ts) child_args[index]="$adapter_worktree/delegation/extensions/qq-alignment-channel.ts" ;;
-    "$fanout_extension") yaml_extension="${fanout_extension%/src/extension/fanout-child.ts}/node_modules/yaml/dist/index.js" ;;
-  esac
-done
-if [[ -n "$yaml_extension" ]]; then
-  [[ -f "$yaml_extension" && -r "$yaml_extension" && ! -L "$yaml_extension"
-    && "$(realpath -e -- "$yaml_extension" 2>/dev/null || true)" == "$yaml_extension" ]] \
-    || fail 64 "child YAML runtime is unsafe or unavailable"
-  export JITI_ALIAS="$("$node_binary" -e 'process.stdout.write(JSON.stringify({yaml:process.argv[1]}))' "$yaml_extension")"
+if [[ -n "${QQ_LANDSTRIP_BIN:-}" ]]; then
+  if ! qq_resolve_bin landstrip; then
+    fail 69 "$QQ_BIN_ERROR"
+  fi
+  landstrip_binary="$QQ_BIN_RESULT"
+else
+  [[ -n "${HOME:-}" ]] \
+    || fail 69 "HOME is required to resolve Landstrip from the operator Pi npm tree"
+  if ! platform="$("$node_binary" -p 'process.platform' 2>/dev/null)" \
+    || ! architecture="$("$node_binary" -p 'process.arch' 2>/dev/null)"; then
+    fail 69 "cannot determine the Landstrip platform package"
+  fi
+  landstrip_binary="${HOME%/}/.pi/agent/npm/node_modules/@landstrip/landstrip-${platform}-${architecture}/bin/landstrip"
+fi
+[[ "$landstrip_binary" == /* ]] \
+  || fail 69 "Landstrip binary path must be absolute"
+[[ -f "$landstrip_binary" && -x "$landstrip_binary" ]] \
+  || fail 69 "Landstrip is unavailable at the configured path"
+if ! landstrip_binary="$(realpath -e -- "$landstrip_binary" 2>/dev/null)"; then
+  fail 69 "cannot resolve the Landstrip binary"
+fi
+if ! landstrip_version="$("$landstrip_binary" --version 2>&1)"; then
+  fail 69 "Landstrip version probe failed: $landstrip_version"
 fi
 
-if [[ "$role" != orchestrator ]]; then
-  if [[ -n "${QQ_LANDSTRIP_BIN:-}" ]]; then
-    if ! qq_resolve_bin landstrip; then
-      fail 69 "$QQ_BIN_ERROR"
-    fi
-    landstrip_binary="$QQ_BIN_RESULT"
-  else
-    [[ -n "${HOME:-}" ]] \
-      || fail 69 "HOME is required to resolve Landstrip from the operator Pi npm tree"
-    if ! platform="$("$node_binary" -p 'process.platform' 2>/dev/null)" \
-      || ! architecture="$("$node_binary" -p 'process.arch' 2>/dev/null)"; then
-      fail 69 "cannot determine the Landstrip platform package"
-    fi
-    landstrip_binary="${HOME%/}/.pi/agent/npm/node_modules/@landstrip/landstrip-${platform}-${architecture}/bin/landstrip"
-  fi
-  [[ "$landstrip_binary" == /* ]] \
-    || fail 69 "Landstrip binary path must be absolute"
-  [[ -f "$landstrip_binary" && -x "$landstrip_binary" ]] \
-    || fail 69 "Landstrip is unavailable at the configured path"
-  if ! landstrip_binary="$(realpath -e -- "$landstrip_binary" 2>/dev/null)"; then
-    fail 69 "cannot resolve the Landstrip binary"
-  fi
-  if ! landstrip_version="$("$landstrip_binary" --version 2>&1)"; then
-    fail 69 "Landstrip version probe failed: $landstrip_version"
-  fi
-fi
-
-if [[ "$role" == orchestrator && -v QQ_DISPATCH_TIMEOUT ]]; then
-  fail 71 "orchestrator dispatch forbids inherited QQ_DISPATCH_TIMEOUT"
-fi
 if [[ -v QQ_DISPATCH_TIMEOUT ]]; then
   timeout_spec="$QQ_DISPATCH_TIMEOUT"
   [[ "$timeout_spec" =~ ^(0\.[0-9]+|[1-9][0-9]*(\.[0-9]+)?)([smhd])?$ ]] \
@@ -406,35 +329,28 @@ else
     || fail 68 "cannot create the pi-subagents session root: $session_root"
 fi
 
+policy_path="$run_dir/landstrip-policy.json"
 event_log="$runtime_root/wrapper-events.jsonl"
-policy_identity=qq-orchestrator-trusted-process-v1
-access_scope=trusted-process
-sandbox_prefix=()
-if [[ "$role" != orchestrator ]]; then
-  policy_path="$run_dir/landstrip-policy.json"
-  if ! metadata="$("$node_binary" "$policy_renderer" \
-    --roles "$roles_file" \
-    --role "$role" \
-    --run-id "$run_token" \
-    --worktree "$worktree" \
-    --git-common-dir "$git_common_dir" \
-    --git-worktree-dir "$git_worktree_dir" \
-    --runtime-root "$runtime_root" \
-    --change-worktree-root "$change_worktree_root" \
-    --pi-auth "$pi_auth_path" \
-    --pi-subagent-temp-dir "$launcher_tmp" \
-    --structured-output-capture "$structured_output_capture" \
-    --policy "$policy_path" \
-    --event-log "$event_log" \
-    --timeout "$timeout_spec" \
-    --landstrip-version "$landstrip_version")"; then
-    fail 72 "Landstrip policy rendering failed"
-  fi
-  IFS=$'\t' read -r policy_identity access_scope <<< "$metadata"
-  [[ -n "$policy_identity" && -n "$access_scope" ]] \
-    || fail 72 "Landstrip policy renderer returned incomplete metadata"
-  sandbox_prefix=("$landstrip_binary" -p "$policy_path")
+if ! metadata="$("$node_binary" "$policy_renderer" \
+  --roles "$roles_file" \
+  --role "$role" \
+  --run-id "$run_token" \
+  --worktree "$worktree" \
+  --git-common-dir "$git_common_dir" \
+  --git-worktree-dir "$git_worktree_dir" \
+  --runtime-root "$runtime_root" \
+  --pi-auth "$pi_auth_path" \
+  --pi-subagent-temp-dir "$launcher_tmp" \
+  --structured-output-capture "$structured_output_capture" \
+  --policy "$policy_path" \
+  --event-log "$event_log" \
+  --timeout "$timeout_spec" \
+  --landstrip-version "$landstrip_version")"; then
+  fail 72 "Landstrip policy rendering failed"
 fi
+IFS=$'\t' read -r policy_identity access_scope <<< "$metadata"
+[[ -n "$policy_identity" && -n "$access_scope" ]] \
+  || fail 72 "Landstrip policy renderer returned incomplete metadata"
 
 export QQ_DISPATCH_WORKTREE="$worktree"
 export QQ_DISPATCH_GIT_COMMON_DIR="$git_common_dir"
@@ -482,13 +398,8 @@ fi
 # assertion. The retained fork supplies its separate trusted child assertion.
 unset QQ_EXECUTION_PROFILE_LAUNCHER QQ_EXECUTION_PROFILE_LAUNCHER_ROLE
 
-if [[ "$role" == orchestrator ]]; then
-  printf '[qq-dispatch] role=%s policy=%s scope=%s boundary=trusted-process timeout=%s\n' \
-    "$role" "$policy_identity" "$access_scope" "$timeout_spec" >&2
-else
-  printf '[qq-dispatch] role=%s policy=%s scope=%s boundary=landstrip landstrip=%s timeout=%s\n' \
-    "$role" "$policy_identity" "$access_scope" "$landstrip_version" "$timeout_spec" >&2
-fi
+printf '[qq-dispatch] role=%s policy=%s scope=%s boundary=landstrip landstrip=%s timeout=%s\n' \
+  "$role" "$policy_identity" "$access_scope" "$landstrip_version" "$timeout_spec" >&2
 
 dispatch_pid=""
 termination_signal=""
@@ -504,10 +415,10 @@ trap 'forward_termination INT' INT
 trap 'forward_termination HUP' HUP
 
 set +e
-  "$timeout_binary" -k 10 --signal=TERM "$timeout_spec" \
+"$timeout_binary" -k 10 --signal=TERM "$timeout_spec" \
   "$python_binary" "$tree_supervisor" -- \
-  "${sandbox_prefix[@]}" \
-  "$pi_runtime" exec -- --approve --offline "${child_args[@]}" &
+  "$landstrip_binary" -p "$policy_path" \
+  "$pi_binary" --approve --offline "$@" &
 dispatch_pid=$!
 [[ -z "$termination_signal" ]] || forward_termination "$termination_signal"
 while true; do
