@@ -215,7 +215,7 @@ export FAKE_FOCUS_UNCONFIRMED=1
 expect_failure 'Backlog board focus was not confirmed' focus-board --repo "$repo"
 
 tr '\n\t' '  ' <"$ROOT/CONCEPTS.md" | \
-  grep -Fq 'Change checkouts are plain linked worktrees with no Herdr workspace, and delegated agents run as headless child processes in the Change worktree.'
+  grep -Fq 'Changes are plain linked worktrees with headless delegates.'
 tr '\n\t' '  ' <"$ROOT/cockpit/README.md" | \
   grep -Fq 'Changes live in plain linked worktrees; no per-Change Herdr workspaces are created.'
 tr '\n\t' '  ' <"$ROOT/cockpit/README.md" | \
