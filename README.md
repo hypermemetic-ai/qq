@@ -446,9 +446,9 @@ bin/qq-execution-profiles install
 bin/qq-execution-profiles verify
 ```
 
-`delegation/policies/execution-profiles.json` assigns only Observer to
-`kimi-coding/k3:max`; Orchestrator, Architect, Implementer, Reviewer, and
-Researcher use `openai-codex/gpt-5.6-sol:xhigh`. All six request the provider
+`delegation/policies/execution-profiles.json` assigns Orchestrator, Architect,
+and Reviewer to `kimi-coding/k3:max`; Implementer, Researcher, and Observer use
+`openai-codex/gpt-5.6-sol:xhigh`. All six request the provider
 default service class. Repository settings, Pi defaults, manifests, caller
 arguments, fallbacks, and inherited environment values cannot override this
 map. The resolver rereads it before each logical request and rejects invalid,
