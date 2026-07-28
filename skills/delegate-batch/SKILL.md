@@ -12,7 +12,9 @@ worktree.
 ## Work orders
 
 For adapter tickets, require production-seam acceptance tests; protocol-only
-adapter evidence is never sufficient.
+adapter evidence is never sufficient. A work order that builds on a
+rebuildable derived store names the one materialization function that
+rebuilds it.
 
 At ticket creation, create one private durable run directory beneath the
 delegate runtime root and write its complete work order there as `BRIEF.md`.

@@ -42,8 +42,10 @@ locally or through GitHub Actions.
 research, an idea, a reusable lesson, or shared vocabulary.
 
 **managed Backlog markdown** — Markdown owned by Backlog and edited only
-through the Backlog CLI. When associating documents with a Task, `--doc`
-replaces the complete list; it does not append to it.
+through the Backlog CLI surface; the two `bin/qq-backlog` wrapper verbs
+(`decision update --content`, `doc supersede`) are part of that surface, the
+only edits permitted outside the vendor CLI. When associating documents with
+a Task, `--doc` replaces the complete list; it does not append to it.
 
 **decision ledger** — The block in an owning Task's Description listing every
 consequential decision its Change embeds, each citing the disposition that

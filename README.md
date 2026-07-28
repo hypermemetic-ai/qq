@@ -226,54 +226,10 @@ jq -e --arg source "$source" '
     | select(. == $source)
   ] == [$source]
 ' "$HOME/.pi/agent/settings.json"
-SOURCE="$source" PI_PACKAGE_LIST="$(FORCE_COLOR=0 pi list --approve)" python3 - <<'PY_VERIFY_PI_SUBAGENTS'
-import json
-import os
-from pathlib import Path
-
-expected = os.environ["SOURCE"]
-settings_paths = [Path.home() / ".pi" / "agent" / "settings.json", Path.cwd() / ".pi" / "settings.json"]
-for settings_path in settings_paths:
-    if not settings_path.is_file():
-        continue
-    settings = json.loads(settings_path.read_text())
-    for entry in settings.get("packages", []):
-        package_source = entry if isinstance(entry, str) else entry.get("source")
-        if (
-            not isinstance(package_source, str)
-            or not package_source
-            or package_source != package_source.strip()
-            or not package_source.isprintable()
-            or package_source.endswith(" (filtered)")
-        ):
-            raise SystemExit(f"ambiguous package source in {settings_path}")
-
-records = []
-for line in os.environ["PI_PACKAGE_LIST"].splitlines():
-    if line.startswith("  ") and not line.startswith("    "):
-        records.append([line.strip().removesuffix(" (filtered)"), None])
-    elif line.startswith("    ") and records:
-        records[-1][1] = line.strip()
-
-authorities = []
-for package_source, installed_path in records:
-    package_name = None
-    if package_source != expected:
-        if not installed_path:
-            raise SystemExit(f"unresolved package identity: {package_source}")
-        manifest = Path(installed_path) / "package.json"
-        try:
-            document = json.loads(manifest.read_text())
-            package_name = document.get("name")
-        except (OSError, json.JSONDecodeError) as error:
-            raise SystemExit(f"invalid package identity for {package_source}: {error}")
-        if not isinstance(package_name, str) or not package_name.strip():
-            raise SystemExit(f"invalid package name for {package_source}")
-    if package_source == expected or package_name == "pi-subagents":
-        authorities.append(package_source)
-if authorities != [expected]:
-    raise SystemExit(f"unexpected pi-subagents authorities: {authorities}")
-PY_VERIFY_PI_SUBAGENTS
+bin/qq-pi-inventory --check "$source"
+bin/qq-pi-inventory --json | jq -e --arg source "$source" \
+  '[.[] | select(.name == "pi-subagents" or .source == $source) | .source] == [$source]' \
+  >/dev/null
 test "$(git -C "$checkout" rev-parse HEAD)" = "$pin"
 test -z "$(git -C "$checkout" status --porcelain)"
 test "$(git -C "$checkout" remote get-url origin)" = https://github.com/hypermemetic-ai/pi-subagents
