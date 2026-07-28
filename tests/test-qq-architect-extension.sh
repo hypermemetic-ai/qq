@@ -5,7 +5,7 @@ TEST_NAME=test-qq-architect-extension
 # shellcheck source=tests/helpers.sh
 source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd -- "$TESTS_DIR/.." && pwd -P)"
-TMP="$(mktemp -d "${TMPDIR:?TMPDIR is required}/qq-architect.XXXXXX")"
+TMP="$(mktemp -d "$ROOT/.test-qq-architect.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 node --input-type=module - "$ROOT/extensions/qq-architect.ts" "$TMP" <<'JS'
 import assert from "node:assert/strict";

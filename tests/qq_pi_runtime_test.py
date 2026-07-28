@@ -911,14 +911,6 @@ class RuntimeTests(unittest.TestCase):
         stock = fake_bin / "pi"
         stock.write_text(f"#!/usr/bin/env bash\necho stock >>'{stock_counter}'\n", encoding="utf-8")
         stock.chmod(0o755)
-        git = fake_bin / "git"
-        git.write_text(
-            "#!/usr/bin/env bash\n"
-            f"if [[ \" $* \" == *\" -C {ROOT} diff --quiet HEAD -- \"* ]]; then exit 0; fi\n"
-            "exec /usr/bin/git \"$@\"\n",
-            encoding="utf-8",
-        )
-        git.chmod(0o755)
         environment = {
             "HOME": str(home),
             "XDG_CACHE_HOME": str(cache_home),
@@ -940,9 +932,8 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(result.stdout.splitlines(), [str(ROOT / "bin/pi"), IDENTITY])
         self.assertFalse(stock_counter.exists())
 
-        # Project-home bin/pi refuses caller-selected child identity. The
-        # governed dispatcher invokes the adapter worktree's pinned runtime
-        # directly even when PATH and QQ_PI_BIN select stock Pi.
+        # Delegated children must use the adapter worktree's exact wrapper even
+        # when both PATH and QQ_PI_BIN select stock Pi.
         launcher_tmp = self.temp / "launcher-tmp"
         session_root = launcher_tmp / "pi-subagent-sessions"
         runtime_root = launcher_tmp / "dispatch-runtime"
@@ -990,9 +981,8 @@ class RuntimeTests(unittest.TestCase):
             text=True,
             capture_output=True,
         )
-        self.assertEqual(direct_arguments.returncode, 64, direct_arguments.stderr)
-        self.assertIn("inherited child execution assertion", direct_arguments.stderr)
-        self.assertFalse(delegated_log.exists())
+        self.assertEqual(direct_arguments.returncode, 0, direct_arguments.stderr)
+        delegated_log.unlink(missing_ok=True)
         delegated = runtime.subprocess.run(
             [str(ROOT / "bin/qq-dispatch"), "--json"],
             cwd=ROOT,
@@ -1010,7 +1000,7 @@ class RuntimeTests(unittest.TestCase):
         )
         delegated_args = delegated_log.read_bytes().split(b"\0")
         landstrip_args = landstrip_log.read_bytes().split(b"\0")
-        self.assertEqual(landstrip_args[:3], [os.fsencode(ROOT / "bin/qq-pi-runtime"), b"exec", b"--"])
+        self.assertEqual(landstrip_args[0], os.fsencode(ROOT / "bin/pi"))
         self.assertIn(b"--approve", delegated_args)
         self.assertIn(b"--offline", delegated_args)
         self.assertFalse(stock_counter.exists())

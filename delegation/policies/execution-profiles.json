@@ -1,10 +1,4 @@
 {
-  "aligner": {
-    "provider": "openai-codex",
-    "model": "gpt-5.6-sol",
-    "effort": "xhigh",
-    "serviceClass": "provider-default"
-  },
   "architect": {
     "provider": "openai-codex",
     "model": "gpt-5.6-sol",
