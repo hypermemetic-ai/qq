@@ -1,7 +1,8 @@
 // @ts-nocheck
 
 import { randomBytes, randomUUID } from "node:crypto";
-import { chmod, lstat, readFile, readdir, realpath, rename, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { chmod, open, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { validateAlignerRequest, validateOrchestratorProjection } from "../../extensions/lib/qq-alignment-contracts.ts";
 
@@ -17,16 +18,14 @@ async function atomicJson(path, value) {
   await rename(temporary, path);
 }
 async function directDirectory(path, label) {
-  const info = await lstat(path);
-  if (!info.isDirectory() || info.isSymbolicLink()) throw new Error(`${label} is not a direct directory`);
-  if ((info.mode & 0o077) !== 0) throw new Error(`${label} is not mode-restricted`);
+  const handle = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  try { if (((await handle.stat()).mode & 0o077) !== 0) throw new Error(`${label} is not mode-restricted`); }
+  finally { await handle.close(); }
 }
 
 export default async function register(pi) {
-  const configured = process.env.QQ_ALIGNMENT_CHANNEL_ROOT;
-  if (typeof configured !== "string" || !isAbsolute(configured)) throw new Error("qq alignment channel root is missing or non-absolute");
-  const channelRoot = await realpath(configured);
-  if (channelRoot !== configured) throw new Error("qq alignment channel root must already be canonical");
+  const channelRoot = process.env.QQ_ALIGNMENT_CHANNEL_ROOT;
+  if (typeof channelRoot !== "string" || !isAbsolute(channelRoot)) throw new Error("qq alignment channel root is missing or non-absolute");
   await directDirectory(channelRoot, "qq alignment channel root");
   const session = JSON.parse(await readFile(join(channelRoot, "session.json"), "utf8"));
   exact(session, ["version", "session_id", "trace_id", "cwd", "created_at"], "qq alignment channel session");

@@ -31,13 +31,14 @@ fi
 ROOT="$ROOT" TMP="$TMP" node --experimental-strip-types --input-type=module <<'JS'
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { chmod, lstat, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, readdir, rename, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const root = process.env.ROOT; const scratch = process.env.TMP;
 const contracts = await import(pathToFileURL(join(root, "extensions/lib/qq-alignment-contracts.ts")));
 const { AlignmentBroker, childContinuityProjection, protocolState, readNativeSessionBranch, reduceProtocolState, alignmentBrokerConstants } = await import(pathToFileURL(join(root, "extensions/lib/qq-alignment-broker.ts")));
+const registerAlignmentChannel = (await import(pathToFileURL(join(root, "delegation/extensions/qq-alignment-channel.ts")))).default;
 const trace = "1".repeat(32); const change = "T-165.1"; const id = (prefix) => `${prefix}-${randomUUID()}`;
 function request(kind, exchange, requestId, replyTo, operatorText, payload) {
   return { version: 1, change_id: change, exchange_id: exchange, trace_id: trace, request_id: requestId, reply_to: replyTo, kind, operator_text: operatorText, interpretation: `Interpretation of ${operatorText}`, payload };
@@ -84,6 +85,24 @@ assert.equal(Buffer.byteLength(multibyteReceipt.operator_response, "utf8"), cont
 assert.throws(() => contracts.validateDispositionReceipt({ ...multibyteReceipt, operator_response: `${multibyteReceipt.operator_response}é` }), /UTF-8 byte bound/);
 assert.throws(() => contracts.validateOrchestratorProjection({ ...validProjection, material: { ...validProjection.material, evidence_capability_ids: [] } }), /unknown field/);
 assert.throws(() => contracts.validateOrchestratorProjection({ ...validProjection, material: { ...validProjection.material, trace_references: [] } }), /unknown field/);
+
+const channelRoot = join(scratch, "channel-direct");
+await mkdir(channelRoot, { mode: 0o700 });
+for (const name of ["requests", "responses", "notifications"]) await mkdir(join(channelRoot, name), { mode: 0o700 });
+await writeFile(join(channelRoot, "session.json"), JSON.stringify({
+  version: 1, session_id: "session-channel", trace_id: trace, cwd: root, created_at: new Date().toISOString(),
+}), { mode: 0o600 });
+Object.assign(process.env, { QQ_ALIGNMENT_CHANNEL_ROOT: channelRoot, QQ_ALIGNMENT_SESSION_ID: "session-channel", QQ_ALIGNMENT_TRACE_ID: trace });
+const channelTools = [];
+await registerAlignmentChannel({ registerTool(tool) { channelTools.push(tool.name); } });
+assert.deepEqual(channelTools.sort(), ["qq_alignment_notify", "qq_alignment_receive", "qq_alignment_reply"]);
+const channelLink = join(scratch, "channel-linked");
+await symlink(channelRoot, channelLink, "dir");
+process.env.QQ_ALIGNMENT_CHANNEL_ROOT = channelLink;
+await assert.rejects(() => registerAlignmentChannel({ registerTool() {} }), /ELOOP|ENOTDIR/);
+delete process.env.QQ_ALIGNMENT_CHANNEL_ROOT;
+delete process.env.QQ_ALIGNMENT_SESSION_ID;
+delete process.env.QQ_ALIGNMENT_TRACE_ID;
 
 class NativeStore {
   constructor(file) { this.file = file; this.entries = []; this.next = 1; this.failEvent = null; }
@@ -450,6 +469,8 @@ JS
 assert_file_not_matches "$ROOT/extensions/qq-aligner.ts" 'open_alignment_evidence|seal_alignment_package|registerCommand\("architect"'
 assert_file_not_matches "$ROOT/extensions/lib/qq-alignment-broker.ts" 'journal\.jsonl|sealed-alignment|evidence capability|canonical_target|allowed_range'
 assert_file_not_matches "$ROOT/delegation/extensions/qq-alignment-channel.ts" 'qq_register_evidence|canonical_target|allowed_range'
+assert_file_not_matches "$ROOT/delegation/extensions/qq-alignment-channel.ts" '\blstat\b'
+assert_file_contains "$ROOT/delegation/extensions/qq-alignment-channel.ts" 'constants.O_NOFOLLOW'
 assert_file_not_matches "$ROOT/delegation/manifests/agents/orchestrator.md" 'qq_register_evidence|capability ids'
 assert_file_contains "$ROOT/extensions/lib/qq-alignment-broker.ts" 'sessionManager.getBranch()'
 assert_file_not_matches "$ROOT/extensions/lib/qq-alignment-broker.ts" 'rename\(temporary, path\); await chmod\(path'
