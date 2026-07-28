@@ -5,26 +5,28 @@ description: Delegates decision-grade investigation to a fresh read-only researc
 
 # Research
 
-Delegate the reading; retain the judgment. Write the exact question, decision,
-constraints, method, and relevant Repository paths into a brief under the OS
-temporary directory. Dispatch env and dispatcher config: per README Install.
+Delegate the reading; retain the judgment. Create one private durable run
+directory beneath the delegate runtime root and write the exact question,
+decision, constraints, method, relevant Repository paths, Checks, and completion
+requirements there as `BRIEF.md`. Keep researcher scratch beneath that run
+directory. Dispatch env and dispatcher config: per README Install. The globally
+mounted extension selects the active qq checkout for qq worktrees and canonical
+qq primary `main` elsewhere; `cwd` selects the assigned Git worktree.
 
-Use primary-`main`; never Change copies. `cwd` selects same-Repository
-worktrees:
-`<repo-primary>/delegation/manifests/agents/researcher.md`.
+Pass the absolute run directory as `QQ_DISPATCH_RUN_DIR` for this dispatch:
 
 ```ts
-const completionEnvelopeSchema=JSON.parse(readFileSync("<absolute-working-root>/delegation/manifests/completion-envelope.schema.json","utf8"))
-subagent({agent:"researcher",task:"Read-and-perform:<absolute-brief-path>",outputSchema:completionEnvelopeSchema,acceptance:{level:"none",reason:"per the manifests"},cwd:"<absolute-working-root>",context:"fresh",async:true})
+// QQ_DISPATCH_RUN_DIR=<absolute-run-dir>
+subagent({agent:"researcher",task:"Read-and-perform:<absolute-run-dir>/BRIEF.md",acceptance:{level:"none",reason:"per the manifests"},cwd:"<absolute-working-root>",context:"fresh",async:true})
 ```
 
-Paths absolute; task only the brief pointer. Pi-subagents owns
-lifecycle/artifacts; adapter containment. Inspect id/`details.asyncDir` once:
-run/fleet status, `status.json`, `events.jsonl`,
-`output-<index>.log`, and `subagent-log-<run-id>.md`. Validated `summary` carries
-cited, confidence-tagged findings; nonzero/missing/invalid fails. After
-infrastructure failure, resume with the source run's recorded `timeoutMs`;
-relaunch conclusions fresh. Owner spot-checks load-bearing citations, judges
+The researcher writes `<absolute-run-dir>/ENVELOPE.md` per
+`delegation/manifests/ENVELOPE.md`, and the adapter writes `TERMINAL` there at
+child exit. Missing `ENVELOPE.md` is not complete; ending on a user message is
+failed. Sweep active run directories' terminal records on every inbound event.
+After a research-infrastructure failure, resume once with the source run's
+recorded `timeoutMs`, then record `inconclusive-under-substrate`; never request
+an operator restatement. The owner spot-checks load-bearing citations, judges
 findings, and writes the Repository artifact.
 
 ## Method
