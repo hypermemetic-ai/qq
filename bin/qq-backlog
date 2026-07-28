@@ -42,11 +42,7 @@ def resolve_tool(name: str) -> str:
     found = shutil.which(name)
     if found and Path(found).is_file() and os.access(found, os.X_OK):
         return found
-    for directory in ("/home/linuxbrew/.linuxbrew/bin", "/opt/homebrew/bin"):
-        candidate = Path(directory, name)
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return os.fspath(candidate)
-    raise Refusal(f"{name} not found; set {env_name} to its absolute path")
+    raise Refusal(f"{name} not found on PATH; set {env_name} to its absolute path")
 
 
 def run_git(git: str, cwd: Path, *args: str, binary: bool = False) -> str | bytes:

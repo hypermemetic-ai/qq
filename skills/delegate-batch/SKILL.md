@@ -60,7 +60,8 @@ boundaries: fleet state, the run directory, `status.json`, `events.jsonl`,
 output, and the subagent log. No start after ten minutes blocks with `no thread
 after 10m`; a terminal nonzero fails. A review-infrastructure failure gets one
 resume with the source run's recorded `timeoutMs`, then is
-`inconclusive-under-substrate`—never ask the operator to restate it.
+`inconclusive-under-substrate`—never ask the operator to restate it. Resume
+passes the source run's recorded `timeoutMs` and no contract override.
 Reconstruct from Tasks, run directories, artifacts, transcripts, and
 worktrees.
 

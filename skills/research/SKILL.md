@@ -24,8 +24,8 @@ The researcher writes `<absolute-run-dir>/ENVELOPE.md` per
 `delegation/manifests/ENVELOPE.md`, and the adapter writes `TERMINAL` there at
 child exit. Missing `ENVELOPE.md` is not complete; ending on a user message is
 failed. Sweep active run directories' terminal records on every inbound event.
-After a research-infrastructure failure, resume once with the source run's
-recorded `timeoutMs`, then record `inconclusive-under-substrate`; never request
+After a research-infrastructure failure, resume once with the
+source run's recorded `timeoutMs`, then record `inconclusive-under-substrate`; never request
 an operator restatement. The owner spot-checks load-bearing citations, judges
 findings, and writes the Repository artifact.
 
