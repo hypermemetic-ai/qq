@@ -3,8 +3,11 @@ id: doc-123
 title: Plan — Make grilling the engagement-first alignment contract
 type: specification
 created_date: '2026-07-28 06:27'
-updated_date: '2026-07-28 07:00'
+updated_date: '2026-07-28 07:59'
 ---
+# Plan — Make grilling the engagement-first alignment contract
+
+**Status:** APPROVED by the operator in the 2026-07-28 intake alignment exchange (one answered card covering both plans; batches 1d06da51 and a997e834 absorbed).
 
 ## Outcome
 
