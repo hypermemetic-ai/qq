@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded Linux descendant cleanup for one Landstrip child tree."""
+"""Bounded Linux descendant cleanup for one delegated child tree."""
 
 from __future__ import annotations
 

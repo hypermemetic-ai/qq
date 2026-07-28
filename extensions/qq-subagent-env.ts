@@ -1,19 +1,11 @@
 // @ts-nocheck
-// qq-subagent-env — confined-delegate dispatch env, by construction (T-128).
+// qq-subagent-env — delegation dispatch environment, by construction (T-184).
 //
-// qq's pi-subagents dispatch must run through bin/qq-dispatch (Landstrip
-// confinement) with canonical role manifests. pi-subagents reads the adapter,
-// manifest-directory, and trusted-seat variables at dispatch time. This globally
-// mounted extension configures every session; the adapter remains fail-closed for
-// delegated child directories that are not Git worktrees.
-//
-// It also carries QQ_DISPATCH_RUNTIME_ROOT (T-137): pi-subagents places the
-// structured-output capture file beneath its own temp root
-// ($TMPDIR/pi-subagents-uid-<uid>), while bin/qq-dispatch's runtime root
-// defaults to $TMPDIR/qq-delegate-runtime, so the adapter's fail-closed
-// guard refused every strict-envelope dispatch (T-129's one-time waiver).
-// Setting the runtime root to pi-subagents' temp root keeps the capture
-// path inside it by construction.
+// qq's pi-subagents dispatch runs through bin/qq-dispatch with canonical role
+// manifests. The Git worktree is the only delegate boundary. pi-subagents reads
+// the adapter, manifest-directory, and trusted-seat variables at dispatch time.
+// This globally mounted extension configures every session; the adapter remains
+// fail-closed for delegated child directories that are not Git worktrees.
 //
 // Delegation authority is always restored from qq; caller or inherited compute
 // overrides do not win. Runtime-root placement is set only when truly absent.
