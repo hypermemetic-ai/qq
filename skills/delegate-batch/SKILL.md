@@ -11,6 +11,9 @@ worktree.
 
 ## Work orders
 
+For adapter tickets, require production-seam acceptance tests; protocol-only
+adapter evidence is never sufficient.
+
 Write a complete temporary brief per ticket: ticket and acceptance criteria,
 context, exact orientation paths and verified facts, constraints, commit protocol,
 exact Checks, and completion envelope. Require every temporary file, redirected log,

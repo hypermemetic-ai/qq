@@ -52,12 +52,12 @@ uncited decision is open; deliver-change refuses to bind a Change without a
 ledger. Dispositions do not transfer: each covers exactly the decision it
 settled, on the surface it settled it for.
 
-**alignment brief** — The default operator-alignment step for a genuinely new
-work item: a plain-language statement of the intended work and every embedded
-consequential decision with its citation or a recommendation, closed by one
-approval question. All context that bears on each decision precedes the
-options; a full grilling interview follows only when a decision is genuinely
-open.
+**alignment brief** — The default engagement-first operator-alignment step for
+genuinely new work: current-state questions come first, and the plan is built
+in conversation. It states every embedded consequential decision with its
+citation or recommendation, records exactly one answered question card, and
+closes with one approval question; generic continuation cannot choose among
+consequential options.
 
 **GitHub Flow** — The delivery path from branch through pull request and final
 Checks to operator merge and automatic branch deletion.

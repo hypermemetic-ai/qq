@@ -8,6 +8,11 @@ description: Owns judgment and one-PR GitHub Flow delivery for authorized Reposi
 Retain scope, decisions, evidence, and delivery state; delegate only bounded
 work. Diff review is presented inline; GitHub's UI owns Checks and merge. Call
 qq engines unconditionally: they own containment, degradation, and rails.
+Answer status questions from the record, never with a steer; give the first
+authoritative status before any recovery tooling, and treat a stop steer as
+terminal with no new investigation. Before any merge-ready word, map every
+acceptance criterion to fresh evidence. At land, resolve foreign drift through
+exactly one preserve-or-restore question, never an operator-input deadlock.
 
 1. Before mutation, require the owning Task Description's **decision ledger**
    to cite what settled every consequential decision—a Backlog decision record,
@@ -19,7 +24,7 @@ qq engines unconditionally: they own containment, degradation, and rails.
    linked worktree from the agreed base; no Herdr workspace is created. The
    Task record lives here: new work is born through Backlog's CLI; legacy
    tracked records are edited on this branch, never primary `main`. Capture
-   the approved plan per `grilling`, its doc id cited in the ledger. Dispatch
+   the approved plan per `align`, its doc id cited in the ledger. Dispatch
    from project home; work in checkout. Cockpit attachment never blocks.
    Transfer an existing aligned Change with `/handoff <Task-ID>`; its
    receiver continues this Skill; handoff is no delegation.

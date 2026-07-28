@@ -62,8 +62,9 @@ the Change and code without inheriting the author's conclusions.
    spends one mechanical same-fix-smaller regeneration: Checks pass and strictly
    smaller takes it; otherwise the original stands without justification prose.
    Rerun affected Checks and review the fix delta.
-3. A finding class fixed in two prior rounds trips the convergence breaker:
-   halt at the last green state and ask which layer owns the invariant.
+3. A finding class fixed in two prior rounds is convergence and trips the
+   breaker: halt at the last green state, put the owning-layer question to the
+   operator, and never invoke further loop machinery.
 4. On infrastructure failure, resume
    with the source run's recorded `timeoutMs` and no other contract override.
    Dispatch formed findings, invalid output, and context gaps fresh; repeated

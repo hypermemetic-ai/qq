@@ -408,7 +408,7 @@ assert start == ["agent","start",start[2],"--kind","pi","--pane","w:pNew",
 assert len(start[2]) <= 48
 prompt_call = next(call for call in actual if call[:2] == ["agent","prompt"])
 prompt = prompt_call[3]
-for phrase in ("Take accountable ownership","already aligned; do not restart grilling","preserve all existing dirt",
+for phrase in ("Take accountable ownership","already aligned; do not restart alignment","preserve all existing dirt",
                "skills/deliver-change/SKILL.md","fresh-context code review and fix-delta review","Never merge",
                "Report progress and results in this tab","No originating conversation"):
     assert phrase in prompt, phrase
@@ -597,7 +597,7 @@ receipt = invoke(0, "intake-start", "--handoff", str(handoff_path), "--repo", ma
 assert receipt["action"] == "intake-start" and receipt["handoff_id"] == handoff_id
 assert receipt["checkout"] == main and receipt["transaction"]["observed_state"] == "working"
 intake_prompt = next(call[3] for call in calls() if call[:2] == ["agent","prompt"])
-for phrase in ("genuinely new Architect intake", "not approved implementation", "normal grilling",
+for phrase in ("genuinely new Architect intake", "not approved implementation", "the align contract",
                "born-in-worktree Task", "record-handoff-result", "No originating conversation"):
     assert phrase in intake_prompt, phrase
 # The deterministic handoff agent name prevents a second live recipient.

@@ -10,6 +10,9 @@ mechanics. This qq overlay does not start, own, or retire agents.
 
 ## Coordinate Pi agents
 
+Never self-prompt through intercom: preload only, and describe preloaded state
+as preloaded.
+
 Name sessions uniquely. Call `intercom({ action: "list" })`, use its current
 session name as `<id>`, and begin every `send`, `ask`, and `reply` message with
 `AGENT from=<id>: <message>`.
