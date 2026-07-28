@@ -289,7 +289,19 @@ jq --arg session "$session_a" '
       session:$session, entries:[2,3], quote:"expected\n   event"
     }
 ' "$valid" >"$tmp/spanning-quote.json"
-expect_analysis_success spanning-quote "$tmp/spanning-quote.json"
+expect_analysis_failure spanning-quote "$tmp/spanning-quote.json"
+assert_file_contains "$tmp/spanning-quote.stdout" \
+  'use separate evidence objects per entry' \
+  'multi-entry citation did not explain the one-entry evidence rule'
+
+jq --arg session "$session_a" '
+  .episodes = [.episodes[0]]
+  | .episodes[0].evidence = [
+      {session:$session,entries:[2],quote:"expected"},
+      {session:$session,entries:[3],quote:"event"}
+    ]
+' "$valid" >"$tmp/separate-entry-evidence.json"
+expect_analysis_success separate-entry-evidence "$tmp/separate-entry-evidence.json"
 
 jq --arg session "$session_a" '
   .episodes = [.episodes[0]]
@@ -300,7 +312,7 @@ jq --arg session "$session_a" '
 expect_analysis_success plain-string-quote "$tmp/plain-string-quote.json"
 
 jq --arg session "$session_a" '
-  .episodes[0].evidence[0] = {session:$session,entries:[4,2],quote:"expected"}
+  .episodes[0].evidence[0] = {session:$session,entries:[4],quote:"expected"}
 ' "$valid" >"$tmp/textless-entry.json"
 expect_analysis_failure textless-entry "$tmp/textless-entry.json"
 assert_file_contains "$tmp/textless-entry.stdout" 'citation carries no quotable text' \
@@ -312,8 +324,9 @@ jq '.episodes[0].evidence[0] = {
   quote:"expected expected"
 }' "$valid" >"$tmp/duplicate-citation-entry.json"
 expect_analysis_failure duplicate-citation-entry "$tmp/duplicate-citation-entry.json"
-assert_file_contains "$tmp/duplicate-citation-entry.stdout" 'duplicate entry in citation' \
-  'duplicate citation entry did not use the required reason'
+assert_file_contains "$tmp/duplicate-citation-entry.stdout" \
+  'use separate evidence objects per entry' \
+  'duplicate citation entry did not explain the one-entry evidence rule'
 
 jq '.episodes[0].evidence = [
   .episodes[0].evidence[0],

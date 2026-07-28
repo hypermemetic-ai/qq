@@ -595,53 +595,6 @@ def pi_first_record(path):
     return True, ""
 
 
-def content_match(path, text):
-    needle = text.encode("utf-8")
-    overlap = max(0, len(needle) - 1)
-    tail = b""
-    try:
-        with Path(path).open("rb") as source:
-            while True:
-                chunk = source.read(1024 * 1024)
-                if not chunk:
-                    return False
-                block = tail + chunk
-                if needle in block:
-                    return True
-                tail = block[-overlap:] if overlap else b""
-    except OSError:
-        return None
-
-
-def content_contains(path, text):
-    return content_match(path, text) is True
-
-
-def session_in_window(path, start, end):
-    observed_in_window = False
-    observed_any = False
-    try:
-        with Path(path).open("rb") as source:
-            for raw in source:
-                try:
-                    item = json.loads(raw.decode("utf-8-sig"))
-                except (UnicodeDecodeError, ValueError, RecursionError):
-                    return False, "malformed session JSONL"
-                if isinstance(item, dict) and "timestamp" in item:
-                    try:
-                        observed = time_value(item["timestamp"])
-                    except ValueError:
-                        return False, "invalid session timestamp"
-                    observed_any = True
-                    if start <= observed <= end:
-                        observed_in_window = True
-    except OSError:
-        return False, "cannot read session JSONL"
-    if not observed_any:
-        return False, "session JSONL has no timestamped entries"
-    return observed_in_window, None
-
-
 def git_paths(repo, commit, *pathspecs):
     raw = checked(
         [git_binary, "-C", os.fspath(repo), "ls-tree", "-r", "-z", "--name-only",
@@ -972,7 +925,6 @@ def assemble(values):
                 "path": status_path, "parent": parent, "cwd": cwd_path,
                 "started": started_at,
                 "session_file": status_record.get("sessionFile"),
-                "session_dir": status_record.get("sessionDir"),
             }
 
             live_common = None
@@ -1001,50 +953,24 @@ def assemble(values):
                 except UnicodeDecodeError:
                     observed_branch = ""
                 if observed_branch == branch:
-                    selected_runs[run_id] = "live-worktree-branch"
-                continue
-            if live_common is not None and live_common != common:
-                continue
-            if branch_readable:
-                continue
-            if (
-                within(cwd_path, worktree_root)
-                and window_start <= started_at <= window_end
-                and parent is not None
-                and regular_file(parent)
-                and content_contains(parent, branch)
-            ):
-                session_file_value = status_records[run_id]["session_file"]
-                if not isinstance(session_file_value, str) or not os.path.isabs(session_file_value):
+                    selected_runs[run_id] = "named-branch-status-lineage"
+                else:
                     append_unknown(
                         unknown, status_path,
-                        "weak delegate sessionFile is missing or not an absolute path",
+                        "delegate status names another branch in this Repository",
                     )
-                    continue
-                session_file = Path(os.path.realpath(session_file_value))
-                if not regular_file(session_file):
-                    append_unknown(
-                        unknown, session_file,
-                        "weak delegate sessionFile is missing or non-regular",
+                    warnings.append(
+                        f"delegate {run_id} is outside the explicit named-branch lineage"
                     )
-                    continue
-                if not (session_validity := pi_first_record(session_file))[0]:
-                    append_unknown(unknown, session_file, f"weak delegate {session_validity[1]}")
-                    continue
-                branch_match = content_match(session_file, branch)
-                if branch_match is None:
-                    append_unknown(
-                        unknown, session_file,
-                        "weak delegate sessionFile is unreadable",
-                    )
-                    continue
-                if not branch_match:
-                    append_unknown(
-                        unknown, session_file,
-                        "weak delegate transcript does not mention the PR branch",
-                    )
-                    continue
-                selected_runs[run_id] = "retired-worktree-content"
+                continue
+            if within(cwd_path, worktree_root) and window_start <= started_at <= window_end:
+                append_unknown(
+                    unknown, status_path,
+                    "delegate status does not verify the named branch checkout",
+                )
+                warnings.append(
+                    f"delegate {run_id} is outside the explicit named-branch lineage"
+                )
     elif async_root.is_symlink():
         fail(f"async run root is not a directory: {async_root}", 65)
 
@@ -1091,7 +1017,6 @@ def assemble(values):
             identifier = stem.rsplit("_", 1)[-1]
             add_session(parent, f"accountable-{identifier}", "accountable", "parent-of-delegate")
 
-    scanned_jsonl = set()
     for run_id in sorted(selected_runs):
         record = status_records[run_id]
         session_file_value = record["session_file"]
@@ -1100,114 +1025,16 @@ def assemble(values):
                 unknown, record["path"],
                 "delegate sessionFile is missing or not an absolute path",
             )
-            warnings.append(f"delegate {run_id} has no valid sessionFile")
+            warnings.append(f"delegate {run_id} has no valid explicit sessionFile lineage")
             continue
         session_file = Path(os.path.realpath(session_file_value))
-        scanned_jsonl.add(session_file)
         add_session(
             session_file, f"delegate-{run_id}-primary", "delegate",
             selected_runs[run_id], run_id=run_id,
         )
 
-    for run_id in sorted(selected_runs):
-        record = status_records[run_id]
-        session_dir_value = record["session_dir"]
-        if not isinstance(session_dir_value, str) or not os.path.isabs(session_dir_value):
-            append_unknown(
-                unknown, record["path"],
-                "delegate sessionDir is missing or not an absolute path",
-            )
-            continue
-        root = Path(os.path.realpath(session_dir_value))
-        if not root.exists():
-            continue
-        if not root.is_dir():
-            append_unknown(unknown, root, "delegate sessionDir is not a directory")
-            continue
-        candidates = sorted(root.rglob("*.jsonl"), key=lambda item: os.fspath(item))
-        for index, candidate in enumerate(candidates, start=1):
-            canonical = Path(os.path.realpath(candidate))
-            if canonical in scanned_jsonl:
-                continue
-            scanned_jsonl.add(canonical)
-            if not regular_file(candidate) or candidate.is_symlink():
-                append_unknown(unknown, candidate, "JSONL candidate is not a regular file")
-                continue
-            valid, reason = pi_first_record(candidate)
-            if not valid:
-                append_unknown(unknown, candidate, reason)
-                continue
-            add_session(
-                candidate, f"delegate-{run_id}-sessiondir-{index}", "delegate",
-                selected_runs[run_id], run_id=run_id,
-            )
-
-    for run_id in sorted(selected_runs):
-        roots = [runtime / "runs" / run_id, async_root / run_id]
-        for root in roots:
-            if not root.exists():
-                continue
-            if not root.is_dir() or root.is_symlink():
-                append_unknown(unknown, root, "delegate transcript root is not a directory")
-                continue
-            for candidate in sorted(root.rglob("*.jsonl"), key=lambda item: os.fspath(item)):
-                canonical = Path(os.path.realpath(candidate))
-                if canonical in scanned_jsonl:
-                    continue
-                scanned_jsonl.add(canonical)
-                if not regular_file(candidate) or candidate.is_symlink():
-                    append_unknown(unknown, candidate, "JSONL candidate is not a regular file")
-                    continue
-                valid, reason = pi_first_record(candidate)
-                if not valid:
-                    append_unknown(unknown, candidate, reason)
-                    continue
-                basename = candidate.stem
-                add_session(
-                    candidate, f"delegate-{run_id}-{basename}", "delegate",
-                    selected_runs[run_id], run_id=run_id,
-                )
-
     if not selected_runs:
-        home = os.environ.get("HOME")
-        if not home or not os.path.isabs(home):
-            fail("HOME must be absolute for Repository session discovery", 65)
-        repo_home = repo
-        encoded = repo_home.as_posix().rstrip("/").replace("/", "-")
-        names = [f"-{encoded}--", f"-{encoded}-"]
-        sessions_base = Path(home) / ".pi" / "agent" / "sessions"
-        candidates = [sessions_base / name for name in names if (sessions_base / name).is_dir()]
-        if len(candidates) > 1:
-            warnings.append("multiple Repository-home Pi session directories matched the encoding")
-        matched = []
-        for directory in candidates:
-            for candidate in sorted(directory.glob("*.jsonl"), key=lambda item: item.name):
-                canonical = Path(os.path.realpath(candidate))
-                if canonical in {row[0] for row in matched}:
-                    continue
-                if not regular_file(candidate) or candidate.is_symlink():
-                    append_unknown(unknown, candidate, "session-search candidate is not a regular file")
-                    continue
-                valid, reason = pi_first_record(candidate)
-                if not valid:
-                    append_unknown(unknown, candidate, reason)
-                    continue
-                in_window, session_error = session_in_window(
-                    candidate, window_start, window_end,
-                )
-                if session_error is not None:
-                    append_unknown(unknown, candidate, session_error)
-                    continue
-                if content_contains(candidate, branch) and in_window:
-                    matched.append((canonical, candidate.stem.rsplit("_", 1)[-1]))
-        for source, identifier in matched:
-            add_session(source, f"accountable-{identifier}", "accountable", "content-search")
-        if len(matched) != 1:
-            warnings.append(
-                f"no delegate runs selected; accountable content search found {len(matched)} matches"
-            )
-        else:
-            warnings.append("no delegate runs selected; used accountable content search")
+        warnings.append("no delegate runs have explicit named-branch status lineage")
 
     session_rows.sort(key=lambda row: (0 if row["role"] == "accountable" else 1, row["label"]))
     packaged_sessions = []
@@ -1531,6 +1358,11 @@ def minimal_analysis(item):
                 or not isinstance(citation.get("quote"), str)
             ):
                 fail(f"analysis schema violation: episodes[{index}].evidence has the wrong shape")
+            if len(citation["entries"]) != 1:
+                fail(
+                    f"analysis schema violation: episodes[{index}].evidence entries must contain "
+                    "exactly one entry; use separate evidence objects per entry"
+                )
         cost = episode["cost"]
         if (
             not all(field in cost for field in ("turns", "tokens", "duration_ms", "source"))
@@ -3473,22 +3305,13 @@ def verify_result_task_evidence(receipt, require_hashes=True):
         primary = [record for record in records if record.get("branch") == "refs/heads/main"]
         if len(selected) != 1 or selected[0].get("branch") != f"refs/heads/{branch}" or len(primary) != 1:
             fail("mapped Task is not a registered named linked worktree", 65)
-        task_matches = []
-        for record in records:
-            tasks_dir = Path(record["worktree"]) / "backlog" / "tasks"
-            if not tasks_dir.is_dir() or tasks_dir.is_symlink():
-                continue
-            for candidate in tasks_dir.iterdir():
-                if candidate.suffix != ".md" or not regular_file(candidate):
-                    continue
-                candidate_fields, _ = backlog_frontmatter(candidate, "registered Task candidate")
-                if candidate_fields.get("id") == task_id:
-                    task_matches.append(Path(os.path.realpath(candidate)))
         task_path = Path(task["task_path"])
-        if task_matches != [Path(os.path.realpath(task_path))]:
-            fail("mapped Task does not resolve uniquely in its linked worktree", 65)
+        task_real = Path(os.path.realpath(task_path))
+        tasks_dir = Path(os.path.realpath(checkout / "backlog" / "tasks"))
+        if task_real.parent != tasks_dir:
+            fail("mapped Task path is not in the named checkout's backlog/tasks directory", 65)
         if (
-            not within(Path(os.path.realpath(task_path)), checkout)
+            not within(task_real, checkout)
             or not regular_file(task_path)
             or not isinstance(task.get("task_sha256"), str)
             or require_hashes
@@ -4361,7 +4184,13 @@ def finalize(values):
             fail(f"analyst trace is not Pi v3: {reason}")
         trace_data = read_regular(trace, "analyst trace")
     if "--analysis" in options:
-        source = canonical_existing(options["--analysis"], "analysis input")
+        source = canonical_existing(options["--analysis"], "temporary analysis input")
+        if within(source, run_dir):
+            fail(
+                "--analysis must name a temporary child/runtime input outside the Observer run; "
+                "qq-observe finalize is the sole writer of the run's analysis.json",
+                65,
+            )
         raw = validated_package_analysis(run_dir, source)
         analysis = json_document(raw, "validated analysis output")
         if os.path.lexists(run_dir / "analysis_failed.json"):
@@ -5578,7 +5407,11 @@ def validate_analysis_shape(item):
             analysis_string(citation["session"], f"{citation_label}.session")
             citation["session"] = canonical_path(citation["session"])
             analysis_entry_array(citation["entries"], f"{citation_label}.entries")
-            refuse_duplicates(citation["entries"], "duplicate entry in citation")
+            if len(citation["entries"]) != 1:
+                fail(
+                    f"analysis schema violation: {citation_label}.entries must contain "
+                    "exactly one entry; use separate evidence objects per entry"
+                )
             analysis_string(citation["quote"], f"{citation_label}.quote", maximum=200)
         for field in ("what_happened", "root_cause"):
             analysis_string(episode[field], f"{label}.{field}", nonempty=True)
@@ -5824,15 +5657,14 @@ def validate_and_rank_analysis(values):
             session = citation["session"]
             if session not in session_lines:
                 fail(f"citation references unknown session: {session}")
-            cited_texts = []
-            for entry in citation["entries"]:
-                if entry not in session_lines[session]:
-                    fail(f"citation entry {entry} does not exist in session: {session}")
-                entry_text = quotable_entry_text(session_lines[session][entry])
-                if not normalized_whitespace(entry_text):
-                    fail("citation carries no quotable text")
-                cited_texts.append(entry_text)
-            cited_text = normalized_whitespace(" ".join(cited_texts))
+            entry = citation["entries"][0]
+            if entry not in session_lines[session]:
+                fail(f"citation entry {entry} does not exist in session: {session}")
+            cited_text = normalized_whitespace(
+                quotable_entry_text(session_lines[session][entry])
+            )
+            if not cited_text:
+                fail("citation carries no quotable text")
             quote = normalized_whitespace(citation["quote"])
             if not quote:
                 fail("citation quote is empty after whitespace normalization")

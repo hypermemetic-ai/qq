@@ -59,6 +59,20 @@ printf '%s\n' \
   '{"reason":"blind failure","schema":"qq-observer.analysis","schema_version":1,"status":"analysis_failed"}' \
   >"$health_blind/analysis_failed.json"
 
+# Routed analysis readers retain the one-entry evidence invariant.
+cp "$second/analysis.json" "$tmp/second-analysis-one-entry.json"
+jq -cS '.episodes[0].evidence[0].entries = [1,2]' \
+  "$second/analysis.json" >"$tmp/multi-entry-analysis.json"
+mv "$tmp/multi-entry-analysis.json" "$second/analysis.json"
+set +e
+"$OBSERVE" architect-context >"$tmp/multi-entry.out" 2>"$tmp/multi-entry.err"
+status=$?
+set -e
+assert_equal 64 "$status" 'Architect context accepted a multi-entry evidence object'
+assert_file_contains "$tmp/multi-entry.err" 'use separate evidence objects per entry' \
+  'multi-entry routing refusal did not explain the one-entry remedy'
+mv "$tmp/second-analysis-one-entry.json" "$second/analysis.json"
+
 # A stale ledger marker must not authorize replaced analysis bytes.
 cp "$second/analysis.json" "$tmp/second-analysis-applied.json"
 jq -cS '.episodes[0].title = "Replaced after ledger application"' "$second/analysis.json" >"$tmp/replaced-analysis.json"
@@ -268,6 +282,27 @@ jq -cn --arg id "$handoff_id" --arg checkout "$(realpath "$checkout")" \
     repository:"fixture/tasks",task_sha256:$tsha,plan_sha256:{($plan):$psha}}],
   verified_at:"2026-08-02T00:00:00.000Z"
 }' >"$result"
+# Duplicate Task ids elsewhere in the Repository topology do not override the
+# receipt's explicit named-checkout subject.
+duplicate_checkout="$tmp/task-duplicate"
+git -C "$repo" worktree add -qb feature/duplicate "$duplicate_checkout" main >/dev/null
+mkdir -p "$duplicate_checkout/backlog/tasks" "$duplicate_checkout/backlog/docs/plans"
+cp "$task_path" "$duplicate_checkout/backlog/tasks/$(basename "$task_path")"
+cp "$plan_path" "$duplicate_checkout/backlog/docs/plans/$(basename "$plan_path")"
+jq --arg checkout "$(realpath "$duplicate_checkout")" \
+  '.tasks[0].checkout=$checkout | .tasks[0].branch="feature/duplicate"' \
+  "$result" >"$tmp/wrong-named-checkout-result.json"
+set +e
+"$fixture_observe" record-handoff-result --run "$run" \
+  --receipt "$tmp/wrong-named-checkout-result.json" \
+  >"$tmp/wrong-named-checkout.out" 2>"$tmp/wrong-named-checkout.err"
+status=$?
+set -e
+assert_equal 65 "$status" 'receipt Task path outside its named checkout was accepted'
+assert_file_contains "$tmp/wrong-named-checkout.err" "named checkout's backlog/tasks" \
+  'wrong named checkout refusal did not identify the failed invariant'
+[ ! -e "$run/routing/result.json" ] || fail 'wrong named checkout mutated the Observer run'
+
 set +e
 "$OBSERVE" record-handoff-result --run "$run" --receipt "$result"   >"$tmp/foreign-result.out" 2>"$tmp/foreign-result.err"
 status=$?
@@ -275,17 +310,6 @@ set -e
 assert_equal 65 "$status" 'foreign Repository Task result was accepted by the qq Observer'
 assert_file_contains "$tmp/foreign-result.err" 'running qq topology'
 [ ! -e "$run/routing/result.json" ] || fail 'foreign Task result mutated the Observer run'
-mkdir -p "$repo/backlog/tasks"
-malformed_task="$repo/backlog/tasks/t-202 - Malformed.md"
-printf '%s\n' '---' 'id: T-202' 'references:' '    orphan continuation' '---' >"$malformed_task"
-set +e
-"$fixture_observe" record-handoff-result --run "$run" --receipt "$result" >"$tmp/malformed-list.out" 2>"$tmp/malformed-list.err"
-status=$?
-set -e
-assert_equal 65 "$status" 'orphan frontmatter list continuation was accepted'
-assert_file_contains "$tmp/malformed-list.err" 'malformed frontmatter list'
-[ ! -e "$run/routing/result.json" ] || fail 'malformed frontmatter list mutated the Observer run'
-rm "$malformed_task"
 # Generic intake shape is not authority to use another Repository prefix.
 jq '(.mapping[].task_ids[], .tasks[].task_id) = "T-201.3"' "$result" \
   >"$tmp/mismatched-prefix-result.json"
@@ -299,6 +323,8 @@ assert_equal 65 "$status" 'mismatched configured Task prefix was accepted by Obs
 [ ! -e "$run/routing/result.json" ] \
   || fail 'mismatched configured Task prefix mutated the Observer run'
 "$fixture_observe" record-handoff-result --run "$run" --receipt "$result" >/dev/null
+[ -f "$run/routing/result.json" ] \
+  || fail 'complete named-checkout evidence was rejected because another worktree shares its Task id'
 # Global results map every routed decision ID (set-aside decisions remain Task-free).
 global_decision_id="$(jq -r '.decisions[] | select(.action=="route") | .decision_id' "$global_handoff")"
 jq --arg id "$global_handoff_id" --arg item "$global_decision_id" '.handoff_id=$id | .mapping=[{item:$item,task_ids:["FEAT-201.3"]}]' "$result" >"$tmp/global-result.json"
