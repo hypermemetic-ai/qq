@@ -9,6 +9,7 @@ ROOT="$(cd "$TESTS_DIR/.." && pwd -P)"
 CHANGE="$ROOT/bin/qq-change"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
+export XDG_STATE_HOME="$tmp/state"
 
 remote="$tmp/remote.git"
 main_checkout="$tmp/main"
@@ -34,6 +35,7 @@ cat >"$fake_gh" <<'SH'
 set -euo pipefail
 after_options=false
 repo_option=false
+selector=""
 for argument in "$@"; do
   if [ "$after_options" = true ] && [[ "$argument" == --repo=* ]]; then
     exit 64
@@ -43,8 +45,14 @@ for argument in "$@"; do
   fi
   if [ "$argument" = -- ]; then
     after_options=true
+  elif [[ "$argument" =~ ^[0-9]+$ ]]; then
+    selector="$argument"
   fi
 done
+if [ "${1:-} ${2:-}" = "repo view" ]; then
+  printf '%s\n' '{"nameWithOwner":"fixture/repo"}'
+  exit 0
+fi
 if [ "${FAKE_GH_BAD:-}" = 1 ]; then
   printf 'not-json\n'
   exit 0
@@ -54,9 +62,11 @@ if [ "$repo_option" = true ]; then
   state=OPEN
 fi
 jq -cn \
+  --argjson number "${selector:-83}" \
   --arg state "$state" \
+  --arg head_ref "${FAKE_PR_HEAD:-feature}" \
   --arg oid "${FAKE_MERGE_OID:-}" \
-  '{state:$state,mergedAt:(if $state == "MERGED" then "2026-07-18T00:00:00Z" else null end),mergeCommit:(if $state == "MERGED" then {oid:$oid} else null end),url:"https://example.test/pr/83"}'
+  '{number:$number,state:$state,headRefName:$head_ref,mergedAt:(if $state == "MERGED" then "2026-07-18T00:00:00Z" else null end),mergeCommit:(if $state == "MERGED" then {oid:$oid} else null end),url:"https://example.test/pr/83"}'
 SH
 chmod +x "$fake_gh"
 export QQ_GH_BIN="$fake_gh"
@@ -243,6 +253,42 @@ jq -e '
 rm -- "$change_task"
 rmdir -- "$change_checkout/backlog/tasks" "$change_checkout/backlog"
 
+observer_package="$XDG_STATE_HOME/qq/observer/runs/by-repository/fixture/repo/pr-83/package.json"
+
+# A known merged PR refuses retirement until its canonical guided observer
+# package is a regular file with the matching schema and identity.
+run_change 2 retire change-ws --repo "$main_checkout" --branch feature --pr 83 \
+  --placeholder-pane change-ws:p1
+jq -e --arg package "$observer_package" '
+  .status == "refused"
+  and .state.observer_package == $package
+  and (.message | contains("qq-observe assemble --pr 83 --repo"))
+' "$tmp/result.json" >/dev/null
+[ -d "$change_checkout" ] || fail 'missing-observer refusal removed the checkout'
+
+mkdir -p "$(dirname "$observer_package")"
+printf '%s\n' '{"schema":"wrong","pr":83,"repository":"fixture/repo"}' \
+  >"$observer_package"
+run_change 2 retire change-ws --repo "$main_checkout" --branch feature --pr 83 \
+  --placeholder-pane change-ws:p1
+jq -e '.status == "refused" and .state.observer_package_status == "missing-or-invalid"' \
+  "$tmp/result.json" >/dev/null
+
+# The sole explicit operator override bypasses only the package check, is
+# visible in result state, and inspect still leaves every subject intact.
+run_change 0 inspect retire change-ws --repo "$main_checkout" --branch feature \
+  --pr 83 --allow-unobserved-retire --placeholder-pane change-ws:p1
+jq -e '
+  .status == "done"
+  and .state.allow_unobserved_retire == true
+  and .state.observer_package_status == "override"
+' "$tmp/result.json" >/dev/null
+[ -d "$change_checkout" ] || fail 'observer override inspect removed the checkout'
+
+printf '%s\n' \
+  '{"schema":"qq-observer.package","schema_version":2,"pr":83,"repository":"fixture/repo"}' \
+  >"$observer_package"
+
 # Retirement refuses while any live delegate remains and changes nothing.
 export FAKE_LIVE_AGENT=1
 run_change 2 retire change-ws --repo "$main_checkout" --branch feature \
@@ -268,12 +314,12 @@ jq -e '
 
 # Inspect mirrors every retirement rail without removing anything.
 run_change 0 inspect retire change-ws --repo "$main_checkout" --branch feature \
-  --placeholder-pane change-ws:p1
+  --pr 83 --placeholder-pane change-ws:p1
 [ -d "$change_checkout" ] || fail 'retire inspect removed the checkout'
 
 # Green retirement uses unforced Herdr removal followed by branch -d.
 run_change 0 retire change-ws --repo "$main_checkout" --branch feature \
-  --placeholder-pane change-ws:p1
+  --pr 83 --placeholder-pane change-ws:p1
 [ ! -e "$change_checkout" ] || fail 'retire left the Change checkout'
 if git -C "$main_checkout" show-ref --verify --quiet refs/heads/feature; then
   fail 'retire left the local Change branch'
