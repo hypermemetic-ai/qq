@@ -4,7 +4,7 @@ title: Delete delegate confinement and rebuild delegate lifecycle on one run dir
 status: To Do
 assignee: []
 created_date: '2026-07-28 06:30'
-updated_date: '2026-07-28 06:46'
+updated_date: '2026-07-28 07:01'
 labels: []
 dependencies: []
 documentation:
@@ -26,7 +26,7 @@ Delete qq's confined-delegation layer and the writer role; rebuild delegate life
 - D3 Reversal of T-177 / `decision-19` (global confined delegation) — disposition: operator disposition in the 2026-07-28 architect alignment session, recorded in settled batch scope (a) ("Reverses T-177 per operator disposition").
 - D4 REVIEW.md per-fix-commit counter deletion (counter portion of `decision-5` reversed; smallest-resulting-system and fence-or-shrink retained) — disposition: Cut 6 of the settled batch plus the operator's 2026-07-28 alignment session (counter deletion).
 - D5 Architect/disposition-pipeline ceremony bundle (generic validation rejections, in-memory context loss, stale-evidence refusals, exact-phrase retry rituals, hand-cranked pending intakes) — disposition: operator bundle directive given verbally in the architect session 2026-07-28 after the first handoff was confirmed.
-- D6 Cross-Change decision records will be minted in this Change's checkout before finalization and this ledger switched to their ids — disposition: grilling decision-record rule; the exchange citations above govern until then.
+- D6 Cross-Change decision records will be minted in this Change's checkout before finalization and this ledger switched to their ids — disposition: align (formerly grilling) decision-record rule; the exchange citations above govern until then.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
