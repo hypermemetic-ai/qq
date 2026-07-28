@@ -1,10 +1,10 @@
 ---
 id: T-184
 title: Delete delegate confinement and rebuild delegate lifecycle on one run dir
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-07-28 06:30'
-updated_date: '2026-07-28 07:01'
+updated_date: '2026-07-28 13:11'
 labels: []
 dependencies: []
 documentation:
