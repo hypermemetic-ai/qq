@@ -37,7 +37,7 @@ import { pathToFileURL } from "node:url";
 
 const root = process.env.ROOT; const scratch = process.env.TMP;
 const contracts = await import(pathToFileURL(join(root, "extensions/lib/qq-alignment-contracts.ts")));
-const { AlignmentBroker, childContinuityProjection, protocolState, readNativeSessionBranch, reduceProtocolState, alignmentBrokerConstants } = await import(pathToFileURL(join(root, "extensions/lib/qq-alignment-broker.ts")));
+const { AlignmentBroker, childContinuityProjection, protocolState, readNativeSessionBranch, reduceProtocolState, requestExactRunStop, alignmentBrokerConstants } = await import(pathToFileURL(join(root, "extensions/lib/qq-alignment-broker.ts")));
 const registerAlignmentChannel = (await import(pathToFileURL(join(root, "delegation/extensions/qq-alignment-channel.ts")))).default;
 const trace = "1".repeat(32); const change = "T-165.1"; const id = (prefix) => `${prefix}-${randomUUID()}`;
 function request(kind, exchange, requestId, replyTo, operatorText, payload) {
@@ -103,6 +103,23 @@ await assert.rejects(() => registerAlignmentChannel({ registerTool() {} }), /ELO
 delete process.env.QQ_ALIGNMENT_CHANNEL_ROOT;
 delete process.env.QQ_ALIGNMENT_SESSION_ID;
 delete process.env.QQ_ALIGNMENT_TRACE_ID;
+
+// The pinned vendor's stop RPC compares unlike Pi session identities. The
+// broker's exact-run fallback writes only the proven owner's portable stop
+// request and refuses foreign or linked run directories.
+const portableRoot = join(scratch, "portable-async-runs"); const portableRun = "portable-run"; const portableOwner = join(scratch, "portable-owner.jsonl");
+await mkdir(join(portableRoot, portableRun, "control"), { recursive: true });
+await writeFile(join(portableRoot, portableRun, "status.json"), JSON.stringify({ runId: portableRun, sessionId: portableOwner, state: "running" }), { mode: 0o600 });
+await requestExactRunStop({ asyncRunRoot: portableRoot, runId: portableRun, ownerSessionFile: portableOwner, reason: "unit shutdown" });
+const portableRequest = JSON.parse(await readFile(join(portableRoot, portableRun, "control", "stop.json"), "utf8"));
+assert.equal(Number.isFinite(portableRequest.ts), true);
+assert.deepEqual({ ...portableRequest, ts: 0 }, { type: "stop", ts: 0, source: "qq-alignment-broker", reason: "unit shutdown" });
+const foreignRun = "foreign-portable-run";
+await mkdir(join(portableRoot, foreignRun, "control"), { recursive: true });
+await writeFile(join(portableRoot, foreignRun, "status.json"), JSON.stringify({ runId: foreignRun, sessionId: join(scratch, "foreign.jsonl"), state: "running" }), { mode: 0o600 });
+await assert.rejects(() => requestExactRunStop({ asyncRunRoot: portableRoot, runId: foreignRun, ownerSessionFile: portableOwner, reason: "unit shutdown" }), /foreign or non-running/);
+const linkedRun = "linked-portable-run"; await symlink(join(portableRoot, portableRun), join(portableRoot, linkedRun), "dir");
+await assert.rejects(() => requestExactRunStop({ asyncRunRoot: portableRoot, runId: linkedRun, ownerSessionFile: portableOwner, reason: "unit shutdown" }), /not a direct directory/);
 
 class NativeStore {
   constructor(file) { this.file = file; this.entries = []; this.next = 1; this.failEvent = null; }
@@ -253,6 +270,17 @@ await assert.rejects(() => failedBroker.exchange(failedRequest), /orchestrator e
 assert.deepEqual(failedExchange.store.entries.at(-1).data, { version: 1, alignment_session_id: failedBroker.sessionId, trace_id: trace,
   event: "orchestrator-terminal", payload: { run_id: failedBroker.orchestratorRunId, state: "failed", proof: "status" } });
 assert.equal(failedBroker.pendingExchanges, 0); await failedBroker.shutdown("quit");
+
+// A stop-RPC identity refusal falls back to the exact portable request and
+// still requires public status to prove the same run terminal.
+const portableFallback = fixture("portable-fallback"); await portableFallback.store.persist();
+portableFallback.events.stopError = "not_found"; const fallbackRequests = [];
+const fallbackBroker = new AlignmentBroker(portableFallback.pi, { cwd: root, runtimeRoot: join(scratch, "portable-fallback-runtime"),
+  sessionId: "session-portable-fallback", traceId: trace, piSessionFile: portableFallback.file, sessionManager: portableFallback.store.manager(),
+  pollMs: 2, stopTimeoutMs: 20, requestRunStop: async (input) => { fallbackRequests.push(input); portableFallback.events.status = "stopped"; } });
+await fallbackBroker.initialize(); await fallbackBroker.startOrchestrator(); await fallbackBroker.shutdown("quit");
+assert.deepEqual(fallbackRequests, [{ asyncRunRoot: fallbackBroker.asyncRunRoot, runId: "orchestrator-run-1", ownerSessionFile: portableFallback.file, reason: "quit" }]);
+assert.equal(portableFallback.store.entries.at(-1).data.event, "shutdown");
 
 // One reducer admits live and replayed native state transactionally.
 function bareBroker(label, events = new Events()) {
@@ -432,12 +460,12 @@ await assert.rejects(() => new AlignmentBroker(foreign.pi, { cwd: root, runtimeR
 // bridge proves the exact recorded run terminal; only then may replacement spawn.
 const blocked = fixture("blocked"); await blocked.store.persist(); blocked.events.status = "running"; blocked.events.stopError = "not_found";
 const stuck = new AlignmentBroker(blocked.pi, { cwd: root, runtimeRoot: join(scratch, "blocked-runtime"), sessionId: "session-blocked", traceId: "4".repeat(32), piSessionFile: blocked.file,
-  sessionManager: blocked.store.manager(), pollMs: 2, stopTimeoutMs: 15 });
+  sessionManager: blocked.store.manager(), pollMs: 2, stopTimeoutMs: 15, requestRunStop: async () => { throw new Error("fixture portable stop unavailable"); } });
 await stuck.initialize(); await stuck.startOrchestrator();
 await assert.rejects(() => stuck.prepareReplacement("new", null), /terminal state was not proven/);
 assert.equal(blocked.store.entries.at(-1).data.event, "recovery"); assert.equal(blocked.events.spawnCount, 1); await blocked.store.persist();
 const recovered = new AlignmentBroker(blocked.pi, { cwd: root, runtimeRoot: join(scratch, "blocked-runtime"), piSessionFile: blocked.file,
-  sessionManager: blocked.store.manager(), pollMs: 2, stopTimeoutMs: 15 });
+  sessionManager: blocked.store.manager(), pollMs: 2, stopTimeoutMs: 15, requestRunStop: async () => { throw new Error("fixture portable stop unavailable"); } });
 await recovered.initialize(); assert.equal(recovered.recoveredRunId, "orchestrator-run-1");
 await assert.rejects(() => recovered.startOrchestrator(), /recovery is required/); assert.equal(blocked.events.spawnCount, 1);
 blocked.events.unavailable = true; await assert.rejects(() => recovered.reconcileRecoveredOrchestrator(), /terminal state was not proven/); blocked.events.unavailable = false;

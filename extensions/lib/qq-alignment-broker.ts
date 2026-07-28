@@ -183,6 +183,12 @@ async function privateDirectory(path) {
   const uid = process.geteuid?.(); reject(uid !== undefined && info.uid !== uid, `private runtime path is foreign-owned: ${path}`);
   if ((info.mode & 0o777) !== 0o700) await chmod(path, 0o700);
 }
+async function directOwnedDirectory(path, label) {
+  let info;
+  try { info = await lstat(path); } catch (error) { throw new AlignmentContractError(`${label} is unavailable: ${error instanceof Error ? error.message : String(error)}`); }
+  reject(!info.isDirectory() || info.isSymbolicLink(), `${label} is not a direct directory`);
+  const uid = process.geteuid?.(); reject(uid !== undefined && info.uid !== uid, `${label} is foreign-owned`);
+}
 async function atomicJson(path, value) {
   const temporary = `${path}.tmp-${process.pid}-${randomBytes(6).toString("hex")}`;
   await writeFile(temporary, JSON.stringify(value), { encoding: "utf8", flag: "wx", mode: 0o600 }); await rename(temporary, path);
@@ -212,10 +218,39 @@ function runtimeBase(override) {
   if (process.env.XDG_RUNTIME_DIR !== undefined) { reject(!isAbsolute(process.env.XDG_RUNTIME_DIR), "XDG_RUNTIME_DIR must be absolute"); return join(process.env.XDG_RUNTIME_DIR, "qq", "alignment"); }
   reject(uid === undefined, "cannot derive a private alignment runtime without a uid"); return join(tmpdir(), `qq-alignment-${uid}`);
 }
-function terminalStateFromStatus(status, expectedRunId) {
+function asyncRunBase(override) {
+  if (override !== undefined) { reject(!isAbsolute(override), "pi-subagents async-run root must be absolute"); return override; }
+  if (process.env.QQ_DISPATCH_RUNTIME_ROOT !== undefined) {
+    reject(!isAbsolute(process.env.QQ_DISPATCH_RUNTIME_ROOT), "QQ_DISPATCH_RUNTIME_ROOT must be absolute");
+    return join(process.env.QQ_DISPATCH_RUNTIME_ROOT, "async-subagent-runs");
+  }
+  const uid = process.getuid?.() ?? process.geteuid?.(); reject(uid === undefined, "cannot derive the pi-subagents async-run root without a uid");
+  return join(tmpdir(), `pi-subagents-uid-${uid}`, "async-subagent-runs");
+}
+function runStateFromStatus(status, expectedRunId) {
   if (status === null || typeof status !== "object" || typeof status.text !== "string") return null;
   const lines = status.text.split(/\r?\n/u); const runs = lines.map((line) => line.match(/^Run: (.+)$/u)?.[1]).filter(Boolean); const states = lines.map((line) => line.match(/^State: ([a-z]+)$/u)?.[1]).filter(Boolean);
-  return runs.length === 1 && runs[0] === expectedRunId && states.length === 1 && TERMINAL.has(states[0]) ? states[0] : null;
+  return runs.length === 1 && runs[0] === expectedRunId && states.length === 1 ? states[0] : null;
+}
+function terminalStateFromStatus(status, expectedRunId) {
+  const state = runStateFromStatus(status, expectedRunId); return state !== null && TERMINAL.has(state) ? state : null;
+}
+export async function requestExactRunStop({ asyncRunRoot, runId, ownerSessionFile, reason }) {
+  reject(!isAbsolute(asyncRunRoot) || !validId(runId) || !isAbsolute(ownerSessionFile), "portable orchestrator stop identity is malformed");
+  reject(typeof reason !== "string" || reason.length === 0 || reason.length > 256, "portable orchestrator stop reason is malformed");
+  const runDirectory = join(asyncRunRoot, runId); const controlDirectory = join(runDirectory, "control");
+  await directOwnedDirectory(asyncRunRoot, "pi-subagents async-run root");
+  await directOwnedDirectory(runDirectory, "orchestrator async-run directory");
+  await directOwnedDirectory(controlDirectory, "orchestrator control directory");
+  let status;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try { status = await readJsonDirect(join(runDirectory, "status.json"), "orchestrator async-run status"); break; }
+    catch (error) { if (attempt === 2) throw error; }
+  }
+  reject(status === null || typeof status !== "object" || Array.isArray(status)
+    || status.runId !== runId || status.sessionId !== ownerSessionFile || status.state !== "running",
+  "portable orchestrator stop refused a foreign or non-running async run");
+  await atomicJson(join(controlDirectory, "stop.json"), { type: "stop", ts: Date.now(), source: "qq-alignment-broker", reason });
 }
 
 export async function readNativeSessionBranch(path) {
@@ -238,12 +273,12 @@ export async function readNativeSessionBranch(path) {
 
 export class AlignmentBroker {
   constructor(pi, options = {}) {
-    this.pi = pi; this.cwd = options.cwd; this.runtimeRoot = runtimeBase(options.runtimeRoot);
+    this.pi = pi; this.cwd = options.cwd; this.runtimeRoot = runtimeBase(options.runtimeRoot); this.asyncRunRoot = asyncRunBase(options.asyncRunRoot);
     this.exchangeTimeoutMs = options.exchangeTimeoutMs ?? null; this.stopTimeoutMs = options.stopTimeoutMs ?? RPC_TIMEOUT_MS; this.pollMs = options.pollMs ?? 25;
     installProtocolState(this, initialProtocolState(options.sessionId ?? `session-${randomUUID()}`, options.traceId ?? (process.env.QQ_TRACE_ID?.match(TRACE_PATTERN)?.[0] ?? randomBytes(16).toString("hex"))));
     this.piSessionFile = sessionFile(options.piSessionFile, "Pi session file", true); this.resumeFromSessionFile = sessionFile(options.resumeFromSessionFile, "previous Pi session file", true);
     this.sessionReason = options.sessionReason ?? "startup"; this.sessionManager = options.sessionManager ?? null; this.appendEntry = options.appendEntry ?? ((type, data) => this.pi.appendEntry(type, data));
-    this.previousBranchReader = options.previousBranchReader ?? readNativeSessionBranch; this.channelRoot = join(this.runtimeRoot, this.sessionId);
+    this.previousBranchReader = options.previousBranchReader ?? readNativeSessionBranch; this.requestRunStop = options.requestRunStop ?? requestExactRunStop; this.channelRoot = join(this.runtimeRoot, this.sessionId);
     this.lastOperatorText = null; this.projectionAcceptanceTail = Promise.resolve(); this.pendingExchanges = 0;
     this.started = false; this.closed = false; this.finalizing = false; this.continuationPrepared = false; this.resumed = false; this.recoveredRunId = null; this.canonicalCwd = null;
     this.unsubscribeAsync = null; this.spawnPending = false; this.ambiguousSpawn = false; this.earlyAsyncCompletions = new Map(); this.notificationTimer = null; this.activeNotificationDrains = 0; this.notificationDrainWaiters = [];
@@ -435,7 +470,19 @@ export class AlignmentBroker {
   }
   async stopOrchestrator(reason = "quit") {
     if (this.orchestratorRunId === null || TERMINAL.has(this.orchestratorLifecycle)) return; let stopError = null;
-    try { await this.rpc("stop", { id: this.orchestratorRunId }, Math.min(RPC_TIMEOUT_MS, this.stopTimeoutMs)); } catch (error) { stopError = error; }
+    try { await this.rpc("stop", { id: this.orchestratorRunId }, Math.min(RPC_TIMEOUT_MS, this.stopTimeoutMs)); }
+    catch (error) {
+      stopError = error;
+      try {
+        const status = await this.rpc("status", { id: this.orchestratorRunId }, Math.min(2000, this.stopTimeoutMs));
+        reject(runStateFromStatus(status, this.orchestratorRunId) !== "running", "portable orchestrator stop requires exact running status proof");
+        const ownerSessionFile = this.recoveredRunId !== null && this.resumeFromSessionFile !== null ? this.resumeFromSessionFile : this.piSessionFile;
+        reject(ownerSessionFile === null, "portable orchestrator stop requires its owning Pi session file");
+        await this.requestRunStop({ asyncRunRoot: this.asyncRunRoot, runId: this.orchestratorRunId, ownerSessionFile, reason }); stopError = null;
+      } catch (fallbackError) {
+        stopError = new AlignmentContractError(`${error instanceof Error ? error.message : String(error)}; portable stop: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+      }
+    }
     try {
       let terminal = null; const deadline = Date.now() + this.stopTimeoutMs;
       while (Date.now() < deadline) {
