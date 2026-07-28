@@ -3,18 +3,16 @@ id: doc-123
 title: Plan — Make grilling the engagement-first alignment contract
 type: specification
 created_date: '2026-07-28 06:27'
-updated_date: '2026-07-28 06:48'
+updated_date: '2026-07-28 07:00'
 ---
-
-**Status:** APPROVED by the operator in the 2026-07-28 intake alignment exchange (one answered card covering both plans; batches 1d06da51 and a997e834 absorbed).
 
 ## Outcome
 
-Alignment becomes an engagement-first contract instead of a form-shaped gate. The accountable owner opens with current-state questions before any recommendation, narrowing, freeze, or defer proposal; the plan is built in conversation with the operator rather than presented as a finished artifact; operator corrections are binding text — restated back verbatim and never silently reverted; exactly one answered question card is recorded on the owning Task as the alignment evidence; and the owner stays read-only until approval. Generic continuation ("continue") is never a consequential disposition, and only an answer to the card's question settles it. The standing conduct rules observed missing in this cycle land as prose in the skills that own each behavior.
+Alignment becomes an engagement-first contract instead of a form-shaped gate. The skill lands as `skills/align` — renamed from `grilling` per the operator's 2026-07-28 naming directive (one question, answer: align) — and every reference across skills, AGENTS.md, and CONCEPTS.md follows; "grilling interview" vocabulary goes with it. Names teach posture: "grilling" taught interrogation; "align" mounts the canonical vocabulary (alignment brief, alignment session) and states what the skill owns. The Task title and this plan's doc title deliberately keep the old name — retitling would rename managed files pinned by the recorded intake receipts, and the operator judged the cost exceeds the gain (2026-07-28). The accountable owner opens with current-state questions before any recommendation, narrowing, freeze, or defer proposal; the plan is built in conversation with the operator rather than presented as a finished artifact; operator corrections are binding text — restated back verbatim and never silently reverted; exactly one answered question card is recorded on the owning Task as the alignment evidence; and the owner stays read-only until approval. Generic continuation ("continue") is never a consequential disposition, and only an answer to the card's question settles it. The standing conduct rules observed missing in this cycle land as prose in the skills that own each behavior.
 
 Every element is settled by the operator-settled architect batches `batch-1d06da518a08f95d931c3a1a07fc2ae7` (immutable handoff `handoff-1d06da518a08f95d931c3a1a07fc2ae7`, 14 routed findings in scope (b), settled 2026-07-28) and `batch-a997e8347fde61d4b394c0a3dccb0c5e` (immutable handoff `handoff-a997e8347fde61d4b394c0a3dccb0c5e`, 8 routed findings folded into this same Change, settled 2026-07-28), plus the operator's verbal alignment session in the architect tab the same day.
 
-## Contract (grilling rewrite)
+## Contract (align rewrite)
 
 - **Questions first.** Current-state questions precede any scope recommendation, freeze/defer proposal, or class narrowing; when the operator names a broad class with an example, the class boundary is restated in conversation before narrowing.
 - **Boundaries before proposals.** Affected/unaffected actor and outcome boundaries are engaged with the operator before any incident is generalized into a proposal; a coupled question shape is engaged before dispatch, never collapsed to one failure case.
@@ -34,7 +32,7 @@ Every element is settled by the operator-settled architect batches `batch-1d06da
 
 ## Ownership boundary
 
-- `skills/grilling/SKILL.md` — rewritten as the engagement-first contract
+- `skills/grilling/` → `skills/align/SKILL.md` — directory and SKILL.md renamed and rewritten as the engagement-first contract; all references across skills, AGENTS.md, and CONCEPTS.md updated in the same pass
 - `skills/deliver-change/SKILL.md`, `skills/delegate-batch/SKILL.md`, `skills/agent-messaging/SKILL.md`, `skills/operator-input/SKILL.md`, `skills/code-review/SKILL.md` — standing conduct prose
 - `CONCEPTS.md` — alignment vocabulary (alignment brief becomes the engagement-first contract; one answered card)
 - `tests/**` prose/ratchet budgets touched by the rewrite
@@ -47,5 +45,5 @@ Every element is settled by the operator-settled architect batches `batch-1d06da
 
 ## Success evidence
 
-- grilling reads as the engagement-first contract with the elements above, including the batch-2 card contents (dependency inventory, role-map enumeration reconciled with the operator's count), per-unspecified-field confirmation, and the visible-sentence rule; each standing rule appears in its owning skill; operator-input carries staging verification and the Pi-activation example; the review contract carries the convergence prose; CONCEPTS.md vocabulary matches.
+- `skills/align` reads as the engagement-first contract with the elements above; no `grilling` reference survives outside Git history, including the batch-2 card contents (dependency inventory, role-map enumeration reconciled with the operator's count), per-unspecified-field confirmation, and the visible-sentence rule; each standing rule appears in its owning skill; operator-input carries staging verification and the Pi-activation example; the review contract carries the convergence prose; CONCEPTS.md vocabulary matches.
 - Prose budgets, ratchet, and skill-surface Checks green; fresh-context code-review PASS; one PR carrying T-185's intent and this plan.
