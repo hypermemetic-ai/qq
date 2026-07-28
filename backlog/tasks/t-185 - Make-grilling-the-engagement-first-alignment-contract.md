@@ -1,10 +1,10 @@
 ---
 id: T-185
 title: Make grilling the engagement-first alignment contract
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-07-28 06:30'
-updated_date: '2026-07-28 07:01'
+updated_date: '2026-07-28 07:23'
 labels: []
 dependencies: []
 documentation:
