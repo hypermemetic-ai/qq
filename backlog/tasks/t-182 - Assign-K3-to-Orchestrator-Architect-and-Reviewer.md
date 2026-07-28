@@ -1,10 +1,10 @@
 ---
 id: T-182
 title: Assign K3 to Orchestrator Architect and Reviewer
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-28 04:57'
-updated_date: '2026-07-28 05:13'
+updated_date: '2026-07-28 05:17'
 labels: []
 dependencies: []
 documentation:
@@ -47,3 +47,9 @@ Verification 2026-07-28: repository and active policy jq assertions pass for exa
 
 Fresh-context review returned APPROVE with no material findings. The reviewer substrate failed after capturing the valid completion envelope because its execution-profile receipt directory had been removed; the same receipt-path infrastructure failure repeated on resume. The reviewer-reported focused-script limitation was confined to its Landstrip substrate following the unchanged O_NOFOLLOW probe; the owner-run focused script passed on the host.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Delivered PR #276. The persistent repository and active operator-owned execution-profile maps now assign exactly Architect, Orchestrator, and Reviewer to kimi-coding/k3:max provider-default, and Implementer, Researcher, and Observer to openai-codex/gpt-5.6-sol:xhigh provider-default. README and pinned resolver/footer assertions match. Local focused and full shell suites, native Landstrip delegate-enforcement, installer/verifier, byte-exact active-policy comparison, static checks, and GitHub shell-tests are green. Fresh-context review returned APPROVE with no material findings; its post-envelope receipt-path infrastructure failure is recorded in the notes. No live provider calls were claimed.
+<!-- SECTION:FINAL_SUMMARY:END -->
