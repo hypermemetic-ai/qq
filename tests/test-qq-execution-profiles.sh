@@ -18,8 +18,10 @@ POLICY="$ROOT/delegation/policies/execution-profiles.json"
 
 jq -e '
   (keys == ["architect", "implementer", "observer", "orchestrator", "researcher", "reviewer"])
-  and .observer == {provider:"kimi-coding", model:"k3", effort:"max", serviceClass:"provider-default"}
-  and ([.architect, .implementer, .orchestrator, .researcher, .reviewer] | all(
+  and ([.architect, .orchestrator, .reviewer] | all(
+    . == {provider:"kimi-coding", model:"k3", effort:"max", serviceClass:"provider-default"}
+  ))
+  and ([.implementer, .observer, .researcher] | all(
     . == {provider:"openai-codex", model:"gpt-5.6-sol", effort:"xhigh", serviceClass:"provider-default"}
   ))
 ' "$POLICY" >/dev/null || fail 'six-role policy does not match the operator-settled map'
@@ -140,7 +142,7 @@ env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES = "caller-conflict";
 handlers.get("tool_call")();
 assert(env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES === pinnedBeforeEdit, "mid-request edit or env override changed pinned delegated snapshot");
 await resolver({ purpose: "agent" }, {});
-assert(JSON.parse(env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES).observer.model === "k3", "next valid policy did not recover");
+assert(JSON.parse(env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES).reviewer.model === "k3", "next valid policy did not recover");
 const unsupportedSibling = structuredClone(parsed);
 unsupportedSibling.observer = { provider: "missing", model: "nope", effort: "high", serviceClass: "provider-default" };
 writePolicy(unsupportedSibling);
@@ -170,11 +172,11 @@ const display = ext.getExecutionProfileDisplay();
 assert(display?.acknowledgedServiceClass === "default", "acknowledged telemetry was not retained");
 const footer = await import(pathToFileURL(path.join(process.env.ROOT, "extensions", "qq-footer.ts")).href);
 assert(
-  footer.executionProfileText(parsed.observer) === "(kimi-coding) k3 • max • class provider-default • ack n/a",
+  footer.executionProfileText(parsed.observer) === "(openai-codex) gpt-5.6-sol • xhigh • class provider-default • ack n/a",
   "footer did not expose selected Observer profile and absent acknowledgement",
 );
 assert(
-  footer.executionProfileText(display) === "(openai-codex) gpt-5.6-sol • xhigh • class provider-default • ack default",
+  footer.executionProfileText(display) === "(kimi-coding) k3 • max • class provider-default • ack default",
   "footer did not expose selected and acknowledged root profile",
 );
 
