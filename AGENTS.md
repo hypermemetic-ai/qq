@@ -35,6 +35,11 @@ shared multi-harness infrastructure; qq owns only its Herdr tenancy
 (`cockpit/`, `bin/qq-herdr-*`, and the workspace), not Herdr itself. Agents
 perform documented Pi activation steps; never hand them to the operator.
 
+Project-home Pi is qq's seventh role: the privileged aligner and sole Change
+interface. It preserves exact intent/dispositions with bounded supplied material
+but never executes. One session-long orchestrator owns depth-2 role fanout;
+envelopes stay internal. Architect remains separate and post-hoc.
+
 Start with the assignment and context already provided. Resolve only what is
 missing, using the surfaces present in the Repository:
 

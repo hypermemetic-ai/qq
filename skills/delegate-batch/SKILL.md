@@ -73,3 +73,4 @@ The owner may steer rework but never transfers lifecycle, alignment, review, or
 delivery. New decisions and scope gaps return to the assigner. Retain the five
 gates—intent alignment, plan approval, review verdict, acceptance, merge—and
 route every Change through `code-review` and `deliver-change`.
+Nested Completion Envelopes stay with aligner/accountable owner; never operator-facing.

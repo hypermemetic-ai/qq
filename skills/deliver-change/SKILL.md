@@ -1,28 +1,25 @@
 ---
 name: deliver-change
-description: Owns judgment and one-PR GitHub Flow delivery for authorized Repository changes through Task completion, green handoff, verified disposition, and engine-driven retirement. Use only in the operator-facing accountable agent, never for delegated work inside another Actor's Change.
+description: Internal one-PR GitHub Flow execution; the aligner retains operator judgment and dispositions.
 ---
 
 # Deliver a Change
 
 Retain scope, decisions, evidence, and delivery state; delegate only bounded
-work. Diff review is presented inline; GitHub's UI owns Checks and merge. Call
-qq engines unconditionally: they own containment, degradation, and rails.
+work. Project findings to the aligner through the typed broker, never directly
+to the operator. GitHub owns Checks and merge; qq engines own workflow rails.
 
 1. Before mutation, require the owning Task Description's **decision ledger**
    to cite what settled every consequential decision—a Backlog decision record,
-   approved Task, asked-and-answered exchange, or verbatim operator opt-out—or
-   say `none`. Dispositions do not transfer. An uncited decision returns to
-   alignment. Cite a decision record for broader reach. Confirm
-   branch and worktree isolation.
+   approved Task, asked-and-answered exchange, or verbatim opt-out—or say
+   `none`. Dispositions do not transfer; uncited decisions return to alignment.
+   Cite a decision record for broader reach. Confirm branch/worktree isolation.
 2. Call `qq-herdr-home inspect --repo <root>`. The Change is born as a plain
    linked worktree from the agreed base; no Herdr workspace is created. The
    Task record lives here: new work is born through Backlog's CLI; legacy
    tracked records are edited on this branch, never primary `main`. Capture
-   the approved plan per `grilling`, its doc id cited in the ledger. Dispatch
+   the approved plan per `grilling`, citing its doc id in the ledger. Dispatch
    from project home; work in checkout. Cockpit attachment never blocks.
-   Transfer an existing aligned Change with `/handoff <Task-ID>`; its
-   receiver continues this Skill; handoff is no delegation.
 3. Implement through one complete work order and `delegate-batch`; verify its
    envelope against the tree. Use `research` for decision-grade evidence. Run
    Checks observing changed behavior. In-boundary state-space shrinkage or
@@ -32,14 +29,13 @@ qq engines unconditionally: they own containment, degradation, and rails.
    non-trivial Change. Its brief declares trust boundaries beside the threat
    model. Verify findings, fix only confirmed in-scope failures, rerun affected
    Checks, review each fix delta, then present the diff inline.
-5. Commit and push only green units. Open one pull request carrying Task intent
-   and Check evidence; pass final GitHub Checks.
-6. In its checkout, verify acceptance criteria, summarize, mark Done
-   through Backlog's CLI, push finalization, rerun affected Checks, then
-   hand off.
-7. An unmet criterion reactivates the same Task and Change. If the Change is
-   unavailable, align its branch disposition without replacing the Task. A
-   later intent change is new work and requires approval.
+5. Commit/push only green units. Open one PR with Task intent and Check
+   evidence; pass final GitHub Checks.
+6. In its checkout, verify criteria, summarize, mark Done through Backlog's CLI,
+   push finalization, rerun affected Checks, then hand off.
+7. An unmet criterion reactivates the same Task/Change. If unavailable, align
+   branch disposition without replacing the Task. Later intent requires
+   approval.
 8. Confirm the open pull request is reviewed, finalized, and green; the gh
    CLI (`gh pr checks`, `gh pr view --json mergeStateStatus,reviewDecision`)
    is the authoritative terminal surface (T-112). Open its resolved URL in the
@@ -76,5 +72,6 @@ qq engines unconditionally: they own containment, degradation, and rails.
     forces removal. On refusal or error, report state and leave every session,
     checkout, pane, and branch intact. Never force-delete, stash, clean, reset,
     switch, or repair delivery state.
-14. Keep the five gates with the accountable owner: intent alignment, plan
-    approval, review verdict, acceptance, and merge.
+14. Orchestrator owns execution/evidence, the aligner owns operator conversation
+    and dispositions, and the operator owns merge. Keep the five gates: intent,
+    plan, review, acceptance, and merge.

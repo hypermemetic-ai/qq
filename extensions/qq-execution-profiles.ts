@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 export const ROLES = [
+  "aligner",
   "architect",
   "implementer",
   "observer",
@@ -18,13 +19,14 @@ export const ROLES = [
 ] as const;
 export type ExecutionRole = (typeof ROLES)[number];
 
-const DELEGATED_ROLES = ["implementer", "observer", "researcher", "reviewer"] as const;
+const DELEGATED_ROLES = ["implementer", "observer", "orchestrator", "researcher", "reviewer"] as const;
 const PROFILE_KEYS = ["effort", "model", "provider", "serviceClass"] as const;
 const EFFORTS = new Set(["provider-default", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const SERVICE_CLASSES = new Set(["provider-default", "auto", "default", "flex", "priority"]);
 const MAX_POLICY_BYTES = 64 * 1024;
 const UNRESOLVED_PROFILES = "__qq_execution_profile_resolver_required__";
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const ALIGNER_LAUNCHER = join(REPO_ROOT, "bin", "pi");
 const ARCHITECT_LAUNCHER = join(REPO_ROOT, "bin", "qq-pi-role");
 export const PROFILE_PATH = join(homedir(), ".config", "qq", "execution-profiles.json");
 
@@ -175,6 +177,8 @@ export async function readExecutionProfiles(path = PROFILE_PATH): Promise<Execut
     throw new Error("execution-profile policy directory must be operator-owned and private");
   }
 
+  const pathStat = await lstat(path);
+  if (pathStat.isSymbolicLink()) throw new Error("execution-profile policy must not be a symlink");
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const before = await handle.stat({ bigint: true });
@@ -196,6 +200,7 @@ export async function readExecutionProfiles(path = PROFILE_PATH): Promise<Execut
 export function resolveExecutionRole(
   env: NodeJS.ProcessEnv = process.env,
   architectLauncher = ARCHITECT_LAUNCHER,
+  alignerLauncher = ALIGNER_LAUNCHER,
 ): ExecutionRole {
   const delegated = env.PI_SUBAGENT_TRUSTED_EXECUTION_ROLE;
   const child = env.PI_SUBAGENT_CHILD_AGENT;
@@ -216,13 +221,12 @@ export function resolveExecutionRole(
   if (child !== undefined || receipt !== undefined) {
     throw new Error("delegated child is missing its trusted execution-role assertion");
   }
-  if (rootRole !== undefined || launcher !== undefined) {
-    if (rootRole !== "architect" || launcher !== architectLauncher) {
-      throw new Error("invalid architect launcher assertion");
-    }
-    return "architect";
+  if (rootRole === undefined || launcher === undefined) {
+    throw new Error("root is missing its trusted launcher assertion");
   }
-  return "orchestrator";
+  if (rootRole === "aligner" && launcher === alignerLauncher) return "aligner";
+  if (rootRole === "architect" && launcher === architectLauncher) return "architect";
+  throw new Error("invalid root launcher assertion");
 }
 
 function delegatedProfilesJson(profiles: ExecutionProfiles): string {

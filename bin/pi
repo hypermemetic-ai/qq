@@ -1,3 +1,149 @@
 #!/usr/bin/env bash
 set -euo pipefail
-exec "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/qq-pi-runtime" exec -- "$@"
+
+bin_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+runtime="$bin_dir/qq-pi-runtime"
+repo_root="$(cd -- "$bin_dir/.." && pwd -P)"
+
+verify_landed_inputs() {
+  local inputs=(bin/pi bin/qq-pi-runtime patches/pi/v0.81.1/manifest.json patches/pi/v0.81.1/qq-execution-profile.patch)
+  local relative resource
+  for relative in "${inputs[@]}"; do
+    resource="$repo_root/$relative"
+    [[ -f "$resource" && -r "$resource" && ! -L "$resource" ]] || {
+      printf 'pi: refusing: privileged runtime resource is missing, unreadable, or linked: %s\n' "$resource" >&2
+      exit 64
+    }
+  done
+  [[ -x "$runtime" ]] || { printf 'pi: refusing: privileged qq Pi runtime is not executable\n' >&2; exit 64; }
+  git -C "$repo_root" diff --quiet HEAD -- "${inputs[@]}" || {
+    printf 'pi: refusing: privileged runtime resource differs from landed qq HEAD\n' >&2
+    exit 64
+  }
+}
+verify_landed_inputs
+
+# Administrative and identity commands keep native Pi behavior. Agent starts
+# (TUI, print, JSON, RPC, resume, and compaction-capable sessions) take an
+# immutable qq root profile below.
+case "${1:-}" in
+  --version|-v|--help|-h|install|remove|uninstall|update|list|config)
+    exec "$runtime" exec -- "$@"
+    ;;
+esac
+
+if [[ -n "${QQ_PI_ROOT_PROFILE:-}" ]]; then
+  printf 'pi: refusing: QQ_PI_ROOT_PROFILE is launcher-owned\n' >&2
+  exit 64
+fi
+for variable in PI_SUBAGENT_CHILD_AGENT PI_SUBAGENT_TRUSTED_EXECUTION_ROLE PI_SUBAGENT_EXECUTION_PROFILE_RECEIPT; do
+  [[ -z "${!variable+x}" ]] || { printf 'pi: refusing: inherited child execution assertion: %s\n' "$variable" >&2; exit 64; }
+done
+
+launcher_path="$(readlink -f -- "${BASH_SOURCE[0]}" || true)"
+[[ "$launcher_path" == "$bin_dir/pi" ]] || {
+  printf 'pi: refusing: cannot establish exact root launcher provenance\n' >&2
+  exit 64
+}
+if [[ -n "${QQ_EXECUTION_PROFILE_LAUNCHER_ROLE+x}" || -n "${QQ_EXECUTION_PROFILE_LAUNCHER+x}" ]]; then
+  printf 'pi: refusing: inherited root execution-profile assertion\n' >&2
+  exit 64
+fi
+export QQ_EXECUTION_PROFILE_LAUNCHER_ROLE=aligner
+export QQ_EXECUTION_PROFILE_LAUNCHER="$launcher_path"
+
+for argument in "$@"; do
+  case "$argument" in
+    -e|--extension|--extension=*|--no-extensions|--skill|--skill=*|--no-skills|--prompt-template|--prompt-template=*|--no-prompt-templates|--no-context-files|-nc|--tools|--tools=*|-t|--exclude-tools|--exclude-tools=*|-xt|--no-builtin-tools|-nbt|--no-tools|-nt|--system-prompt|--system-prompt=*|--append-system-prompt|--append-system-prompt=*)
+      printf 'pi: refusing: root profile aligner owns resource, prompt, and tool selection (conflict: %s)\n' "$argument" >&2
+      exit 64
+      ;;
+  esac
+done
+
+for variable in QQ_GOVERNED_PROJECT_HOME QQ_GOVERNED_GIT_COMMON_DIR QQ_GOVERNED_CHANGE_WORKTREE_ROOT; do
+  if [[ -n "${!variable+x}" ]]; then
+    printf 'pi: refusing: %s is launcher-owned\n' "$variable" >&2
+    exit 64
+  fi
+done
+launch_cwd="$(pwd -P)" || { printf 'pi: refusing: cannot resolve launch cwd\n' >&2; exit 65; }
+project_inside="$(git -C "$launch_cwd" rev-parse --is-inside-work-tree 2>/dev/null || true)"
+project_root="$(git -C "$launch_cwd" rev-parse --show-toplevel 2>/dev/null || true)"
+project_git="$(git -C "$launch_cwd" rev-parse --path-format=absolute --git-dir 2>/dev/null || true)"
+project_common="$(git -C "$launch_cwd" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+project_branch="$(git -C "$launch_cwd" symbolic-ref --quiet HEAD 2>/dev/null || true)"
+project_head="$(git -C "$launch_cwd" rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)"
+project_main="$(git -C "$launch_cwd" rev-parse --verify --quiet 'refs/heads/main^{commit}' 2>/dev/null || true)"
+source_common="$(git -C "$repo_root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+project_root="$(realpath -e -- "$project_root" 2>/dev/null || true)"
+project_git="$(realpath -e -- "$project_git" 2>/dev/null || true)"
+project_common="$(realpath -e -- "$project_common" 2>/dev/null || true)"
+source_common="$(realpath -e -- "$source_common" 2>/dev/null || true)"
+project_dot_git="$(realpath -e -- "$project_root/.git" 2>/dev/null || true)"
+project_head_ref="$(cat -- "$project_git/HEAD" 2>/dev/null || true)"
+if [[ "$project_inside" != true || -z "$project_root" || -z "$project_git" || -z "$project_common" || -z "$source_common"
+  || ! -d "$project_root/.git" || -L "$project_root/.git" || "$project_dot_git" != "$project_git"
+  || ! -f "$project_git/HEAD" || -L "$project_git/HEAD" || "$project_head_ref" != 'ref: refs/heads/main'
+  || "$project_git" != "$project_common" || "$project_branch" != refs/heads/main
+  || -z "$project_head" || "$project_head" != "$project_main" ]]; then
+  printf 'pi: refusing: aligner launch requires the canonical primary main Git project home\n' >&2
+  exit 65
+fi
+if [[ "$project_common" != "$source_common" ]]; then
+  governed_agents="$project_root/AGENTS.md"
+  [[ -L "$governed_agents" && "$(realpath -e -- "$governed_agents" 2>/dev/null || true)" == "$repo_root/AGENTS.md" ]] || {
+    printf 'pi: refusing: Repository is not governed through the canonical qq AGENTS.md\n' >&2
+    exit 65
+  }
+fi
+[[ -n "${HOME:-}" ]] || { printf 'pi: refusing: HOME is required for the exact Change-worktree root\n' >&2; exit 68; }
+repository_name="$(basename -- "$(dirname -- "$project_common")")"
+change_root_input="$HOME/.herdr/worktrees/$repository_name"
+[[ -d "$change_root_input" && ! -L "$change_root_input" && -O "$change_root_input" ]] || {
+  printf 'pi: refusing: exact Repository Change-worktree root is unavailable: %s\n' "$change_root_input" >&2
+  exit 68
+}
+change_root="$(realpath -e -- "$change_root_input" 2>/dev/null || true)"
+[[ -n "$change_root" ]] || { printf 'pi: refusing: cannot resolve exact Repository Change-worktree root\n' >&2; exit 68; }
+export QQ_GOVERNED_PROJECT_HOME="$project_root"
+export QQ_GOVERNED_GIT_COMMON_DIR="$project_common"
+export QQ_GOVERNED_CHANGE_WORKTREE_ROOT="$change_root"
+
+env_extension="$repo_root/extensions/qq-subagent-env.ts"
+execution_profile_extension="$repo_root/extensions/qq-execution-profiles.ts"
+vendor_root="${HOME:?HOME is required for the exact pi-subagents source}/.pi/agent/git/github.com/hypermemetic-ai/pi-subagents"
+vendor_extension="$vendor_root/index.ts"
+profile_extension="$repo_root/extensions/qq-aligner.ts"
+bridge_extension="$repo_root/extensions/qq-alignment-subagents.ts"
+qq_resource_relatives=(extensions/qq-subagent-env.ts extensions/qq-execution-profiles.ts extensions/qq-aligner.ts extensions/qq-alignment-subagents.ts extensions/lib/qq-alignment-broker.ts extensions/lib/qq-alignment-contracts.ts delegation/extensions/qq-alignment-channel.ts delegation/manifests/aligner-request.v1.schema.json delegation/manifests/alignment-episode.v1.schema.json delegation/manifests/roots/aligner.md delegation/manifests/agents/orchestrator.md)
+for relative_path in "${qq_resource_relatives[@]}"; do
+  resource="$repo_root/$relative_path"
+  [[ -f "$resource" && -r "$resource" && ! -L "$resource" ]] || {
+    printf 'pi: refusing: exact aligner resource is missing, unreadable, or linked: %s\n' "$resource" >&2
+    exit 64
+  }
+done
+[[ -f "$vendor_extension" && -r "$vendor_extension" && ! -L "$vendor_extension" ]] || {
+  printf 'pi: refusing: exact aligner resource is missing, unreadable, or linked: %s\n' "$vendor_extension" >&2
+  exit 64
+}
+git -C "$repo_root" diff --quiet HEAD -- "${qq_resource_relatives[@]}" || {
+  printf 'pi: refusing: tracked aligner resource dirt differs from landed qq HEAD\n' >&2
+  exit 64
+}
+actual_vendor_commit="$(git -C "$vendor_root" rev-parse HEAD 2>/dev/null || true)"
+expected_vendor_commit=f8f0ef71ef70606288e34e10b14949c730cf9dcf
+[[ "$actual_vendor_commit" == "$expected_vendor_commit" ]] || {
+  printf 'pi: refusing: exact pi-subagents source drift (expected %s, got %s)\n' "$expected_vendor_commit" "${actual_vendor_commit:-unavailable}" >&2
+  exit 64
+}
+export QQ_PI_ROOT_PROFILE=qq-root-aligner-v1
+# Load the profile before pi-subagents so its shutdown handler proves the
+# exact predecessor terminal before the vendor bridge tears down on /reload.
+# The profile defers spawn until resources_discover, after every session_start
+# handler has established the replacement runtime and RPC bridge.
+exec "$runtime" exec -- \
+  --no-extensions --extension "$env_extension" --extension "$execution_profile_extension" --extension "$profile_extension" --extension "$bridge_extension" \
+  --no-skills --no-prompt-templates --no-context-files \
+  --tools alignment_exchange,create_alignment_artifact,present_alignment,capture_operator_disposition,complete_alignment "$@"

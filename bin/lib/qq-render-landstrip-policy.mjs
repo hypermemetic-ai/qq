@@ -60,6 +60,14 @@ const worktree = canonicalDirectory(required(args, "--worktree"), "worktree");
 const gitCommonDir = canonicalDirectory(required(args, "--git-common-dir"), "Git common directory");
 const gitWorktreeDir = canonicalDirectory(required(args, "--git-worktree-dir"), "worktree Git directory");
 const runtimeRoot = canonicalDirectory(required(args, "--runtime-root"), "runtime root");
+const changeWorktreeInput = args.get("--change-worktree-root") ?? "";
+let changeWorktreeRoot = "";
+if (changeWorktreeInput) {
+  if (!path.isAbsolute(changeWorktreeInput)) fail("Change-worktree root must be absolute");
+  changeWorktreeRoot = canonicalDirectory(changeWorktreeInput, "Change-worktree root");
+  const info = fs.lstatSync(changeWorktreeInput);
+  if (info.isSymbolicLink() || info.uid !== process.geteuid()) fail("Change-worktree root must be an operator-owned direct directory");
+}
 const piAuthInput = required(args, "--pi-auth");
 if (!path.isAbsolute(piAuthInput)) fail("Pi auth path must be absolute");
 const piConfigDir = canonicalDirectory(path.dirname(piAuthInput), "Pi config directory");
@@ -161,6 +169,7 @@ fs.appendFileSync(eventLogPath, `${JSON.stringify({
   gitCommonDir,
   gitWorktreeDir,
   runtimeRoot,
+  changeWorktreeRoot: changeWorktreeRoot || null,
   structuredOutputCapture: structuredOutputCapture || null,
   timeout,
   landstripVersion,
