@@ -5,8 +5,9 @@ title: >-
   dir
 type: specification
 created_date: '2026-07-28 06:27'
-updated_date: '2026-07-28 06:48'
+updated_date: '2026-07-28 07:59'
 ---
+# Plan — Delete delegate confinement and rebuild delegate lifecycle on one run dir
 
 **Status:** APPROVED by the operator in the 2026-07-28 intake alignment exchange (one answered card covering both plans; batches 1d06da51 and a997e834 absorbed).
 
