@@ -281,6 +281,13 @@ def doc_supersede(root: Path, git: str, requested_id: str) -> None:
         match = DOC_ID.fullmatch(value)
         assert match is not None
         all_ids.add(int(match.group(1)))
+    # Ids merged on main since the merge-base also reserve their numbers: two
+    # sibling Changes merging docs in flight is exactly the collision class this
+    # command repairs, so allocation must see main's tree, not only this tree.
+    for value in ids_on_main(git, root, main_ref):
+        match = DOC_ID.fullmatch(value)
+        if match is not None:
+            all_ids.add(int(match.group(1)))
     next_number = max(all_ids, default=0) + 1
     while next_number in all_ids:
         next_number += 1

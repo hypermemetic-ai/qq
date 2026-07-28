@@ -163,6 +163,33 @@ tail -n 1 "$receipt" >"$tmp/second-receipt"
 jq -e '.old_id == "doc-9" and .new_id == "doc-10"' "$tmp/second-receipt" >/dev/null \
   || fail 'second supersede receipt has the wrong allocation'
 
+# A doc merged on main after the merge-base reserves its number: the next
+# supersede must allocate above main's maximum, not only this tree's maximum.
+git -C "$repo" switch -q main
+cat >"$repo/backlog/docs/plans/doc-12 - Main-side.md" <<'EOF_MAINDOC'
+---
+id: doc-12
+title: Main-side
+---
+Main-side.
+EOF_MAINDOC
+git -C "$repo" add backlog
+git -C "$repo" -c user.name=test -c user.email=test@example.com commit -qm main-side-doc
+git -C "$repo" switch -q feature
+cat >"$repo/backlog/docs/plans/doc-14 - Third.md" <<'EOF_THIRD'
+---
+id: doc-14
+title: Third
+---
+Third.
+EOF_THIRD
+(
+  cd "$repo"
+  "$QQ_BACKLOG" doc supersede doc-14 >"$tmp/third-path"
+)
+assert_equal 'backlog/docs/plans/doc-15 - Third.md' "$(cat "$tmp/third-path")" \
+  'supersede did not allocate above main-side doc-12'
+
 # A document already present on main's merge-base tree is never superseded.
 merged_before="$(sha256sum "$repo/backlog/docs/plans/doc-1 - Merged.md")"
 set +e
