@@ -4,9 +4,11 @@ title: Make Ghostty readable on laptop and 4K displays
 status: Done
 assignee: []
 created_date: '2026-07-28 03:16'
-updated_date: '2026-07-28 03:37'
+updated_date: '2026-07-28 03:41'
 labels: []
 dependencies: []
+references:
+  - 'https://github.com/hypermemetic-ai/qq/pull/274'
 modified_files:
   - cockpit/ghostty/config
   - cockpit/ghostty/shaders/column-rails.glsl
