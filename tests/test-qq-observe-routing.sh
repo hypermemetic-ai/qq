@@ -59,19 +59,25 @@ printf '%s\n' \
   '{"reason":"blind failure","schema":"qq-observer.analysis","schema_version":1,"status":"analysis_failed"}' \
   >"$health_blind/analysis_failed.json"
 
-# Routed analysis readers retain the one-entry evidence invariant.
+# Historical finalized analyses predate the one-entry rule: routed readers
+# (architect context, batch verification, resolution) must ACCEPT multi-entry
+# evidence in immutable history, while validate-analysis still refuses it for
+# newly authored analyses (covered in test-qq-observe-validate-analysis.sh).
 cp "$second/analysis.json" "$tmp/second-analysis-one-entry.json"
 jq -cS '.episodes[0].evidence[0].entries = [1,2]' \
   "$second/analysis.json" >"$tmp/multi-entry-analysis.json"
 mv "$tmp/multi-entry-analysis.json" "$second/analysis.json"
-set +e
-"$OBSERVE" architect-context >"$tmp/multi-entry.out" 2>"$tmp/multi-entry.err"
-status=$?
-set -e
-assert_equal 64 "$status" 'Architect context accepted a multi-entry evidence object'
-assert_file_contains "$tmp/multi-entry.err" 'use separate evidence objects per entry' \
-  'multi-entry routing refusal did not explain the one-entry remedy'
+# Keep the fixture's ledger marker bound to its own (rewritten) analysis, as a
+# run finalized under the pre-one-entry rule would record it.
+cp "$second/.ledger-applied" "$tmp/marker-original.json"
+new_hash="$(sha256sum "$second/analysis.json" | awk '{print $1}')"
+jq -cS --arg hash "$new_hash" '.analysis_sha256 = $hash' \
+  "$second/.ledger-applied" >"$tmp/marker.json"
+mv "$tmp/marker.json" "$second/.ledger-applied"
+"$OBSERVE" architect-context >"$tmp/multi-entry.out" 2>"$tmp/multi-entry.err" \
+  || { cat "$tmp/multi-entry.err" >&2; fail 'Architect context refused a historical multi-entry evidence object'; }
 mv "$tmp/second-analysis-one-entry.json" "$second/analysis.json"
+mv "$tmp/marker-original.json" "$second/.ledger-applied"
 
 # A stale ledger marker must not authorize replaced analysis bytes.
 cp "$second/analysis.json" "$tmp/second-analysis-applied.json"

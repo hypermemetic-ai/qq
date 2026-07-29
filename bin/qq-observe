@@ -1357,11 +1357,9 @@ def minimal_analysis(item):
                 or not isinstance(citation.get("quote"), str)
             ):
                 fail(f"analysis schema violation: episodes[{index}].evidence has the wrong shape")
-            if len(citation["entries"]) != 1:
-                fail(
-                    f"analysis schema violation: episodes[{index}].evidence entries must contain "
-                    "exactly one entry; use separate evidence objects per entry"
-                )
+            # The one-entry evidence rule is enforced only where new analyses are
+            # accepted (validate-analysis and, through it, finalize). Historical
+            # finalized analyses predate the rule and stay valid immutable evidence.
         cost = episode["cost"]
         if (
             not all(field in cost for field in ("turns", "tokens", "duration_ms", "source"))
