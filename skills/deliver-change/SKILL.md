@@ -59,8 +59,10 @@ exactly one preserve-or-restore question, never an operator-input deadlock.
    verified merge with `qq-observe resolve-task --batch <origin-batch-dir>
    --task <Task-ID> --repo <qq-root>`; v1 compatibility uses `--run
    <origin-run-dir>`. Before retirement, run `qq-observe assemble` while the
-   worktree lives, dispatch the `observer` asynchronously with procedure and
-   package paths, then validate and finalize its analysis on wake; use
+   worktree lives, then dispatch
+   `<worktree>/bin/qq-delegate run --role observer --cwd <absolute-worktree>
+   --brief <absolute-run-dir>/BRIEF.md` with procedure and package paths in its
+   brief. The call blocks; validate and finalize its analysis on return; use
    `qq-observe finalize --failed` on analysis failure. `qq-observe
    verify-delivery` remains advisory. Assemble and finalize this guided package
    before calling `qq-change retire`, which refuses while the package is

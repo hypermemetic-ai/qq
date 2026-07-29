@@ -5,30 +5,29 @@ description: Delegates decision-grade investigation to a fresh read-only researc
 
 # Research
 
-Delegate the reading; retain the judgment. Create one private durable run
-directory beneath the delegate runtime root and write the exact question,
-decision, constraints, method, relevant Repository paths, Checks, and completion
-requirements there as `BRIEF.md`. Keep researcher scratch beneath that run
-directory. Dispatch env and dispatcher config: per README Install. The globally
-mounted extension selects the active qq checkout for qq worktrees and canonical
-qq primary `main` elsewhere; `cwd` selects the assigned Git worktree.
+Delegate the reading; retain the judgment. The owner creates one private
+mode-700 run directory beneath the delegate runtime root and writes a complete
+`BRIEF.md` there with the exact question, decision, constraints, method,
+relevant Repository paths, Checks, and completion requirements. Keep researcher
+scratch beneath that run directory. Invoke the assigned worktree's resident
+engine. It resolves its Pi wrapper, manifests, and execution-profile policy and
+rejects `--cwd` outside its Git common directory:
 
-The work-order reference is the transport: the adapter derives the run
-directory from the task's `Read-and-perform:<absolute-run-dir>/BRIEF.md` path
-(no environment variable is passed):
-
-```ts
-subagent({agent:"researcher",task:"Read-and-perform:<absolute-run-dir>/BRIEF.md",acceptance:{level:"none",reason:"per the manifests"},cwd:"<absolute-working-root>",context:"fresh",async:true})
+```sh
+<assigned-worktree>/bin/qq-delegate run --role researcher \
+  --cwd <absolute-worktree> --brief <absolute-run-dir>/BRIEF.md
 ```
 
-The researcher writes `<absolute-run-dir>/ENVELOPE.md` per
-`delegation/manifests/ENVELOPE.md`, and the adapter writes `TERMINAL` there at
-child exit. Missing `ENVELOPE.md` is not complete; ending on a user message is
-failed. Sweep active run directories' terminal records on every inbound event.
-After a research-infrastructure failure, resume once with the
-source run's recorded `timeoutMs`, then record `inconclusive-under-substrate`; never request
-an operator restatement. The owner spot-checks load-bearing citations, judges
-findings, and writes the Repository artifact.
+It blocks through child exit, writes `TERMINAL` v2 (`exit_code`, `timed_out`,
+artifact paths), and returns child code. A nonzero exit or missing `ENVELOPE.md`
+fails dispatch. For dispatch-infrastructure failure—engine refusal, timeout,
+or substrate
+failure—resume once in a fresh run directory with the same `BRIEF.md`. The
+engine rejects the spent directory, which is sealed or has prior output. Use
+the source manifest's recorded `timeoutMs`, never an override; a second failure
+is `inconclusive-under-substrate`, never an operator restatement. The owner
+spot-checks load-bearing citations, judges findings, and writes the Repository
+artifact.
 
 ## Method
 
