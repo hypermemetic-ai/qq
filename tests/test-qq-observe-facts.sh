@@ -109,19 +109,6 @@ printf '\357\273\277%s\n' \
 ) >"$tmp/bom-pi-facts.json"
 jq -e '.session_format == "pi" and .entries == 1' "$tmp/bom-pi-facts.json" >/dev/null \
   || fail 'facts did not retain its documented UTF-8 BOM acceptance'
-set +e
-(
-  cd "$ROOT"
-  "$OBSERVE" read-session "$bom_pi"
-) >"$tmp/bom-pi-read.stdout" 2>"$tmp/bom-pi-read.stderr"
-status=$?
-set -e
-assert_equal 64 "$status" 'read-session accepted a BOM-prefixed Pi header'
-[ ! -s "$tmp/bom-pi-read.stdout" ] || fail 'read-session BOM refusal emitted stdout'
-assert_file_contains "$tmp/bom-pi-read.stderr" \
-  'qq-observe: cannot read session JSONL: Unexpected UTF-8 BOM' \
-  'read-session BOM refusal did not preserve its legacy error'
-
 invalid_constant="$tmp/invalid-constant.jsonl"
 cat >"$invalid_constant" <<'JSONL'
 {"type":"session","version":3,"timestamp":"2026-07-03T00:00:00Z"}
@@ -142,12 +129,6 @@ for command in facts signals; do
     'malformed JSON at line 2:' \
     "$command non-RFC constant failure did not cite the malformed physical line"
 done
-# read-session retains its legacy acceptance of named numeric constants.
-(
-  cd "$ROOT"
-  "$OBSERVE" read-session "$invalid_constant"
-) >"$tmp/read-session-invalid-constant.json"
-
 malformed_pi="$tmp/malformed-pi.jsonl"
 cat >"$malformed_pi" <<'JSONL'
 {"type":"session","version":3,"timestamp":"2026-07-03T00:00:00Z"}

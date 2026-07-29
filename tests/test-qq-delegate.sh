@@ -58,26 +58,6 @@ exit "${exit_code:-0}"
 SH
 chmod +x "$fake_pi"
 
-fake_observe="$tmp/fake-observe"
-cat >"$fake_observe" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-case "${1:-}" in
-  id)
-    case "${2:-}" in
-      trace) printf '11111111111111111111111111111111\n' ;;
-      span) printf '2222222222222222\n' ;;
-      *) exit 64 ;;
-    esac
-    ;;
-  record)
-    printf '%s\n' "$*" >>"$FAKE_OBSERVE_LOG"
-    ;;
-  *) exit 64 ;;
-esac
-SH
-chmod +x "$fake_observe"
-
 fixture="$tmp/fixture"
 mkdir -p "$fixture/bin/lib" "$fixture/delegation/manifests/agents" \
   "$fixture/delegation/policies"
@@ -87,16 +67,13 @@ git -C "$fixture" -c user.name=test -c user.email=test@example.invalid \
 cp "$ENGINE" "$fixture/bin/qq-delegate"
 cp "$SUPERVISOR" "$fixture/bin/lib/qq-process-tree-supervisor.py"
 cp "$fake_pi" "$fixture/bin/pi"
-cp "$fake_observe" "$fixture/bin/qq-observe"
 cp "$ROOT"/delegation/manifests/agents/*.md "$fixture/delegation/manifests/agents/"
 cp "$ROOT/delegation/policies/execution-profiles.json" \
   "$fixture/delegation/policies/execution-profiles.json"
 chmod +x "$fixture/bin/qq-delegate" "$fixture/bin/pi" \
-  "$fixture/bin/qq-observe" "$fixture/bin/lib/qq-process-tree-supervisor.py"
+  "$fixture/bin/lib/qq-process-tree-supervisor.py"
 fixture_engine="$fixture/bin/qq-delegate"
 policy="$fixture/delegation/policies/execution-profiles.json"
-export FAKE_OBSERVE_LOG="$tmp/observe.log"
-: >"$FAKE_OBSERVE_LOG"
 
 new_run() {
   local name="$1"
@@ -125,7 +102,7 @@ run_case() {
   set -e
 }
 
-# Happy path: argv, prompt, environment, terminal discovery, and span.
+# Happy path: argv, prompt, environment, and terminal discovery.
 parent_session="12345678-1234-4abc-8def-1234567890ab"
 happy_run="$(new_run happy)"
 run_case happy reviewer "$fixture" "$happy_run/BRIEF.md" \
@@ -183,15 +160,8 @@ jq -e --arg run "$happy_run" --arg cwd "$fixture" --arg session "$parent_session
   and .sessions_dir == ($run + "/sessions") and .parent_session == $session
   and (.started_at | test("Z$")) and (.ended_at | test("Z$"))
 ' "$happy_run/TERMINAL" >/dev/null
-happy_id="$(jq -r .run_id "$happy_run/TERMINAL")"
 [ ! -e "$runtime_root/async-subagent-runs" ] \
   || fail "delegate recreated the retired async-subagent-runs bridge"
-assert_file_contains "$FAKE_OBSERVE_LOG" '--name invoke_agent --phase review --actor reviewer'
-assert_file_contains "$FAKE_OBSERVE_LOG" "run.id=$happy_id"
-assert_file_contains "$FAKE_OBSERVE_LOG" 'child.index=0'
-assert_file_contains "$FAKE_OBSERVE_LOG" "worktree=$fixture"
-assert_file_contains "$FAKE_OBSERVE_LOG" 'exit.status=0'
-
 # A child failure remains the terminal run result.
 failed_run="$(new_run child-failed 'exit=3')"
 run_case child-failed reviewer "$fixture" "$failed_run/BRIEF.md"

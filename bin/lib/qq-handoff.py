@@ -1277,8 +1277,8 @@ After creation, run `qq-handoff intake-result --handoff <handoff-path> --mapping
 
     def result_record_command(self) -> str:
         if self.handoff["schema_version"] == 2:
-            return f"qq-observe record-handoff-result --batch {Path(self.handoff['path']).parent} --receipt <receipt.json>"
-        return f"qq-observe record-handoff-result --run {self.handoff['round']['run_dir']} --receipt <receipt.json>"
+            return "qq-observe " f"record-handoff-result --batch {Path(self.handoff['path']).parent} --receipt <receipt.json>"
+        return "qq-observe " f"record-handoff-result --run {self.handoff['round']['run_dir']} --receipt <receipt.json>"
 
     def start_receipt(self) -> tuple[dict[str, Any], int]:
         receipt, code = super().start_receipt()

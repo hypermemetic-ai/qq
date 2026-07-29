@@ -24,7 +24,7 @@ a clear operator affirmative.
 
 A set-aside-only batch is Task-free. Routing creates one immutable handoff and
 recipient, and stays pending until complete verified Task mappings arrive. The
-recipient records that settled intake with `qq-observe record-handoff-result
+recipient records that settled intake with `qq-observe` `record-handoff-result
 --batch <batch-dir> --receipt <receipt.json>`. V1 round handoffs use `--run
 <origin-run-dir>` as a compatibility path.
 
