@@ -125,7 +125,7 @@ run_case() {
   set -e
 }
 
-# Happy path: argv, prompt, environment, artifacts, discovery record, and span.
+# Happy path: argv, prompt, environment, terminal discovery, and span.
 parent_session="12345678-1234-4abc-8def-1234567890ab"
 happy_run="$(new_run happy)"
 run_case happy reviewer "$fixture" "$happy_run/BRIEF.md" \
@@ -175,36 +175,28 @@ if grep -Eq '^(PI_SUBAGENT_|QQ_EXECUTION_PROFILE_LAUNCHER|QQ_DISPATCH_RUN_DIR=/i
 fi
 assert_file_contains "$happy_run/output.jsonl" '"event":"fixture-output"'
 assert_file_contains "$happy_run/stderr.log" 'fixture-stderr'
-jq -e --arg run "$happy_run" --arg cwd "$fixture" '
+jq -e --arg run "$happy_run" --arg cwd "$fixture" --arg session "$parent_session" '
   .schema == "qq-run-terminal" and .version == 2
   and (.run_id | test("^[0-9a-f-]{36}$")) and .agent == "reviewer"
   and .exit_code == 0 and .timed_out == false and .cwd == $cwd
   and .run_dir == $run and .output_log == ($run + "/output.jsonl")
-  and .sessions_dir == ($run + "/sessions")
+  and .sessions_dir == ($run + "/sessions") and .parent_session == $session
   and (.started_at | test("Z$")) and (.ended_at | test("Z$"))
 ' "$happy_run/TERMINAL" >/dev/null
 happy_id="$(jq -r .run_id "$happy_run/TERMINAL")"
-happy_record="$runtime_root/async-subagent-runs/$happy_id/status.json"
-jq -e --arg session "$parent_session" --arg run "$happy_run" '
-  keys == ["cwd","isNested","lastActivityAt","mode","runId","sessionFile","sessionId","startedAt","state"]
-  and .mode == "single" and .state == "completed" and .isNested == false
-  and .sessionId == $session and .sessionFile == ($run + "/sessions/nested/child.jsonl")
-  and (.startedAt | type == "number") and (.lastActivityAt | type == "number")
-' "$happy_record" >/dev/null
-[ "$(stat -c %a "$happy_record")" = 600 ] || fail "status record mode is not 600"
+[ ! -e "$runtime_root/async-subagent-runs" ] \
+  || fail "delegate recreated the retired async-subagent-runs bridge"
 assert_file_contains "$FAKE_OBSERVE_LOG" '--name invoke_agent --phase review --actor reviewer'
 assert_file_contains "$FAKE_OBSERVE_LOG" "run.id=$happy_id"
 assert_file_contains "$FAKE_OBSERVE_LOG" 'child.index=0'
 assert_file_contains "$FAKE_OBSERVE_LOG" "worktree=$fixture"
 assert_file_contains "$FAKE_OBSERVE_LOG" 'exit.status=0'
 
-# A child failure remains the run result and is recorded as failed.
+# A child failure remains the terminal run result.
 failed_run="$(new_run child-failed 'exit=3')"
 run_case child-failed reviewer "$fixture" "$failed_run/BRIEF.md"
 assert_equal 3 "$RUN_STATUS" "child exit 3 was not preserved"
 jq -e '.exit_code == 3 and .timed_out == false' "$failed_run/TERMINAL" >/dev/null
-failed_id="$(jq -r .run_id "$failed_run/TERMINAL")"
-jq -e '.state == "failed"' "$runtime_root/async-subagent-runs/$failed_id/status.json" >/dev/null
 
 # Timeout reaps the stub's descendant and is durable.
 timeout_run="$(new_run timeout 'wedge=1')"
@@ -356,9 +348,8 @@ expect_refusal context-key 'forbids inherited CONTEXT7_API_KEY' \
 fallback_run="$(new_run parent-fallback)"
 run_case parent-fallback reviewer "$fixture" "$fallback_run/BRIEF.md"
 assert_equal 0 "$RUN_STATUS" "parent-session fallback dispatch failed"
-fallback_id="$(jq -r .run_id "$fallback_run/TERMINAL")"
-jq -e '.sessionId == "00000000-0000-0000-0000-000000000000"' \
-  "$runtime_root/async-subagent-runs/$fallback_id/status.json" >/dev/null
+jq -e '.parent_session == "00000000-0000-0000-0000-000000000000"' \
+  "$fallback_run/TERMINAL" >/dev/null
 
 # An uppercase-hex parent session UUID canonicalizes to lowercase: the
 # consumer (bin/qq-observe SESSION_UUID) matches lowercase only.
@@ -367,9 +358,8 @@ upper_run="$(new_run parent-uppercase)"
 run_case parent-uppercase reviewer "$fixture" "$upper_run/BRIEF.md" \
   PI_SUBAGENT_PARENT_SESSION="$upper_session"
 assert_equal 0 "$RUN_STATUS" "uppercase parent-session dispatch failed"
-upper_id="$(jq -r .run_id "$upper_run/TERMINAL")"
-jq -e '.sessionId == "abcdefab-1234-4abc-8def-abcdef012345"' \
-  "$runtime_root/async-subagent-runs/$upper_id/status.json" >/dev/null
+jq -e '.parent_session == "abcdefab-1234-4abc-8def-abcdef012345"' \
+  "$upper_run/TERMINAL" >/dev/null
 
 # Batch is blocking, concurrent, complete, and summarizes every ticket.
 batch_runs=()

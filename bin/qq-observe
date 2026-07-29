@@ -22,6 +22,7 @@ usage:
   qq-observe validate-analysis ANALYSIS.json SESSION.jsonl [SESSION.jsonl...] \
     --facts SESSION_PATH=FACTS_PATH [--facts SESSION_PATH=FACTS_PATH...]
   qq-observe assemble --pr N --repo ROOT [--worktree-root DIR] [--variant guided|blind]
+  qq-observe materialize --run DIR
   qq-observe verify-delivery --repo ROOT [--since ISO]
   qq-observe render-doc --run DIR
   qq-observe finalize --run DIR \
@@ -73,7 +74,7 @@ case "${1:-}" in
     exit 0
     ;;
   record | read-session | summarize | facts | signals | validate-analysis | \
-  assemble | verify-delivery | render-doc | finalize | ledger-update | ledger-rebuild | \
+  assemble | materialize | verify-delivery | render-doc | finalize | ledger-update | ledger-rebuild | \
   digest | architect-context | prepare-handoff | record-handoff-result | \
   mark-discussed | resolve-task | rounds | record-comparison) command="$1"; shift ;;
   *) usage ;;
@@ -89,7 +90,7 @@ python_binary="$QQ_BIN_RESULT"
 # them before the legacy Repository/store bootstrap so their explicit --repo
 # and --run subjects remain authoritative.
 case "$command" in
-  assemble | verify-delivery | render-doc | finalize | ledger-update | ledger-rebuild | \
+  assemble | materialize | verify-delivery | render-doc | finalize | ledger-update | ledger-rebuild | \
   digest | architect-context | prepare-handoff | record-handoff-result | \
   mark-discussed | resolve-task | rounds | record-comparison)
     observer_git=""
@@ -707,10 +708,9 @@ def assemble_blind(pr, repo, repository, runs_root):
         if not isinstance(label, str) or not SAFE_COMPONENT.fullmatch(label):
             fail("guided package session has an unsafe label", 65)
         guided_session = guided_dir / "sessions" / f"{label}.jsonl"
-        guided_facts = guided_dir / "facts" / f"{label}.json"
-        if not regular_file(guided_session) or not regular_file(guided_facts):
+        if not regular_file(guided_session):
             fail(f"guided package session inputs are incomplete: {label}", 65)
-        row["facts"] = os.fspath(run_dir / "facts" / f"{label}.json")
+        row.pop("facts", None)
         row.pop("signals", None)
 
     package_data = (
@@ -718,7 +718,17 @@ def assemble_blind(pr, repo, repository, runs_root):
     ).encode()
     package_path = run_dir / "package.json"
     if package_path.exists() or package_path.is_symlink():
-        if read_regular(package_path, "blind observer package") != package_data:
+        existing = json_document(
+            read_regular(package_path, "blind observer package"),
+            "blind observer package",
+        )
+        comparable = json.loads(json.dumps(existing)) if isinstance(existing, dict) else None
+        if isinstance(comparable, dict) and isinstance(comparable.get("sessions"), list):
+            for row in comparable["sessions"]:
+                if isinstance(row, dict):
+                    row.pop("facts", None)
+                    row.pop("signals", None)
+        if comparable != blind:
             fail(f"append-only conflict at {package_path}", 65)
         for marker in ("analysis.json", "analysis_failed.json"):
             marker_path = run_dir / marker
@@ -729,7 +739,6 @@ def assemble_blind(pr, repo, repository, runs_root):
 
     ensure_directory(run_dir, runs_root)
     clone_input_tree(guided_dir / "sessions", run_dir / "sessions", runs_root)
-    clone_input_tree(guided_dir / "facts", run_dir / "facts", runs_root)
     atomic_append(
         run_dir / "inventory.json",
         read_regular(guided_dir / "inventory.json", "guided package inventory"),
@@ -808,9 +817,6 @@ def assemble(values):
     )
     ensure_directory(run_dir, runs_root)
     ensure_directory(run_dir / "sessions", runs_root)
-    ensure_directory(run_dir / "facts", runs_root)
-    if variant == "guided":
-        ensure_directory(run_dir / "signals", runs_root)
     package_path = run_dir / "package.json"
     existing_package = False
     if package_path.exists() or package_path.is_symlink():
@@ -860,70 +866,105 @@ def assemble(values):
     if not os.path.isabs(runtime_value):
         fail("dispatch runtime root must be absolute", 65)
     runtime = Path(os.path.realpath(runtime_value))
-    async_root = runtime / "async-subagent-runs"
     selected_runs = {}
-    status_records = {}
+    terminal_records = {}
     unknown = []
     warnings = []
     window_start = merged_at - dt.timedelta(days=30)
     window_end = merged_at + dt.timedelta(days=1)
+    zero_session_id = "00000000-0000-0000-0000-000000000000"
 
-    if async_root.exists():
-        if not async_root.is_dir():
-            fail(f"async run root is not a directory: {async_root}", 65)
-        for entry in sorted(async_root.iterdir(), key=lambda item: item.name):
-            if not entry.is_dir() or entry.is_symlink():
-                append_unknown(unknown, entry, "async run entry is not a directory")
+    if runtime.exists():
+        try:
+            runtime_info = os.lstat(runtime)
+        except OSError as error:
+            fail(f"cannot inspect dispatch runtime root {runtime}: {error}", 65)
+        if not stat.S_ISDIR(runtime_info.st_mode):
+            fail(f"dispatch runtime root is not a directory: {runtime}", 65)
+        try:
+            runtime_entries = sorted(runtime.iterdir(), key=lambda item: item.name)
+        except OSError as error:
+            fail(f"cannot enumerate dispatch runtime root {runtime}: {error}", 65)
+        for entry in runtime_entries:
+            try:
+                entry_info = os.lstat(entry)
+            except OSError:
                 continue
-            run_id = entry.name
-            if not SAFE_COMPONENT.fullmatch(run_id) or run_id in (".", ".."):
-                append_unknown(unknown, entry, "unsafe delegate run ID")
+            if not stat.S_ISDIR(entry_info.st_mode):
                 continue
-            status_path = entry / "status.json"
-            if not regular_file(status_path):
-                append_unknown(unknown, status_path, "missing or non-regular status.json")
+            terminal_path = entry / "TERMINAL"
+            if not regular_file(terminal_path):
+                continue
+            if not SAFE_COMPONENT.fullmatch(entry.name) or entry.name in (".", ".."):
+                append_unknown(unknown, terminal_path, "unsafe delegate run directory")
                 continue
             try:
-                raw = read_regular(status_path, "delegate status")
+                raw = read_regular(terminal_path, "delegate terminal")
                 if len(raw) > STATUS_CAP:
-                    raise ValueError("status.json exceeds size limit")
-                status_record = json.loads(
+                    raise ValueError("TERMINAL exceeds size limit")
+                terminal = json.loads(
                     raw.decode("utf-8"),
                     parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
                 )
-                if not isinstance(status_record, dict):
+                if not isinstance(terminal, dict):
                     raise ValueError("top level is not an object")
-                session_id = status_record.get("sessionId")
-                cwd_value = status_record.get("cwd")
-                if not isinstance(session_id, str):
-                    raise ValueError("sessionId is not a string")
+                run_id = terminal.get("run_id")
+                agent = terminal.get("agent")
+                cwd_value = terminal.get("cwd")
+                exit_code = terminal.get("exit_code")
+                run_dir_value = terminal.get("run_dir")
+                sessions_dir_value = terminal.get("sessions_dir")
+                if terminal.get("schema") != "qq-run-terminal" or terminal.get("version") != 2:
+                    raise ValueError("schema or version is invalid")
+                if (
+                    not isinstance(run_id, str)
+                    or not SAFE_COMPONENT.fullmatch(run_id)
+                    or run_id in (".", "..")
+                ):
+                    raise ValueError("run_id is unsafe")
+                if not isinstance(agent, str):
+                    raise ValueError("agent is not a string")
                 if not isinstance(cwd_value, str) or not os.path.isabs(cwd_value):
                     raise ValueError("cwd is not an absolute path")
-                started_at = time_value(status_record.get("startedAt"))
-                last_activity = status_record.get("lastActivityAt")
-                if (
-                    isinstance(last_activity, bool)
-                    or not isinstance(last_activity, (int, float))
-                    or not math.isfinite(last_activity)
-                    or not isinstance(status_record.get("mode"), str)
-                    or not isinstance(status_record.get("isNested"), bool)
-                    or not isinstance(status_record.get("state"), str)
-                ):
-                    raise ValueError("status metadata has the wrong shape")
-                parent, parent_issue = accountable_session(session_id)
+                if isinstance(exit_code, bool) or not isinstance(exit_code, int):
+                    raise ValueError("exit_code is not an integer")
+                started_at = time_value(terminal.get("started_at"))
+                time_value(terminal.get("ended_at"))
+                if not isinstance(terminal.get("timed_out"), bool):
+                    raise ValueError("timed_out is not a boolean")
+                if not isinstance(run_dir_value, str) or not os.path.isabs(run_dir_value):
+                    raise ValueError("run_dir is not an absolute path")
+                if Path(os.path.realpath(run_dir_value)) != Path(os.path.realpath(entry)):
+                    raise ValueError("run_dir does not name the containing directory")
+                if not isinstance(sessions_dir_value, str) or not os.path.isabs(sessions_dir_value):
+                    raise ValueError("sessions_dir is not an absolute path")
+                if run_id in terminal_records:
+                    raise ValueError("run_id is duplicated")
+                if "parent_session" not in terminal or terminal.get("parent_session") in ("", zero_session_id):
+                    parent = None
+                    parent_issue = None
+                    parent_unavailable = True
+                else:
+                    parent_session = terminal.get("parent_session")
+                    if not isinstance(parent_session, str):
+                        raise ValueError("parent_session is not a string")
+                    parent, parent_issue = accountable_session(parent_session)
+                    parent_unavailable = False
             except (OSError, UnicodeDecodeError, ValueError, RecursionError):
-                append_unknown(unknown, status_path, "malformed delegate status.json")
+                append_unknown(unknown, terminal_path, "malformed delegate TERMINAL")
                 continue
-            if parent_issue is not None:
-                append_unknown(unknown, status_path, parent_issue)
+            if parent_unavailable:
+                warnings.append(f"delegate {run_id} accountable session is unavailable")
+            elif parent_issue is not None:
+                append_unknown(unknown, terminal_path, parent_issue)
                 warnings.append(
                     f"delegate {run_id} accountable session is unavailable: {parent_issue}"
                 )
             cwd_path = Path(os.path.realpath(cwd_value))
-            status_records[run_id] = {
-                "path": status_path, "parent": parent, "cwd": cwd_path,
+            terminal_records[run_id] = {
+                "path": terminal_path, "parent": parent, "cwd": cwd_path,
                 "started": started_at,
-                "session_file": status_record.get("sessionFile"),
+                "sessions_dir": Path(os.path.realpath(sessions_dir_value)),
             }
 
             live_common = None
@@ -952,11 +993,11 @@ def assemble(values):
                 except UnicodeDecodeError:
                     observed_branch = ""
                 if observed_branch == branch:
-                    selected_runs[run_id] = "named-branch-status-lineage"
+                    selected_runs[run_id] = "named-branch-terminal-lineage"
                 else:
                     append_unknown(
-                        unknown, status_path,
-                        "delegate status names another branch in this Repository",
+                        unknown, terminal_path,
+                        "delegate terminal names another branch in this Repository",
                     )
                     warnings.append(
                         f"delegate {run_id} is outside the explicit named-branch lineage"
@@ -964,14 +1005,12 @@ def assemble(values):
                 continue
             if within(cwd_path, worktree_root) and window_start <= started_at <= window_end:
                 append_unknown(
-                    unknown, status_path,
-                    "delegate status does not verify the named branch checkout",
+                    unknown, terminal_path,
+                    "delegate terminal does not verify the named branch checkout",
                 )
                 warnings.append(
                     f"delegate {run_id} is outside the explicit named-branch lineage"
                 )
-    elif async_root.is_symlink():
-        fail(f"async run root is not a directory: {async_root}", 65)
 
     session_rows = []
     session_sources = set()
@@ -1010,30 +1049,43 @@ def assemble(values):
         session_rows.append(row)
 
     for run_id in sorted(selected_runs):
-        parent = status_records[run_id]["parent"]
+        parent = terminal_records[run_id]["parent"]
         if parent is not None:
             stem = parent.stem
             identifier = stem.rsplit("_", 1)[-1]
             add_session(parent, f"accountable-{identifier}", "accountable", "parent-of-delegate")
 
     for run_id in sorted(selected_runs):
-        record = status_records[run_id]
-        session_file_value = record["session_file"]
-        if not isinstance(session_file_value, str) or not os.path.isabs(session_file_value):
+        record = terminal_records[run_id]
+        sessions_dir = record["sessions_dir"]
+        session_files = []
+        try:
+            sessions_info = os.lstat(sessions_dir)
+            if stat.S_ISDIR(sessions_info.st_mode):
+                for candidate in sessions_dir.rglob("*.jsonl"):
+                    try:
+                        candidate_info = os.lstat(candidate)
+                    except OSError:
+                        continue
+                    if stat.S_ISREG(candidate_info.st_mode):
+                        session_files.append((candidate_info.st_mtime_ns, os.fspath(candidate), candidate))
+        except (OSError, RuntimeError, ValueError):
+            session_files = []
+        if not session_files:
             append_unknown(
                 unknown, record["path"],
-                "delegate sessionFile is missing or not an absolute path",
+                "delegate sessions_dir contains no regular JSONL session",
             )
             warnings.append(f"delegate {run_id} has no valid explicit sessionFile lineage")
             continue
-        session_file = Path(os.path.realpath(session_file_value))
+        session_file = max(session_files)[2]
         add_session(
             session_file, f"delegate-{run_id}-primary", "delegate",
             selected_runs[run_id], run_id=run_id,
         )
 
     if not selected_runs:
-        warnings.append("no delegate runs have explicit named-branch status lineage")
+        warnings.append("no delegate runs have explicit named-branch terminal lineage")
 
     session_rows.sort(key=lambda row: (0 if row["role"] == "accountable" else 1, row["label"]))
     packaged_sessions = []
@@ -1041,33 +1093,13 @@ def assemble(values):
         label = row["label"]
         source = row["source"]
         session_rel = f"sessions/{label}.jsonl"
-        facts_rel = f"facts/{label}.json"
-        signals_rel = f"signals/{label}.json"
         atomic_append(run_dir / session_rel, read_regular(source, "selected session transcript"))
-        derivatives = [("facts", facts_rel)]
-        if variant == "guided":
-            derivatives.append(("signals", signals_rel))
-        for subcommand, relative in derivatives:
-            process = run_process(
-                [self_path, subcommand, os.fspath(run_dir / session_rel)],
-                f"qq-observe {subcommand}", cwd=repo,
-            )
-            if process.returncode != 0:
-                detail = process.stderr.decode("utf-8", "replace").strip()
-                fail(f"qq-observe {subcommand} failed for {source}{': ' + detail if detail else ''}")
-            json_document(process.stdout, f"{subcommand} output for {source}")
-            atomic_append(run_dir / relative, process.stdout)
         package_row = {
             "label": label,
             "source_path": os.fspath(source),
             "role": row["role"],
             "evidence": row["evidence"],
-            "facts": os.fspath((run_dir / facts_rel).resolve(strict=True)),
         }
-        if variant == "guided":
-            package_row["signals"] = os.fspath(
-                (run_dir / signals_rel).resolve(strict=True)
-            )
         if "run_id" in row:
             package_row["run_id"] = row["run_id"]
         packaged_sessions.append(package_row)
@@ -1152,6 +1184,101 @@ def assemble(values):
         "status": "assembled", "run_dir": os.fspath(run_dir),
         "sessions": len(packaged_sessions), "warnings": len(warnings),
         "unknown_entries": len(unknown), "variant": variant,
+    })
+
+
+def materialize(values):
+    options = parse_flags(values, {"--run"})
+    if set(options) != {"--run"}:
+        fail("materialize requires --run")
+    run_dir = run_directory(options["--run"])
+    package_path = run_dir / "package.json"
+    package = json_document(
+        read_regular(package_path, f"observer package in run {run_dir}"),
+        f"observer package in run {run_dir}",
+    )
+    if not isinstance(package, dict) or package.get("schema") != "qq-observer.package":
+        fail(f"observer package has the wrong shape in run {run_dir}", 65)
+    version = package.get("schema_version")
+    if version == 1:
+        fail(f"cannot materialize legacy v1 observer package in run {run_dir}", 65)
+    if isinstance(version, bool) or version != 2:
+        fail(f"observer package has an unsupported schema_version in run {run_dir}", 65)
+    identity = package_metadata(run_dir)
+    variant = identity["variant"]
+    sessions = package.get("sessions")
+    if not isinstance(sessions, list):
+        fail(f"observer package has no session list in run {run_dir}", 65)
+
+    labels = set()
+    for row in sessions:
+        if not isinstance(row, dict):
+            fail(f"observer package session has the wrong shape in run {run_dir}", 65)
+        label = row.get("label")
+        if (
+            not isinstance(label, str)
+            or not SAFE_COMPONENT.fullmatch(label)
+            or label in (".", "..")
+            or label in labels
+        ):
+            fail(f"observer package session has an unsafe or duplicate label in run {run_dir}", 65)
+        labels.add(label)
+        session_path = run_dir / "sessions" / f"{label}.jsonl"
+        if not regular_file(session_path):
+            fail(f"session transcript is missing for {label} in run {run_dir}", 65)
+        derivatives = [("facts", run_dir / "facts" / f"{label}.json")]
+        if variant == "guided":
+            derivatives.append(("signals", run_dir / "signals" / f"{label}.json"))
+        for subcommand, destination in derivatives:
+            process = run_process(
+                [self_path, subcommand, os.fspath(session_path)],
+                f"qq-observe {subcommand}", cwd=Path(identity["repo"]),
+            )
+            if process.returncode != 0:
+                detail = process.stderr.decode("utf-8", "replace").strip()
+                fail(
+                    f"qq-observe {subcommand} failed for session {label} in run {run_dir}"
+                    f"{': ' + detail if detail else ''}",
+                    65,
+                )
+            try:
+                json.loads(
+                    process.stdout.decode("utf-8"),
+                    parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
+                )
+            except (UnicodeDecodeError, ValueError, RecursionError) as error:
+                fail(
+                    f"qq-observe {subcommand} emitted invalid JSON for session {label} "
+                    f"in run {run_dir}: {error}",
+                    65,
+                )
+            atomic_append(destination, process.stdout)
+        row["facts"] = os.fspath(run_dir / "facts" / f"{label}.json")
+        if variant == "guided":
+            row["signals"] = os.fspath(run_dir / "signals" / f"{label}.json")
+        else:
+            row.pop("signals", None)
+
+    package_data = canonical_json_bytes(package)
+    temporary = package_path.with_name(
+        f".{package_path.name}.materialize-{os.getpid()}-{os.urandom(8).hex()}"
+    )
+    try:
+        atomic_append(temporary, package_data)
+        os.replace(temporary, package_path)
+        directory = os.open(package_path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+    emit({
+        "status": "materialized", "run_dir": os.fspath(run_dir),
+        "sessions": len(sessions),
     })
 
 
@@ -3842,19 +3969,22 @@ def digest(values):
 
 
 def analysis_for_comparison(run_dir, expected_variant):
+    identity = package_metadata(run_dir)
+    if identity["legacy"]:
+        fail("legacy observer runs are read-only", 65)
+    if identity["variant"] != expected_variant:
+        fail(
+            f"comparison {expected_variant} run has variant {identity['variant']}",
+            65,
+        )
+    require_materialized_package(identity["package"])
     if not regular_file(run_dir / "analysis.json"):
         fail(f"comparison run lacks analysis.json: {run_dir}", 65)
     analysis = minimal_analysis(json_document(
         read_regular(run_dir / "analysis.json", "comparison analysis"),
         "comparison analysis",
     ))
-    pr, variant, _ = package_identity(run_dir)
-    if variant != expected_variant:
-        fail(f"comparison {expected_variant} run has variant {variant}", 65)
-    identity = package_metadata(run_dir)
-    if identity["legacy"]:
-        fail("legacy observer runs are read-only", 65)
-    return pr, identity["repository"], analysis
+    return identity["pr"], identity["repository"], analysis
 
 
 def record_comparison(values):
@@ -3933,18 +4063,38 @@ def compact_value(value):
     return json.dumps(value, separators=(",", ":"), sort_keys=True)
 
 
+def require_materialized_package(package):
+    if not isinstance(package, dict) or not isinstance(package.get("sessions"), list):
+        fail("observer package has the wrong shape", 65)
+    for row in package["sessions"]:
+        if not isinstance(row, dict):
+            fail("observer package session has the wrong shape", 65)
+        facts = row.get("facts")
+        if not isinstance(facts, str) or not facts:
+            fail(
+                "package is not materialized; run "
+                "`qq-observe materialize --run <dir>`",
+                65,
+            )
+
+
 def render_bytes(run_dir, analysis=None):
     package = json_document(read_regular(run_dir / "package.json", "observer package"), "observer package")
     if not isinstance(package, dict) or not isinstance(package.get("sessions"), list):
         fail("observer package has the wrong shape")
+    require_materialized_package(package)
     if analysis is None:
         analysis = json_document(read_regular(run_dir / "analysis.json", "analysis JSON"), "analysis JSON")
     analysis = minimal_analysis(analysis)
     facts_rows = []
-    facts_dir = run_dir / "facts"
-    if not facts_dir.is_dir() or facts_dir.is_symlink():
-        fail(f"facts directory is missing: {facts_dir}")
-    for path in sorted(facts_dir.glob("*.json"), key=lambda item: item.name):
+    for row in sorted(package["sessions"], key=lambda item: item.get("label", "")):
+        label = row.get("label")
+        if not isinstance(label, str) or not SAFE_COMPONENT.fullmatch(label):
+            fail("observer package session has an unsafe label")
+        path = Path(row["facts"])
+        expected_path = run_dir / "facts" / f"{label}.json"
+        if not path.is_absolute() or Path(os.path.realpath(path)) != expected_path:
+            fail(f"observer package facts path has the wrong identity: {label}")
         facts = json_document(read_regular(path, "facts JSON"), f"facts JSON {path}")
         required = {
             "entries": int, "turns_by_role": dict, "token_usage": dict,
@@ -3962,7 +4112,7 @@ def render_bytes(run_dir, analysis=None):
             or not isinstance(facts["unknown_entries"].get("total"), int)
         ):
             fail(f"facts JSON has the wrong shape: {path}")
-        facts_rows.append((path.stem, facts))
+        facts_rows.append((label, facts))
     if not facts_rows:
         fail("facts directory contains no facts JSON")
 
@@ -4071,6 +4221,7 @@ def validated_package_analysis(run_dir, analysis_path):
     )
     if not isinstance(package, dict) or not isinstance(package.get("sessions"), list):
         fail("observer package has the wrong shape", 65)
+    require_materialized_package(package)
     repo_value = package.get("repo")
     if not isinstance(repo_value, str):
         fail("observer package lacks its Repository root", 65)
@@ -4090,8 +4241,15 @@ def validated_package_analysis(run_dir, analysis_path):
             fail("observer package session has an unsafe or duplicate label", 65)
         labels.add(label)
         session = run_dir / "sessions" / f"{label}.jsonl"
-        fact = run_dir / "facts" / f"{label}.json"
-        if not regular_file(session) or not regular_file(fact):
+        fact_value = row["facts"]
+        fact = Path(fact_value)
+        expected_fact = run_dir / "facts" / f"{label}.json"
+        if (
+            not fact.is_absolute()
+            or Path(os.path.realpath(fact)) != expected_fact
+            or not regular_file(session)
+            or not regular_file(fact)
+        ):
             fail(f"observer package session inputs are incomplete: {label}", 65)
         sessions.append(session)
         facts.append(fact)
@@ -4211,6 +4369,8 @@ try:
         ledger_writer = open_ledger_writer_lock()
     if command == "assemble":
         assemble(args)
+    elif command == "materialize":
+        materialize(args)
     elif command == "verify-delivery":
         verify_delivery(args)
     elif command == "render-doc":

@@ -130,7 +130,10 @@ export MERGE_41="$merge_41" MERGE_42="$merge_42" OUTSIDE_MAIN="$outside_main"
 
 runtime="$TMPDIR/pi-subagents-uid-$(id -u)"
 export QQ_DISPATCH_RUNTIME_ROOT="$runtime"
-mkdir -p "$runtime/async-subagent-runs" "$runtime/runs"
+mkdir -p "$runtime/async-subagent-runs" "$runtime/runs" \
+  "$runtime/nested-subagent-events" "$runtime/async-subagent-results" \
+  "$runtime/owner-review"
+printf '{"legacy":"scratch"}\n' >"$runtime/wrapper-events.jsonl"
 parent_uuid='019f9324-8966-7ba8-abe4-07cba639cfaf'
 parent_strong_dir="$HOME/.pi/agent/sessions/--fixture-accountable--"
 parent_strong="$parent_strong_dir/2026-07-20T00-00-00_${parent_uuid}.jsonl"
@@ -160,23 +163,23 @@ JSONL
 done
 make_run() {
   local run_id="$1" cwd="$2" parent="$3" session_hash="$4" transcript_text="${5:-delegate $1}"
-  local session_root="$TMPDIR/pi-subagent-sessions/$session_hash"
-  local session_file="$session_root/run-0/session.jsonl"
-  local session_dir="${6:-$session_root}" mode="${7:-async}"
-  mkdir -p "$runtime/async-subagent-runs/$run_id" "$runtime/runs/$run_id" \
-    "$(dirname "$session_file")" "$session_dir"
-  jq -cn --arg cwd "$cwd" --arg parent "$parent" --arg mode "$mode" \
-    --arg session_file "$session_file" --arg session_dir "$session_dir" '{
-    sessionId:$parent,sessionFile:$session_file,sessionDir:$session_dir,cwd:$cwd,
-    startedAt:"2026-07-20T10:00:00Z",lastActivityAt:1784541600000,
-    mode:$mode,isNested:false,state:"complete"
-  }' >"$runtime/async-subagent-runs/$run_id/status.json"
+  local run_dir="$runtime/$run_id"
+  local session_dir="${6:-$run_dir/sessions}"
+  local session_file="$session_dir/run-0/session.jsonl"
+  mkdir -p "$run_dir" "$(dirname "$session_file")"
+  jq -cn --arg run_id "$run_id" --arg cwd "$cwd" --arg parent "$parent" \
+    --arg run_dir "$run_dir" --arg session_dir "$session_dir" '{
+    schema:"qq-run-terminal",version:2,run_id:$run_id,agent:"reviewer",
+    cwd:$cwd,exit_code:0,started_at:"2026-07-20T10:00:00Z",
+    ended_at:"2026-07-20T10:01:00Z",timed_out:false,
+    run_dir:$run_dir,sessions_dir:$session_dir,parent_session:$parent
+  }' >"$run_dir/TERMINAL"
   jq -cn --arg text "$transcript_text" '
     {type:"session",version:3,timestamp:"2026-07-20T10:00:00Z"},
     {type:"message",timestamp:"2026-07-20T10:00:02Z",message:{role:"assistant",content:[{type:"text",text:$text}],usage:{input:2,output:3}}}
   ' >"$session_file"
 }
-strong_session_dir="$TMPDIR/pi-subagent-sessions/strong-hash/async-strong-run"
+strong_session_dir="$runtime/strong-run/sessions"
 make_run strong-run "$strong_worktree" "$parent_uuid" strong-hash \
   'delegate strong-run was killed at exactly 1800000ms' "$strong_session_dir" single
 make_run collision-a-run "$strong_worktree" "$collision_parent_a" collision-a-hash \
@@ -189,11 +192,11 @@ collision_parent_b_label="accountable-parent-session-$(
 make_run weak-run "$worktree_root/retired-a" "$parent_weak" weak-hash 'delegate feature work'
 make_run weak-other-run "$worktree_root/retired-b" "$parent_weak" weak-other-hash 'delegate solo work'
 make_run missing-run "$strong_worktree" "$parent_strong" missing-hash
-missing_session_file="$TMPDIR/pi-subagent-sessions/missing-hash/run-0/session.jsonl"
+missing_session_file="$runtime/missing-run/sessions/run-0/session.jsonl"
 rm "$missing_session_file"
 make_run weak-missing-run "$worktree_root/retired-missing" "$parent_weak_missing" \
   weak-missing-hash 'delegate feature work'
-weak_missing_session_file="$TMPDIR/pi-subagent-sessions/weak-missing-hash/run-0/session.jsonl"
+weak_missing_session_file="$runtime/weak-missing-run/sessions/run-0/session.jsonl"
 rm "$weak_missing_session_file"
 nested_quoted_session="$strong_session_dir/session.jsonl"
 cat >"$nested_quoted_session" <<'JSONL'
@@ -224,11 +227,11 @@ make_run weak-absolute-symlink-run "$worktree_root/retired-absolute-symlink" \
 
 make_run weak-invalid-delegate-run "$worktree_root/retired-invalid-delegate" \
   "$parent_uuid" weak-invalid-delegate-hash 'delegate feature work'
-weak_invalid_delegate="$TMPDIR/pi-subagent-sessions/weak-invalid-delegate-hash/run-0/session.jsonl"
+weak_invalid_delegate="$runtime/weak-invalid-delegate-run/sessions/run-0/session.jsonl"
 printf '{"schema":"not-pi","content":"delegate feature work"}\n' \
   >"$weak_invalid_delegate"
-mkdir -p "$TMPDIR/pi-subagent-sessions/weak-invalid-delegate-hash/extra"
-cat >"$TMPDIR/pi-subagent-sessions/weak-invalid-delegate-hash/extra/session.jsonl" <<'JSONL'
+mkdir -p "$runtime/weak-invalid-delegate-run/sessions/extra"
+cat >"$runtime/weak-invalid-delegate-run/sessions/extra/session.jsonl" <<'JSONL'
 {"type":"session","version":3,"timestamp":"2026-07-20T10:00:00Z"}
 {"type":"message","timestamp":"2026-07-20T10:00:01Z","message":{"role":"assistant","content":"unrelated sibling"}}
 JSONL
@@ -240,20 +243,23 @@ for directory in ambiguous-a ambiguous-b; do
     "$HOME/.pi/agent/sessions/$directory/fixture_${ambiguous_uuid}.jsonl"
 done
 make_run ambiguous-run "$strong_worktree" "$ambiguous_uuid" ambiguous-hash
-zero_uuid='219f9324-8966-7ba8-abe4-07cba639cfaf'
-make_run zero-run "$repo" "$zero_uuid" zero-hash
+make_run parent-zero-run "$strong_worktree" \
+  '00000000-0000-0000-0000-000000000000' parent-zero-hash
+make_run branch-mismatch-run "$repo" "$parent_uuid" branch-mismatch-hash
 
-printf '{"schema":"span"}\n' >"$runtime/runs/strong-run/spans.jsonl"
-mkdir -p "$runtime/async-subagent-runs/malformed-run"
-printf '{not json\n' >"$runtime/async-subagent-runs/malformed-run/status.json"
+printf '{"schema":"span"}\n' >"$runtime/runs/spans.jsonl"
+mkdir -p "$runtime/malformed-run"
+printf '{not json\n' >"$runtime/malformed-run/TERMINAL"
 make_run invalid-relative-run "$repo" 'relative/session.jsonl' invalid-relative-hash
-jq -e --arg uuid "$parent_uuid" --arg session_file \
-  "$TMPDIR/pi-subagent-sessions/strong-hash/run-0/session.jsonl" \
+ln -s "$runtime/strong-run" "$runtime/linked-run"
+strong_session_file="$strong_session_dir/run-0/session.jsonl"
+touch "$strong_session_file"
+jq -e --arg uuid "$parent_uuid" --arg run "$runtime/strong-run" \
   --arg session_dir "$strong_session_dir" '
-  .mode == "single" and .state == "complete" and .sessionId == $uuid
-  and .sessionFile == $session_file and .sessionDir == $session_dir
-' "$runtime/async-subagent-runs/strong-run/status.json" >/dev/null \
-  || fail 'true-single status fixture has the wrong shape'
+  .schema == "qq-run-terminal" and .version == 2 and .run_id == "strong-run"
+  and .parent_session == $uuid and .run_dir == $run and .sessions_dir == $session_dir
+' "$runtime/strong-run/TERMINAL" >/dev/null \
+  || fail 'qq run TERMINAL fixture has the wrong shape'
 
 set +e
 "$OBSERVE" assemble --pr 43 --repo "$repo" \
@@ -267,21 +273,24 @@ assert_file_contains "$tmp/outside-main.stderr" 'not an ancestor of local main'
 
 "$OBSERVE" assemble --pr 41 --repo "$repo" >"$tmp/assembled-41.json"
 run_41="$qualified_runs/pr-41"
-jq -e --arg repo "$(realpath "$repo")" --arg missing "$missing_session_file" \
+jq -e --arg repo "$(realpath "$repo")" \
+  --arg missing_terminal "$runtime/missing-run/TERMINAL" \
+  --arg malformed_terminal "$runtime/malformed-run/TERMINAL" \
   --arg parent_strong "$parent_strong" --arg collision_parent_a "$collision_parent_a" \
   --arg collision_parent_b "$collision_parent_b" \
   --arg collision_parent_b_label "$collision_parent_b_label" \
   --arg accountable_strong "accountable-$parent_uuid" \
   --arg ambiguous_uuid "$ambiguous_uuid" \
   --arg nested_quoted "$nested_quoted_session" \
-  --arg weak_invalid_uuid "$weak_invalid_uuid" '
+  --arg weak_invalid_uuid "$weak_invalid_uuid" \
+  --arg runtime "$runtime" '
   .schema == "qq-observer.package" and .schema_version == 2
   and .repository == "fixture/repo"
   and .pr == 41 and .branch == "feature" and .repo == $repo
   and .variant == "guided"
   and ([.sessions[] | select(
-    .role == "delegate" and .evidence == "named-branch-status-lineage"
-  )] | length) == 4
+    .role == "delegate" and .evidence == "named-branch-terminal-lineage"
+  )] | length) == 5
   and ([.sessions[] | select(
     .role == "accountable" and .source_path == $parent_strong and .label == $accountable_strong
   )] | length) == 1
@@ -294,15 +303,28 @@ jq -e --arg repo "$(realpath "$repo")" --arg missing "$missing_session_file" \
   and ([.sessions[].label] | length) == ([.sessions[].label] | unique | length)
   and ([.sessions[] | select(.role == "accountable" and .evidence == "parent-of-delegate")] | length) == 3
   and ([.sessions[] | select(.role == "delegate" and .run_id == "ambiguous-run")] | length) == 1
+  and ([.sessions[] | select(.role == "delegate" and .run_id == "parent-zero-run")] | length) == 1
   and ([.sessions[] | select(.source_path | contains($ambiguous_uuid))] | length) == 0
   and ([.sessions[] | select(.source_path == $nested_quoted)] | length) == 0
   and ([.sessions[] | select((.run_id // "") | startswith("weak-"))] | length) == 0
-  and ([.unknown_entries[] | select(.path == $missing and (.reason | length > 0))] | length) == 1
+  and ([.unknown_entries[] | select(.path == $missing_terminal and (.reason | length > 0))] | length) == 1
+  and ([.unknown_entries[] | select(.path == $malformed_terminal and .reason == "malformed delegate TERMINAL")] | length) == 1
   and ([.unknown_entries[] | select(.reason | (contains($ambiguous_uuid) and contains("matched 2 regular files")))] | length) == 1
   and ([.unknown_entries[] | select(.reason | (contains($weak_invalid_uuid) and contains("is not Pi v3")))] | length) == 1
+  and ([.unknown_entries[] | select(
+    .path == ($runtime + "/async-subagent-runs")
+    or .path == ($runtime + "/runs")
+    or .path == ($runtime + "/nested-subagent-events")
+    or .path == ($runtime + "/async-subagent-results")
+    or .path == ($runtime + "/owner-review")
+    or .path == ($runtime + "/wrapper-events.jsonl")
+    or .path == ($runtime + "/linked-run")
+  )] | length) == 0
+  and ([.sessions[] | has("facts") or has("signals")] | any | not)
   and any(.warnings[]; contains("outside the explicit named-branch lineage"))
+  and any(.warnings[]; contains("parent-zero-run accountable session is unavailable"))
 ' "$run_41/package.json" >/dev/null \
-  || fail 'explicit status/run-parent lineage was not the sole package membership source'
+  || fail 'explicit terminal/run-parent lineage was not the sole package membership source'
 [ -f "$run_41/inventory.json" ] || fail 'inventory was not written'
 [ -f "$run_41/corpus/skills/fixture/SKILL.md" ] || fail 'merge-time corpus was not snapshotted'
 [ -f "$run_41/corpus/delegation/manifests/agents/implementer.md" ] \
@@ -320,11 +342,83 @@ assert_file_not_matches "$run_41/corpus/skills/fixture/SKILL.md" 'timeoutMs:6000
   'package corpus read the later working tree instead of the Change snapshot'
 jq -e '.skills == [{name:"fixture",description:"Fixture skill at merge time."}]' \
   "$run_41/inventory.json" >/dev/null || fail 'skill inventory did not preserve the merge-time description'
-assert_equal 7 "$(find "$run_41/sessions" -type f | wc -l)" 'session transcript count is wrong'
-assert_equal 7 "$(find "$run_41/facts" -type f | wc -l)" 'facts count is wrong'
-assert_equal 7 "$(find "$run_41/signals" -type f | wc -l)" 'signals count is wrong'
-jq -e '[.sessions[] | has("signals")] | all' "$run_41/package.json" >/dev/null \
-  || fail 'guided package omitted a session signals pointer'
+assert_equal 8 "$(find "$run_41/sessions" -type f | wc -l)" 'session transcript count is wrong'
+[ ! -e "$run_41/facts" ] || fail 'assemble eagerly created a facts directory'
+[ ! -e "$run_41/signals" ] || fail 'assemble eagerly created a signals directory'
+set +e
+"$OBSERVE" render-doc --run "$run_41" \
+  >"$tmp/unmaterialized-render.stdout" 2>"$tmp/unmaterialized-render.stderr"
+status=$?
+set -e
+assert_equal 65 "$status" 'render-doc accepted an unmaterialized package'
+assert_file_contains "$tmp/unmaterialized-render.stderr" \
+  'package is not materialized; run `qq-observe materialize --run <dir>`'
+expected_facts="$tmp/expected-facts"
+expected_signals="$tmp/expected-signals"
+mkdir "$expected_facts" "$expected_signals"
+while IFS=$'\t' read -r label session; do
+  "$OBSERVE" facts "$session" >"$expected_facts/$label.json"
+  "$OBSERVE" signals "$session" >"$expected_signals/$label.json"
+done < <(jq -r '.sessions[] | [.label, ("'"$run_41"'/sessions/" + .label + ".jsonl")] | @tsv' \
+  "$run_41/package.json")
+"$OBSERVE" materialize --run "$run_41" >"$tmp/materialized-41.json"
+jq -e '.status == "materialized" and .sessions == 8' "$tmp/materialized-41.json" >/dev/null \
+  || fail 'guided package did not materialize'
+for expected in "$expected_facts"/*.json; do
+  cmp "$expected" "$run_41/facts/$(basename "$expected")" \
+    || fail 'materialized facts differ from direct qq-observe facts output'
+done
+for expected in "$expected_signals"/*.json; do
+  cmp "$expected" "$run_41/signals/$(basename "$expected")" \
+    || fail 'materialized signals differ from direct qq-observe signals output'
+done
+jq -e '[.sessions[] | has("facts") and has("signals")] | all' \
+  "$run_41/package.json" >/dev/null \
+  || fail 'guided materialization omitted derivative pointers'
+cp "$run_41/package.json" "$tmp/materialized-package.json"
+"$OBSERVE" materialize --run "$run_41" >"$tmp/rematerialized-41.json"
+cmp "$tmp/materialized-package.json" "$run_41/package.json" \
+  || fail 'materialize was not content-idempotent'
+
+missing_package_run="$qualified_runs/pr-96"
+mkdir "$missing_package_run"
+set +e
+"$OBSERVE" materialize --run "$missing_package_run" \
+  >"$tmp/missing-package.stdout" 2>"$tmp/missing-package.stderr"
+status=$?
+set -e
+assert_equal 64 "$status" 'materialize accepted a run without package.json'
+assert_file_contains "$tmp/missing-package.stderr" "$missing_package_run"
+rmdir "$missing_package_run"
+legacy_run="$XDG_STATE_HOME/qq/observer/runs/pr-95"
+mkdir "$legacy_run"
+jq -cn --arg repo "$(realpath "$repo")" '{
+  schema:"qq-observer.package",schema_version:1,pr:95,variant:"guided",
+  repo:$repo,sessions:[]
+}' >"$legacy_run/package.json"
+set +e
+"$OBSERVE" materialize --run "$legacy_run" \
+  >"$tmp/legacy-materialize.stdout" 2>"$tmp/legacy-materialize.stderr"
+status=$?
+set -e
+assert_equal 65 "$status" 'materialize accepted a legacy v1 package'
+assert_file_contains "$tmp/legacy-materialize.stderr" "$legacy_run"
+rm -rf "$legacy_run"
+bad_facts_run="$qualified_runs/pr-94"
+mkdir -p "$bad_facts_run/sessions"
+printf '{"not":"pi-v3"}\n' >"$bad_facts_run/sessions/fixture.jsonl"
+jq -cn --arg repo "$(realpath "$repo")" '{
+  schema:"qq-observer.package",schema_version:2,repository:"fixture/repo",
+  pr:94,variant:"guided",repo:$repo,sessions:[{label:"fixture"}]
+}' >"$bad_facts_run/package.json"
+set +e
+"$OBSERVE" materialize --run "$bad_facts_run" \
+  >"$tmp/bad-facts.stdout" 2>"$tmp/bad-facts.stderr"
+status=$?
+set -e
+assert_equal 65 "$status" 'materialize accepted a transcript that facts refused'
+assert_file_contains "$tmp/bad-facts.stderr" "$bad_facts_run"
+rm -rf "$bad_facts_run"
 
 # Blind calibration packages derive only from the frozen guided package. They do
 # not repeat gh/runtime/session discovery after the accountable transcript advances.
@@ -337,20 +431,31 @@ blind_run_41="$qualified_runs/pr-41-blind"
 jq -e '
   .schema == "qq-observer.package" and .schema_version == 2
   and .repository == "fixture/repo" and .variant == "blind" and .derived_from == "pr-41"
-  and ([.sessions[] | has("signals")] | all | not)
+  and ([.sessions[] | has("facts") or has("signals")] | any | not)
 ' "$blind_run_41/package.json" >/dev/null \
-  || fail 'blind package manifest did not derive from guided without signal pointers'
+  || fail 'blind package manifest was not assembled without derivative pointers'
 jq -S 'del(.variant,.derived_from) | .sessions |= map(del(.facts,.signals))' \
   "$blind_run_41/package.json" >"$tmp/blind-comparable.json"
 jq -S 'del(.variant) | .sessions |= map(del(.facts,.signals))' \
   "$run_41/package.json" >"$tmp/guided-comparable.json"
 cmp "$tmp/guided-comparable.json" "$tmp/blind-comparable.json" \
   || fail 'blind package identity or session inputs differ from guided'
-assert_equal 7 "$(find "$blind_run_41/sessions" -type f | wc -l)" \
+assert_equal 8 "$(find "$blind_run_41/sessions" -type f | wc -l)" \
   'blind session transcript count is wrong'
-assert_equal 7 "$(find "$blind_run_41/facts" -type f | wc -l)" \
-  'blind facts count is wrong'
-[ ! -e "$blind_run_41/signals" ] || fail 'blind package wrote a signals directory'
+[ ! -e "$blind_run_41/facts" ] || fail 'blind assemble eagerly wrote facts'
+[ ! -e "$blind_run_41/signals" ] || fail 'blind assemble eagerly wrote signals'
+"$OBSERVE" materialize --run "$blind_run_41" >"$tmp/materialized-41-blind.json"
+jq -e '
+  .variant == "blind"
+  and ([.sessions[] | has("facts")] | all)
+  and ([.sessions[] | has("signals")] | any | not)
+' "$blind_run_41/package.json" >/dev/null \
+  || fail 'blind materialization has the wrong derivative pointers'
+for expected in "$expected_facts"/*.json; do
+  cmp "$expected" "$blind_run_41/facts/$(basename "$expected")" \
+    || fail 'blind materialized facts differ from direct qq-observe facts output'
+done
+[ ! -e "$blind_run_41/signals" ] || fail 'blind materialization wrote a signals directory'
 [ "$blind_run_41" != "$run_41" ] || fail 'guided and blind variants shared a run directory'
 "$OBSERVE" assemble --pr 41 --repo "$repo" --variant blind \
   >"$tmp/reassembled-41-blind.json"
@@ -399,7 +504,7 @@ jq -e '.status == "already assembled"' "$tmp/reassembled-41.json" >/dev/null \
 
 # No selected delegates: discover the accountable session from the Repository-home Pi directory.
 runtime_solo="$tmp/solo-runtime"
-mkdir -p "$runtime_solo/async-subagent-runs"
+mkdir -p "$runtime_solo"
 export QQ_DISPATCH_RUNTIME_ROOT="$runtime_solo"
 encoded="-$(realpath "$repo" | tr / -)--"
 repo_sessions="$HOME/.pi/agent/sessions/$encoded"
@@ -415,7 +520,7 @@ run_42="$qualified_runs/pr-42"
 jq -e --arg solo "$solo_session" '
   .sessions == []
   and ([.sessions[] | select(.source_path == $solo)] | length) == 0
-  and any(.warnings[]; . == "no delegate runs have explicit named-branch status lineage")
+  and any(.warnings[]; . == "no delegate runs have explicit named-branch terminal lineage")
 ' "$run_42/package.json" >/dev/null \
   || fail 'test-created Pi session was promoted without explicit lineage'
 

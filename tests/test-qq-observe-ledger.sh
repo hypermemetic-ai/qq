@@ -167,6 +167,7 @@ jq -cn --arg repo "$ROOT" --arg ts 2026-08-03T10:00:00Z '{
   assembled_at:$ts,repo:$repo,
   sessions:[{label:"fixture",role:"accountable",evidence:"fixture"}]
 }' >"$run_3/package.json"
+"$OBSERVE" materialize --run "$run_3" >"$tmp/materialized-3.json"
 turns="$(jq '[.turns_by_role[]] | add' "$run_3/facts/fixture.json")"
 tokens="$(jq '(.token_usage.input // 0) + (.token_usage.output // 0)' "$run_3/facts/fixture.json")"
 duration="$(jq '.wall_clock.duration_ms' "$run_3/facts/fixture.json")"
@@ -212,6 +213,7 @@ jq -cn --arg repo "$coverage_repo" '{
   assembled_at:"2026-08-03T11:00:00Z",repo:$repo,
   sessions:[{label:"fixture",role:"accountable",evidence:"fixture"}]
 }' >"$run_7/package.json"
+"$OBSERVE" materialize --run "$run_7" >"$tmp/materialized-7.json"
 turns="$(jq '[.turns_by_role[]] | add' "$run_7/facts/fixture.json")"
 tokens="$(jq '(.token_usage.input // 0) + (.token_usage.output // 0)' "$run_7/facts/fixture.json")"
 duration="$(jq '.wall_clock.duration_ms' "$run_7/facts/fixture.json")"

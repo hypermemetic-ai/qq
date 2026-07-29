@@ -48,6 +48,8 @@ as `--facts SESSION_PATH=FACTS_PATH`.
 
 ### Phase 0 — Package integrity and reading mode
 
+The package is materialized by the owner before dispatch (`qq-observe materialize --run <dir>`); a package without per-session `facts` paths is not analyzable.
+
 Load every package member and verify its schema and session membership. Require
 `package.variant` to be exactly `guided` or `blind`. For guided packages,
 require one facts file and one signals file per session. For blind packages,

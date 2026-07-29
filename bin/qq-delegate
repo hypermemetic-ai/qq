@@ -120,13 +120,12 @@ write_terminal_and_status() {
   local timed_out=false
   [[ "$child_status" -ne 124 && "$child_status" -ne 137 ]] || timed_out=true
 
-  if ! "$python_binary" - "$run_dir" "$runtime_root" "$run_id" "$role" "$child_status" "$started_at" "$ended_at" "$started_ms" "$ended_ms" "$worktree" "$timed_out" "$accountable_session_id" <<'PY'
-import json, os, stat, sys
+  if ! "$python_binary" - "$run_dir" "$run_id" "$role" "$child_status" "$started_at" "$ended_at" "$worktree" "$timed_out" "$accountable_session_id" <<'PY'
+import json, os, sys
 from pathlib import Path
-(run_dir_text, runtime_text, run_id, role, exit_text, started_at, ended_at,
- started_ms_text, ended_ms_text, cwd, timed_text, session_id) = sys.argv[1:]
+(run_dir_text, run_id, role, exit_text, started_at, ended_at,
+ cwd, timed_text, session_id) = sys.argv[1:]
 run_dir = Path(run_dir_text)
-runtime = Path(runtime_text)
 exit_code = int(exit_text)
 timed_out = timed_text == "true"
 
@@ -147,27 +146,9 @@ terminal = {
     "ended_at": ended_at, "timed_out": timed_out, "cwd": cwd,
     "run_dir": str(run_dir), "output_log": str(run_dir / "output.jsonl"),
     "sessions_dir": str(run_dir / "sessions"),
+    "parent_session": session_id,
 }
 atomic_json(run_dir / "TERMINAL", terminal)
-
-session_files = []
-for candidate in (run_dir / "sessions").rglob("*.jsonl"):
-    try:
-        state = candidate.lstat()
-    except OSError:
-        continue
-    if stat.S_ISREG(state.st_mode):
-        session_files.append((state.st_mtime_ns, str(candidate)))
-session_file = max(session_files, default=(0, ""))[1]
-record_dir = runtime / "async-subagent-runs" / run_id
-record_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
-record = {
-    "runId": run_id, "mode": "single", "cwd": cwd,
-    "sessionId": session_id, "sessionFile": session_file,
-    "startedAt": int(started_ms_text), "lastActivityAt": int(ended_ms_text),
-    "state": "completed" if exit_code == 0 else "failed", "isNested": False,
-}
-atomic_json(record_dir / "status.json", record)
 PY
   then
     printf '[qq-delegate] fail-closed: cannot write terminal or observation run state\n' >&2
