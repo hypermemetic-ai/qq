@@ -101,7 +101,8 @@ invoking_home="${HOME:-}"
 inherited_parent_session="${PI_SUBAGENT_PARENT_SESSION:-}"
 zero_session_id="00000000-0000-0000-0000-000000000000"
 if [[ "$inherited_parent_session" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
-  accountable_session_id="$inherited_parent_session"
+  # Canonicalize to lowercase: bin/qq-observe's SESSION_UUID is lowercase-only.
+  accountable_session_id="${inherited_parent_session,,}"
 else
   accountable_session_id="$zero_session_id"
 fi

@@ -362,6 +362,17 @@ fallback_id="$(jq -r .run_id "$fallback_run/TERMINAL")"
 jq -e '.sessionId == "00000000-0000-0000-0000-000000000000"' \
   "$runtime_root/async-subagent-runs/$fallback_id/status.json" >/dev/null
 
+# An uppercase-hex parent session UUID canonicalizes to lowercase: the
+# consumer (bin/qq-observe SESSION_UUID) matches lowercase only.
+upper_session="ABCDEFAB-1234-4ABC-8DEF-ABCDEF012345"
+upper_run="$(new_run parent-uppercase)"
+run_case parent-uppercase reviewer "$fixture" "$upper_run/BRIEF.md" \
+  PI_SUBAGENT_PARENT_SESSION="$upper_session"
+assert_equal 0 "$RUN_STATUS" "uppercase parent-session dispatch failed"
+upper_id="$(jq -r .run_id "$upper_run/TERMINAL")"
+jq -e '.sessionId == "abcdefab-1234-4abc-8def-abcdef012345"' \
+  "$runtime_root/async-subagent-runs/$upper_id/status.json" >/dev/null
+
 # Batch is blocking, concurrent, complete, and summarizes every ticket.
 batch_runs=()
 for spec in 'batch-a:sleep=0.4' 'batch-b:sleep=0.4' $'batch-c:sleep=0.4\nexit=2'; do
