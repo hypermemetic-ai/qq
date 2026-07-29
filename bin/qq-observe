@@ -27,11 +27,11 @@ usage:
   qq-observe architect-context
   qq-observe prepare-handoff --context CONTEXT-ID --decisions FILE.json
   qq-observe prepare-handoff --run DIR --outcomes FILE.json  # v1 compatibility
-  qq-observe  record-handoff-result (--batch DIR | --run DIR) --receipt FILE.json
+  qq-observe record-handoff-result (--batch DIR | --run DIR) --receipt FILE.json
   qq-observe mark-discussed --run DIR --outcomes FILE.json [--twin DIR]
   qq-observe resolve-task (--batch DIR | --run DIR) --task <Task-ID> --repo ROOT
   qq-observe rounds
-  qq-observe  record-comparison --guided DIR --blind DIR
+  qq-observe record-comparison --guided DIR --blind DIR
 
 facts, signals, and validate-analysis accept Pi v3 session JSONL. Signal
 entries and unknown-entry citations are 1-based physical JSONL line numbers.
