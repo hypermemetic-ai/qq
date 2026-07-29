@@ -1,8 +1,7 @@
 // @ts-nocheck
 
-import { randomUUID } from "node:crypto";
 import { constants, type BigIntStats } from "node:fs";
-import { lstat, open, realpath, rename, unlink } from "node:fs/promises";
+import { lstat, open, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,12 +17,10 @@ export const ROLES = [
 ] as const;
 export type ExecutionRole = (typeof ROLES)[number];
 
-const DELEGATED_ROLES = ["implementer", "observer", "researcher", "reviewer"] as const;
 const PROFILE_KEYS = ["effort", "model", "provider", "serviceClass"] as const;
 const EFFORTS = new Set(["provider-default", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const SERVICE_CLASSES = new Set(["provider-default", "auto", "default", "flex", "priority"]);
 const MAX_POLICY_BYTES = 64 * 1024;
-const UNRESOLVED_PROFILES = "__qq_execution_profile_resolver_required__";
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ARCHITECT_LAUNCHER = join(REPO_ROOT, "bin", "qq-pi-role");
 export const PROFILE_PATH = join(homedir(), ".config", "qq", "execution-profiles.json");
@@ -197,25 +194,9 @@ export function resolveExecutionRole(
   env: NodeJS.ProcessEnv = process.env,
   architectLauncher = ARCHITECT_LAUNCHER,
 ): ExecutionRole {
-  const delegated = env.PI_SUBAGENT_TRUSTED_EXECUTION_ROLE;
-  const child = env.PI_SUBAGENT_CHILD_AGENT;
-  const receipt = env.PI_SUBAGENT_EXECUTION_PROFILE_RECEIPT;
   const rootRole = env.QQ_EXECUTION_PROFILE_LAUNCHER_ROLE;
   const launcher = env.QQ_EXECUTION_PROFILE_LAUNCHER;
 
-  if (delegated !== undefined) {
-    if (rootRole !== undefined || launcher !== undefined) throw new Error("conflicting delegated and root role assertions");
-    if (!(DELEGATED_ROLES as readonly string[]).includes(delegated)) {
-      throw new Error(`untrusted delegated execution role: ${delegated}`);
-    }
-    if (child !== delegated || typeof receipt !== "string" || receipt.length === 0) {
-      throw new Error("trusted delegated role, child identity, and receipt assertion must agree");
-    }
-    return delegated as ExecutionRole;
-  }
-  if (child !== undefined || receipt !== undefined) {
-    throw new Error("delegated child is missing its trusted execution-role assertion");
-  }
   if (rootRole !== undefined || launcher !== undefined) {
     if (rootRole !== "architect" || launcher !== architectLauncher) {
       throw new Error("invalid architect launcher assertion");
@@ -223,10 +204,6 @@ export function resolveExecutionRole(
     return "architect";
   }
   return "orchestrator";
-}
-
-function delegatedProfilesJson(profiles: ExecutionProfiles): string {
-  return JSON.stringify(Object.fromEntries(DELEGATED_ROLES.map((role) => [role, profiles[role]])));
 }
 
 function profileMatches(left: ExecutionProfile, right: ExecutionProfile): boolean {
@@ -258,43 +235,6 @@ export function acceptExecutionProfileTelemetry(message: unknown): Readonly<Prof
   return latestTelemetry;
 }
 
-async function writeExecutionProfileReceipt(path: string, telemetry: Readonly<ProfileTelemetry>): Promise<void> {
-  const directory = dirname(path);
-  const uid = process.getuid?.();
-  if (uid === undefined || await realpath(directory) !== directory) {
-    throw new Error("execution-profile receipt directory is not attributable or canonical");
-  }
-  const directoryStat = await lstat(directory);
-  if (!directoryStat.isDirectory() || directoryStat.uid !== uid || (directoryStat.mode & 0o077) !== 0) {
-    throw new Error("execution-profile receipt directory must be operator-owned and private");
-  }
-  try {
-    const existing = await lstat(path);
-    if (!existing.isFile() || existing.isSymbolicLink() || existing.uid !== uid
-      || (existing.mode & 0o777) !== 0o600 || existing.nlink !== 1) {
-      throw new Error("execution-profile receipt target is not one private regular file");
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-
-  const temporary = join(directory, `.execution-profile-receipt.${process.pid}.${randomUUID()}`);
-  const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-  try {
-    await handle.writeFile(`${JSON.stringify(telemetry)}\n`, "utf8");
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  try {
-    await rename(temporary, path);
-  } finally {
-    await unlink(temporary).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== "ENOENT") throw error;
-    });
-  }
-}
-
 export function getExecutionProfileDisplay(): Readonly<ProfileTelemetry> | undefined {
   return latestTelemetry ?? latestSelection;
 }
@@ -303,26 +243,14 @@ export default function register(pi: ExtensionAPI, deps: { profilePath?: string;
   const api = pi as ExecutionProfileApi;
   const env = deps.env ?? process.env;
   const profilePath = deps.profilePath ?? PROFILE_PATH;
-  let pinnedDelegatedProfiles: string | undefined;
-  let receiptPath: string | undefined;
-
   async function loadSnapshot(modelRegistry: { validateExecutionProfile(profile: ExecutionProfile): void }): Promise<Readonly<ExecutionProfile>> {
     latestSelection = undefined;
     latestTelemetry = undefined;
-    pinnedDelegatedProfiles = undefined;
-    receiptPath = undefined;
-    env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES = UNRESOLVED_PROFILES;
 
     const profiles = await readExecutionProfiles(profilePath);
     for (const role of ROLES) modelRegistry.validateExecutionProfile(profiles[role]);
-    const role = resolveExecutionRole(env);
-    const profile = Object.freeze({ ...profiles[role] });
+    const profile = Object.freeze({ ...profiles[resolveExecutionRole(env)] });
     latestSelection = profile;
-    pinnedDelegatedProfiles = delegatedProfilesJson(profiles);
-    env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES = pinnedDelegatedProfiles;
-    if ((DELEGATED_ROLES as readonly string[]).includes(role)) {
-      receiptPath = env.PI_SUBAGENT_EXECUTION_PROFILE_RECEIPT;
-    }
     return profile;
   }
 
@@ -330,18 +258,5 @@ export default function register(pi: ExtensionAPI, deps: { profilePath?: string;
 
   pi.on("session_start", async (_event, ctx) => {
     await loadSnapshot(ctx.modelRegistry);
-  });
-
-  pi.on("message_end", async (event) => {
-    if (receiptPath === undefined || event.message?.role !== "assistant") return;
-    const telemetry = acceptExecutionProfileTelemetry(event.message);
-    if (!telemetry) throw new Error("trusted delegated response omitted or conflicted with execution-profile telemetry");
-    await writeExecutionProfileReceipt(receiptPath, telemetry);
-  });
-
-  pi.on("tool_call", () => {
-    if (pinnedDelegatedProfiles !== undefined) {
-      env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES = pinnedDelegatedProfiles;
-    }
   });
 }

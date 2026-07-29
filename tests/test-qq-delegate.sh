@@ -131,8 +131,6 @@ happy_run="$(new_run happy)"
 run_case happy reviewer "$fixture" "$happy_run/BRIEF.md" \
   PI_SUBAGENT_PARENT_SESSION="$parent_session" \
   PI_SUBAGENT_CHILD_AGENT=reviewer \
-  PI_SUBAGENT_EXECUTION_PROFILE_RECEIPT=/nonexistent \
-  PI_SUBAGENT_TRUSTED_EXECUTION_ROLE=reviewer \
   QQ_EXECUTION_PROFILE_LAUNCHER=/bad/launcher \
   QQ_EXECUTION_PROFILE_LAUNCHER_ROLE=reviewer \
   QQ_DISPATCH_RUN_DIR=/inherited/wrong

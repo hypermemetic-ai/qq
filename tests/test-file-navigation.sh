@@ -128,13 +128,4 @@ export FAKE_FZF_QUERY=project
 export FAKE_FZF_PICK="$tmp/home/picked project"
 assert_equal "$FAKE_FZF_PICK" "$(qqcd "$FAKE_FZF_QUERY"; pwd -P)"
 
-# Dispatch adapter env: the confined-delegate PI_SUBAGENT_* pair is set
-# in-process by extensions/qq-subagent-env.ts (tested in
-# test-qq-subagent-env.sh); the shell surface intentionally does not export
-# them, so other repositories' sessions keep the vanilla dispatcher.
-if env -u PI_SUBAGENT_PI_BINARY -u PI_SUBAGENT_EXTRA_AGENT_DIRS \
-  bash -c 'source "$1"; [ -n "${PI_SUBAGENT_PI_BINARY:-}" ] || [ -n "${PI_SUBAGENT_EXTRA_AGENT_DIRS:-}" ]' _ "$NAVIGATION"; then
-  fail "file-navigation.bash exports PI_SUBAGENT_* (that moved to extensions/qq-subagent-env.ts)"
-fi
-
 printf 'test-file-navigation: pass\n'

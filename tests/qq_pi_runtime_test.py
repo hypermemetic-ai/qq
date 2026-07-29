@@ -932,64 +932,6 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(result.stdout.splitlines(), [str(ROOT / "bin/pi"), IDENTITY])
         self.assertFalse(stock_counter.exists())
 
-        # Delegated children must use the adapter worktree's exact wrapper even
-        # when both PATH and QQ_PI_BIN select stock Pi.
-        launcher_tmp = self.temp / "launcher-tmp"
-        session_root = launcher_tmp / "pi-subagent-sessions"
-        runtime_root = launcher_tmp / "dispatch-runtime"
-        session_root.mkdir(parents=True, mode=0o700)
-        config = home / ".pi/agent/extensions/subagent/config.json"
-        config.parent.mkdir(parents=True)
-        config.write_text(json.dumps({"defaultSessionDir": str(session_root)}), encoding="utf-8")
-        delegated_log = self.temp / "delegated-pi-args"
-        node_binary = shutil.which("node")
-        self.assertIsNotNone(node_binary)
-        delegated_environment = {
-            **environment,
-            "PATH": f"{fake_bin}:{ROOT / 'bin'}:/usr/bin:/bin",
-            "QQ_NODE_BIN": node_binary,
-            "QQ_PI_BIN": str(stock),
-            "TMPDIR": str(launcher_tmp),
-            "QQ_DISPATCH_RUNTIME_ROOT": str(runtime_root),
-            "QQ_DISPATCH_TIMEOUT": "5s",
-            "PI_SUBAGENT_TRUSTED_AGENT_PATHS": json.dumps({
-                role: str(ROOT / "delegation/manifests/agents" / f"{role}.md")
-                for role in ("implementer", "observer", "researcher", "reviewer")
-            }),
-            "PI_SUBAGENT_CHILD_AGENT": "reviewer",
-            "PI_SUBAGENT_RUN_ID": "runtime-path-test",
-            "PI_SUBAGENT_CHILD_INDEX": "0",
-            "QQ_TEST_PI_LOG": str(delegated_log),
-            "XDG_STATE_HOME": str(self.temp / "state"),
-        }
-        direct_arguments = runtime.subprocess.run(
-            [str(ROOT / "bin/pi"), "--approve", "--offline", "--json"],
-            cwd=ROOT,
-            env=delegated_environment,
-            text=True,
-            capture_output=True,
-        )
-        self.assertEqual(direct_arguments.returncode, 0, direct_arguments.stderr)
-        delegated_log.unlink(missing_ok=True)
-        delegated = runtime.subprocess.run(
-            [str(ROOT / "bin/qq-dispatch"), "--json"],
-            cwd=ROOT,
-            env=delegated_environment,
-            text=True,
-            capture_output=True,
-        )
-        self.assertEqual(
-            delegated.returncode,
-            0,
-            f"stderr={delegated.stderr!r} stdout={delegated.stdout!r} "
-            f"log={delegated_log.read_bytes() if delegated_log.exists() else None!r} "
-            f"stock={stock_counter.read_text() if stock_counter.exists() else None!r}",
-        )
-        delegated_args = delegated_log.read_bytes().split(b"\0")
-        self.assertIn(b"--approve", delegated_args)
-        self.assertIn(b"--offline", delegated_args)
-        self.assertFalse(stock_counter.exists())
-
         current = production.data_root / "current"
         current_target = os.readlink(current)
         current.unlink()

@@ -54,7 +54,7 @@ assert_file_contains "$ROOT/README.md" \
   'it inherits a nonempty `CONTEXT7_API_KEY`; it does not silently clear or use the'
 assert_file_contains "$ROOT/README.md" \
   'A failed or rolled-back adoption leaves Context7 absent.'
-assert_file_contains "$ROOT/bin/qq-dispatch" \
+assert_file_contains "$ROOT/bin/qq-delegate" \
   'researcher dispatch forbids inherited CONTEXT7_API_KEY'
 
 if find "$ROOT" -path '*/node_modules' -prune -o \

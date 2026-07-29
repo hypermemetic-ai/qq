@@ -75,50 +75,13 @@ const pi = {
 const env = {};
 ext.default(pi, { profilePath: policyPath, env });
 assert(typeof resolver === "function", "resolver was not registered");
-assert(handlers.has("session_start") && handlers.has("tool_call") && handlers.has("message_end"), "profile lifecycle handlers missing");
+assert(handlers.size === 1 && handlers.has("session_start"), "root profile lifecycle handler drifted");
 await handlers.get("session_start")({}, ctx);
 
 const parsed = JSON.parse(canonical);
 let profile = await resolver({ purpose: "agent" }, {});
 assert(JSON.stringify(profile) === JSON.stringify(parsed.orchestrator), "plain root did not resolve orchestrator");
 assert(Object.keys(profile).sort().join(",") === "effort,model,provider,serviceClass", "resolver returned extra fields");
-let delegated = JSON.parse(env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES);
-assert(JSON.stringify(Object.keys(delegated).sort()) === JSON.stringify(["implementer", "observer", "researcher", "reviewer"]), "delegated snapshot keys drifted");
-assert(JSON.stringify(delegated.observer) === JSON.stringify(parsed.observer), "observer snapshot drifted");
-
-const receiptDirectory = path.join(temp, "receipt");
-fs.mkdirSync(receiptDirectory, { mode: 0o700 });
-const receiptPath = path.join(receiptDirectory, "execution-profile-receipt.json");
-env.PI_SUBAGENT_CHILD_AGENT = "observer";
-env.PI_SUBAGENT_TRUSTED_EXECUTION_ROLE = "observer";
-env.PI_SUBAGENT_EXECUTION_PROFILE_RECEIPT = receiptPath;
-profile = await resolver({ purpose: "agent" }, {});
-assert(JSON.stringify(profile) === JSON.stringify(parsed.observer), "trusted observer did not resolve Observer");
-await handlers.get("message_end")({ message: {
-  role: "assistant",
-  executionProfile: { ...parsed.observer, acknowledgedServiceClass: "default" },
-} });
-const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf8"));
-assert(JSON.stringify(receipt) === JSON.stringify({ ...parsed.observer, acknowledgedServiceClass: "default" }), "delegated receipt was not published exactly");
-assert((fs.statSync(receiptPath).mode & 0o777) === 0o600, "delegated receipt is not mode 600");
-fs.unlinkSync(receiptPath);
-fs.symlinkSync(policyPath, receiptPath);
-await expectReject(() => handlers.get("message_end")({ message: {
-  role: "assistant",
-  executionProfile: parsed.observer,
-} }), "receipt target is not one private regular file");
-assert(fs.lstatSync(receiptPath).isSymbolicLink(), "receipt writer replaced a conflicting symlink");
-fs.unlinkSync(receiptPath);
-
-env.PI_SUBAGENT_TRUSTED_EXECUTION_ROLE = "reviewer";
-await expectReject(() => resolver({ purpose: "agent" }, {}), "must agree");
-env.PI_SUBAGENT_TRUSTED_EXECUTION_ROLE = "observer";
-env.QQ_EXECUTION_PROFILE_LAUNCHER_ROLE = "architect";
-await expectReject(() => resolver({ purpose: "agent" }, {}), "conflicting delegated and root");
-delete env.PI_SUBAGENT_CHILD_AGENT;
-delete env.PI_SUBAGENT_TRUSTED_EXECUTION_ROLE;
-delete env.PI_SUBAGENT_EXECUTION_PROFILE_RECEIPT;
-delete env.QQ_EXECUTION_PROFILE_LAUNCHER_ROLE;
 env.QQ_EXECUTION_PROFILE_LAUNCHER = `${process.env.ROOT}/bin/qq-pi-role`;
 env.QQ_EXECUTION_PROFILE_LAUNCHER_ROLE = "architect";
 profile = await resolver({ purpose: "agent" }, {});
@@ -127,27 +90,18 @@ env.QQ_EXECUTION_PROFILE_LAUNCHER = "/tmp/forged";
 await expectReject(() => resolver({ purpose: "agent" }, {}), "invalid architect launcher assertion");
 delete env.QQ_EXECUTION_PROFILE_LAUNCHER;
 delete env.QQ_EXECUTION_PROFILE_LAUNCHER_ROLE;
-env.PI_SUBAGENT_CHILD_AGENT = "reviewer";
-await expectReject(() => resolver({ purpose: "agent" }, {}), "missing its trusted execution-role assertion");
-delete env.PI_SUBAGENT_CHILD_AGENT;
 
 const changed = structuredClone(parsed);
-changed.observer = structuredClone(parsed.reviewer);
+changed.orchestrator = structuredClone(parsed.implementer);
 writePolicy(changed);
 profile = await resolver({ purpose: "agent" }, {});
 assert(JSON.stringify(profile) === JSON.stringify(changed.orchestrator), "valid update did not apply on next resolution");
-const pinnedBeforeEdit = env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES;
 writePolicy(parsed);
-env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES = "caller-conflict";
-handlers.get("tool_call")();
-assert(env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES === pinnedBeforeEdit, "mid-request edit or env override changed pinned delegated snapshot");
 await resolver({ purpose: "agent" }, {});
-assert(JSON.parse(env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES).reviewer.model === "k3", "next valid policy did not recover");
 const unsupportedSibling = structuredClone(parsed);
 unsupportedSibling.observer = { provider: "missing", model: "nope", effort: "high", serviceClass: "provider-default" };
 writePolicy(unsupportedSibling);
 await expectReject(() => resolver({ purpose: "agent" }, {}), "unsupported test profile: missing/nope");
-assert(env.PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES === "__qq_execution_profile_resolver_required__", "invalid complete policy retained a stale delegated snapshot");
 
 writePolicy(canonical.replace('"architect"', '"architect"').replace('"implementer"', '"architect"'));
 await expectReject(() => resolver({ purpose: "agent" }, {}), "duplicate object key");
@@ -223,12 +177,11 @@ assert_equal --version "${launched[2]}" 'launcher argument forwarding mismatch'
 if "$launcher_root/bin/qq-pi-role" observer >/dev/null 2>&1; then
   fail 'launcher accepted a delegated role'
 fi
-if PI_SUBAGENT_CHILD_AGENT=reviewer "$launcher_root/bin/qq-pi-role" architect >/dev/null 2>&1; then
-  fail 'launcher erased a conflicting inherited child assertion'
+if QQ_EXECUTION_PROFILE_LAUNCHER_ROLE=orchestrator "$launcher_root/bin/qq-pi-role" architect >/dev/null 2>&1; then
+  fail 'launcher erased a conflicting inherited root assertion'
 fi
 
 assert_file_contains "$ROOT/extensions/index.ts" 'registerExecutionProfiles(pi)'
 assert_file_contains "$ROOT/extensions/qq-footer.ts" 'acknowledgedServiceClass'
-assert_file_contains "$ROOT/bin/qq-dispatch" 'unset QQ_EXECUTION_PROFILE_LAUNCHER QQ_EXECUTION_PROFILE_LAUNCHER_ROLE'
 
 printf 'test-qq-execution-profiles: pass\n'
