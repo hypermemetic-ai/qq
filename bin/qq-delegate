@@ -1,0 +1,646 @@
+#!/usr/bin/env bash
+# Minimal blocking delegate engine for qq trusted roles.
+set -euo pipefail
+
+umask 077
+
+fail() {
+  local exit_code="$1"
+  shift
+  printf '[qq-delegate] fail-closed: %s\n' "$*" >&2
+  exit "$exit_code"
+}
+
+usage() {
+  printf '%s\n' 'usage: qq-delegate run --role <role> --cwd <worktree> --brief <abs-run-dir>/BRIEF.md' '       qq-delegate batch <abs-batch.json>' >&2
+  exit 64
+}
+
+path_is_within() {
+  local candidate="$1"
+  local parent="$2"
+  [[ "$candidate" == "$parent" || "$candidate" == "$parent"/* ]]
+}
+
+self="$(readlink -f -- "${BASH_SOURCE[0]}")" || fail 64 "cannot resolve the engine path"
+bin_dir="$(cd -- "$(dirname -- "$self")" && pwd -P)" || fail 64 "cannot resolve the engine directory"
+engine_worktree="$(cd -- "$bin_dir/.." && pwd -P)" || fail 64 "cannot resolve the engine worktree"
+
+[[ $# -gt 0 ]] || usage
+command_name="$1"
+shift
+for cli_arg in "$command_name" "$@"; do
+  [[ "$cli_arg" != --help ]] || usage
+done
+
+run_role=""
+run_cwd=""
+run_brief=""
+batch_path=""
+case "$command_name" in
+  run)
+    while [[ $# -gt 0 ]]; do
+      [[ $# -ge 2 && "$2" != --* ]] || usage
+      case "$1" in
+        --role) [[ -z "$run_role" ]] || usage; run_role="$2" ;;
+        --cwd) [[ -z "$run_cwd" ]] || usage; run_cwd="$2" ;;
+        --brief) [[ -z "$run_brief" ]] || usage; run_brief="$2" ;;
+        *) usage ;;
+      esac
+      shift 2
+    done
+    [[ -n "$run_role" && -n "$run_cwd" && -n "$run_brief" ]] || usage
+    ;;
+  batch)
+    [[ $# -eq 1 && "$1" != -* ]] || usage
+    batch_path="$1"
+    ;;
+  *) usage ;;
+esac
+
+for required_command in git python3 timeout realpath; do
+  command -v "$required_command" >/dev/null 2>&1 || fail 71 "required command is unavailable: $required_command"
+done
+git_binary="$(command -v git)"
+python_binary="$(command -v python3)"
+timeout_binary="$(command -v timeout)"
+
+git_query() {
+  (
+    unset "${!GIT_@}"
+    "$git_binary" "$@"
+  )
+}
+
+if ! engine_repository_root="$(git_query -C "$engine_worktree" rev-parse --show-toplevel 2>/dev/null)"; then
+  fail 64 "engine is not installed in a Git worktree"
+fi
+engine_repository_root="$(realpath -e -- "$engine_repository_root" 2>/dev/null)" || fail 64 "cannot resolve the engine's Git worktree"
+[[ "$engine_repository_root" == "$engine_worktree" ]] || fail 64 "engine path does not resolve beneath its assigned worktree"
+engine_git_common_dir="$(realpath -e -- "$(git_query -C "$engine_worktree" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" 2>/dev/null)" || fail 67 "cannot resolve the engine Git common directory"
+
+launcher_tmp_input="${TMPDIR:-/tmp}"
+runtime_root_input="${QQ_DISPATCH_RUNTIME_ROOT:-$launcher_tmp_input/pi-subagents-uid-$(id -u)}"
+[[ "$runtime_root_input" == /* ]] || fail 68 "QQ_DISPATCH_RUNTIME_ROOT must be absolute"
+mkdir -p -- "$runtime_root_input" || fail 68 "cannot create the dispatch runtime root"
+runtime_root="$(realpath -e -- "$runtime_root_input" 2>/dev/null)" || fail 68 "cannot resolve the dispatch runtime root"
+system_tmp="$(realpath -e -- /tmp 2>/dev/null)" || fail 68 "cannot resolve /tmp"
+launcher_tmp="$(realpath -e -- "$launcher_tmp_input" 2>/dev/null)" || fail 68 "cannot resolve the launcher temporary directory"
+[[ -d "$launcher_tmp" ]] || fail 68 "launcher temporary path is not a directory"
+path_is_within "$runtime_root" "$system_tmp" || fail 68 "runtime root must stay beneath /tmp"
+[[ "$runtime_root" != "$system_tmp" ]] || fail 68 "runtime root may not be all of /tmp"
+
+pi_binary="$bin_dir/pi"
+[[ -f "$pi_binary" && -x "$pi_binary" && ! -L "$pi_binary" ]] || fail 70 "the worktree Pi wrapper is unavailable or linked"
+[[ "$(realpath -e -- "$pi_binary" 2>/dev/null)" == "$pi_binary" ]] || fail 70 "the worktree Pi wrapper does not resolve exactly"
+[[ "$pi_binary" != "$self" ]] || fail 70 "Pi target cannot recurse into the engine"
+tree_supervisor="$bin_dir/lib/qq-process-tree-supervisor.py"
+[[ -f "$tree_supervisor" && -x "$tree_supervisor" && ! -L "$tree_supervisor" ]] || fail 71 "process-tree supervisor is unavailable"
+
+invoking_home="${HOME:-}"
+inherited_parent_session="${PI_SUBAGENT_PARENT_SESSION:-}"
+zero_session_id="00000000-0000-0000-0000-000000000000"
+if [[ "$inherited_parent_session" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
+  accountable_session_id="$inherited_parent_session"
+else
+  accountable_session_id="$zero_session_id"
+fi
+
+new_run_id() {
+  "$python_binary" - <<'PY'
+import uuid
+print(uuid.uuid4())
+PY
+}
+
+write_terminal_and_status() {
+  local run_dir="$1" run_id="$2" role="$3" child_status="$4"
+  local started_at="$5" ended_at="$6" started_ms="$7" ended_ms="$8" worktree="$9"
+  local timed_out=false
+  [[ "$child_status" -ne 124 && "$child_status" -ne 137 ]] || timed_out=true
+
+  if ! "$python_binary" - "$run_dir" "$runtime_root" "$run_id" "$role" "$child_status" "$started_at" "$ended_at" "$started_ms" "$ended_ms" "$worktree" "$timed_out" "$accountable_session_id" <<'PY'
+import json, os, stat, sys
+from pathlib import Path
+(run_dir_text, runtime_text, run_id, role, exit_text, started_at, ended_at,
+ started_ms_text, ended_ms_text, cwd, timed_text, session_id) = sys.argv[1:]
+run_dir = Path(run_dir_text)
+runtime = Path(runtime_text)
+exit_code = int(exit_text)
+timed_out = timed_text == "true"
+
+def atomic_json(target, value):
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    data = (json.dumps(value, separators=(",", ":")) + "\n").encode()
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        os.write(descriptor, data)
+    finally:
+        os.close(descriptor)
+    os.replace(temporary, target)
+    os.chmod(target, 0o600)
+
+terminal = {
+    "schema": "qq-run-terminal", "version": 2, "run_id": run_id,
+    "agent": role, "exit_code": exit_code, "started_at": started_at,
+    "ended_at": ended_at, "timed_out": timed_out, "cwd": cwd,
+    "run_dir": str(run_dir), "output_log": str(run_dir / "output.jsonl"),
+    "sessions_dir": str(run_dir / "sessions"),
+}
+atomic_json(run_dir / "TERMINAL", terminal)
+
+session_files = []
+for candidate in (run_dir / "sessions").rglob("*.jsonl"):
+    try:
+        state = candidate.lstat()
+    except OSError:
+        continue
+    if stat.S_ISREG(state.st_mode):
+        session_files.append((state.st_mtime_ns, str(candidate)))
+session_file = max(session_files, default=(0, ""))[1]
+record_dir = runtime / "async-subagent-runs" / run_id
+record_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
+record = {
+    "runId": run_id, "mode": "single", "cwd": cwd,
+    "sessionId": session_id, "sessionFile": session_file,
+    "startedAt": int(started_ms_text), "lastActivityAt": int(ended_ms_text),
+    "state": "completed" if exit_code == 0 else "failed", "isNested": False,
+}
+atomic_json(record_dir / "status.json", record)
+PY
+  then
+    printf '[qq-delegate] fail-closed: cannot write terminal or observation run state\n' >&2
+    return 73
+  fi
+}
+
+execute_ticket() {
+  local role="$1" cwd_input="$2" brief_path="$3" child_index="$4" run_id="$5"
+  local metadata_file="${6:-}" observation_phase
+
+  case "$role" in
+    implementer) observation_phase=implementation ;;
+    reviewer) observation_phase=review ;;
+    researcher) observation_phase=research ;;
+    observer) observation_phase=analysis ;;
+    *) fail 66 "unsupported delegated role '$role'" ;;
+  esac
+  if [[ "$role" == researcher && -n "${CONTEXT7_API_KEY:-}" ]]; then
+    fail 66 "researcher dispatch forbids inherited CONTEXT7_API_KEY"
+  fi
+
+  [[ "$cwd_input" == /* ]] || fail 65 "child cwd must be absolute: $cwd_input"
+  [[ -d "$cwd_input" ]] || fail 65 "child cwd is not a Git worktree: $cwd_input"
+  local requested_cwd
+  requested_cwd="$(realpath -e -- "$cwd_input" 2>/dev/null)" || fail 65 "cannot resolve the child cwd"
+  local worktree
+  if ! worktree="$(git_query -C "$requested_cwd" rev-parse --show-toplevel 2>/dev/null)"; then
+    fail 65 "child cwd is not a Git worktree"
+  fi
+  worktree="$(realpath -e -- "$worktree" 2>/dev/null)" || fail 65 "cannot resolve the child cwd's Git worktree"
+  [[ "$requested_cwd" == "$worktree" ]] || fail 65 "child cwd must name the Git worktree root"
+  local git_common_dir
+  git_common_dir="$(realpath -e -- "$(git_query -C "$worktree" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" 2>/dev/null)" || fail 67 "cannot resolve the child Git common directory"
+  [[ "$git_common_dir" == "$engine_git_common_dir" ]] || fail 65 "child cwd belongs to a different Git common directory"
+
+  [[ "$brief_path" == /* ]] || fail 68 "work-order brief path must be absolute: $brief_path"
+  [[ "${brief_path##*/}" == BRIEF.md ]] || fail 68 "work-order reference must name BRIEF.md: $brief_path"
+  [[ ! -L "$brief_path" ]] || fail 68 "work-order brief may not be a symlink"
+  [[ -f "$brief_path" ]] || fail 68 "work-order brief must exist at dispatch: $brief_path"
+  local run_dir_input run_dir resolved_brief
+  run_dir_input="$(dirname -- "$brief_path")"
+  [[ ! -L "$run_dir_input" ]] || fail 68 "dispatch run directory may not be a symlink"
+  run_dir="$(realpath -e -- "$run_dir_input" 2>/dev/null)" || fail 68 "cannot resolve the dispatch run directory"
+  resolved_brief="$(realpath -e -- "$brief_path" 2>/dev/null)" || fail 68 "cannot resolve the work-order brief"
+  [[ "$resolved_brief" == "$run_dir/BRIEF.md" ]] || fail 68 "work-order brief does not resolve exactly beneath its run directory"
+  path_is_within "$run_dir" "$runtime_root" || path_is_within "$run_dir" "$worktree" || fail 68 "dispatch run directory must stay beneath the runtime root or the assigned worktree"
+  [[ "$run_dir" != "$runtime_root" && "$run_dir" != "$worktree" ]] || fail 68 "dispatch run directory may not be the runtime root or the worktree itself"
+  [[ -O "$run_dir" ]] || fail 68 "dispatch run directory is not owned by the operator"
+  local run_dir_mode
+  run_dir_mode="$(stat -c %a "$run_dir")"
+  [[ "$run_dir_mode" == 700 ]] || fail 68 "dispatch run directory must be mode 700 (found $run_dir_mode): $run_dir"
+  [[ ! -e "$run_dir/TERMINAL" && ! -L "$run_dir/TERMINAL" ]] || fail 68 "dispatch run directory is sealed by TERMINAL: $run_dir"
+
+  local run_entry
+  shopt -s nullglob dotglob
+  local run_entries=("$run_dir"/*)
+  shopt -u nullglob dotglob
+  for run_entry in "${run_entries[@]}"; do
+    case "${run_entry##*/}" in
+      BRIEF.md|ENVELOPE.md|cache|pi-config|sessions|.system-prompt.md) ;;
+      *) fail 68 "dispatch run directory contains unexpected entry: $run_entry" ;;
+    esac
+  done
+
+  local stage_dir
+  for stage_dir in cache pi-config sessions; do
+    [[ ! -L "$run_dir/$stage_dir" ]] || fail 68 "dispatch $stage_dir path may not be a symlink"
+    [[ ! -e "$run_dir/$stage_dir" || -d "$run_dir/$stage_dir" ]] || fail 68 "dispatch $stage_dir path is not a directory"
+  done
+  install -d -m 700 -- "$run_dir/cache" "$run_dir/pi-config" "$run_dir/sessions" || fail 68 "cannot create the dispatch run directories"
+  local pi_config_dir
+  pi_config_dir="$(realpath -e -- "$run_dir/pi-config" 2>/dev/null)" || fail 68 "cannot resolve the dispatch Pi config directory"
+  path_is_within "$pi_config_dir" "$run_dir" || fail 68 "dispatch Pi config directory must stay beneath the run directory"
+  if [[ -n "$invoking_home" && -f "$invoking_home/.pi/agent/auth.json" ]]; then
+    cp -- "$invoking_home/.pi/agent/auth.json" "$pi_config_dir/auth.json" || fail 68 "cannot stage Pi authentication"
+    chmod 600 -- "$pi_config_dir/auth.json" || fail 68 "cannot secure staged Pi authentication"
+  fi
+
+  local manifest="$engine_worktree/delegation/manifests/agents/$role.md"
+  local policy="$engine_worktree/delegation/policies/execution-profiles.json"
+  local config_file="$runtime_root/.qq-delegate-config-$run_id"
+  local system_prompt="$run_dir/.system-prompt.md"
+  local parse_error parse_status
+  if parse_error="$("$python_binary" - "$manifest" "$policy" "$role" "$invoking_home" "$config_file" "$system_prompt" <<'PY' 2>&1
+import json, os, re, stat, sys
+from pathlib import Path
+manifest_text, policy_text, role, home, config_text, prompt_text = sys.argv[1:]
+manifest = Path(manifest_text)
+policy_path = Path(policy_text)
+config_path = Path(config_text)
+prompt_path = Path(prompt_text)
+
+def refuse(message, status=71):
+    print(message, file=sys.stderr)
+    raise SystemExit(status)
+
+try:
+    state = manifest.lstat()
+    if not stat.S_ISREG(state.st_mode) or manifest.is_symlink() or manifest.resolve() != manifest:
+        raise OSError
+    source = manifest.read_bytes().decode("utf-8")
+except (OSError, UnicodeError):
+    refuse(f"manifest for {role} is unsafe or unavailable")
+lines = source.splitlines(keepends=True)
+plain = [line.rstrip("\r\n") for line in lines]
+if not plain or plain[0] != "---": refuse(f"manifest for {role} has malformed frontmatter")
+try:
+    close = plain.index("---", 1)
+except ValueError:
+    refuse(f"manifest for {role} has malformed frontmatter")
+frontmatter = plain[1:close]
+timeout_lines = [line for line in frontmatter if line.startswith("timeoutMs:")]
+tool_lines = [line for line in frontmatter if line.startswith("tools:")]
+extension_lines = [line for line in frontmatter if line.startswith("subagentOnlyExtensions:")]
+if len(timeout_lines) != 1: refuse(f"manifest for {role} must contain exactly one timeoutMs line")
+if len(tool_lines) != 1: refuse(f"manifest for {role} must contain exactly one tools line")
+if len(extension_lines) > 1: refuse(f"manifest for {role} may contain at most one subagentOnlyExtensions line")
+match = re.fullmatch(r"timeoutMs:\s*([1-9][0-9]*)\s*", timeout_lines[0])
+if not match: refuse(f"manifest for {role} timeoutMs must be a positive integer")
+milliseconds = int(match.group(1))
+if milliseconds > 9007199254740991: refuse(f"manifest for {role} timeoutMs cannot be converted losslessly")
+whole, remainder = divmod(milliseconds, 1000)
+fraction = (f".{remainder:03d}".rstrip("0") if remainder else "")
+timeout_spec = f"{whole}{fraction}s"
+tools = [item.strip() for item in tool_lines[0][len("tools:"):].split(",")]
+if not tools or any(not item for item in tools): refuse(f"manifest for {role} tools declaration must not be empty")
+stock = {"read", "bash", "edit", "write", "grep", "find", "ls"}
+extension_map = {
+    "~/.pi/agent/npm/node_modules/@upstash/context7-pi/extensions/context7.ts":
+        {"resolve-library-id", "query-docs"},
+}
+extension_declared = ""
+extension_path = ""
+extension_tools = set()
+if extension_lines:
+    extension_declared = extension_lines[0].split(":", 1)[1].strip()
+    if extension_declared not in extension_map: refuse(f"manifest for {role} declares unavailable extension '{extension_declared}'", 66)
+    if not home: refuse(f"manifest for {role} extension requires HOME", 66)
+    extension_path = os.path.join(home, extension_declared[2:])
+    if not os.path.isfile(extension_path): refuse(f"manifest for {role} extension is unavailable: {extension_path}", 66)
+    extension_tools = extension_map[extension_declared]
+for tool in tools:
+    if tool not in stock and tool not in extension_tools: refuse(f"manifest for {role} declares unavailable tool '{tool}'", 66)
+try:
+    policy_state = policy_path.lstat()
+    if not stat.S_ISREG(policy_state.st_mode):
+        raise OSError
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
+except (OSError, UnicodeError, json.JSONDecodeError):
+    refuse("execution-profile policy is malformed")
+if not isinstance(policy, dict) or role not in policy or not isinstance(policy[role], dict): refuse(f"execution-profile policy has no object for role {role}")
+profile = policy[role]
+keys = ("provider", "model", "effort", "serviceClass")
+if any(not isinstance(profile.get(key), str) for key in keys): refuse(f"execution-profile policy for {role} has invalid fields")
+if profile["serviceClass"] != "provider-default": refuse(f"execution-profile serviceClass for {role} must be provider-default", 66)
+effort = profile["effort"]
+if effort != "provider-default" and effort not in {
+    "off", "minimal", "low", "medium", "high", "xhigh", "max"
+}:
+    refuse(f"execution-profile effort for {role} is unsupported: {effort}", 66)
+values = [timeout_spec, ",".join(tools), profile["provider"], profile["model"],
+          effort, extension_path]
+if any("\0" in value for value in values): refuse(f"execution-profile or extension value for {role} contains NUL")
+config_path.write_bytes(b"\0".join(value.encode() for value in values) + b"\0")
+os.chmod(config_path, 0o600)
+body = "".join(lines[close + 1:]).encode()
+try:
+    descriptor = os.open(prompt_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "wb") as output:
+        output.write(body)
+    os.chmod(prompt_path, 0o600)
+except OSError:
+    refuse(f"cannot write system prompt for {role}")
+PY
+  )"; then
+    :
+  else
+    parse_status=$?
+    rm -f -- "$config_file"
+    if [[ "$parse_status" -eq 66 ]]; then
+      fail 66 "$parse_error"
+    fi
+    fail 71 "$parse_error"
+  fi
+  local -a dispatch_config
+  mapfile -d '' -t dispatch_config <"$config_file"
+  rm -f -- "$config_file"
+  [[ "${#dispatch_config[@]}" -eq 6 ]] || fail 71 "manifest and execution-profile parser returned malformed data"
+  local timeout_spec="${dispatch_config[0]}"
+  local tools_csv="${dispatch_config[1]}"
+  local provider="${dispatch_config[2]}"
+  local model="${dispatch_config[3]}"
+  local effort="${dispatch_config[4]}"
+  local extension_path="${dispatch_config[5]}"
+  if [[ -v QQ_DISPATCH_TIMEOUT ]]; then
+    timeout_spec="$QQ_DISPATCH_TIMEOUT"
+    [[ "$timeout_spec" =~ ^(0\.[0-9]+|[1-9][0-9]*(\.[0-9]+)?)([smhd])?$ ]] || fail 71 "invalid QQ_DISPATCH_TIMEOUT '$timeout_spec'"
+  fi
+
+  if [[ -n "$metadata_file" ]]; then
+    printf '%s\0' "$run_dir" >"$metadata_file"
+  fi
+
+  local observe="$bin_dir/qq-observe"
+  local observation_enabled=true
+  local trace_id="${QQ_TRACE_ID:-}"
+  local parent_span_id="${PI_PARENT_SPAN_ID:-}"
+  local root_span_id="${PI_ROOT_SPAN_ID:-}"
+  local span_id="" span_start=""
+  if [[ -n "$trace_id" && ! "$trace_id" =~ ^[0-9a-f]{32}$ ]] || [[ -n "$parent_span_id" && ! "$parent_span_id" =~ ^[0-9a-f]{16}$ ]] || [[ -n "$root_span_id" && ! "$root_span_id" =~ ^[0-9a-f]{16}$ ]]; then
+    printf '[qq-delegate] observation disabled: inherited trace context is malformed\n' >&2
+    unset QQ_TRACE_ID PI_PARENT_SPAN_ID PI_ROOT_SPAN_ID
+    observation_enabled=false
+  elif [[ ! -x "$observe" ]]; then
+    printf '[qq-delegate] observation disabled: qq-observe is unavailable\n' >&2
+    observation_enabled=false
+  else
+    if [[ -z "$trace_id" ]]; then
+      trace_id="$("$observe" id trace 2>/dev/null)" || observation_enabled=false
+    fi
+    span_id="$("$observe" id span 2>/dev/null)" || observation_enabled=false
+    if $observation_enabled; then
+      [[ -n "$root_span_id" ]] || root_span_id="${parent_span_id:-$span_id}"
+      export QQ_TRACE_ID="$trace_id"
+      export PI_ROOT_SPAN_ID="$root_span_id"
+      export PI_PARENT_SPAN_ID="$span_id"
+      span_start="$(date --iso-8601=ns)"
+    else
+      printf '[qq-delegate] observation disabled: cannot generate trace context\n' >&2
+    fi
+  fi
+
+  local -a child_argv=(
+    "$pi_binary" --approve --offline --mode json -p
+    --provider "$provider" --model "$model"
+  )
+  if [[ "$effort" != provider-default ]]; then
+    child_argv+=(--thinking "$effort")
+  fi
+  child_argv+=(--tools "$tools_csv" --no-extensions)
+  if [[ -n "$extension_path" ]]; then
+    child_argv+=(--extension "$extension_path")
+  fi
+  child_argv+=(
+    --no-skills --no-context-files --system-prompt "$system_prompt"
+    "Task: Read-and-perform:$run_dir/BRIEF.md"
+  )
+
+  local started_at started_ms ended_at ended_ms
+  IFS=$'\t' read -r started_at started_ms < <("$python_binary" - <<'PY'
+import datetime
+import time
+print(datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"), int(time.time() * 1000), sep="\t")
+PY
+  )
+  printf '[qq-delegate] role=%s timeout=%s run-dir=%s\n' "$role" "$timeout_spec" "$run_dir" >&2
+
+  local dispatch_pid=""
+  local termination_signal=""
+  forward_termination() {
+    termination_signal="$1"
+    if [[ -n "$dispatch_pid" ]]; then
+      kill -s "$1" "$dispatch_pid" 2>/dev/null || true
+    fi
+  }
+  trap 'forward_termination TERM' TERM
+  trap 'forward_termination INT' INT
+  trap 'forward_termination HUP' HUP
+
+  set +e
+  (
+    cd -- "$worktree" || exit 125
+    local inherited_name
+    while IFS= read -r inherited_name; do
+      unset "$inherited_name"
+    done < <(compgen -A variable PI_SUBAGENT_ || true)
+    unset QQ_EXECUTION_PROFILE_LAUNCHER QQ_EXECUTION_PROFILE_LAUNCHER_ROLE
+    unset QQ_DISPATCH_RUN_DIR
+    export QQ_DISPATCH_RUN_DIR="$run_dir"
+    export XDG_CACHE_HOME="$run_dir/cache"
+    export PI_CODING_AGENT_DIR="$pi_config_dir"
+    export PI_CODING_AGENT_SESSION_DIR="$run_dir/sessions"
+    export PI_OFFLINE=1
+    exec "$timeout_binary" -k 10 --signal=TERM "$timeout_spec" "$python_binary" "$tree_supervisor" -- "${child_argv[@]}"
+  ) >"$run_dir/output.jsonl" 2>"$run_dir/stderr.log" &
+  dispatch_pid=$!
+  [[ -z "$termination_signal" ]] || forward_termination "$termination_signal"
+  local child_status
+  while true; do
+    wait "$dispatch_pid"
+    child_status=$?
+    if [[ -n "$termination_signal" ]] && kill -0 "$dispatch_pid" 2>/dev/null; then
+      continue
+    fi
+    break
+  done
+  set -e
+  trap - TERM INT HUP
+  if [[ -n "$termination_signal" ]]; then
+    case "$termination_signal" in
+      HUP) child_status=129 ;;
+      INT) child_status=130 ;;
+      TERM) child_status=143 ;;
+    esac
+  fi
+
+  IFS=$'\t' read -r ended_at ended_ms < <("$python_binary" - <<'PY'
+import datetime
+import time
+print(datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"), int(time.time() * 1000), sep="\t")
+PY
+  )
+  write_terminal_and_status "$run_dir" "$run_id" "$role" "$child_status" "$started_at" "$ended_at" "$started_ms" "$ended_ms" "$worktree" || return $?
+
+  if $observation_enabled; then
+    local span_end observation_status
+    span_end="$(date --iso-8601=ns)"
+    observation_status=ok
+    [[ "$child_status" -eq 0 ]] || observation_status=error
+    local -a parent_context=()
+    if [[ -n "$parent_span_id" ]]; then
+      parent_context=(--parent-span-id "$parent_span_id")
+    fi
+    if ! "$observe" record --name invoke_agent --phase "$observation_phase" --actor "$role" --start "$span_start" --end "$span_end" --trace-id "$trace_id" --span-id "$span_id" --root-span-id "$root_span_id" "${parent_context[@]}" --status "$observation_status" --source qq-delegate --attribute "run.id=$run_id" --attribute "child.index=$child_index" --attribute "worktree=$worktree" --attribute "exit.status=$child_status" >/dev/null; then
+      printf '[qq-delegate] observation write failed; dispatch result preserved\n' >&2
+    fi
+  fi
+  return "$child_status"
+}
+
+if [[ "$command_name" == run ]]; then
+  run_id="$(new_run_id)" || fail 71 "cannot mint a delegate run ID"
+  execute_ticket "$run_role" "$run_cwd" "$run_brief" 0 "$run_id"
+  exit $?
+fi
+
+[[ "$batch_path" == /* ]] || fail 65 "batch file path must be absolute"
+[[ ! -L "$batch_path" ]] || fail 65 "batch file may not be a symlink"
+[[ -f "$batch_path" ]] || fail 65 "batch file is not a regular file: $batch_path"
+batch_tmp="$(mktemp -d "${TMPDIR:-/tmp}/qq-delegate-batch.XXXXXX")" || fail 71 "cannot create batch scratch directory"
+trap 'rm -rf -- "$batch_tmp"' EXIT
+batch_items="$batch_tmp/items"
+if batch_error="$("$python_binary" - "$batch_path" "$batch_items" <<'PY' 2>&1
+import json, os, sys
+from pathlib import Path
+source, output = map(Path, sys.argv[1:])
+try:
+    value = json.loads(source.read_text(encoding="utf-8"))
+except (OSError, UnicodeError, json.JSONDecodeError):
+    print("batch file is malformed", file=sys.stderr)
+    raise SystemExit(65)
+if not isinstance(value, list):
+    print("batch top level must be an array", file=sys.stderr)
+    raise SystemExit(65)
+if not 1 <= len(value) <= 12:
+    print("batch must contain 1..12 tickets", file=sys.stderr)
+    raise SystemExit(65)
+briefs = set()
+parts = []
+for index, ticket in enumerate(value):
+    if not isinstance(ticket, dict) or set(ticket) != {"role", "cwd", "brief"}:
+        print(f"batch ticket {index} must have exact keys role,cwd,brief", file=sys.stderr)
+        raise SystemExit(65)
+    if any(not isinstance(ticket[key], str) or not ticket[key] or "\0" in ticket[key]
+           for key in ("role", "cwd", "brief")):
+        print(f"batch ticket {index} values must be non-empty NUL-free strings", file=sys.stderr)
+        raise SystemExit(65)
+    if not ticket["cwd"].startswith("/") or not ticket["brief"].startswith("/"):
+        print(f"batch ticket {index} cwd and brief must be absolute", file=sys.stderr)
+        raise SystemExit(65)
+    brief_key = os.path.normpath(ticket["brief"])
+    if brief_key in briefs:
+        print(f"batch ticket {index} duplicates brief path {ticket['brief']}", file=sys.stderr)
+        raise SystemExit(65)
+    briefs.add(brief_key)
+    parts.extend(ticket[key].encode() for key in ("role", "cwd", "brief"))
+output.write_bytes(b"\0".join(parts) + b"\0")
+PY
+)"; then
+  :
+else
+  batch_status=$?
+  fail "$batch_status" "$batch_error"
+fi
+
+roles=()
+cwds=()
+briefs=()
+while IFS= read -r -d '' item_role && IFS= read -r -d '' item_cwd && IFS= read -r -d '' item_brief; do
+  roles+=("$item_role")
+  cwds+=("$item_cwd")
+  briefs+=("$item_brief")
+done <"$batch_items"
+
+pids=()
+summary_files=()
+for index in "${!roles[@]}"; do
+  summary_file="$batch_tmp/summary.$index"
+  metadata_file="$batch_tmp/metadata.$index"
+  run_id="$(new_run_id)" || fail 71 "cannot mint a delegate run ID"
+  summary_files+=("$summary_file")
+  (
+    ticket_started_ms="$(date +%s%3N)"
+    # shellcheck disable=SC2317  # Invoked by the EXIT trap below.
+    finish_batch_ticket() {
+      ticket_status=$?
+      trap - EXIT
+      set +e
+      ticket_ended_ms="$(date +%s%3N)"
+      ticket_run_dir="$(dirname -- "${briefs[index]}")"
+      if [[ -s "$metadata_file" ]]; then
+        IFS= read -r -d '' ticket_run_dir <"$metadata_file"
+      fi
+      timed_out=false
+      [[ "$ticket_status" -ne 124 && "$ticket_status" -ne 137 ]] || timed_out=true
+      if ! "$python_binary" - "$summary_file" "$run_id" "${roles[index]}" "${cwds[index]}" "$ticket_run_dir" "$ticket_status" "$ticket_started_ms" "$ticket_ended_ms" "$timed_out" <<'PY'
+import json, sys
+from pathlib import Path
+(target, run_id, role, cwd, run_dir, exit_text,
+ started_text, ended_text, timed_text) = sys.argv[1:]
+summary = {
+    "run_id": run_id, "role": role, "cwd": cwd, "run_dir": run_dir,
+    "exit_code": int(exit_text),
+    "duration_s": round((int(ended_text) - int(started_text)) / 1000, 3),
+    "timed_out": timed_text == "true",
+}
+Path(target).write_text(json.dumps(summary, separators=(",", ":")) + "\n")
+PY
+      then
+        printf '[qq-delegate] fail-closed: cannot write batch summary\n' >&2
+        exit 73
+      fi
+      exit "$ticket_status"
+    }
+    trap finish_batch_ticket EXIT
+    execute_ticket "${roles[index]}" "${cwds[index]}" "${briefs[index]}" "$index" "$run_id" "$metadata_file"
+  ) &
+  pids+=("$!")
+done
+
+batch_signal=""
+# shellcheck disable=SC2317  # Invoked asynchronously by the traps below.
+forward_batch() {
+  batch_signal="$1"
+  local pid
+  for pid in "${pids[@]}"; do
+    kill -s "$1" "$pid" 2>/dev/null || true
+  done
+}
+trap 'forward_batch TERM' TERM
+trap 'forward_batch INT' INT
+trap 'forward_batch HUP' HUP
+batch_failed=false
+set +e
+for pid in "${pids[@]}"; do
+  while true; do
+    wait "$pid"
+    ticket_status=$?
+    if [[ -n "$batch_signal" ]] && kill -0 "$pid" 2>/dev/null; then
+      continue
+    fi
+    break
+  done
+  [[ "$ticket_status" -eq 0 ]] || batch_failed=true
+done
+set -e
+trap - TERM INT HUP
+for summary_file in "${summary_files[@]}"; do
+  [[ -f "$summary_file" ]] || fail 73 "batch worker did not write its summary"
+  cat -- "$summary_file"
+done
+if [[ -n "$batch_signal" ]]; then
+  case "$batch_signal" in HUP) exit 129 ;; INT) exit 130 ;; TERM) exit 143 ;; esac
+fi
+$batch_failed && exit 1
+exit 0
