@@ -124,93 +124,40 @@ jq -e '
 
 ledger_repo="$tmp/ledger"
 init_repo "$ledger_repo"
-commit_empty "$ledger_repo" 'Ledger marker fixture (#13)' "$window_date"
+commit_empty "$ledger_repo" 'Finalized analysis fixture (#13)' "$window_date"
+commit_empty "$ledger_repo" 'Finding analysis fixture (#14)' "$window_date"
+commit_empty "$ledger_repo" 'Uncovered fixture (#15)' "$window_date"
 ledger_runs="$XDG_STATE_HOME/qq/observer/runs/by-repository/fixture/ledger"
-ledger_run="$ledger_runs/pr-13"
-mkdir -p "$ledger_run"
-printf '%s\n' '{"schema":"qq-observer.analysis","schema_version":1,"run":{"change":"fixture","sessions":["/fixture/session.jsonl"]},"episodes":[],"dropped_signals":[],"limitations":"Fixture."}' \
-  >"$ledger_run/analysis.json"
+write_package() {
+  local pr="$1"
+  local run="$ledger_runs/pr-$pr"
+  mkdir -p "$run"
+  jq -cn --arg repo "$ledger_repo" --argjson pr "$pr" '{
+    assembled_at:"2026-01-01T00:00:00Z",branch:"fixture",merge_commit:"aaaaaaaa",
+    merged_at:"2026-01-01T00:00:00Z",pr:$pr,repo:$repo,repository:"fixture/ledger",
+    schema:"qq-observer.package",schema_version:2,sessions:[],unknown_entries:[],
+    variant:"guided",warnings:[]
+  }' >"$run/package.json"
+}
+write_package 13
+printf '%s\n' '{"schema":"qq-observer.analysis","schema_version":1,"run":{"change":"fixture/ledger#13","sessions":["/fixture/session.jsonl"]},"episodes":[],"dropped_signals":[],"limitations":"Fixture."}' \
+  >"$ledger_runs/pr-13/analysis.json"
+write_package 14
+cat >"$ledger_runs/pr-14/analysis.json" <<'JSON'
+{"schema":"qq-observer.analysis","schema_version":1,"run":{"change":"fixture/ledger#14","sessions":["/fixture/session.jsonl"]},"episodes":[{"kind":"waste","title":"Covered finding","sessions":["/fixture/session.jsonl"],"evidence":[{"session":"/fixture/session.jsonl","entries":[1],"quote":"fixture"}],"what_happened":"Fixture.","root_cause":"Fixture.","root_cause_location":"harness-design","cost":{"turns":1,"tokens":1,"duration_ms":1,"source":"facts:/fixture/session.jsonl"},"remedy":{"type":"process","smallest_change":"Fix it."},"confidence":"high","confidence_why":"Fixture.","recurrence_key":"covered-finding","rank":1,"no_signal":false}],"dropped_signals":[],"limitations":"Fixture."}
+JSON
 set +e
 "$OBSERVE" verify-delivery --repo "$ledger_repo" --since "$since" \
-  >"$tmp/ledger-uncovered.json"
+  >"$tmp/analysis-coverage.json"
 status=$?
 set -e
-assert_equal 1 "$status" 'successful analysis without ledger marker counted as covered'
+assert_equal 1 "$status" 'uncovered Change reported healthy delivery'
 jq -e '
   .ok == false and .status == "uncovered Changes present"
-  and .prs == [13] and .covered == [] and .uncovered == [13]
-' "$tmp/ledger-uncovered.json" >/dev/null || fail 'missing ledger marker was not uncovered'
-printf '%s\n' \
-  '{"analysis_sha256":"0000000000000000000000000000000000000000000000000000000000000000","episode_count":0,"schema":"qq-observer.ledger-applied","schema_version":1,"written_at":"2026-01-01T00:00:00.000Z","written_seq":1}' \
-  >"$ledger_run/.ledger-applied"
-set +e
-"$OBSERVE" verify-delivery --repo "$ledger_repo" --since "$since" \
-  >"$tmp/ledger-wrong-hash.json"
-status=$?
-set -e
-assert_equal 1 "$status" 'ledger marker with the wrong analysis hash counted as covered'
-analysis_sha256="$(sha256sum "$ledger_run/analysis.json" | awk '{print $1}')"
-jq -cnS --arg sha "$analysis_sha256" '{
-  analysis_sha256:$sha,episode_count:0,
-  schema:"qq-observer.ledger-applied",schema_version:1,
-  written_at:"2026-01-01T00:00:00.000Z",written_seq:1
-}' >"$ledger_run/.ledger-applied"
-"$OBSERVE" verify-delivery --repo "$ledger_repo" --since "$since" \
-  >"$tmp/ledger-covered.json"
-jq -e '
-  .ok == true and .status == "covered" and .covered == [13]
-  and .analysis_failed == [] and .uncovered == []
-' "$tmp/ledger-covered.json" >/dev/null || fail 'certified empty analysis was not covered'
-
-# Coverage is per package variant: blind findings cannot certify a guided marker,
-# while a zero-episode guided marker remains covered beside blind findings.
-commit_empty "$ledger_repo" 'Blind-only coverage fixture (#14)' "$window_date"
-commit_empty "$ledger_repo" 'Zero guided coverage fixture (#15)' "$window_date"
-commit_empty "$ledger_repo" 'Legacy marker fixture (#16)' "$window_date"
-for pr in 14 15 16; do
-  run="$ledger_runs/pr-$pr"
-  mkdir -p "$run"
-  if [ "$pr" -eq 14 ]; then
-    printf '%s\n' '{"episodes":[{}]}' >"$run/analysis.json"
-  else
-    printf '%s\n' '{"episodes":[]}' >"$run/analysis.json"
-  fi
-  sha="$(sha256sum "$run/analysis.json" | awk '{print $1}')"
-  if [ "$pr" -eq 16 ]; then
-    jq -cnS --arg sha "$sha" '{
-      analysis_sha256:$sha,schema:"qq-observer.ledger-applied",schema_version:1
-    }' >"$run/.ledger-applied"
-  else
-    count=0
-    [ "$pr" -eq 14 ] && count=1
-    jq -cnS --arg sha "$sha" --argjson pr "$pr" --argjson count "$count" '{
-      analysis_sha256:$sha,episode_count:$count,
-      schema:"qq-observer.ledger-applied",schema_version:1,
-      written_at:"2026-01-01T00:00:00.000Z",written_seq:$pr
-    }' >"$run/.ledger-applied"
-  fi
-done
-ledger_events="$XDG_STATE_HOME/qq/observer/ledger/events.jsonl"
-mkdir -p "$(dirname "$ledger_events")"
-for pr in 14 15; do
-  jq -cn --argjson pr "$pr" '{
-    schema:"qq-observer.ledger-event",schema_version:1,written_seq:$pr,
-    ts:"2026-01-01T00:00:00.000Z",type:"finding_seen",pr:$pr,variant:"blind",
-    recurrence_key:("blind-"+($pr|tostring)),kind:"waste",title:"Blind finding",
-    rank:1,confidence:"high",no_signal:false,
-    cost:{turns:1,tokens:1,duration_ms:1}
-  }' >>"$ledger_events"
-done
-set +e
-"$OBSERVE" verify-delivery --repo "$ledger_repo" --since "$since" \
-  >"$tmp/ledger-variant-coverage.json"
-status=$?
-set -e
-assert_equal 1 "$status" 'blind finding or legacy marker produced complete coverage'
-jq -e '
-  .covered == [13,15] and .analysis_failed == [] and .uncovered == [14,16]
-' "$tmp/ledger-variant-coverage.json" >/dev/null \
-  || fail 'delivery coverage was not variant-aware and legacy-fail-closed'
+  and .prs == [13,14,15] and .covered == [13,14]
+  and .analysis_failed == [] and .uncovered == [15]
+' "$tmp/analysis-coverage.json" >/dev/null \
+  || fail 'delivery coverage did not derive from finalized live analyses'
 
 custom_repo="$tmp/custom"
 init_repo "$custom_repo"

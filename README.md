@@ -298,49 +298,6 @@ the same handoff; it cannot re-propose scope or create another batch. Exact
 `MERGED` PR/head/Repository receipts later resolve mapped Tasks. Existing v1
 round handoffs remain recoverable through low-level compatibility commands.
 
-### Local latency observation
-
-`qq-observe` writes append-only JSONL spans to
-`${XDG_STATE_HOME:-$HOME/.local/state}/qq/spans/<repo-name>/spans.jsonl`.
-It refuses a store that resolves inside any Git worktree. There is no daemon,
-network export, or tracked runtime state. Record an engine span directly, or
-import the timestamp range of a Pi session JSONL file:
-
-```bash
-qq-observe record --name execute_tool --phase implementation --actor engine \
-  --start 2026-07-21T10:00:00Z --end 2026-07-21T10:00:01Z
-qq-observe read-session ~/.pi/agent/sessions/--path--/session.jsonl \
-  --phase orientation --actor accountable-session
-```
-
-At each delegate spawn, `qq-delegate` records an `invoke_agent` span and
-injects `QQ_TRACE_ID`, `PI_ROOT_SPAN_ID`, and its new span ID as
-`PI_PARENT_SPAN_ID`. These arbitrary parent environment variables reach the
-plain Pi child, so nested delegate runs correlate automatically when the
-accountable session supplies root context. Observation failures are reported
-but never change the child exit status.
-
-The project extension `.pi/extensions/qq-trace-context.ts` establishes one
-root trace context when an accountable interactive Pi session loads. When the
-variables are absent, it mints `QQ_TRACE_ID` and a session-root span ID, sets
-both `PI_ROOT_SPAN_ID` and `PI_PARENT_SPAN_ID` to that root, and records a
-zero-duration, phase-less `invoke_workflow` structural marker. Explicitly set
-values always win; delegate sessions inherit all three variables through
-`qq-delegate`, so the extension is a no-op there. With no pre-set span context,
-each top-level dispatch is therefore a direct child of the accountable session
-root. The extension logs its IDs once as `[qq-trace-context] trace_id=…
-root_span_id=…`; observation failure is non-fatal.
-
-Use those logged IDs to import the session JSONL's coarse wall-time span into
-the same trace after the session:
-
-```bash
-qq-observe read-session <session.jsonl> --trace-id <trace> --parent-span-id <root>
-```
-
-The accountable session's own phases remain one coarse span, not per-phase
-splits.
-
 On a machine with the retired Skill mount, remove it if it exists (after
 checking it points into this checkout): `rm -r ~/.codex/skills`.
 

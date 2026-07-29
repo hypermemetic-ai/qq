@@ -19,7 +19,6 @@ JSON
 cat >"$run/analysis.json" <<'JSON'
 {"schema":"qq-observer.analysis","schema_version":1,"run":{"change":"fixture/source#4","sessions":["/fixture/session.jsonl"]},"episodes":[{"kind":"waste","title":"Route alpha","sessions":["/fixture/session.jsonl"],"evidence":[{"session":"/fixture/session.jsonl","entries":[1],"quote":"fixture"}],"what_happened":"Fixture.","root_cause":"Fixture.","root_cause_location":"harness-design","cost":{"turns":1,"tokens":1,"duration_ms":1,"source":"facts:/fixture/session.jsonl"},"remedy":{"type":"process","smallest_change":"Route it."},"confidence":"high","confidence_why":"Fixture.","recurrence_key":"alpha","rank":1,"no_signal":false}],"dropped_signals":[],"limitations":"Fixture."}
 JSON
-"$OBSERVE" ledger-update --run "$run" >/dev/null
 # Global Architect context groups exact uncovered occurrences across Repositories.
 second="$XDG_STATE_HOME/qq/observer/runs/by-repository/fixture/other/pr-5"
 mkdir -p "$second"
@@ -27,7 +26,6 @@ cat >"$second/package.json" <<JSON
 {"assembled_at":"2026-08-02T00:00:00Z","branch":"other","merge_commit":"bbbbbbbb","merged_at":"2026-08-02T00:00:00Z","pr":5,"repo":"$ROOT","repository":"fixture/other","schema":"qq-observer.package","schema_version":2,"sessions":[],"unknown_entries":[],"variant":"guided","warnings":[]}
 JSON
 jq '.run.change="fixture/other#5" | .episodes[0].title="Route alpha again" | .episodes += [{"kind":"friction","title":"Leave beta untouched","sessions":["/fixture/session.jsonl"],"evidence":[{"session":"/fixture/session.jsonl","entries":[2],"quote":"beta evidence"}],"what_happened":"Beta.","root_cause":"Beta.","root_cause_location":"harness-design","cost":{"turns":1,"tokens":1,"duration_ms":1,"source":"facts:/fixture/session.jsonl"},"remedy":{"type":"process","smallest_change":"Route beta."},"confidence":"medium","confidence_why":"Fixture.","recurrence_key":"beta","rank":2,"no_signal":false}]' "$run/analysis.json" >"$second/analysis.json"
-"$OBSERVE" ledger-update --run "$second" >/dev/null
 
 # Architect health is a bounded, non-selectable view over Repository-qualified
 # guided rounds whose observation failed or has not completed.
@@ -67,28 +65,10 @@ cp "$second/analysis.json" "$tmp/second-analysis-one-entry.json"
 jq -cS '.episodes[0].evidence[0].entries = [1,2]' \
   "$second/analysis.json" >"$tmp/multi-entry-analysis.json"
 mv "$tmp/multi-entry-analysis.json" "$second/analysis.json"
-# Keep the fixture's ledger marker bound to its own (rewritten) analysis, as a
-# run finalized under the pre-one-entry rule would record it.
-cp "$second/.ledger-applied" "$tmp/marker-original.json"
-new_hash="$(sha256sum "$second/analysis.json" | awk '{print $1}')"
-jq -cS --arg hash "$new_hash" '.analysis_sha256 = $hash' \
-  "$second/.ledger-applied" >"$tmp/marker.json"
-mv "$tmp/marker.json" "$second/.ledger-applied"
 "$OBSERVE" architect-context >"$tmp/multi-entry.out" 2>"$tmp/multi-entry.err" \
   || { cat "$tmp/multi-entry.err" >&2; fail 'Architect context refused a historical multi-entry evidence object'; }
 mv "$tmp/second-analysis-one-entry.json" "$second/analysis.json"
-mv "$tmp/marker-original.json" "$second/.ledger-applied"
 
-# A stale ledger marker must not authorize replaced analysis bytes.
-cp "$second/analysis.json" "$tmp/second-analysis-applied.json"
-jq -cS '.episodes[0].title = "Replaced after ledger application"' "$second/analysis.json" >"$tmp/replaced-analysis.json"
-mv "$tmp/replaced-analysis.json" "$second/analysis.json"
-set +e
-"$OBSERVE" architect-context >"$tmp/stale-ledger.out" 2>"$tmp/stale-ledger.err"
-status=$?
-set -e
-assert_equal 65 "$status" 'stale ledger marker authorized replaced analysis'
-mv "$tmp/second-analysis-applied.json" "$second/analysis.json"
 "$OBSERVE" architect-context >"$tmp/context-health-before.json"
 jq -e '
   .schema == "qq-observer.architect-context" and .schema_version == 3
@@ -110,14 +90,13 @@ jq -cn --arg repo "$ROOT" '{
   schema:"qq-observer.package",schema_version:2,sessions:[],unknown_entries:[],
   variant:"guided",warnings:[]
 }' >"$health_partial/package.json"
-cp "$second/analysis.json" "$health_partial/analysis.json"
 "$OBSERVE" architect-context >"$tmp/context-1.json"
 jq -e --arg before "$health_context_before" '
   .schema == "qq-observer.architect-context" and .schema_version == 3
   and .context_id != $before and (.context_id | test("^context-[0-9a-f]{32}$"))
   and .pending_intakes == [] and .omitted_findings == 0 and (.findings | length) == 2
   and [.observer_health.rounds[] | {status,pr,reason}] == [
-    {status:"pending",pr:13,reason:"successful analysis is not ledger-applied"},
+    {status:"pending",pr:13,reason:"analysis is not finalized"},
     {status:"pending",pr:12,reason:"analysis is not finalized"},
     {status:"analysis_failed",pr:11,reason:("x" * 500)}
   ]
@@ -146,7 +125,6 @@ cat >"$third/package.json" <<JSON
 {"assembled_at":"2026-08-03T00:00:00Z","branch":"third","merge_commit":"cccccccc","merged_at":"2026-08-03T00:00:00Z","pr":6,"repo":"$ROOT","repository":"third/repo","schema":"qq-observer.package","schema_version":2,"sessions":[],"unknown_entries":[],"variant":"guided","warnings":[]}
 JSON
 jq '.run.change="third/repo#6" | .episodes=[.episodes[0]] | .episodes[0].title="Later alpha occurrence"' "$run/analysis.json" >"$third/analysis.json"
-"$OBSERVE" ledger-update --run "$third" >/dev/null
 "$OBSERVE" architect-context >"$tmp/context-3.json"
 jq -e 'any(.findings[]; .recurrence_key == "alpha" and ([.occurrences[].source.repository] | sort) == ["fixture/other","third/repo"])' "$tmp/context-3.json" >/dev/null \
   || fail 'later same-key occurrence did not reopen with exact source identity'
@@ -204,7 +182,6 @@ cat >"$fourth/package.json" <<JSON
 {"assembled_at":"2026-08-04T00:00:00Z","branch":"fourth","merge_commit":"dddddddd","merged_at":"2026-08-04T00:00:00Z","pr":7,"repo":"$ROOT","repository":"fourth/repo","schema":"qq-observer.package","schema_version":2,"sessions":[],"unknown_entries":[],"variant":"guided","warnings":[]}
 JSON
 jq '.run.change="fourth/repo#7" | .episodes=[.episodes[0]] | .episodes[0].title="Pending sibling alpha"' "$run/analysis.json" >"$fourth/analysis.json"
-"$OBSERVE" ledger-update --run "$fourth" >/dev/null
 "$OBSERVE" architect-context >"$tmp/pending-sibling.json"
 jq -e '
   (.pending_intakes | length) == 1
@@ -365,6 +342,8 @@ mv "$tmp/plan-before-stale-check" "$plan_path"
 printf '\n## Implementation Notes\n\nWork started after verified intake.\n' >>"$task_path"
 "$OBSERVE" mark-discussed --run "$run" --outcomes "$accepted" >/dev/null
 [ -f "$run/discussed.json" ] || fail 'verified routed result did not permit explicit discussion mark'
+jq -e 'has("written_seq") | not' "$run/discussed.json" >/dev/null \
+  || fail 'new discussed mark retained a store-order sequence'
 "$OBSERVE" rounds >"$tmp/rounds.json"
 jq -e --arg run "$run" 'any(.[]; .run_dir == $run and .task_ids == ["FEAT-201.3"] and .resolved == false)' "$tmp/rounds.json" >/dev/null \
   || fail 'rounds omitted routed unresolved Task identity'
@@ -378,7 +357,6 @@ for pair in "$historical:8:2026-08-05T00:00:00Z" "$historical_sibling:9:2026-08-
   mkdir -p "$dir"
   jq -cn --arg repo "$ROOT" --argjson pr "$pr" --arg assembled "$assembled" '{assembled_at:$assembled,branch:"history",merge_commit:"eeeeeeee",merged_at:$assembled,pr:$pr,repo:$repo,repository:"history/repo",schema:"qq-observer.package",schema_version:2,sessions:[],unknown_entries:[],variant:"guided",warnings:[]}' >"$dir/package.json"
   jq --argjson pr "$pr" '.run.change=("history/repo#"+($pr|tostring)) | .episodes=[.episodes[0]] | .episodes[0].recurrence_key="historical-key" | .episodes[0].title=("Historical "+($pr|tostring))' "$run/analysis.json" >"$dir/analysis.json"
-  "$OBSERVE" ledger-update --run "$dir" >/dev/null
 done
 printf '[{"recurrence_key":"historical-key","verdict":"rejected","scope":"","note":"Discussed previously."}]\n' >"$tmp/historical-outcomes.json"
 "$OBSERVE" mark-discussed --run "$historical" --outcomes "$tmp/historical-outcomes.json" >/dev/null
@@ -416,7 +394,6 @@ for index in range(55):
 analysis["run"]["change"]="large/repo#10"; analysis["episodes"]=episodes
 with open(sys.argv[2], "w") as target: json.dump(analysis,target,separators=(",",":"),sort_keys=True); target.write("\n")
 PYFIXTURE
-"$OBSERVE" ledger-update --run "$large" >/dev/null
 # More than the health cap remains deterministically summarized without raising
 # the finding cap or context byte bound.
 for pr in $(seq 20 41); do

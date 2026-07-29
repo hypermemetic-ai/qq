@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Emit local qq observation spans and import Pi session JSONL.
+# Analyze local Pi session JSONL and materialize Observer views from run records.
 # shellcheck disable=SC1091
 set -euo pipefail
 
@@ -13,21 +13,16 @@ source "$bin_dir/lib/qq-bin.sh"
 usage() {
   cat >&2 <<'EOF'
 usage:
-  qq-observe id <span|trace>
-  qq-observe record --name NAME --actor ACTOR --start TIME --end TIME [options]
-  qq-observe read-session SESSION.jsonl [--actor ACTOR] [--phase PHASE] [context options]
-  qq-observe summarize [--since TS] [--until TS] [--json]
   qq-observe facts SESSION.jsonl
   qq-observe signals SESSION.jsonl
   qq-observe validate-analysis ANALYSIS.json SESSION.jsonl [SESSION.jsonl...] \
     --facts SESSION_PATH=FACTS_PATH [--facts SESSION_PATH=FACTS_PATH...]
   qq-observe assemble --pr N --repo ROOT [--worktree-root DIR] [--variant guided|blind]
+  qq-observe materialize --run DIR
   qq-observe verify-delivery --repo ROOT [--since ISO]
   qq-observe render-doc --run DIR
   qq-observe finalize --run DIR \
     (--analysis FILE --analyst-trace FILE | --failed REASON [--analyst-trace FILE])
-  qq-observe ledger-update --run DIR
-  qq-observe ledger-rebuild
   qq-observe digest [--since ISO]
   qq-observe architect-context
   qq-observe prepare-handoff --context CONTEXT-ID --decisions FILE.json
@@ -38,42 +33,19 @@ usage:
   qq-observe rounds
   qq-observe record-comparison --guided DIR --blind DIR
 
-context options: --trace-id ID --span-id ID --parent-span-id ID --root-span-id ID
-record options:  --phase PHASE --status STATUS --source SOURCE --attribute KEY=VALUE
-
-qq-dispatch writes raw exit-code status; summarize resolves teardown signals
-from <runtime-root>/async-subagent-runs/<run.id>/status.json at read time:
-complete becomes ok; failed, stopped, or unresolved outcomes remain error.
---json includes each span's raw and resolved status. runtime-root is
-QQ_DISPATCH_RUNTIME_ROOT or ${TMPDIR:-/tmp}/pi-subagents-uid-<uid>.
 facts, signals, and validate-analysis accept Pi v3 session JSONL. Signal
 entries and unknown-entry citations are 1-based physical JSONL line numbers.
 validate-analysis requires one --facts SESSION_PATH=FACTS_PATH pair per session.
 facts emits token fields as integer-rounded accumulated totals (Python half-to-even);
-fields with no observed value remain null. Ledger events are stored at
-<observer-store>/ledger/events.jsonl; durable feed order is carried by each
-source record's written_seq.
+fields with no observed value remain null. Digest and Architect views are
+computed by scanning finalized analyses and their durable run records.
 EOF
   exit 64
 }
 
-random_hex() {
-  local bytes="$1"
-  od -An -N "$bytes" -tx1 /dev/urandom | tr -d ' \n'
-}
-
 case "${1:-}" in
-  id)
-    [ "$#" -eq 2 ] || usage
-    case "$2" in
-      span) random_hex 8 ;;
-      trace) random_hex 16 ;;
-      *) usage ;;
-    esac
-    exit 0
-    ;;
-  record | read-session | summarize | facts | signals | validate-analysis | \
-  assemble | verify-delivery | render-doc | finalize | ledger-update | ledger-rebuild | \
+  facts | signals | validate-analysis | \
+  assemble | materialize | verify-delivery | render-doc | finalize | \
   digest | architect-context | prepare-handoff | record-handoff-result | \
   mark-discussed | resolve-task | rounds | record-comparison) command="$1"; shift ;;
   *) usage ;;
@@ -85,11 +57,9 @@ if ! qq_resolve_bin python3; then
 fi
 python_binary="$QQ_BIN_RESULT"
 
-# Package assembly and delivery commands do not use the span store. Dispatch
-# them before the legacy Repository/store bootstrap so their explicit --repo
-# and --run subjects remain authoritative.
+# Package assembly and delivery commands share one embedded implementation.
 case "$command" in
-  assemble | verify-delivery | render-doc | finalize | ledger-update | ledger-rebuild | \
+  assemble | materialize | verify-delivery | render-doc | finalize | \
   digest | architect-context | prepare-handoff | record-handoff-result | \
   mark-discussed | resolve-task | rounds | record-comparison)
     observer_git=""
@@ -110,7 +80,6 @@ case "$command" in
     fi
     exec "$python_binary" - "$self" "$command" "$observer_git" "$observer_gh" "$@" <<'PY_ASSEMBLER'
 import datetime as dt
-import fcntl
 import hashlib
 import json
 import math
@@ -707,10 +676,9 @@ def assemble_blind(pr, repo, repository, runs_root):
         if not isinstance(label, str) or not SAFE_COMPONENT.fullmatch(label):
             fail("guided package session has an unsafe label", 65)
         guided_session = guided_dir / "sessions" / f"{label}.jsonl"
-        guided_facts = guided_dir / "facts" / f"{label}.json"
-        if not regular_file(guided_session) or not regular_file(guided_facts):
+        if not regular_file(guided_session):
             fail(f"guided package session inputs are incomplete: {label}", 65)
-        row["facts"] = os.fspath(run_dir / "facts" / f"{label}.json")
+        row.pop("facts", None)
         row.pop("signals", None)
 
     package_data = (
@@ -718,7 +686,17 @@ def assemble_blind(pr, repo, repository, runs_root):
     ).encode()
     package_path = run_dir / "package.json"
     if package_path.exists() or package_path.is_symlink():
-        if read_regular(package_path, "blind observer package") != package_data:
+        existing = json_document(
+            read_regular(package_path, "blind observer package"),
+            "blind observer package",
+        )
+        comparable = json.loads(json.dumps(existing)) if isinstance(existing, dict) else None
+        if isinstance(comparable, dict) and isinstance(comparable.get("sessions"), list):
+            for row in comparable["sessions"]:
+                if isinstance(row, dict):
+                    row.pop("facts", None)
+                    row.pop("signals", None)
+        if comparable != blind:
             fail(f"append-only conflict at {package_path}", 65)
         for marker in ("analysis.json", "analysis_failed.json"):
             marker_path = run_dir / marker
@@ -729,7 +707,6 @@ def assemble_blind(pr, repo, repository, runs_root):
 
     ensure_directory(run_dir, runs_root)
     clone_input_tree(guided_dir / "sessions", run_dir / "sessions", runs_root)
-    clone_input_tree(guided_dir / "facts", run_dir / "facts", runs_root)
     atomic_append(
         run_dir / "inventory.json",
         read_regular(guided_dir / "inventory.json", "guided package inventory"),
@@ -808,9 +785,6 @@ def assemble(values):
     )
     ensure_directory(run_dir, runs_root)
     ensure_directory(run_dir / "sessions", runs_root)
-    ensure_directory(run_dir / "facts", runs_root)
-    if variant == "guided":
-        ensure_directory(run_dir / "signals", runs_root)
     package_path = run_dir / "package.json"
     existing_package = False
     if package_path.exists() or package_path.is_symlink():
@@ -860,70 +834,105 @@ def assemble(values):
     if not os.path.isabs(runtime_value):
         fail("dispatch runtime root must be absolute", 65)
     runtime = Path(os.path.realpath(runtime_value))
-    async_root = runtime / "async-subagent-runs"
     selected_runs = {}
-    status_records = {}
+    terminal_records = {}
     unknown = []
     warnings = []
     window_start = merged_at - dt.timedelta(days=30)
     window_end = merged_at + dt.timedelta(days=1)
+    zero_session_id = "00000000-0000-0000-0000-000000000000"
 
-    if async_root.exists():
-        if not async_root.is_dir():
-            fail(f"async run root is not a directory: {async_root}", 65)
-        for entry in sorted(async_root.iterdir(), key=lambda item: item.name):
-            if not entry.is_dir() or entry.is_symlink():
-                append_unknown(unknown, entry, "async run entry is not a directory")
+    if runtime.exists():
+        try:
+            runtime_info = os.lstat(runtime)
+        except OSError as error:
+            fail(f"cannot inspect dispatch runtime root {runtime}: {error}", 65)
+        if not stat.S_ISDIR(runtime_info.st_mode):
+            fail(f"dispatch runtime root is not a directory: {runtime}", 65)
+        try:
+            runtime_entries = sorted(runtime.iterdir(), key=lambda item: item.name)
+        except OSError as error:
+            fail(f"cannot enumerate dispatch runtime root {runtime}: {error}", 65)
+        for entry in runtime_entries:
+            try:
+                entry_info = os.lstat(entry)
+            except OSError:
                 continue
-            run_id = entry.name
-            if not SAFE_COMPONENT.fullmatch(run_id) or run_id in (".", ".."):
-                append_unknown(unknown, entry, "unsafe delegate run ID")
+            if not stat.S_ISDIR(entry_info.st_mode):
                 continue
-            status_path = entry / "status.json"
-            if not regular_file(status_path):
-                append_unknown(unknown, status_path, "missing or non-regular status.json")
+            terminal_path = entry / "TERMINAL"
+            if not regular_file(terminal_path):
+                continue
+            if not SAFE_COMPONENT.fullmatch(entry.name) or entry.name in (".", ".."):
+                append_unknown(unknown, terminal_path, "unsafe delegate run directory")
                 continue
             try:
-                raw = read_regular(status_path, "delegate status")
+                raw = read_regular(terminal_path, "delegate terminal")
                 if len(raw) > STATUS_CAP:
-                    raise ValueError("status.json exceeds size limit")
-                status_record = json.loads(
+                    raise ValueError("TERMINAL exceeds size limit")
+                terminal = json.loads(
                     raw.decode("utf-8"),
                     parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
                 )
-                if not isinstance(status_record, dict):
+                if not isinstance(terminal, dict):
                     raise ValueError("top level is not an object")
-                session_id = status_record.get("sessionId")
-                cwd_value = status_record.get("cwd")
-                if not isinstance(session_id, str):
-                    raise ValueError("sessionId is not a string")
+                run_id = terminal.get("run_id")
+                agent = terminal.get("agent")
+                cwd_value = terminal.get("cwd")
+                exit_code = terminal.get("exit_code")
+                run_dir_value = terminal.get("run_dir")
+                sessions_dir_value = terminal.get("sessions_dir")
+                if terminal.get("schema") != "qq-run-terminal" or terminal.get("version") != 2:
+                    raise ValueError("schema or version is invalid")
+                if (
+                    not isinstance(run_id, str)
+                    or not SAFE_COMPONENT.fullmatch(run_id)
+                    or run_id in (".", "..")
+                ):
+                    raise ValueError("run_id is unsafe")
+                if not isinstance(agent, str):
+                    raise ValueError("agent is not a string")
                 if not isinstance(cwd_value, str) or not os.path.isabs(cwd_value):
                     raise ValueError("cwd is not an absolute path")
-                started_at = time_value(status_record.get("startedAt"))
-                last_activity = status_record.get("lastActivityAt")
-                if (
-                    isinstance(last_activity, bool)
-                    or not isinstance(last_activity, (int, float))
-                    or not math.isfinite(last_activity)
-                    or not isinstance(status_record.get("mode"), str)
-                    or not isinstance(status_record.get("isNested"), bool)
-                    or not isinstance(status_record.get("state"), str)
-                ):
-                    raise ValueError("status metadata has the wrong shape")
-                parent, parent_issue = accountable_session(session_id)
+                if isinstance(exit_code, bool) or not isinstance(exit_code, int):
+                    raise ValueError("exit_code is not an integer")
+                started_at = time_value(terminal.get("started_at"))
+                time_value(terminal.get("ended_at"))
+                if not isinstance(terminal.get("timed_out"), bool):
+                    raise ValueError("timed_out is not a boolean")
+                if not isinstance(run_dir_value, str) or not os.path.isabs(run_dir_value):
+                    raise ValueError("run_dir is not an absolute path")
+                if Path(os.path.realpath(run_dir_value)) != Path(os.path.realpath(entry)):
+                    raise ValueError("run_dir does not name the containing directory")
+                if not isinstance(sessions_dir_value, str) or not os.path.isabs(sessions_dir_value):
+                    raise ValueError("sessions_dir is not an absolute path")
+                if run_id in terminal_records:
+                    raise ValueError("run_id is duplicated")
+                if "parent_session" not in terminal or terminal.get("parent_session") in ("", zero_session_id):
+                    parent = None
+                    parent_issue = None
+                    parent_unavailable = True
+                else:
+                    parent_session = terminal.get("parent_session")
+                    if not isinstance(parent_session, str):
+                        raise ValueError("parent_session is not a string")
+                    parent, parent_issue = accountable_session(parent_session)
+                    parent_unavailable = False
             except (OSError, UnicodeDecodeError, ValueError, RecursionError):
-                append_unknown(unknown, status_path, "malformed delegate status.json")
+                append_unknown(unknown, terminal_path, "malformed delegate TERMINAL")
                 continue
-            if parent_issue is not None:
-                append_unknown(unknown, status_path, parent_issue)
+            if parent_unavailable:
+                warnings.append(f"delegate {run_id} accountable session is unavailable")
+            elif parent_issue is not None:
+                append_unknown(unknown, terminal_path, parent_issue)
                 warnings.append(
                     f"delegate {run_id} accountable session is unavailable: {parent_issue}"
                 )
             cwd_path = Path(os.path.realpath(cwd_value))
-            status_records[run_id] = {
-                "path": status_path, "parent": parent, "cwd": cwd_path,
+            terminal_records[run_id] = {
+                "path": terminal_path, "parent": parent, "cwd": cwd_path,
                 "started": started_at,
-                "session_file": status_record.get("sessionFile"),
+                "sessions_dir": Path(os.path.realpath(sessions_dir_value)),
             }
 
             live_common = None
@@ -952,11 +961,11 @@ def assemble(values):
                 except UnicodeDecodeError:
                     observed_branch = ""
                 if observed_branch == branch:
-                    selected_runs[run_id] = "named-branch-status-lineage"
+                    selected_runs[run_id] = "named-branch-terminal-lineage"
                 else:
                     append_unknown(
-                        unknown, status_path,
-                        "delegate status names another branch in this Repository",
+                        unknown, terminal_path,
+                        "delegate terminal names another branch in this Repository",
                     )
                     warnings.append(
                         f"delegate {run_id} is outside the explicit named-branch lineage"
@@ -964,14 +973,12 @@ def assemble(values):
                 continue
             if within(cwd_path, worktree_root) and window_start <= started_at <= window_end:
                 append_unknown(
-                    unknown, status_path,
-                    "delegate status does not verify the named branch checkout",
+                    unknown, terminal_path,
+                    "delegate terminal does not verify the named branch checkout",
                 )
                 warnings.append(
                     f"delegate {run_id} is outside the explicit named-branch lineage"
                 )
-    elif async_root.is_symlink():
-        fail(f"async run root is not a directory: {async_root}", 65)
 
     session_rows = []
     session_sources = set()
@@ -1010,30 +1017,43 @@ def assemble(values):
         session_rows.append(row)
 
     for run_id in sorted(selected_runs):
-        parent = status_records[run_id]["parent"]
+        parent = terminal_records[run_id]["parent"]
         if parent is not None:
             stem = parent.stem
             identifier = stem.rsplit("_", 1)[-1]
             add_session(parent, f"accountable-{identifier}", "accountable", "parent-of-delegate")
 
     for run_id in sorted(selected_runs):
-        record = status_records[run_id]
-        session_file_value = record["session_file"]
-        if not isinstance(session_file_value, str) or not os.path.isabs(session_file_value):
+        record = terminal_records[run_id]
+        sessions_dir = record["sessions_dir"]
+        session_files = []
+        try:
+            sessions_info = os.lstat(sessions_dir)
+            if stat.S_ISDIR(sessions_info.st_mode):
+                for candidate in sessions_dir.rglob("*.jsonl"):
+                    try:
+                        candidate_info = os.lstat(candidate)
+                    except OSError:
+                        continue
+                    if stat.S_ISREG(candidate_info.st_mode):
+                        session_files.append((candidate_info.st_mtime_ns, os.fspath(candidate), candidate))
+        except (OSError, RuntimeError, ValueError):
+            session_files = []
+        if not session_files:
             append_unknown(
                 unknown, record["path"],
-                "delegate sessionFile is missing or not an absolute path",
+                "delegate sessions_dir contains no regular JSONL session",
             )
             warnings.append(f"delegate {run_id} has no valid explicit sessionFile lineage")
             continue
-        session_file = Path(os.path.realpath(session_file_value))
+        session_file = max(session_files)[2]
         add_session(
             session_file, f"delegate-{run_id}-primary", "delegate",
             selected_runs[run_id], run_id=run_id,
         )
 
     if not selected_runs:
-        warnings.append("no delegate runs have explicit named-branch status lineage")
+        warnings.append("no delegate runs have explicit named-branch terminal lineage")
 
     session_rows.sort(key=lambda row: (0 if row["role"] == "accountable" else 1, row["label"]))
     packaged_sessions = []
@@ -1041,33 +1061,13 @@ def assemble(values):
         label = row["label"]
         source = row["source"]
         session_rel = f"sessions/{label}.jsonl"
-        facts_rel = f"facts/{label}.json"
-        signals_rel = f"signals/{label}.json"
         atomic_append(run_dir / session_rel, read_regular(source, "selected session transcript"))
-        derivatives = [("facts", facts_rel)]
-        if variant == "guided":
-            derivatives.append(("signals", signals_rel))
-        for subcommand, relative in derivatives:
-            process = run_process(
-                [self_path, subcommand, os.fspath(run_dir / session_rel)],
-                f"qq-observe {subcommand}", cwd=repo,
-            )
-            if process.returncode != 0:
-                detail = process.stderr.decode("utf-8", "replace").strip()
-                fail(f"qq-observe {subcommand} failed for {source}{': ' + detail if detail else ''}")
-            json_document(process.stdout, f"{subcommand} output for {source}")
-            atomic_append(run_dir / relative, process.stdout)
         package_row = {
             "label": label,
             "source_path": os.fspath(source),
             "role": row["role"],
             "evidence": row["evidence"],
-            "facts": os.fspath((run_dir / facts_rel).resolve(strict=True)),
         }
-        if variant == "guided":
-            package_row["signals"] = os.fspath(
-                (run_dir / signals_rel).resolve(strict=True)
-            )
         if "run_id" in row:
             package_row["run_id"] = row["run_id"]
         packaged_sessions.append(package_row)
@@ -1155,6 +1155,101 @@ def assemble(values):
     })
 
 
+def materialize(values):
+    options = parse_flags(values, {"--run"})
+    if set(options) != {"--run"}:
+        fail("materialize requires --run")
+    run_dir = run_directory(options["--run"])
+    package_path = run_dir / "package.json"
+    package = json_document(
+        read_regular(package_path, f"observer package in run {run_dir}"),
+        f"observer package in run {run_dir}",
+    )
+    if not isinstance(package, dict) or package.get("schema") != "qq-observer.package":
+        fail(f"observer package has the wrong shape in run {run_dir}", 65)
+    version = package.get("schema_version")
+    if version == 1:
+        fail(f"cannot materialize legacy v1 observer package in run {run_dir}", 65)
+    if isinstance(version, bool) or version != 2:
+        fail(f"observer package has an unsupported schema_version in run {run_dir}", 65)
+    identity = package_metadata(run_dir)
+    variant = identity["variant"]
+    sessions = package.get("sessions")
+    if not isinstance(sessions, list):
+        fail(f"observer package has no session list in run {run_dir}", 65)
+
+    labels = set()
+    for row in sessions:
+        if not isinstance(row, dict):
+            fail(f"observer package session has the wrong shape in run {run_dir}", 65)
+        label = row.get("label")
+        if (
+            not isinstance(label, str)
+            or not SAFE_COMPONENT.fullmatch(label)
+            or label in (".", "..")
+            or label in labels
+        ):
+            fail(f"observer package session has an unsafe or duplicate label in run {run_dir}", 65)
+        labels.add(label)
+        session_path = run_dir / "sessions" / f"{label}.jsonl"
+        if not regular_file(session_path):
+            fail(f"session transcript is missing for {label} in run {run_dir}", 65)
+        derivatives = [("facts", run_dir / "facts" / f"{label}.json")]
+        if variant == "guided":
+            derivatives.append(("signals", run_dir / "signals" / f"{label}.json"))
+        for subcommand, destination in derivatives:
+            process = run_process(
+                [self_path, subcommand, os.fspath(session_path)],
+                f"qq-observe {subcommand}", cwd=Path(identity["repo"]),
+            )
+            if process.returncode != 0:
+                detail = process.stderr.decode("utf-8", "replace").strip()
+                fail(
+                    f"qq-observe {subcommand} failed for session {label} in run {run_dir}"
+                    f"{': ' + detail if detail else ''}",
+                    65,
+                )
+            try:
+                json.loads(
+                    process.stdout.decode("utf-8"),
+                    parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
+                )
+            except (UnicodeDecodeError, ValueError, RecursionError) as error:
+                fail(
+                    f"qq-observe {subcommand} emitted invalid JSON for session {label} "
+                    f"in run {run_dir}: {error}",
+                    65,
+                )
+            atomic_append(destination, process.stdout)
+        row["facts"] = os.fspath(run_dir / "facts" / f"{label}.json")
+        if variant == "guided":
+            row["signals"] = os.fspath(run_dir / "signals" / f"{label}.json")
+        else:
+            row.pop("signals", None)
+
+    package_data = canonical_json_bytes(package)
+    temporary = package_path.with_name(
+        f".{package_path.name}.materialize-{os.getpid()}-{os.urandom(8).hex()}"
+    )
+    try:
+        atomic_append(temporary, package_data)
+        os.replace(temporary, package_path)
+        directory = os.open(package_path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+    emit({
+        "status": "materialized", "run_dir": os.fspath(run_dir),
+        "sessions": len(sessions),
+    })
+
+
 def canonical_analysis_failure_reason(path):
     if not regular_file(path):
         return None
@@ -1224,22 +1319,13 @@ def verify_delivery(values):
     prs = sorted(prs)
     runs_root = observer_runs_root(create=False)
     finding_counts = {}
-    events_path = runs_root.parent / "ledger" / "events.jsonl"
-    if os.path.lexists(events_path):
-        if not regular_file(events_path):
-            fail(f"ledger event store is not a regular file: {events_path}", 65)
-        fd = open_ledger_events()
-        try:
-            events, _ = read_ledger_events(fd)
-        finally:
-            close_ledger_events(fd)
-        for event in events:
-            if (
-                event["type"] == "finding_seen" and "variant" in event
-                and event.get("repository") == repository
-            ):
-                identity = (repository, event["pr"], event["variant"])
-                finding_counts[identity] = finding_counts.get(identity, 0) + 1
+    for event in materialize_ledger()["events"]:
+        if (
+            event["type"] == "finding_seen" and "variant" in event
+            and event.get("repository") == repository
+        ):
+            identity = (repository, event["pr"], event["variant"])
+            finding_counts[identity] = finding_counts.get(identity, 0) + 1
     covered = []
     analysis_failed = []
     uncovered = []
@@ -1248,21 +1334,16 @@ def verify_delivery(values):
         analyzed = False
         analysis_path = run / "analysis.json"
         failure_path = run / "analysis_failed.json"
-        marker_path = run / ".ledger-applied"
         analysis_present = os.path.lexists(analysis_path)
         failure_present = os.path.lexists(failure_path)
-        marker_present = os.path.lexists(marker_path)
-        if regular_file(analysis_path) and regular_file(marker_path):
-            raw = read_regular(analysis_path, "finalized analysis")
-            marker = json_document(
-                read_regular(marker_path, "ledger-applied marker"),
-                "ledger-applied marker",
-            )
-            analysis_sha256 = hashlib.sha256(raw).hexdigest()
+        if regular_file(analysis_path) and not failure_present:
+            analysis = minimal_analysis(json_document(
+                read_regular(analysis_path, "finalized analysis"),
+                "finalized analysis",
+            ))
             analyzed = (
-                valid_ledger_marker(marker, analysis_sha256)
-                and "episode_count" in marker
-                and finding_counts.get((repository, pr, "guided"), 0) == marker["episode_count"]
+                finding_counts.get((repository, pr, "guided"), 0)
+                == len(analysis["episodes"])
             )
         failure_reason = canonical_analysis_failure_reason(failure_path)
         if analyzed and not failure_present:
@@ -1270,7 +1351,6 @@ def verify_delivery(values):
         elif (
             failure_reason is not None
             and not analysis_present
-            and not marker_present
         ):
             analysis_failed.append(pr)
         else:
@@ -1394,7 +1474,6 @@ def minimal_analysis(item):
     return item
 
 
-LEDGER_SCHEMA = "qq-observer.ledger-event"
 LEDGER_VERSION = 2
 COMPARISON_SCHEMA = "qq-observer.comparison"
 COMPARISON_VERSION = 2
@@ -1753,7 +1832,7 @@ def valid_ledger_event(item):
     version = item.get("schema_version") if isinstance(item, dict) else None
     if (
         not isinstance(item, dict)
-        or item.get("schema") != LEDGER_SCHEMA
+        or item.get("schema") != "qq-observer.ledger-event"
         or version not in (1, 2)
         or not isinstance(item.get("ts"), str)
         or not isinstance(item.get("type"), str)
@@ -1838,39 +1917,6 @@ def valid_ledger_event(item):
 
 
 
-def valid_ledger_marker(item, analysis_sha256):
-    legacy = {"schema", "schema_version", "analysis_sha256"}
-    current = legacy | {"written_at", "written_seq", "episode_count"}
-    if (
-        not isinstance(item, dict)
-        or set(item) not in (legacy, legacy | {"written_at"}, legacy | {
-            "written_at", "written_seq",
-        }, current)
-        or item.get("schema") != "qq-observer.ledger-applied"
-        or item.get("schema_version") != 1
-        or item.get("analysis_sha256") != analysis_sha256
-        or ("written_seq" in item and not valid_written_seq(item["written_seq"]))
-        or (
-            "episode_count" in item
-            and (
-                not isinstance(item["episode_count"], int)
-                or isinstance(item["episode_count"], bool)
-                or item["episode_count"] < 0
-            )
-        )
-    ):
-        return False
-    if "written_at" not in item:
-        return True
-    if not isinstance(item["written_at"], str):
-        return False
-    try:
-        time_value(item["written_at"])
-    except ValueError:
-        return False
-    return True
-
-
 def valid_comparison_record(item):
     required = {
         "schema", "schema_version", "guided", "blind", "written_at", "candidates",
@@ -1906,12 +1952,10 @@ def valid_comparison_record(item):
         if set(candidate) not in (required_candidate, required_candidate | {"signal_kind"}):
             return False
         event = {
-            "schema": LEDGER_SCHEMA, "schema_version": version,
+            "schema": "qq-observer.ledger-event", "schema_version": version,
             "ts": item["written_at"], "type": "signal_tune_candidate", **source_names_for(item),
             **candidate,
         }
-        if "written_seq" in item:
-            event["written_seq"] = item["written_seq"]
         if not valid_ledger_event(event):
             return False
         identity = json.dumps(candidate, separators=(",", ":"), sort_keys=True)
@@ -1932,7 +1976,7 @@ def source_names_for(item):
 
 def ledger_event(event_type, **fields):
     return {
-        "schema": LEDGER_SCHEMA, "schema_version": LEDGER_VERSION,
+        "schema": "qq-observer.ledger-event", "schema_version": LEDGER_VERSION,
         "ts": utc_now(), "type": event_type, **fields,
     }
 
@@ -1943,333 +1987,6 @@ def mtime_timestamp(info):
         microseconds=nanoseconds // 1000,
     )
     return value.isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
-def maximum_recorded_sequence():
-    maximum = 0
-    for run_dir in observer_run_directories():
-        for name in (".ledger-applied", "discussed.json", "comparison.json"):
-            path = run_dir / name
-            if not os.path.lexists(path):
-                continue
-            record = json_document(
-                read_regular(path, f"feed record {path}"), f"feed record {path}",
-            )
-            if not isinstance(record, dict):
-                fail(f"feed record has the wrong shape: {path}", 65)
-            if "written_seq" not in record:
-                continue
-            written_seq = record["written_seq"]
-            if not valid_written_seq(written_seq):
-                fail(f"invalid written_seq at {path}", 65)
-            maximum = max(maximum, written_seq)
-    events_path = observer_store_root(create=True) / "ledger" / "events.jsonl"
-    if os.path.lexists(events_path):
-        fd = open_ledger_events()
-        try:
-            events, _ = read_ledger_events(fd)
-        finally:
-            close_ledger_events(fd)
-        for event in events:
-            if "written_seq" in event:
-                maximum = max(maximum, event["written_seq"])
-    return maximum
-
-
-def read_high_water():
-    path = observer_store_root(create=True) / "ledger" / ".high-water"
-    if not os.path.lexists(os.fspath(path)):
-        return 0
-    raw = read_regular(path, "ledger high-water")
-    try:
-        text = raw.decode("ascii").strip()
-    except UnicodeDecodeError:
-        fail("ledger high-water is not ASCII", 65)
-    if not re.fullmatch(r"[0-9]{1,19}", text):
-        fail("ledger high-water is not a non-negative integer", 65)
-    return int(text)
-
-
-def replace_file(path, data):
-    path = Path(path)
-    ensure_directory(path.parent)
-    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-    temporary = None
-    try:
-        name = f".{path.name}.tmp-{os.getpid()}-{os.urandom(8).hex()}"
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-        try:
-            fd = os.open(name, flags, 0o600, dir_fd=directory)
-            temporary = name
-        except FileExistsError:
-            fail(f"cannot allocate temporary file for {path}", 65)
-        try:
-            view = memoryview(data)
-            while view:
-                written = os.write(fd, view)
-                view = view[written:]
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        os.rename(temporary, path.name, src_dir_fd=directory, dst_dir_fd=directory)
-        os.fsync(directory)
-    finally:
-        if temporary is not None:
-            try:
-                os.unlink(temporary, dir_fd=directory)
-            except FileNotFoundError:
-                pass
-        os.close(directory)
-
-
-def next_feed_sequence():
-    # Every caller holds the store-wide writer lock. The high-water file is
-    # the one ledger-state value that is never derived: it records the
-    # greatest sequence ever allocated, surviving record deletion and
-    # full-view rebuilds. Removing the whole ledger directory (the
-    # documented recovery path) resets it to the surviving records' maximum.
-    allocated = max(read_high_water(), maximum_recorded_sequence()) + 1
-    replace_file(
-        observer_store_root(create=True) / "ledger" / ".high-water",
-        f"{allocated}\n".encode("ascii"),
-    )
-    return allocated
-
-
-def open_ledger_writer_lock():
-    root = observer_store_root(create=True)
-    ledger_dir = root / "ledger"
-    ensure_directory(ledger_dir, root)
-    path = ledger_dir / ".lock"
-    try:
-        info = os.lstat(path)
-    except FileNotFoundError:
-        info = None
-    except OSError as error:
-        fail(f"cannot inspect ledger writer lock: {error}", 65)
-    if info is not None and not stat.S_ISREG(info.st_mode):
-        fail("ledger writer lock is not a regular file", 65)
-    directory = None
-    try:
-        directory = os.open(ledger_dir, os.O_RDONLY | os.O_DIRECTORY)
-        resolved = os.path.realpath(f"/proc/self/fd/{directory}")
-        if resolved != os.fspath(ledger_dir):
-            fail("ledger directory changed during writer lock open", 65)
-        flags = os.O_RDWR | os.O_CREAT | os.O_NONBLOCK
-        flags |= getattr(os, "O_NOFOLLOW", 0)
-        fd = os.open(path.name, flags, 0o600, dir_fd=directory)
-    except OSError as error:
-        fail(f"cannot open ledger writer lock: {error}", 65)
-    finally:
-        if directory is not None:
-            os.close(directory)
-    if not stat.S_ISREG(os.fstat(fd).st_mode):
-        os.close(fd)
-        fail("ledger writer lock is not a regular file", 65)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-    except OSError as error:
-        os.close(fd)
-        fail(f"cannot acquire ledger writer lock: {error}", 65)
-    return fd
-
-
-def close_ledger_writer_lock(fd):
-    try:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-    finally:
-        os.close(fd)
-
-
-def open_ledger_events():
-    root = observer_store_root(create=True)
-    ledger_dir = root / "ledger"
-    ensure_directory(ledger_dir, root)
-    path = ledger_dir / "events.jsonl"
-    try:
-        info = os.lstat(path)
-    except FileNotFoundError:
-        info = None
-    except OSError as error:
-        fail(f"cannot inspect ledger event store: {error}", 65)
-    if info is not None and not stat.S_ISREG(info.st_mode):
-        fail("ledger event store is not a regular file", 65)
-    directory = None
-    try:
-        directory = os.open(ledger_dir, os.O_RDONLY | os.O_DIRECTORY)
-        resolved = os.path.realpath(f"/proc/self/fd/{directory}")
-        if resolved != os.fspath(ledger_dir):
-            fail("ledger directory changed during open", 65)
-        flags = os.O_RDWR | os.O_CREAT | os.O_NONBLOCK
-        flags |= getattr(os, "O_NOFOLLOW", 0)
-        fd = os.open(path.name, flags, 0o600, dir_fd=directory)
-    except OSError as error:
-        fail(f"cannot open ledger event store: {error}", 65)
-    finally:
-        if directory is not None:
-            os.close(directory)
-    if not stat.S_ISREG(os.fstat(fd).st_mode):
-        os.close(fd)
-        fail("ledger event store is not a regular file", 65)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_SH)
-    except OSError as error:
-        os.close(fd)
-        fail(f"cannot lock ledger event store: {error}", 65)
-    return fd
-
-
-def close_ledger_events(fd):
-    try:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-    finally:
-        os.close(fd)
-
-
-def read_ledger_events(fd, since=None):
-    try:
-        os.lseek(fd, 0, os.SEEK_SET)
-        chunks = []
-        while True:
-            chunk = os.read(fd, 1024 * 1024)
-            if not chunk:
-                break
-            chunks.append(chunk)
-    except OSError as error:
-        fail(f"cannot read ledger event store: {error}", 65)
-    events = []
-    unknown = 0
-    for raw in b"".join(chunks).splitlines():
-        try:
-            item = json.loads(
-                raw.decode("utf-8"),
-                parse_constant=lambda value: (_ for _ in ()).throw(
-                    ValueError(f"invalid JSON constant: {value}")
-                ),
-            )
-        except (UnicodeDecodeError, ValueError, RecursionError):
-            unknown += 1
-            continue
-        if not valid_ledger_event(item):
-            unknown += 1
-            continue
-        if since is not None and time_value(item["ts"]) < since:
-            continue
-        events.append(item)
-    events.sort(key=lambda event: (
-        "written_seq" in event, event.get("written_seq", 0),
-    ))
-    return events, unknown
-
-
-def ledger_event_bytes(event):
-    return (json.dumps(event, separators=(",", ":"), sort_keys=True) + "\n").encode(
-        "utf-8",
-    )
-
-
-def replace_ledger_events(events):
-    root = observer_store_root(create=True)
-    ledger_dir = root / "ledger"
-    ensure_directory(ledger_dir, root)
-    path = ledger_dir / "events.jsonl"
-    try:
-        info = os.lstat(path)
-    except FileNotFoundError:
-        info = None
-    except OSError as error:
-        fail(f"cannot inspect ledger event store: {error}", 65)
-    if info is not None and not stat.S_ISREG(info.st_mode):
-        fail("ledger event store is not a regular file", 65)
-    data = b"".join(ledger_event_bytes(event) for event in events)
-    directory = os.open(ledger_dir, os.O_RDONLY | os.O_DIRECTORY)
-    temporary = None
-    try:
-        for _ in range(100):
-            temporary = f".events.jsonl.tmp-{os.getpid()}-{os.urandom(8).hex()}"
-            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-            try:
-                fd = os.open(temporary, flags, 0o600, dir_fd=directory)
-                break
-            except FileExistsError:
-                continue
-        else:
-            fail("cannot allocate temporary ledger event store", 65)
-        try:
-            view = memoryview(data)
-            while view:
-                view = view[os.write(fd, view):]
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        os.replace(temporary, path.name, src_dir_fd=directory, dst_dir_fd=directory)
-        temporary = None
-        os.fsync(directory)
-    except OSError as error:
-        fail(f"cannot replace ledger event store: {error}", 65)
-    finally:
-        if temporary is not None:
-            try:
-                os.unlink(temporary, dir_fd=directory)
-            except FileNotFoundError:
-                pass
-        os.close(directory)
-
-
-def persist_ledger_marker(run_dir):
-    analysis_path = run_dir / "analysis.json"
-    if not regular_file(analysis_path):
-        fail(f"finalized analysis is missing: {analysis_path}", 65)
-    raw = read_regular(analysis_path, "finalized analysis")
-    analysis = minimal_analysis(json_document(raw, "finalized analysis"))
-    identity = package_metadata(run_dir, require_timestamp=True)
-    if identity["legacy"]:
-        fail("legacy observer runs are read-only", 65)
-    marker = run_dir / ".ledger-applied"
-    analysis_sha256 = hashlib.sha256(raw).hexdigest()
-    old_marker = existing_bytes(marker)
-    if old_marker is not None:
-        marker_record = json_document(old_marker, "ledger-applied marker")
-        canonical_marker = ledger_event_bytes(marker_record)
-        if (
-            not valid_ledger_marker(marker_record, analysis_sha256)
-            or old_marker != canonical_marker
-        ):
-            fail(f"append-only conflict at {marker}", 65)
-        return marker_record, False
-    marker_record = {
-        "schema": "qq-observer.ledger-applied", "schema_version": 1,
-        "analysis_sha256": analysis_sha256,
-        "episode_count": len(analysis["episodes"]),
-        "written_at": utc_now(), "written_seq": next_feed_sequence(),
-    }
-    atomic_append(marker, ledger_event_bytes(marker_record))
-    return marker_record, True
-
-
-def ledger_update_run(run_dir):
-    marker, marker_written = persist_ledger_marker(run_dir)
-    result = materialize_ledger()
-    source_events = [
-        event for event in result.pop("_added_events")
-        if event.get("written_seq") == marker.get("written_seq")
-    ]
-    findings = sum(event["type"] == "finding_seen" for event in source_events)
-    promoted = sum(event["type"] == "promoted" for event in source_events)
-    return {
-        "findings": findings, "promoted": promoted,
-        "events_skipped": marker.get("episode_count", 0) - findings,
-        "already_applied": not marker_written and not findings and not promoted,
-    }
-
-
-def ledger_update(values):
-    options = parse_flags(values, {"--run"})
-    if "--run" not in options:
-        fail("ledger-update requires --run")
-    run_dir = run_directory(options["--run"])
-    result = ledger_update_run(run_dir)
-    emit({"status": "updated", "run_dir": os.fspath(run_dir), **result})
 
 
 def comparison_candidate_content(event):
@@ -2299,34 +2016,21 @@ def replay_record_metadata(path, info, field, label):
         timestamp_value = time_value(timestamp)
     except ValueError:
         fail(f"invalid internal timestamp at {path}", 65)
-    has_written_seq = isinstance(record, dict) and "written_seq" in record
-    written_seq = record["written_seq"] if has_written_seq else None
-    if has_written_seq and not valid_written_seq(written_seq):
-        fail(f"invalid written_seq at {path}", 65)
-    return timestamp, timestamp_value, written_seq
+    return timestamp, timestamp_value
 
 
 def materialize_findings(
-    run_dir, written_seq, events, seen_findings, seen_promotions, sources_by_key,
+    run_dir, events, seen_findings, seen_promotions, sources_by_key,
     kinds_by_key,
 ):
     analysis_path = run_dir / "analysis.json"
     raw = read_regular(analysis_path, "finalized analysis")
     analysis = minimal_analysis(json_document(raw, "finalized analysis"))
-    marker_path = run_dir / ".ledger-applied"
-    marker_raw = read_regular(marker_path, "ledger-applied marker")
-    marker = json_document(marker_raw, "ledger-applied marker")
-    if (
-        not valid_ledger_marker(marker, hashlib.sha256(raw).hexdigest())
-        or marker_raw != ledger_event_bytes(marker)
-    ):
-        fail(f"invalid ledger-applied marker at {marker_path}", 65)
     pr, variant, timestamp = package_identity(run_dir, require_timestamp=True)
     source_fields = package_source_fields(run_dir)
     timestamp = time_value(timestamp).isoformat(timespec="milliseconds").replace(
         "+00:00", "Z",
     )
-    sequence_fields = {} if written_seq is None else {"written_seq": written_seq}
     for index, episode in enumerate(analysis["episodes"], 1):
         confidence = episode["confidence"]
         key = episode["recurrence_key"]
@@ -2342,7 +2046,6 @@ def materialize_findings(
             rank=episode.get("rank", index), confidence=confidence,
             no_signal=episode.get("no_signal", False),
             cost={field: cost[field] for field in ("turns", "tokens", "duration_ms")},
-            **sequence_fields,
         )
         if not valid_ledger_event(event):
             fail(f"analysis episode {index} cannot be represented as a ledger event", 65)
@@ -2377,12 +2080,12 @@ def materialize_findings(
         if len(sources) >= 2 and key not in seen_promotions:
             events.append(ledger_event(
                 "promoted", ts=timestamp, recurrence_key=key,
-                kind=kinds_by_key[key], sources=sources, **sequence_fields,
+                kind=kinds_by_key[key], sources=sources,
             ))
             seen_promotions.add(key)
 
 
-def materialize_disposition(run_dir, timestamp, written_seq, events, seen):
+def materialize_disposition(run_dir, timestamp, events, seen):
     path = run_dir / "discussed.json"
     mark = json_document(read_regular(path, "discussed mark"), "discussed mark")
     pr, package_variant, _ = package_identity(run_dir)
@@ -2401,16 +2104,15 @@ def materialize_disposition(run_dir, timestamp, written_seq, events, seen):
     )
     if identity in seen:
         return
-    sequence_fields = {} if written_seq is None else {"written_seq": written_seq}
     note_fields = {"note": mark["note"]} if "note" in mark else {}
     events.append(ledger_event(
         "disposition", ts=timestamp, pr=pr, variant=variant, **source_fields,
-        outcomes=mark["outcomes"], **note_fields, **sequence_fields,
+        outcomes=mark["outcomes"], **note_fields,
     ))
     seen.add(identity)
 
 
-def materialize_comparison(run_dir, timestamp, written_seq, events, seen):
+def materialize_comparison(run_dir, timestamp, events, seen):
     path = run_dir / "comparison.json"
     record = json_document(read_regular(path, "comparison record"), "comparison record")
     pr, variant, _ = package_identity(run_dir)
@@ -2423,13 +2125,12 @@ def materialize_comparison(run_dir, timestamp, written_seq, events, seen):
         or any(candidate["pr"] != pr for candidate in record.get("candidates", []))
     ):
         fail(f"invalid comparison record at {path}", 65)
-    sequence_fields = {} if written_seq is None else {"written_seq": written_seq}
     for candidate in record["candidates"]:
         identity = (source_key(source_fields, pr), comparison_candidate_identity(candidate))
         if identity in seen:
             continue
         event = ledger_event(
-            "signal_tune_candidate", ts=timestamp, **source_fields, **candidate, **sequence_fields,
+            "signal_tune_candidate", ts=timestamp, **source_fields, **candidate,
         )
         if not valid_ledger_event(event):
             fail(f"invalid comparison candidate at {path}", 65)
@@ -2441,21 +2142,18 @@ def materialize_ledger():
     run_dirs = observer_run_directories()
     replay_items = []
     replayed_runs = set()
-    sequenced_records = {}
     for run_dir in run_dirs:
         run_items = []
-        marker = run_dir / ".ledger-applied"
+        analysis_path = run_dir / "analysis.json"
         if (
-            not regular_file(run_dir / "analysis_failed.json")
-            and regular_file(run_dir / "analysis.json") and regular_file(marker)
+            regular_file(analysis_path)
+            and not os.path.lexists(run_dir / "analysis_failed.json")
         ):
-            info = os.lstat(marker)
-            timestamp, timestamp_value, written_seq = replay_record_metadata(
-                marker, info, "written_at", "ledger-applied marker",
+            info = os.lstat(analysis_path)
+            timestamp, timestamp_value = replay_record_metadata(
+                analysis_path, info, "written_at", "finalized analysis",
             )
-            run_items.append((
-                "finding_seen", marker, info, timestamp, timestamp_value, written_seq,
-            ))
+            run_items.append(("finding_seen", timestamp, timestamp_value))
         for name, kind, field, label in (
             ("discussed.json", "disposition", "ts", "discussed mark"),
             ("comparison.json", "signal_tune_candidate", "written_at", "comparison record"),
@@ -2469,26 +2167,12 @@ def materialize_ledger():
                 fail(f"cannot inspect replay record {path}: {error}", 65)
             if not stat.S_ISREG(info.st_mode):
                 fail(f"replay record is not a regular file: {path}", 65)
-            timestamp, timestamp_value, written_seq = replay_record_metadata(
-                path, info, field, label,
-            )
-            run_items.append((kind, path, info, timestamp, timestamp_value, written_seq))
+            timestamp, timestamp_value = replay_record_metadata(path, info, field, label)
+            run_items.append((kind, timestamp, timestamp_value))
         if run_items:
             pr, _, _ = package_identity(run_dir)
-            for kind, path, info, timestamp, timestamp_value, written_seq in run_items:
-                if written_seq is None:
-                    sort_key = (0, timestamp_value, info.st_mtime_ns, pr, kind)
-                else:
-                    if written_seq in sequenced_records:
-                        fail(
-                            f"duplicate written_seq {written_seq} at "
-                            f"{sequenced_records[written_seq]} and {path}", 65,
-                        )
-                    sequenced_records[written_seq] = path
-                    sort_key = (1, written_seq)
-                replay_items.append((
-                    sort_key, kind, run_dir, timestamp, written_seq,
-                ))
+            for kind, timestamp, timestamp_value in run_items:
+                replay_items.append(((timestamp_value, pr, kind), kind, run_dir, timestamp))
             replayed_runs.add(run_dir)
     replay_items.sort(key=lambda item: item[0])
 
@@ -2499,43 +2183,21 @@ def materialize_ledger():
     seen_candidates = set()
     sources_by_key = {}
     kinds_by_key = {}
-    for _, kind, run_dir, timestamp, written_seq in replay_items:
+    for _, kind, run_dir, timestamp in replay_items:
         if kind == "finding_seen":
             materialize_findings(
-                run_dir, written_seq, events, seen_findings, seen_promotions,
+                run_dir, events, seen_findings, seen_promotions,
                 sources_by_key, kinds_by_key,
             )
         elif kind == "disposition":
-            materialize_disposition(
-                run_dir, timestamp, written_seq, events, seen_dispositions,
-            )
+            materialize_disposition(run_dir, timestamp, events, seen_dispositions)
         else:
-            materialize_comparison(
-                run_dir, timestamp, written_seq, events, seen_candidates,
-            )
+            materialize_comparison(run_dir, timestamp, events, seen_candidates)
 
-    fd = open_ledger_events()
-    try:
-        previous, _ = read_ledger_events(fd)
-    finally:
-        close_ledger_events(fd)
-    previous_bytes = {ledger_event_bytes(event) for event in previous}
-    added_events = [event for event in events if ledger_event_bytes(event) not in previous_bytes]
-    replace_ledger_events(events)
     return {
         "runs_seen": len(run_dirs), "runs_replayed": len(replayed_runs),
-        "events_appended": len(added_events),
-        "events_skipped": len(events) - len(added_events),
-        "_added_events": added_events,
+        "events": events,
     }
-
-
-def ledger_rebuild(values):
-    if values:
-        fail(f"invalid or incomplete option: {values[0]}")
-    result = materialize_ledger()
-    result.pop("_added_events")
-    emit(result)
 
 
 ARCHITECT_CONTEXT_SCHEMA = "qq-observer.architect-context"
@@ -2609,6 +2271,10 @@ def architect_round_identity(run_dir, identity):
     }
 
 
+def occurrence_episode(episode, position):
+    return episode if "rank" in episode else {**episode, "rank": position}
+
+
 def occurrence_identity(source, package_sha256, analysis_sha256, episode):
     immutable = {
         "source": source, "package_sha256": package_sha256, "analysis_sha256": analysis_sha256,
@@ -2637,7 +2303,7 @@ def discussed_analysis_keys(run_dir, identity, analysis):
     if version == 2 and outcomes == []:
         outcomes_valid = mark.get("note") == "no retained episodes"
     if (
-        raw != ledger_event_bytes(mark)
+        raw != canonical_json_bytes(mark)
         or not valid_ledger_event(mark) or mark.get("type") != "disposition"
         or mark.get("pr") != identity["pr"]
         or mark.get("variant", "guided") != identity["variant"]
@@ -2657,22 +2323,14 @@ def all_architect_occurrences():
         identity = package_metadata(run_dir, require_timestamp=True)
         if identity["variant"] != "guided" or not regular_file(run_dir / "analysis.json"):
             continue
-        marker_path = run_dir / ".ledger-applied"
-        if not os.path.lexists(marker_path):
-            continue
-        if not regular_file(marker_path):
-            fail(f"ledger-applied marker is not a regular file: {marker_path}", 65)
         analysis_raw = read_regular(run_dir / "analysis.json", "Architect source analysis")
         analysis = minimal_analysis(json_document(analysis_raw, "Architect source analysis"))
         analysis_sha256 = hashlib.sha256(analysis_raw).hexdigest()
-        marker_raw = read_regular(marker_path, "Architect ledger-applied marker")
-        marker = json_document(marker_raw, "Architect ledger-applied marker")
-        if not valid_ledger_marker(marker, analysis_sha256) or marker_raw != ledger_event_bytes(marker):
-            fail(f"invalid ledger-applied marker at {marker_path}", 65)
         package_sha256 = sha256_file(run_dir / "package.json", "Architect source package")
         source = architect_round_identity(run_dir, identity)
         discussed_keys = discussed_analysis_keys(run_dir, identity, analysis)
-        for episode in analysis["episodes"]:
+        for position, source_episode in enumerate(analysis["episodes"], 1):
+            episode = occurrence_episode(source_episode, position)
             occurrence_id = occurrence_identity(source, package_sha256, analysis_sha256, episode)
             occurrences.append({
                 "occurrence_id": occurrence_id,
@@ -2796,7 +2454,11 @@ def validate_global_batch(item, raw, batch_dir, require_handoff=None):
             read_regular(run_dir / "analysis.json", "Architect batch source analysis"),
             "Architect batch source analysis",
         ))
-        matches = [episode for episode in analysis["episodes"] if episode.get("recurrence_key") == occurrence["recurrence_key"] and episode == occurrence["episode"]]
+        matches = [
+            episode for position, source_episode in enumerate(analysis["episodes"], 1)
+            if (episode := occurrence_episode(source_episode, position)).get("recurrence_key")
+            == occurrence["recurrence_key"] and episode == occurrence["episode"]
+        ]
         if len(matches) != 1 or occurrence_identity(source, package_digest, digest, occurrence["episode"]) != occurrence["occurrence_id"]:
             fail("Observer Architect batch occurrence evidence changed", 65)
     return item
@@ -2880,14 +2542,10 @@ def architect_health_state():
             continue
         analysis_path = run_dir / "analysis.json"
         failure_path = run_dir / "analysis_failed.json"
-        marker_path = run_dir / ".ledger-applied"
         analysis_present = os.path.lexists(analysis_path)
         failure_present = os.path.lexists(failure_path)
-        marker_present = os.path.lexists(marker_path)
         if analysis_present and failure_present:
             fail(f"observer run has both terminal analysis records: {run_dir}", 65)
-        if failure_present and marker_present:
-            fail(f"failed observer run has a ledger-applied marker: {run_dir}", 65)
 
         status = "pending"
         reason = "analysis is not finalized"
@@ -2899,14 +2557,8 @@ def architect_health_state():
         elif failure_present:
             reason = "analysis failure record is invalid; inspect analysis_failed.json"
             reason_truncated = True
-        elif regular_file(analysis_path) and regular_file(marker_path):
-            # all_architect_occurrences has already validated the exact marker and
-            # analysis identity. A certified zero-episode analysis is healthy too.
-            continue
         elif regular_file(analysis_path):
-            reason = "successful analysis is not ledger-applied"
-        elif marker_present:
-            reason = "analysis ledger marker has no finalized analysis"
+            continue
 
         rows.append({
             "status": status,
@@ -3434,8 +3086,7 @@ def mark_discussed(values):
         ):
             fail(f"append-only conflict at {path}", 65)
     else:
-        event["written_seq"] = next_feed_sequence()
-        mark_written = atomic_append(path, ledger_event_bytes(event))
+        mark_written = atomic_append(path, canonical_json_bytes(event))
 
     twin_written = False
     if twin_dir is not None:
@@ -3447,26 +3098,17 @@ def mark_discussed(values):
         twin_old = existing_bytes(twin_path)
         if twin_old is not None:
             current = json_document(twin_old, "blind twin discussed mark")
-            if current != twin_event | {"ts": current.get("ts"), "written_seq": current.get("written_seq")}:
-                if (
-                    not valid_ledger_event(current) or current.get("type") != "disposition"
-                    or current.get("pr") != pr or current.get("variant") != "blind"
-                    or source_names_for(current) != source_fields or current.get("outcomes") != []
-                    or current.get("note") != "discussed with guided twin"
-                ):
-                    fail(f"append-only conflict at {twin_path}", 65)
+            if (
+                not valid_ledger_event(current) or current.get("type") != "disposition"
+                or current.get("pr") != pr or current.get("variant") != "blind"
+                or source_names_for(current) != source_fields or current.get("outcomes") != []
+                or current.get("note") != "discussed with guided twin"
+            ):
+                fail(f"append-only conflict at {twin_path}", 65)
         else:
-            twin_event["written_seq"] = next_feed_sequence()
-            twin_written = atomic_append(twin_path, ledger_event_bytes(twin_event))
+            twin_written = atomic_append(twin_path, canonical_json_bytes(twin_event))
 
-    result = materialize_ledger()
-    event_added = any(
-        item["type"] == "disposition" and item["pr"] == pr
-        and source_names_for(item) == source_fields
-        and item.get("variant", "guided") == variant
-        and item["outcomes"] == outcomes for item in result["_added_events"]
-    )
-    status = "discussed" if mark_written or event_added else "already discussed"
+    status = "discussed" if mark_written else "already discussed"
     response = {"status": status, "run_dir": os.fspath(run_dir)}
     if twin_dir is not None:
         response.update({
@@ -3634,7 +3276,7 @@ def observer_run_rows(since=None):
         if since is not None and timestamp_value < since:
             continue
         analysis_present = regular_file(run_dir / "analysis.json")
-        analyzed = analysis_present and regular_file(run_dir / ".ledger-applied")
+        analyzed = analysis_present
         failed = regular_file(run_dir / "analysis_failed.json")
         if analysis_present and failed:
             fail(f"observer run has both terminal markers: {run_dir}", 65)
@@ -3767,11 +3409,7 @@ def digest(values):
     since = None
     if "--since" in options:
         since = parse_time(options["--since"], "--since")
-    fd = open_ledger_events()
-    try:
-        events, unknown = read_ledger_events(fd)
-    finally:
-        close_ledger_events(fd)
+    events = materialize_ledger()["events"]
     rows = digest_score_rows(events)
     if since is not None:
         rows = [row for row in rows if row["_latest_time"] >= since]
@@ -3827,7 +3465,7 @@ def digest(values):
     failed = sum(row["failed"] for row in run_rows)
     lines.extend([
         "", f"Coverage: {finalized} finalized, {failed} failed.",
-        f"Unknown ledger entries: {unknown}.", "",
+        "Unknown ledger entries: 0.", "",
     ])
     data = "\n".join(lines).encode("utf-8")
     root = observer_store_root(create=True)
@@ -3842,19 +3480,22 @@ def digest(values):
 
 
 def analysis_for_comparison(run_dir, expected_variant):
+    identity = package_metadata(run_dir)
+    if identity["legacy"]:
+        fail("legacy observer runs are read-only", 65)
+    if identity["variant"] != expected_variant:
+        fail(
+            f"comparison {expected_variant} run has variant {identity['variant']}",
+            65,
+        )
+    require_materialized_package(identity["package"])
     if not regular_file(run_dir / "analysis.json"):
         fail(f"comparison run lacks analysis.json: {run_dir}", 65)
     analysis = minimal_analysis(json_document(
         read_regular(run_dir / "analysis.json", "comparison analysis"),
         "comparison analysis",
     ))
-    pr, variant, _ = package_identity(run_dir)
-    if variant != expected_variant:
-        fail(f"comparison {expected_variant} run has variant {variant}", 65)
-    identity = package_metadata(run_dir)
-    if identity["legacy"]:
-        fail("legacy observer runs are read-only", 65)
-    return pr, identity["repository"], analysis
+    return identity["pr"], identity["repository"], analysis
 
 
 def record_comparison(values):
@@ -3914,14 +3555,12 @@ def record_comparison(values):
             "schema": COMPARISON_SCHEMA, "schema_version": COMPARISON_VERSION,
             "repository": guided_repository,
             "guided": os.fspath(guided_dir), "blind": os.fspath(blind_dir),
-            "written_at": utc_now(), "written_seq": next_feed_sequence(),
-            "candidates": candidates,
+            "written_at": utc_now(), "candidates": candidates,
         }
         if not valid_comparison_record(record):
             fail("comparison produced an invalid durable record", 65)
-        atomic_append(path, ledger_event_bytes(record))
+        atomic_append(path, canonical_json_bytes(record))
         status = "recorded"
-    materialize_ledger()
     emit({"status": status, "pr": guided_pr, "candidates": len(candidates)})
 
 
@@ -3933,18 +3572,38 @@ def compact_value(value):
     return json.dumps(value, separators=(",", ":"), sort_keys=True)
 
 
+def require_materialized_package(package):
+    if not isinstance(package, dict) or not isinstance(package.get("sessions"), list):
+        fail("observer package has the wrong shape", 65)
+    for row in package["sessions"]:
+        if not isinstance(row, dict):
+            fail("observer package session has the wrong shape", 65)
+        facts = row.get("facts")
+        if not isinstance(facts, str) or not facts:
+            fail(
+                "package is not materialized; run "
+                "`qq-observe materialize --run <dir>`",
+                65,
+            )
+
+
 def render_bytes(run_dir, analysis=None):
     package = json_document(read_regular(run_dir / "package.json", "observer package"), "observer package")
     if not isinstance(package, dict) or not isinstance(package.get("sessions"), list):
         fail("observer package has the wrong shape")
+    require_materialized_package(package)
     if analysis is None:
         analysis = json_document(read_regular(run_dir / "analysis.json", "analysis JSON"), "analysis JSON")
     analysis = minimal_analysis(analysis)
     facts_rows = []
-    facts_dir = run_dir / "facts"
-    if not facts_dir.is_dir() or facts_dir.is_symlink():
-        fail(f"facts directory is missing: {facts_dir}")
-    for path in sorted(facts_dir.glob("*.json"), key=lambda item: item.name):
+    for row in sorted(package["sessions"], key=lambda item: item.get("label", "")):
+        label = row.get("label")
+        if not isinstance(label, str) or not SAFE_COMPONENT.fullmatch(label):
+            fail("observer package session has an unsafe label")
+        path = Path(row["facts"])
+        expected_path = run_dir / "facts" / f"{label}.json"
+        if not path.is_absolute() or Path(os.path.realpath(path)) != expected_path:
+            fail(f"observer package facts path has the wrong identity: {label}")
         facts = json_document(read_regular(path, "facts JSON"), f"facts JSON {path}")
         required = {
             "entries": int, "turns_by_role": dict, "token_usage": dict,
@@ -3962,7 +3621,7 @@ def render_bytes(run_dir, analysis=None):
             or not isinstance(facts["unknown_entries"].get("total"), int)
         ):
             fail(f"facts JSON has the wrong shape: {path}")
-        facts_rows.append((path.stem, facts))
+        facts_rows.append((label, facts))
     if not facts_rows:
         fail("facts directory contains no facts JSON")
 
@@ -4071,6 +3730,7 @@ def validated_package_analysis(run_dir, analysis_path):
     )
     if not isinstance(package, dict) or not isinstance(package.get("sessions"), list):
         fail("observer package has the wrong shape", 65)
+    require_materialized_package(package)
     repo_value = package.get("repo")
     if not isinstance(repo_value, str):
         fail("observer package lacks its Repository root", 65)
@@ -4090,8 +3750,15 @@ def validated_package_analysis(run_dir, analysis_path):
             fail("observer package session has an unsafe or duplicate label", 65)
         labels.add(label)
         session = run_dir / "sessions" / f"{label}.jsonl"
-        fact = run_dir / "facts" / f"{label}.json"
-        if not regular_file(session) or not regular_file(fact):
+        fact_value = row["facts"]
+        fact = Path(fact_value)
+        expected_fact = run_dir / "facts" / f"{label}.json"
+        if (
+            not fact.is_absolute()
+            or Path(os.path.realpath(fact)) != expected_fact
+            or not regular_file(session)
+            or not regular_file(fact)
+        ):
             fail(f"observer package session inputs are incomplete: {label}", 65)
         sessions.append(session)
         facts.append(fact)
@@ -4196,110 +3863,42 @@ def finalize(values):
     for path, data in writes:
         if atomic_append(path, data):
             changed.append(path.name)
-    if "--analysis" in options:
-        ledger_update_run(run_dir)
     emit({"status": "finalized", "run_dir": os.fspath(run_dir), "written": changed})
 
 
-ledger_writer = None
-try:
-    if command in {
-        "finalize", "ledger-update", "ledger-rebuild", "architect-context", "prepare-handoff",
-        "record-handoff-result", "mark-discussed",
-        "resolve-task", "record-comparison",
-    }:
-        ledger_writer = open_ledger_writer_lock()
-    if command == "assemble":
-        assemble(args)
-    elif command == "verify-delivery":
-        verify_delivery(args)
-    elif command == "render-doc":
-        render_doc(args)
-    elif command == "finalize":
-        finalize(args)
-    elif command == "ledger-update":
-        ledger_update(args)
-    elif command == "ledger-rebuild":
-        ledger_rebuild(args)
-    elif command == "digest":
-        digest(args)
-    elif command == "architect-context":
-        architect_context(args)
-    elif command == "prepare-handoff":
-        prepare_handoff(args)
-    elif command == "record-handoff-result":
-        record_handoff_result(args)
-    elif command == "mark-discussed":
-        mark_discussed(args)
-    elif command == "resolve-task":
-        resolve_task(args)
-    elif command == "rounds":
-        rounds(args)
-    elif command == "record-comparison":
-        record_comparison(args)
-    else:
-        fail(f"unknown package command: {command}")
-finally:
-    if ledger_writer is not None:
-        close_ledger_writer_lock(ledger_writer)
+if command == "assemble":
+    assemble(args)
+elif command == "materialize":
+    materialize(args)
+elif command == "verify-delivery":
+    verify_delivery(args)
+elif command == "render-doc":
+    render_doc(args)
+elif command == "finalize":
+    finalize(args)
+elif command == "digest":
+    digest(args)
+elif command == "architect-context":
+    architect_context(args)
+elif command == "prepare-handoff":
+    prepare_handoff(args)
+elif command == "record-handoff-result":
+    record_handoff_result(args)
+elif command == "mark-discussed":
+    mark_discussed(args)
+elif command == "resolve-task":
+    resolve_task(args)
+elif command == "rounds":
+    rounds(args)
+elif command == "record-comparison":
+    record_comparison(args)
+else:
+    fail(f"unknown package command: {command}")
 PY_ASSEMBLER
     ;;
 esac
 
-if ! qq_resolve_bin git; then
-  printf 'qq-observe: %s\n' "$QQ_BIN_ERROR" >&2
-  exit 69
-fi
-git_binary="$QQ_BIN_RESULT"
-
-repo_root="$($git_binary rev-parse --show-toplevel 2>/dev/null)" \
-  || { printf 'qq-observe: current directory is not in a Git worktree\n' >&2; exit 65; }
-repo_root="$(realpath -e -- "$repo_root")"
-git_common_dir="$($git_binary rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
-  || { printf 'qq-observe: cannot discover the Git common directory\n' >&2; exit 65; }
-git_common_dir="$(realpath -e -- "$git_common_dir")"
-repo_name="$(basename -- "$(dirname -- "$git_common_dir")")"
-[[ "$repo_name" =~ ^[A-Za-z0-9._-]+$ ]] \
-  || { printf 'qq-observe: unsafe Repository name: %s\n' "$repo_name" >&2; exit 65; }
-state_home="${XDG_STATE_HOME:-${HOME:?HOME is required when XDG_STATE_HOME is unset}/.local/state}"
-[[ "$state_home" == /* ]] \
-  || { printf 'qq-observe: state home must be absolute\n' >&2; exit 65; }
-store_paths="$("$python_binary" - "$state_home" "$repo_name" <<'PY'
-import os, sys
-state_root = os.path.realpath(sys.argv[1])
-store = os.path.realpath(os.path.join(sys.argv[1], "qq", "spans", sys.argv[2]))
-print(state_root)
-print(store)
-PY
-)"
-state_root="${store_paths%%$'\n'*}"
-store_candidate="${store_paths#*$'\n'}"
-path_is_within() {
-  local candidate="$1" root="$2"
-  [[ "$candidate" == "$root" || "$candidate" == "$root"/* ]]
-}
-path_is_within "$store_candidate" "$state_root" \
-  || { printf 'qq-observe: span store escapes the resolved state root: %s\n' "$store_candidate" >&2; exit 65; }
-existing="$store_candidate"
-while [[ ! -e "$existing" ]]; do
-  parent="$(dirname -- "$existing")"
-  [[ "$parent" != "$existing" ]] || break
-  existing="$parent"
-done
-if containing_root="$($git_binary -C "$existing" rev-parse --show-toplevel 2>/dev/null)"; then
-  containing_root="$(realpath -e -- "$containing_root")"
-  if path_is_within "$store_candidate" "$containing_root"; then
-    printf 'qq-observe: refusing span store inside Git worktree: %s\n' "$store_candidate" >&2
-    exit 65
-  fi
-fi
-mkdir -p -- "$store_candidate"
-store_dir="$(realpath -e -- "$store_candidate")"
-path_is_within "$store_dir" "$state_root" \
-  || { printf 'qq-observe: span store escapes the resolved state root: %s\n' "$store_dir" >&2; exit 65; }
-store_file="$store_dir/spans.jsonl"
-
-exec "$python_binary" - "$command" "$store_file" "$@" <<'PY'
+exec "$python_binary" - "$command" "$@" <<'PY'
 from collections import Counter
 import datetime as dt
 import json
@@ -4307,15 +3906,9 @@ import math
 import os
 from pathlib import Path
 import re
-import stat
 import sys
-import uuid
 
-command, store_file, *args = sys.argv[1:]
-HEX16 = re.compile(r"^[0-9a-f]{16}$")
-HEX32 = re.compile(r"^[0-9a-f]{32}$")
-PHASES = {"orientation", "alignment", "implementation", "review", "research", "delivery", "analysis"}
-STATUS_JSON_CAP = 1024 * 1024
+command, *args = sys.argv[1:]
 # Tunable deterministic heuristics from the 2026-07-23/24 operator notes.
 REASONING_VOLUME_CHARS = 20000
 REASONING_CONTORTION_MESSAGES = 3
@@ -4375,12 +3968,6 @@ ANALYSIS_ROOT_CAUSE_LOCATIONS = {
 ANALYSIS_CONFIDENCE = {"high": 3, "medium": 2, "low": 1}
 # Sane-session bound: rejects absurd magnitudes before cost arithmetic.
 SANE_SESSION_BOUND = 10 ** 15
-SPAN_FIELDS = {
-    "schema_version", "trace_id", "span_id", "parent_span_id", "root_span_id",
-    "name", "phase", "actor", "start_time", "end_time", "duration_ms",
-    "status", "source", "attributes",
-}
-
 analysis_validation_mode = False
 
 
@@ -4400,350 +3987,6 @@ def fail(message):
     print(f"qq-observe: {message}", file=sys.stderr)
     raise SystemExit(64)
 
-def timestamp(value):
-    try:
-        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        fail(f"invalid timestamp: {value}")
-    if parsed.tzinfo is None:
-        fail(f"timestamp requires a timezone: {value}")
-    return parsed
-
-def new_id(chars):
-    return os.urandom(chars // 2).hex()
-
-def parse_summary_options(values):
-    options = {"json": False}
-    while values:
-        flag = values.pop(0)
-        if flag == "--json":
-            options["json"] = True
-        elif flag in {"--since", "--until"} and values:
-            options[flag[2:]] = values.pop(0)
-        else:
-            fail(f"invalid or incomplete option: {flag}")
-    return options
-
-def parse_options(values, session=False):
-    options = {"attributes": {}}
-    if session:
-        if not values or values[0].startswith("--"):
-            fail("read-session requires a session JSONL path")
-        options["session"] = values.pop(0)
-    valued = {"--name", "--actor", "--start", "--end", "--phase", "--status",
-              "--source", "--trace-id", "--span-id", "--parent-span-id", "--root-span-id"}
-    while values:
-        flag = values.pop(0)
-        if flag not in valued | {"--attribute"} or not values:
-            fail(f"invalid or incomplete option: {flag}")
-        value = values.pop(0)
-        if flag == "--attribute":
-            if "=" not in value or not value.split("=", 1)[0]:
-                fail("attributes must be KEY=VALUE")
-            key, item = value.split("=", 1)
-            options["attributes"][key] = item
-        else:
-            options[flag[2:].replace("-", "_")] = value
-    return options
-
-def context(options):
-    trace_id = options.get("trace_id") or os.environ.get("QQ_TRACE_ID") or new_id(32)
-    span_id = options.get("span_id") or new_id(16)
-    parent = options.get("parent_span_id") or os.environ.get("PI_PARENT_SPAN_ID") or None
-    root = options.get("root_span_id") or os.environ.get("PI_ROOT_SPAN_ID") or parent or span_id
-    if not HEX32.fullmatch(trace_id): fail("trace ID must be 32 lowercase hex characters")
-    for label, value in (("span ID", span_id), ("parent span ID", parent), ("root span ID", root)):
-        if value is not None and not HEX16.fullmatch(value):
-            fail(f"{label} must be 16 lowercase hex characters")
-    return trace_id, span_id, parent, root
-
-def append(record):
-    try:
-        existing = os.lstat(store_file)
-    except FileNotFoundError:
-        existing = None
-    except OSError as error:
-        fail(f"cannot inspect span store leaf: {error}")
-    if existing is not None and not stat.S_ISREG(existing.st_mode):
-        fail("span store leaf is not a regular file")
-    line = json.dumps(record, separators=(",", ":"), sort_keys=True)
-    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NONBLOCK
-    flags |= getattr(os, "O_NOFOLLOW", 0)
-    try:
-        directory = os.open(os.path.dirname(store_file), os.O_RDONLY | os.O_DIRECTORY)
-        if os.path.realpath(f"/proc/self/fd/{directory}") != os.path.dirname(store_file):
-            fail("span store directory changed during open")
-        fd = os.open(os.path.basename(store_file), flags, 0o600, dir_fd=directory)
-        os.close(directory)
-    except OSError as error:
-        fail(f"cannot open span store leaf: {error}")
-    try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            fail("span store leaf is not a regular file")
-        os.write(fd, (line + "\n").encode())
-    finally:
-        os.close(fd)
-
-def read_store():
-    try:
-        existing = os.lstat(store_file)
-    except FileNotFoundError:
-        return
-    except OSError as error:
-        fail(f"cannot inspect span store leaf: {error}")
-    if not stat.S_ISREG(existing.st_mode):
-        fail("span store leaf is not a regular file")
-    flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
-    try:
-        directory = os.open(os.path.dirname(store_file), os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            if os.path.realpath(f"/proc/self/fd/{directory}") != os.path.dirname(store_file):
-                fail("span store directory changed during open")
-            fd = os.open(os.path.basename(store_file), flags, dir_fd=directory)
-        finally:
-            os.close(directory)
-    except OSError as error:
-        fail(f"cannot open span store leaf: {error}")
-    try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            fail("span store leaf is not a regular file")
-        with os.fdopen(fd, "rb") as source:
-            fd = None
-            yield from source
-    except OSError as error:
-        fail(f"cannot read span store: {error}")
-    finally:
-        if fd is not None:
-            os.close(fd)
-
-def summary_span(line):
-    try:
-        item = json.loads(line.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError, RecursionError):
-        return None
-    if not isinstance(item, dict) or not SPAN_FIELDS <= item.keys():
-        return None
-    try:
-        start = dt.datetime.fromisoformat(item["start_time"].replace("Z", "+00:00"))
-        end = dt.datetime.fromisoformat(item["end_time"].replace("Z", "+00:00"))
-    except (AttributeError, ValueError):
-        return None
-    duration = item.get("duration_ms")
-    phase = item.get("phase")
-    if isinstance(duration, bool) or not isinstance(duration, (int, float)):
-        return None
-    try:
-        duration = float(duration)
-    except OverflowError:
-        return None
-    if (
-        start.tzinfo is None
-        or end.tzinfo is None
-        or isinstance(item["schema_version"], bool)
-        or item["schema_version"] != 1
-        or not isinstance(item["trace_id"], str)
-        or not HEX32.fullmatch(item["trace_id"])
-        or not isinstance(item["span_id"], str)
-        or not HEX16.fullmatch(item["span_id"])
-        or (item["parent_span_id"] is not None and (
-            not isinstance(item["parent_span_id"], str) or not HEX16.fullmatch(item["parent_span_id"])
-        ))
-        or not isinstance(item["root_span_id"], str)
-        or not HEX16.fullmatch(item["root_span_id"])
-        or not isinstance(item["name"], str)
-        or not isinstance(item["actor"], str)
-        or (phase is not None and (not isinstance(phase, str) or phase not in PHASES))
-        or not math.isfinite(duration)
-        or duration < 0
-        or not isinstance(item["status"], str)
-        or not isinstance(item["source"], str)
-        or not isinstance(item["attributes"], dict)
-    ):
-        return None
-    # schema v1 derives duration_ms from start/end (see emit()): reject
-    # impossible ordering, and durations exceeding the span's own wall time
-    # beyond slack, so adversarial or corrupt lines cannot poison aggregates.
-    # Understated durations (active-time spans) remain admissible.
-    if end < start or duration > (end - start).total_seconds() * 1000 + 1000:
-        return None
-    item["duration_ms"] = duration
-    return item, start
-
-def resolved_span_status(item):
-    detail = {
-        "trace_id": item["trace_id"],
-        "span_id": item["span_id"],
-        "name": item["name"],
-        "raw_status": item["status"],
-        "status": item["status"],
-    }
-    attributes = item["attributes"]
-    exit_status = attributes.get("exit.status")
-    if (
-        item["source"] != "qq-dispatch"
-        or exit_status not in ("143", "130", "129")
-        or "run.id" not in attributes
-        or attributes["run.id"] == "manual"
-    ):
-        return detail
-
-    detail["status"] = "error"
-    detail["outcome"] = {"resolved": "unresolved", "note": "teardown-signal"}
-    run_id = attributes["run.id"]
-    if (
-        not isinstance(run_id, str)
-        or not run_id
-        or run_id in (".", "..")
-        or os.path.basename(run_id) != run_id
-    ):
-        return detail
-
-    if "QQ_DISPATCH_RUNTIME_ROOT" in os.environ:
-        runtime_root = Path(os.environ["QQ_DISPATCH_RUNTIME_ROOT"])
-    else:
-        runtime_root = Path(os.environ.get("TMPDIR") or "/tmp") / f"pi-subagents-uid-{os.getuid()}"
-    status_path = runtime_root / "async-subagent-runs" / run_id / "status.json"
-    fd = None
-    try:
-        existing = os.lstat(status_path)
-        if not stat.S_ISREG(existing.st_mode):
-            return detail
-        flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
-        fd = os.open(status_path, flags)
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            return detail
-        with os.fdopen(fd, "rb") as source:
-            fd = None
-            payload = source.read(STATUS_JSON_CAP + 1)
-            if len(payload) > STATUS_JSON_CAP:
-                return detail
-            record = json.loads(payload.decode("utf-8"))
-    except (OSError, ValueError, UnicodeError, RecursionError):
-        return detail
-    finally:
-        if fd is not None:
-            os.close(fd)
-
-    if not isinstance(record, dict):
-        return detail
-    state = record.get("state")
-    status = {"complete": "ok", "failed": "error", "stopped": "error"}.get(state) if isinstance(state, str) else None
-    if status:
-        detail["status"] = status
-        detail["outcome"]["resolved"] = state
-    return detail
-
-def rounded(value):
-    return float(f"{value:.1f}")
-
-def aggregate_summary(options):
-    since = timestamp(options["since"]) if "since" in options else None
-    until = timestamp(options["until"]) if "until" in options else None
-    if since is not None and until is not None and since > until:
-        fail("since timestamp follows until timestamp")
-    span_count = skipped = 0
-    traces = set()
-    phase_durations = {}
-    recurrence_stats = {}
-    status_counts = {}
-    span_statuses = []
-    for line in read_store():
-        parsed = summary_span(line)
-        if parsed is None:
-            skipped += 1
-            continue
-        item, start = parsed
-        if (since is not None and start < since) or (until is not None and start > until):
-            continue
-        span_count += 1
-        traces.add(item["trace_id"])
-        phase_durations.setdefault(item["phase"], []).append(item["duration_ms"])
-        recurrence = recurrence_stats.setdefault((item["name"], item["actor"]), [0, 0.0])
-        recurrence[0] += 1
-        recurrence[1] += item["duration_ms"]
-        status_detail = resolved_span_status(item)
-        span_statuses.append(status_detail)
-        status = status_detail["status"]
-        if status != "ok":
-            status_counts[status] = status_counts.get(status, 0) + 1
-
-    phases = []
-    for phase, durations in phase_durations.items():
-        ordered = sorted(durations)
-        total = sum(durations)
-        phases.append({
-            "phase": phase,
-            "spans": len(durations),
-            "total_ms": rounded(total),
-            "mean_ms": rounded(total / len(durations)),
-            "p50_ms": rounded(ordered[math.ceil(0.50 * len(ordered)) - 1]),
-            "p95_ms": rounded(ordered[math.ceil(0.95 * len(ordered)) - 1]),
-        })
-    phases.sort(key=lambda row: (
-        -sum(phase_durations[row["phase"]]),
-        "(none)" if row["phase"] is None else row["phase"],
-    ))
-
-    recurrence = [{
-        "name": name,
-        "actor": actor,
-        "runs": runs,
-        "total_ms": rounded(total),
-        "mean_ms": rounded(total / runs),
-    } for (name, actor), (runs, total) in recurrence_stats.items()]
-    recurrence.sort(key=lambda row: (
-        -recurrence_stats[(row["name"], row["actor"])][1], row["name"], row["actor"],
-    ))
-    recurrence = recurrence[:20]
-    statuses = [
-        {"status": status, "count": count}
-        for status, count in sorted(status_counts.items(), key=lambda item: (-item[1], item[0]))
-    ]
-    return {
-        "window": {"since": options.get("since"), "until": options.get("until")},
-        "spans": span_count,
-        "traces": len(traces),
-        "skipped": skipped,
-        "phases": phases,
-        "recurrence": recurrence,
-        "statuses": statuses,
-        "span_statuses": span_statuses,
-    }
-
-def print_summary(summary):
-    window = summary["window"]
-    if window["since"] is None and window["until"] is None:
-        print("Window: all")
-    else:
-        print(f"Window: [{window['since'] or '(open)'}, {window['until'] or '(open)'}]")
-    print(f"Spans: {summary['spans']}")
-    print(f"Traces: {summary['traces']}")
-    print(f"Malformed lines skipped: {summary['skipped']}")
-    if not summary["spans"]:
-        return
-
-    print("\nPhase latencies")
-    print("PHASE            SPANS  TOTAL_MS  MEAN_MS   P50_MS   P95_MS")
-    for row in summary["phases"]:
-        label = "(none)" if row["phase"] is None else row["phase"]
-        print(f"{label:<16} {row['spans']:>5d} {row['total_ms']:>9.1f} "
-              f"{row['mean_ms']:>8.1f} {row['p50_ms']:>8.1f} {row['p95_ms']:>8.1f}")
-
-    print("\nSpan recurrence")
-    name_width = max(len("NAME"), *(len(row["name"]) for row in summary["recurrence"]))
-    actor_width = max(len("ACTOR"), *(len(row["actor"]) for row in summary["recurrence"]))
-    print(f"{'NAME':<{name_width}}  {'ACTOR':<{actor_width}}  RUNS  TOTAL_MS  MEAN_MS")
-    for row in summary["recurrence"]:
-        print(f"{row['name']:<{name_width}}  {row['actor']:<{actor_width}}  {row['runs']:>4d} "
-              f"{row['total_ms']:>9.1f} {row['mean_ms']:>8.1f}")
-
-    if summary["statuses"]:
-        print("\nNon-ok statuses")
-        status_width = max(len("STATUS"), *(len(row["status"]) for row in summary["statuses"]))
-        print(f"{'STATUS':<{status_width}} COUNT")
-        for row in summary["statuses"]:
-            print(f"{row['status']:<{status_width}} {row['count']:>5d}")
-
 OBSERVE_BLOCKS = ("text", "thinking", "toolCall", "toolResult")
 TOKEN_FIELDS = ("input", "output", "cache_read", "cache_write")
 CORRECTION = re.compile(
@@ -4761,29 +4004,14 @@ PI_CONTROL_ENTRIES = {
 }
 
 
-def session_jsonl(path, legacy=False):
-    """Read once; facts/signals accept BOM, while legacy preserves read-session's Pi contract."""
+def session_jsonl(path):
     entries = []
     observed = []
-    header_seen = False
     try:
         with path.open("rb") as source:
             for number, raw in enumerate(source, 1):
                 if not raw.strip():
-                    if legacy:
-                        continue
                     fail(f"malformed JSON at line {number}: blank line")
-                if legacy:
-                    item = json.loads(raw.decode("utf-8"))
-                    if not header_seen:
-                        if not isinstance(item, dict) or item.get("type") != "session" or item.get("version") != 3:
-                            fail("session JSONL must begin with a type=session, version=3 header")
-                        header_seen = True
-                    if not isinstance(item, dict) or not isinstance(item.get("timestamp"), str):
-                        fail(f"session entry {number} lacks a timestamp")
-                    observed.append(timestamp(item["timestamp"]))
-                    entries.append({"line": number, "item": item})
-                    continue
                 try:
                     item = json.loads(raw, parse_constant=int)
                 except (UnicodeDecodeError, ValueError, RecursionError) as error:
@@ -4801,14 +4029,8 @@ def session_jsonl(path, legacy=False):
                     observed.append(parsed_time)
                 entries.append({"line": number, "item": item, "time": parsed_time})
     except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:
-        if legacy:
-            fail(f"cannot read session JSONL: {error}")
         fail(f"cannot read session JSONL: {error}")
 
-    if legacy:
-        if not observed:
-            fail("session JSONL has no timestamped entries")
-        return entries, observed
     if not entries:
         fail("session JSONL has no entries")
     first = entries[0]["item"]
@@ -5658,42 +4880,8 @@ def validate_and_rank_analysis(values):
     output["episodes"] = [dict(episode, rank=index) for index, episode in enumerate(ranked, 1)]
     print(json.dumps(output, separators=(",", ":"), sort_keys=True))
 
-
-def emit(options, start, end):
-    if end < start: fail("end timestamp precedes start timestamp")
-    phase = options.get("phase")
-    if phase and phase not in PHASES: fail(f"unknown SDLC phase: {phase}")
-    trace_id, span_id, parent, root = context(options)
-    record = {
-        "schema_version": 1,
-        "trace_id": trace_id,
-        "span_id": span_id,
-        "parent_span_id": parent,
-        "root_span_id": root,
-        "name": options["name"],
-        "phase": phase,
-        "actor": options["actor"],
-        "start_time": start.isoformat(),
-        "end_time": end.isoformat(),
-        "duration_ms": round((end - start).total_seconds() * 1000, 3),
-        "status": options.get("status", "ok"),
-        "source": options.get("source", "qq-observe"),
-        "attributes": options["attributes"],
-    }
-    append(record)
-    print(json.dumps({k: record[k] for k in ("trace_id", "span_id", "root_span_id")}, separators=(",", ":")))
-
 if command == "validate-analysis":
     validate_and_rank_analysis(args)
-    raise SystemExit(0)
-
-if command == "summarize":
-    summary_options = parse_summary_options(args)
-    summary = aggregate_summary(summary_options)
-    if summary_options["json"]:
-        print(json.dumps(summary, separators=(",", ":")))
-    else:
-        print_summary(summary)
     raise SystemExit(0)
 
 if command in {"facts", "signals"}:
@@ -5708,18 +4896,5 @@ if command in {"facts", "signals"}:
     print(json.dumps(result, separators=(",", ":"), sort_keys=True))
     raise SystemExit(0)
 
-options = parse_options(args, session=command == "read-session")
-if command == "record":
-    for required in ("name", "actor", "start", "end"):
-        if not options.get(required): fail(f"--{required} is required")
-    emit(options, timestamp(options["start"]), timestamp(options["end"]))
-else:
-    path = Path(options["session"])
-    if not path.is_file(): fail(f"session JSONL is not a regular file: {path}")
-    session_entries, observed = session_jsonl(path, legacy=True)
-    options.setdefault("name", "invoke_workflow")
-    options.setdefault("actor", "accountable-session")
-    options.setdefault("source", "pi-session-jsonl")
-    options["attributes"].update({"session.file": str(path.resolve()), "session.entries": len(session_entries)})
-    emit(options, min(observed), max(observed))
+fail(f"unknown analysis command: {command}")
 PY
