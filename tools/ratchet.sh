@@ -70,11 +70,26 @@ count_occurrences() {
   local match_kind="$3"
   local pattern="$4"
   local scope_path="$ROOT/${scope%/}"
+  local tracked_files
+  local path
   local output
   local grep_status
   local count
+  local -a tracked_paths=()
 
   [ -d "$scope_path" ] || fail "$name scope is not a directory: $scope"
+
+  if ! tracked_files="$(
+    git -c core.quotepath=false -C "$ROOT" ls-files -- "${scope%/}/"
+  )"; then
+    fail "$name could not list tracked files under scope: $scope"
+  fi
+  [ -n "$tracked_files" ] || \
+    fail "$name scope matched no tracked files: $scope"
+
+  while IFS= read -r path; do
+    tracked_paths+=("$ROOT/$path")
+  done <<<"$tracked_files"
 
   # --binary-files=text: a scoped file carrying a NUL byte is otherwise
   # treated as binary, its -o matches suppressed from stdout while grep still
@@ -82,11 +97,15 @@ count_occurrences() {
   set +e
   case "$match_kind" in
     fixed)
-      output="$(grep --binary-files=text -rhoF -- "$pattern" "$scope_path")"
+      output="$(
+        grep --binary-files=text -hoF -- "$pattern" "${tracked_paths[@]}"
+      )"
       grep_status=$?
       ;;
     extended-regex)
-      output="$(grep --binary-files=text -rhoE -- "$pattern" "$scope_path")"
+      output="$(
+        grep --binary-files=text -hoE -- "$pattern" "${tracked_paths[@]}"
+      )"
       grep_status=$?
       ;;
   esac
