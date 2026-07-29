@@ -15,15 +15,11 @@ integrity='sha512-RVwu0alq02SoniWzn3oRbtRzQmM3g/UuVwKEGHGKj77B0twq6RHRyXuq1Gs/WF
 
 [ ! -e "$ROOT/.mcp.json" ] || fail 'retired root MCP configuration still exists'
 tools_line='tools: read, grep, find, ls, bash, resolve-library-id, query-docs'
-extensions_line='extensions:'
 child_extension_line="subagentOnlyExtensions: $context7_path"
 assert_equal 1 "$(grep -Fxc -- "$tools_line" "$researcher")" \
   'researcher tools must be one exact line'
-assert_equal 1 "$(grep -Fxc -- "$extensions_line" "$researcher")" \
-  'researcher ordinary extensions must be exactly blank'
-assert_equal "$child_extension_line" \
-  "$(awk '$0 == "extensions:" { getline; print; exit }' "$researcher")" \
-  'researcher ordinary extensions must have no block-list entries'
+assert_equal 0 "$(grep -Fxc -- 'extensions:' "$researcher")" \
+  'researcher ordinary extensions field must not exist'
 assert_equal 1 "$(grep -Fxc -- "$child_extension_line" "$researcher")" \
   'researcher child extension must be one exact line'
 assert_equal 1 "$(grep -Fc -- 'subagentOnlyExtensions:' "$researcher")" \
