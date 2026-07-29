@@ -177,4 +177,115 @@ for retired in record id summarize read-session; do
   assert_file_contains "$tmp/$retired.err" 'usage:'
 done
 
+# F-1 regression coverage: behaviors that survived the store deletion keep
+# their Checks here (review finding, T-186.9).
+
+# (1) A recurrence key seen in two or more sources is promoted; the digest
+# sections promoted rows under "Opportunities ledger" and the rest under
+# "Open findings". The shared scan-key spans pr-1 and pr-2 above.
+write_package 5 2026-01-05T00:00:00Z
+jq '.episodes[0].recurrence_key = "solo-key"' \
+  "$runs/pr-2/analysis.json" >"$tmp/pr-5-analysis.json"
+mkdir -p "$runs/pr-5"
+cp "$tmp/pr-5-analysis.json" "$runs/pr-5/analysis.json"
+"$OBSERVE" digest >"$tmp/digest-sectioned.md"
+awk '/^## Opportunities ledger$/{s=1} /^## Open findings$/{s=2} {print s, $0}' \
+  "$tmp/digest-sectioned.md" >"$tmp/sections.txt"
+grep -q '^1 .*`scan-key`' "$tmp/sections.txt" \
+  || fail 'promoted key missing from Opportunities ledger'
+if grep -q '^2 .*`scan-key`' "$tmp/sections.txt"; then
+  fail 'promoted key also rendered under Open findings'
+fi
+grep -q '^2 .*`solo-key`' "$tmp/sections.txt" \
+  || fail 'single-source key missing from Open findings'
+if grep -q '^1 .*`solo-key`' "$tmp/sections.txt"; then
+  fail 'single-source key promoted with one source'
+fi
+assert_no_ledger
+
+# (2) mark-discussed --twin writes the blind twin mark with empty outcomes.
+# A rejected (scopeless) outcome exercises the analysis-matched path without
+# pulling the intake registry (O2's domain) into this suite.
+guided6="$runs/pr-6"
+write_package 6 2026-01-06T00:00:00Z
+jq '.episodes[0].recurrence_key = "twin-key"' \
+  "$runs/pr-2/analysis.json" >"$tmp/pr-6-analysis.json"
+cp "$tmp/pr-6-analysis.json" "$guided6/analysis.json"
+twin6="$runs/pr-6-blind"
+mkdir -p "$twin6"
+jq '.variant = "blind"' "$guided6/package.json" >"$twin6/package.json"
+cp "$tmp/pr-6-analysis.json" "$twin6/analysis.json"
+jq -cnS '[{recurrence_key:"twin-key",verdict:"rejected",scope:"",note:"Fixture."}]' \
+  >"$tmp/outcomes.json"
+"$OBSERVE" mark-discussed --run "$guided6" --twin "$twin6" \
+  --outcomes "$tmp/outcomes.json" >"$tmp/twin.json"
+jq -e '.status == "discussed" and .twin_status == "discussed"' \
+  "$tmp/twin.json" >/dev/null || fail 'twin marks were not both written'
+jq -e '.type == "disposition" and .variant == "blind" and .pr == 6
+  and .outcomes == [] and .note == "discussed with guided twin"' \
+  "$twin6/discussed.json" >/dev/null || fail 'blind twin mark has the wrong shape'
+"$OBSERVE" mark-discussed --run "$guided6" --twin "$twin6" \
+  --outcomes "$tmp/outcomes.json" >"$tmp/twin-retry.json"
+jq -e '.status == "already discussed" and .twin_status == "already discussed"' \
+  "$tmp/twin-retry.json" >/dev/null || fail 'identical twin retry was not a no-op'
+assert_no_ledger
+
+# (3) record-comparison: candidate selection, durable record shape,
+# identical-retry no-op, and append-only conflict on divergence.
+guided7="$runs/pr-7"
+write_package 7 2026-01-07T00:00:00Z
+jq '.episodes = [
+      (.episodes[0] | .recurrence_key = "shared-key" | .title = "Shared"),
+      (.episodes[0] | .recurrence_key = "guided-only-key" | .title = "Guided only" | .rank = 2)
+    ] | .dropped_signals = [{kind:"noisy",entries:[2],why:"fixture signal"}]' \
+  "$runs/pr-2/analysis.json" >"$tmp/pr-7-guided-analysis.json"
+cp "$tmp/pr-7-guided-analysis.json" "$guided7/analysis.json"
+blind7="$runs/pr-7-blind"
+mkdir -p "$blind7"
+jq '.variant = "blind"' "$guided7/package.json" >"$blind7/package.json"
+jq '.episodes = [
+      (.episodes[0] | .recurrence_key = "shared-key" | .title = "Shared"),
+      (.episodes[0] | .recurrence_key = "blind-only-key" | .title = "Blind only" | .rank = 2)
+    ]' "$runs/pr-2/analysis.json" >"$blind7/analysis.json"
+"$OBSERVE" record-comparison --guided "$guided7" --blind "$blind7" \
+  >"$tmp/comparison.json"
+jq -e '.status == "recorded" and .pr == 7 and .candidates == 3' \
+  "$tmp/comparison.json" >/dev/null || fail 'comparison candidates were not selected'
+jq -e '[.candidates[] | {direction,recurrence_key,evidence}] == [
+  {direction:"prune",recurrence_key:"guided-only-key",evidence:"guided-only"},
+  {direction:"promote",recurrence_key:"blind-only-key",evidence:"blind-only"},
+  {direction:"prune",recurrence_key:"signal:noisy",evidence:"unabsorbed"}]' \
+  "$guided7/comparison.json" >/dev/null \
+  || fail 'comparison record has the wrong candidate shape'
+"$OBSERVE" record-comparison --guided "$guided7" --blind "$blind7" \
+  >"$tmp/comparison-retry.json"
+jq -e '.status == "already recorded"' "$tmp/comparison-retry.json" >/dev/null \
+  || fail 'identical comparison retry was not a no-op'
+jq '.episodes[1].title = "Diverged"' \
+  "$blind7/analysis.json" >"$tmp/diverged.json" && mv "$tmp/diverged.json" "$blind7/analysis.json"
+set +e
+"$OBSERVE" record-comparison --guided "$guided7" --blind "$blind7" \
+  >"$tmp/comparison-conflict.out" 2>"$tmp/comparison-conflict.err"
+status=$?
+set -e
+assert_equal 65 "$status" 'diverged comparison did not hit append-only conflict'
+assert_file_contains "$tmp/comparison-conflict.err" 'append-only conflict'
+assert_no_ledger
+
+# (4) digest --since windowing and the stored digest file.
+"$OBSERVE" digest --since 2026-06-01T00:00:00Z >"$tmp/digest-windowed.md"
+assert_file_contains "$tmp/digest-windowed.md" '| — | — | None'
+digest_dir="$observer_root/digests"
+[ -d "$digest_dir" ] || fail 'digest did not persist into the digests store'
+stored_count="$(find "$digest_dir" -maxdepth 1 -name '*.md' | wc -l)"
+[ "$stored_count" -ge 1 ] || fail 'no stored digest file written'
+latest="$(ls -t "$digest_dir"/*.md | head -1)"
+cmp "$latest" "$tmp/digest-windowed.md" \
+  || fail 'stored digest does not match the emitted digest'
+"$OBSERVE" digest --since 2026-06-01T00:00:00Z >"$tmp/digest-windowed-2.md"
+stored_count_2="$(find "$digest_dir" -maxdepth 1 -name '*.md' | wc -l)"
+[ "$stored_count_2" -gt "$stored_count" ] \
+  || fail 'repeated digest did not suffix a new stored digest'
+assert_no_ledger
+
 printf 'test-qq-observe-ledger-scan: pass\n'
