@@ -1,10 +1,10 @@
 ---
 id: T-184
 title: Delete delegate confinement and rebuild delegate lifecycle on one run dir
-status: Done
+status: In Progress
 assignee: []
 created_date: '2026-07-28 06:30'
-updated_date: '2026-07-29 01:40'
+updated_date: '2026-07-29 02:16'
 labels: []
 dependencies: []
 documentation:
@@ -35,7 +35,7 @@ Delete qq's confined-delegation layer and the writer role; rebuild delegate life
 - [x] #2 The structured-output schema pipeline is deleted; one durable run dir per delegate holds brief, ENVELOPE.md result, and terminal state from creation, and the parent incorporates async terminal wakes from that record.
 - [x] #3 deliver-change reads as six steps with Task finalization before PR open; created-locally vs mergeable-now vocabulary lands; the PR watch is retained for post-handoff drift.
 - [x] #4 REVIEW.md contains no per-fix-commit counter mandate; T-177's global confined-delegation posture is reversed in CONCEPTS.md, README, and docs.
-- [x] #5 Observer integrity lands: one entry per evidence object, assembler sole writer of analysis.json, explicit run lineage; intake verifies a named-branch checkout without the deleted identity rejections.
+- [ ] #5 Observer integrity lands: one entry per evidence object, assembler sole writer of analysis.json, explicit run lineage; intake verifies a named-branch checkout without the deleted identity rejections.
 - [x] #6 Architect/disposition ceremony (generic validation rejections, in-memory context loss, stale-evidence refusals, exact-phrase retry rituals, hand-cranked pending intakes) is deleted while settled-batch immutability and verified intake results remain.
 - [x] #7 Keeps work: backlog decision update --content authors a decision body noninteractively; atomic doc supersede re-ids a colliding unmerged document with an append-only receipt; a second concurrent intercom ask is an ordinary tool error; send with a pending inbound ask refuses; bash refuses unsupported arguments.
 - [x] #8 Focused tests, full ratchet, shellcheck, and extension tests green; fresh-context review PASS; exactly one PR.
