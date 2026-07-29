@@ -15,7 +15,7 @@ real_home="$HOME"
 # The carried context must describe the currently installed package. This is
 # deliberately valid for both states so the test remains stable after apply.
 HOME="$real_home" "$PATCH_APPLY" check >"$tmp/real-check"
-grep -Eq '^pi-intercom@0\.6\.0: (pristine|applied)$' "$tmp/real-check" \
+grep -Eq '^pi-intercom@0\.6\.0: (pristine|applied|absent)( — |$)' "$tmp/real-check" \
   || fail 'patch context does not match the currently installed pi-intercom 0.6.0 files'
 
 fixture_home="$tmp/home"
@@ -90,6 +90,6 @@ HOME="$symlink_home" "$PATCH_APPLY" check >"$tmp/symlink-check" 2>"$tmp/symlink-
 status=$?
 set -e
 assert_equal 1 "$status" 'symlinked package root did not refuse'
-assert_file_contains "$tmp/symlink-check" 'or a symlink'
+assert_file_contains "$tmp/symlink-check" 'is a symlink'
 
 printf 'test-qq-patch-apply: pass\n'

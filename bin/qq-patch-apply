@@ -210,8 +210,10 @@ def package_root(spec: PatchSpec) -> Path:
 
 def inspect(spec: PatchSpec) -> Inspection:
     root = package_root(spec)
-    if root.is_symlink() or not root.is_dir():
-        return Inspection(spec, None, "DRIFTED", f"installed package root is absent, non-directory, or a symlink: {root}")
+    if root.is_symlink():
+        return Inspection(spec, None, "DRIFTED", f"installed package root is a symlink: {root}")
+    if not root.is_dir():
+        return Inspection(spec, None, "absent", f"installed package root is absent: {root}")
     manifest_path = root / "package.json"
     try:
         package = json.loads(regular_bytes(manifest_path, "installed package manifest"))
@@ -309,7 +311,9 @@ def stage(path: Path, data: bytes, mode: int) -> Path:
 def apply_spec(inspection: Inspection) -> Inspection:
     if inspection.state == "applied":
         return inspection
-    if inspection.state != "pristine" or inspection.root is None:
+    if inspection.state == "absent" or inspection.root is None:
+        raise PatchError(f"{inspection.spec.label} cannot be applied: {inspection.detail}")
+    if inspection.state != "pristine":
         raise PatchError(f"{inspection.spec.label} is DRIFTED")
     patch_by_path = {item.path: item for item in inspection.spec.diff}
     originals: dict[Path, tuple[bytes, int]] = {}

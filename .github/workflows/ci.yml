@@ -32,6 +32,5 @@ jobs:
         run: |
           set -euo pipefail
           for test_script in tests/test-*.sh; do
-            echo "RUN: $test_script"
-            bash "$test_script" || { echo "FAILED($?): $test_script"; exit 1; }
+            bash "$test_script"
           done
