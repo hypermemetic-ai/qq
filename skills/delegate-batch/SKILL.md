@@ -16,15 +16,19 @@ adapter evidence is never sufficient. A work order that builds on a
 rebuildable derived store names the one materialization function that
 rebuilds it.
 
-At ticket creation, create one private durable run directory beneath the
-delegate runtime root and write its complete work order there as `BRIEF.md`.
+At ticket creation, the owner creates one private mode-700 durable run directory
+beneath the delegate runtime root and writes its complete work order as
+`BRIEF.md`.
 Include the ticket and acceptance criteria, context, exact orientation paths
 and verified facts, constraints, per-ticket commit protocol, exact Checks, and
 the required completion envelope. The brief exists at dispatch by construction.
-Keep delegate scratch, temporary files, redirected logs, generated helpers, and
-caches beneath this run directory. Writers never push, open pull requests, or
-edit `backlog/`. Durable intent stays in the checkout's Task. The `subagent`
-task is `Read-and-perform:<absolute-run-dir>/BRIEF.md`.
+Before dispatch, the owner executes every literal Check in the work order
+exactly as written from the target worktree and records the baseline outcome in
+the run directory. A Check that cannot run as written is a work-order defect—fix
+the order, never dispatch around it. Keep delegate scratch, temporary files,
+redirected logs, generated helpers, and caches beneath this run directory.
+Writers never push, open pull requests, or edit `backlog/`. Durable intent stays
+in the checkout's Task.
 
 - Couple shared files or invariants; work sequentially.
 - Fan out independent reads; give writers disjoint branches, worktrees, and
@@ -36,34 +40,32 @@ task is `Read-and-perform:<absolute-run-dir>/BRIEF.md`.
 
 ## Dispatch and status
 
-Dispatch environment and config: README Install. The globally mounted
-extension selects the active qq checkout for qq worktrees and canonical qq
-primary `main` elsewhere; `cwd` selects the assigned Git worktree.
+Invoke the assigned worktree's resident engine. It resolves that checkout's Pi
+wrapper, manifests, and execution-profile policy and rejects a `--cwd` outside
+its Git common directory. For one ticket:
 
-The work-order reference is the transport: the adapter derives the ticket's
-run directory from the task's `Read-and-perform:<absolute-run-dir>/BRIEF.md`
-path (no environment variable is passed):
-
-```ts
-subagent({agent:"implementer",task:"Read-and-perform:<absolute-run-dir>/BRIEF.md",acceptance:{level:"none",reason:"per the manifests"},cwd:"<absolute-worktree>",context:"fresh",async:true})
+```sh
+<assigned-worktree>/bin/qq-delegate run --role implementer \
+  --cwd <absolute-worktree> --brief <absolute-run-dir>/BRIEF.md
 ```
 
-The delegate writes its only result to `<absolute-run-dir>/ENVELOPE.md` per
-`delegation/manifests/ENVELOPE.md`; no envelope means the ticket is not
-complete, and a delegate ending on a user message has failed. The adapter
-writes `<absolute-run-dir>/TERMINAL` when the child exits. Keep each active run
-directory and sweep its `TERMINAL` on every inbound event so asynchronous
-completions are incorporated.
+For fan-out, make `<absolute-batch.json>` a JSON array of
+`{"role","cwd","brief"}` tickets:
 
-Keep the subagent id and `details.asyncDir`. Inspect only at lifecycle
-boundaries: fleet state, the run directory, `status.json`, `events.jsonl`,
-output, and the subagent log. No start after ten minutes blocks with `no thread
-after 10m`; a terminal nonzero fails. A review-infrastructure failure gets one
-resume with the source run's recorded `timeoutMs`, then is
-`inconclusive-under-substrate`—never ask the operator to restate it. Resume
-passes the source run's recorded `timeoutMs` and no contract override.
-Reconstruct from Tasks, run directories, artifacts, transcripts, and
-worktrees.
+```sh
+<assigned-worktree>/bin/qq-delegate batch <absolute-batch.json>
+```
+
+Calls block through child lifecycles; the engine writes `TERMINAL` v2
+(`exit_code`, `timed_out`, artifact paths) per child. Run returns child code;
+batch returns zero if and only if all do. The delegate's only result is
+`<absolute-run-dir>/ENVELOPE.md`; a nonzero exit or missing envelope fails
+dispatch. For dispatch-infrastructure failure—engine refusal, timeout, or
+substrate
+failure—resume once in a fresh run directory with the same `BRIEF.md`. The
+engine rejects the spent directory, which is sealed or has prior output. Use
+the source manifest's recorded `timeoutMs`, never an override; a second failure
+is `inconclusive-under-substrate`, never an operator restatement.
 
 After the first recognized `/dev/fd` or equivalent substrate failure, record
 the Check once as `inconclusive-under-substrate` and do not rerun it in the

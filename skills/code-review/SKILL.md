@@ -14,7 +14,8 @@ the Change and code without inheriting the author's conclusions.
    merge-base. Include committed, staged, unstaged, and untracked work.
 2. Compare the Change with reconciled intent, inclusions, ownership boundary,
    and non-goals. Conflicting intent or a crossed boundary returns to alignment.
-3. Create one private durable run directory beneath the delegate runtime root.
+3. The owner creates one private mode-700 durable run directory beneath the
+   delegate runtime root.
    Write its complete review brief as `BRIEF.md` with Repository/base/head/tree;
    objective/layer; changed-path map; intent/acceptance; boundary/non-goals;
    threat model with trust boundaries, defended modes, and declined classes;
@@ -23,23 +24,19 @@ the Change and code without inheriting the author's conclusions.
    redirected logs, generated helpers, and caches beneath the run directory.
    Give coordinates and facts, never dumps, suspected findings, author
    conclusions, or transcript. `REVIEW.md` supplies owned rules.
-4. Dispatch env and dispatcher config: per README Install. The globally mounted
-   extension selects the active qq checkout for qq worktrees and canonical qq
-   primary `main` elsewhere; `cwd` selects the assigned Git worktree. The
-   work-order reference is the transport: the adapter derives the run directory
-   from the task's `Read-and-perform:<absolute-run-dir>/BRIEF.md` path (no
-   environment variable is passed):
+4. Invoke the assigned worktree's resident engine. It resolves that checkout's
+   Pi wrapper, manifests, and execution-profile policy and rejects a `--cwd`
+   outside its Git common directory:
 
-   ```ts
-   subagent({agent:"reviewer",task:"Read-and-perform:<absolute-run-dir>/BRIEF.md",acceptance:{level:"none",reason:"per the manifests"},cwd:"<absolute-change-worktree>",context:"fresh",async:true})
+   ```sh
+   <assigned-worktree>/bin/qq-delegate run --role reviewer \
+     --cwd <absolute-worktree> --brief <absolute-run-dir>/BRIEF.md
    ```
 
-   The reviewer writes `<absolute-run-dir>/ENVELOPE.md` per
-   `delegation/manifests/ENVELOPE.md`; the adapter writes `TERMINAL` at child
-   exit. Missing `ENVELOPE.md` is not a verdict, and ending on a user message
-   is failed. Sweep active run directories' terminal records on every inbound
-   event. The brief completes orientation—no further broad intent search or
-   full-suite rerun.
+   It blocks through child exit, writes `TERMINAL` v2 (`exit_code`, `timed_out`,
+   artifact paths), and returns child code. A nonzero exit or missing
+   `ENVELOPE.md` fails dispatch. The brief completes orientation—no further
+   broad intent search or full-suite rerun.
 5. The reviewer tests responsibilities against the brief, exact diff, callers,
    tests, and suspected failure paths. Review moves and deletions by invariant.
    A hole reports the missing or contradictory fact, why it controls the
@@ -61,7 +58,9 @@ the Change and code without inheriting the author's conclusions.
 3. A finding class fixed in two prior rounds is convergence and trips the
    breaker: halt at the last green state, put the owning-layer question to the
    operator, and never invoke further loop machinery.
-4. On review-infrastructure failure, resume once with the
-   source run's recorded `timeoutMs` and no other contract override; a second
+4. For dispatch-infrastructure failure—engine refusal, timeout, or substrate
+   failure—resume once in a fresh run directory with the same `BRIEF.md`. The
+   engine rejects the spent directory, which is sealed or has prior output. Use
+   the source manifest's recorded `timeoutMs`, never an override; a second
    failure is `inconclusive-under-substrate`, never an operator restatement.
    Dispatch formed findings and context gaps fresh.
