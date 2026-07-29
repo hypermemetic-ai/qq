@@ -1,10 +1,10 @@
 ---
 id: T-184
 title: Delete delegate confinement and rebuild delegate lifecycle on one run dir
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-28 06:30'
-updated_date: '2026-07-29 02:16'
+updated_date: '2026-07-29 03:08'
 labels: []
 dependencies: []
 documentation:
@@ -35,7 +35,7 @@ Delete qq's confined-delegation layer and the writer role; rebuild delegate life
 - [x] #2 The structured-output schema pipeline is deleted; one durable run dir per delegate holds brief, ENVELOPE.md result, and terminal state from creation, and the parent incorporates async terminal wakes from that record.
 - [x] #3 deliver-change reads as six steps with Task finalization before PR open; created-locally vs mergeable-now vocabulary lands; the PR watch is retained for post-handoff drift.
 - [x] #4 REVIEW.md contains no per-fix-commit counter mandate; T-177's global confined-delegation posture is reversed in CONCEPTS.md, README, and docs.
-- [ ] #5 Observer integrity lands: one entry per evidence object, assembler sole writer of analysis.json, explicit run lineage; intake verifies a named-branch checkout without the deleted identity rejections.
+- [x] #5 Observer integrity lands: one entry per evidence object, assembler sole writer of analysis.json, explicit run lineage; intake verifies a named-branch checkout without the deleted identity rejections.
 - [x] #6 Architect/disposition ceremony (generic validation rejections, in-memory context loss, stale-evidence refusals, exact-phrase retry rituals, hand-cranked pending intakes) is deleted while settled-batch immutability and verified intake results remain.
 - [x] #7 Keeps work: backlog decision update --content authors a decision body noninteractively; atomic doc supersede re-ids a colliding unmerged document with an append-only receipt; a second concurrent intercom ask is an ordinary tool error; send with a pending inbound ask refuses; bash refuses unsupported arguments.
 - [x] #8 Focused tests, full ratchet, shellcheck, and extension tests green; fresh-context review PASS; exactly one PR.
@@ -45,5 +45,5 @@ Delete qq's confined-delegation layer and the writer role; rebuild delegate life
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Landed as one branch (27 commits, +5000/-2900, 56 files): Landlock/Landstrip confinement and the writer role deleted (git worktree is the only boundary; one mutation path); structured-output pipeline replaced by run-dir ENVELOPE.md; one owner-created run dir per delegate derived from the Read-and-perform reference (BRIEF.md at dispatch by construction, TERMINAL at exit, unsealed continuation); deliver-change rewritten as six steps with finalization-before-PR and created-locally/mergeable-now vocabulary; REVIEW.md counter mandate deleted; intake relaxed to named-branch verification; observer one-entry evidence, finalize sole analysis writer, explicit lineage only; architect ceremony cut to durable confirm; keeps landed: qq-backlog decision update --content + atomic doc supersede (main-side id union), intercom single-flight via hash-verified install-time patch (applied), role startup tool validation (extension-aware), bash arg refusal, qq-pi-inventory replacing the README display parser, retire refusing until guided observer package, derived-store materialization prose, pi-lens autoformat deleted via config. T-177 reversed (decision-23/24/25 minted and ledger-switched). Checks: full tests/*.sh sweep green, ratchet clean (8023→8071 under approved plan), shellcheck clean; fresh-context review found 3 (run-dir transport, tracked pycache, supersede allocation) — all fixed and verified closed by fix-delta review (one hygiene scratch finding also fixed). pi-lens deletion applied to ~/.pi-lens/config.json.
+Landed as PRs #279+#280 (merged, main a354d17): Landlock/Landstrip confinement and writer role deleted (worktree-only boundary, decision-23); structured-output pipeline replaced by run-dir ENVELOPE.md; one owner-created run dir derived from the Read-and-perform reference (brief at dispatch by construction, TERMINAL at exit, unsealed continuation); deliver-change six steps with finalization-before-PR and two-state vocabulary; REVIEW.md counters deleted (decision-24); intake relaxed to named-branch verification; observer one-entry evidence at acceptance gates with historical analyses tolerated (#280 regression fix), finalize sole analysis writer, explicit lineage only; architect ceremony cut to durable confirm (decision-25); keeps landed: qq-backlog decision update --content + atomic doc supersede (main-side id union), intercom single-flight install-time patch (applied), extension-aware startup tool validation, bash arg refusal, qq-pi-inventory replacing the README display parser, retire refusing until guided observer package, derived-store materialization prose, pi-lens autoformat deleted via config. T-177 reversed. resolve-task recorded MERGED against both origin batches. Checks: full tests/*.sh sweep green, ratchet clean (budget to 8071 under approved plan), shellcheck clean; fresh-context review 3 findings all fixed and verified closed plus 2 integration hygiene fixes; CI green on both PRs. Observer pr-279 and pr-280 packages assembled, analyses validated and finalized.
 <!-- SECTION:FINAL_SUMMARY:END -->
