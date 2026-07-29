@@ -37,10 +37,12 @@ is valid.
 
 Paths in the analysis must name sessions in that package. The observer writes
 canonical absolute paths; validation canonicalizes all package and analysis
-paths defensively before identity comparisons. Facts are the numeric authority;
-transcripts supply cited context. Signals are an audit input only after reading
-has produced candidates. Pass each facts file to validation as
-`--facts SESSION_PATH=FACTS_PATH`.
+paths defensively before identity comparisons. The analyst captures JSON only
+to its temporary child/runtime input. `qq-observe finalize --analysis` validates
+that input and is the sole writer of the run's `analysis.json`. Facts are the
+numeric authority; transcripts supply cited context. Signals are an audit input
+only after reading has produced candidates. Pass each facts file to validation
+as `--facts SESSION_PATH=FACTS_PATH`.
 
 ## Procedure
 
@@ -81,8 +83,10 @@ Stop. A broken package never produces a salvaged finding.
 Read according to the selected mode and form specifically named episode
 candidates from that reading, anchored to transcript entries. Do this before
 consulting the deterministic signal list. Never call a candidate merely
-"inefficient." Each evidence `quote` must be verbatim from its cited entries;
-whitespace may differ only by collapsed runs. Reasoning can explain how the
+"inefficient." Each evidence object cites exactly one transcript entry; use
+separate evidence objects for separate entries. Its `quote` must be verbatim
+from that entry; whitespace may differ only by collapsed runs. Reasoning can
+explain how the
 agent understood a problem; it cannot establish that an external action
 succeeded or failed.
 
@@ -165,8 +169,9 @@ limitations. Cost is fixed from the episode's `sessions`:
 - `source` is exactly `facts:<sessions[0]>`.
 
 The validator's sane-session bound rejects `turns`, `tokens`, or `duration_ms`
-values above 10^15 before arithmetic. Duplicate episode sessions and duplicate
-entries within one citation are invalid rather than deduplicated.
+values above 10^15 before arithmetic. Duplicate episode sessions are invalid
+rather than deduplicated. An evidence object with zero or multiple entries is
+invalid; use separate evidence objects for separate entries.
 
 After emission, `qq-observe validate-analysis` resolves verbatim citations,
 grounds costs using the supplied facts, rejects invalid output, and ranks valid

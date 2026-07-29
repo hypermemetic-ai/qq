@@ -24,3 +24,7 @@
 
 # machine-managed codex system skills — local installs, never tracked
 /skills/.system/
+__pycache__/
+.brief-*.md
+.review-brief-*.md
+.fix-review-brief.md

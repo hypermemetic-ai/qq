@@ -1,0 +1,15 @@
+{
+  "schema": "qq-patch.manifest",
+  "version": 1,
+  "package": "pi-intercom",
+  "package_version": "0.6.0",
+  "patch": "single-flight.patch",
+  "patch_sha256": "3b012788c20cea2fdfb961525b95641ec005565dbc5ac9c826feaec9bc50d73c",
+  "files": [
+    {
+      "path": "index.ts",
+      "pristine_sha256": "71efa2be0e7f84efa436480207f00079fb50fd4d86d0140cd43e2ec8e61d3a7a",
+      "applied_sha256": "ecc36999bdca92ee2a8e2d650e84e6abb35ed3fc83496ec61d70b34a08b93232"
+    }
+  ]
+}

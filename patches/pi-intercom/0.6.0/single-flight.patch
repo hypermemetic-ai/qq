@@ -1,0 +1,90 @@
+--- a/index.ts
++++ b/index.ts
+@@ -430,6 +430,7 @@
+   const replyTracker = new ReplyTracker();
+   const pendingIdleMessages: InboundMessageEntry[] = [];
+   let inboundFlushTimer: NodeJS.Timeout | null = null;
++  let outboundAskPending = false;
+   let replyWaiter: {
+     from: string;
+     replyTo: string;
+@@ -1169,14 +1170,15 @@
+           }
+         }
+ 
+-        if (replyWaiter) {
++        if (outboundAskPending || replyWaiter) {
+           return {
+-            content: [{ type: "text", text: "Already waiting for a reply" }],
++            content: [{ type: "text", text: "single-flight: an outbound ask is already pending" }],
+             isError: true,
+             details: { error: true },
+           };
+         }
+ 
++        outboundAskPending = true;
+         let replyPromise: Promise<Message> | null = null;
+         try {
+           const questionId = randomUUID();
+@@ -1264,6 +1266,8 @@
+             isError: true,
+             details: { error: true },
+           };
++        } finally {
++          outboundAskPending = false;
+         }
+       },
+       renderCall(args, theme) {
+@@ -1397,6 +1401,15 @@
+               details: { error: true },
+             };
+           }
++          const pendingInboundAsks = replyTracker.listPending();
++          if (pendingInboundAsks.length > 0) {
++            const pendingIds = pendingInboundAsks.map(({ message: pending }) => pending.id).join(", ");
++            return {
++              content: [{ type: "text", text: `single-flight: inbound ask ${pendingIds} is pending; use reply instead of send` }],
++              isError: true,
++              details: { error: true, pendingAskIds: pendingInboundAsks.map(({ message: pending }) => pending.id) },
++            };
++          }
+           try {
+             const sendTo = await resolveSessionTarget(connectedClient, to) ?? to;
+             if (sendTo === connectedClient.sessionId) {
+@@ -1464,9 +1477,9 @@
+             };
+           }
+ 
+-          if (replyWaiter) {
++          if (outboundAskPending || replyWaiter) {
+             return {
+-              content: [{ type: "text", text: "Already waiting for a reply" }],
++              content: [{ type: "text", text: "single-flight: an outbound ask is already pending" }],
+               isError: true,
+               details: { error: true },
+             };
+@@ -1479,6 +1492,7 @@
+               details: { error: true },
+             };
+           }
++          outboundAskPending = true;
+           let replyPromise: Promise<Message> | null = null;
+ 
+           try {
+@@ -1499,6 +1513,7 @@
+             }
+             const questionId = randomUUID();
+             replyPromise = waitForReply(sendTo, questionId, _signal);
++            replyPromise.catch(() => undefined);
+             const sendResult = await connectedClient.send(sendTo, {
+               messageId: questionId,
+               text: message,
+@@ -1558,6 +1573,8 @@
+               isError: true,
+               details: { error: true },
+             };
++          } finally {
++            outboundAskPending = false;
+           }
+         }
+ 

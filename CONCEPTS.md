@@ -29,7 +29,9 @@ satisfied. Frontier membership permits consideration for overlap; accountable
 ownership and conflict review determines actual concurrency.
 
 **Change** — A branch, its commits, and its pull request considered as one unit
-of delivery.
+of delivery. It has two delivery states: **created locally** until finalized,
+and **mergeable now** only when finalized and green. Never call a Change bare
+"mergeable".
 
 **Check** — A reproducible observation that provides evidence about a Change,
 locally or through GitHub Actions.
@@ -40,8 +42,10 @@ locally or through GitHub Actions.
 research, an idea, a reusable lesson, or shared vocabulary.
 
 **managed Backlog markdown** — Markdown owned by Backlog and edited only
-through the Backlog CLI. When associating documents with a Task, `--doc`
-replaces the complete list; it does not append to it.
+through the Backlog CLI surface; the two `bin/qq-backlog` wrapper verbs
+(`decision update --content`, `doc supersede`) are part of that surface, the
+only edits permitted outside the vendor CLI. When associating documents with
+a Task, `--doc` replaces the complete list; it does not append to it.
 
 **decision ledger** — The block in an owning Task's Description listing every
 consequential decision its Change embeds, each citing the disposition that
@@ -79,17 +83,18 @@ working context or conclusions.
 operator-visible herdr notifications outside transcripts. It does not start,
 own, or retire agents.
 
-**work order** — One complete work-order brief per delegated ticket: the
-delegate's complete orientation and the plan bound, carrying the ticket and its
-acceptance criteria, exact orientation paths and reconciliation facts the owner
-already verified, hard constraints, the per-ticket commit protocol, the exact
-Checks to run, and the required completion envelope.
+**work order** — One complete `BRIEF.md` per delegated ticket, written in the
+ticket's durable run directory at creation. It carries the delegate's complete
+orientation and plan bound: ticket and acceptance criteria, exact orientation
+paths and owner-verified reconciliation facts, hard constraints, per-ticket
+commit protocol, exact Checks, and required completion envelope. The run
+directory owns the ticket's brief, scratch, result, and terminal lifecycle state.
 
-**completion envelope** — Every delegate's final message must report per-ticket
-status, commits, files changed, Checks run with results, decisions taken that
-the operator might contest, open questions, unresolved risks, and the branch
-and worktree that contain the work. The owner must verify every claim against
-the tree; an envelope claim is not yet evidence.
+**completion envelope** — The delegate's run-directory `ENVELOPE.md` is its only
+result surface. It reports per-ticket status, commits, files changed, Checks and
+results, contestable decisions, open questions, unresolved risks, branch, and
+worktree. The owner verifies every claim against the tree; an envelope claim is
+not yet evidence.
 
 **silent failure** — A command that succeeds or produces plausible output while
 answering a different question from the one intended.

@@ -1,0 +1,388 @@
+#!/usr/bin/env python3
+"""Hash-verify and apply Repository-carried patches to installed Pi packages."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import hashlib
+import json
+import os
+from pathlib import Path, PurePosixPath
+import re
+import stat
+import sys
+import tempfile
+from typing import NoReturn
+
+
+SHA256 = re.compile(r"[0-9a-f]{64}")
+HUNK_HEADER = re.compile(rb"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
+
+class PatchError(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class Hunk:
+    old_start: int
+    old_count: int
+    new_start: int
+    new_count: int
+    lines: tuple[bytes, ...]
+    raw: bytes
+
+
+@dataclass(frozen=True)
+class FilePatch:
+    path: str
+    hunks: tuple[Hunk, ...]
+
+
+@dataclass(frozen=True)
+class PatchSpec:
+    manifest_path: Path
+    package: str
+    version: str
+    patch_path: Path
+    files: tuple[dict[str, str], ...]
+    diff: tuple[FilePatch, ...]
+
+    @property
+    def label(self) -> str:
+        return f"{self.package}@{self.version}"
+
+
+@dataclass
+class Inspection:
+    spec: PatchSpec
+    root: Path | None
+    state: str
+    detail: str = ""
+
+
+def fail(message: str, code: int = 1) -> NoReturn:
+    print(f"qq-patch-apply: {message}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def digest(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def regular_bytes(path: Path, label: str) -> bytes:
+    if path.is_symlink() or not path.is_file():
+        raise PatchError(f"{label} is not a regular file: {path}")
+    try:
+        return path.read_bytes()
+    except OSError as error:
+        raise PatchError(f"cannot read {label} {path}: {error}") from error
+
+
+def parse_diff(data: bytes, label: str) -> tuple[FilePatch, ...]:
+    lines = data.splitlines(keepends=True)
+    files: list[FilePatch] = []
+    index = 0
+    while index < len(lines):
+        if not lines[index].startswith(b"--- a/"):
+            raise PatchError(f"{label} has unsupported unified-diff content at line {index + 1}")
+        old_path = lines[index][len(b"--- a/") :].rstrip(b"\r\n")
+        index += 1
+        if index >= len(lines) or not lines[index].startswith(b"+++ b/"):
+            raise PatchError(f"{label} lacks a matching +++ file header")
+        new_path = lines[index][len(b"+++ b/") :].rstrip(b"\r\n")
+        index += 1
+        if old_path != new_path:
+            raise PatchError(f"{label} may not rename patch targets")
+        try:
+            path = old_path.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise PatchError(f"{label} contains a non-UTF-8 target path") from error
+        pure = PurePosixPath(path)
+        if pure.is_absolute() or not pure.parts or ".." in pure.parts or "." in pure.parts:
+            raise PatchError(f"{label} contains an unsafe target path: {path}")
+        hunks: list[Hunk] = []
+        while index < len(lines) and lines[index].startswith(b"@@ "):
+            header = lines[index]
+            match = HUNK_HEADER.match(header.rstrip(b"\r\n"))
+            if not match:
+                raise PatchError(f"{label} has an invalid hunk header at line {index + 1}")
+            old_start = int(match.group(1))
+            old_count = int(match.group(2) or b"1")
+            new_start = int(match.group(3))
+            new_count = int(match.group(4) or b"1")
+            raw = [header]
+            index += 1
+            body: list[bytes] = []
+            observed_old = 0
+            observed_new = 0
+            while index < len(lines) and not lines[index].startswith((b"@@ ", b"--- a/")):
+                line = lines[index]
+                if line.startswith(b"\\ No newline at end of file"):
+                    raise PatchError(f"{label} uses unsupported no-newline patch notation")
+                if not line.startswith((b" ", b"+", b"-")):
+                    raise PatchError(f"{label} has invalid hunk content at line {index + 1}")
+                if line[:1] in (b" ", b"-"):
+                    observed_old += 1
+                if line[:1] in (b" ", b"+"):
+                    observed_new += 1
+                body.append(line)
+                raw.append(line)
+                index += 1
+            if observed_old != old_count or observed_new != new_count:
+                raise PatchError(f"{label} hunk counts do not match its body")
+            hunks.append(Hunk(old_start, old_count, new_start, new_count, tuple(body), b"".join(raw)))
+        if not hunks:
+            raise PatchError(f"{label} has a target without hunks: {path}")
+        files.append(FilePatch(path, tuple(hunks)))
+    if not files:
+        raise PatchError(f"{label} is empty")
+    if len({item.path for item in files}) != len(files):
+        raise PatchError(f"{label} repeats a target file")
+    return tuple(files)
+
+
+def load_specs(repository: Path) -> tuple[PatchSpec, ...]:
+    manifests = sorted((repository / "patches").glob("*/*/manifest.json"))
+    if not manifests:
+        raise PatchError("no patch manifests were found")
+    specs: list[PatchSpec] = []
+    for path in manifests:
+        raw = regular_bytes(path, "patch manifest")
+        try:
+            manifest = json.loads(raw)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise PatchError(f"invalid patch manifest JSON: {path}") from error
+        if not isinstance(manifest, dict) or manifest.get("schema") != "qq-patch.manifest":
+            continue
+        if manifest.get("version") != 1:
+            raise PatchError(f"unsupported patch manifest: {path}")
+        package = manifest.get("package")
+        version = manifest.get("package_version")
+        patch_name = manifest.get("patch")
+        patch_hash = manifest.get("patch_sha256")
+        file_records = manifest.get("files")
+        if not all(isinstance(value, str) and value for value in (package, version, patch_name)):
+            raise PatchError(f"patch manifest identity is invalid: {path}")
+        if not SHA256.fullmatch(str(patch_hash)):
+            raise PatchError(f"patch manifest digest is invalid: {path}")
+        patch_pure = PurePosixPath(patch_name)
+        if patch_pure.is_absolute() or len(patch_pure.parts) != 1:
+            raise PatchError(f"patch manifest names an unsafe patch path: {path}")
+        patch_path = path.parent / patch_name
+        patch_data = regular_bytes(patch_path, "patch")
+        if digest(patch_data) != patch_hash:
+            raise PatchError(f"patch digest mismatch: {patch_path}")
+        if not isinstance(file_records, list) or not file_records:
+            raise PatchError(f"patch manifest has no file records: {path}")
+        files: list[dict[str, str]] = []
+        for record in file_records:
+            if not isinstance(record, dict) or set(record) != {"path", "pristine_sha256", "applied_sha256"}:
+                raise PatchError(f"patch manifest file record is invalid: {path}")
+            target = record["path"]
+            pure = PurePosixPath(target) if isinstance(target, str) else PurePosixPath("/")
+            if (
+                not isinstance(target, str)
+                or pure.is_absolute()
+                or not pure.parts
+                or ".." in pure.parts
+                or "." in pure.parts
+                or not SHA256.fullmatch(str(record["pristine_sha256"]))
+                or not SHA256.fullmatch(str(record["applied_sha256"]))
+            ):
+                raise PatchError(f"patch manifest file identity is invalid: {path}")
+            files.append(dict(record))
+        parsed = parse_diff(patch_data, os.fspath(patch_path))
+        if {item.path for item in parsed} != {item["path"] for item in files}:
+            raise PatchError(f"patch targets and manifest file records differ: {path}")
+        specs.append(PatchSpec(path, package, version, patch_path, tuple(files), parsed))
+    if not specs:
+        raise PatchError("no npm package patch manifests were found")
+    return tuple(specs)
+
+
+def package_root(spec: PatchSpec) -> Path:
+    home = os.environ.get("HOME")
+    if not home or not os.path.isabs(home):
+        raise PatchError("HOME must be an absolute path")
+    return Path(home) / ".pi" / "agent" / "npm" / "node_modules" / spec.package
+
+
+def inspect(spec: PatchSpec) -> Inspection:
+    root = package_root(spec)
+    if root.is_symlink():
+        return Inspection(spec, None, "DRIFTED", f"installed package root is a symlink: {root}")
+    if not root.is_dir():
+        return Inspection(spec, None, "absent", f"installed package root is absent: {root}")
+    manifest_path = root / "package.json"
+    try:
+        package = json.loads(regular_bytes(manifest_path, "installed package manifest"))
+    except (UnicodeDecodeError, json.JSONDecodeError, PatchError) as error:
+        return Inspection(spec, root, "DRIFTED", str(error))
+    if not isinstance(package, dict) or package.get("name") != spec.package or package.get("version") != spec.version:
+        return Inspection(
+            spec,
+            root,
+            "DRIFTED",
+            f"installed manifest identity is {package.get('name')!r}@{package.get('version')!r}, expected {spec.label}",
+        )
+    hashes: list[tuple[str, str, str]] = []
+    for record in spec.files:
+        target = root.joinpath(*PurePosixPath(record["path"]).parts)
+        try:
+            current = digest(regular_bytes(target, "installed patch target"))
+        except PatchError as error:
+            return Inspection(spec, root, "DRIFTED", str(error))
+        hashes.append((current, record["pristine_sha256"], record["applied_sha256"]))
+    if all(current == pristine for current, pristine, _applied in hashes):
+        return Inspection(spec, root, "pristine")
+    if all(current == applied for current, _pristine, applied in hashes):
+        return Inspection(spec, root, "applied")
+    return Inspection(spec, root, "DRIFTED", "one or more installed target hashes match neither complete patch state")
+
+
+def apply_file(data: bytes, patch: FilePatch) -> bytes:
+    source = data.splitlines(keepends=True)
+    output: list[bytes] = []
+    cursor = 0
+    for hunk in patch.hunks:
+        start = hunk.old_start - 1
+        if start < cursor or start > len(source):
+            raise PatchError(hunk.raw.decode("utf-8", "replace"))
+        output.extend(source[cursor:start])
+        cursor = start
+        for line in hunk.lines:
+            marker, payload = line[:1], line[1:]
+            if marker in (b" ", b"-"):
+                if cursor >= len(source) or source[cursor] != payload:
+                    raise PatchError(hunk.raw.decode("utf-8", "replace"))
+                if marker == b" ":
+                    output.append(payload)
+                cursor += 1
+            else:
+                output.append(payload)
+    output.extend(source[cursor:])
+    return b"".join(output)
+
+
+def hunk_matches(lines: list[bytes], hunk: Hunk, side: str) -> bool:
+    start = (hunk.old_start if side == "old" else hunk.new_start) - 1
+    markers = (b" ", b"-") if side == "old" else (b" ", b"+")
+    expected = [line[1:] for line in hunk.lines if line[:1] in markers]
+    return start >= 0 and lines[start : start + len(expected)] == expected
+
+
+def mismatched_hunks(inspection: Inspection) -> list[str]:
+    if inspection.root is None:
+        return []
+    expected = {item.path: item for item in inspection.spec.diff}
+    mismatches: list[str] = []
+    for record in inspection.spec.files:
+        target = inspection.root.joinpath(*PurePosixPath(record["path"]).parts)
+        try:
+            lines = regular_bytes(target, "installed patch target").splitlines(keepends=True)
+        except PatchError:
+            continue
+        for hunk in expected[record["path"]].hunks:
+            if not hunk_matches(lines, hunk, "old") and not hunk_matches(lines, hunk, "new"):
+                mismatches.append(hunk.raw.decode("utf-8", "replace"))
+    return mismatches
+
+
+def stage(path: Path, data: bytes, mode: int) -> Path:
+    descriptor, name = tempfile.mkstemp(prefix=f".{path.name}.qq-patch-", dir=path.parent)
+    temporary = Path(name)
+    try:
+        os.fchmod(descriptor, mode)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        return temporary
+    except BaseException:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def apply_spec(inspection: Inspection) -> Inspection:
+    if inspection.state == "applied":
+        return inspection
+    if inspection.state == "absent" or inspection.root is None:
+        raise PatchError(f"{inspection.spec.label} cannot be applied: {inspection.detail}")
+    if inspection.state != "pristine":
+        raise PatchError(f"{inspection.spec.label} is DRIFTED")
+    patch_by_path = {item.path: item for item in inspection.spec.diff}
+    originals: dict[Path, tuple[bytes, int]] = {}
+    replacements: dict[Path, bytes] = {}
+    for record in inspection.spec.files:
+        target = inspection.root.joinpath(*PurePosixPath(record["path"]).parts)
+        original = regular_bytes(target, "installed patch target")
+        mode = stat.S_IMODE(target.stat().st_mode)
+        if digest(original) != record["pristine_sha256"]:
+            raise PatchError(f"{inspection.spec.label} changed after its dry-run inspection")
+        try:
+            replacement = apply_file(original, patch_by_path[record["path"]])
+        except PatchError as error:
+            raise PatchError(f"mismatched hunk:\n{error}") from error
+        if digest(replacement) != record["applied_sha256"]:
+            raise PatchError(f"{inspection.spec.label} dry-run output hash does not match its manifest")
+        originals[target] = (original, mode)
+        replacements[target] = replacement
+
+    staged: dict[Path, Path] = {}
+    installed: list[Path] = []
+    try:
+        for target, replacement in replacements.items():
+            staged[target] = stage(target, replacement, originals[target][1])
+        for target, temporary in staged.items():
+            os.replace(temporary, target)
+            installed.append(target)
+    except BaseException as error:
+        for target in reversed(installed):
+            original, mode = originals[target]
+            rollback = stage(target, original, mode)
+            os.replace(rollback, target)
+        raise PatchError(f"{inspection.spec.label} apply failed and was rolled back: {error}") from error
+    finally:
+        for temporary in staged.values():
+            temporary.unlink(missing_ok=True)
+    result = inspect(inspection.spec)
+    if result.state != "applied":
+        raise PatchError(f"{inspection.spec.label} did not re-hash as applied")
+    return result
+
+
+def main(argv: list[str]) -> None:
+    if argv not in (["check"], ["apply"]):
+        fail("usage: qq-patch-apply check | qq-patch-apply apply", 2)
+    mode = argv[0]
+    repository = Path(__file__).resolve().parent.parent
+    try:
+        specs = load_specs(repository)
+    except PatchError as error:
+        fail(str(error))
+    inspections = [inspect(spec) for spec in specs]
+    drifted = [item for item in inspections if item.state == "DRIFTED"]
+    if drifted:
+        for item in inspections:
+            suffix = f" — {item.detail}" if item.detail else ""
+            print(f"{item.spec.label}: {item.state}{suffix}")
+            if mode == "apply" and item.state == "DRIFTED":
+                for hunk in mismatched_hunks(item):
+                    print(f"mismatched hunk for {item.spec.label}:\n{hunk}", file=sys.stderr)
+        raise SystemExit(1)
+    if mode == "apply":
+        try:
+            inspections = [apply_spec(item) for item in inspections]
+        except PatchError as error:
+            fail(str(error))
+    for item in inspections:
+        print(f"{item.spec.label}: {item.state}")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

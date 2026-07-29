@@ -20,7 +20,7 @@ verb="${1:-}"
 case "$verb" in
   land | retire) ;;
   *) qq_engine_error \
-    'usage: qq-change [inspect] land <pull-request> [--repo <path>] [--dry-run] | qq-change [inspect] retire <work-session-id> --repo <path> --branch <branch> [--placeholder-pane <id>] [--checkout <path> --workspace-absent-owned] [--dry-run]' ;;
+    'usage: qq-change [inspect] land <pull-request> [--repo <path>] [--dry-run] | qq-change [inspect] retire <work-session-id> --repo <path> --branch <branch> [--pr <number>] [--allow-unobserved-retire] [--placeholder-pane <id>] [--checkout <path> --workspace-absent-owned] [--dry-run]' ;;
 esac
 shift
 subject="${1:-}"
@@ -32,6 +32,8 @@ branch=""
 checkout_arg=""
 placeholder_pane=""
 workspace_absent_owned=false
+pull_request=""
+allow_unobserved_retire=false
 dry_run=false
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -57,6 +59,17 @@ while [ "$#" -gt 0 ]; do
       ;;
     --workspace-absent-owned)
       workspace_absent_owned=true
+      shift
+      ;;
+    --pr)
+      [ "$#" -ge 2 ] || qq_engine_error '--pr requires a positive integer'
+      [[ "$2" =~ ^[1-9][0-9]*$ ]] \
+        || qq_engine_error '--pr requires a positive integer'
+      pull_request="$2"
+      shift 2
+      ;;
+    --allow-unobserved-retire)
+      allow_unobserved_retire=true
       shift
       ;;
     --dry-run)
@@ -119,6 +132,9 @@ land_change() {
     || qq_engine_error '--placeholder-pane applies only to retire'
   [ "$workspace_absent_owned" = false ] \
     || qq_engine_error '--workspace-absent-owned applies only to retire'
+  [ -z "$pull_request" ] || qq_engine_error '--pr applies only to retire'
+  [ "$allow_unobserved_retire" = false ] \
+    || qq_engine_error '--allow-unobserved-retire applies only to retire'
   if ! qq_resolve_bin gh; then
     qq_engine_error "$QQ_BIN_ERROR"
   fi
@@ -222,6 +238,82 @@ retire_change() {
   local branch_checkout
   local agents panes snapshot focused_workspace state branch_exists sole_pane
   local workspace_exists=true
+  local observer_state
+
+  observer_state="$("$QQ_ENGINE_JQ" -cn \
+    --argjson allow_unobserved_retire "$allow_unobserved_retire" \
+    '{allow_unobserved_retire:$allow_unobserved_retire}')"
+
+  verify_observer_package() {
+    local gh_bin repository_response repository remote_url pr_response
+    local observed_number pr_state pr_branch merged_at package state_home
+    local package_status=not-required
+
+    if [ -z "$pull_request" ]; then
+      return
+    fi
+    if ! qq_resolve_bin gh; then
+      qq_engine_error "$QQ_BIN_ERROR"
+    fi
+    gh_bin="$QQ_BIN_RESULT"
+    remote_url="$({ "$git_bin" -C "$main_checkout" remote get-url origin 2>/dev/null || true; })"
+    [ -n "$remote_url" ] \
+      || qq_engine_error 'Could not resolve the Repository remote needed to verify the merged pull request.'
+    if ! repository_response="$(cd "$repo_root" && "$gh_bin" repo view \
+      "$remote_url" --json nameWithOwner 2>/dev/null)"; then
+      qq_engine_error 'GitHub Repository inspection failed during retirement.'
+    fi
+    repository="$("$QQ_ENGINE_JQ" -er '.nameWithOwner | select(type == "string" and length > 0)' \
+      <<<"$repository_response" 2>/dev/null || true)"
+    if [[ ! "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+      qq_engine_error 'GitHub returned an unsafe Repository identity during retirement.'
+    fi
+    if ! pr_response="$(cd "$repo_root" && "$gh_bin" pr view "$pull_request" \
+      --repo "$repository" --json number,state,mergedAt,headRefName,url 2>/dev/null)"; then
+      qq_engine_error 'GitHub pull-request inspection failed during retirement.'
+    fi
+    observed_number="$("$QQ_ENGINE_JQ" -er '.number | select(type == "number" and floor == .)' \
+      <<<"$pr_response" 2>/dev/null || true)"
+    pr_state="$("$QQ_ENGINE_JQ" -r '.state // ""' <<<"$pr_response" 2>/dev/null || true)"
+    pr_branch="$("$QQ_ENGINE_JQ" -r '.headRefName // ""' <<<"$pr_response" 2>/dev/null || true)"
+    merged_at="$("$QQ_ENGINE_JQ" -r '.mergedAt // ""' <<<"$pr_response" 2>/dev/null || true)"
+    if [ "$observed_number" != "$pull_request" ] || [ "$pr_state" != MERGED ] \
+      || [ -z "$merged_at" ] || [ "$pr_branch" != "$branch" ]; then
+      state="$("$QQ_ENGINE_JQ" -cn --arg pull_request "$pull_request" \
+        --arg observed_number "$observed_number" --arg pr_state "$pr_state" \
+        --arg expected_branch "$branch" --arg head_ref "$pr_branch" \
+        '{pull_request:$pull_request, observed_number:$observed_number, pr_state:$pr_state, expected_branch:$expected_branch, head_ref:$head_ref}')"
+      qq_engine_refuse \
+        'The supplied pull request is not the verifiably merged pull request for the retiring branch. Preserve the Change and supply its exact merged PR number.' \
+        "$state"
+    fi
+
+    state_home="${XDG_STATE_HOME:-${HOME:+$HOME/.local/state}}"
+    if [ -z "$state_home" ] || [[ "$state_home" != /* ]]; then
+      qq_engine_error 'HOME is required and the observer state home must be absolute.'
+    fi
+    package="$state_home/qq/observer/runs/by-repository/$repository/pr-$pull_request/package.json"
+    if [ "$allow_unobserved_retire" = true ]; then
+      package_status=override
+    elif [ ! -f "$package" ] || [ -L "$package" ] \
+      || ! "$QQ_ENGINE_JQ" -e --argjson pr "$pull_request" --arg repository "$repository" \
+        '.schema == "qq-observer.package" and .pr == $pr and .repository == $repository' \
+        "$package" >/dev/null 2>&1; then
+      state="$("$QQ_ENGINE_JQ" -cn --arg pull_request "$pull_request" \
+        --arg repository "$repository" --arg observer_package "$package" \
+        --argjson allow_unobserved_retire false \
+        '{pull_request:$pull_request, repository:$repository, observer_package:$observer_package, observer_package_status:"missing-or-invalid", allow_unobserved_retire:$allow_unobserved_retire}')"
+      qq_engine_refuse \
+        "The canonical guided observer package is missing or invalid: $package. Assemble it before retirement with: qq-observe assemble --pr $pull_request --repo $repo_root" \
+        "$state"
+    else
+      package_status=present
+    fi
+    observer_state="$("$QQ_ENGINE_JQ" -cn --argjson base "$observer_state" \
+      --arg pull_request "$pull_request" --arg repository "$repository" \
+      --arg observer_package "$package" --arg observer_package_status "$package_status" \
+      '$base + {pull_request:$pull_request, repository:$repository, observer_package:$observer_package, observer_package_status:$observer_package_status}')"
+  }
 
   [ -n "$branch" ] || qq_engine_error 'retire requires --branch <branch>'
   "$git_bin" check-ref-format --branch "$branch" >/dev/null 2>&1 \
@@ -252,7 +344,8 @@ retire_change() {
     state="$("$QQ_ENGINE_JQ" -cn \
       --arg workspace "$workspace" --arg branch "$branch" \
       --argjson branch_exists "$branch_exists" --arg repo_root "$repo_root" \
-      '{workspace:$workspace, workspace_state:"absent", branch:$branch, branch_exists:$branch_exists, repo_root:$repo_root}')"
+      --argjson observer "$observer_state" \
+      '{workspace:$workspace, workspace_state:"absent", branch:$branch, branch_exists:$branch_exists, repo_root:$repo_root} + $observer')"
     if [ "$branch_exists" = false ] \
       && { [ -z "$checkout_arg" ] \
         || { [ ! -e "$checkout_arg" ] && [ ! -L "$checkout_arg" ]; }; }; then
@@ -285,9 +378,11 @@ retire_change() {
           'The work session and checkout are absent, but the remaining branch is not proven merged into freshly fetched origin/main. Preserve it for inspection.' \
           "$state"
       fi
+      verify_observer_package
       state="$("$QQ_ENGINE_JQ" -cn --arg workspace "$workspace" \
         --arg branch "$branch" --arg branch_tip "$branch_tip" \
-        '{workspace:$workspace, workspace_state:"absent", checkout_state:"absent", branch:$branch, branch_tip:$branch_tip, merged_into_origin_main:true}')"
+        --argjson observer "$observer_state" \
+        '{workspace:$workspace, workspace_state:"absent", checkout_state:"absent", branch:$branch, branch_tip:$branch_tip, merged_into_origin_main:true} + $observer')"
       if [ "$mode" = inspect ] || [ "$dry_run" = true ]; then
         qq_engine_done \
           'branch-only retirement rails passed; the merged local branch was not deleted' "$state"
@@ -408,6 +503,7 @@ retire_change() {
       'The attached branch tip is not an ancestor of freshly fetched origin/main. This Change is not proven merged; preserve the work session, checkout, and branch.' \
       "$state"
   fi
+  verify_observer_package
 
   live_agent_count=0
   pane_count=0
@@ -495,6 +591,7 @@ retire_change() {
     --argjson workspace_exists "$workspace_exists" \
     --argjson live_agent_count "$live_agent_count" \
     --argjson pane_count "$pane_count" --argjson tab_count "$tab_count" \
+    --argjson observer "$observer_state" \
     '{
       workspace:$workspace,
       workspace_exists:$workspace_exists,
@@ -506,7 +603,7 @@ retire_change() {
       live_agent_count:$live_agent_count,
       pane_count:$pane_count,
       tab_count:$tab_count
-    }')"
+    } + $observer')"
   if [ "$mode" = inspect ] || [ "$dry_run" = true ]; then
     qq_engine_done \
       'retirement rails passed; the work session, checkout, and branch were not removed' "$state"

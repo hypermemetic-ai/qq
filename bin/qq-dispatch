@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run one pi-subagents child beneath its role-selected Landstrip policy.
+# Run one pi-subagents child in its assigned Git worktree.
 # shellcheck disable=SC1091
 set -euo pipefail
 
@@ -73,6 +73,8 @@ if ! git_worktree_dir="$(realpath -e -- "$git_worktree_dir" 2>/dev/null)"; then
   fail 67 "cannot resolve the worktree Git directory"
 fi
 
+# The canonical adapter may serve any resolvable Git Repository. An adapter in
+# a linked worktree may serve only worktrees sharing its own common directory.
 if [[ "$git_common_dir" != "$adapter_git_common_dir" ]]; then
   adapter_git_worktree_dir="$(realpath -e -- "$(git_query -C "$adapter_worktree" rev-parse --path-format=absolute --git-dir 2>/dev/null)" 2>/dev/null)" \
     || fail 67 "cannot resolve the adapter Git worktree directory"
@@ -95,13 +97,7 @@ if [[ "$role" == "researcher" && -n "${CONTEXT7_API_KEY:-}" ]]; then
   fail 66 "researcher dispatch forbids inherited CONTEXT7_API_KEY"
 fi
 
-roles_file="$adapter_worktree/delegation/policies/roles.json"
-policy_renderer="$bin_dir/lib/qq-render-landstrip-policy.mjs"
 tree_supervisor="$bin_dir/lib/qq-process-tree-supervisor.py"
-[[ -f "$roles_file" && -r "$roles_file" ]] \
-  || fail 72 "Landstrip role policy is unavailable"
-[[ -f "$policy_renderer" && -r "$policy_renderer" ]] \
-  || fail 72 "Landstrip policy renderer is unavailable"
 [[ -f "$tree_supervisor" && -x "$tree_supervisor" ]] \
   || fail 71 "process-tree supervisor is unavailable"
 
@@ -127,32 +123,6 @@ path_is_within "$runtime_root" "$system_tmp" \
 [[ "$runtime_root" != "$system_tmp" ]] \
   || fail 68 "runtime root may not be all of /tmp"
 
-structured_output_capture=""
-if [[ -n "${PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE:-}" ]]; then
-  capture_input="$PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE"
-  [[ "$capture_input" == /* ]] \
-    || fail 68 "structured-output capture path must be absolute"
-  [[ ! -L "$capture_input" ]] \
-    || fail 68 "structured-output capture path may not be a symlink"
-  if [[ -e "$capture_input" && ! -f "$capture_input" ]]; then
-    fail 68 "structured-output capture path must be a regular file when it exists"
-  fi
-  capture_parent_input="$(dirname -- "$capture_input")"
-  [[ -d "$capture_parent_input" ]] \
-    || fail 68 "structured-output capture directory is unavailable"
-  if ! capture_parent="$(realpath -e -- "$capture_parent_input" 2>/dev/null)"; then
-    fail 68 "cannot resolve the structured-output capture directory"
-  fi
-  capture_leaf="$(basename -- "$capture_input")"
-  [[ -n "$capture_leaf" && "$capture_leaf" != "." && "$capture_leaf" != ".." ]] \
-    || fail 68 "structured-output capture filename is invalid"
-  structured_output_capture="$capture_parent/$capture_leaf"
-  if ! path_is_within "$structured_output_capture" "$runtime_root" \
-    && ! path_is_within "$structured_output_capture" "$worktree"; then
-    fail 68 "structured-output capture path must stay beneath the runtime root or assigned worktree"
-  fi
-fi
-
 run_token="${PI_SUBAGENT_RUN_ID:-manual}"
 run_token="${run_token//[^A-Za-z0-9._-]/_}"
 run_token="${run_token:0:80}"
@@ -160,16 +130,86 @@ run_token="${run_token:0:80}"
 child_index="${PI_SUBAGENT_CHILD_INDEX:-0}"
 [[ "$child_index" =~ ^[0-9]+$ ]] \
   || fail 68 "PI_SUBAGENT_CHILD_INDEX must be a non-negative integer"
-run_dir="$runtime_root/runs/$run_token/${role}-${child_index}-$$"
-mkdir -p -- "$run_dir/tmp" "$run_dir/pi-config" "$run_dir/sessions" \
+
+# The work-order reference is the only per-dispatch transport: the child argv
+# carries `Task: Read-and-perform:<absolute-run-dir>/BRIEF.md` inline, or in a
+# `@file` spill for long tasks. The brief's directory is the run dir by
+# construction. QQ_DISPATCH_RUN_DIR is an adapter->child export only; any
+# inherited value is ignored here.
+brief_path=""
+for arg in "$@"; do
+  case "$arg" in
+    "Task: Read-and-perform:"*)
+      [[ -z "$brief_path" ]] \
+        || fail 68 "dispatch carries two work-order references"
+      brief_path="${arg#Task: Read-and-perform:}"
+      ;;
+    @*)
+      spill="${arg#@}"
+      if [[ -f "$spill" && ! -L "$spill" ]]; then
+        spill_ref="$(grep -m1 -oE 'Read-and-perform:[^[:space:]]+' -- "$spill" 2>/dev/null || true)"
+        if [[ -n "$spill_ref" ]]; then
+          [[ -z "$brief_path" ]] \
+            || fail 68 "dispatch carries two work-order references"
+          brief_path="${spill_ref#Read-and-perform:}"
+        fi
+      fi
+      ;;
+  esac
+done
+
+if [[ -n "$brief_path" ]]; then
+  [[ "$brief_path" == /* ]] \
+    || fail 68 "work-order brief path must be absolute: $brief_path"
+  [[ "${brief_path##*/}" == "BRIEF.md" ]] \
+    || fail 68 "work-order reference must name BRIEF.md: $brief_path"
+  [[ ! -L "$brief_path" ]] \
+    || fail 68 "work-order brief may not be a symlink"
+  [[ -f "$brief_path" ]] \
+    || fail 68 "work-order brief must exist at dispatch: $brief_path"
+  run_dir_input="$(dirname -- "$brief_path")"
+  [[ ! -L "$run_dir_input" ]] \
+    || fail 68 "dispatch run directory may not be a symlink"
+  if ! run_dir="$(realpath -e -- "$run_dir_input" 2>/dev/null)"; then
+    fail 68 "cannot resolve the dispatch run directory"
+  fi
+  path_is_within "$run_dir" "$runtime_root" || path_is_within "$run_dir" "$worktree" \
+    || fail 68 "dispatch run directory must stay beneath the runtime root or the assigned worktree"
+  [[ "$run_dir" != "$runtime_root" && "$run_dir" != "$worktree" ]] \
+    || fail 68 "dispatch run directory may not be the runtime root or the worktree itself"
+  [[ -O "$run_dir" ]] \
+    || fail 68 "dispatch run directory is not owned by the operator"
+  run_dir_mode="$(stat -c %a "$run_dir")"
+  [[ "$run_dir_mode" == "700" ]] \
+    || fail 68 "dispatch run directory must be mode 700 (found $run_dir_mode): $run_dir"
+  [[ ! -f "$run_dir/TERMINAL" ]] \
+    || fail 68 "dispatch run directory is sealed by TERMINAL: $run_dir"
+  # A fresh dir holds only BRIEF.md; an unsealed dir with the standard
+  # structure is a continuation after a mid-flight adapter death.
+  shopt -s nullglob dotglob
+  run_entries=("$run_dir"/*)
+  shopt -u nullglob dotglob
+  for run_entry in "${run_entries[@]}"; do
+    case "${run_entry##*/}" in
+      BRIEF.md|ENVELOPE.md|cache|pi-config|sessions) ;;
+      *) fail 68 "dispatch run directory contains unexpected entry: $run_entry" ;;
+    esac
+  done
+else
+  run_dir="$runtime_root/runs/$run_token/${role}-${child_index}-$$"
+  mkdir -p -- "$(dirname -- "$run_dir")" \
+    || fail 68 "cannot create the dispatch run parent"
+  mkdir -m 700 -- "$run_dir" \
+    || fail 68 "cannot create the dispatch run directory"
+fi
+
+install -d -m 700 -- "$run_dir/cache" "$run_dir/pi-config" "$run_dir/sessions" \
   || fail 68 "cannot create the dispatch run directories"
 if ! pi_config_dir="$(realpath -e -- "$run_dir/pi-config" 2>/dev/null)"; then
   fail 68 "cannot resolve the dispatch Pi config directory"
 fi
-path_is_within "$pi_config_dir" "$runtime_root" \
-  || fail 68 "dispatch Pi config directory must stay beneath the runtime root"
-[[ "$pi_config_dir" != "$runtime_root" ]] \
-  || fail 68 "dispatch Pi config directory may not be the runtime root"
+path_is_within "$pi_config_dir" "$run_dir" \
+  || fail 68 "dispatch Pi config directory must stay beneath the run directory"
 pi_auth_path="$pi_config_dir/auth.json"
 if [[ -n "${HOME:-}" ]]; then
   launcher_auth_path="$HOME/.pi/agent/auth.json"
@@ -181,7 +221,7 @@ if [[ -n "${HOME:-}" ]]; then
   fi
 fi
 
-# Delegates may execute only this verified worktree's qq Pi wrapper; PATH and
+# Delegates execute only this verified worktree's qq Pi wrapper; PATH and
 # QQ_PI_BIN are not child-runtime authorities.
 pi_binary="$bin_dir/pi"
 [[ -f "$pi_binary" && -x "$pi_binary" && ! -L "$pi_binary" ]] \
@@ -198,11 +238,12 @@ fi
 node_binary="$QQ_BIN_RESULT"
 
 canonical_manifest="$adapter_worktree/delegation/manifests/agents/$role.md"
-if ! timeout_spec="$({ "$node_binary" - "$role" "$canonical_manifest" <<'NODE'
+manifest_status=0
+if manifest_result="$({ "$node_binary" - "$role" "$canonical_manifest" <<'NODE'
 const fs = require("node:fs");
 const role = process.argv[2];
 const expected = process.argv[3];
-const refuse = (message) => { process.stderr.write(message); process.exit(1); };
+const refuse = (message, status = 1) => { process.stderr.write(message); process.exit(status); };
 
 const rawPaths = process.env.PI_SUBAGENT_TRUSTED_AGENT_PATHS;
 if (!rawPaths) refuse("PI_SUBAGENT_TRUSTED_AGENT_PATHS is required");
@@ -229,15 +270,49 @@ const lines = source.split("\n");
 const frontmatterEnd = lines.indexOf("---", 1);
 if (lines[0] !== "---" || frontmatterEnd < 0)
   refuse(`trusted manifest for ${role} has malformed YAML frontmatter`);
-const declarations = lines.slice(1, frontmatterEnd)
-  .filter((line) => line.includes("timeoutMs"));
-if (declarations.length !== 1 || !/^timeoutMs:/.test(declarations[0]))
+const frontmatter = lines.slice(1, frontmatterEnd);
+const timeoutDeclarations = frontmatter.filter((line) => line.includes("timeoutMs"));
+if (timeoutDeclarations.length !== 1 || !/^timeoutMs:/.test(timeoutDeclarations[0]))
   refuse(`trusted manifest for ${role} must contain exactly one timeoutMs declaration`);
-const match = /^timeoutMs:\s*([1-9][0-9]*)\s*$/.exec(declarations[0]);
-if (!match) refuse(`trusted manifest for ${role} timeoutMs must be a positive integer`);
-const milliseconds = Number(match[1]);
+const timeoutMatch = /^timeoutMs:\s*([1-9][0-9]*)\s*$/.exec(timeoutDeclarations[0]);
+if (!timeoutMatch) refuse(`trusted manifest for ${role} timeoutMs must be a positive integer`);
+const milliseconds = Number(timeoutMatch[1]);
 if (!Number.isSafeInteger(milliseconds))
   refuse(`trusted manifest for ${role} timeoutMs cannot be converted losslessly`);
+
+const toolDeclarations = frontmatter.filter((line) => line.includes("tools:"));
+if (toolDeclarations.length !== 1 || !/^tools:/.test(toolDeclarations[0]))
+  refuse(`trusted manifest for ${role} must contain exactly one tools declaration`);
+const toolsText = toolDeclarations[0].slice("tools:".length).trim()
+  .replace(/^\[/, "").replace(/\]$/, "");
+if (!toolsText) refuse(`trusted manifest for ${role} tools declaration must not be empty`);
+const tools = toolsText.split(",").map((tool) => tool.trim()).filter(Boolean);
+// Deliberate choke point: every role tool must be in this adapter-owned inventory.
+const knownTools = new Set([
+  "read", "bash", "edit", "write", "grep", "glob", "find", "ls",
+  "subagent", "subagent_wait", "intercom", "ask_user_question",
+  "web_search", "web_fetch", "agent_browser", "todo", "lsp_diagnostics",
+  "lens_diagnostics", "symbol_search", "module_report", "read_symbol",
+  "read_enclosing", "pi_lens_activate_tools", "operator_stage", "qq_pr_watch",
+  "architect_disposition",
+]);
+// Extension-provided tools validate only for a role that loads the providing
+// extension through subagentOnlyExtensions (decision-15: researcher-only Context7).
+const extensionTools = new Map([
+  ["~/.pi/agent/npm/node_modules/@upstash/context7-pi/extensions/context7.ts",
+    ["resolve-library-id", "query-docs"]],
+]);
+const childExtensionLines = frontmatter.filter((line) => line.startsWith("subagentOnlyExtensions:"));
+const childTools = new Set();
+for (const [extensionPath, provided] of extensionTools) {
+  if (childExtensionLines.some((line) => line.slice("subagentOnlyExtensions:".length).trim() === extensionPath))
+    for (const tool of provided) childTools.add(tool);
+}
+for (const tool of tools) {
+  if (!knownTools.has(tool) && !childTools.has(tool))
+    refuse(`trusted manifest for ${role} declares unavailable tool '${tool}'`, 66);
+}
+
 const wholeSeconds = Math.floor(milliseconds / 1000);
 const remainder = milliseconds % 1000;
 const fraction = remainder
@@ -245,32 +320,13 @@ const fraction = remainder
 process.stdout.write(`${wholeSeconds}${fraction}s`);
 NODE
 } 2>&1)"; then
-  fail 71 "$timeout_spec"
-fi
-
-if [[ -n "${QQ_LANDSTRIP_BIN:-}" ]]; then
-  if ! qq_resolve_bin landstrip; then
-    fail 69 "$QQ_BIN_ERROR"
-  fi
-  landstrip_binary="$QQ_BIN_RESULT"
+  timeout_spec="$manifest_result"
 else
-  [[ -n "${HOME:-}" ]] \
-    || fail 69 "HOME is required to resolve Landstrip from the operator Pi npm tree"
-  if ! platform="$("$node_binary" -p 'process.platform' 2>/dev/null)" \
-    || ! architecture="$("$node_binary" -p 'process.arch' 2>/dev/null)"; then
-    fail 69 "cannot determine the Landstrip platform package"
+  manifest_status=$?
+  if [[ "$manifest_status" -eq 66 ]]; then
+    fail 66 "$manifest_result"
   fi
-  landstrip_binary="${HOME%/}/.pi/agent/npm/node_modules/@landstrip/landstrip-${platform}-${architecture}/bin/landstrip"
-fi
-[[ "$landstrip_binary" == /* ]] \
-  || fail 69 "Landstrip binary path must be absolute"
-[[ -f "$landstrip_binary" && -x "$landstrip_binary" ]] \
-  || fail 69 "Landstrip is unavailable at the configured path"
-if ! landstrip_binary="$(realpath -e -- "$landstrip_binary" 2>/dev/null)"; then
-  fail 69 "cannot resolve the Landstrip binary"
-fi
-if ! landstrip_version="$("$landstrip_binary" --version 2>&1)"; then
-  fail 69 "Landstrip version probe failed: $landstrip_version"
+  fail 71 "$manifest_result"
 fi
 
 if [[ -v QQ_DISPATCH_TIMEOUT ]]; then
@@ -287,15 +343,9 @@ if ! qq_resolve_bin python3; then
 fi
 python_binary="$QQ_BIN_RESULT"
 
-# Establish the pi-subagents session root. pi-subagents stores child session
-# transcripts beneath its configured defaultSessionDir (README Install); when
-# the config is missing or malformed it silently falls back to the parent
-# session tree, which the Landstrip policy deliberately does not grant — so
-# the config is REQUIRED here, and the configured path must be a direct
-# pi-subagent-* child of the launcher temp dir for the policy enumeration to
-# grant it. Fail closed on a missing/malformed/nonconforming config, a
-# symlink, foreign ownership, or a loose mode rather than dispatching into a
-# later EACCES or a transcript-readable directory.
+# pi-subagents stores child transcripts beneath defaultSessionDir. Missing or
+# malformed configuration silently falls back to the parent session tree, so
+# keep this root explicit, private, and constrained to the launcher's temp dir.
 if ! session_root="$("$node_binary" -e '
   try {
     const c = JSON.parse(require("fs").readFileSync(
@@ -329,37 +379,12 @@ else
     || fail 68 "cannot create the pi-subagents session root: $session_root"
 fi
 
-policy_path="$run_dir/landstrip-policy.json"
-event_log="$runtime_root/wrapper-events.jsonl"
-if ! metadata="$("$node_binary" "$policy_renderer" \
-  --roles "$roles_file" \
-  --role "$role" \
-  --run-id "$run_token" \
-  --worktree "$worktree" \
-  --git-common-dir "$git_common_dir" \
-  --git-worktree-dir "$git_worktree_dir" \
-  --runtime-root "$runtime_root" \
-  --pi-auth "$pi_auth_path" \
-  --pi-subagent-temp-dir "$launcher_tmp" \
-  --structured-output-capture "$structured_output_capture" \
-  --policy "$policy_path" \
-  --event-log "$event_log" \
-  --timeout "$timeout_spec" \
-  --landstrip-version "$landstrip_version")"; then
-  fail 72 "Landstrip policy rendering failed"
-fi
-IFS=$'\t' read -r policy_identity access_scope <<< "$metadata"
-[[ -n "$policy_identity" && -n "$access_scope" ]] \
-  || fail 72 "Landstrip policy renderer returned incomplete metadata"
-
+unset QQ_DISPATCH_POLICY_IDENTITY QQ_DISPATCH_POLICY_SCOPE QQ_DISPATCH_WRAPPER_EVENT_LOG
 export QQ_DISPATCH_WORKTREE="$worktree"
 export QQ_DISPATCH_GIT_COMMON_DIR="$git_common_dir"
 export QQ_DISPATCH_GIT_WORKTREE_DIR="$git_worktree_dir"
 export QQ_DISPATCH_RUN_DIR="$run_dir"
-export QQ_DISPATCH_POLICY_IDENTITY="$policy_identity"
-export QQ_DISPATCH_POLICY_SCOPE="$access_scope"
-export QQ_DISPATCH_WRAPPER_EVENT_LOG="$event_log"
-export TMPDIR="$run_dir/tmp"
+export XDG_CACHE_HOME="$run_dir/cache"
 export PI_CODING_AGENT_DIR="$pi_config_dir"
 export PI_CODING_AGENT_SESSION_DIR="$run_dir/sessions"
 export PI_OFFLINE=1
@@ -380,9 +405,9 @@ elif [[ ! -x "$observe" ]]; then
   observation_enabled=false
 else
   if [[ -z "$trace_id" ]]; then
-    trace_id="$($observe id trace 2>/dev/null)" || observation_enabled=false
+    trace_id="$("$observe" id trace 2>/dev/null)" || observation_enabled=false
   fi
-  span_id="$($observe id span 2>/dev/null)" || observation_enabled=false
+  span_id="$("$observe" id span 2>/dev/null)" || observation_enabled=false
   if $observation_enabled; then
     [[ -n "$root_span_id" ]] || root_span_id="${parent_span_id:-$span_id}"
     export QQ_TRACE_ID="$trace_id"
@@ -398,8 +423,8 @@ fi
 # assertion. The retained fork supplies its separate trusted child assertion.
 unset QQ_EXECUTION_PROFILE_LAUNCHER QQ_EXECUTION_PROFILE_LAUNCHER_ROLE
 
-printf '[qq-dispatch] role=%s policy=%s scope=%s boundary=landstrip landstrip=%s timeout=%s\n' \
-  "$role" "$policy_identity" "$access_scope" "$landstrip_version" "$timeout_spec" >&2
+printf '[qq-dispatch] role=%s boundary=git-worktree timeout=%s run-dir=%s\n' \
+  "$role" "$timeout_spec" "$run_dir" >&2
 
 dispatch_pid=""
 termination_signal=""
@@ -417,7 +442,6 @@ trap 'forward_termination HUP' HUP
 set +e
 "$timeout_binary" -k 10 --signal=TERM "$timeout_spec" \
   "$python_binary" "$tree_supervisor" -- \
-  "$landstrip_binary" -p "$policy_path" \
   "$pi_binary" --approve --offline "$@" &
 dispatch_pid=$!
 [[ -z "$termination_signal" ]] || forward_termination "$termination_signal"
@@ -437,6 +461,28 @@ if [[ -n "$termination_signal" ]]; then
     INT) child_status=130 ;;
     TERM) child_status=143 ;;
   esac
+fi
+
+if ! "$node_binary" - "$run_dir" "${PI_SUBAGENT_RUN_ID:-manual}" "$role" "$child_status" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const [runDir, runId, agent, exitCodeText] = process.argv.slice(2);
+const terminal = {
+  schema: "qq-run-terminal",
+  version: 1,
+  run_id: runId,
+  agent,
+  exit_code: Number(exitCodeText),
+  ended_at: new Date().toISOString(),
+};
+const target = path.join(runDir, "TERMINAL");
+const temporary = path.join(runDir, `.TERMINAL.${process.pid}.tmp`);
+fs.writeFileSync(temporary, `${JSON.stringify(terminal)}\n`, { mode: 0o600 });
+fs.renameSync(temporary, target);
+NODE
+then
+  printf '[qq-dispatch] fail-closed: cannot write terminal run state\n' >&2
+  exit 73
 fi
 
 if $observation_enabled; then

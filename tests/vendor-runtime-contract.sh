@@ -8,8 +8,8 @@
 # covers foreground/background completion, structured-output recovery and
 # negatives, lifecycle/status/wait/stop/resume, output isolation, timeout and
 # signal handling, and session/artifact behavior. The qq boundary then covers
-# same-Repository dispatch validation, Landstrip policy identity, descendant
-# cleanup, persisted-session observation, and the canonical-seat environment.
+# same-Repository dispatch validation, durable run state, descendant cleanup,
+# persisted-session observation, and the canonical-seat environment.
 set -euo pipefail
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -49,8 +49,6 @@ clean_env=(
   -u PI_SUBAGENT_PARENT_SESSION
   -u PI_CODING_AGENT_DIR
   -u QQ_DISPATCH_RUNTIME_ROOT
-  -u PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE
-  -u PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA
   HOME="$contract_tmp/home"
   TMPDIR="$contract_tmp/tmp"
   XDG_CONFIG_HOME="$contract_tmp/xdg-config"
@@ -73,7 +71,6 @@ clean_env=(
 )
 
 bash "$TESTS_DIR/test-qq-dispatch.sh"
-bash "$TESTS_DIR/test-qq-delegate-enforcement.sh"
 bash "$TESTS_DIR/test-qq-observe-seam-signals.sh"
 bash "$TESTS_DIR/test-qq-subagent-env.sh"
 

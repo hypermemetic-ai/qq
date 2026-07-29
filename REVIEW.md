@@ -29,11 +29,6 @@ threat model; its scope wins.
 - Smallest remedy means smallest resulting system; diff breaks ties. In-boundary
   state-space shrinkage or preservation is pre-authorized and reported in the
   completion envelope; boundary changes align.
-- Always display parallel, unblended net production-LOC and decision-point
-  deltas per fix commit on completion and review surfaces. Growth in either
-  spends one mechanical implementer-loop same-fix-smaller regeneration: passing
-  Checks plus strict shrink wins; otherwise retain the original without
-  justification prose.
 - Block only at shape: merge-boundary gates are only-down count budgets, such
   as complex functions or long files. Trend gauges, including fix-net and
   health composites, gate nothing.

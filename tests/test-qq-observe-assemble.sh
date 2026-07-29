@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC1091,SC2034
+# shellcheck disable=SC1091,SC2016,SC2034
 set -euo pipefail
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -195,9 +195,10 @@ make_run weak-missing-run "$worktree_root/retired-missing" "$parent_weak_missing
   weak-missing-hash 'delegate feature work'
 weak_missing_session_file="$TMPDIR/pi-subagent-sessions/weak-missing-hash/run-0/session.jsonl"
 rm "$weak_missing_session_file"
-cat >"$strong_session_dir/session.jsonl" <<'JSONL'
+nested_quoted_session="$strong_session_dir/session.jsonl"
+cat >"$nested_quoted_session" <<'JSONL'
 {"type":"session","version":3,"timestamp":"2026-07-20T10:30:00Z"}
-{"type":"message","timestamp":"2026-07-20T10:30:01Z","message":{"role":"assistant","content":[{"type":"text","text":"continued strong-run"}],"usage":{"input":1,"output":2}}}
+{"type":"message","timestamp":"2026-07-20T10:30:01Z","message":{"role":"assistant","content":[{"type":"text","text":"quoted notes about the solo package"}],"usage":{"input":1,"output":2}}}
 JSONL
 # Matching symlinks are not accountable-session candidates.
 mkdir -p "$HOME/.pi/agent/sessions/--fixture-symlink--"
@@ -272,15 +273,15 @@ jq -e --arg repo "$(realpath "$repo")" --arg missing "$missing_session_file" \
   --arg collision_parent_b_label "$collision_parent_b_label" \
   --arg accountable_strong "accountable-$parent_uuid" \
   --arg ambiguous_uuid "$ambiguous_uuid" \
-  --arg zero_uuid "$zero_uuid" --arg weak_invalid_uuid "$weak_invalid_uuid" \
-  --arg weak_invalid_delegate "$weak_invalid_delegate" \
-  --arg weak_other "$TMPDIR/pi-subagent-sessions/weak-other-hash/run-0/session.jsonl" \
-  --arg weak_missing "$weak_missing_session_file" '
+  --arg nested_quoted "$nested_quoted_session" \
+  --arg weak_invalid_uuid "$weak_invalid_uuid" '
   .schema == "qq-observer.package" and .schema_version == 2
   and .repository == "fixture/repo"
   and .pr == 41 and .branch == "feature" and .repo == $repo
   and .variant == "guided"
-  and ([.sessions[] | select(.role == "delegate" and .evidence == "live-worktree-branch")] | length) == 5
+  and ([.sessions[] | select(
+    .role == "delegate" and .evidence == "named-branch-status-lineage"
+  )] | length) == 4
   and ([.sessions[] | select(
     .role == "accountable" and .source_path == $parent_strong and .label == $accountable_strong
   )] | length) == 1
@@ -291,43 +292,17 @@ jq -e --arg repo "$(realpath "$repo")" --arg missing "$missing_session_file" \
     .source_path == $collision_parent_b and .label == $collision_parent_b_label
   )] | length) == 1
   and ([.sessions[].label] | length) == ([.sessions[].label] | unique | length)
+  and ([.sessions[] | select(.role == "accountable" and .evidence == "parent-of-delegate")] | length) == 3
   and ([.sessions[] | select(.role == "delegate" and .run_id == "ambiguous-run")] | length) == 1
   and ([.sessions[] | select(.source_path | contains($ambiguous_uuid))] | length) == 0
-  and ([.sessions[] | select(
-    .role == "delegate" and .evidence == "retired-worktree-content" and .run_id == "weak-run"
-  )] | length) == 1
-  and ([.sessions[] | select(
-    .run_id == "weak-other-run" or .run_id == "weak-missing-run" or .run_id == "weak-invalid-run"
-    or .run_id == "weak-absolute-invalid-run" or .run_id == "weak-absolute-symlink-run"
-    or .run_id == "weak-invalid-delegate-run"
-  )] | length) == 0
-  and ([.sessions[] | select(.role == "accountable" and .evidence == "parent-of-delegate")] | length) == 4
-  and ([.sessions[] | select(.label == "accountable-parent-weak")] | length) == 1
-  and ([.sessions[] | select(.label == "accountable-parent-weak-missing")] | length) == 0
+  and ([.sessions[] | select(.source_path == $nested_quoted)] | length) == 0
+  and ([.sessions[] | select((.run_id // "") | startswith("weak-"))] | length) == 0
   and ([.unknown_entries[] | select(.path == $missing and (.reason | length > 0))] | length) == 1
-  and ([.unknown_entries[] | select(.path == $weak_other and (.reason | contains("does not mention")))] | length) == 1
-  and ([.unknown_entries[] | select(.path == $weak_missing and (.reason | contains("missing")))] | length) == 1
-  and ([.unknown_entries[] | select(
-    .path == $weak_invalid_delegate and (.reason | (contains("weak delegate") and contains("not a Pi v3")))
-  )] | length) == 1
-  and ([.unknown_entries[] | select(.path | endswith("spans.jsonl"))] | length) == 1
-  and ([.unknown_entries[] | select(.path | endswith("malformed-run/status.json"))] | length) == 1
-  and ([.unknown_entries[] | select((.path | endswith("invalid-relative-run/status.json")) and .reason == "malformed delegate status.json")] | length) == 1
   and ([.unknown_entries[] | select(.reason | (contains($ambiguous_uuid) and contains("matched 2 regular files")))] | length) == 1
-  and ([.unknown_entries[] | select(.reason | (contains($zero_uuid) and contains("matched 0 regular files")))] | length) == 1
   and ([.unknown_entries[] | select(.reason | (contains($weak_invalid_uuid) and contains("is not Pi v3")))] | length) == 1
-  and ([.unknown_entries[] | select(
-    (.path | endswith("weak-absolute-invalid-run/status.json")) and (.reason | contains("is not Pi v3"))
-  )] | length) == 1
-  and ([.unknown_entries[] | select(
-    (.path | endswith("weak-absolute-symlink-run/status.json")) and (.reason | contains("not a regular file"))
-  )] | length) == 1
-  and ([.warnings[] | select(contains("weak-absolute-invalid-run"))] | length) == 1
-  and ([.warnings[] | select(contains("weak-absolute-symlink-run"))] | length) == 1
-  and ([.warnings[] | select(contains($ambiguous_uuid))] | length) == 1
-  and ([.warnings[] | select(contains($zero_uuid))] | length) == 1
-  and ([.warnings[] | select(contains($weak_invalid_uuid))] | length) == 1
-' "$run_41/package.json" >/dev/null || fail 'external delegate sessions were not assembled defensively'
+  and any(.warnings[]; contains("outside the explicit named-branch lineage"))
+' "$run_41/package.json" >/dev/null \
+  || fail 'explicit status/run-parent lineage was not the sole package membership source'
 [ -f "$run_41/inventory.json" ] || fail 'inventory was not written'
 [ -f "$run_41/corpus/skills/fixture/SKILL.md" ] || fail 'merge-time corpus was not snapshotted'
 [ -f "$run_41/corpus/delegation/manifests/agents/implementer.md" ] \
@@ -345,9 +320,9 @@ assert_file_not_matches "$run_41/corpus/skills/fixture/SKILL.md" 'timeoutMs:6000
   'package corpus read the later working tree instead of the Change snapshot'
 jq -e '.skills == [{name:"fixture",description:"Fixture skill at merge time."}]' \
   "$run_41/inventory.json" >/dev/null || fail 'skill inventory did not preserve the merge-time description'
-assert_equal 10 "$(find "$run_41/sessions" -type f | wc -l)" 'session transcript count is wrong'
-assert_equal 10 "$(find "$run_41/facts" -type f | wc -l)" 'facts count is wrong'
-assert_equal 10 "$(find "$run_41/signals" -type f | wc -l)" 'signals count is wrong'
+assert_equal 7 "$(find "$run_41/sessions" -type f | wc -l)" 'session transcript count is wrong'
+assert_equal 7 "$(find "$run_41/facts" -type f | wc -l)" 'facts count is wrong'
+assert_equal 7 "$(find "$run_41/signals" -type f | wc -l)" 'signals count is wrong'
 jq -e '[.sessions[] | has("signals")] | all' "$run_41/package.json" >/dev/null \
   || fail 'guided package omitted a session signals pointer'
 
@@ -371,9 +346,9 @@ jq -S 'del(.variant) | .sessions |= map(del(.facts,.signals))' \
   "$run_41/package.json" >"$tmp/guided-comparable.json"
 cmp "$tmp/guided-comparable.json" "$tmp/blind-comparable.json" \
   || fail 'blind package identity or session inputs differ from guided'
-assert_equal 10 "$(find "$blind_run_41/sessions" -type f | wc -l)" \
+assert_equal 7 "$(find "$blind_run_41/sessions" -type f | wc -l)" \
   'blind session transcript count is wrong'
-assert_equal 10 "$(find "$blind_run_41/facts" -type f | wc -l)" \
+assert_equal 7 "$(find "$blind_run_41/facts" -type f | wc -l)" \
   'blind facts count is wrong'
 [ ! -e "$blind_run_41/signals" ] || fail 'blind package wrote a signals directory'
 [ "$blind_run_41" != "$run_41" ] || fail 'guided and blind variants shared a run directory'
@@ -437,11 +412,12 @@ JSONL
 printf '{"schema":"not-a-session"}\n' >"$repo_sessions/not-session.jsonl"
 "$OBSERVE" assemble --pr 42 --repo "$repo" >"$tmp/assembled-42.json"
 run_42="$qualified_runs/pr-42"
-jq -e '
-  ([.sessions[] | select(.role == "accountable" and .evidence == "content-search")] | length) == 1
-  and ([.unknown_entries[] | select(.path | endswith("not-session.jsonl"))] | length) == 1
-  and (.warnings | length) >= 1
-' "$run_42/package.json" >/dev/null || fail 'accountable-only content search did not preserve evidence'
+jq -e --arg solo "$solo_session" '
+  .sessions == []
+  and ([.sessions[] | select(.source_path == $solo)] | length) == 0
+  and any(.warnings[]; . == "no delegate runs have explicit named-branch status lineage")
+' "$run_42/package.json" >/dev/null \
+  || fail 'test-created Pi session was promoted without explicit lineage'
 
 # Run-scoped commands may act only beneath the observer runs store.
 outside_finalize="$tmp/outside-finalize"
@@ -506,6 +482,15 @@ assert_file_contains "$tmp/missing-trace.stderr" '--analyst-trace is required'
 
 "$OBSERVE" finalize --run "$run_41" --analysis "$analysis" \
   --analyst-trace "$parent_strong" >"$tmp/finalized-41.json"
+set +e
+"$OBSERVE" finalize --run "$run_41" --analysis "$run_41/analysis.json" \
+  --analyst-trace "$parent_strong" >"$tmp/run-analysis-input.stdout" \
+  2>"$tmp/run-analysis-input.stderr"
+status=$?
+set -e
+assert_equal 65 "$status" 'finalize accepted the run analysis path as analyst capture input'
+assert_file_contains "$tmp/run-analysis-input.stderr" 'sole writer' \
+  'run analysis path refusal did not identify finalize as sole writer'
 "$OBSERVE" render-doc --run "$run_41" >"$tmp/rendered-41.json"
 jq -e '.status == "rendered"' "$tmp/rendered-41.json" >/dev/null \
   || fail 'render-doc did not accept a run inside the observer store'

@@ -941,17 +941,7 @@ class RuntimeTests(unittest.TestCase):
         config = home / ".pi/agent/extensions/subagent/config.json"
         config.parent.mkdir(parents=True)
         config.write_text(json.dumps({"defaultSessionDir": str(session_root)}), encoding="utf-8")
-        landstrip = self.temp / "landstrip"
-        landstrip.write_text(
-            "#!/usr/bin/env bash\n"
-            "set -euo pipefail\n"
-            "if [ \"${1:-}\" = --version ]; then echo 'landstrip 0.17.31'; exit 0; fi\n"
-            "[ \"${1:-}\" = -p ]; shift 2; printf '%s\\0' \"$@\" >\"$FAKE_LANDSTRIP_LOG\"; exec \"$@\"\n",
-            encoding="utf-8",
-        )
-        landstrip.chmod(0o755)
         delegated_log = self.temp / "delegated-pi-args"
-        landstrip_log = self.temp / "landstrip-args"
         node_binary = shutil.which("node")
         self.assertIsNotNone(node_binary)
         delegated_environment = {
@@ -960,7 +950,6 @@ class RuntimeTests(unittest.TestCase):
             "QQ_NODE_BIN": node_binary,
             "QQ_PI_BIN": str(stock),
             "TMPDIR": str(launcher_tmp),
-            "QQ_LANDSTRIP_BIN": str(landstrip),
             "QQ_DISPATCH_RUNTIME_ROOT": str(runtime_root),
             "QQ_DISPATCH_TIMEOUT": "5s",
             "PI_SUBAGENT_TRUSTED_AGENT_PATHS": json.dumps({
@@ -971,7 +960,6 @@ class RuntimeTests(unittest.TestCase):
             "PI_SUBAGENT_RUN_ID": "runtime-path-test",
             "PI_SUBAGENT_CHILD_INDEX": "0",
             "QQ_TEST_PI_LOG": str(delegated_log),
-            "FAKE_LANDSTRIP_LOG": str(landstrip_log),
             "XDG_STATE_HOME": str(self.temp / "state"),
         }
         direct_arguments = runtime.subprocess.run(
@@ -995,12 +983,9 @@ class RuntimeTests(unittest.TestCase):
             0,
             f"stderr={delegated.stderr!r} stdout={delegated.stdout!r} "
             f"log={delegated_log.read_bytes() if delegated_log.exists() else None!r} "
-            f"stock={stock_counter.read_text() if stock_counter.exists() else None!r} "
-            f"landstrip={landstrip_log.read_bytes() if landstrip_log.exists() else None!r}",
+            f"stock={stock_counter.read_text() if stock_counter.exists() else None!r}",
         )
         delegated_args = delegated_log.read_bytes().split(b"\0")
-        landstrip_args = landstrip_log.read_bytes().split(b"\0")
-        self.assertEqual(landstrip_args[0], os.fsencode(ROOT / "bin/pi"))
         self.assertIn(b"--approve", delegated_args)
         self.assertIn(b"--offline", delegated_args)
         self.assertFalse(stock_counter.exists())

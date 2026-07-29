@@ -59,6 +59,20 @@ printf '%s\n' \
   '{"reason":"blind failure","schema":"qq-observer.analysis","schema_version":1,"status":"analysis_failed"}' \
   >"$health_blind/analysis_failed.json"
 
+# Routed analysis readers retain the one-entry evidence invariant.
+cp "$second/analysis.json" "$tmp/second-analysis-one-entry.json"
+jq -cS '.episodes[0].evidence[0].entries = [1,2]' \
+  "$second/analysis.json" >"$tmp/multi-entry-analysis.json"
+mv "$tmp/multi-entry-analysis.json" "$second/analysis.json"
+set +e
+"$OBSERVE" architect-context >"$tmp/multi-entry.out" 2>"$tmp/multi-entry.err"
+status=$?
+set -e
+assert_equal 64 "$status" 'Architect context accepted a multi-entry evidence object'
+assert_file_contains "$tmp/multi-entry.err" 'use separate evidence objects per entry' \
+  'multi-entry routing refusal did not explain the one-entry remedy'
+mv "$tmp/second-analysis-one-entry.json" "$second/analysis.json"
+
 # A stale ledger marker must not authorize replaced analysis bytes.
 cp "$second/analysis.json" "$tmp/second-analysis-applied.json"
 jq -cS '.episodes[0].title = "Replaced after ledger application"' "$second/analysis.json" >"$tmp/replaced-analysis.json"
@@ -149,24 +163,34 @@ cp "$global_handoff" "$tmp/global-handoff-before.json"
 "$OBSERVE" prepare-handoff --context "$context_id" --decisions "$tmp/global-route.json" >"$tmp/global-again.json"
 jq -e '.status == "already confirmed"' "$tmp/global-again.json" >/dev/null
 cmp "$tmp/global-handoff-before.json" "$global_handoff" || fail 'idempotent global retry rewrote immutable handoff'
-# Attempt receipts bind to the global batch and remain content-idempotent.
 global_handoff_id="$(jq -r .handoff_id "$global_handoff")"
-jq -cn --arg id "$global_handoff_id" '{schema:"qq-handoff/v1",version:1,engine:"qq-handoff",action:"intake-start",status:"error",message:"retryable",handoff_id:$id,rails:[]}' >"$tmp/global-attempt.json"
-"$OBSERVE" record-handoff-attempt --batch "$global_batch" --receipt "$tmp/global-attempt.json" >"$tmp/global-attempt-1.json"
-"$OBSERVE" record-handoff-attempt --batch "$global_batch" --receipt "$tmp/global-attempt.json" >"$tmp/global-attempt-2.json"
-jq -e '.status == "recorded"' "$tmp/global-attempt-1.json" >/dev/null
-jq -e '.status == "already recorded"' "$tmp/global-attempt-2.json" >/dev/null
-# Prepared/failed routed intake is explicit, exact, and not offered for re-decision.
+# Prepared routed intake is explicit, exact, and not offered for re-decision.
 "$OBSERVE" architect-context >"$tmp/pending-context.json"
 jq -e --arg batch "$global_batch" --arg handoff "$global_handoff" '
   (.pending_intakes | length) == 1
   and .pending_intakes[0].batch_dir == $batch and .pending_intakes[0].handoff_path == $handoff
-  and .pending_intakes[0].status == "attempted_awaiting_result"
-  and .pending_intakes[0].attempt_statuses == ["error"]
+  and .pending_intakes[0].status == "prepared"
+  and .pending_intakes[0].attempt_statuses == []
   and ([.pending_intakes[0].decisions[] | select(.action == "route") | .scope] == ["Route current alpha evidence across both Repositories."])
   and ([.pending_intakes[0].occurrences[].occurrence_id] | length) == 3
   and all(.findings[]; .recurrence_key != "alpha" and .recurrence_key != "beta")
 ' "$tmp/pending-context.json" >/dev/null || fail 'pending routed intake was hidden, inexact, or re-exposed as a finding'
+# Existing attempt files remain validated read-only history; no command authors new ones.
+mkdir -p "$global_batch/attempts"
+jq -cnS --arg id "$global_handoff_id" '{
+  schema:"qq-handoff/v1",version:1,engine:"qq-handoff",action:"intake-start",
+  status:"error",message:"historical fixture",handoff_id:$id,rails:[]
+}' >"$tmp/historical-attempt.json"
+historical_attempt_hash="$(sha256sum "$tmp/historical-attempt.json" | awk '{print $1}')"
+cp "$tmp/historical-attempt.json" \
+  "$global_batch/attempts/attempt-$historical_attempt_hash.json"
+"$OBSERVE" architect-context >"$tmp/historical-attempt-context.json"
+jq -e '
+  .pending_intakes[0].status == "attempted_awaiting_result"
+  and .pending_intakes[0].attempt_statuses == ["error"]
+  and (.pending_intakes[0].attempt_paths | length) == 1
+' "$tmp/historical-attempt-context.json" >/dev/null \
+  || fail 'existing intake attempt history was not preserved read-only'
 # A new same-key occurrence remains independently unsettled while the older immutable batch stays pending.
 fourth="$XDG_STATE_HOME/qq/observer/runs/by-repository/fourth/repo/pr-7"
 mkdir -p "$fourth"
@@ -229,14 +253,6 @@ assert_equal 64 "$status" 'routed round was discussed before a verified result'
 [ ! -e "$run/discussed.json" ] || fail 'premature discussion wrote a mark'
 
 handoff_id="$(jq -r .handoff_id "$handoff")"
-attempt="$tmp/attempt.json"
-jq -cn --arg id "$handoff_id" '{schema:"qq-handoff/v1",version:1,engine:"qq-handoff",action:"intake-start",status:"error",message:"retryable fixture",handoff_id:$id,rails:[]}' >"$attempt"
-"$OBSERVE" record-handoff-attempt --run "$run" --receipt "$attempt" >"$tmp/attempt-1.json"
-"$OBSERVE" record-handoff-attempt --run "$run" --receipt "$attempt" >"$tmp/attempt-2.json"
-jq -e '.status == "recorded"' "$tmp/attempt-1.json" >/dev/null
-jq -e '.status == "already recorded"' "$tmp/attempt-2.json" >/dev/null
-assert_equal 1 "$(find "$run/routing/attempts" -type f | wc -l)" 'attempt retry was not content-idempotent'
-
 # Build current born-in-worktree Task evidence for result and resolution.
 repo="$tmp/tasks-repo"; checkout="$tmp/task-change"
 git init -q -b main "$repo"
@@ -268,6 +284,27 @@ jq -cn --arg id "$handoff_id" --arg checkout "$(realpath "$checkout")" \
     repository:"fixture/tasks",task_sha256:$tsha,plan_sha256:{($plan):$psha}}],
   verified_at:"2026-08-02T00:00:00.000Z"
 }' >"$result"
+# Duplicate Task ids elsewhere in the Repository topology do not override the
+# receipt's explicit named-checkout subject.
+duplicate_checkout="$tmp/task-duplicate"
+git -C "$repo" worktree add -qb feature/duplicate "$duplicate_checkout" main >/dev/null
+mkdir -p "$duplicate_checkout/backlog/tasks" "$duplicate_checkout/backlog/docs/plans"
+cp "$task_path" "$duplicate_checkout/backlog/tasks/$(basename "$task_path")"
+cp "$plan_path" "$duplicate_checkout/backlog/docs/plans/$(basename "$plan_path")"
+jq --arg checkout "$(realpath "$duplicate_checkout")" \
+  '.tasks[0].checkout=$checkout | .tasks[0].branch="feature/duplicate"' \
+  "$result" >"$tmp/wrong-named-checkout-result.json"
+set +e
+"$fixture_observe" record-handoff-result --run "$run" \
+  --receipt "$tmp/wrong-named-checkout-result.json" \
+  >"$tmp/wrong-named-checkout.out" 2>"$tmp/wrong-named-checkout.err"
+status=$?
+set -e
+assert_equal 65 "$status" 'receipt Task path outside its named checkout was accepted'
+assert_file_contains "$tmp/wrong-named-checkout.err" "named checkout's backlog/tasks" \
+  'wrong named checkout refusal did not identify the failed invariant'
+[ ! -e "$run/routing/result.json" ] || fail 'wrong named checkout mutated the Observer run'
+
 set +e
 "$OBSERVE" record-handoff-result --run "$run" --receipt "$result"   >"$tmp/foreign-result.out" 2>"$tmp/foreign-result.err"
 status=$?
@@ -275,17 +312,6 @@ set -e
 assert_equal 65 "$status" 'foreign Repository Task result was accepted by the qq Observer'
 assert_file_contains "$tmp/foreign-result.err" 'running qq topology'
 [ ! -e "$run/routing/result.json" ] || fail 'foreign Task result mutated the Observer run'
-mkdir -p "$repo/backlog/tasks"
-malformed_task="$repo/backlog/tasks/t-202 - Malformed.md"
-printf '%s\n' '---' 'id: T-202' 'references:' '    orphan continuation' '---' >"$malformed_task"
-set +e
-"$fixture_observe" record-handoff-result --run "$run" --receipt "$result" >"$tmp/malformed-list.out" 2>"$tmp/malformed-list.err"
-status=$?
-set -e
-assert_equal 65 "$status" 'orphan frontmatter list continuation was accepted'
-assert_file_contains "$tmp/malformed-list.err" 'malformed frontmatter list'
-[ ! -e "$run/routing/result.json" ] || fail 'malformed frontmatter list mutated the Observer run'
-rm "$malformed_task"
 # Generic intake shape is not authority to use another Repository prefix.
 jq '(.mapping[].task_ids[], .tasks[].task_id) = "T-201.3"' "$result" \
   >"$tmp/mismatched-prefix-result.json"
@@ -299,6 +325,8 @@ assert_equal 65 "$status" 'mismatched configured Task prefix was accepted by Obs
 [ ! -e "$run/routing/result.json" ] \
   || fail 'mismatched configured Task prefix mutated the Observer run'
 "$fixture_observe" record-handoff-result --run "$run" --receipt "$result" >/dev/null
+[ -f "$run/routing/result.json" ] \
+  || fail 'complete named-checkout evidence was rejected because another worktree shares its Task id'
 # Global results map every routed decision ID (set-aside decisions remain Task-free).
 global_decision_id="$(jq -r '.decisions[] | select(.action=="route") | .decision_id' "$global_handoff")"
 jq --arg id "$global_handoff_id" --arg item "$global_decision_id" '.handoff_id=$id | .mapping=[{item:$item,task_ids:["FEAT-201.3"]}]' "$result" >"$tmp/global-result.json"

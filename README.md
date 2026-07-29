@@ -36,8 +36,8 @@ wiring needed to expose it.
 - herdr provides persistent `main` project homes, named agents, and direct
   agent-to-agent messaging.
 - `cockpit/` contains the operator's terminal configuration.
-- `delegation/` contains the production pi-subagents role manifests,
-  Completion Envelope schema, and Landstrip role policy map.
+- `delegation/` contains the production pi-subagents role manifests, completion
+  envelope template, and execution-profile policy.
 - `bin/` holds the qq commands — mounted on `PATH` by the cockpit shell
   surface — for guarded local OpenWiki updates and Herdr project-home focus
   and pane movement.
@@ -126,31 +126,23 @@ The fork commit extends the previous exact reviewed fork pin
 Rollback is the previous exact fork commit
 `9e045ed75e09a163afa17271e55150ed1e8369df`.
 
-The fork carries three qq runtime semantics. First, a successful terminal
-`structured_output` tool result is a trusted recovery watermark. Failed tool
-results, bare calls, missing or invalid captures, and later errors remain
-failures under parent schema validation. Second, when
+The fork carries two qq runtime semantics. When
 `PI_SUBAGENT_TRUSTED_AGENT_PATHS` is set, the canonical reviewer, researcher,
-implementer, and observer seats must resolve from their exact qq manifest
-paths before launch or resume. Third, the matching trusted execution profile
-replaces manifest/invocation/fallback compute, publishes the validated child
-role, and requires the child-written profile receipt before a run can succeed.
-These source and compute locks are drift-nets against supported caller and
+implementer, and observer seats must resolve from their exact qq manifest paths
+before launch or resume. The matching trusted execution profile replaces
+manifest, invocation, and fallback compute, publishes the validated child role,
+and requires the child-written profile receipt before a run can succeed. These
+source and compute locks are drift-nets against supported caller and
 configuration paths, not hostile-process security boundaries.
 
-For a new install, use the verified qq `pi` wrapper and Pi's Git-package
-syntax with that exact commit. The vendor runtime remains compatible with the
-patched runtime; it does not authorize stock-Pi fallback. npm
-packages, branches, tags, version ranges, moving refs, and local paths are not
-authoritative pi-subagents install sources. Install the Landstrip binary package
-directly into Pi's operator-owned npm tree. Do NOT
-`pi install npm:pi-landstrip`: registering that extension makes it wrap the
-accountable session's own Bash in a sandbox, and unversioned installs drift from
-the adapter's pinned Landstrip version (`delegation/policies/roles.json`).
+For a new install, use the verified qq `pi` wrapper and Pi's Git-package syntax
+with that exact commit. The vendor runtime remains compatible with the patched
+runtime; it does not authorize stock-Pi fallback. npm packages, branches, tags,
+version ranges, moving refs, and local paths are not authoritative pi-subagents
+install sources.
 
 ```bash
 pi install git:github.com/hypermemetic-ai/pi-subagents@f8f0ef71ef70606288e34e10b14949c730cf9dcf
-npm install --prefix ~/.pi/agent/npm --legacy-peer-deps @landstrip/landstrip-linux-x64@0.17.31
 ```
 
 Migrate an npm install by removing its recorded source before installing the
@@ -160,12 +152,6 @@ pin (use the exact old settings source instead when migrating another source):
 pi remove npm:pi-subagents
 pi install git:github.com/hypermemetic-ai/pi-subagents@f8f0ef71ef70606288e34e10b14949c730cf9dcf
 ```
-
-(On macOS/Windows install the matching `@landstrip/landstrip-<platform>-<arch>`
-package at the same version.) The Landstrip binary then lives beneath
-`~/.pi/agent/npm`. `qq-dispatch` resolves that operator Pi copy by default, or
-the absolute `QQ_LANDSTRIP_BIN` override when one is set. It does not resolve a
-Repository-local `.pi/npm` copy.
 
 #### Vendor-runtime maintenance
 
@@ -206,8 +192,7 @@ env -u PI_SUBAGENT_PI_BINARY -u PI_SUBAGENT_EXTRA_AGENT_DIRS \
   -u PI_SUBAGENT_TRUSTED_AGENT_PATHS -u PI_SUBAGENT_TRUSTED_AGENT_KEYS \
   -u PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES -u PI_SUBAGENT_TRUSTED_EXECUTION_ROLE \
   -u PI_SUBAGENT_EXECUTION_PROFILE_RECEIPT -u QQ_DISPATCH_RUNTIME_ROOT \
-  -u PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE \
-  -u PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA TMPDIR="$test_root" \
+  -u QQ_DISPATCH_RUN_DIR TMPDIR="$test_root" \
   npm --prefix "$work/pi-subagents" run test:all
 git -C "$work/pi-subagents" commit -m 'fix: preserve qq runtime contracts'
 new_pin="$(git -C "$work/pi-subagents" rev-parse HEAD)"
@@ -241,54 +226,10 @@ jq -e --arg source "$source" '
     | select(. == $source)
   ] == [$source]
 ' "$HOME/.pi/agent/settings.json"
-SOURCE="$source" PI_PACKAGE_LIST="$(FORCE_COLOR=0 pi list --approve)" python3 - <<'PY_VERIFY_PI_SUBAGENTS'
-import json
-import os
-from pathlib import Path
-
-expected = os.environ["SOURCE"]
-settings_paths = [Path.home() / ".pi" / "agent" / "settings.json", Path.cwd() / ".pi" / "settings.json"]
-for settings_path in settings_paths:
-    if not settings_path.is_file():
-        continue
-    settings = json.loads(settings_path.read_text())
-    for entry in settings.get("packages", []):
-        package_source = entry if isinstance(entry, str) else entry.get("source")
-        if (
-            not isinstance(package_source, str)
-            or not package_source
-            or package_source != package_source.strip()
-            or not package_source.isprintable()
-            or package_source.endswith(" (filtered)")
-        ):
-            raise SystemExit(f"ambiguous package source in {settings_path}")
-
-records = []
-for line in os.environ["PI_PACKAGE_LIST"].splitlines():
-    if line.startswith("  ") and not line.startswith("    "):
-        records.append([line.strip().removesuffix(" (filtered)"), None])
-    elif line.startswith("    ") and records:
-        records[-1][1] = line.strip()
-
-authorities = []
-for package_source, installed_path in records:
-    package_name = None
-    if package_source != expected:
-        if not installed_path:
-            raise SystemExit(f"unresolved package identity: {package_source}")
-        manifest = Path(installed_path) / "package.json"
-        try:
-            document = json.loads(manifest.read_text())
-            package_name = document.get("name")
-        except (OSError, json.JSONDecodeError) as error:
-            raise SystemExit(f"invalid package identity for {package_source}: {error}")
-        if not isinstance(package_name, str) or not package_name.strip():
-            raise SystemExit(f"invalid package name for {package_source}")
-    if package_source == expected or package_name == "pi-subagents":
-        authorities.append(package_source)
-if authorities != [expected]:
-    raise SystemExit(f"unexpected pi-subagents authorities: {authorities}")
-PY_VERIFY_PI_SUBAGENTS
+bin/qq-pi-inventory --check "$source"
+bin/qq-pi-inventory --json | jq -e --arg source "$source" \
+  '[.[] | select(.name == "pi-subagents" or .source == $source) | .source] == [$source]' \
+  >/dev/null
 test "$(git -C "$checkout" rev-parse HEAD)" = "$pin"
 test -z "$(git -C "$checkout" status --porcelain)"
 test "$(git -C "$checkout" remote get-url origin)" = https://github.com/hypermemetic-ai/pi-subagents
@@ -372,26 +313,42 @@ ln -sT "$HOME/projects/qq/skills" "$HOME/.pi/agent/skills"
 ```
 
 The globally mounted `extensions/qq-subagent-env.ts` sets the delegation
-adapter, canonical agent directory, exact trusted-seat map, and structured-
-output runtime root in every Pi session. qq and its worktrees are recognized by
-Git common-directory identity and use the active checkout. Every other cwd uses
-qq's canonical primary checkout, including a non-Git parent session so a
-non-Git delegated cwd reaches the adapter's explicit refusal:
+adapter, canonical agent directory, exact trusted-seat map, execution-profile
+resolver marker, and delegate runtime root in every Pi session. qq and its
+worktrees are recognized by Git common-directory identity and use the active
+checkout. Every other cwd uses qq's canonical primary checkout, including a
+non-Git parent session so a non-Git delegated cwd reaches the adapter's explicit
+refusal:
 
 - `PI_SUBAGENT_PI_BINARY=<checkout>/bin/qq-dispatch`
 - `PI_SUBAGENT_EXTRA_AGENT_DIRS=<checkout>/delegation/manifests/agents`
 - `PI_SUBAGENT_TRUSTED_AGENT_PATHS={...exact canonical manifest paths...}`
-- `PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES={...resolver snapshot...}`
-- `QQ_DISPATCH_RUNTIME_ROOT=<temporary-directory>/pi-subagents-uid-<uid>`
+- `PI_SUBAGENT_TRUSTED_EXECUTION_PROFILES=__qq_execution_profile_resolver_required__`
+- `QQ_DISPATCH_RUNTIME_ROOT=<os-temp-directory>/pi-subagents-uid-<uid>`
 
-The trusted binary, manifest, path, and profile variables are qq authority and
-replace caller or inherited values; environment compute overrides do not win.
-`QQ_DISPATCH_RUNTIME_ROOT` remains operator-overridable placement only. The
-global qq extension loads the resolver and delegation configuration everywhere.
-Pi's project-trust mechanism remains authoritative for Repository-supplied
-settings, extensions, packages, and executable code; global qq delegation does
-not grant that trust. Delegates dispatch confined by construction without shell
-exports. Relaunch Pi (or `/reload`) after install or upgrade.
+The first four values are restored from qq and caller or inherited compute does
+not win. The extension sets `QQ_DISPATCH_RUNTIME_ROOT` only when it is absent,
+so an operator-supplied absolute placement remains authoritative. Pi's
+project-trust mechanism remains authoritative for Repository-supplied settings,
+extensions, packages, and executable code; global qq delegation grants no
+Repository trust.
+Relaunch Pi or run `/reload` after install or upgrade.
+
+qq methodology is global through the mounted context and Skill roots.
+Delegation launches plain headless role children with open network egress; the
+assigned Git worktree is their only boundary. At delegated-ticket creation, the
+owner creates one mode-700 run directory beneath `QQ_DISPATCH_RUNTIME_ROOT` or
+the assigned worktree and writes its complete `BRIEF.md`; the task's
+`Read-and-perform:<absolute-run-dir>/BRIEF.md` reference is the transport, and
+the adapter derives the run directory from it fail-closed. Without a reference
+the adapter mints a private run directory. It validates the worktree, run
+directory, canonical role
+manifest, timeout, and declared role tools before launch, then places child
+cache, Pi configuration, and session state beneath the run directory. The child
+writes `ENVELOPE.md` there as its only result; the adapter atomically writes
+`TERMINAL` when the child exits. Missing `ENVELOPE.md` is not complete, and a
+child ending on a user message is failed. Open egress remains the decision-8
+posture; role and Skill privacy rules govern what may leave the worktree.
 
 Set the dispatcher-side pi-subagents config at
 `~/.pi/agent/extensions/subagent/config.json` to include:
@@ -405,28 +362,27 @@ Set the dispatcher-side pi-subagents config at
 }
 ```
 
-qq delegate visibility uses run artifacts and status, so the intercom bridge
-stays off instead of adding bridge tools to the staged child configuration.
-`defaultSessionDir` keeps child session transcripts under a Landstrip-granted
-temp root; without it, pi-subagents nests child sessions inside the parent
-session tree, which the confinement policy deliberately does not grant. The
-config is required: the adapter refuses dispatch when it is missing or
-malformed. The configured path must be a direct `pi-subagent-*` child of the
-launcher temp directory (`$TMPDIR` or `/tmp`). The global extension pre-creates
-the root (mode 700) at session start and tightens an operator-owned loose root; at dispatch the adapter enforces the contract and
-fails closed on a symlink, foreign ownership, or any mode other than 700
-rather than widening the grant.
+qq delegate visibility uses run directories and vendor lifecycle status, so
+the intercom bridge stays off instead of adding bridge tools to the staged
+child configuration. `defaultSessionDir` keeps vendor child transcripts in an
+explicit private temporary root instead of nesting them in the parent session
+tree. The adapter requires this config. The path must be a direct
+`pi-subagent-*` child of the launcher temporary directory (`$TMPDIR` or
+`/tmp`). The global extension pre-creates it with mode 700 at session start and
+tightens an operator-owned loose directory; at dispatch the adapter refuses a
+symlink, foreign ownership, or any mode other than 700.
 
 For qq worktrees the extension resolves adapter and manifests from that
 checkout; every other Repository uses canonical qq primary `main`.
 Pi-subagents supplies a trusted child-role assertion only after exact canonical
-manifest validation, while its `cwd` selects the assigned Repository worktree.
-The canonical adapter serves any resolvable Git Repository, refuses non-Git
-child directories, clears an inherited accountable-root assertion, renders
-grants scoped to the invocation Repository and its exact Git metadata, and
-starts the real Pi child under bounded descendant cleanup. Canonical manifests
-carry no model or thinking authority; the retained fork locks each child to the
-central resolver snapshot and requires its matching execution-profile receipt.
+manifest validation, while `cwd` selects the assigned Repository worktree. The
+canonical primary adapter serves any resolvable Git Repository; an adapter from
+a linked qq worktree serves only worktrees sharing its Git common directory.
+The adapter refuses non-Git child directories, clears inherited accountable-root
+assertions, and starts the real Pi child under bounded descendant cleanup.
+Canonical manifests carry no model or thinking authority; the retained fork
+locks each child to the central resolver snapshot and requires its matching
+execution-profile receipt.
 
 Start Pi and use `/login` to configure both providers: select Kimi For Coding
 for the accountable session's dedicated `pi-qq` credential, then select
@@ -497,7 +453,7 @@ confirmation and pane-read-back outcome validation remain in the pane.
 The accountable Pi session stays in the Repository project home and owns
 alignment, Task and Change judgment, work orders, verdicts, UAT, and handoff.
 Bounded implementation, fresh review, and research run through pi-subagents;
-`qq-dispatch` is only its fail-closed Landstrip adapter.
+`qq-dispatch` is its fail-closed plain-child adapter.
 
 For an existing aligned Change, `/handoff <Task-ID>` is the standard transfer
 to a fresh accountable Pi tab. It resolves the Task's unique linked checkout,
@@ -556,9 +512,9 @@ qq-observe read-session ~/.pi/agent/sessions/--path--/session.jsonl \
 
 At each delegate spawn, `qq-dispatch` records an `invoke_agent` span and injects
 `QQ_TRACE_ID`, `PI_ROOT_SPAN_ID`, and its new span ID as
-`PI_PARENT_SPAN_ID`. A policy-path experiment confirms these arbitrary parent
-environment variables reach the confined Pi child, so nested pi-subagents runs
-correlate automatically when the accountable session supplies root context.
+`PI_PARENT_SPAN_ID`. These arbitrary parent environment variables reach the
+plain Pi child, so nested pi-subagents runs correlate automatically when the
+accountable session supplies root context.
 Observation failures are reported but never change the child exit status.
 
 `qq-dispatch` maps the child exit code to a raw span status at write time. At
