@@ -15,9 +15,6 @@ function qq_mount_bin() {
 qq_mount_bin
 unset -f qq_mount_bin
 export PATH
-# Confined delegation adapter env is provided by the globally mounted qq
-# extension extensions/qq-subagent-env.ts (README, Install), which activates
-# PI_SUBAGENT_* in-process only for qq-governed Repositories.
 function qqroot() {
     if [ -d "$QQ_HOME" ]; then
         builtin cd -- "$QQ_HOME"

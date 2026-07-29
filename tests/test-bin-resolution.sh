@@ -61,9 +61,14 @@ if [ -x /home/linuxbrew/.linuxbrew/bin/herdr ]; then
 fi
 
 for script in \
-  qq-change qq-dispatch qq-herdr-home qq-herdr-pull qq-openwiki; do
-  assert_file_contains "$ROOT/bin/$script" 'lib/qq-bin.sh' \
-    "$script does not source the shared resolver"
+  qq-change qq-delegate qq-herdr-home qq-herdr-pull qq-openwiki; do
+  if [ "$script" = qq-delegate ]; then
+    assert_file_contains "$ROOT/bin/$script" 'command -v "$required_command"' \
+      "$script does not resolve its fixed runtime dependencies"
+  else
+    assert_file_contains "$ROOT/bin/$script" 'lib/qq-bin.sh' \
+      "$script does not source the shared resolver"
+  fi
 done
 
 old_names='HERDR_BIN_''PATH|(^|[^A-Z0-9_])OPENWIKI_''BIN|QQ_OPENWIKI_NODE_''BIN'

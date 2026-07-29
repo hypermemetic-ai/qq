@@ -13,7 +13,6 @@ import registerExecutionProfiles from "./qq-execution-profiles.ts";
 import registerQqFooter from "./qq-footer.ts";
 import registerArchitect from "./qq-architect.ts";
 import registerHandoff from "./qq-handoff.ts";
-import registerSubagentEnv from "./qq-subagent-env.ts";
 
 export default function register(pi) {
   registerPrWatch(pi);
@@ -25,5 +24,4 @@ export default function register(pi) {
   registerQqFooter(pi);
   registerArchitect(pi);
   registerHandoff(pi);
-  registerSubagentEnv(pi);
 }

@@ -19,7 +19,7 @@ KILL_GRACE_SECONDS = 0.75
 
 
 def fail(message: str) -> NoReturn:
-    print(f"[qq-dispatch] process-tree supervisor: {message}", file=sys.stderr)
+    print(f"[qq-delegate] process-tree supervisor: {message}", file=sys.stderr)
     raise SystemExit(125)
 
 
