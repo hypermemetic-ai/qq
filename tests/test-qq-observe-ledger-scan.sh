@@ -18,7 +18,9 @@ git -C "$repo" config branch.main.remote origin
 mkdir -p "$repo/bin/lib" "$repo/backlog"/{tasks,completed,drafts,docs,decisions,archive,milestones}
 cp "$ROOT/bin/qq-observe" "$repo/bin/qq-observe"
 cp "$ROOT/bin/lib/qq-bin.sh" "$ROOT/bin/lib/qq_task_identity.py" "$repo/bin/lib/"
-cp "$ROOT/backlog/config.yml" "$repo/backlog/config.yml"
+# M1: the store's config is unavailable on CI (dangling symlink); the fixture
+# writes its own (identical task_prefix).
+printf 'task_prefix: "t"\n' >"$repo/backlog/config.yml"
 OBSERVE="$repo/bin/qq-observe"
 commit_fixture() {
   local subject="$1" date="$2"
