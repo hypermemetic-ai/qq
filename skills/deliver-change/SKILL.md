@@ -19,9 +19,10 @@ exactly one preserve-or-restore question, never an operator-input deadlock.
    transfer; an uncited decision returns to alignment, and broader reach needs
    a decision record. Confirm branch and worktree isolation.
 2. **Born.** Call `qq-herdr-home inspect --repo <root>`. Create the Change as a
-   plain linked worktree from the agreed base, with no Herdr workspace. Create
-   its Task record there through Backlog's CLI, never on primary `main`; edit
-   any legacy tracked record only on this branch. Capture the approved plan per
+   plain linked worktree from the agreed base, with no Herdr workspace.
+   Backlog's CLI creates the Change's Task record in decision-28's
+   by-construction operator-store; lifecycle edits stay there (commit+push),
+   off-branch. Capture the approved plan per
    `align` and cite its doc id in the ledger. Dispatch from project home, work
    in the checkout, and never let cockpit attachment block. Transfer an
    existing aligned Change with `/handoff <Task-ID>`; the receiver continues
@@ -37,7 +38,8 @@ exactly one preserve-or-restore question, never an operator-input deadlock.
    review every fix delta, and present the diff inline.
 5. **Finalize, then PR.** First verify every acceptance criterion in the
    checkout, summarize the Change, mark its Task Done through Backlog's CLI,
-   and push the green finalization. Then open the one pull request carrying
+   store-commit—not branch-commit—the status edit, and push the green finalization.
+   Then open the one pull request carrying
    Task intent and Check evidence, pass final GitHub Checks, and use `gh pr
    checks` plus `gh pr view --json mergeStateStatus,reviewDecision` as the
    authoritative terminal surface. Open the resolved URL in the operator's

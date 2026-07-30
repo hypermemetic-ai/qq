@@ -20,19 +20,21 @@ git -C "$repo" -c user.name=qq-test -c user.email=qq-test.invalid \
   -c commit.gpgsign=false -c core.hooksPath=/dev/null \
   commit -q --allow-empty -m initial
 git -C "$repo" worktree add -q -b guard-check "$worktree"
-mkdir -p "$worktree/src/deep"
+store="$TMP/store"
+mkdir -p "$worktree/src/deep" "$store/tasks" "$store/docs"
+ln -s "$store" "$worktree/backlog"
 
 # The extension intentionally contains JavaScript-compatible TypeScript, so
 # CI can exercise its real registration and handler without installing Pi.
 module="$TMP/qq-backlog-guard.mjs"
 cp -- "$EXTENSION" "$module"
 
-HOME="$TMP" node --input-type=module - "$module" "$worktree" <<'JS'
+HOME="$TMP" node --input-type=module - "$module" "$worktree" "$store" <<'JS'
 import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 
-const [modulePath, worktree] = process.argv.slice(2);
+const [modulePath, worktree, store] = process.argv.slice(2);
 const { default: register } = await import(pathToFileURL(modulePath));
 let handler;
 
@@ -82,6 +84,14 @@ assertBlocked(
   call("write", { path: "~/linked/backlog/tasks/t-91.md", content: "no" }),
   "Pi tilde path under backlog was allowed",
 );
+assertBlocked(
+  call("write", { path: join(store, "tasks/t-91.md"), content: "no" }),
+  "write through the resolved store path was allowed",
+);
+assertBlocked(
+  call("edit", { path: pathToFileURL(join(store, "docs/note.md")).href }),
+  "edit through the resolved store path was allowed",
+);
 
 assertAllowed(
   call("write", { path: "backlog-copy/note.md", content: "ok" }),
@@ -90,6 +100,10 @@ assertAllowed(
 assertAllowed(
   call("edit", { path: "README.md" }),
   "ordinary path was blocked",
+);
+assertAllowed(
+  call("write", { path: join(store, "../store-copy/note.md"), content: "ok" }),
+  "resolved-store sibling was blocked",
 );
 assertAllowed(
   call("read", { path: "backlog/tasks/t-91.md" }),

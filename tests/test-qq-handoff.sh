@@ -598,7 +598,7 @@ assert receipt["action"] == "intake-start" and receipt["handoff_id"] == handoff_
 assert receipt["checkout"] == main and receipt["transaction"]["observed_state"] == "working"
 intake_prompt = next(call[3] for call in calls() if call[:2] == ["agent","prompt"])
 for phrase in ("genuinely new Architect intake", "not approved implementation", "the align contract",
-               "born-in-worktree Task", "record-handoff-result", "No originating conversation"):
+               "mapped Task record", "record-handoff-result", "No originating conversation"):
     assert phrase in intake_prompt, phrase
 # The deterministic handoff agent name prevents a second live recipient.
 second_receipt = invoke(2, "intake-start", "--handoff", str(handoff_path), "--repo", main)
