@@ -1931,18 +1931,6 @@ def update_dispositions(document, entries):
         fail("Backlog Observer dispositions update did not persist the complete body", 65)
 
 
-def backlog_key_covered(key, dispositions):
-    if not display_text(key, nonempty=True) or "\n" in key:
-        fail("Observer recurrence key is unsafe for Backlog search", 65)
-    settled = {
-        entry["recurrence_key"] for entry in (dispositions or {}).get("entries", [])
-        if entry["status"] == "settled"
-    }
-    if key in settled:
-        return True
-    return backlog_search_covers(key)
-
-
 def backlog_search_covers(key):
     try:
         process = subprocess.run(
@@ -1981,6 +1969,9 @@ def coverage_by_key(keys, dispositions=None):
         if entry["status"] == "settled"
     }
     unique = sorted(set(keys))
+    for key in unique:
+        if not display_text(key, nonempty=True) or "\n" in key:
+            fail("Observer recurrence key is unsafe for Backlog search", 65)
     # One CLI call per key is the semantic unit; per-process startup dominates,
     # so searches run concurrently (bounded). Doc-settled keys never spawn a
     # process. Failure order stays deterministic (sorted keys), matching the
