@@ -55,7 +55,7 @@ command("git", "-C", str(repo), "config", "branch.main.remote", "origin")
 command("git", "-C", str(repo), "add", "bin", "backlog")
 command("git", "-C", str(repo), "-c", "user.name=test", "-c", "user.email=test@example.com",
         "commit", "-qm", "initial")
-command("git", "-C", str(repo), "worktree", "add", "-qb", "feat/change", str(change))
+command("git", "-C", str(repo), "worktree", "add", "-qb", "feat/t-155-change", str(change))
 main = str(repo.resolve())
 checkout = str(change.resolve())
 common = command("git", "-C", main, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
@@ -288,7 +288,7 @@ for args, code in [
 reset()
 receipt = invoke(0, "inspect", "T-155", "--repo", main)
 assert receipt["status"] == "done" and receipt["task"]["title"] == "Fixture accountable handoff"
-assert receipt["branch"] == "feat/change" and receipt["checkout"] == checkout
+assert receipt["branch"] == "feat/t-155-change" and receipt["checkout"] == checkout
 assert receipt["plans"] == [str(plan_path.resolve())]
 assert [rail["name"] for rail in receipt["rails"]] == ["repository_topology","change_checkout","task_and_plan_evidence","duplicate_owner","caller_identity"]
 caller_rail = next(rail for rail in receipt["rails"] if rail["name"] == "caller_identity")
@@ -310,10 +310,12 @@ reset()
 task_path.unlink()
 feat_path = task_dir / "feat-12.3 - Fixture.md"
 feat_path.write_text(task_text().replace("id: T-155", "id: FEAT-12.3"), encoding="utf-8")
+command("git","-C",checkout,"branch","-m","feat/t-155-change","chore/feat-12.3-fixture")
 feat_receipt = invoke(0, "inspect", "FEAT-12.3", "--repo", main)
 assert feat_receipt["task"]["id"] == "FEAT-12.3"
 assert feat_receipt["task"]["path"] == str(feat_path.resolve())
 assert_no_mutation()
+command("git","-C",checkout,"branch","-m","chore/feat-12.3-fixture","feat/t-155-change")
 (repo / "backlog" / "config.yml").write_text('task_prefix: "t"\n', encoding="utf-8")
 
 # No candidate and primary-only evidence refuse without mutation.
@@ -322,17 +324,46 @@ reset(); task_path.unlink(); primary_task_dir = repo / "backlog" / "tasks"; prim
 primary_task = primary_task_dir / task_path.name; primary_task.write_text(task_text());
 invoke(2, "inspect", "T-155", "--repo", main); assert_no_mutation(); primary_task.unlink()
 
-# Two linked candidates refuse; detached candidate and unavailable path refuse.
-reset(); command("git","-C",main,"worktree","add","-qb","feat/second",str(second));
+# Two linked candidates (two branches mapping to one Task) refuse; detached candidate and unavailable path refuse.
+reset(); command("git","-C",main,"worktree","add","-qb","feat/t-155-second",str(second));
 (second / "backlog/tasks").mkdir(parents=True); (second / "backlog/tasks" / task_path.name).write_text(task_text())
 (second / "backlog/docs/plans").mkdir(parents=True); (second / "backlog/docs/plans" / plan_path.name).write_text(plan_text())
 invoke(2, "inspect", "T-155", "--repo", main); assert_no_mutation()
-command("git","-C",main,"worktree","remove","--force",str(second)); command("git","-C",main,"branch","-D","feat/second")
+command("git","-C",main,"worktree","remove","--force",str(second)); command("git","-C",main,"branch","-D","feat/t-155-second")
 reset(); command("git","-C",checkout,"checkout","--detach","-q"); invoke(2,"inspect","T-155","--repo",main); assert_no_mutation()
-command("git","-C",checkout,"checkout","-q","feat/change")
+command("git","-C",checkout,"checkout","-q","feat/t-155-change")
 reset(); moved = scratch / "temporarily missing"; change.rename(moved)
 try: invoke(2,"inspect","T-155","--repo",main)
 finally: moved.rename(change)
+
+# Post-M1 store shape: backlog is a symlink into one shared store repo;
+# the transfer binds the Change checkout by branch identity and reads the
+# record through the symlink (decision-28 containment).
+reset()
+store = scratch / "store"
+command("git","init","-q","-b","main",str(store))
+for checkout_dir in (repo, change):
+    shutil.rmtree(checkout_dir / "backlog")
+    (checkout_dir / "backlog").symlink_to(store)
+store_tasks = store / "tasks"; store_plans = store / "docs" / "plans"
+store_tasks.mkdir(parents=True); store_plans.mkdir(parents=True)
+store_task = store_tasks / task_path.name; store_task.write_text(task_text())
+store_plan = store_plans / plan_path.name; store_plan.write_text(plan_text())
+(store / "config.yml").write_text('task_prefix: "t"\n', encoding="utf-8")
+store_receipt = invoke(0, "inspect", "T-155", "--repo", main)
+assert store_receipt["status"] == "done" and store_receipt["branch"] == "feat/t-155-change"
+assert store_receipt["task"]["path"] == str(store_task.resolve())
+assert store_receipt["plans"] == [str(store_plan.resolve())]
+# A resolving store missing the record refuses loudly, never silently.
+store_task.unlink()
+invoke(2, "inspect", "T-155", "--repo", main)
+# Restore the pre-M1 fixture shape for the remaining cases.
+for checkout_dir in (repo, change):
+    (checkout_dir / "backlog").unlink()
+shutil.rmtree(store)
+(repo / "backlog").mkdir(exist_ok=True)
+(repo / "backlog" / "config.yml").write_text('task_prefix: "t"\n', encoding="utf-8")
+reset()
 
 # A listed checkout resolving through a foreign gitdir cannot become the Change.
 reset(); dotgit = change / ".git"; original_gitfile = dotgit.read_text(); foreign = scratch / "foreign"

@@ -259,6 +259,24 @@ class Engine:
         if self.task_id is None or self.task_config is None:
             raise Refusal("The configured Task identity was not established.")
         for worktree in topology["worktrees"]:
+            # Post-M1 (decision-28): every checkout reads the same store, so
+            # the record's location no longer identifies its Change checkout;
+            # the worktree's branch does (the pre-M1 born-in-worktree signal).
+            # A direct child rides its parent's Change checkout.
+            branch_identity = None
+            if worktree["branch"]:
+                branch_identity = self.task_config.parse_branch(worktree["branch"])
+            requested = self.task_config.parse_display(self.task_id)
+            branch_matches = branch_identity is not None and (
+                branch_identity.display_id == requested.display_id
+                or (
+                    requested.child_number is not None
+                    and branch_identity.child_number is None
+                    and branch_identity.parent_number == requested.parent_number
+                )
+            )
+            if not branch_matches:
+                continue
             task_paths = find_task_records(worktree["path"], self.task_id, self.task_config)
             if len(task_paths) > 1:
                 raise Refusal(
@@ -266,7 +284,10 @@ class Engine:
                     {"worktree": worktree["path"], "paths": task_paths},
                 )
             if not task_paths:
-                continue
+                raise Refusal(
+                    "The Task record is missing for its Change checkout.",
+                    {"worktree": worktree["path"], "branch": worktree["branch"]},
+                )
             found = {**worktree, "task_path": task_paths[0]}
             if (
                 worktree["path"] == topology["primary_main"]
@@ -907,9 +928,24 @@ def secure_directory(path: Path, root: Path, label: str) -> Path:
         raise Refusal(f"The {label} is missing or inaccessible.") from error
     if stat.S_ISLNK(path_stat.st_mode) or not stat.S_ISDIR(path_stat.st_mode):
         raise Refusal(f"The {label} is not a real directory.")
-    if not resolved.is_relative_to(root_resolved):
-        raise Refusal(f"The {label} escapes the Change checkout.")
-    return resolved
+    if resolved.is_relative_to(root_resolved):
+        return resolved
+    # Post-M1 (decision-28): records may live in the operator store, reached
+    # through the checkout's backlog symlink. Containment holds when the
+    # candidate resolves beneath that entry's resolved target; a real
+    # backlog directory keeps the old within-checkout rule.
+    backlog_entry = root / "backlog"
+    try:
+        backlog_stat = backlog_entry.lstat()
+        backlog_resolved = backlog_entry.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise Refusal(f"The {label} escapes the Change checkout.") from error
+    if (
+        stat.S_ISLNK(backlog_stat.st_mode)
+        and resolved.is_relative_to(backlog_resolved)
+    ):
+        return resolved
+    raise Refusal(f"The {label} escapes the Change checkout.")
 
 
 def secure_record(path: Path, root: Path, label: str) -> str:
