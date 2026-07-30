@@ -6,7 +6,6 @@ TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 TEST_NAME="test-qq-observe-ledger-scan"
 source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd "$TESTS_DIR/.." && pwd -P)"
-OBSERVE="$ROOT/bin/qq-observe"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 export HOME="$tmp/home" XDG_STATE_HOME="$tmp/state"
@@ -16,6 +15,13 @@ repo="$tmp/repo"
 git init -q -b main "$repo"
 git -C "$repo" remote add origin git@github.com:fixture/scan.git
 git -C "$repo" config branch.main.remote origin
+mkdir -p "$repo/bin/lib" "$repo/backlog"/{tasks,completed,drafts,docs,decisions,archive,milestones}
+cp "$ROOT/bin/qq-observe" "$repo/bin/qq-observe"
+cp "$ROOT/bin/lib/qq-bin.sh" "$ROOT/bin/lib/qq_task_identity.py" "$repo/bin/lib/"
+# M1: the store's config is unavailable on CI (dangling symlink); the fixture
+# writes its own (identical task_prefix).
+printf 'task_prefix: "t"\n' >"$repo/backlog/config.yml"
+OBSERVE="$repo/bin/qq-observe"
 commit_fixture() {
   local subject="$1" date="$2"
   GIT_AUTHOR_DATE="$date" GIT_COMMITTER_DATE="$date" \
@@ -35,6 +41,124 @@ printf '{"nameWithOwner":"fixture/scan"}\n'
 SH
 chmod +x "$fake_gh"
 export QQ_GH_BIN="$fake_gh"
+
+# backlog.md is not installed on CI runners; a faithful stub implements the
+# exact verbs this suite and bin/qq-observe call, so both venues exercise the
+# identical path (PATH-prepended + explicit override).
+mkdir -p "$tmp/bin"
+cat >"$tmp/bin/backlog" <<'SH'
+#!/usr/bin/env bash
+# Fixture backlog.md stub: doc create/update, task create, decision create,
+# and decision-scoped search, over the caller's nearest backlog/ directory.
+set -euo pipefail
+fail() { printf 'backlog-stub: %s\n' "$*" >&2; exit 1; }
+
+root=""
+dir="$(pwd -P)"
+while [ "$dir" != "/" ]; do
+  if [ -d "$dir/backlog" ]; then root="$dir/backlog"; break; fi
+  dir="$(dirname "$dir")"
+done
+[ -n "$root" ] || fail "no backlog directory found from $(pwd -P)"
+
+next_id() {
+  local max=0 n base
+  for f in "$root/$1"/*.md; do
+    [ -e "$f" ] || continue
+    base="${f##*/}"
+    n="$(printf '%s' "$base" | sed -n "s/^$2-\([0-9][0-9]*\) -.*/\1/p")"
+    [ -n "$n" ] && [ "$n" -gt "$max" ] && max="$n"
+  done
+  printf '%s-%d' "$2" "$((max + 1))"
+}
+slug() { printf '%s' "$1" | tr ' ' '-'; }
+
+case "${1:-}" in
+  doc)
+    case "${2:-}" in
+      create)
+        [ "${3:-}" = "-t" ] || fail "usage: doc create -t <type> <title>"
+        doctype="$4"; shift 4
+        id="$(next_id docs doc)"
+        file="$root/docs/$id - $(slug "$*").md"
+        printf -- "---\nid: %s\ntitle: %s\ntype: %s\n---\n\n" "$id" "$*" "$doctype" >"$file"
+        printf 'Path: %s\n' "$file"
+        ;;
+      update)
+        id="${3:-}"
+        [ "${4:-}" = "--content" ] || fail "usage: doc update <id> --content <body>"
+        file="$(grep -rl "^id: $id\$" "$root/docs" --include='*.md' | head -1)"
+        [ -n "$file" ] || fail "no document with id $id"
+        last="$(awk '/^---$/{c++; if(c==2){print NR; exit}}' "$file")"
+        [ -n "$last" ] || fail "document $id has malformed frontmatter"
+        head -n "$last" "$file" >"$file.tmp"
+        printf '%s\n' "${5:-}" >>"$file.tmp"
+        mv "$file.tmp" "$file"
+        printf 'Path: %s\n' "$file"
+        ;;
+      *) fail "unsupported doc verb: ${2:-}" ;;
+    esac
+    ;;
+  task)
+    [ "${2:-}" = "create" ] || fail "usage: task create <title> [--description X] [--plain]"
+    shift 2; title=""; desc=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --description) desc="$2"; shift 2 ;;
+        --plain) shift ;;
+        *) title="${title:+$title }$1"; shift ;;
+      esac
+    done
+    id="$(next_id tasks t)"
+    file="$root/tasks/$id - $(slug "$title").md"
+    printf -- "---\nid: %s\ntitle: %s\nstatus: To Do\n---\n\n%s\n" \
+      "$(printf '%s' "$id" | tr 'a-z' 'A-Z')" "$title" "$desc" >"$file"
+    printf 'File: %s\n' "$file"
+    ;;
+  decision)
+    [ "${2:-}" = "create" ] || fail "usage: decision create [-s status] <title>"
+    shift 2; status="proposed"; title=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -s) status="$2"; shift 2 ;;
+        *) title="${title:+$title }$1"; shift ;;
+      esac
+    done
+    id="$(next_id decisions decision)"
+    file="$root/decisions/$id - $(slug "$title").md"
+    printf -- "---\nid: %s\ntitle: %s\ndate: '2026-01-01 00:00'\nstatus: %s\n---\n## Context\n\n## Decision\n\n## Consequences\n" \
+      "$id" "$title" "$status" >"$file"
+    printf 'Path: %s\n' "$file"
+    ;;
+  search)
+    shift; type=""; key=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --type) type="$2"; shift 2 ;;
+        --plain) shift ;;
+        --limit) shift 2 ;;
+        *) key="$1"; shift ;;
+      esac
+    done
+    [ "$type" = "decision" ] || fail "stub supports only --type decision"
+    hits=()
+    for f in "$root/decisions"/*.md; do
+      [ -e "$f" ] || continue
+      if grep -qF -- "$key" "$f"; then hits+=("$f"); fi
+    done
+    if [ "${#hits[@]}" -eq 0 ]; then printf 'No results found.\n'; exit 0; fi
+    printf 'Decisions:\n'
+    for f in "${hits[@]}"; do
+      base="${f##*/}"
+      printf '  %s - %s [score 0.500]\n' "${base%% -*}" "$(sed -n 's/^title: //p' "$f" | head -1)"
+    done
+    ;;
+  *) fail "unsupported verb: ${1:-}" ;;
+esac
+SH
+chmod +x "$tmp/bin/backlog"
+export PATH="$tmp/bin:$PATH"
+export QQ_BACKLOG_BIN="$tmp/bin/backlog"
 
 runs="$XDG_STATE_HOME/qq/observer/runs/by-repository/fixture/scan"
 write_package() {
@@ -62,6 +186,14 @@ write_analysis() {
       cost:{turns:1,tokens:1,duration_ms:1,source:"facts:/fixture/session.jsonl"},
       remedy:{type:"process",smallest_change:"Fix it."},confidence:"high",
       confidence_why:"Fixture.",recurrence_key:"scan-key",rank:1,no_signal:false
+    },{
+      kind:"friction",title:"Decision-covered fixture",sessions:["/fixture/session.jsonl"],
+      evidence:[{session:"/fixture/session.jsonl",entries:[2],quote:"decision fixture"}],
+      what_happened:"Fixture.",root_cause:"Fixture.",
+      root_cause_location:"harness-design",
+      cost:{turns:1,tokens:1,duration_ms:1,source:"facts:/fixture/session.jsonl"},
+      remedy:{type:"process",smallest_change:"Keep the decision."},confidence:"medium",
+      confidence_why:"Fixture.",recurrence_key:"explicit-decision-settlement-zebra-984",rank:2,no_signal:false
     }],dropped_signals:[],limitations:"Fixture."
   }' >"$run/analysis.json"
 }
@@ -75,14 +207,33 @@ write_analysis 2 'Run two title'
 touch -d 2026-01-01T01:00:00Z "$runs/pr-1/analysis.json"
 touch -d 2026-01-02T01:00:00Z "$runs/pr-2/analysis.json"
 
-# A durable disposition is scanned with the analyses; old sequence fields are
-# accepted by readers but new records do not need one.
-jq -cnS '{
-  schema:"qq-observer.ledger-event",schema_version:2,
-  repository:"fixture/scan",ts:"2026-01-03T00:00:00.000Z",type:"disposition",
-  pr:1,variant:"guided",written_seq:99,
-  outcomes:[{recurrence_key:"scan-key",verdict:"rejected",scope:"",note:"Fixture."}]
-}' >"$runs/pr-1/discussed.json"
+# Seed the fixture store's managed Observer-dispositions document.
+created="$(cd "$repo" && backlog doc create -t specification "Observer dispositions")"
+dispositions_id="$(printf '%s\n' "$created" | grep -oE 'doc-[0-9]+' | head -1)"
+dispositions_body=$(cat <<'EOF'
+# Observer dispositions
+
+The operator-settled dispositions of Observer Architect findings. Append
+only through `backlog doc update --content` with the complete body
+(qq-observe owns the append; never hand-edit). Coverage of a recurrence
+key = a settled entry here, or a Backlog decision-record hit for the key
+(Task, plan, and doc mentions never settle).
+
+## Entries
+
+(none yet)
+EOF
+)
+(cd "$repo" && backlog doc update "$dispositions_id" --content "$dispositions_body" >/dev/null)
+
+# Only settlement-grade surfaces cover: Task and document hits for scan-key do
+# not cover it, while a decision-record hit covers its separate recurrence key.
+(cd "$repo" && backlog task create "Task mentions scan-key" --description "scan-key" --plain >/dev/null)
+other_doc="$(cd "$repo" && backlog doc create -t specification "Document mentions scan-key")"
+other_doc_id="$(printf '%s\n' "$other_doc" | grep -oE 'doc-[0-9]+' | head -1)"
+(cd "$repo" && backlog doc update "$other_doc_id" --content "scan-key" >/dev/null)
+(cd "$repo" && backlog decision create -s accepted \
+  "Settlement for explicit-decision-settlement-zebra-984" >/dev/null)
 
 write_package 3 2026-01-03T00:00:00Z
 printf '%s\n' \
@@ -95,6 +246,36 @@ assert_no_ledger() {
   [ ! -e "$ledger_dir" ] || fail 'computed Observer view created a ledger directory'
 }
 
+# The doc-backed disposition is proposed, appears pending, then settles the key.
+"$OBSERVE" architect-context >"$tmp/context-uncovered.json"
+jq -e '
+  .schema_version == 4 and .pending_intakes == []
+  and any(.findings[]; .recurrence_key == "scan-key" and .covered == false
+    and (.occurrences | length) == 2)
+  and all(.findings[]; .recurrence_key != "explicit-decision-settlement-zebra-984")
+' "$tmp/context-uncovered.json" >/dev/null \
+  || fail 'Architect context did not expose the uncovered fixture key'
+context_id="$(jq -r .context_id "$tmp/context-uncovered.json")"
+jq '[.findings[] | select(.recurrence_key == "scan-key") |
+  {recurrence_key,occurrence_ids:([.occurrences[].occurrence_id]|sort),action:"set_aside",scope:"",note:"Fixture."}]
+' "$tmp/context-uncovered.json" >"$tmp/disposition-decisions.json"
+"$OBSERVE" disposition-propose --context "$context_id" \
+  --decisions "$tmp/disposition-decisions.json" >"$tmp/disposition-proposed.json"
+batch_id="$(jq -r .batch_id "$tmp/disposition-proposed.json")"
+"$OBSERVE" architect-context >"$tmp/context-pending.json"
+jq -e --arg batch "$batch_id" --arg birth "$context_id" '
+  (.pending_intakes | length) == 1 and .pending_intakes[0].batch_id == $batch
+  and .pending_intakes[0].status == "proposed"
+  and .pending_intakes[0].context_id == $birth and .context_id != $birth
+  and all(.findings[]; .recurrence_key != "scan-key")
+' "$tmp/context-pending.json" >/dev/null || fail 'doc-backed proposal lost its birth context or did not become pending'
+"$OBSERVE" disposition-confirm --context "$context_id" --batch "$batch_id" \
+  >"$tmp/disposition-confirmed.json"
+"$OBSERVE" architect-context >"$tmp/context-covered.json"
+jq -e '
+  .pending_intakes == [] and all(.findings[]; .recurrence_key != "scan-key")
+' "$tmp/context-covered.json" >/dev/null || fail 'settled disposition did not cover its key'
+
 "$OBSERVE" digest >"$tmp/digest.md"
 assert_file_contains "$tmp/digest.md" 'Run two title'
 assert_file_contains "$tmp/digest.md" 'fixture/scan#1, fixture/scan#2'
@@ -105,17 +286,9 @@ rm -rf "$ledger_dir"
 
 "$OBSERVE" rounds >"$tmp/rounds.json"
 jq -e --arg run "$runs/pr-2" '
-  any(.[]; .run_dir == $run and .analyzed == true and .failed == false)
-' "$tmp/rounds.json" >/dev/null || fail 'rounds did not recognize a finalized analysis'
-assert_no_ledger
-
-"$OBSERVE" architect-context >"$tmp/context.json"
-jq -e '
-  any(.findings[]; .recurrence_key == "scan-key"
-    and (.occurrences | length) == 1
-    and .occurrences[0].source.pr == 2)
-' "$tmp/context.json" >/dev/null \
-  || fail 'Architect occurrences did not derive from live analyses and dispositions'
+  any(.[]; .run_dir == $run and .analyzed == true and .failed == false and .covered == true
+    and (has("discussed")|not) and (has("handoff")|not) and (has("task_ids")|not))
+' "$tmp/rounds.json" >/dev/null || fail 'rounds did not use doc-backed run coverage'
 assert_no_ledger
 
 # Delivery coverage is computed from the same live analysis scan.
@@ -184,7 +357,7 @@ done
 # sections promoted rows under "Opportunities ledger" and the rest under
 # "Open findings". The shared scan-key spans pr-1 and pr-2 above.
 write_package 5 2026-01-05T00:00:00Z
-jq '.episodes[0].recurrence_key = "solo-key"' \
+jq '.episodes = [(.episodes[0] | .recurrence_key = "solo-key")]' \
   "$runs/pr-2/analysis.json" >"$tmp/pr-5-analysis.json"
 mkdir -p "$runs/pr-5"
 cp "$tmp/pr-5-analysis.json" "$runs/pr-5/analysis.json"
@@ -203,76 +376,7 @@ if grep -q '^1 .*`solo-key`' "$tmp/sections.txt"; then
 fi
 assert_no_ledger
 
-# (2) mark-discussed --twin writes the blind twin mark with empty outcomes.
-# A rejected (scopeless) outcome exercises the analysis-matched path without
-# pulling the intake registry (O2's domain) into this suite.
-guided6="$runs/pr-6"
-write_package 6 2026-01-06T00:00:00Z
-jq '.episodes[0].recurrence_key = "twin-key"' \
-  "$runs/pr-2/analysis.json" >"$tmp/pr-6-analysis.json"
-cp "$tmp/pr-6-analysis.json" "$guided6/analysis.json"
-twin6="$runs/pr-6-blind"
-mkdir -p "$twin6"
-jq '.variant = "blind"' "$guided6/package.json" >"$twin6/package.json"
-cp "$tmp/pr-6-analysis.json" "$twin6/analysis.json"
-jq -cnS '[{recurrence_key:"twin-key",verdict:"rejected",scope:"",note:"Fixture."}]' \
-  >"$tmp/outcomes.json"
-"$OBSERVE" mark-discussed --run "$guided6" --twin "$twin6" \
-  --outcomes "$tmp/outcomes.json" >"$tmp/twin.json"
-jq -e '.status == "discussed" and .twin_status == "discussed"' \
-  "$tmp/twin.json" >/dev/null || fail 'twin marks were not both written'
-jq -e '.type == "disposition" and .variant == "blind" and .pr == 6
-  and .outcomes == [] and .note == "discussed with guided twin"' \
-  "$twin6/discussed.json" >/dev/null || fail 'blind twin mark has the wrong shape'
-"$OBSERVE" mark-discussed --run "$guided6" --twin "$twin6" \
-  --outcomes "$tmp/outcomes.json" >"$tmp/twin-retry.json"
-jq -e '.status == "already discussed" and .twin_status == "already discussed"' \
-  "$tmp/twin-retry.json" >/dev/null || fail 'identical twin retry was not a no-op'
-assert_no_ledger
-
-# (3) record-comparison: candidate selection, durable record shape,
-# identical-retry no-op, and append-only conflict on divergence.
-guided7="$runs/pr-7"
-write_package 7 2026-01-07T00:00:00Z
-jq '.episodes = [
-      (.episodes[0] | .recurrence_key = "shared-key" | .title = "Shared"),
-      (.episodes[0] | .recurrence_key = "guided-only-key" | .title = "Guided only" | .rank = 2)
-    ] | .dropped_signals = [{kind:"noisy",entries:[2],why:"fixture signal"}]' \
-  "$runs/pr-2/analysis.json" >"$tmp/pr-7-guided-analysis.json"
-cp "$tmp/pr-7-guided-analysis.json" "$guided7/analysis.json"
-blind7="$runs/pr-7-blind"
-mkdir -p "$blind7"
-jq '.variant = "blind"' "$guided7/package.json" >"$blind7/package.json"
-jq '.episodes = [
-      (.episodes[0] | .recurrence_key = "shared-key" | .title = "Shared"),
-      (.episodes[0] | .recurrence_key = "blind-only-key" | .title = "Blind only" | .rank = 2)
-    ]' "$runs/pr-2/analysis.json" >"$blind7/analysis.json"
-"$OBSERVE" record-comparison --guided "$guided7" --blind "$blind7" \
-  >"$tmp/comparison.json"
-jq -e '.status == "recorded" and .pr == 7 and .candidates == 3' \
-  "$tmp/comparison.json" >/dev/null || fail 'comparison candidates were not selected'
-jq -e '[.candidates[] | {direction,recurrence_key,evidence}] == [
-  {direction:"prune",recurrence_key:"guided-only-key",evidence:"guided-only"},
-  {direction:"promote",recurrence_key:"blind-only-key",evidence:"blind-only"},
-  {direction:"prune",recurrence_key:"signal:noisy",evidence:"unabsorbed"}]' \
-  "$guided7/comparison.json" >/dev/null \
-  || fail 'comparison record has the wrong candidate shape'
-"$OBSERVE" record-comparison --guided "$guided7" --blind "$blind7" \
-  >"$tmp/comparison-retry.json"
-jq -e '.status == "already recorded"' "$tmp/comparison-retry.json" >/dev/null \
-  || fail 'identical comparison retry was not a no-op'
-jq '.episodes[1].title = "Diverged"' \
-  "$blind7/analysis.json" >"$tmp/diverged.json" && mv "$tmp/diverged.json" "$blind7/analysis.json"
-set +e
-"$OBSERVE" record-comparison --guided "$guided7" --blind "$blind7" \
-  >"$tmp/comparison-conflict.out" 2>"$tmp/comparison-conflict.err"
-status=$?
-set -e
-assert_equal 65 "$status" 'diverged comparison did not hit append-only conflict'
-assert_file_contains "$tmp/comparison-conflict.err" 'append-only conflict'
-assert_no_ledger
-
-# (4) digest --since windowing and the stored digest file.
+# (2) digest --since windowing and the stored digest file.
 "$OBSERVE" digest --since 2026-06-01T00:00:00Z >"$tmp/digest-windowed.md"
 assert_file_contains "$tmp/digest-windowed.md" '| — | — | None'
 digest_dir="$observer_root/digests"

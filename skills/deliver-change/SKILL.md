@@ -56,11 +56,8 @@ exactly one preserve-or-restore question, never an operator-input deadlock.
    resume, or operator message, call idempotent `qq-change land <pr> --repo
    <checkout>`. Its engine verifies merge and ancestry and safely
    fast-forwards the sole primary `main`; exit 2 is a rail refusal and exit 1
-   an error. Stop and preserve the Change; repeating the call is safe. When an
-   Observer accountable-intake handoff originated the Change, record the
-   verified merge with `qq-observe resolve-task --batch <origin-batch-dir>
-   --task <Task-ID> --repo <qq-root>`; v1 compatibility uses `--run
-   <origin-run-dir>`. Run `qq-observe assemble` while the worktree lives, then
+   an error. Stop and preserve the Change; repeating the call is safe. Run
+   `qq-observe assemble` while the worktree lives, then
    `qq-observe materialize --run <run-dir>`, then dispatch
    `<worktree>/bin/qq-delegate run --role observer --cwd <absolute-worktree>
    --brief <absolute-run-dir>/BRIEF.md` with its brief-contained procedure/package

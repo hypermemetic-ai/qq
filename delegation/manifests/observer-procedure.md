@@ -25,15 +25,11 @@ A new guided package uses `qq-observer.package` v2, carries both its canonical
 local `repo` root and explicit GitHub `repository` (`owner/name`), and lives at
 `runs/by-repository/<owner>/<repo>/pr-<N>/`. Legacy v1 flat packages are
 read-only evidence: inspect them in place, label them legacy, and never infer a
-GitHub Repository or rewrite/copy them. Separate discussion and routing records
-may still be appended beside a legacy package. A guided package declares `variant:
-"guided"` in `package.json` and contains a
-`facts.json` and `signals.json` for every session, the corresponding session
-transcripts, the qq tool and skill inventory, and the live instruction corpus
-(including AGENTS.md, CONCEPTS.md, skills, and manifests). A blind package
-declares `variant: "blind"` and is identical except that signal files and
-session signal pointers are deliberately absent. No other missing-signal shape
-is valid.
+GitHub Repository or rewrite/copy them. A guided package declares `variant:
+"guided"` in `package.json` and contains a `facts.json` and `signals.json` for
+every session, the corresponding session transcripts, the qq tool and skill
+inventory, and the live instruction corpus (including AGENTS.md, CONCEPTS.md,
+skills, and manifests).
 
 Paths in the analysis must name sessions in that package. The observer writes
 canonical absolute paths; validation canonicalizes all package and analysis
@@ -51,13 +47,10 @@ as `--facts SESSION_PATH=FACTS_PATH`.
 The package is materialized by the owner before dispatch (`qq-observe materialize --run <dir>`); a package without per-session `facts` paths is not analyzable.
 
 Load every package member and verify its schema and session membership. Require
-`package.variant` to be exactly `guided` or `blind`. For guided packages,
-require one facts file and one signals file per session. For blind packages,
-require one facts file per session and tolerate signal absence only because the
-manifest declares the blind variant. Verify every available pre-pass citation
-resolves to a 1-based physical transcript entry. Integrity validation may inspect
-signal shape and citations mechanically, but do not use signal kinds or windows
-to form candidates yet.
+`package.variant` to be exactly `guided`, with one facts file and one signals
+file per session. Verify every pre-pass citation resolves to a 1-based physical
+transcript entry. Integrity validation may inspect signal shape and citations
+mechanically, but do not use signal kinds or windows to form candidates yet.
 
 Select one reading mode from the total byte length of all packaged session
 transcripts:
@@ -108,9 +101,8 @@ deterministic signals:
 
 Every guided signal must resolve through one of those two paths. Mark every
 retained episode with no matching signal as `no_signal: true`, so later digests
-can identify recall gaps. In a blind package no signal list exists, so every
-retained episode is marked `no_signal: true` and `dropped_signals` is empty.
-Signals may challenge the reading, but never define its candidate agenda.
+can identify recall gaps. Signals may challenge the reading, but never define
+its candidate agenda.
 
 Treat `reasoning_volume` and `reasoning_contortion` as prompts to inspect whether
 a harness rule forced disproportionate or contorted work. The seam signals are
@@ -179,22 +171,6 @@ After emission, `qq-observe validate-analysis` resolves verbatim citations,
 grounds costs using the supplied facts, rejects invalid output, and ranks valid
 episodes. Findings remain proposals for the operator.
 
-## Dual-run calibration protocol
-
-Analyze each of the first five real post-launch runs twice. First assemble and
-analyze its guided package. Then assemble and analyze the blind calibration
-package with `qq-observe assemble --variant blind`. Blind assembly derives from
-the frozen guided package by construction: it clones the guided transcripts,
-facts, inventory, corpus, and package identity into a separate append-only run
-directory without repeating discovery, omits all signals, and records
-`variant: "blind"` plus `derived_from: "pr-N"`. Do not expose the guided result
-or signals to the blind analyst.
-
-In the architect discussion compare the two retained episode sets. Treat
-signals-only findings as false-positive candidates and blind-only findings as
-signal-promotion candidates. Neither category is an automatic verdict; both
-feed explicit signal-set tuning proposals.
-
 ## Taxonomy v1
 
 - **tool-gap.capability-unknown** — an existing qq tool or skill would collapse
@@ -245,8 +221,7 @@ feed explicit signal-set tuning proposals.
 4. Reasoning informs root cause but is not outcome evidence; outcomes come from
    tool results.
 5. On any package, schema, variant, or validation failure, emit
-   `analysis_failed` and never salvage findings. Declared blind signal absence is
-   not a failure.
+   `analysis_failed` and never salvage findings.
 6. Findings are proposals only; apply nothing.
 7. Represent uncertainty honestly. Label weak evidence low-confidence or
    tentative and never rank it up by assertion.
