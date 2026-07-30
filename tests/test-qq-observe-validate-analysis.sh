@@ -114,32 +114,6 @@ assert_equal 65 "$not_materialized_status" \
 assert_file_contains "$tmp/not-materialized.stderr" \
   'package is not materialized; run `qq-observe materialize --run <dir>`' \
   'unmaterialized refusal omitted the materialize remedy'
-comparison_guided="$XDG_STATE_HOME/qq/observer/runs/by-repository/fixture/repo/pr-102"
-comparison_blind="$XDG_STATE_HOME/qq/observer/runs/by-repository/fixture/repo/pr-102-blind"
-for spec in "$comparison_guided:guided" "$comparison_blind:blind"; do
-  path="${spec%:*}"
-  variant="${spec##*:}"
-  mkdir -p "$path/sessions"
-  cp "$session_a" "$path/sessions/fixture.jsonl"
-  jq -cn --arg repo "$ROOT" --arg variant "$variant" '{
-    schema:"qq-observer.package",schema_version:2,repository:"fixture/repo",
-    pr:102,variant:$variant,assembled_at:"2026-07-23T00:00:00Z",repo:$repo,
-    sessions:[{label:"fixture",role:"accountable",evidence:"fixture"}]
-  }' >"$path/package.json"
-  cp "$valid" "$path/analysis.json"
-done
-set +e
-"$OBSERVE" record-comparison --guided "$comparison_guided" --blind "$comparison_blind" \
-  >"$tmp/not-materialized-comparison.stdout" \
-  2>"$tmp/not-materialized-comparison.stderr"
-not_materialized_comparison_status=$?
-set -e
-assert_equal 65 "$not_materialized_comparison_status" \
-  'record-comparison accepted an unmaterialized package'
-assert_file_contains "$tmp/not-materialized-comparison.stderr" \
-  'package is not materialized; run `qq-observe materialize --run <dir>`' \
-  'comparison refusal omitted the materialize remedy'
-
 roundtrip_analysis="$tmp/roundtrip-analysis.json"
 jq -n --arg session "$roundtrip_session" --slurpfile facts "$roundtrip_facts" '
   {

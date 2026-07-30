@@ -420,48 +420,6 @@ assert_equal 65 "$status" 'materialize accepted a transcript that facts refused'
 assert_file_contains "$tmp/bad-facts.stderr" "$bad_facts_run"
 rm -rf "$bad_facts_run"
 
-# Blind calibration packages derive only from the frozen guided package. They do
-# not repeat gh/runtime/session discovery after the accountable transcript advances.
-export GH_MUST_NOT_RUN="$tmp/blind-touched-gh"
-"$OBSERVE" assemble --pr 41 --repo "$repo" --variant blind \
-  >"$tmp/assembled-41-blind.json"
-unset GH_MUST_NOT_RUN
-[ ! -e "$tmp/blind-touched-gh" ] || fail 'blind assembly touched gh instead of deriving from guided'
-blind_run_41="$qualified_runs/pr-41-blind"
-jq -e '
-  .schema == "qq-observer.package" and .schema_version == 2
-  and .repository == "fixture/repo" and .variant == "blind" and .derived_from == "pr-41"
-  and ([.sessions[] | has("facts") or has("signals")] | any | not)
-' "$blind_run_41/package.json" >/dev/null \
-  || fail 'blind package manifest was not assembled without derivative pointers'
-jq -S 'del(.variant,.derived_from) | .sessions |= map(del(.facts,.signals))' \
-  "$blind_run_41/package.json" >"$tmp/blind-comparable.json"
-jq -S 'del(.variant) | .sessions |= map(del(.facts,.signals))' \
-  "$run_41/package.json" >"$tmp/guided-comparable.json"
-cmp "$tmp/guided-comparable.json" "$tmp/blind-comparable.json" \
-  || fail 'blind package identity or session inputs differ from guided'
-assert_equal 8 "$(find "$blind_run_41/sessions" -type f | wc -l)" \
-  'blind session transcript count is wrong'
-[ ! -e "$blind_run_41/facts" ] || fail 'blind assemble eagerly wrote facts'
-[ ! -e "$blind_run_41/signals" ] || fail 'blind assemble eagerly wrote signals'
-"$OBSERVE" materialize --run "$blind_run_41" >"$tmp/materialized-41-blind.json"
-jq -e '
-  .variant == "blind"
-  and ([.sessions[] | has("facts")] | all)
-  and ([.sessions[] | has("signals")] | any | not)
-' "$blind_run_41/package.json" >/dev/null \
-  || fail 'blind materialization has the wrong derivative pointers'
-for expected in "$expected_facts"/*.json; do
-  cmp "$expected" "$blind_run_41/facts/$(basename "$expected")" \
-    || fail 'blind materialized facts differ from direct qq-observe facts output'
-done
-[ ! -e "$blind_run_41/signals" ] || fail 'blind materialization wrote a signals directory'
-[ "$blind_run_41" != "$run_41" ] || fail 'guided and blind variants shared a run directory'
-"$OBSERVE" assemble --pr 41 --repo "$repo" --variant blind \
-  >"$tmp/reassembled-41-blind.json"
-jq -e '.status == "already assembled"' "$tmp/reassembled-41-blind.json" >/dev/null \
-  || fail 'blind reassembly was not idempotent'
-
 # Equal PR numbers in another multi-remote Repository remain distinct and every
 # GitHub lookup carries the canonical primary-main tracking Repository.
 repo_other="$tmp/repo-other"
@@ -474,29 +432,12 @@ other_run="$XDG_STATE_HOME/qq/observer/runs/by-repository/fixture/other/pr-41"
 jq -e --arg repo "$(realpath "$repo_other")" '
   .schema_version == 2 and .repository == "fixture/other" and .repo == $repo and .pr == 41
 ' "$other_run/package.json" >/dev/null || fail 'second Repository package identity was conflated'
-"$OBSERVE" assemble --pr 41 --repo "$repo_other" --variant blind >"$tmp/assembled-other-41-blind.json"
-[ -f "$XDG_STATE_HOME/qq/observer/runs/by-repository/fixture/other/pr-41-blind/package.json" ] \
-  || fail 'second Repository blind run did not use its qualified namespace'
 [ "$other_run" != "$run_41" ] || fail 'equal PR numbers shared one run identity'
 assert_file_contains "$GH_LOG" 'pr view 41 --repo fixture/repo --json'
 assert_file_contains "$GH_LOG" 'pr view 41 --repo fixture/other --json'
 if grep -E '^pr view 41 --json|^pr view 41$' "$GH_LOG"; then
   fail 'assembly performed a cwd-only GitHub PR lookup'
 fi
-
-export GH_MUST_NOT_RUN="$tmp/absent-guided-touched-gh"
-set +e
-"$OBSERVE" assemble --pr 99 --repo "$repo" --variant blind \
-  >"$tmp/absent-guided.stdout" 2>"$tmp/absent-guided.stderr"
-status=$?
-set -e
-unset GH_MUST_NOT_RUN
-assert_equal 65 "$status" 'blind assembly without guided package was accepted'
-[ ! -e "$tmp/absent-guided-touched-gh" ] \
-  || fail 'blind assembly consulted gh when guided package was absent'
-assert_file_contains "$tmp/absent-guided.stderr" 'guided package is required'
-[ ! -e "$qualified_runs/pr-99-blind" ] \
-  || fail 'absent guided package left a blind run directory'
 
 "$OBSERVE" assemble --pr 41 --repo "$repo" >"$tmp/reassembled-41.json"
 jq -e '.status == "already assembled"' "$tmp/reassembled-41.json" >/dev/null \

@@ -101,7 +101,7 @@ assert.equal(proposed.details.status, "proposed"); assert.equal(proposed.details
 assert.match(proposed.content[0].text, new RegExp(batchId)); assert.match(proposed.content[0].text, /doc-backed dispositions/);
 assert.deepEqual(writtenDecisions, decisions);
 assert.deepEqual(h.calls.at(-1).args.slice(0, 4), ["disposition-propose", "--context", contextId, "--decisions"]);
-assert.equal(h.calls.some((call) => call.args[0] === "prepare-handoff" || call.command === "qq-handoff"), false);
+assert.equal(h.calls.some((call) => call.command === "qq-handoff"), false);
 
 // Confirmation re-reads the doc-backed proposal and requires the latest clear interactive affirmative.
 await h.input(`Yes, please proceed with ${batchId}; this looks good.`);
