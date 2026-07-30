@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Aggregate Task truth into a derived scratch tree and render its board.
+# Materialize the single-home Task store into a derived scratch tree and render it.
 # shellcheck disable=SC1091,SC2016
 set -euo pipefail
-
 export LC_ALL=C
 
 self="$(readlink -f -- "${BASH_SOURCE[0]}")"
@@ -10,7 +9,6 @@ self="$(readlink -f -- "${BASH_SOURCE[0]}")"
 source "$(dirname "$self")/lib/qq-bin.sh"
 # shellcheck source=bin/lib/qq-engine.sh
 source "$(dirname "$self")/lib/qq-engine.sh"
-
 qq_engine_init qq-board board
 
 usage() {
@@ -18,10 +16,10 @@ usage() {
 usage: qq-board [inspect] reconcile [--repo <path>] [--dry-run]
        qq-board watch [--repo <path>] [--interval <seconds>]
 
-reconcile aggregates backlog/tasks records from primary and linked worktrees,
-derives their statuses from branches and pull requests, and atomically publishes
-a scratch board tree outside every checkout. inspect and --dry-run report the
-same result without changing the scratch tree. Source records are never written.
+reconcile materializes the store's Task records into a derived scratch tree
+outside every checkout and renders that single-home view without aggregation.
+inspect and --dry-run report the same result without changing the scratch tree.
+Source records are never written.
 
 The Herdr board pane command is:
   qq-board watch --interval 3
@@ -31,766 +29,204 @@ EOF
 }
 
 mode=apply
-if [ "${1:-}" = inspect ]; then
-  mode=inspect
-  shift
-fi
-
+if [ "${1:-}" = inspect ]; then mode=inspect; shift; fi
 case "${1:-}" in
-  -h | --help | help)
-    usage
-    exit 0
-    ;;
-  reconcile | watch)
-    verb="$1"
-    shift
-    ;;
-  *)
-    qq_engine_error \
-      'usage: qq-board [inspect] reconcile [--repo <path>] [--dry-run] | qq-board watch [--repo <path>] [--interval <seconds>]'
-    ;;
+  -h | --help | help) usage; exit 0 ;;
+  reconcile | watch) verb="$1"; shift ;;
+  *) qq_engine_error 'usage: qq-board [inspect] reconcile [--repo <path>] [--dry-run] | qq-board watch [--repo <path>] [--interval <seconds>]' ;;
 esac
-
-repo=.
-interval=3
-interval_supplied=false
-dry_run=false
+repo=.; interval=3; interval_supplied=false; dry_run=false
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --repo)
-      [ "$#" -ge 2 ] || qq_engine_error '--repo requires a path'
-      repo="$2"
-      shift 2
-      ;;
-    --interval)
-      [ "$#" -ge 2 ] || qq_engine_error '--interval requires seconds'
-      interval="$2"
-      interval_supplied=true
-      shift 2
-      ;;
-    --dry-run)
-      dry_run=true
-      shift
-      ;;
-    -h | --help)
-      usage
-      exit 0
-      ;;
+    --repo) [ "$#" -ge 2 ] || qq_engine_error '--repo requires a path'; repo="$2"; shift 2 ;;
+    --interval) [ "$#" -ge 2 ] || qq_engine_error '--interval requires seconds'; interval="$2"; interval_supplied=true; shift 2 ;;
+    --dry-run) dry_run=true; shift ;;
+    -h | --help) usage; exit 0 ;;
     *) qq_engine_error "unknown qq-board argument: $1" ;;
   esac
 done
-
 qq_engine_set_action "$mode:$verb"
-
 if [ "$verb" = reconcile ]; then
-  [ "$interval_supplied" = false ] \
-    || qq_engine_error '--interval applies only to watch'
+  [ "$interval_supplied" = false ] || qq_engine_error '--interval applies only to watch'
 else
   [ "$mode" = apply ] || qq_engine_error 'inspect applies only to reconcile'
   [ "$dry_run" = false ] || qq_engine_error '--dry-run applies only to reconcile'
-  [[ "$interval" =~ ^[1-9][0-9]*$ ]] \
-    || qq_engine_error '--interval must be a positive integer number of seconds'
+  [[ "$interval" =~ ^[1-9][0-9]*$ ]] || qq_engine_error '--interval must be a positive integer number of seconds'
 fi
 
-if ! qq_resolve_bin git; then
-  qq_engine_error "$QQ_BIN_ERROR"
-fi
-git_bin="$QQ_BIN_RESULT"
+qq_resolve_bin git || qq_engine_error "$QQ_BIN_ERROR"; git_bin="$QQ_BIN_RESULT"
 checkout_root="$({ "$git_bin" -C "$repo" rev-parse --show-toplevel 2>/dev/null || true; })"
 [ -n "$checkout_root" ] || qq_engine_error "not a Git checkout: $repo"
-checkout_root="$(cd "$checkout_root" && pwd -P)" \
-  || qq_engine_error "cannot canonicalize Repository root: $checkout_root"
-
-if ! worktrees="$({
-  "$git_bin" -C "$checkout_root" worktree list --porcelain 2>/dev/null
-})"; then
-  qq_engine_error "cannot list Git worktrees for: $checkout_root"
-fi
-[ -n "$worktrees" ] \
-  || qq_engine_error "Git returned an empty worktree list for: $checkout_root"
-
-listed_worktrees=()
-main_paths=()
-current_worktree=
+checkout_root="$(cd "$checkout_root" && pwd -P)" || qq_engine_error "cannot canonicalize Repository root: $checkout_root"
+worktrees="$({ "$git_bin" -C "$checkout_root" worktree list --porcelain 2>/dev/null; })" \
+  || qq_engine_error "cannot list Git worktrees for: $checkout_root"
+[ -n "$worktrees" ] || qq_engine_error "Git returned an empty worktree list for: $checkout_root"
+listed_worktrees=(); main_paths=(); current_worktree=
 while IFS= read -r line; do
   case "$line" in
-    'worktree '*)
-      current_worktree="${line#worktree }"
-      listed_worktrees+=("$current_worktree")
-      ;;
-    'branch refs/heads/main')
-      [ -n "$current_worktree" ] && main_paths+=("$current_worktree")
-      ;;
+    'worktree '*) current_worktree="${line#worktree }"; listed_worktrees+=("$current_worktree") ;;
+    'branch refs/heads/main') [ -n "$current_worktree" ] && main_paths+=("$current_worktree") ;;
   esac
 done <<<"$worktrees"
-
 if [ "${#main_paths[@]}" -ne 1 ]; then
-  state="$("$QQ_ENGINE_JQ" -cn --arg checkout_root "$checkout_root" \
-    --argjson count "${#main_paths[@]}" \
-    '{checkout_root:$checkout_root, primary_main_count:$count}')"
-  qq_engine_error \
-    'Expected exactly one primary checkout attached to refs/heads/main.' "$state"
+  state="$("$QQ_ENGINE_JQ" -cn --arg checkout_root "$checkout_root" --argjson count "${#main_paths[@]}" \
+    '{checkout_root:$checkout_root,primary_main_count:$count}')"
+  qq_engine_error 'Expected exactly one primary checkout attached to refs/heads/main.' "$state"
 fi
-repo_root="$(cd "${main_paths[0]}" 2>/dev/null && pwd -P)" \
-  || qq_engine_error 'The primary main checkout is unavailable.'
-
+repo_root="$(cd "${main_paths[0]}" 2>/dev/null && pwd -P)" || qq_engine_error 'The primary main checkout is unavailable.'
 worktree_paths=()
-for listed_worktree in "${listed_worktrees[@]}"; do
-  canonical_worktree="$(cd "$listed_worktree" 2>/dev/null && pwd -P)" \
-    || qq_engine_error "A listed Git worktree is unavailable: $listed_worktree"
-  worktree_paths+=("$canonical_worktree")
+for path in "${listed_worktrees[@]}"; do
+  path="$(cd "$path" 2>/dev/null && pwd -P)" || qq_engine_error 'A listed Git worktree is unavailable.'
+  worktree_paths+=("$path")
 done
 
-primary_tasks_dir="$repo_root/backlog/tasks"
-primary_config="$repo_root/backlog/config.yml"
-[ -d "$primary_tasks_dir" ] \
-  || qq_engine_error "Task records directory is missing: $primary_tasks_dir"
-[ -f "$primary_config" ] \
-  || qq_engine_error "Backlog config is missing: $primary_config"
-
-if ! qq_resolve_bin python3; then
-  qq_engine_error "$QQ_BIN_ERROR"
-fi
-python_bin="$QQ_BIN_RESULT"
-task_identity_helper="$(dirname "$self")/lib/qq_task_identity.py"
-[ -f "$task_identity_helper" ] \
-  || qq_engine_error "Task identity helper is missing: $task_identity_helper"
-if ! task_config="$({
-  "$python_bin" "$task_identity_helper" config --repo "$repo_root" 2>&1
-})"; then
-  state="$("$QQ_ENGINE_JQ" -cn --arg detail "$task_config" '{detail:$detail}')"
-  qq_engine_error 'Backlog Task prefix configuration is invalid.' "$state"
-fi
-
-if ! qq_resolve_bin sha256sum; then
-  qq_engine_error "$QQ_BIN_ERROR"
-fi
-sha256sum_bin="$QQ_BIN_RESULT"
-repo_key="$(printf '%s' "$repo_root" | "$sha256sum_bin" | awk '{print $1}')"
-[[ "$repo_key" =~ ^[0-9a-f]{64}$ ]] \
-  || qq_engine_error 'Could not derive the Repository scratch-board key.'
-
-if [ -n "${XDG_CACHE_HOME:-}" ]; then
-  cache_home="$XDG_CACHE_HOME"
-elif [ -n "${HOME:-}" ]; then
-  cache_home="$HOME/.cache"
-else
-  qq_engine_error 'HOME or XDG_CACHE_HOME is required for the scratch board.'
-fi
-case "$cache_home" in
-  /*) ;;
-  *) qq_engine_error 'The scratch-board cache root must be an absolute path.' ;;
-esac
-cache_home="$(readlink -m -- "$cache_home")" \
-  || qq_engine_error "cannot canonicalize scratch-board cache root: $cache_home"
-board_parent="$(readlink -m -- "$cache_home/qq/board")" \
-  || qq_engine_error "cannot canonicalize scratch-board parent: $cache_home/qq/board"
+primary_tasks_dir="$repo_root/backlog/tasks"; primary_config="$repo_root/backlog/config.yml"
+[ -d "$primary_tasks_dir" ] || qq_engine_error "Task records directory is missing: $primary_tasks_dir"
+[ -f "$primary_config" ] || qq_engine_error "Backlog config is missing: $primary_config"
+qq_resolve_bin python3 || qq_engine_error "$QQ_BIN_ERROR"; python_bin="$QQ_BIN_RESULT"
+identity_helper="$(dirname "$self")/lib/qq_task_identity.py"
+[ -f "$identity_helper" ] || qq_engine_error "Task identity helper is missing: $identity_helper"
+qq_resolve_bin sha256sum || qq_engine_error "$QQ_BIN_ERROR"; sha256sum_bin="$QQ_BIN_RESULT"
+repo_key="$(printf %s "$repo_root" | "$sha256sum_bin" | awk '{print $1}')"
+[[ "$repo_key" =~ ^[0-9a-f]{64}$ ]] || qq_engine_error 'Could not derive the Repository scratch-board key.'
+cache_home="${XDG_CACHE_HOME:-${HOME:+$HOME/.cache}}"
+[ -n "$cache_home" ] || qq_engine_error 'HOME or XDG_CACHE_HOME is required for the scratch board.'
+[[ "$cache_home" = /* ]] || qq_engine_error 'The scratch-board cache root must be an absolute path.'
+cache_home="$(readlink -m -- "$cache_home")" || qq_engine_error 'cannot canonicalize scratch-board cache root'
+board_parent="$(readlink -m -- "$cache_home/qq/board")" || qq_engine_error 'cannot canonicalize scratch-board parent'
 scratch_root="$board_parent/$repo_key"
-for worktree_path in "${worktree_paths[@]}"; do
-  case "$scratch_root" in
-    "$worktree_path" | "$worktree_path"/*)
-      state="$("$QQ_ENGINE_JQ" -cn --arg scratch_root "$scratch_root" \
-        --arg worktree "$worktree_path" \
-        '{scratch_root:$scratch_root, worktree:$worktree}')"
-      qq_engine_error \
-        'The scratch board must be outside every Repository checkout.' "$state"
-      ;;
+for path in "${worktree_paths[@]}"; do
+  case "$scratch_root" in "$path" | "$path"/*)
+    state="$("$QQ_ENGINE_JQ" -cn --arg scratch_root "$scratch_root" --arg worktree "$path" '{scratch_root:$scratch_root,worktree:$worktree}')"
+    qq_engine_error 'The scratch board must be outside every Repository checkout.' "$state" ;;
   esac
 done
 
 if [ "$verb" = watch ]; then
-  if ! qq_resolve_bin watch; then
-    qq_engine_error "$QQ_BIN_ERROR"
-  fi
-  watch_bin="$QQ_BIN_RESULT"
-  if ! qq_resolve_bin backlog; then
-    qq_engine_error "$QQ_BIN_ERROR"
-  fi
-  backlog_bin="$QQ_BIN_RESULT"
-  if ! qq_resolve_bin bash; then
-    qq_engine_error "$QQ_BIN_ERROR"
-  fi
-  bash_bin="$QQ_BIN_RESULT"
-
-  exec "$watch_bin" --no-title --interval "$interval" --exec \
-    "$bash_bin" -c '
-      "$1" reconcile --repo "$2" >/dev/null 2>&1 || exit $?
-      cd "$3" || exit 1
-      exec "$4" board
-    ' qq-board-watch "$self" "$repo_root" "$scratch_root" "$backlog_bin"
+  qq_resolve_bin watch || qq_engine_error "$QQ_BIN_ERROR"; watch_bin="$QQ_BIN_RESULT"
+  qq_resolve_bin backlog || qq_engine_error "$QQ_BIN_ERROR"; backlog_bin="$QQ_BIN_RESULT"
+  qq_resolve_bin bash || qq_engine_error "$QQ_BIN_ERROR"; bash_bin="$QQ_BIN_RESULT"
+  exec "$watch_bin" --no-title --interval "$interval" --exec "$bash_bin" -c '
+    "$1" reconcile --repo "$2" >/dev/null 2>&1 || exit $?
+    cd "$3" || exit 1
+    exec "$4" board
+  ' qq-board-watch "$self" "$repo_root" "$scratch_root" "$backlog_bin"
 fi
-
-gh_timeout_seconds=10
-if [ -n "${QQ_BOARD_GH_TIMEOUT_SECONDS+x}" ]; then
-  gh_timeout_seconds="$QQ_BOARD_GH_TIMEOUT_SECONDS"
-  if [[ ! "$gh_timeout_seconds" =~ ^[0-9]+([.][0-9]+)?$ ]] \
-    || [[ "$gh_timeout_seconds" =~ ^0+([.]0+)?$ ]]; then
-    qq_engine_error \
-      'QQ_BOARD_GH_TIMEOUT_SECONDS must be a positive number of seconds'
-  fi
-fi
-if ! qq_resolve_bin timeout; then
-  qq_engine_error "$QQ_BIN_ERROR"
-fi
-timeout_bin="$QQ_BIN_RESULT"
-
-if ! refs="$({
-  "$git_bin" -C "$repo_root" for-each-ref --format='%(refname)' \
-    refs/heads refs/remotes/origin 2>/dev/null
-})"; then
-  qq_engine_error "cannot list Git branches for: $repo_root"
-fi
-
-declare -A branch_seen=()
-declare -A branches_by_task=()
-branch_names=()
-
-record_branch_ref() {
-  local ref="$1"
-  local branch
-
-  case "$ref" in
-    refs/heads/*) branch="${ref#refs/heads/}" ;;
-    refs/remotes/origin/*) branch="${ref#refs/remotes/origin/}" ;;
-    *) return 0 ;;
-  esac
-  if [ -z "${branch_seen[$branch]+present}" ]; then
-    branch_seen["$branch"]=true
-    branch_names+=("$branch")
-  fi
-}
-
-while IFS= read -r line; do
-  case "$line" in
-    'branch refs/heads/'*) record_branch_ref "${line#branch }" ;;
-  esac
-done <<<"$worktrees"
-while IFS= read -r ref; do
-  [ -n "$ref" ] && record_branch_ref "$ref"
-done <<<"$refs"
-
-if ! branch_identities="$(
-  "$python_bin" "$task_identity_helper" branches --repo "$repo_root" \
-    "${branch_names[@]}" 2>&1
-)"; then
-  state="$("$QQ_ENGINE_JQ" -cn --arg detail "$branch_identities" '{detail:$detail}')"
-  qq_engine_error 'Could not interpret branch Task identities.' "$state"
-fi
-if ! branch_records="$("$QQ_ENGINE_JQ" -r '
-  if (.identities | type) == "array" then
-    .identities[] | [.input, .display_id] | @tsv
-  else error("invalid identities") end
-' <<<"$branch_identities")"; then
-  qq_engine_error 'Task identity helper returned malformed branch data.'
-fi
-while IFS=$'\t' read -r branch task_id; do
-  [ -n "$branch" ] || continue
-  if [ -n "${branches_by_task[$task_id]+present}" ]; then
-    branches_by_task["$task_id"]+=$'\n'"$branch"
-  else
-    branches_by_task["$task_id"]="$branch"
-  fi
-done <<<"$branch_records"
 
 read_task_metadata() {
-  local path="$1"
-
   awk '
-    function scalar(line, key, value, quote) {
-      sub("^" key ":[[:space:]]*", "", line)
-      sub("[[:space:]]+$", "", line)
-      value = line
-      quote = substr(value, 1, 1)
-      if ((quote == "\"" || quote == "\047") &&
-          substr(value, length(value), 1) == quote) {
-        value = substr(value, 2, length(value) - 2)
-      }
+    function scalar(line,key,value,quote) {
+      sub("^" key ":[[:space:]]*", "", line); sub("[[:space:]]+$", "", line)
+      value=line; quote=substr(value,1,1)
+      if ((quote == "\"" || quote == "\047") && substr(value,length(value),1) == quote)
+        value=substr(value,2,length(value)-2)
       return value
     }
-    NR == 1 && $0 == "---" { frontmatter = 1; next }
-    frontmatter && $0 == "---" { closed = 1; exit }
-    frontmatter && /^id:[[:space:]]*/ { id = scalar($0, "id") }
-    frontmatter && /^status:[[:space:]]*/ { status = scalar($0, "status") }
-    END {
-      if (!frontmatter || !closed || id == "" || status == "") {
-        exit 65
-      }
-      printf "%s\t%s\n", id, status
-    }
-  ' "$path"
+    NR == 1 && $0 == "---" { frontmatter=1; next }
+    frontmatter && $0 == "---" { closed=1; exit }
+    frontmatter && /^id:[[:space:]]*/ { id=scalar($0,"id") }
+    frontmatter && /^status:[[:space:]]*/ { status=scalar($0,"status") }
+    END { if (!frontmatter || !closed || id == "" || status == "") exit 65; printf "%s\t%s\n",id,status }
+  ' "$1"
 }
+data_refuse() { local state="${2-}"; qq_engine_finish 65 refused "$1" "${state:-\{\}}"; }
 
-notes='[]'
-collisions='[]'
-collision_count=0
+shopt -s nullglob; task_files=("$primary_tasks_dir"/*.md); shopt -u nullglob
+task_names=(); for path in "${task_files[@]}"; do task_names+=("${path##*/}"); done
+if ! identity_json="$("$python_bin" "$identity_helper" filenames --repo "$repo_root" "${task_names[@]}" 2>&1)"; then
+  state="$("$QQ_ENGINE_JQ" -cn --arg detail "$identity_json" '{detail:$detail}')"
+  data_refuse 'A Task filename does not expose a configured parent or direct-child identity.' "$state"
+fi
+identity_records="$("$QQ_ENGINE_JQ" -r 'if (.identities | type) == "array" then .identities[] | [.input,.display_id] | @tsv else error("invalid identities") end' <<<"$identity_json")" \
+  || qq_engine_error 'Task identity helper returned malformed filename data.'
+declare -A expected_by_name=() seen_ids=()
+while IFS=$'\t' read -r name task_id; do [ -n "$name" ] && expected_by_name["$name"]="$task_id"; done <<<"$identity_records"
+task_ids=(); statuses=(); hashes=(); tasks='[]'
+for index in "${!task_files[@]}"; do
+  path="${task_files[$index]}"; name="${task_names[$index]}"; expected="${expected_by_name[$name]-}"
+  [ -n "$expected" ] || qq_engine_error "Task identity helper omitted a Task filename: $path"
+  metadata="$(read_task_metadata "$path")" || data_refuse 'Task record has unreadable id or status frontmatter.'
+  IFS=$'\t' read -r task_id status <<<"$metadata"
+  [ "$task_id" = "$expected" ] || data_refuse 'Task filename and frontmatter id disagree.' \
+    "$("$QQ_ENGINE_JQ" -cn --arg task_file "$path" --arg expected_id "$expected" --arg stored_id "$task_id" '{task_file:$task_file,expected_id:$expected_id,stored_id:$stored_id}')"
+  case "$status" in 'To Do' | 'In Progress' | Done) ;; *) data_refuse 'Task record has an unsupported stored status.' \
+    "$("$QQ_ENGINE_JQ" -cn --arg task_id "$task_id" --arg stored_status "$status" '{task_id:$task_id,stored_status:$stored_status}')" ;; esac
+  [ -z "${seen_ids[$task_id]+x}" ] || data_refuse 'Duplicate Task record id in the store.'
+  seen_ids["$task_id"]=1; task_ids+=("$task_id"); statuses+=("$status")
+  hash="$("$sha256sum_bin" -- "$path" | awk '{print $1}')"; [[ "$hash" =~ ^[0-9a-f]{64}$ ]] || qq_engine_error "Could not hash Task record: $path"
+  hashes+=("$hash")
+done
 
-append_note() {
-  local note="$1"
-  notes="$("$QQ_ENGINE_JQ" -cn --argjson notes "$notes" --arg note "$note" \
-    '$notes + [$note]')"
-}
-
-declare -A task_path_by_id=()
-declare -A task_name_by_id=()
-declare -A task_status_by_id=()
-declare -A task_hash_by_id=()
-declare -A task_source_by_id=()
-declare -A task_source_kind_by_id=()
-declare -A changed_paths=()
-task_ids=()
-
-aggregate_tree() {
-  local tree="$1"
-  local source_kind="$2"
-  local tasks_dir="$tree/backlog/tasks"
-  local task_file task_name identity_json identity_records expected_id metadata task_id stored_status
-  local task_hash
-  local -a tree_task_files=() task_names=()
-  local -A expected_id_by_name=() tree_task_seen=()
-
-  [ -d "$tasks_dir" ] || return 0
-  shopt -s nullglob
-  tree_task_files=("$tasks_dir"/*.md)
-  shopt -u nullglob
-  for task_file in "${tree_task_files[@]}"; do
-    task_names+=("${task_file##*/}")
-  done
-  if ! identity_json="$(
-    "$python_bin" "$task_identity_helper" filenames --repo "$repo_root" \
-      "${task_names[@]}" 2>&1
-  )"; then
-    state="$("$QQ_ENGINE_JQ" -cn --arg worktree "$tree" \
-      --arg detail "$identity_json" '{worktree:$worktree, detail:$detail}')"
-    qq_engine_error \
-      'A Task filename does not expose a configured parent or direct-child identity.' "$state"
-  fi
-  if ! identity_records="$("$QQ_ENGINE_JQ" -r '
-    if (.identities | type) == "array" then
-      .identities[] | [.input, .display_id] | @tsv
-    else error("invalid identities") end
-  ' <<<"$identity_json")"; then
-    qq_engine_error 'Task identity helper returned malformed filename data.'
-  fi
-  while IFS=$'\t' read -r task_name task_id; do
-    [ -n "$task_name" ] && expected_id_by_name["$task_name"]="$task_id"
-  done <<<"$identity_records"
-
-  for task_file in "${tree_task_files[@]}"; do
-    task_name="${task_file##*/}"
-    task_id="${expected_id_by_name[$task_name]-}"
-    [ -n "$task_id" ] \
-      || qq_engine_error "Task identity helper omitted a Task filename: $task_file"
-    # Participation is decided by Git history, never by byte-inequality with
-    # primary: only records the Change itself touched (committed against the
-    # merge-base or dirty/untracked in the worktree) can overlay. A clean
-    # inherited snapshot stays out even after main advances beneath it.
-    if [ "$source_kind" = linked ] && [ "$participate_all" != true ] \
-      && [ -z "${changed_paths[backlog/tasks/$task_name]+present}" ]; then
-      continue
-    fi
-    if ! metadata="$(read_task_metadata "$task_file")"; then
-      state="$("$QQ_ENGINE_JQ" -cn --arg task_file "$task_file" \
-        '{task_file:$task_file}')"
-      qq_engine_error \
-        'Task record has unreadable id or status frontmatter.' "$state"
-    fi
-    expected_id="$task_id"
-    IFS=$'\t' read -r task_id stored_status <<<"$metadata"
-    if [ "$task_id" != "$expected_id" ]; then
-      state="$("$QQ_ENGINE_JQ" -cn --arg task_file "$task_file" \
-        --arg expected_id "$expected_id" --arg stored_id "$task_id" \
-        '{task_file:$task_file, expected_id:$expected_id, stored_id:$stored_id}')"
-      qq_engine_error 'Task filename and frontmatter id disagree.' "$state"
-    fi
-    case "$stored_status" in
-      'To Do' | 'In Progress' | Done) ;;
-      *)
-        state="$("$QQ_ENGINE_JQ" -cn --arg task_id "$task_id" \
-          --arg stored_status "$stored_status" \
-          '{task_id:$task_id, stored_status:$stored_status}')"
-        qq_engine_error 'Task record has an unsupported stored status.' "$state"
-        ;;
-    esac
-    if [ -n "${tree_task_seen[$task_id]+present}" ]; then
-      state="$("$QQ_ENGINE_JQ" -cn --arg task_id "$task_id" \
-        --arg worktree "$tree" '{task_id:$task_id, worktree:$worktree}')"
-      qq_engine_error 'Duplicate Task record id within one worktree.' "$state"
-    fi
-    tree_task_seen["$task_id"]=true
-
-    task_hash="$("$sha256sum_bin" -- "$task_file" | awk '{print $1}')"
-    [[ "$task_hash" =~ ^[0-9a-f]{64}$ ]] \
-      || qq_engine_error "Could not hash Task record: $task_file"
-
-    if [ -z "${task_hash_by_id[$task_id]+present}" ]; then
-      task_ids+=("$task_id")
-    # Among participants, identical copies step aside; a divergent copy
-    # overlays; only two divergent Change-side copies collide.
-    elif [ "$task_hash" = "${task_hash_by_id[$task_id]}" ]; then
-      continue
-    elif [ "${task_source_kind_by_id[$task_id]}" = linked ]; then
-      append_note "Divergent cross-worktree Task copies for $task_id: ${task_source_by_id[$task_id]} -> $tree; the later divergent copy was selected."
-      collisions="$("$QQ_ENGINE_JQ" -cn --argjson collisions "$collisions" \
-        --arg id "$task_id" \
-        --arg previous_source "${task_source_by_id[$task_id]}" \
-        --arg overriding_source "$tree" \
-        '$collisions + [{id:$id, previous_source:$previous_source, overriding_source:$overriding_source}]')"
-      collision_count=$((collision_count + 1))
-    fi
-
-    task_path_by_id["$task_id"]="$task_file"
-    task_name_by_id["$task_id"]="$task_name"
-    task_status_by_id["$task_id"]="$stored_status"
-    task_hash_by_id["$task_id"]="$task_hash"
-    task_source_by_id["$task_id"]="$tree"
-    task_source_kind_by_id["$task_id"]="$source_kind"
-  done
-}
-
-board_temp=
-reads_tmp=
-
-# Disposal eligibility is ownership by construction: a direct child whose
-# name is exactly this Repository's generation shape (mktemp's six
-# alphanumeric characters — a regex, since glob wildcards match '/'), or
-# the stale pre-symlink directory at scratch_root itself, intersecting no
-# listed checkout in either direction.
+effective_dry_run=false; if [ "$mode" = inspect ] || [ "$dry_run" = true ]; then effective_dry_run=true; fi
+notes='[]'; board_temp=
+append_note() { notes="$("$QQ_ENGINE_JQ" -cn --argjson n "$notes" --arg v "$1" '$n+[$v]')"; }
 disposal_eligible() {
-  local target="$1" base worktree_path
-  # Direct child of board_parent only: a nested directory never qualifies.
-  [ "${target%/*}" = "$board_parent" ] || return 1
-  base="${target##*/}"
-  if [ "$target" != "$scratch_root" ] \
-    && [[ ! "$base" =~ ^\.${repo_key}\.gen\.[A-Za-z0-9]{6}$ ]]; then
-    return 1
-  fi
-  for worktree_path in "${worktree_paths[@]}"; do
-    if [[ "$target/" = "$worktree_path/"* ]] \
-      || [[ "$worktree_path/" = "$target/"* ]]; then
-      return 1
-    fi
+  local target="$1" base path
+  [ "${target%/*}" = "$board_parent" ] || return 1; base="${target##*/}"
+  if [ "$target" != "$scratch_root" ] && [[ ! "$base" =~ ^\.${repo_key}\.gen\.[A-Za-z0-9]{6}$ ]]; then return 1; fi
+  for path in "${worktree_paths[@]}"; do
+    if [[ "$target/" = "$path/"* ]] || [[ "$path/" = "$target/"* ]]; then return 1; fi
   done
-  return 0
 }
-
-# Disposal is a move into the cache-local trash, never a recursive delete:
-# a guard mis-match costs a recoverable move, not rm -rf on a checkout.
-# Trash expiry rides qq-reap's weekly debris scan.
 dispose_dir() {
   local target="$1"
   [ -e "$target" ] || [ -L "$target" ] || return 0
-  if [ ! -d "$target" ] || [ -L "$target" ]; then
-    append_note "Refused to dispose of a non-directory scratch target: $target"
-    return 1
-  fi
-  if ! disposal_eligible "$target"; then
-    append_note "Refused to dispose of an ineligible scratch target: $target"
-    return 1
-  fi
+  if [ ! -d "$target" ] || [ -L "$target" ]; then append_note "Refused to dispose of a non-directory scratch target: $target"; return 1; fi
+  if ! disposal_eligible "$target"; then append_note "Refused to dispose of an ineligible scratch target: $target"; return 1; fi
   mkdir -p -- "$board_parent/.trash" || return 1
   mv -- "$target" "$board_parent/.trash/${target##*/}.$(date +%s).$RANDOM"
 }
-
-cleanup_materialization() {
-  case "$board_temp" in
-    "$board_parent"/.*)
-      dispose_dir "$board_temp" 2>/dev/null \
-        || printf 'warning: scratch generation left behind: %s\n' "$board_temp" >&2
-      ;;
-  esac
-  if [ -n "$reads_tmp" ]; then
-    rm -f -- "$reads_tmp"
-  fi
+cleanup() {
+  case "$board_temp" in "$board_parent"/.*) dispose_dir "$board_temp" 2>/dev/null || printf 'warning: scratch generation left behind: %s\n' "$board_temp" >&2 ;; esac
 }
-trap cleanup_materialization EXIT
-
-read_changed_paths() {
-  local change_kind="$1" offset="$2" changed_record changed_rel
-  shift 2
-
-  # Participation reads buffer through a file so a failed Git command is
-  # distinguishable from an empty result; a failed read degrades loudly
-  # (every record participates) instead of hiding Task truth.
-  if [ -z "$reads_tmp" ]; then
-    mkdir -p -- "$board_parent" \
-      || qq_engine_error "Could not create scratch-board parent: $board_parent"
-    reads_tmp="$(mktemp "$board_parent/.${repo_key}.reads.XXXXXX")" \
-      || qq_engine_error 'Could not allocate the participation-read buffer.'
-  fi
-  : >"$reads_tmp"
-  if "$@" >"$reads_tmp" 2>/dev/null; then
-    while IFS= read -r -d '' changed_record; do
-      changed_rel="${changed_record:$offset}"
-      [ -n "$changed_rel" ] && changed_paths["$changed_rel"]=true
-    done <"$reads_tmp"
-  else
-    participate_all=true
-    append_note "Cannot read $change_kind Task changes for $worktree_path; every record there participates."
-  fi
-}
-
-aggregate_tree "$repo_root" primary
-for worktree_path in "${worktree_paths[@]}"; do
-  [ "$worktree_path" = "$repo_root" ] && continue
-  changed_paths=()
-  participate_all=false
-  # A failed merge-base read discards stdout: partial output is never
-  # trusted as a merge-base.
-  if ! merge_base="$("$git_bin" -C "$worktree_path" merge-base HEAD refs/heads/main 2>/dev/null)"; then
-    merge_base=
-  fi
-  if [ -n "$merge_base" ]; then
-    read_changed_paths committed 0 "$git_bin" -C "$worktree_path" diff --name-only -z \
-      "$merge_base" HEAD -- backlog/tasks/
-    read_changed_paths uncommitted 3 "$git_bin" -C "$worktree_path" status --porcelain -z \
-      --untracked-files=all -- backlog/tasks/
-  else
-    participate_all=true
-    append_note "Cannot derive a merge-base with main for $worktree_path; every record there participates."
-  fi
-  aggregate_tree "$worktree_path" linked
-done
-
-pr_state_available=false
-declare -A merged_branch=()
-if qq_resolve_bin gh; then
-  gh_bin="$QQ_BIN_RESULT"
-  set +e
-  pr_response="$({
-    cd "$repo_root" \
-      && "$timeout_bin" -k 1 "$gh_timeout_seconds" \
-        "$gh_bin" pr list --state all --limit 1000 \
-        --json headRefName,state,mergedAt 2>/dev/null
-  })"
-  pr_status=$?
-  set -e
-  if [ "$pr_status" -eq 0 ] \
-    && "$QQ_ENGINE_JQ" -e '
-      type == "array"
-      and all(.[];
-        (.headRefName | type == "string")
-        and (.state | type == "string")
-        and ((.mergedAt == null) or (.mergedAt | type == "string"))
-      )
-    ' <<<"$pr_response" >/dev/null 2>&1; then
-    pr_state_available=true
-    while IFS= read -r branch; do
-      if [ -n "${branch_seen[$branch]+present}" ]; then
-        merged_branch["$branch"]=true
-      fi
-    done < <(
-      "$QQ_ENGINE_JQ" -r '.[]
-        | select(.state == "MERGED" or .mergedAt != null)
-        | .headRefName' <<<"$pr_response"
-    )
-  elif [ "$pr_status" -eq 124 ] || [ "$pr_status" -eq 137 ]; then
-    append_note 'PR state unavailable: gh pr list timed out'
-  else
-    append_note \
-      'PR state unavailable: gh pr list failed or returned unreadable data'
-  fi
-else
-  append_note "PR state unavailable: $QQ_BIN_ERROR"
-fi
-
-stored_statuses=()
-derived_statuses=()
-changed_values=()
-task_branches_json=()
-changed_count=0
-
-for task_id in "${task_ids[@]}"; do
-  stored_status="${task_status_by_id[$task_id]}"
-  branches="${branches_by_task[$task_id]-}"
-  branches_json="$(printf '%s\n' "$branches" \
-    | "$QQ_ENGINE_JQ" -Rsc \
-      'split("\n") | map(select(length > 0)) | unique | sort')"
-  derived_status='To Do'
-  if [ "$stored_status" = Done ]; then
-    derived_status=Done
-  elif [ -n "$branches" ]; then
-    derived_status='In Progress'
-    while IFS= read -r branch; do
-      if [ -n "${merged_branch[$branch]+present}" ]; then
-        derived_status=Done
-        break
-      fi
-    done <<<"$branches"
-  fi
-
-  changed=false
-  if [ "$derived_status" != "$stored_status" ]; then
-    changed=true
-    changed_count=$((changed_count + 1))
-  fi
-  stored_statuses+=("$stored_status")
-  derived_statuses+=("$derived_status")
-  changed_values+=("$changed")
-  task_branches_json+=("$branches_json")
-done
-
-effective_dry_run=false
-if [ "$mode" = inspect ] || [ "$dry_run" = true ]; then
-  effective_dry_run=true
-fi
-
+trap cleanup EXIT
 board_signature() {
-  local index task_id
-  {
-    "$sha256sum_bin" -- "$primary_config"
-    for index in "${!task_ids[@]}"; do
-      task_id="${task_ids[$index]}"
-      printf '%s\t%s\t%s\t%s\n' \
-        "$task_id" "${task_name_by_id[$task_id]}" \
-        "${task_hash_by_id[$task_id]}" "${derived_statuses[$index]}"
-    done
+  { "$sha256sum_bin" -- "$primary_config"
+    for index in "${!task_ids[@]}"; do printf '%s\t%s\t%s\t%s\n' "${task_ids[$index]}" "${task_names[$index]}" "${hashes[$index]}" "${statuses[$index]}"; done
   } | "$sha256sum_bin" | awk '{print $1}'
 }
-
 materialize_board() {
-  local index task_id destination rewrite
-  local link_temp previous_target current_signature new_signature
-
-  mkdir -p -- "$board_parent" \
-    || qq_engine_error "Could not create scratch-board parent: $board_parent"
+  local previous_target current_signature new_signature link_temp index
+  previous_target=; current_signature=
+  mkdir -p -- "$board_parent" || qq_engine_error "Could not create scratch-board parent: $board_parent"
   new_signature="$(board_signature)"
-
-  # Publish atomically: scratch_root is a symlink swapped onto a complete
-  # generation by rename, so a renderer always sees a whole board.
-  previous_target=
   if [ -L "$scratch_root" ]; then
-    if ! previous_target="$(readlink -f -- "$scratch_root" 2>/dev/null)"; then
-      append_note "Could not resolve the previous scratch target; replacing the link without disposal."
-      previous_target=
-    fi
+    previous_target="$(readlink -f -- "$scratch_root" 2>/dev/null || true)"
+    [ -n "$previous_target" ] || append_note 'Could not resolve the previous scratch target; replacing the link without disposal.'
   elif [ -e "$scratch_root" ]; then
-    # A stale directory from before the symlink scheme is disposed like
-    # any other generation (dispose_dir enforces eligibility).
-    dispose_dir "$scratch_root" \
-      || qq_engine_error "Could not dispose of the stale scratch directory: $scratch_root"
+    dispose_dir "$scratch_root" || qq_engine_error "Could not dispose of the stale scratch directory: $scratch_root"
   fi
-
-  # An unchanged aggregate is not republished — the signature is compared
-  # before anything is built, so the watch loop creates no churn. Only an
-  # owned generation's signature is trusted; a foreign target is replaced
-  # and reported through the disposal refusal.
-  current_signature=
-  if [ -n "$previous_target" ] && disposal_eligible "$previous_target"; then
-    current_signature="$(cat -- "$previous_target/.signature" 2>/dev/null || true)"
-  fi
-  if [ -n "$current_signature" ] && [ "$current_signature" = "$new_signature" ]; then
-    append_note 'Board unchanged; kept the current generation.'
-    return 0
-  fi
-
-  board_temp="$(mktemp -d "$board_parent/.${repo_key}.gen.XXXXXX")" \
-    || qq_engine_error 'Could not allocate a scratch-board generation.'
-  mkdir -p -- "$board_temp/backlog/tasks" \
-    || qq_engine_error 'Could not create the scratch Backlog tree.'
-  cp -- "$primary_config" "$board_temp/backlog/config.yml" \
-    || qq_engine_error 'Could not copy primary Backlog configuration.'
-
-  for index in "${!task_ids[@]}"; do
-    task_id="${task_ids[$index]}"
-    destination="$board_temp/backlog/tasks/${task_name_by_id[$task_id]}"
-    cp -- "${task_path_by_id[$task_id]}" "$destination" \
-      || qq_engine_error "Could not copy aggregated Task record: $task_id"
-    if [ "${changed_values[$index]}" = true ]; then
-      rewrite="$destination.qq-board.tmp"
-      if ! awk -v replacement="${derived_statuses[$index]}" '
-        NR == 1 && $0 == "---" { frontmatter = 1 }
-        frontmatter && /^status:[[:space:]]*/ {
-          print "status: " replacement
-          next
-        }
-        frontmatter && NR > 1 && $0 == "---" { frontmatter = 0 }
-        { print }
-      ' "$destination" >"$rewrite"; then
-        qq_engine_error "Could not derive Task status in scratch: $task_id"
-      fi
-      mv -- "$rewrite" "$destination" \
-        || qq_engine_error "Could not publish derived Task status: $task_id"
-    fi
-  done
-  printf '%s\n' "$new_signature" >"$board_temp/.signature" \
-    || qq_engine_error 'Could not write the scratch-board signature.'
-
-  link_temp="$(mktemp -u "$board_parent/.${repo_key}.link.XXXXXX")" \
-    || qq_engine_error 'Could not reserve the scratch-board link name.'
-  ln -s -- "$board_temp" "$link_temp" \
-    || qq_engine_error 'Could not stage the scratch-board link.'
-  if ! mv -T -- "$link_temp" "$scratch_root"; then
-    rm -f -- "$link_temp"
-    qq_engine_error 'Could not publish the scratch board tree.'
-  fi
-  board_temp=
-  dispose_dir "$previous_target" || true
+  if [ -n "$previous_target" ] && disposal_eligible "$previous_target"; then current_signature="$(cat -- "$previous_target/.signature" 2>/dev/null || true)"; fi
+  if [ -n "$current_signature" ] && [ "$current_signature" = "$new_signature" ]; then append_note 'Board unchanged; kept the current generation.'; return; fi
+  board_temp="$(mktemp -d "$board_parent/.${repo_key}.gen.XXXXXX")" || qq_engine_error 'Could not allocate a scratch-board generation.'
+  mkdir -p -- "$board_temp/backlog/tasks" || qq_engine_error 'Could not create the scratch Backlog tree.'
+  cp -- "$primary_config" "$board_temp/backlog/config.yml" || qq_engine_error 'Could not copy primary Backlog configuration.'
+  for index in "${!task_files[@]}"; do cp -- "${task_files[$index]}" "$board_temp/backlog/tasks/${task_names[$index]}" || qq_engine_error "Could not copy Task record: ${task_ids[$index]}"; done
+  printf '%s\n' "$new_signature" >"$board_temp/.signature" || qq_engine_error 'Could not write the scratch-board signature.'
+  link_temp="$(mktemp -u "$board_parent/.${repo_key}.link.XXXXXX")" || qq_engine_error 'Could not reserve the scratch-board link name.'
+  ln -s -- "$board_temp" "$link_temp" || qq_engine_error 'Could not stage the scratch-board link.'
+  if ! mv -T -- "$link_temp" "$scratch_root"; then rm -f -- "$link_temp"; qq_engine_error 'Could not publish the scratch board tree.'; fi
+  board_temp=; dispose_dir "$previous_target" || true
 }
 
 materialized=false
 if [ "$effective_dry_run" = false ]; then
-  materialize_board
-  materialized=true
+  materialize_board; materialized=true
+elif [ -L "$scratch_root" ]; then
+  previous_target="$(readlink -f -- "$scratch_root" 2>/dev/null || true)"
+  if [ -n "$previous_target" ] && disposal_eligible "$previous_target" \
+    && [ "$(cat -- "$previous_target/.signature" 2>/dev/null || true)" = "$(board_signature)" ]; then
+    append_note 'Board unchanged; kept the current generation.'
+  fi
 fi
-
-tasks='[]'
 for index in "${!task_ids[@]}"; do
-  task_id="${task_ids[$index]}"
-  task="$("$QQ_ENGINE_JQ" -cn \
-    --arg id "$task_id" \
-    --arg filename "${task_name_by_id[$task_id]}" \
-    --arg source_worktree "${task_source_by_id[$task_id]}" \
-    --arg stored_status "${stored_statuses[$index]}" \
-    --arg derived_status "${derived_statuses[$index]}" \
-    --argjson changed "${changed_values[$index]}" \
-    --argjson materialized "$materialized" \
-    --argjson branches "${task_branches_json[$index]}" \
-    '{
-      id:$id,
-      filename:$filename,
-      source_worktree:$source_worktree,
-      stored_status:$stored_status,
-      derived_status:$derived_status,
-      changed:$changed,
-      materialized:$materialized,
-      branches:$branches
-    }')"
-  tasks="$("$QQ_ENGINE_JQ" -cn --argjson tasks "$tasks" \
-    --argjson task "$task" '$tasks + [$task]')"
+  task="$("$QQ_ENGINE_JQ" -cn --arg id "${task_ids[$index]}" --arg filename "${task_names[$index]}" --arg status "${statuses[$index]}" \
+    --argjson materialized "$materialized" '{id:$id,filename:$filename,status:$status,materialized:$materialized}')"
+  tasks="$("$QQ_ENGINE_JQ" -cn --argjson tasks "$tasks" --argjson task "$task" '$tasks+[$task]')"
 done
-
-state="$("$QQ_ENGINE_JQ" -cn \
-  --arg repo_root "$repo_root" \
-  --arg scratch_root "$scratch_root" \
-  --arg config_source "$primary_config" \
-  --argjson dry_run "$effective_dry_run" \
-  --argjson materialized "$materialized" \
-  --argjson pr_state_available "$pr_state_available" \
-  --argjson notes "$notes" \
-  --argjson worktree_count "${#worktree_paths[@]}" \
-  --argjson task_count "${#task_ids[@]}" \
-  --argjson changed_count "$changed_count" \
-  --argjson collision_count "$collision_count" \
-  --argjson collisions "$collisions" \
-  --argjson tasks "$tasks" \
-  '{
-    repo_root:$repo_root,
-    scratch_root:$scratch_root,
-    config_source:$config_source,
-    dry_run:$dry_run,
-    materialized:$materialized,
-    pr_state_available:$pr_state_available,
-    notes:$notes,
-    worktree_count:$worktree_count,
-    task_count:$task_count,
-    changed_count:$changed_count,
-    collision_count:$collision_count,
-    collisions:$collisions,
-    tasks:$tasks
-  }')"
-
-if [ "$effective_dry_run" = true ]; then
-  qq_engine_done 'derived the aggregated board; the scratch tree was not changed' \
-    "$state"
-fi
-qq_engine_done 'materialized the aggregated scratch board' "$state"
+state="$("$QQ_ENGINE_JQ" -cn --arg repo_root "$repo_root" --arg scratch_root "$scratch_root" --arg config_source "$primary_config" \
+  --argjson dry_run "$effective_dry_run" --argjson materialized "$materialized" --argjson notes "$notes" \
+  --argjson task_count "${#task_ids[@]}" --argjson tasks "$tasks" \
+  '{repo_root:$repo_root,scratch_root:$scratch_root,config_source:$config_source,dry_run:$dry_run,materialized:$materialized,notes:$notes,task_count:$task_count,tasks:$tasks}')"
+if [ "$effective_dry_run" = true ]; then qq_engine_done 'derived the single-home board; the scratch tree was not changed' "$state"; fi
+qq_engine_done 'materialized the single-home scratch board' "$state"
