@@ -83,6 +83,7 @@ case "$command" in
       observer_backlog="$QQ_BIN_RESULT"
     fi
     exec "$python_binary" - "$self" "$command" "$observer_git" "$observer_gh" "$observer_backlog" "$@" <<'PY_ASSEMBLER'
+import concurrent.futures
 import datetime as dt
 import hashlib
 import json
@@ -1930,15 +1931,7 @@ def update_dispositions(document, entries):
         fail("Backlog Observer dispositions update did not persist the complete body", 65)
 
 
-def backlog_key_covered(key, dispositions):
-    if not display_text(key, nonempty=True) or "\n" in key:
-        fail("Observer recurrence key is unsafe for Backlog search", 65)
-    settled = {
-        entry["recurrence_key"] for entry in (dispositions or {}).get("entries", [])
-        if entry["status"] == "settled"
-    }
-    if key in settled:
-        return True
+def backlog_search_covers(key):
     try:
         process = subprocess.run(
             [backlog_binary, "search", "--type", "decision", key, "--plain", "--limit", "1000"],
@@ -1971,7 +1964,26 @@ def backlog_key_covered(key, dispositions):
 def coverage_by_key(keys, dispositions=None):
     if dispositions is None:
         dispositions = load_dispositions(required=False)
-    return {key: backlog_key_covered(key, dispositions) for key in sorted(set(keys))}
+    settled = {
+        entry["recurrence_key"] for entry in (dispositions or {}).get("entries", [])
+        if entry["status"] == "settled"
+    }
+    unique = sorted(set(keys))
+    for key in unique:
+        if not display_text(key, nonempty=True) or "\n" in key:
+            fail("Observer recurrence key is unsafe for Backlog search", 65)
+    # One CLI call per key is the semantic unit; per-process startup dominates,
+    # so searches run concurrently (bounded). Doc-settled keys never spawn a
+    # process. Failure order stays deterministic (sorted keys), matching the
+    # sequential fail-closed contract.
+    searches = [key for key in unique if key not in settled]
+    results = {}
+    if searches:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(searches))) as pool:
+            futures = {key: pool.submit(backlog_search_covers, key) for key in searches}
+            for key in searches:
+                results[key] = futures[key].result()
+    return {key: True if key in settled else results[key] for key in unique}
 
 
 def architect_round_identity(run_dir, identity):
