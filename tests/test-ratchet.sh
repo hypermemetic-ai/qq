@@ -116,6 +116,28 @@ rm "$fixture/skills/ratchet-ignored-probe.txt"
 cp "$tmp/gitignore-before-ignored-probe" "$fixture/.gitignore"
 fixture_track
 
+# An unstaged tracked deletion must not abort measurement: ls-files lists the
+# index while the budgets measure the working tree, so the grep input skips
+# paths absent from the tree (pr-287,
+# ratchet-ignore-unstaged-deleted-tracked-paths).
+printf 'probe\n' >"$fixture/bin/ratchet-probe"
+git -C "$fixture" add bin/ratchet-probe >/dev/null
+rm "$fixture/bin/ratchet-probe"
+"$fixture_ratchet" check >"$tmp/output"
+printf '%s\n' 'codex exec' >"$fixture/skills/ratchet-probe.txt"
+git -C "$fixture" add skills/ratchet-probe.txt >/dev/null
+expect_failure check 'exceed check with an unstaged deletion pending'
+assert_contains "$(<"$tmp/output")" 'codex_exec exceeds budget'
+rm "$fixture/skills/ratchet-probe.txt"
+fixture_track
+
+# Every tracked path under a scope deleted unstaged measures as zero
+# occurrences; the grep input must never fall through to reading stdin.
+find "$fixture/bin" -type f -delete
+"$fixture_ratchet" check >"$tmp/output"
+git -C "$fixture" checkout -- bin/
+fixture_track
+
 cmp "$tmp/state-before-checks" "$fixture_state" || \
   fail 'check mode modified the budget state'
 

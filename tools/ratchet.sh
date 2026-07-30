@@ -88,8 +88,19 @@ count_occurrences() {
     fail "$name scope matched no tracked files: $scope"
 
   while IFS= read -r path; do
+    # ls-files lists the index; the budgets measure the working tree. Skip
+    # tracked paths absent from the tree (deleted, not yet staged) so grep
+    # never sees a nonexistent file.
+    [ -e "$ROOT/$path" ] || continue
     tracked_paths+=("$ROOT/$path")
   done <<<"$tracked_files"
+
+  # Every tracked path under the scope deleted unstaged measures as zero
+  # occurrences; grep with no file operands would read stdin instead.
+  if [ "${#tracked_paths[@]}" -eq 0 ]; then
+    printf '0\n'
+    return
+  fi
 
   # --binary-files=text: a scoped file carrying a NUL byte is otherwise
   # treated as binary, its -o matches suppressed from stdout while grep still
