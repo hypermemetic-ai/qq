@@ -96,7 +96,8 @@ dispositions_body=$(cat <<'EOF'
 The operator-settled dispositions of Observer Architect findings. Append
 only through `backlog doc update --content` with the complete body
 (qq-observe owns the append; never hand-edit). Coverage of a recurrence
-key = a settled entry here, or any other Backlog hit for the key.
+key = a settled entry here, or a Backlog decision-record hit for the key
+(Task, plan, and doc mentions never settle).
 
 ## Entries
 
