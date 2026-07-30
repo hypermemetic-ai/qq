@@ -400,7 +400,7 @@ screen_bound_worktree() {
 
 derive_nominations() {
   local docs_file branches_file doc candidate doc_path token_file dead_paths dead_count command
-  local nomination branch tip ancestry_status
+  local nomination branch tip ancestry_status store_root_arg
   local worktree branch_ref status workspace_matches workspace_count workspace_id removal
   local refusal_id
 
@@ -443,19 +443,19 @@ derive_nominations() {
 
   docs_file="$(mktemp "${TMPDIR:-/tmp}/qq-reap-docs.XXXXXX")" \
     || finish_problem error 'could not allocate temporary stale-doc inspection space'
-  if ! "$git_bin" -C "$repo_root" ls-files -z -- backlog/docs >"$docs_file"; then
+  if ! "$git_bin" -C "$repo_root/backlog" ls-files -z -- docs >"$docs_file"; then
     rm -f -- "$docs_file"
-    finish_problem error 'could not list tracked files under backlog/docs/'
+    finish_problem error 'could not list tracked docs in the backlog store'
   fi
   while IFS= read -r -d '' doc; do
     if [[ "$doc" == *$'\n'* || "$doc" == *$'\r'* ]]; then
       rm -f -- "$docs_file"
-      finish_problem error 'tracked backlog doc path is not single-line report data'
+      finish_problem error 'tracked store doc path is not single-line report data'
     fi
-    doc_path="$repo_root/$doc"
+    doc_path="$repo_root/backlog/$doc"
     if [ ! -f "$doc_path" ] || [ ! -r "$doc_path" ]; then
       rm -f -- "$docs_file"
-      finish_problem error "tracked backlog doc is unreadable: $doc"
+      finish_problem error "tracked store doc is unreadable: $doc"
     fi
     token_file="$(mktemp "${TMPDIR:-/tmp}/qq-reap-tokens.XXXXXX")" \
       || finish_problem error 'could not allocate temporary markdown inspection space'
@@ -477,8 +477,10 @@ derive_nominations() {
     rm -f -- "$token_file"
     dead_count="$("$QQ_ENGINE_JQ" -r 'length' <<<"$dead_paths")"
     if [ "$dead_count" -gt 0 ]; then
+      shell_double_quote "$repo_root/backlog"
+      store_root_arg="$QUOTED_VALUE"
       shell_double_quote "$doc"
-      command="git rm -- $QUOTED_VALUE"
+      command="git -C $store_root_arg rm -- $QUOTED_VALUE"
       nomination="$("$QQ_ENGINE_JQ" -cn \
         --arg id "doc:$doc" --arg doc "$doc" --arg command "$command" \
         --argjson dead_paths "$dead_paths" \
@@ -729,7 +731,7 @@ validate_nomination_id() {
   case "$id" in
     doc:*)
       value="${id#doc:}"
-      [[ "$value" == backlog/docs/* ]] || return 1
+      [[ "$value" == docs/* ]] || return 1
       case "$value" in
         *$'\n'* | *$'\r'* | /* | ../* | */../* | */..) return 1 ;;
       esac
@@ -761,7 +763,7 @@ parse_source_report() {
   local saw_heading=false saw_nominations=false saw_summary=false
   local tail_lines='[]' expected_tail
   local value short_value expected_command removal_value workspace_value branch_value
-  local placeholder_value nul_dump line_number=0 entry position last_position=-1
+  local placeholder_value nul_dump line_number=0 entry position last_position=-1 store_root_arg
 
   if [ ! -f "$source_report" ] || [ ! -r "$source_report" ]; then
     finish_problem error "report is not a readable file: $source_report"
@@ -824,8 +826,10 @@ parse_source_report() {
           case "$kind" in
             doc)
               value="${id#doc:}"
+              shell_double_quote "$repo_root/backlog"
+              store_root_arg="$QUOTED_VALUE"
               shell_double_quote "$value"
-              expected_command="git rm -- $QUOTED_VALUE"
+              expected_command="git -C $store_root_arg rm -- $QUOTED_VALUE"
               if ! "$QQ_ENGINE_JQ" -e --arg value "$value" \
                 --arg command "$expected_command" '
                   (.evidence | keys | sort) == ["dead_paths","doc"]
@@ -1170,7 +1174,7 @@ while IFS= read -r -d '' id; do
   case "$kind" in
     doc)
       doc="$("$QQ_ENGINE_JQ" -r '.evidence.doc' <<<"$nomination")"
-      if "$git_bin" -C "$repo_root" rm -- "$doc" >/dev/null 2>&1; then
+      if "$git_bin" -C "$repo_root/backlog" rm -- "$doc" >/dev/null 2>&1; then
         command_succeeded=true
       fi
       ;;
@@ -1230,6 +1234,8 @@ apply_metadata="$("$QQ_ENGINE_JQ" -cn \
   --arg fetched_main_oid "$fresh_main_oid" \
   --argjson applied "$applied_count" --argjson skipped "$skipped_count" \
   '{format:"qq-reap-v1",mode:"apply",generated_at:$generated_at,repository:$repository,source_report:$source_report,fetched_main_oid:$fetched_main_oid,current_counts:$counts,applied:$applied,skipped:$skipped}')"
+shell_double_quote "$repo_root/backlog"
+store_command_root="$QUOTED_VALUE"
 {
   printf '# qq-reap apply report\n\n'
   printf 'qq-reap-metadata: %s\n\n' "$apply_metadata"
@@ -1251,7 +1257,7 @@ apply_metadata="$("$QQ_ENGINE_JQ" -cn \
   printf -- '- skipped: %s\n' "$skipped_count"
   printf -- '- newly nominated: %s\n\n' \
     "$("$QQ_ENGINE_JQ" -r 'length' <<<"$new_ids")"
-  printf 'Review staged stale-doc deletions with `git diff --cached -- backlog/docs/`; then commit them with `git commit`. qq-reap never commits.\n'
+  printf 'Review staged store-doc deletions with `git -C %s diff --cached -- docs/`; then commit them in the store. qq-reap never commits.\n' "$store_command_root"
 } >"$report_draft" || finish_problem error 'could not write the apply heartbeat report'
 publish_report
 
@@ -1275,4 +1281,4 @@ fi
 if [ "$inspect" = true ] || [ "$dry_run" = true ]; then
   qq_engine_done 'apply inspected; no nomination command was run' "$state"
 fi
-qq_engine_done 'authorized current nominations applied; stale docs are staged and uncommitted' "$state"
+qq_engine_done 'authorized current nominations applied; stale store docs are staged and uncommitted' "$state"

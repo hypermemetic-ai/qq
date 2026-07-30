@@ -21,13 +21,20 @@ init_fixture() {
   git -C "$fixture_repo" config user.name test
   git -C "$fixture_repo" config user.email test@example.com
   git -C "$fixture_repo" switch -qc main
-  mkdir -p "$fixture_repo/backlog/docs" "$fixture_repo/live"
+  fixture_store="$fixture_root/store"
+  git init -q "$fixture_store"
+  git -C "$fixture_store" config user.name test
+  git -C "$fixture_store" config user.email test@example.com
+  mkdir -p "$fixture_store/docs" "$fixture_repo/live"
+  ln -s "$fixture_store" "$fixture_repo/backlog"
   printf 'live\n' >"$fixture_repo/live/path.txt"
   printf '# Fixture\n' >"$fixture_repo/README.md"
 }
 
 commit_and_push_base() {
   local repo="$1"
+  git -C "$repo/backlog" add .
+  git -C "$repo/backlog" commit -qm base --allow-empty
   git -C "$repo" add .
   git -C "$repo" commit -qm base
   git -C "$repo" push -qu origin main
@@ -149,6 +156,7 @@ export XDG_STATE_HOME="$tmp/rich-state"
 export XDG_CACHE_HOME="$tmp/rich-cache"
 
 status_before="$(git -C "$repo" status --porcelain --untracked-files=all)"
+store_status_before="$(git -C "$repo/backlog" status --porcelain --untracked-files=all)"
 branches_before="$(git -C "$repo" for-each-ref --format='%(refname)' refs/heads)"
 worktrees_before="$(git -C "$repo" worktree list --porcelain)"
 scan_json="$tmp/rich-scan.json"
@@ -168,22 +176,26 @@ assert_equal "$(basename "$scan_report")" \
 assert_equal "$status_before" \
   "$(git -C "$repo" status --porcelain --untracked-files=all)" \
   'scan changed the primary working tree'
+assert_equal "$store_status_before" \
+  "$(git -C "$repo/backlog" status --porcelain --untracked-files=all)" \
+  'scan changed the backlog store'
 assert_equal "$branches_before" \
   "$(git -C "$repo" for-each-ref --format='%(refname)' refs/heads)" \
   'scan changed local branches'
 assert_equal "$worktrees_before" "$(git -C "$repo" worktree list --porcelain)" \
   'scan changed registered worktrees'
 
-assert_file_contains "$scan_report" '"id":"doc:backlog/docs/stale.md"'
-assert_file_contains "$scan_report" '"id":"doc:backlog/docs/mixed.md"'
+assert_file_contains "$scan_report" '"id":"doc:docs/stale.md"'
+assert_file_contains "$scan_report" '"id":"doc:docs/mixed.md"'
 assert_file_contains "$scan_report" '"dead_paths":["live/other-missing.txt","REVIEW.md"]'
-assert_file_contains "$scan_report" '"command":"git rm -- \"backlog/docs/stale.md\""'
+assert_file_contains "$scan_report" \
+  '"command":"git -C \"'"$repo"'/backlog\" rm -- \"docs/stale.md\""'
 assert_file_contains "$scan_report" '"id":"branch:refs/heads/merged-feature"'
 assert_file_contains "$scan_report" '"command":"git branch -d merged-feature"'
 assert_file_contains "$scan_report" "\"id\":\"worktree:$clean_worktree\""
 assert_file_contains "$scan_report" \
   '"command":"herdr worktree remove --workspace clean-ws"'
-assert_not_contains "$(<"$scan_report")" 'doc:backlog/docs/live.md' \
+assert_not_contains "$(<"$scan_report")" 'doc:docs/live.md' \
   'live doc was nominated'
 assert_not_contains "$(<"$scan_report")" 'branch:refs/heads/unmerged-feature' \
   'unmerged branch was nominated'
@@ -284,7 +296,7 @@ jq -e '.status == "error" and (.message | contains("NUL byte"))' \
 reordered_report="$tmp/reordered-report.md"
 awk '
   /"id":"branch:refs\/heads\/merged-feature"/ { held = $0; next }
-  /"id":"doc:backlog\/docs\/mixed.md"/ { print; print held; held = ""; next }
+  /"id":"doc:docs\/mixed.md"/ { print; print held; held = ""; next }
   { print }
   END { if (held != "") print held }
 ' "$scan_report" >"$reordered_report"
@@ -307,10 +319,11 @@ assert_equal "$worktrees_before" "$(git -C "$repo" worktree list --porcelain)" \
 # Delete one nomination line as the operator veto, then apply the remainder.
 veto_report="$tmp/veto-report.md"
 cp "$scan_report" "$veto_report"
-sed -i '\|"id":"doc:backlog/docs/stale.md"|d' "$veto_report"
-assert_not_contains "$(<"$veto_report")" '"id":"doc:backlog/docs/stale.md"' \
+sed -i '\|"id":"doc:docs/stale.md"|d' "$veto_report"
+assert_not_contains "$(<"$veto_report")" '"id":"doc:docs/stale.md"' \
   'veto line was not deleted'
 head_before="$(git -C "$repo" rev-parse HEAD)"
+store_head_before="$(git -C "$repo/backlog" rev-parse HEAD)"
 apply_json="$tmp/apply.json"
 run_reap 0 "$apply_json" apply "$veto_report" --repo "$repo"
 jq -e '
@@ -324,15 +337,17 @@ jq -e '
 apply_report="$(jq -r '.state.report_path' "$apply_json")"
 [ -f "$apply_report" ] || fail 'apply did not write its dated report'
 assert_file_contains "$apply_report" \
-  '{"id":"doc:backlog/docs/stale.md","reason":"vetoed"}'
+  '{"id":"doc:docs/stale.md","reason":"vetoed"}'
 assert_file_contains "$apply_report" \
-  'Review staged stale-doc deletions with `git diff --cached -- backlog/docs/`; then commit them with `git commit`. qq-reap never commits.'
+  'Review staged store-doc deletions with `git -C '"\"$repo/backlog\""' diff --cached -- docs/`; then commit them in the store. qq-reap never commits.'
 [ -f "$repo/backlog/docs/stale.md" ] || fail 'apply deleted the vetoed doc'
 [ ! -e "$repo/backlog/docs/mixed.md" ] || fail 'apply left an authorized stale doc'
-assert_file_contains <(git -C "$repo" diff --cached --name-status) \
-  $'D\tbacklog/docs/mixed.md' 'stale-doc deletion was not staged'
+assert_file_contains <(git -C "$repo/backlog" diff --cached --name-status) \
+  $'D\tdocs/mixed.md' 'stale-doc deletion was not staged in the store'
 assert_equal "$head_before" "$(git -C "$repo" rev-parse HEAD)" \
-  'apply committed staged stale-doc deletion'
+  'apply changed the code Repository HEAD'
+assert_equal "$store_head_before" "$(git -C "$repo/backlog" rev-parse HEAD)" \
+  'apply committed the staged store-doc deletion'
 if git -C "$repo" show-ref --verify --quiet refs/heads/merged-feature; then
   fail 'apply left an authorized merged branch'
 fi

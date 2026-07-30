@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,8 +56,20 @@ export default function (pi) {
     }
 
     const backlogRoot = resolve(root, "backlog");
+    let storeRoot;
+    try {
+      storeRoot = realpathSync(backlogRoot);
+    } catch {
+      storeRoot = undefined;
+    }
+
     const target = resolvePiPath(ctx.cwd, rawPath);
-    if (target === backlogRoot || target.startsWith(`${backlogRoot}${sep}`)) {
+    if (
+      target === backlogRoot ||
+      target.startsWith(`${backlogRoot}${sep}`) ||
+      target === storeRoot ||
+      (storeRoot !== undefined && target.startsWith(`${storeRoot}${sep}`))
+    ) {
       return { block: true, reason: FEEDBACK };
     }
 
