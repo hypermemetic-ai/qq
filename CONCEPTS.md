@@ -45,7 +45,9 @@ research, an idea, a reusable lesson, or shared vocabulary.
 through the Backlog CLI surface; the two `bin/qq-backlog` wrapper verbs
 (`decision update --content`, `doc supersede`) are part of that surface, the
 only edits permitted outside the vendor CLI. When associating documents with
-a Task, `--doc` replaces the complete list; it does not append to it.
+a Task, `--doc` replaces the complete list; it does not append to it. When
+updating a managed document's body, generate the complete body and pass it once
+to `backlog doc update --content`.
 
 **decision ledger** — The block in an owning Task's Description listing every
 consequential decision its Change embeds, each citing the disposition that

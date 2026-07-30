@@ -9,23 +9,34 @@ import { decode } from "@toon-format/toon";
 
 const [modulePath] = process.argv.slice(2);
 const { encodeModelContext } = await import(pathToFileURL(modulePath));
+const contextId = `context-${"a".repeat(32)}`;
+const source = { run_dir: "/state/runs/fixture/repo/pr-1", repository: "fixture/repo",
+  legacy: false, pr: 1, variant: "guided", assembled_at: "2026-08-01T00:00:00Z" };
+const findingOccurrence = { occurrence_id: `occurrence-${"b".repeat(32)}`,
+  recurrence_key: "quotes, commas: and [brackets]", source };
+const pendingOccurrence = { occurrence_id: `occurrence-${"c".repeat(32)}`,
+  recurrence_key: "pending-key", source: { ...source, pr: 2, run_dir: "/state/runs/fixture/repo/pr-2" } };
 const value = {
   schema: "qq-observer.architect-context",
-  schema_version: 2,
-  context_id: `context-${"a".repeat(32)}`,
+  schema_version: 4,
+  context_id: contextId,
   findings: [{
-    recurrence_key: "quotes, commas: and [brackets]",
+    recurrence_key: findingOccurrence.recurrence_key,
     title: "line one\nline two\t\"quoted\" \\ slash — 雪",
-    kind: "friction",
-    confidence: "high",
-    suggested_scope: "",
-    occurrences: [{ occurrence_id: `occurrence-${"b".repeat(32)}`, legacy: false, pr: 0, note: null }],
+    kind: "friction", confidence: "high", covered: false,
+    suggested_scope: "", occurrences: [findingOccurrence],
   }],
-  pending_intakes: [],
+  pending_intakes: [{
+    batch_id: `batch-${"d".repeat(32)}`, context_id: `context-${"e".repeat(32)}`, status: "proposed",
+    decisions: [{ recurrence_key: "pending-key", action: "set_aside", scope: "",
+      note: " leading and trailing ", occurrence_ids: [pendingOccurrence.occurrence_id] }],
+    occurrences: [pendingOccurrence],
+  }],
+  observer_health: { rounds: [], omitted_rounds: 0 },
   omitted_findings: 0,
-  edge_strings: ["", "true", "null", " leading and trailing ", "a|b,c:d"],
-  empty_object: {},
 };
+assert.deepEqual(Object.keys(value), ["schema", "schema_version", "context_id", "findings", "pending_intakes", "observer_health", "omitted_findings"]);
+assert.deepEqual(Object.keys(value.pending_intakes[0]), ["batch_id", "context_id", "status", "decisions", "occurrences"]);
 const encoded = encodeModelContext(value);
 assert.equal(typeof encoded, "string");
 assert.ok(encoded.length > 0);

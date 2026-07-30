@@ -25,6 +25,8 @@ usage:
     (--analysis FILE --analyst-trace FILE | --failed REASON [--analyst-trace FILE])
   qq-observe digest [--since ISO]
   qq-observe architect-context
+  qq-observe disposition-propose --context CONTEXT-ID --decisions FILE.json
+  qq-observe disposition-confirm --context CONTEXT-ID --batch BATCH-ID
   qq-observe prepare-handoff --context CONTEXT-ID --decisions FILE.json
   qq-observe prepare-handoff --run DIR --outcomes FILE.json  # v1 compatibility
   qq-observe record-handoff-result (--batch DIR | --run DIR) --receipt FILE.json
@@ -46,8 +48,9 @@ EOF
 case "${1:-}" in
   facts | signals | validate-analysis | \
   assemble | materialize | verify-delivery | render-doc | finalize | \
-  digest | architect-context | prepare-handoff | record-handoff-result | \
-  mark-discussed | resolve-task | rounds | record-comparison) command="$1"; shift ;;
+  digest | architect-context | disposition-propose | disposition-confirm | \
+  prepare-handoff | record-handoff-result | mark-discussed | resolve-task | \
+  rounds | record-comparison) command="$1"; shift ;;
   *) usage ;;
 esac
 
@@ -60,11 +63,21 @@ python_binary="$QQ_BIN_RESULT"
 # Package assembly and delivery commands share one embedded implementation.
 case "$command" in
   assemble | materialize | verify-delivery | render-doc | finalize | \
-  digest | architect-context | prepare-handoff | record-handoff-result | \
-  mark-discussed | resolve-task | rounds | record-comparison)
+  digest | architect-context | disposition-propose | disposition-confirm | \
+  prepare-handoff | record-handoff-result | mark-discussed | resolve-task | \
+  rounds | record-comparison)
     observer_git=""
     observer_gh=""
-    if [[ "$command" == assemble || "$command" == verify-delivery || "$command" == resolve-task || "$command" == record-handoff-result || "$command" == mark-discussed || "$command" == rounds || "$command" == digest || "$command" == architect-context ]]; then
+    observer_backlog=""
+    observer_needs_backlog=false
+    if [[ "$command" == prepare-handoff ]]; then
+      for observer_arg in "$@"; do
+        if [[ "$observer_arg" == --context ]]; then
+          observer_needs_backlog=true
+        fi
+      done
+    fi
+    if [[ "$command" == assemble || "$command" == verify-delivery || "$command" == resolve-task || "$command" == record-handoff-result || "$command" == mark-discussed || "$command" == rounds || "$command" == digest || "$command" == architect-context || "$command" == disposition-propose || "$command" == disposition-confirm ]]; then
       if ! qq_resolve_bin git; then
         printf 'qq-observe: %s\n' "$QQ_BIN_ERROR" >&2
         exit 69
@@ -78,7 +91,14 @@ case "$command" in
       fi
       observer_gh="$QQ_BIN_RESULT"
     fi
-    exec "$python_binary" - "$self" "$command" "$observer_git" "$observer_gh" "$@" <<'PY_ASSEMBLER'
+    if [[ "$command" == digest || "$command" == architect-context || "$command" == disposition-propose || "$command" == disposition-confirm || "$command" == rounds || "$observer_needs_backlog" == true ]]; then
+      if ! qq_resolve_bin backlog; then
+        printf 'qq-observe: %s\n' "$QQ_BIN_ERROR" >&2
+        exit 69
+      fi
+      observer_backlog="$QQ_BIN_RESULT"
+    fi
+    exec "$python_binary" - "$self" "$command" "$observer_git" "$observer_gh" "$observer_backlog" "$@" <<'PY_ASSEMBLER'
 import datetime as dt
 import hashlib
 import json
@@ -91,7 +111,7 @@ import subprocess
 import sys
 from urllib.parse import quote
 
-self_path, command, git_binary, gh_binary, *args = sys.argv[1:]
+self_path, command, git_binary, gh_binary, backlog_binary, *args = sys.argv[1:]
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.fspath(Path(self_path).resolve().parent / "lib"))
 from qq_task_identity import (  # noqa: E402
@@ -2155,7 +2175,6 @@ def materialize_ledger():
             )
             run_items.append(("finding_seen", timestamp, timestamp_value))
         for name, kind, field, label in (
-            ("discussed.json", "disposition", "ts", "discussed mark"),
             ("comparison.json", "signal_tune_candidate", "written_at", "comparison record"),
         ):
             path = run_dir / name
@@ -2189,8 +2208,6 @@ def materialize_ledger():
                 run_dir, events, seen_findings, seen_promotions,
                 sources_by_key, kinds_by_key,
             )
-        elif kind == "disposition":
-            materialize_disposition(run_dir, timestamp, events, seen_dispositions)
         else:
             materialize_comparison(run_dir, timestamp, events, seen_candidates)
 
@@ -2206,6 +2223,15 @@ ARCHITECT_FINDING_LIMIT = 50
 ARCHITECT_HEALTH_LIMIT = 20
 ARCHITECT_HEALTH_REASON_LIMIT = 500
 ARCHITECT_CONTEXT_BYTE_LIMIT = 131072
+DISPOSITIONS_TITLE = "Observer dispositions"
+DISPOSITIONS_PREAMBLE = """# Observer dispositions
+
+The operator-settled dispositions of Observer Architect findings. Append
+only through `backlog doc update --content` with the complete body
+(qq-observe owns the append; never hand-edit). Coverage of a recurrence
+key = a settled entry here, or any other Backlog hit for the key.
+
+## Entries"""
 
 
 def display_text(value, nonempty=False):
@@ -2215,6 +2241,250 @@ def display_text(value, nonempty=False):
         and len(value) <= 20000
         and not any(ord(character) < 32 and character not in "\n\t" or ord(character) == 127 for character in value)
     )
+
+
+def qq_repository_root():
+    root = Path(self_path).resolve().parent.parent
+    if not root.is_dir():
+        fail("qq Observer source root is unavailable", 65)
+    return root
+
+
+def disposition_decision(entry):
+    return {
+        "recurrence_key": entry["recurrence_key"],
+        "action": entry["action"], "scope": entry["scope"], "note": entry["note"],
+        "occurrence_ids": entry["occurrence_ids"],
+    }
+
+
+def disposition_batch_groups(entries):
+    groups = []
+    by_batch = {}
+    closed = set()
+    previous = None
+    for entry in entries:
+        batch_id = entry["batch_id"]
+        if batch_id != previous:
+            if batch_id in closed:
+                fail(f"Observer dispositions batch is not contiguous: {batch_id}", 65)
+            if previous is not None:
+                closed.add(previous)
+            group = []
+            groups.append((batch_id, group))
+            by_batch[batch_id] = group
+            previous = batch_id
+        by_batch[batch_id].append(entry)
+    for batch_id, group in groups:
+        decisions = [disposition_decision(entry) for entry in group]
+        expected = "batch-" + hashlib.sha256(canonical_json_bytes(decisions)).hexdigest()[:32]
+        statuses = {entry["status"] for entry in group}
+        contexts = {entry["context_id"] for entry in group}
+        if (
+            expected != batch_id or len(statuses) != 1 or len(contexts) != 1
+            or len({entry["recurrence_key"] for entry in group}) != len(group)
+        ):
+            fail(f"Observer dispositions batch is malformed: {batch_id}", 65)
+        if statuses == {"settled"} and len({entry["settled_at"] for entry in group}) != 1:
+            fail(f"Observer dispositions batch has inconsistent settlement time: {batch_id}", 65)
+    return groups
+
+
+def parse_dispositions_body(body, path):
+    label = f"Observer dispositions document {path}"
+    if body == f"{DISPOSITIONS_PREAMBLE}\n\n(none yet)":
+        return []
+    prefix = f"{DISPOSITIONS_PREAMBLE}\n\n"
+    if not body.startswith(prefix):
+        fail(f"{label} has a malformed complete body", 65)
+    sections = re.split(r"\n\n(?=### )", body[len(prefix):])
+    entries = []
+    for section in sections:
+        lines = section.splitlines()
+        heading = re.fullmatch(r"### (batch-[0-9a-f]{32}) — (.+)", lines[0] if lines else "")
+        if heading is None or len(lines) not in (8, 9) or lines[1] != "":
+            fail(f"{label} has a malformed disposition section", 65)
+        status = re.fullmatch(r"- status: (proposed|settled)", lines[2])
+        action = re.fullmatch(r"- action: (route|set_aside)", lines[3])
+        scope = re.fullmatch(r"- scope: (.*)", lines[4])
+        note = re.fullmatch(r"- note: (.*)", lines[5])
+        occurrences = re.fullmatch(
+            r"- occurrences: (occurrence-[0-9a-f]{32}(?:, occurrence-[0-9a-f]{32})*)",
+            lines[6],
+        )
+        context = re.fullmatch(r"- context: (context-[0-9a-f]{32})", lines[7])
+        if any(value is None for value in (status, action, scope, note, occurrences, context)):
+            fail(f"{label} has malformed disposition fields", 65)
+        expected_length = 9 if status.group(1) == "settled" else 8
+        if len(lines) != expected_length:
+            fail(f"{label} has the wrong fields for status {status.group(1)}", 65)
+        settled_at = None
+        if status.group(1) == "settled":
+            match = re.fullmatch(r"- settled_at: (.+)", lines[8])
+            if match is None:
+                fail(f"{label} has a malformed settlement timestamp", 65)
+            try:
+                time_value(match.group(1))
+            except ValueError:
+                fail(f"{label} has a malformed settlement timestamp", 65)
+            settled_at = match.group(1)
+        key = heading.group(2)
+        occurrence_ids = occurrences.group(1).split(", ")
+        if (
+            not display_text(key, nonempty=True) or "\n" in key
+            or not display_text(scope.group(1)) or not display_text(note.group(1))
+            or occurrence_ids != sorted(occurrence_ids)
+            or len(occurrence_ids) != len(set(occurrence_ids))
+            or (action.group(1) == "route" and not scope.group(1).strip())
+            or (action.group(1) == "set_aside" and scope.group(1) != "")
+        ):
+            fail(f"{label} violates the disposition contract", 65)
+        entry = {
+            "batch_id": heading.group(1), "recurrence_key": key,
+            "status": status.group(1), "action": action.group(1),
+            "scope": scope.group(1), "note": note.group(1),
+            "occurrence_ids": occurrence_ids, "context_id": context.group(1),
+        }
+        if settled_at is not None:
+            entry["settled_at"] = settled_at
+        entries.append(entry)
+    disposition_batch_groups(entries)
+    return entries
+
+
+def render_dispositions_body(entries):
+    if not entries:
+        return f"{DISPOSITIONS_PREAMBLE}\n\n(none yet)"
+    sections = []
+    for entry in entries:
+        lines = [
+            f"### {entry['batch_id']} — {entry['recurrence_key']}", "",
+            f"- status: {entry['status']}", f"- action: {entry['action']}",
+            f"- scope: {entry['scope']}", f"- note: {entry['note']}",
+            f"- occurrences: {', '.join(entry['occurrence_ids'])}",
+            f"- context: {entry['context_id']}",
+        ]
+        if entry["status"] == "settled":
+            lines.append(f"- settled_at: {entry['settled_at']}")
+        sections.append("\n".join(lines))
+    return f"{DISPOSITIONS_PREAMBLE}\n\n" + "\n\n".join(sections)
+
+
+def load_dispositions(required=False):
+    docs_root = qq_repository_root() / "backlog" / "docs"
+    if not os.path.lexists(docs_root):
+        if required:
+            fail("Observer dispositions document is absent", 65)
+        return None
+    try:
+        info = os.lstat(docs_root)
+    except OSError as error:
+        fail(f"cannot inspect Backlog documents directory: {error}", 65)
+    if not stat.S_ISDIR(info.st_mode):
+        fail("Backlog documents path is not a directory", 65)
+    matches = []
+    try:
+        candidates = sorted(docs_root.rglob("*.md"), key=lambda path: os.fspath(path))
+    except OSError as error:
+        fail(f"cannot scan Backlog documents: {error}", 65)
+    for candidate in candidates:
+        if not regular_file(candidate):
+            fail(f"Backlog document is not a regular file: {candidate}", 65)
+        try:
+            raw_text = read_regular(candidate, "Backlog document").decode("utf-8")
+        except UnicodeDecodeError as error:
+            fail(f"Backlog document is not UTF-8: {error}", 65)
+        lines = raw_text.splitlines()
+        if not lines or lines[0] != "---":
+            if "Observer-dispositions" in candidate.name:
+                fail("Observer dispositions document lacks frontmatter", 65)
+            continue
+        try:
+            frontmatter_end = lines.index("---", 1)
+        except ValueError:
+            if "Observer-dispositions" in candidate.name:
+                fail("Observer dispositions document has unclosed frontmatter", 65)
+            continue
+        titles = []
+        for line in lines[1:frontmatter_end]:
+            match = re.fullmatch(r"title:[ \t]*(.*)", line)
+            if match is not None:
+                titles.append(match.group(1).strip("'\""))
+        if DISPOSITIONS_TITLE in titles:
+            if titles != [DISPOSITIONS_TITLE]:
+                fail("Observer dispositions document has malformed title frontmatter", 65)
+            fields, body = backlog_frontmatter(candidate, "Observer dispositions document")
+            matches.append((candidate, fields, body))
+    if not matches:
+        if required:
+            fail("Observer dispositions document is absent", 65)
+        return None
+    if len(matches) != 1:
+        fail(f"Observer dispositions title matched {len(matches)} documents", 65)
+    path, fields, body = matches[0]
+    doc_id = fields.get("id")
+    if not isinstance(doc_id, str) or re.fullmatch(r"doc-[0-9]+", doc_id) is None:
+        fail("Observer dispositions document has no canonical document id", 65)
+    entries = parse_dispositions_body(body, path)
+    return {"id": doc_id, "path": path, "body": body, "entries": entries}
+
+
+def update_dispositions(document, entries):
+    body = render_dispositions_body(entries)
+    process = run_process(
+        [backlog_binary, "doc", "update", document["id"], "--content", body],
+        "Backlog Observer dispositions update", cwd=qq_repository_root(),
+    )
+    if process.returncode != 0:
+        detail = process.stderr.decode("utf-8", "replace").strip()
+        fail(f"Backlog Observer dispositions update failed{': ' + detail if detail else ''}", 65)
+    updated = load_dispositions(required=True)
+    if updated["id"] != document["id"] or updated["entries"] != entries or updated["body"] != body:
+        fail("Backlog Observer dispositions update did not persist the complete body", 65)
+
+
+def backlog_key_covered(key, dispositions):
+    if not display_text(key, nonempty=True) or "\n" in key:
+        fail("Observer recurrence key is unsafe for Backlog search", 65)
+    settled = {
+        entry["recurrence_key"] for entry in (dispositions or {}).get("entries", [])
+        if entry["status"] == "settled"
+    }
+    if key in settled:
+        return True
+    try:
+        process = subprocess.run(
+            [backlog_binary, "search", "--type", "decision", key, "--plain", "--limit", "1000"],
+            cwd=qq_repository_root(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=False, timeout=15,
+        )
+    except subprocess.TimeoutExpired:
+        fail(f"Backlog decision coverage search timed out for recurrence key {key}", 65)
+    except OSError as error:
+        fail(f"cannot run Backlog decision coverage search: {error}", 65)
+    if process.returncode != 0:
+        detail = process.stderr.decode("utf-8", "replace").strip()
+        fail(f"Backlog decision coverage search failed for recurrence key {key}{': ' + detail if detail else ''}", 65)
+    try:
+        lines = process.stdout.decode("utf-8").splitlines()
+    except UnicodeDecodeError as error:
+        fail(f"Backlog decision coverage search emitted invalid UTF-8: {error}", 65)
+    hit = False
+    for line in lines:
+        if not line:
+            continue
+        if line in ("Decisions:", "No results found."):
+            continue
+        if not line.startswith("  decision-") or re.search(r"\[score [0-9]+(?:\.[0-9]+)?\]$", line) is None:
+            fail("Backlog decision coverage search emitted an unrecognized result shape", 65)
+        hit = True
+    return hit
+
+
+def coverage_by_key(keys, dispositions=None):
+    if dispositions is None:
+        dispositions = load_dispositions(required=False)
+    return {key: backlog_key_covered(key, dispositions) for key in sorted(set(keys))}
 
 
 def architect_root(create=False):
@@ -2318,7 +2588,7 @@ def discussed_analysis_keys(run_dir, identity, analysis):
 
 
 def all_architect_occurrences():
-    occurrences, historically_covered = [], set()
+    occurrences = []
     for run_dir in observer_run_directories():
         identity = package_metadata(run_dir, require_timestamp=True)
         if identity["variant"] != "guided" or not regular_file(run_dir / "analysis.json"):
@@ -2328,7 +2598,6 @@ def all_architect_occurrences():
         analysis_sha256 = hashlib.sha256(analysis_raw).hexdigest()
         package_sha256 = sha256_file(run_dir / "package.json", "Architect source package")
         source = architect_round_identity(run_dir, identity)
-        discussed_keys = discussed_analysis_keys(run_dir, identity, analysis)
         for position, source_episode in enumerate(analysis["episodes"], 1):
             episode = occurrence_episode(source_episode, position)
             occurrence_id = occurrence_identity(source, package_sha256, analysis_sha256, episode)
@@ -2339,8 +2608,6 @@ def all_architect_occurrences():
                 "package_sha256": package_sha256, "analysis_sha256": analysis_sha256,
                 "episode": episode,
             })
-            if episode["recurrence_key"] in discussed_keys:
-                historically_covered.add(occurrence_id)
     occurrences.sort(key=lambda row: (
         row["recurrence_key"], row["source"]["assembled_at"],
         row["source"]["repository"] or row["source"]["repo"],
@@ -2349,7 +2616,7 @@ def all_architect_occurrences():
     identities = [row["occurrence_id"] for row in occurrences]
     if len(identities) != len(set(identities)):
         fail("Observer Architect occurrence identity collision", 65)
-    return occurrences, historically_covered
+    return occurrences
 
 
 def valid_global_decisions(decisions, occurrences, require_ids=True):
@@ -2579,42 +2846,35 @@ def architect_health_state():
     }
 
 
-def architect_context_state():
-    occurrences, historically_covered = all_architect_occurrences()
+def architect_context_state(dispositions=None):
+    if dispositions is None:
+        dispositions = load_dispositions(required=False)
+    occurrences = all_architect_occurrences()
     observer_health = architect_health_state()
-    covered, pending_ids, pending, batch_state = set(historically_covered), set(), [], []
-    for batch_dir in architect_batch_directories():
-        batch, batch_path = load_global_batch(batch_dir)
-        result, result_path = load_global_result(batch_dir, batch) if batch_path.name == "handoff.json" else (None, batch_dir / "result.json")
-        attempts = load_global_attempts(batch_dir, batch) if batch_path.name == "handoff.json" else []
-        batch_state.append({
-            "batch": batch, "result": result,
-            "attempts": [receipt for _, receipt in attempts],
+    coverage = coverage_by_key((row["recurrence_key"] for row in occurrences), dispositions)
+    occurrence_by_id = {row["occurrence_id"]: row for row in occurrences}
+    pending, pending_ids, proposed_entries = [], set(), []
+    groups = disposition_batch_groups((dispositions or {}).get("entries", []))
+    for batch_id, group in groups:
+        if group[0]["status"] != "proposed":
+            continue
+        decisions = [disposition_decision(entry) for entry in group]
+        if not valid_global_decisions(decisions, occurrences, require_ids=False):
+            fail(f"Observer dispositions proposal has dangling or invalid occurrences: {batch_id}", 65)
+        selected_ids = [occurrence_id for decision in decisions for occurrence_id in decision["occurrence_ids"]]
+        overlap = pending_ids & set(selected_ids)
+        if overlap:
+            fail(f"Observer dispositions proposals overlap at {sorted(overlap)[0]}", 65)
+        pending_ids.update(selected_ids)
+        proposed_entries.extend(group)
+        pending.append({
+            "batch_id": batch_id, "context_id": group[0]["context_id"], "status": "proposed",
+            "decisions": decisions,
+            "occurrences": [slim_architect_occurrence(occurrence_by_id[value]) for value in sorted(selected_ids)],
         })
-        for decision in batch["decisions"]:
-            if decision["action"] == "set_aside" or result is not None:
-                covered.update(decision["occurrence_ids"])
-            else:
-                pending_ids.update(decision["occurrence_ids"])
-        if batch_path.name == "handoff.json" and result is None:
-            statuses = sorted({receipt["status"] for _, receipt in attempts})
-            pending.append({
-                "batch_id": batch["batch_id"], "context_id": batch["context_id"],
-                "handoff_id": batch["handoff_id"],
-                "status": "prepared" if not attempts else "attempted_awaiting_result",
-                "attempt_statuses": statuses,
-                "decisions": batch["decisions"],
-                "occurrences": [slim_architect_occurrence(row) for row in batch["occurrences"]],
-                "batch_dir": os.fspath(batch_dir), "handoff_path": os.fspath(batch_path),
-                "result_path": os.fspath(result_path),
-                "attempt_paths": [os.fspath(path) for path, _ in attempts],
-            })
-    overlap = covered & pending_ids
-    if overlap:
-        fail("Observer Architect occurrence is both covered and pending", 65)
     uncovered = [
         row for row in occurrences
-        if row["occurrence_id"] not in covered and row["occurrence_id"] not in pending_ids
+        if not coverage[row["recurrence_key"]] and row["occurrence_id"] not in pending_ids
     ]
     by_key = {}
     for occurrence in uncovered:
@@ -2628,23 +2888,20 @@ def architect_context_state():
              -CONFIDENCE_WEIGHT[episode["confidence"]], key),
             {
                 "recurrence_key": key, "title": episode["title"], "kind": episode["kind"],
-                "confidence": episode["confidence"],
+                "confidence": episode["confidence"], "covered": False,
                 "suggested_scope": episode["remedy"]["smallest_change"],
                 "occurrences": [slim_architect_occurrence(row) for row in rows],
             },
         ))
     ranked.sort(key=lambda item: item[0])
     authoritative = {
-        "occurrences": occurrences,
-        "historically_covered": sorted(historically_covered),
-        "batches": batch_state,
-        "observer_health": observer_health,
+        "occurrences": occurrences, "coverage": coverage, "proposals": proposed_entries,
     }
     context_id = "context-" + hashlib.sha256(canonical_json_bytes(authoritative)).hexdigest()[:32]
     findings = []
     for _, finding in ranked[:ARCHITECT_FINDING_LIMIT]:
         candidate = {
-            "schema": ARCHITECT_CONTEXT_SCHEMA, "schema_version": 3,
+            "schema": ARCHITECT_CONTEXT_SCHEMA, "schema_version": 4,
             "context_id": context_id, "findings": findings + [finding],
             "pending_intakes": pending, "observer_health": observer_health,
             "omitted_findings": len(ranked) - len(findings) - 1,
@@ -2653,7 +2910,7 @@ def architect_context_state():
             break
         findings.append(finding)
     document = {
-        "schema": ARCHITECT_CONTEXT_SCHEMA, "schema_version": 3,
+        "schema": ARCHITECT_CONTEXT_SCHEMA, "schema_version": 4,
         "context_id": context_id, "findings": findings, "pending_intakes": pending,
         "observer_health": observer_health,
         "omitted_findings": len(ranked) - len(findings),
@@ -2673,6 +2930,64 @@ def architect_context(values):
     if values:
         fail(f"invalid or incomplete option: {values[0]}")
     emit(architect_context_state()[0])
+
+
+def disposition_propose(values):
+    options = parse_flags(values, {"--context", "--decisions"})
+    if set(options) != {"--context", "--decisions"}:
+        fail("disposition-propose requires --context and --decisions")
+    path = canonical_existing(options["--decisions"], "Architect decisions input")
+    proposed = json_document(read_regular(path, "Architect decisions input"), "Architect decisions input")
+    dispositions = load_dispositions(required=True)
+    current, displayed = architect_context_state(dispositions)
+    context_id = options["--context"]
+    if context_id != current["context_id"]:
+        fail("Architect context identity is stale or mismatched", 65)
+    occurrences = list(displayed.values())
+    if not valid_global_decisions(proposed, occurrences, require_ids=False):
+        fail("Architect decisions schema or occurrence coverage is invalid", 65)
+    if any("\n" in decision[field] for decision in proposed for field in ("recurrence_key", "scope", "note")):
+        fail("Architect disposition recurrence key, scope, and note must each be one line", 65)
+    batch_id = "batch-" + hashlib.sha256(canonical_json_bytes(proposed)).hexdigest()[:32]
+    if any(entry["batch_id"] == batch_id for entry in dispositions["entries"]):
+        fail(f"Observer dispositions batch already exists: {batch_id}", 65)
+    entries = list(dispositions["entries"])
+    for decision in proposed:
+        entries.append({
+            "batch_id": batch_id, "recurrence_key": decision["recurrence_key"],
+            "status": "proposed", "action": decision["action"],
+            "scope": decision["scope"], "note": decision["note"],
+            "occurrence_ids": decision["occurrence_ids"], "context_id": context_id,
+        })
+    disposition_batch_groups(entries)
+    update_dispositions(dispositions, entries)
+    emit({"status": "proposed", "batch_id": batch_id, "context_id": context_id})
+
+
+def disposition_confirm(values):
+    options = parse_flags(values, {"--context", "--batch"})
+    if set(options) != {"--context", "--batch"}:
+        fail("disposition-confirm requires --context and --batch")
+    batch_id = options["--batch"]
+    if re.fullmatch(r"batch-[0-9a-f]{32}", batch_id) is None:
+        fail("--batch must be a canonical batch identity", 65)
+    dispositions = load_dispositions(required=True)
+    current, _ = architect_context_state(dispositions)
+    pending = [row for row in current["pending_intakes"] if row["batch_id"] == batch_id]
+    if len(pending) != 1:
+        fail(f"Observer dispositions batch is not proposed: {batch_id}", 65)
+    if options["--context"] != pending[0]["context_id"]:
+        fail("Architect proposal context identity is mismatched", 65)
+    settled_at = utc_now()
+    entries = []
+    for entry in dispositions["entries"]:
+        if entry["batch_id"] == batch_id:
+            entries.append({**entry, "status": "settled", "settled_at": settled_at})
+        else:
+            entries.append(entry)
+    disposition_batch_groups(entries)
+    update_dispositions(dispositions, entries)
+    emit({"status": "settled", "batch_id": batch_id})
 
 
 def prepare_global_handoff(context_id, decisions_path):
@@ -3267,8 +3582,8 @@ def resolve_task(values):
 
 
 
-def observer_run_rows(since=None):
-    rows = []
+def observer_run_rows(since=None, dispositions=None):
+    rows, keys = [], set()
     for run_dir in observer_run_directories():
         identity = package_metadata(run_dir, require_timestamp=True)
         pr, variant, timestamp = identity["pr"], identity["variant"], identity["timestamp"]
@@ -3276,59 +3591,29 @@ def observer_run_rows(since=None):
         if since is not None and timestamp_value < since:
             continue
         analysis_present = regular_file(run_dir / "analysis.json")
-        analyzed = analysis_present
         failed = regular_file(run_dir / "analysis_failed.json")
         if analysis_present and failed:
             fail(f"observer run has both terminal markers: {run_dir}", 65)
-        discussed_path = run_dir / "discussed.json"
-        discussed = regular_file(discussed_path)
-        if os.path.lexists(discussed_path) and not discussed:
-            fail(f"discussed mark is not a regular file: {discussed_path}", 65)
-        if discussed:
-            mark = json_document(read_regular(discussed_path, "discussed mark"), "discussed mark")
-            expected_source = {} if identity["legacy"] else {"repository": identity["repository"]}
-            if (
-                not valid_ledger_event(mark) or mark.get("type") != "disposition"
-                or mark.get("pr") != pr or mark.get("variant", "guided") != variant
-                or source_names_for(mark) != expected_source
-            ):
-                fail(f"invalid discussed mark at {discussed_path}", 65)
-        task_ids = []
-        resolved_task_ids = []
-        routing_path = run_dir / "routing"
-        handoff_present = regular_file(routing_path / "handoff.json")
-        result_present = regular_file(routing_path / "result.json")
-        if handoff_present:
-            handoff = load_handoff(run_dir)
-            if result_present:
-                result = load_handoff_result(run_dir, handoff)
-                task_ids = sorted({
-                    task_id for mapping in result["mapping"] for task_id in mapping["task_ids"]
-                }, key=generic_task_ordering_key)
-                for task_id in task_ids:
-                    resolution_path = routing_path / "resolutions" / task_artifact_filename(task_id)
-                    if os.path.lexists(resolution_path) and not regular_file(resolution_path):
-                        fail(f"invalid Task resolution receipt at {resolution_path}", 65)
-                    if regular_file(resolution_path):
-                        raw = read_regular(resolution_path, "Task resolution receipt")
-                        receipt = json_document(raw, "Task resolution receipt")
-                        task_rows = [task for task in result["tasks"] if task.get("task_id") == task_id]
-                        if len(task_rows) != 1:
-                            fail(f"invalid Task resolution receipt at {resolution_path}", 65)
-                        validate_resolution_receipt(receipt, raw, handoff, task_rows[0])
-                        resolved_task_ids.append(task_id)
-        elif os.path.lexists(routing_path / "result.json"):
-            fail(f"handoff result exists without handoff at {routing_path}", 65)
+        episode_keys = []
+        if analysis_present:
+            analysis = minimal_analysis(json_document(
+                read_regular(run_dir / "analysis.json", "rounds finalized analysis"),
+                "rounds finalized analysis",
+            ))
+            episode_keys = [episode["recurrence_key"] for episode in analysis["episodes"]]
+            keys.update(episode_keys)
         rows.append({
             "run_dir": os.fspath(run_dir), "repo": identity["repo"],
             "repository": identity["repository"], "legacy": identity["legacy"],
-            "pr": pr, "variant": variant, "analyzed": analyzed,
-            "failed": failed, "discussed": discussed, "ts": timestamp,
-            "handoff": handoff_present, "result": result_present,
-            "task_ids": task_ids, "resolved_task_ids": resolved_task_ids,
-            "resolved": bool(task_ids) and task_ids == resolved_task_ids,
-            "_time": timestamp_value,
+            "pr": pr, "variant": variant, "analyzed": analysis_present,
+            "failed": failed, "covered": False, "ts": timestamp,
+            "_episode_keys": episode_keys, "_time": timestamp_value,
         })
+    covered = coverage_by_key(keys, dispositions)
+    for row in rows:
+        if row["analyzed"]:
+            row["covered"] = all(covered[key] for key in row["_episode_keys"])
+        row.pop("_episode_keys")
     return rows
 
 
@@ -3338,7 +3623,7 @@ def rounds(values):
         fail(f"invalid or incomplete option: {values[0]}")
     rows = observer_run_rows()
     rows.sort(key=lambda row: (
-        row["discussed"], -row["_time"].timestamp(), row["pr"], row["variant"],
+        row["covered"], -row["_time"].timestamp(), row["pr"], row["variant"],
     ))
     for row in rows:
         row.pop("_time")
@@ -3409,7 +3694,20 @@ def digest(values):
     since = None
     if "--since" in options:
         since = parse_time(options["--since"], "--since")
+    dispositions = load_dispositions(required=False)
     events = materialize_ledger()["events"]
+    for entry in (dispositions or {}).get("entries", []):
+        if entry["status"] != "settled":
+            continue
+        events.append({
+            "type": "disposition", "ts": entry["settled_at"],
+            "outcomes": [{
+                "recurrence_key": entry["recurrence_key"],
+                "verdict": "accepted" if entry["action"] == "route" else "rejected",
+                "scope": entry["scope"], "note": entry["note"],
+            }],
+        })
+    events.sort(key=lambda event: time_value(event["ts"]))
     rows = digest_score_rows(events)
     if since is not None:
         rows = [row for row in rows if row["_latest_time"] >= since]
@@ -3460,7 +3758,7 @@ def digest(values):
             f"{markdown_inline(event['episode_title'])} | "
             f"`{markdown_inline(event['recurrence_key'])}` |"
         )
-    run_rows = observer_run_rows(since=since)
+    run_rows = observer_run_rows(since=since, dispositions=dispositions)
     finalized = sum(row["analyzed"] for row in run_rows)
     failed = sum(row["failed"] for row in run_rows)
     lines.extend([
@@ -3880,6 +4178,10 @@ elif command == "digest":
     digest(args)
 elif command == "architect-context":
     architect_context(args)
+elif command == "disposition-propose":
+    disposition_propose(args)
+elif command == "disposition-confirm":
+    disposition_confirm(args)
 elif command == "prepare-handoff":
     prepare_handoff(args)
 elif command == "record-handoff-result":

@@ -6,7 +6,6 @@ TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 TEST_NAME="test-qq-observe-ledger-scan"
 source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd "$TESTS_DIR/.." && pwd -P)"
-OBSERVE="$ROOT/bin/qq-observe"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 export HOME="$tmp/home" XDG_STATE_HOME="$tmp/state"
@@ -16,6 +15,11 @@ repo="$tmp/repo"
 git init -q -b main "$repo"
 git -C "$repo" remote add origin git@github.com:fixture/scan.git
 git -C "$repo" config branch.main.remote origin
+mkdir -p "$repo/bin/lib" "$repo/backlog"/{tasks,completed,drafts,docs,decisions,archive,milestones}
+cp "$ROOT/bin/qq-observe" "$repo/bin/qq-observe"
+cp "$ROOT/bin/lib/qq-bin.sh" "$ROOT/bin/lib/qq_task_identity.py" "$repo/bin/lib/"
+cp "$ROOT/backlog/config.yml" "$repo/backlog/config.yml"
+OBSERVE="$repo/bin/qq-observe"
 commit_fixture() {
   local subject="$1" date="$2"
   GIT_AUTHOR_DATE="$date" GIT_COMMITTER_DATE="$date" \
@@ -62,6 +66,14 @@ write_analysis() {
       cost:{turns:1,tokens:1,duration_ms:1,source:"facts:/fixture/session.jsonl"},
       remedy:{type:"process",smallest_change:"Fix it."},confidence:"high",
       confidence_why:"Fixture.",recurrence_key:"scan-key",rank:1,no_signal:false
+    },{
+      kind:"friction",title:"Decision-covered fixture",sessions:["/fixture/session.jsonl"],
+      evidence:[{session:"/fixture/session.jsonl",entries:[2],quote:"decision fixture"}],
+      what_happened:"Fixture.",root_cause:"Fixture.",
+      root_cause_location:"harness-design",
+      cost:{turns:1,tokens:1,duration_ms:1,source:"facts:/fixture/session.jsonl"},
+      remedy:{type:"process",smallest_change:"Keep the decision."},confidence:"medium",
+      confidence_why:"Fixture.",recurrence_key:"explicit-decision-settlement-zebra-984",rank:2,no_signal:false
     }],dropped_signals:[],limitations:"Fixture."
   }' >"$run/analysis.json"
 }
@@ -75,14 +87,32 @@ write_analysis 2 'Run two title'
 touch -d 2026-01-01T01:00:00Z "$runs/pr-1/analysis.json"
 touch -d 2026-01-02T01:00:00Z "$runs/pr-2/analysis.json"
 
-# A durable disposition is scanned with the analyses; old sequence fields are
-# accepted by readers but new records do not need one.
-jq -cnS '{
-  schema:"qq-observer.ledger-event",schema_version:2,
-  repository:"fixture/scan",ts:"2026-01-03T00:00:00.000Z",type:"disposition",
-  pr:1,variant:"guided",written_seq:99,
-  outcomes:[{recurrence_key:"scan-key",verdict:"rejected",scope:"",note:"Fixture."}]
-}' >"$runs/pr-1/discussed.json"
+# Seed the fixture store's managed Observer-dispositions document.
+created="$(cd "$repo" && backlog doc create -t specification "Observer dispositions")"
+dispositions_id="$(printf '%s\n' "$created" | grep -oE 'doc-[0-9]+' | head -1)"
+dispositions_body=$(cat <<'EOF'
+# Observer dispositions
+
+The operator-settled dispositions of Observer Architect findings. Append
+only through `backlog doc update --content` with the complete body
+(qq-observe owns the append; never hand-edit). Coverage of a recurrence
+key = a settled entry here, or any other Backlog hit for the key.
+
+## Entries
+
+(none yet)
+EOF
+)
+(cd "$repo" && backlog doc update "$dispositions_id" --content "$dispositions_body" >/dev/null)
+
+# Only settlement-grade surfaces cover: Task and document hits for scan-key do
+# not cover it, while a decision-record hit covers its separate recurrence key.
+(cd "$repo" && backlog task create "Task mentions scan-key" --description "scan-key" --plain >/dev/null)
+other_doc="$(cd "$repo" && backlog doc create -t specification "Document mentions scan-key")"
+other_doc_id="$(printf '%s\n' "$other_doc" | grep -oE 'doc-[0-9]+' | head -1)"
+(cd "$repo" && backlog doc update "$other_doc_id" --content "scan-key" >/dev/null)
+(cd "$repo" && backlog decision create -s accepted \
+  "Settlement for explicit-decision-settlement-zebra-984" >/dev/null)
 
 write_package 3 2026-01-03T00:00:00Z
 printf '%s\n' \
@@ -95,6 +125,36 @@ assert_no_ledger() {
   [ ! -e "$ledger_dir" ] || fail 'computed Observer view created a ledger directory'
 }
 
+# The doc-backed disposition is proposed, appears pending, then settles the key.
+"$OBSERVE" architect-context >"$tmp/context-uncovered.json"
+jq -e '
+  .schema_version == 4 and .pending_intakes == []
+  and any(.findings[]; .recurrence_key == "scan-key" and .covered == false
+    and (.occurrences | length) == 2)
+  and all(.findings[]; .recurrence_key != "explicit-decision-settlement-zebra-984")
+' "$tmp/context-uncovered.json" >/dev/null \
+  || fail 'Architect context did not expose the uncovered fixture key'
+context_id="$(jq -r .context_id "$tmp/context-uncovered.json")"
+jq '[.findings[] | select(.recurrence_key == "scan-key") |
+  {recurrence_key,occurrence_ids:([.occurrences[].occurrence_id]|sort),action:"set_aside",scope:"",note:"Fixture."}]
+' "$tmp/context-uncovered.json" >"$tmp/disposition-decisions.json"
+"$OBSERVE" disposition-propose --context "$context_id" \
+  --decisions "$tmp/disposition-decisions.json" >"$tmp/disposition-proposed.json"
+batch_id="$(jq -r .batch_id "$tmp/disposition-proposed.json")"
+"$OBSERVE" architect-context >"$tmp/context-pending.json"
+jq -e --arg batch "$batch_id" --arg birth "$context_id" '
+  (.pending_intakes | length) == 1 and .pending_intakes[0].batch_id == $batch
+  and .pending_intakes[0].status == "proposed"
+  and .pending_intakes[0].context_id == $birth and .context_id != $birth
+  and all(.findings[]; .recurrence_key != "scan-key")
+' "$tmp/context-pending.json" >/dev/null || fail 'doc-backed proposal lost its birth context or did not become pending'
+"$OBSERVE" disposition-confirm --context "$context_id" --batch "$batch_id" \
+  >"$tmp/disposition-confirmed.json"
+"$OBSERVE" architect-context >"$tmp/context-covered.json"
+jq -e '
+  .pending_intakes == [] and all(.findings[]; .recurrence_key != "scan-key")
+' "$tmp/context-covered.json" >/dev/null || fail 'settled disposition did not cover its key'
+
 "$OBSERVE" digest >"$tmp/digest.md"
 assert_file_contains "$tmp/digest.md" 'Run two title'
 assert_file_contains "$tmp/digest.md" 'fixture/scan#1, fixture/scan#2'
@@ -105,17 +165,9 @@ rm -rf "$ledger_dir"
 
 "$OBSERVE" rounds >"$tmp/rounds.json"
 jq -e --arg run "$runs/pr-2" '
-  any(.[]; .run_dir == $run and .analyzed == true and .failed == false)
-' "$tmp/rounds.json" >/dev/null || fail 'rounds did not recognize a finalized analysis'
-assert_no_ledger
-
-"$OBSERVE" architect-context >"$tmp/context.json"
-jq -e '
-  any(.findings[]; .recurrence_key == "scan-key"
-    and (.occurrences | length) == 1
-    and .occurrences[0].source.pr == 2)
-' "$tmp/context.json" >/dev/null \
-  || fail 'Architect occurrences did not derive from live analyses and dispositions'
+  any(.[]; .run_dir == $run and .analyzed == true and .failed == false and .covered == true
+    and (has("discussed")|not) and (has("handoff")|not) and (has("task_ids")|not))
+' "$tmp/rounds.json" >/dev/null || fail 'rounds did not use doc-backed run coverage'
 assert_no_ledger
 
 # Delivery coverage is computed from the same live analysis scan.
@@ -184,7 +236,7 @@ done
 # sections promoted rows under "Opportunities ledger" and the rest under
 # "Open findings". The shared scan-key spans pr-1 and pr-2 above.
 write_package 5 2026-01-05T00:00:00Z
-jq '.episodes[0].recurrence_key = "solo-key"' \
+jq '.episodes = [(.episodes[0] | .recurrence_key = "solo-key")]' \
   "$runs/pr-2/analysis.json" >"$tmp/pr-5-analysis.json"
 mkdir -p "$runs/pr-5"
 cp "$tmp/pr-5-analysis.json" "$runs/pr-5/analysis.json"
@@ -208,7 +260,7 @@ assert_no_ledger
 # pulling the intake registry (O2's domain) into this suite.
 guided6="$runs/pr-6"
 write_package 6 2026-01-06T00:00:00Z
-jq '.episodes[0].recurrence_key = "twin-key"' \
+jq '.episodes = [(.episodes[0] | .recurrence_key = "twin-key")]' \
   "$runs/pr-2/analysis.json" >"$tmp/pr-6-analysis.json"
 cp "$tmp/pr-6-analysis.json" "$guided6/analysis.json"
 twin6="$runs/pr-6-blind"
