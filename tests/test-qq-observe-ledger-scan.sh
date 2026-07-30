@@ -42,6 +42,124 @@ SH
 chmod +x "$fake_gh"
 export QQ_GH_BIN="$fake_gh"
 
+# backlog.md is not installed on CI runners; a faithful stub implements the
+# exact verbs this suite and bin/qq-observe call, so both venues exercise the
+# identical path (PATH-prepended + explicit override).
+mkdir -p "$tmp/bin"
+cat >"$tmp/bin/backlog" <<'SH'
+#!/usr/bin/env bash
+# Fixture backlog.md stub: doc create/update, task create, decision create,
+# and decision-scoped search, over the caller's nearest backlog/ directory.
+set -euo pipefail
+fail() { printf 'backlog-stub: %s\n' "$*" >&2; exit 1; }
+
+root=""
+dir="$(pwd -P)"
+while [ "$dir" != "/" ]; do
+  if [ -d "$dir/backlog" ]; then root="$dir/backlog"; break; fi
+  dir="$(dirname "$dir")"
+done
+[ -n "$root" ] || fail "no backlog directory found from $(pwd -P)"
+
+next_id() {
+  local max=0 n base
+  for f in "$root/$1"/*.md; do
+    [ -e "$f" ] || continue
+    base="${f##*/}"
+    n="$(printf '%s' "$base" | sed -n "s/^$2-\([0-9][0-9]*\) -.*/\1/p")"
+    [ -n "$n" ] && [ "$n" -gt "$max" ] && max="$n"
+  done
+  printf '%s-%d' "$2" "$((max + 1))"
+}
+slug() { printf '%s' "$1" | tr ' ' '-'; }
+
+case "${1:-}" in
+  doc)
+    case "${2:-}" in
+      create)
+        [ "${3:-}" = "-t" ] || fail "usage: doc create -t <type> <title>"
+        doctype="$4"; shift 4
+        id="$(next_id docs doc)"
+        file="$root/docs/$id - $(slug "$*").md"
+        printf -- "---\nid: %s\ntitle: %s\ntype: %s\n---\n\n" "$id" "$*" "$doctype" >"$file"
+        printf 'Path: %s\n' "$file"
+        ;;
+      update)
+        id="${3:-}"
+        [ "${4:-}" = "--content" ] || fail "usage: doc update <id> --content <body>"
+        file="$(grep -rl "^id: $id\$" "$root/docs" --include='*.md' | head -1)"
+        [ -n "$file" ] || fail "no document with id $id"
+        last="$(awk '/^---$/{c++; if(c==2){print NR; exit}}' "$file")"
+        [ -n "$last" ] || fail "document $id has malformed frontmatter"
+        head -n "$last" "$file" >"$file.tmp"
+        printf '%s\n' "${5:-}" >>"$file.tmp"
+        mv "$file.tmp" "$file"
+        printf 'Path: %s\n' "$file"
+        ;;
+      *) fail "unsupported doc verb: ${2:-}" ;;
+    esac
+    ;;
+  task)
+    [ "${2:-}" = "create" ] || fail "usage: task create <title> [--description X] [--plain]"
+    shift 2; title=""; desc=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --description) desc="$2"; shift 2 ;;
+        --plain) shift ;;
+        *) title="${title:+$title }$1"; shift ;;
+      esac
+    done
+    id="$(next_id tasks t)"
+    file="$root/tasks/$id - $(slug "$title").md"
+    printf -- "---\nid: %s\ntitle: %s\nstatus: To Do\n---\n\n%s\n" \
+      "$(printf '%s' "$id" | tr 'a-z' 'A-Z')" "$title" "$desc" >"$file"
+    printf 'File: %s\n' "$file"
+    ;;
+  decision)
+    [ "${2:-}" = "create" ] || fail "usage: decision create [-s status] <title>"
+    shift 2; status="proposed"; title=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -s) status="$2"; shift 2 ;;
+        *) title="${title:+$title }$1"; shift ;;
+      esac
+    done
+    id="$(next_id decisions decision)"
+    file="$root/decisions/$id - $(slug "$title").md"
+    printf -- "---\nid: %s\ntitle: %s\ndate: '2026-01-01 00:00'\nstatus: %s\n---\n## Context\n\n## Decision\n\n## Consequences\n" \
+      "$id" "$title" "$status" >"$file"
+    printf 'Path: %s\n' "$file"
+    ;;
+  search)
+    shift; type=""; key=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --type) type="$2"; shift 2 ;;
+        --plain) shift ;;
+        --limit) shift 2 ;;
+        *) key="$1"; shift ;;
+      esac
+    done
+    [ "$type" = "decision" ] || fail "stub supports only --type decision"
+    hits=()
+    for f in "$root/decisions"/*.md; do
+      [ -e "$f" ] || continue
+      if grep -qF -- "$key" "$f"; then hits+=("$f"); fi
+    done
+    if [ "${#hits[@]}" -eq 0 ]; then printf 'No results found.\n'; exit 0; fi
+    printf 'Decisions:\n'
+    for f in "${hits[@]}"; do
+      base="${f##*/}"
+      printf '  %s - %s [score 0.500]\n' "${base%% -*}" "$(sed -n 's/^title: //p' "$f" | head -1)"
+    done
+    ;;
+  *) fail "unsupported verb: ${1:-}" ;;
+esac
+SH
+chmod +x "$tmp/bin/backlog"
+export PATH="$tmp/bin:$PATH"
+export QQ_BACKLOG_BIN="$tmp/bin/backlog"
+
 runs="$XDG_STATE_HOME/qq/observer/runs/by-repository/fixture/scan"
 write_package() {
   local pr="$1" assembled="$2"
