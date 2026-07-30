@@ -17,18 +17,13 @@ STATE="$ROOT/tools/ratchet-baselines.conf"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 fixture="$tmp/repo"
-mkdir -p "$fixture/tools" "$fixture/backlog/docs"
-cp \
-  "$ROOT/.gitignore" \
-  "$ROOT/AGENTS.md" \
-  "$ROOT/CONCEPTS.md" \
-  "$ROOT/REVIEW.md" \
-  "$fixture/"
+mkdir -p "$fixture/tools"
+cp "$ROOT/.gitignore" \
+  "$ROOT/AGENTS.md" "$ROOT/CONCEPTS.md" "$ROOT/REVIEW.md" "$fixture/"
 cp -R "$ROOT/skills" "$ROOT/bin" "$fixture/"
 cp "$RATCHET" "$STATE" "$fixture/tools/"
-cp \
-  "$ROOT/backlog/docs/doc-48 - Conventions-—-board-hygiene-Task-vocabulary-board-deep-links.md" \
-  "$fixture/backlog/docs/"
+# M1: doc-48 lives in the external store; the fixture mandatory-read set is
+# repo-local only.
 git init -q "$fixture"
 git -C "$fixture" add -A
 

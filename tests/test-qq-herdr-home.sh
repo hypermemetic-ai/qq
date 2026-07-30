@@ -244,7 +244,14 @@ tr '\n\t' '  ' <"$ROOT/CONCEPTS.md" | \
   grep -qE '\*\*decision ledger\*\* —'
 tr '\n\t' '  ' <"$ROOT/CONCEPTS.md" | \
   grep -qE '\*\*alignment brief\*\* —'
-ls "$ROOT"/backlog/decisions/decision-2*.md >/dev/null
+# M1: backlog decisions live in the external store; on CI the backlog symlink
+# is dangling (-e follows it) and this check is absent by design (decision-28).
+if [ -e "$ROOT/backlog" ]; then
+  ls "$ROOT"/backlog/decisions/decision-2*.md >/dev/null \
+    || fail 'backlog resolves but decision-2* records are missing'
+else
+  printf 'test-qq-herdr-home: backlog store absent (CI); decision-record check skipped\n'
+fi
 tr '\n\t' '  ' <"$ROOT/CONCEPTS.md" | \
   grep -qE 'opt-out +recorded +verbatim'
 
