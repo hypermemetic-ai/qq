@@ -23,26 +23,6 @@ case "${1:-} ${2:-}" in
       "${FAKE_CURRENT_PANE:-source:p1}" "${FAKE_CURRENT_WORKSPACE:-source}" \
       "${FAKE_CURRENT_AGENT_JSON:-\"other-agent\"}"
     ;;
-  "workspace get")
-    [ "${FAKE_WORKSPACE_MISSING:-}" != 1 ] || exit 1
-    printf '{"result":{"workspace":{"workspace_id":"%s"}}}\n' "$3"
-    ;;
-  "pane list")
-    if [ "${FAKE_PANE_COUNT:-1}" = 2 ]; then
-      printf '{"result":{"panes":[{"pane_id":"target:p1","tab_id":"target:t1"},{"pane_id":"target:p2","tab_id":"target:t1"}]}}\n'
-    elif [ -n "${FAKE_TARGET_AGENT:-}" ]; then
-      printf '{"result":{"panes":[{"pane_id":"target:p1","tab_id":"target:t1","agent":"%s"}]}}\n' "$FAKE_TARGET_AGENT"
-    else
-      printf '{"result":{"panes":[{"pane_id":"target:p1","tab_id":"target:t1"}]}}\n'
-    fi
-    ;;
-  "pane process-info")
-    if [ "${FAKE_BUSY:-}" = 1 ]; then
-      printf '%s\n' '{"result":{"process_info":{"shell_pid":10,"foreground_process_group_id":20,"foreground_processes":[{"pid":20}]}}}'
-    else
-      printf '%s\n' '{"result":{"process_info":{"shell_pid":10,"foreground_process_group_id":10,"foreground_processes":[{"pid":10}]}}}'
-    fi
-    ;;
   "agent list")
     printf '%s\n' '{"result":{"type":"agent_list","agents":[{"pane_id":"agent:p1","agent_status":"idle"},{"pane_id":"agent:p2","agent_status":"blocked"}]}}'
     ;;
@@ -77,79 +57,10 @@ export FAKE_LOG="$log"
 
 reset_fake() {
   : >"$log"
-  unset FAKE_BUSY FAKE_CLOSE_FAIL FAKE_CURRENT_PANE FAKE_CURRENT_WORKSPACE
-  unset FAKE_CURRENT_AGENT_JSON
-  unset FAKE_MOVE_FAIL FAKE_MOVED_PANE FAKE_PANE_COUNT FAKE_TARGET_AGENT
-  unset FAKE_MOVE_UNCHANGED
-  unset FAKE_WORKSPACE_MISSING
+  unset FAKE_CLOSE_FAIL FAKE_CURRENT_PANE FAKE_CURRENT_WORKSPACE
+  unset FAKE_CURRENT_AGENT_JSON FAKE_MOVE_FAIL FAKE_MOVED_PANE
+  unset FAKE_MOVE_UNCHANGED FAKE_OPERATOR_TAB
 }
-
-expect_agent_failure() {
-  local expected="$1"
-  shift
-  if "$PULL" --workspace target >"$tmp/out" 2>"$tmp/err"; then
-    fail "agent mode unexpectedly succeeded: $expected"
-  fi
-  assert_file_contains "$tmp/err" "$expected"
-}
-
-reset_fake
-output="$(QQ_HERDR_PULL_DRY=1 "$PULL" --workspace target)"
-test "$output" = 'workspace=target target=target:p1 source=source:p1'
-assert_file_not_matches "$log" '^pane move '
-assert_file_not_matches "$log" '^pane close '
-
-reset_fake
-output="$("$PULL" --workspace target)"
-test "$output" = 'workspace=target pane=target:p2 replaced=target:p1 changed=true'
-grep -q '^pane move source:p1 --tab target:t1 --target-pane target:p1 --split right --focus$' "$log"
-grep -q '^pane close target:p1$' "$log"
-
-reset_fake
-export FAKE_CURRENT_WORKSPACE=target FAKE_CURRENT_PANE=target:p7
-output="$("$PULL" --workspace target)"
-test "$output" = 'workspace=target pane=target:p7 changed=false'
-assert_file_not_matches "$log" '^pane list '
-
-reset_fake
-export FAKE_PANE_COUNT=2
-expect_agent_failure "must contain exactly one placeholder pane (found 2)"
-assert_file_not_matches "$log" '^pane move '
-assert_file_not_matches "$log" '^pane close '
-
-reset_fake
-export FAKE_CURRENT_AGENT_JSON=null
-expect_agent_failure "calling pane 'source:p1' is not an agent"
-assert_file_not_matches "$log" '^workspace get '
-assert_file_not_matches "$log" '^pane move '
-
-reset_fake
-export FAKE_TARGET_AGENT=other-agent
-expect_agent_failure "already occupied by an agent"
-assert_file_not_matches "$log" '^pane move '
-
-reset_fake
-export FAKE_BUSY=1
-expect_agent_failure "is not an idle shell placeholder"
-assert_file_not_matches "$log" '^pane move '
-
-reset_fake
-export FAKE_MOVE_FAIL=1
-expect_agent_failure "move failed (source:p1 -> target:t1)"
-grep -q '^pane move ' "$log"
-assert_file_not_matches "$log" '^pane close '
-
-reset_fake
-export FAKE_MOVE_UNCHANGED=1
-expect_agent_failure "move not applied (source:p1 -> target:t1; reason: zoomed_tab)"
-grep -q '^pane move ' "$log"
-assert_file_not_matches "$log" '^pane close '
-
-reset_fake
-export FAKE_CLOSE_FAIL=1
-expect_agent_failure "agent moved to 'target:p2', but placeholder 'target:p1' could not be closed"
-grep -q '^pane move ' "$log"
-grep -q '^pane close target:p1$' "$log"
 
 reset_fake
 output="$(HERDR_PANE_ID=operator:p1 QQ_HERDR_PULL_DRY=1 "$PULL" 1)"
@@ -169,6 +80,11 @@ HERDR_PANE_ID=operator:p1 "$PULL" 0
 grep -q '^notification show ' "$log"
 assert_file_not_matches "$log" '^pane move '
 
+# Without the injected keybinding identity the focused pane is resolved live.
+reset_fake
+HERDR_PANE_ID= FAKE_CURRENT_PANE=operator:p9 QQ_HERDR_PULL_DRY=1 "$PULL" 1 >/dev/null
+grep -q '^pane current ' "$log"
+
 reset_fake
 export FAKE_MOVE_FAIL=1
 HERDR_PANE_ID=operator:p1 "$PULL" 1
@@ -181,6 +97,22 @@ export FAKE_MOVE_UNCHANGED=1
 HERDR_PANE_ID=operator:p1 "$PULL" 1
 grep -q '^pane move ' "$log"
 grep -q '^notification show ' "$log"
+assert_file_not_matches "$log" '^pane close '
+
+reset_fake
+export FAKE_CLOSE_FAIL=1
+HERDR_PANE_ID=operator:p1 "$PULL" 1
+grep -q '^pane move ' "$log"
+grep -q '^pane close operator:p1$' "$log"
+grep -q '^notification show ' "$log"
+
+# The retired agent-mode spelling dies as an ordinary usage error: a
+# notification, a successful exit, and no layout mutation.
+reset_fake
+HERDR_PANE_ID=operator:p1 "$PULL" --workspace target
+grep -q '^notification show ' "$log"
+assert_file_not_matches "$log" '^workspace get '
+assert_file_not_matches "$log" '^pane move '
 assert_file_not_matches "$log" '^pane close '
 
 printf 'test-qq-herdr-pull: pass\n'

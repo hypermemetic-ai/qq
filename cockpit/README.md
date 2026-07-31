@@ -68,9 +68,6 @@ general tabs stay at that level. Changes live in plain linked worktrees; no
 per-Change Herdr workspaces are created. Accountable agents validate the home
 with `qq-herdr-home inspect --repo <root>` and dispatch delegated work into the
 Change worktree while their own conversation stays in the project home.
-`qq-herdr-pull --workspace <workspace-id>` remains an operator-invocable mover
-for any workspaces that still exist; its binary is unchanged, and it is not
-part of the delivery flow.
 
 At terminal Change disposition, operator-created work panes stay intact for
 inspection, and operator focus is left untouched. `qq-herdr-home focus-board

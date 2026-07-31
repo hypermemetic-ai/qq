@@ -87,6 +87,7 @@ qq_resolve_bin python3 || qq_engine_error "$QQ_BIN_ERROR"; python_bin="$QQ_BIN_R
 identity_helper="$(dirname "$self")/lib/qq_task_identity.py"
 [ -f "$identity_helper" ] || qq_engine_error "Task identity helper is missing: $identity_helper"
 qq_resolve_bin sha256sum || qq_engine_error "$QQ_BIN_ERROR"; sha256sum_bin="$QQ_BIN_RESULT"
+qq_resolve_bin find || qq_engine_error "$QQ_BIN_ERROR"; find_bin="$QQ_BIN_RESULT"
 repo_key="$(printf %s "$repo_root" | "$sha256sum_bin" | awk '{print $1}')"
 [[ "$repo_key" =~ ^[0-9a-f]{64}$ ]] || qq_engine_error 'Could not derive the Repository scratch-board key.'
 cache_home="${XDG_CACHE_HOME:-${HOME:+$HOME/.cache}}"
@@ -160,6 +161,32 @@ done
 effective_dry_run=false; if [ "$mode" = inspect ] || [ "$dry_run" = true ]; then effective_dry_run=true; fi
 notes='[]'; board_temp=
 append_note() { notes="$("$QQ_ENGINE_JQ" -cn --argjson n "$notes" --arg v "$1" '$n+[$v]')"; }
+
+# Board-trash expiry (T-88 disposition as amended by doc-126 Change 8):
+# qq-board disposes old scratch generations into the shared cache trash and
+# prunes this Repository's own entries past the retention window at
+# reconcile time. Age is read from the disposal epoch written into the
+# trash name, never from mtime: a long-lived generation gets its full
+# retention after disposal. Foreign and unparseable entries are never
+# touched, and pruning never runs under inspect or --dry-run.
+prune_board_trash() {
+  local trash_root entry name now_epoch disposal_epoch
+  trash_root="$board_parent/.trash"
+  [ -d "$trash_root" ] || return 0
+  now_epoch="$(date +%s)"
+  while IFS= read -r -d '' entry; do
+    name="${entry##*/}"
+    if [[ ! "$name" =~ ^\.?${repo_key}(\.gen\.[A-Za-z0-9]{6})?\.([0-9]+)\.[0-9]+$ ]]; then
+      continue
+    fi
+    disposal_epoch="${BASH_REMATCH[2]}"
+    [ $((now_epoch - disposal_epoch)) -gt 604800 ] || continue
+    if [ -d "$entry" ] && [ ! -L "$entry" ]; then
+      rm -rf -- "$entry" || append_note "Could not prune aged board trash entry: $entry"
+    fi
+  done < <("$find_bin" "$trash_root" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
+}
+
 disposal_eligible() {
   local target="$1" base path
   [ "${target%/*}" = "$board_parent" ] || return 1; base="${target##*/}"
@@ -212,6 +239,7 @@ materialize_board() {
 materialized=false
 if [ "$effective_dry_run" = false ]; then
   materialize_board; materialized=true
+  prune_board_trash
 elif [ -L "$scratch_root" ]; then
   previous_target="$(readlink -f -- "$scratch_root" 2>/dev/null || true)"
   if [ -n "$previous_target" ] && disposal_eligible "$previous_target" \

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Nominate and, after operator veto, reap stale docs and merged Git debris.
+# Nominate and, after operator selection, reap stale docs and merged Git debris.
 # shellcheck disable=SC1091,SC2016,SC2094
 set -euo pipefail
 
@@ -11,7 +11,7 @@ source "$(dirname "$self")/lib/qq-engine.sh"
 
 qq_engine_init qq-reap reap
 
-usage='usage: qq-reap [inspect] [scan] [--repo <path>] [--dry-run] | qq-reap [inspect] apply <report-file> [--repo <path>] [--dry-run]
+usage='usage: qq-reap [inspect] [scan] [--repo <path>] [--dry-run] | qq-reap [inspect] apply <id>… [--repo <path>] [--dry-run]
 scan fetch boundary: git fetch --no-tags origin main refreshes FETCH_HEAD and may refresh refs/remotes/origin/main; the worktree, index, and refs/heads/ remain untouched'
 
 inspect=false
@@ -21,7 +21,7 @@ if [ "${1:-}" = inspect ]; then
 fi
 
 operation=scan
-source_report=""
+requested_ids=()
 case "${1:-}" in
   scan)
     shift
@@ -29,11 +29,13 @@ case "${1:-}" in
   apply)
     operation=apply
     shift
-    source_report="${1:-}"
-    if [ -z "$source_report" ] || [[ "$source_report" == --* ]]; then
+    while [ "$#" -gt 0 ] && [[ "$1" != --* ]]; do
+      requested_ids+=("$1")
+      shift
+    done
+    if [ "${#requested_ids[@]}" -eq 0 ]; then
       qq_engine_error "$usage"
     fi
-    shift
     ;;
   "" | --*) ;;
   *) qq_engine_error "$usage" ;;
@@ -62,8 +64,8 @@ else
   qq_engine_set_action "$operation"
 fi
 
-git_bin='' sha256sum_bin='' find_bin=''
-for dependency in git sha256sum find; do
+git_bin=''
+for dependency in git; do
   qq_resolve_bin "$dependency" || qq_engine_error "$QQ_BIN_ERROR"
   printf -v "${dependency}_bin" '%s' "$QQ_BIN_RESULT"
 done
@@ -94,7 +96,7 @@ report_draft="$(mktemp "$reports_dir/.qq-reap-report.XXXXXX")" \
   || qq_engine_error 'cannot allocate the qq-reap report draft'
 
 repo_root=""
-nomination_counts='{"docs":0,"branches":0,"worktrees":0,"board_trash":0,"total":0}'
+nomination_counts='{"docs":0,"branches":0,"worktrees":0,"total":0}'
 degraded_checks='[]'
 current_nominations='[]'
 worktree_refusals='[]'
@@ -405,7 +407,7 @@ derive_nominations() {
   local refusal_id
 
   current_nominations='[]'
-  nomination_counts='{"docs":0,"branches":0,"worktrees":0,"board_trash":0,"total":0}'
+  nomination_counts='{"docs":0,"branches":0,"worktrees":0,"total":0}'
   degraded_checks='[]'
   worktree_refusals='[]'
   scan_rail_refused=false
@@ -610,7 +612,6 @@ derive_nominations() {
     fi
   done < <("$QQ_ENGINE_JQ" -c '.[]' <<<"$worktrees")
   fi
-  scan_board_trash
 
   current_nominations="$("$QQ_ENGINE_JQ" -c 'sort_by(.id)' \
     <<<"$current_nominations")"
@@ -619,45 +620,9 @@ derive_nominations() {
       docs:([$nominations[] | select(.kind == "doc")] | length),
       branches:([$nominations[] | select(.kind == "branch")] | length),
       worktrees:([$nominations[] | select(.kind == "worktree")] | length),
-      board_trash:([$nominations[] | select(.kind == "board-trash")] | length),
       total:($nominations | length)
     }
   ')"
-}
-
-# Board-trash expiry (T-88 disposition): qq-board disposes old scratch
-# generations into the shared cache trash and never deletes them itself;
-# entries for this Repository past the retention window are nominated for
-# deletion by this reaper. Age is read from the disposal epoch qq-board
-# writes into the trash name, never from mtime: a long-lived generation
-# gets its full retention after disposal. Shared by the Herdr-available
-# and refusal paths.
-scan_board_trash() {
-  local board_trash trash_repo_key trash_entry trash_name command nomination
-  local primary_canon now_epoch disposal_epoch
-  [ -n "$primary_main" ] || return 0
-  primary_canon="$(cd "$primary_main" 2>/dev/null && pwd -P)" || return 0
-  [ -n "${XDG_CACHE_HOME:-${HOME:-}}" ] || return 0
-  board_trash="$(readlink -m -- \
-    "${XDG_CACHE_HOME:-${HOME:-}/.cache}/qq/board")/.trash"
-  [ -d "$board_trash" ] || return 0
-  trash_repo_key="$(printf '%s' "$primary_canon" | "$sha256sum_bin" | awk '{print $1}')"
-  now_epoch="$(date +%s)"
-  while IFS= read -r -d '' trash_entry; do
-    trash_name="${trash_entry##*/}"
-    if [[ ! "$trash_name" =~ ^\.?${trash_repo_key}(\.gen\.[A-Za-z0-9]{6})?\.([0-9]+)\.[0-9]+$ ]]; then
-      continue
-    fi
-    disposal_epoch="${BASH_REMATCH[2]}"
-    [ $((now_epoch - disposal_epoch)) -gt 604800 ] || continue
-    shell_double_quote "$trash_entry"
-    command="rm -rf -- $QUOTED_VALUE"
-    nomination="$("$QQ_ENGINE_JQ" -cn \
-      --arg id "board-trash:$trash_name" --arg entry "$trash_name" \
-      --arg path "$trash_entry" --arg command "$command" \
-      '{id:$id,kind:"board-trash",evidence:{entry:$entry,path:$path},command:$command}')"
-    append_nomination "$nomination"
-  done < <("$find_bin" "$board_trash" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
 }
 
 if ! repo_root="$("$git_bin" -C "$repo" rev-parse --show-toplevel 2>/dev/null)"; then
@@ -689,8 +654,6 @@ write_scan_report() {
       "$("$QQ_ENGINE_JQ" -r '.branches' <<<"$nomination_counts")"
     printf -- '- clean merged linked worktrees: %s\n' \
       "$("$QQ_ENGINE_JQ" -r '.worktrees' <<<"$nomination_counts")"
-    printf -- '- board trash entries: %s\n' \
-      "$("$QQ_ENGINE_JQ" -r '.board_trash' <<<"$nomination_counts")"
     printf -- '- total: %s\n' \
       "$("$QQ_ENGINE_JQ" -r '.total' <<<"$nomination_counts")"
     printf '\n## Fetch boundary\n\n'
@@ -747,326 +710,32 @@ validate_nomination_id() {
       [ -n "$value" ] && [[ "$value" = /* ]] || return 1
       [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || return 1
       ;;
-    board-trash:*)
-      value="${id#board-trash:}"
-      [ -n "$value" ] || return 1
-      [[ "$value" != */* && "$value" != *$'\n'* && "$value" != *$'\r'* ]] \
-        || return 1
-      ;;
     *) return 1 ;;
   esac
 }
 
-parse_source_report() {
-  local line section=before metadata_line="" metadata_count=0
-  local nomination id kind
-  local saw_heading=false saw_nominations=false saw_summary=false
-  local tail_lines='[]' expected_tail
-  local value short_value expected_command removal_value workspace_value branch_value
-  local placeholder_value nul_dump line_number=0 entry position last_position=-1 store_root_arg
+# The operator's argv is the sole authorization: validate every requested
+# id, re-derive nominations fresh, and apply only what is still current.
+declare -A seen_request=()
+for id in "${requested_ids[@]}"; do
+  validate_nomination_id "$id" \
+    || finish_problem error "unknown nomination id: $id"
+  if [ -n "${seen_request[$id]+present}" ]; then
+    finish_problem error "duplicate nomination id: $id"
+  fi
+  seen_request["$id"]=1
+done
 
-  if [ ! -f "$source_report" ] || [ ! -r "$source_report" ]; then
-    finish_problem error "report is not a readable file: $source_report"
-  fi
-  nul_dump="$(mktemp "${TMPDIR:-/tmp}/qq-reap-report-bytes.XXXXXX")" \
-    || finish_problem error 'could not allocate temporary report-validation space'
-  if ! od -An -v -tx1 -- "$source_report" >"$nul_dump"; then
-    rm -f -- "$nul_dump"
-    finish_problem error "could not inspect report bytes: $source_report"
-  fi
-  if awk '{ for (i = 1; i <= NF; i++) if ($i == "00") found = 1 } END { exit !found }' \
-    "$nul_dump"; then
-    rm -f -- "$nul_dump"
-    finish_problem error 'malformed report: NUL byte is forbidden'
-  fi
-  rm -f -- "$nul_dump"
-  listed_nominations='[]'
-  listed_nomination_lines='[]'
-  while IFS= read -r line || [ -n "$line" ]; do
-    line_number=$((line_number + 1))
-    case "$section" in
-      before)
-        if [ "$saw_heading" = false ]; then
-          [ "$line" = '# qq-reap scan report' ] \
-            || finish_problem error 'malformed report: missing qq-reap scan heading'
-          saw_heading=true
-        elif [[ "$line" == 'qq-reap-metadata: '* ]]; then
-          metadata_count=$((metadata_count + 1))
-          metadata_line="${line#qq-reap-metadata: }"
-        elif [ "$line" = '## Nominations' ]; then
-          saw_nominations=true
-          section=nominations
-        elif [ -n "$line" ]; then
-          finish_problem error 'malformed report: unexpected content before nominations'
-        fi
-        ;;
-      nominations)
-        if [ "$line" = '## Summary' ]; then
-          saw_summary=true
-          section=after
-        elif [ -n "$line" ]; then
-          if ! nomination="$("$QQ_ENGINE_JQ" -ec '
-            select(type == "object")
-            | select((keys | sort) == ["command","evidence","id","kind"])
-            | select(.id | type == "string" and length > 0)
-            | select(.kind == "doc" or .kind == "branch" or .kind == "worktree" or .kind == "board-trash")
-            | select(.evidence | type == "object")
-            | select(.command | type == "string" and length > 0)
-          ' <<<"$line" 2>/dev/null)"; then
-            finish_problem error 'malformed report: nomination lines must be canonical JSON objects'
-          fi
-          id="$("$QQ_ENGINE_JQ" -r '.id' <<<"$nomination")"
-          kind="$("$QQ_ENGINE_JQ" -r '.kind' <<<"$nomination")"
-          [[ "$id" =~ ^(doc|branch|worktree|board-trash): ]] \
-            || finish_problem error "unknown nomination id at line $line_number: $id"
-          [ "${id%%:*}" = "$kind" ] \
-            || finish_problem error "malformed report: nomination kind does not match id: $id"
-          validate_nomination_id "$id" \
-            || finish_problem error "unknown nomination id at line $line_number: $id"
-          case "$kind" in
-            doc)
-              value="${id#doc:}"
-              shell_double_quote "$repo_root/backlog"
-              store_root_arg="$QUOTED_VALUE"
-              shell_double_quote "$value"
-              expected_command="git -C $store_root_arg rm -- $QUOTED_VALUE"
-              if ! "$QQ_ENGINE_JQ" -e --arg value "$value" \
-                --arg command "$expected_command" '
-                  (.evidence | keys | sort) == ["dead_paths","doc"]
-                  and .evidence.doc == $value
-                  and (.evidence.dead_paths | type == "array" and length > 0)
-                  and all(.evidence.dead_paths[]; type == "string" and length > 0)
-                  and ((.evidence.dead_paths | unique | length) == (.evidence.dead_paths | length))
-                  and .command == $command
-                ' <<<"$nomination" >/dev/null; then
-                finish_problem error "malformed report: stale-doc evidence is inconsistent: $id"
-              fi
-              ;;
-            branch)
-              value="${id#branch:}"
-              short_value="${value#refs/heads/}"
-              shell_command_arg "$short_value"
-              expected_command="git branch -d $QUOTED_VALUE"
-              if ! "$QQ_ENGINE_JQ" -e --arg value "$value" \
-                --arg command "$expected_command" '
-                  (.evidence | keys | sort) == ["branch","merged_into","tip"]
-                  and .evidence.branch == $value
-                  and (.evidence.merged_into | type == "string" and test("^[0-9a-f]{40,64}$"))
-                  and (.evidence.tip | type == "string" and test("^[0-9a-f]{40,64}$"))
-                  and .command == $command
-                ' <<<"$nomination" >/dev/null; then
-                finish_problem error "malformed report: branch evidence is inconsistent: $id"
-              fi
-              ;;
-            worktree)
-              value="${id#worktree:}"
-              removal_value="$("$QQ_ENGINE_JQ" -r '.evidence.removal // ""' \
-                <<<"$nomination")"
-              workspace_value="$("$QQ_ENGINE_JQ" -r '.evidence.workspace_id // ""' \
-                <<<"$nomination")"
-              placeholder_value="$("$QQ_ENGINE_JQ" -r \
-                '.evidence.root_placeholder_pane // ""' <<<"$nomination")"
-              branch_value="$("$QQ_ENGINE_JQ" -r '.evidence.branch // ""' \
-                <<<"$nomination")"
-              "$git_bin" check-ref-format --branch "$branch_value" >/dev/null 2>&1 \
-                || finish_problem error "malformed report: worktree branch is unreadable: $id"
-              if [ "$removal_value" = git ] && [ -z "$workspace_value" ] \
-                && [ -z "$placeholder_value" ]; then
-                shell_double_quote "$value"
-                expected_command="git worktree remove $QUOTED_VALUE"
-              elif [ "$removal_value" = herdr ] && [ -n "$workspace_value" ] \
-                && [ -n "$placeholder_value" ] \
-                && [[ "$workspace_value" != *$'\n'* && "$workspace_value" != *$'\r'* ]] \
-                && [[ "$placeholder_value" != *$'\n'* && "$placeholder_value" != *$'\r'* ]]; then
-                shell_command_arg "$workspace_value"
-                expected_command="herdr worktree remove --workspace $QUOTED_VALUE"
-              else
-                finish_problem error "malformed report: worktree removal evidence is inconsistent: $id"
-              fi
-              if ! "$QQ_ENGINE_JQ" -e --arg value "$value" \
-                --arg command "$expected_command" '
-                  (.evidence | keys | sort) == ["branch","clean","merged_into","path","removal","root_placeholder_pane","tip","workspace_id"]
-                  and .evidence.path == $value
-                  and .evidence.clean == true
-                  and (.evidence.merged_into | type == "string" and test("^[0-9a-f]{40,64}$"))
-                  and (.evidence.tip | type == "string" and test("^[0-9a-f]{40,64}$"))
-                  and .command == $command
-                ' <<<"$nomination" >/dev/null; then
-                finish_problem error "malformed report: worktree evidence is inconsistent: $id"
-              fi
-              ;;
-            board-trash)
-              value="${id#board-trash:}"
-              trash_root="$(readlink -m -- \
-                "${XDG_CACHE_HOME:-${HOME:-}/.cache}/qq/board")/.trash"
-              # Key membership is verified against fresh nominations at
-              # apply; the report must carry a well-formed keyed entry.
-              if [[ ! "$value" =~ ^\.?[0-9a-f]{64}(\.gen\.[A-Za-z0-9]{6})?\.[0-9]+\.[0-9]+$ ]]; then
-                finish_problem error "malformed report: board-trash entry is not a keyed disposal name: $id"
-              fi
-              shell_double_quote "$trash_root/$value"
-              expected_command="rm -rf -- $QUOTED_VALUE"
-              if ! "$QQ_ENGINE_JQ" -e --arg value "$value" \
-                --arg path "$trash_root/$value" \
-                --arg command "$expected_command" '
-                  (.evidence | keys | sort) == ["entry","path"]
-                  and .evidence.entry == $value
-                  and .evidence.path == $path
-                  and .command == $command
-                ' <<<"$nomination" >/dev/null; then
-                finish_problem error "malformed report: board-trash evidence is inconsistent: $id"
-              fi
-              ;;
-          esac
-          if "$QQ_ENGINE_JQ" -e --arg id "$id" \
-            '.[] | select(.id == $id)' <<<"$listed_nominations" >/dev/null; then
-            finish_problem error \
-              "malformed report: duplicate nomination id at line $line_number: $id"
-          fi
-          listed_nominations="$("$QQ_ENGINE_JQ" -cn \
-            --argjson current "$listed_nominations" --argjson nomination "$nomination" \
-            '$current + [$nomination]')"
-          listed_nomination_lines="$("$QQ_ENGINE_JQ" -cn \
-            --argjson current "$listed_nomination_lines" --arg id "$id" \
-            --argjson line "$line_number" '$current + [{id:$id,line:$line}]')"
-        fi
-        ;;
-      after)
-        tail_lines="$("$QQ_ENGINE_JQ" -cn --argjson current "$tail_lines" \
-          --arg line "$line" '$current + [$line]')"
-        ;;
-    esac
-  done <"$source_report"
-
-  if [ "$saw_heading" != true ] || [ "$saw_nominations" != true ] \
-    || [ "$saw_summary" != true ] || [ "$metadata_count" -ne 1 ]; then
-    finish_problem error 'malformed report: required report structure is incomplete'
-  fi
-  if ! source_metadata="$("$QQ_ENGINE_JQ" -ec '
-    select(type == "object")
-    | select((keys | sort) == ["counts","degraded_checks","fetched_main_oid","format","generated_at","mode","original_ids","repository","worktree_refusals"])
-    | select(.format == "qq-reap-v1" and .mode == "scan")
-    | select(.generated_at | type == "string" and length > 0)
-    | select(.repository | type == "string" and length > 0)
-    | select(.fetched_main_oid | type == "string" and test("^[0-9a-f]{40,64}$"))
-    | select(.original_ids | type == "array")
-    | select(all(.original_ids[]; type == "string" and length > 0))
-    | select((.original_ids | unique | length) == (.original_ids | length))
-    | select(.original_ids == (.original_ids | sort))
-    | select(.counts | type == "object")
-    | select((.counts | keys | sort) == ["board_trash","branches","docs","total","worktrees"])
-    | select(all(.counts[]; type == "number" and floor == . and . >= 0))
-    | select(.counts.total == (.original_ids | length))
-    | select(.degraded_checks | type == "array")
-    | select(all(.degraded_checks[]; type == "string" and length > 0))
-    | select(.worktree_refusals | type == "array")
-    | select(all(.worktree_refusals[];
-        type == "object"
-        and ((keys | sort) == ["id","observed_state","reason"])
-        and (.id | type == "string" and startswith("worktree:"))
-        and (.reason | type == "string" and length > 0)
-        and (.observed_state | type == "object")))
-  ' <<<"$metadata_line" 2>/dev/null)"; then
-    finish_problem error 'malformed report: metadata is unreadable or inconsistent'
-  fi
-  if [ "$("$QQ_ENGINE_JQ" -r '.repository' <<<"$source_metadata")" != "$repo_root" ]; then
-    finish_problem error 'report Repository does not match --repo'
-  fi
-  original_ids="$("$QQ_ENGINE_JQ" -c '.original_ids' <<<"$source_metadata")"
-  while IFS= read -r -d '' id; do
-    validate_nomination_id "$id" \
-      || finish_problem error "unknown nomination id: $id"
-  done < <("$QQ_ENGINE_JQ" -j '.[] | . + "\u0000"' <<<"$original_ids")
-  expected_counts="$("$QQ_ENGINE_JQ" -cn --argjson ids "$original_ids" '
-    {
-      docs:([$ids[] | select(startswith("doc:"))] | length),
-      branches:([$ids[] | select(startswith("branch:"))] | length),
-      worktrees:([$ids[] | select(startswith("worktree:"))] | length),
-      board_trash:([$ids[] | select(startswith("board-trash:"))] | length),
-      total:($ids | length)
-    }
-  ')"
-  if ! "$QQ_ENGINE_JQ" -e --argjson expected "$expected_counts" \
-    '.counts == $expected' <<<"$source_metadata" >/dev/null; then
-    finish_problem error 'malformed report: metadata counts do not match original ids'
-  fi
-  if ! "$QQ_ENGINE_JQ" -e --arg oid \
-    "$("$QQ_ENGINE_JQ" -r '.fetched_main_oid' <<<"$source_metadata")" '
-      all(.[] | select(.kind == "branch" or .kind == "worktree");
-        .evidence.merged_into == $oid)
-    ' <<<"$listed_nominations" >/dev/null; then
-    finish_problem error 'malformed report: nomination ancestry evidence does not match fetched main'
-  fi
-  expected_tail="$("$QQ_ENGINE_JQ" -cn --argjson metadata "$source_metadata" '
-    [
-      "",
-      "- stale docs: " + ($metadata.counts.docs | tostring),
-      "- merged local branches: " + ($metadata.counts.branches | tostring),
-      "- clean merged linked worktrees: " + ($metadata.counts.worktrees | tostring),
-      "- board trash entries: " + ($metadata.counts.board_trash | tostring),
-      "- total: " + ($metadata.counts.total | tostring),
-      "",
-      "## Fetch boundary",
-      "",
-      "- fetched main commit: `" + $metadata.fetched_main_oid + "`",
-      "- `git fetch --no-tags origin main` refreshes `FETCH_HEAD` and may refresh `refs/remotes/origin/main`; scan otherwise leaves the worktree, index, and `refs/heads/` untouched."
-    ]
-    + (if ($metadata.worktree_refusals | length) > 0 then
-        ["", "## Safety refusals", ""]
-        + [$metadata.worktree_refusals[] | tojson]
-      else [] end)
-    + (if ($metadata.degraded_checks | length) > 0 then
-        ["", "## Degraded checks", ""]
-        + [$metadata.degraded_checks[] | "- " + .]
-      else [] end)
-  ')"
-  "$QQ_ENGINE_JQ" -ne --argjson actual "$tail_lines" \
-    --argjson expected "$expected_tail" '$actual == $expected' \
-    >/dev/null 2>&1 \
-    || finish_problem error 'malformed report: summary or degraded-check data was edited'
-  while IFS= read -r entry; do
-    id="$("$QQ_ENGINE_JQ" -r '.id' <<<"$entry")"
-    line_number="$("$QQ_ENGINE_JQ" -r '.line' <<<"$entry")"
-    position="$("$QQ_ENGINE_JQ" -r --arg id "$id" \
-      'index($id) // -1' <<<"$original_ids")"
-    if [ "$position" -lt 0 ]; then
-      finish_problem error "unknown nomination id at line $line_number: $id"
-    fi
-    if [ "$position" -le "$last_position" ]; then
-      finish_problem error \
-        "malformed report: nomination order violation at line $line_number: $id"
-    fi
-    last_position="$position"
-  done < <("$QQ_ENGINE_JQ" -c '.[]' <<<"$listed_nomination_lines")
-}
-
-parse_source_report
 derive_nominations
 
-listed_ids="$("$QQ_ENGINE_JQ" -c '[.[].id]' <<<"$listed_nominations")"
+requested_json="$("$QQ_ENGINE_JQ" -cn --args '$ARGS.positional' -- "${requested_ids[@]}")"
 current_ids="$("$QQ_ENGINE_JQ" -c '[.[].id]' <<<"$current_nominations")"
-last_current_position=-1
-while IFS= read -r entry; do
-  id="$("$QQ_ENGINE_JQ" -r '.id' <<<"$entry")"
-  line_number="$("$QQ_ENGINE_JQ" -r '.line' <<<"$entry")"
-  current_position="$("$QQ_ENGINE_JQ" -r --arg id "$id" \
-    'index($id) // -1' <<<"$current_ids")"
-  if [ "$current_position" -ge 0 ]; then
-    if [ "$current_position" -le "$last_current_position" ]; then
-      finish_problem error \
-        "malformed report: nomination order violates fresh canonical order at line $line_number: $id"
-    fi
-    last_current_position="$current_position"
-  fi
-done < <("$QQ_ENGINE_JQ" -c '.[]' <<<"$listed_nomination_lines")
-vetoed_ids="$("$QQ_ENGINE_JQ" -cn --argjson original "$original_ids" \
-  --argjson listed "$listed_ids" '$original - $listed')"
-stale_ids="$("$QQ_ENGINE_JQ" -cn --argjson listed "$listed_ids" \
-  --argjson current "$current_ids" '$listed - $current')"
-eligible_ids="$("$QQ_ENGINE_JQ" -cn --argjson listed "$listed_ids" \
-  --argjson stale "$stale_ids" '$listed - $stale')"
-new_ids="$("$QQ_ENGINE_JQ" -cn --argjson current "$current_ids" \
-  --argjson original "$original_ids" '$current - $original')"
+stale_ids="$("$QQ_ENGINE_JQ" -cn --argjson requested "$requested_json" \
+  --argjson current "$current_ids" '$requested - $current')"
+eligible_ids="$("$QQ_ENGINE_JQ" -cn --argjson requested "$requested_json" \
+  --argjson current "$current_ids" '$current - ($current - $requested)')"
+unrequested_ids="$("$QQ_ENGINE_JQ" -cn --argjson requested "$requested_json" \
+  --argjson current "$current_ids" '$current - $requested')"
 
 applied='[]'
 skipped='[]'
@@ -1091,9 +760,6 @@ append_skip_state() {
     '$current + [{id:$id,reason:$reason,observed_state:$observed_state}]')"
 }
 
-while IFS= read -r -d '' id; do
-  append_skip "$id" vetoed
-done < <("$QQ_ENGINE_JQ" -j '.[] | . + "\u0000"' <<<"$vetoed_ids")
 while IFS= read -r -d '' id; do
   if [[ "$id" == worktree:* ]] && [ "$herdr_available" != true ]; then
     refusal="$("$QQ_ENGINE_JQ" -c --arg id "$id" \
@@ -1144,28 +810,6 @@ while IFS= read -r -d '' id; do
     rail_refused=true
     continue
   fi
-  if [ "$kind" = worktree ]; then
-    source_nomination="$("$QQ_ENGINE_JQ" -c --arg id "$id" \
-      '.[] | select(.id == $id)' <<<"$listed_nominations")"
-    if ! "$QQ_ENGINE_JQ" -e --argjson source "$source_nomination" '
-      .evidence.path == $source.evidence.path
-      and .evidence.branch == $source.evidence.branch
-      and .evidence.tip == $source.evidence.tip
-      and .evidence.removal == $source.evidence.removal
-      and .evidence.workspace_id == $source.evidence.workspace_id
-      and .evidence.root_placeholder_pane == $source.evidence.root_placeholder_pane
-    ' <<<"$nomination" >/dev/null; then
-      observed_state="$("$QQ_ENGINE_JQ" -cn \
-        --argjson expected "$("$QQ_ENGINE_JQ" -c '.evidence' <<<"$source_nomination")" \
-        --argjson current "$("$QQ_ENGINE_JQ" -c '.evidence' <<<"$nomination")" \
-        '{herdr_available:true,expected:$expected,current:$current}')"
-      append_skip_state "$id" \
-        'worktree identity or Herdr binding changed after scan; action refused' \
-        "$observed_state"
-      rail_refused=true
-      continue
-    fi
-  fi
   if [ "$inspect" = true ] || [ "$dry_run" = true ]; then
     append_skip "$id" 'inspection only; nomination remains valid'
     continue
@@ -1201,19 +845,6 @@ while IFS= read -r -d '' id; do
         fi
       fi
       ;;
-    board-trash)
-      trash_path="$("$QQ_ENGINE_JQ" -r '.evidence.path' <<<"$nomination")"
-      trash_root="$(readlink -m -- \
-        "${XDG_CACHE_HOME:-${HOME:-}/.cache}/qq/board")/.trash"
-      case "$trash_path" in
-        "$trash_root"/*)
-          if [ -d "$trash_path" ] && [ ! -L "$trash_path" ] \
-            && rm -rf -- "$trash_path" >/dev/null 2>&1; then
-            command_succeeded=true
-          fi
-          ;;
-      esac
-      ;;
   esac
   if [ "$command_succeeded" = true ]; then
     applied="$("$QQ_ENGINE_JQ" -cn --argjson current "$applied" \
@@ -1230,10 +861,10 @@ applied_count="$("$QQ_ENGINE_JQ" -r 'length' <<<"$applied")"
 skipped_count="$("$QQ_ENGINE_JQ" -r 'length' <<<"$skipped")"
 apply_metadata="$("$QQ_ENGINE_JQ" -cn \
   --arg generated_at "$generated_at" --arg repository "$repo_root" \
-  --arg source_report "$source_report" --argjson counts "$nomination_counts" \
+  --argjson requested "$requested_json" --argjson counts "$nomination_counts" \
   --arg fetched_main_oid "$fresh_main_oid" \
   --argjson applied "$applied_count" --argjson skipped "$skipped_count" \
-  '{format:"qq-reap-v1",mode:"apply",generated_at:$generated_at,repository:$repository,source_report:$source_report,fetched_main_oid:$fetched_main_oid,current_counts:$counts,applied:$applied,skipped:$skipped}')"
+  '{format:"qq-reap-v1",mode:"apply",generated_at:$generated_at,repository:$repository,requested_ids:$requested,fetched_main_oid:$fetched_main_oid,current_counts:$counts,applied:$applied,skipped:$skipped}')"
 shell_double_quote "$repo_root/backlog"
 store_command_root="$QUOTED_VALUE"
 {
@@ -1243,8 +874,8 @@ store_command_root="$QUOTED_VALUE"
   "$QQ_ENGINE_JQ" -c '.[]' <<<"$applied"
   printf '\n## Skipped\n\n'
   "$QQ_ENGINE_JQ" -c '.[]' <<<"$skipped"
-  printf '\n## New nominations not authorized by the source report\n\n'
-  "$QQ_ENGINE_JQ" -c '.[]' <<<"$new_ids"
+  printf '\n## Current nominations not requested\n\n'
+  "$QQ_ENGINE_JQ" -c '.[]' <<<"$unrequested_ids"
   if [ "$("$QQ_ENGINE_JQ" -r 'length' <<<"$degraded_checks")" -gt 0 ]; then
     printf '\n## Degraded checks\n\n'
     "$QQ_ENGINE_JQ" -r '.[] | "- " + .' <<<"$degraded_checks"
@@ -1255,26 +886,25 @@ store_command_root="$QUOTED_VALUE"
   printf '\n## Summary\n\n'
   printf -- '- applied: %s\n' "$applied_count"
   printf -- '- skipped: %s\n' "$skipped_count"
-  printf -- '- newly nominated: %s\n\n' \
-    "$("$QQ_ENGINE_JQ" -r 'length' <<<"$new_ids")"
+  printf -- '- not requested: %s\n\n' \
+    "$("$QQ_ENGINE_JQ" -r 'length' <<<"$unrequested_ids")"
   printf 'Review staged store-doc deletions with `git -C %s diff --cached -- docs/`; then commit them in the store. qq-reap never commits.\n' "$store_command_root"
 } >"$report_draft" || finish_problem error 'could not write the apply heartbeat report'
 publish_report
 
 state="$("$QQ_ENGINE_JQ" -cn \
   --arg repo_root "$repo_root" --arg report_path "$report_path" \
-  --arg source_report "$source_report" \
   --arg fetched_main_oid "$fresh_main_oid" --arg primary_main "$primary_main" \
   --argjson main_checkout_count "$primary_main_count" \
   --argjson nomination_counts "$nomination_counts" \
   --argjson degraded_checks "$degraded_checks" \
   --argjson skipped "$skipped" \
   --argjson applied_count "$applied_count" --argjson skipped_count "$skipped_count" \
-  --argjson vetoed_count "$("$QQ_ENGINE_JQ" -r 'length' <<<"$vetoed_ids")" \
+  --argjson requested_count "$("$QQ_ENGINE_JQ" -r 'length' <<<"$requested_json")" \
   --argjson stale_count "$("$QQ_ENGINE_JQ" -r 'length' <<<"$stale_ids")" \
-  --argjson new_count "$("$QQ_ENGINE_JQ" -r 'length' <<<"$new_ids")" \
+  --argjson unrequested_count "$("$QQ_ENGINE_JQ" -r 'length' <<<"$unrequested_ids")" \
   --argjson dry_run "$dry_run" --argjson inspect "$inspect" \
-  '{repo_root:$repo_root,report_path:$report_path,source_report:$source_report,fetched_main_oid:$fetched_main_oid,primary_main:$primary_main,main_checkout_count:$main_checkout_count,nomination_counts:$nomination_counts,degraded_checks:$degraded_checks,skipped:$skipped,applied_count:$applied_count,skipped_count:$skipped_count,vetoed_count:$vetoed_count,stale_count:$stale_count,new_count:$new_count,dry_run:$dry_run,inspect:$inspect}')"
+  '{repo_root:$repo_root,report_path:$report_path,fetched_main_oid:$fetched_main_oid,primary_main:$primary_main,main_checkout_count:$main_checkout_count,nomination_counts:$nomination_counts,degraded_checks:$degraded_checks,skipped:$skipped,applied_count:$applied_count,skipped_count:$skipped_count,requested_count:$requested_count,stale_count:$stale_count,unrequested_count:$unrequested_count,dry_run:$dry_run,inspect:$inspect}')"
 if [ "$rail_refused" = true ]; then
   qq_engine_refuse 'one or more current nominations were refused by their safety rails' "$state"
 fi
