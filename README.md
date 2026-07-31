@@ -287,16 +287,14 @@ once for its prompt. A representative 42-finding context measured about 5.7%
 fewer estimated o200k tokens than compact JSON with TOON 4.1.0; this is shape-
 specific evidence, not a promise of universal savings.
 
-`architect_disposition` first returns an exact natural summary and confirmation
-question without writing. Only an unchanged proposal plus a later exact clear
-affirmative interactive reply confirms. A set-aside-only batch is Task-free; a
-routed multi-source batch writes one content-addressed Observer handoff and
-starts one fresh qq-home accountable recipient. Until complete verified Task
-mappings arrive, that exact batch remains visible as operator-settled pending
-intake. An explicit interactive request naming its batch or handoff can retry
-the same handoff; it cannot re-propose scope or create another batch. Exact
-`MERGED` PR/head/Repository receipts later resolve mapped Tasks. Existing v1
-round handoffs remain recoverable through low-level compatibility commands.
+`architect_disposition` settles explicitly operator-settled findings in one
+call: `action=settle` with one decision per recurrence key — `route` with the
+agreed non-empty scope, `set_aside` with empty scope. qq-observe validates
+each decision against current occurrences, derives occurrence identities
+internally, and appends settled entries to the append-only
+Observer-dispositions document. The operator affirmative is conversational;
+no machinery stages or confirms proposals. Coverage follows settled entries
+and exact key hits in Backlog decision records.
 
 On a machine with the retired Skill mount, remove it if it exists (after
 checking it points into this checkout): `rm -r ~/.codex/skills`.

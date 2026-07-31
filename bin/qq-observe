@@ -1716,7 +1716,7 @@ def parse_dispositions_body(body, path):
             or entry["action"] not in ("route", "set_aside")
             or not display_text(entry["scope"]) or "\n" in entry["scope"]
             or not display_text(entry["note"]) or "\n" in entry["note"]
-            or not isinstance(occurrence_ids, list)
+            or not isinstance(occurrence_ids, list) or not occurrence_ids
             or any(
                 not isinstance(value, str)
                 or re.fullmatch(r"occurrence-[0-9a-f]{32}", value) is None
@@ -1728,6 +1728,8 @@ def parse_dispositions_body(body, path):
             or (entry["action"] == "set_aside" and entry["scope"] != "")
         ):
             fail(f"{label} violates the disposition contract", 65)
+        if not isinstance(entry["settled_at"], str):
+            fail(f"{label} has a malformed settlement timestamp", 65)
         try:
             time_value(entry["settled_at"])
         except ValueError:
