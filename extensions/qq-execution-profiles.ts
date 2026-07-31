@@ -1,8 +1,6 @@
 // @ts-nocheck
 
-import { constants, type BigIntStats } from "node:fs";
-import { lstat, open, realpath } from "node:fs/promises";
-import { homedir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -23,7 +21,7 @@ const SERVICE_CLASSES = new Set(["provider-default", "auto", "default", "flex", 
 const MAX_POLICY_BYTES = 64 * 1024;
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ARCHITECT_LAUNCHER = join(REPO_ROOT, "bin", "qq-pi-role");
-export const PROFILE_PATH = join(homedir(), ".config", "qq", "execution-profiles.json");
+export const PROFILE_PATH = join(REPO_ROOT, "delegation", "policies", "execution-profiles.json");
 
 export interface ExecutionProfile {
   provider: string;
@@ -57,64 +55,10 @@ function exactKeys(value: unknown, expected: readonly string[]): value is Record
   return keys.length === expected.length && keys.every((key, index) => key === expected[index]);
 }
 
-function rejectDuplicateObjectKeys(raw: string): void {
-  const stack: Array<{ kind: "object" | "array"; keys?: Set<string> }> = [];
-  for (let index = 0; index < raw.length; index += 1) {
-    const character = raw[index];
-    if (character === "{") {
-      stack.push({ kind: "object", keys: new Set() });
-      continue;
-    }
-    if (character === "[") {
-      stack.push({ kind: "array" });
-      continue;
-    }
-    if (character === "}" || character === "]") {
-      stack.pop();
-      continue;
-    }
-    if (character !== '"') continue;
-
-    const start = index;
-    index += 1;
-    while (index < raw.length) {
-      if (raw[index] === "\\") {
-        index += 2;
-        continue;
-      }
-      if (raw[index] === '"') break;
-      index += 1;
-    }
-    if (index >= raw.length) return;
-    let next = index + 1;
-    while (/\s/u.test(raw[next] ?? "")) next += 1;
-    const frame = stack.at(-1);
-    if (raw[next] !== ":" || frame?.kind !== "object") continue;
-    const key = JSON.parse(raw.slice(start, index + 1)) as string;
-    if (frame.keys?.has(key)) throw new Error(`duplicate object key ${JSON.stringify(key)}`);
-    frame.keys?.add(key);
-  }
-}
-
-function isWellFormed(value: string): boolean {
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    if (code >= 0xd800 && code <= 0xdbff) {
-      const next = value.charCodeAt(index + 1);
-      if (next < 0xdc00 || next > 0xdfff) return false;
-      index += 1;
-    } else if (code >= 0xdc00 && code <= 0xdfff) {
-      return false;
-    }
-  }
-  return true;
-}
-
 function parseProfiles(raw: string): ExecutionProfiles {
   if (raw.length === 0 || Buffer.byteLength(raw, "utf8") > MAX_POLICY_BYTES) {
     throw new Error("execution-profile policy is empty or too large");
   }
-  rejectDuplicateObjectKeys(raw);
   let document: unknown;
   try {
     document = JSON.parse(raw);
@@ -133,8 +77,8 @@ function parseProfiles(raw: string): ExecutionProfiles {
     }
     for (const field of PROFILE_KEYS) {
       const value = candidate[field];
-      if (typeof value !== "string" || value.length === 0 || value !== value.trim() || !isWellFormed(value)) {
-        throw new Error(`execution profile field ${role}.${field} must be one non-empty well-formed string`);
+      if (typeof value !== "string" || value.length === 0 || value !== value.trim()) {
+        throw new Error(`execution profile field ${role}.${field} must be one non-empty trimmed string`);
       }
     }
     if (!EFFORTS.has(candidate.effort as string)) {
@@ -153,41 +97,9 @@ function parseProfiles(raw: string): ExecutionProfiles {
   return profiles;
 }
 
-function stableStat(before: BigIntStats, after: BigIntStats): boolean {
-  return before.dev === after.dev
-    && before.ino === after.ino
-    && before.size === after.size
-    && before.mtimeNs === after.mtimeNs
-    && before.ctimeNs === after.ctimeNs;
-}
-
 export async function readExecutionProfiles(path = PROFILE_PATH): Promise<ExecutionProfiles> {
-  const directory = dirname(path);
-  const resolvedDirectory = await realpath(directory);
-  if (resolvedDirectory !== directory) throw new Error("execution-profile policy directory must not be a symlink");
-  const directoryStat = await lstat(directory);
-  const uid = process.getuid?.();
-  if (uid === undefined) throw new Error("execution-profile policy requires an attributable Unix owner");
-  if (!directoryStat.isDirectory() || directoryStat.uid !== uid || (directoryStat.mode & 0o077) !== 0) {
-    throw new Error("execution-profile policy directory must be operator-owned and private");
-  }
-
-  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try {
-    const before = await handle.stat({ bigint: true });
-    if ((before.mode & BigInt(constants.S_IFMT)) !== BigInt(constants.S_IFREG)
-      || before.uid !== BigInt(uid)
-      || (before.mode & 0o777n) !== 0o600n
-      || before.nlink !== 1n) {
-      throw new Error("execution-profile policy must be one operator-owned mode-600 regular file");
-    }
-    const raw = await handle.readFile({ encoding: "utf8" });
-    const after = await handle.stat({ bigint: true });
-    if (!stableStat(before, after)) throw new Error("execution-profile policy changed while being read");
-    return parseProfiles(raw);
-  } finally {
-    await handle.close();
-  }
+  const raw = await readFile(path, "utf8");
+  return parseProfiles(raw);
 }
 
 export function resolveExecutionRole(

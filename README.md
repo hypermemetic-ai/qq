@@ -200,22 +200,15 @@ and keep the file private:
 chmod 600 ~/.pi/agent/auth.json
 ```
 
-Install the exact six-role policy as one private, atomically replaced
-operator-owned document, then verify it:
-
-```bash
-bin/qq-execution-profiles install
-bin/qq-execution-profiles verify
-```
-
 `delegation/policies/execution-profiles.json` assigns Orchestrator, Architect,
 and Reviewer to `kimi-coding/k3:max`; Implementer, Researcher, and Observer use
 `openai-codex/gpt-5.6-sol:xhigh`. All six request the provider
-default service class. Repository settings, Pi defaults, manifests, caller
-arguments, fallbacks, and inherited environment values cannot override this
-map. The resolver rereads it before each logical request and rejects invalid,
-unsupported, conflicting, or untrusted state before authentication or network
-activity.
+default service class. The mounted extension reads this Repository file
+directly — there is no mirrored copy to install or reconcile. Repository
+settings, Pi defaults, manifests, caller arguments, fallbacks, and inherited
+environment values cannot override this map. The resolver rereads it before
+each logical request and rejects invalid, unsupported, or conflicting state
+before authentication or network activity.
 
 Start the dedicated Architect root through its role-binding launcher; ordinary
 Pi roots are Orchestrators:
