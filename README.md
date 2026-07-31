@@ -163,12 +163,15 @@ retired `npx @latest` route.
 
 Mount qq's global context and Skill roots directly into Pi. These root mounts
 keep methodology and Skill membership live by construction without per-Repository
-activation:
+activation. The `/bro` intelligibility template mounts the same way: the
+Repository stays the versioned source, the global prompt name resolves
+everywhere.
 
 ```bash
-mkdir -p ~/.pi/agent
+mkdir -p ~/.pi/agent ~/.pi/agent/prompts
 ln -sT "$HOME/projects/qq/AGENTS.md" "$HOME/.pi/agent/AGENTS.md"
 ln -sT "$HOME/projects/qq/skills" "$HOME/.pi/agent/skills"
+ln -sT "$HOME/projects/qq/.pi/prompts/bro.md" "$HOME/.pi/agent/prompts/bro.md"
 ```
 
 Delegation launches through the worktree-resident `bin/qq-delegate` engine. The

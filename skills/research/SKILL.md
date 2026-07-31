@@ -9,25 +9,11 @@ Delegate the reading; retain the judgment. The owner creates one private
 mode-700 run directory beneath the delegate runtime root and writes a complete
 `BRIEF.md` there with the exact question, decision, constraints, method,
 relevant Repository paths, Checks, and completion requirements. Keep researcher
-scratch beneath that run directory. Invoke the assigned worktree's resident
-engine. It resolves its Pi wrapper, manifests, and execution-profile policy and
-rejects `--cwd` outside its Git common directory:
-
-```sh
-<assigned-worktree>/bin/qq-delegate run --role researcher \
-  --cwd <absolute-worktree> --brief <absolute-run-dir>/BRIEF.md
-```
-
-It blocks through child exit, writes `TERMINAL` v2 (`exit_code`, `timed_out`,
-artifact paths), and returns child code. A nonzero exit or missing `ENVELOPE.md`
-fails dispatch. For dispatch-infrastructure failure—engine refusal, timeout,
-or substrate
-failure—resume once in a fresh run directory with the same `BRIEF.md`. The
-engine rejects the spent directory, which is sealed or has prior output. Use
-the source manifest's recorded `timeoutMs`, never an override; a second failure
-is `inconclusive-under-substrate`, never an operator restatement. The owner
-spot-checks load-bearing citations, judges findings, and writes the Repository
-artifact.
+scratch beneath that run directory. Dispatch through the `delegate-batch`
+contract with `--role researcher`; its run-dir, resident-engine, blocking,
+`TERMINAL`, envelope, and infrastructure-failure rules apply unchanged. The
+owner spot-checks load-bearing citations, judges findings, and writes the
+Repository artifact.
 
 ## Method
 

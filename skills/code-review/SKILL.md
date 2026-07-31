@@ -59,8 +59,5 @@ the Change and code without inheriting the author's conclusions.
    breaker: halt at the last green state, put the owning-layer question to the
    operator, and never invoke further loop machinery.
 4. For dispatch-infrastructure failure—engine refusal, timeout, or substrate
-   failure—resume once in a fresh run directory with the same `BRIEF.md`. The
-   engine rejects the spent directory, which is sealed or has prior output. Use
-   the source manifest's recorded `timeoutMs`, never an override; a second
-   failure is `inconclusive-under-substrate`, never an operator restatement.
-   Dispatch formed findings and context gaps fresh.
+   failure—follow the `delegate-batch` contract's resume rule. Dispatch formed
+   findings and context gaps fresh.

@@ -12,11 +12,7 @@ description: >-
 # writing-for-clients
 
 Insures against the sales voice: client-facing material drifting into
-performed confidence until the reader discounts the facts underneath
-[earned 2026-07-03: the meeting-reviewer deck shipped ten epigram
-titles on reasoned copy; the operator refused the register — "be
-normal, the confidence of a practical man who solves real problems in
-the real world"].
+performed confidence until the reader discounts the facts underneath.
 
 Scope: everything a client reads, in any project — a deck, a page, a
 proposal, an email. The communication skill governs what crosses to

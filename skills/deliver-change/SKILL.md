@@ -15,27 +15,39 @@ acceptance criterion to fresh evidence. At land, resolve foreign drift through
 exactly one preserve-or-restore question, never an operator-input deadlock.
 
 1. **Align.** Require the owning Task's decision ledger to cite what settled
-   every consequential decision per `align`—or say `none`. Dispositions do not
-   transfer; an uncited decision returns to alignment, and broader reach needs
-   a decision record. Confirm branch and worktree isolation.
+   every consequential decision—or say `none`. Dispositions do not transfer;
+   an uncited decision returns to alignment, and broader reach needs a
+   decision record. For a settled decision reaching beyond one Change, mint
+   its Backlog decision record in the Change checkout first encoding it,
+   riding that pull request—never primary `main`; cite the asked-and-answered
+   exchange until then, and switch the ledger to the record id before Task
+   finalization. Confirm branch and worktree isolation.
 2. **Born.** Call `qq-herdr-home inspect --repo <root>`. Create the Change as a
    plain linked worktree from the agreed base, with no Herdr workspace.
    Backlog's CLI creates the Change's Task record in decision-28's
    by-construction operator-store; lifecycle edits stay there (commit+push),
-   off-branch. Capture the approved plan per
-   `align` and cite its doc id in the ledger. Dispatch from project home, work
-   in the checkout, and never let cockpit attachment block. Transfer an
-   existing aligned Change with `/handoff <Task-ID>`; the receiver continues
-   this Skill, and handoff is not delegation.
-3. **Implement.** Send one complete work order through `delegate-batch` and
-   verify its run-dir `ENVELOPE.md` against the tree. Use `research` for
+   off-branch. Capture the approved plan as a Backlog `plans` document through
+   Backlog's CLI and attach it to the Task (`--doc` replaces the list); never
+   capture `.pi/plans/` scratch. Cite the plan's doc id in the ledger.
+   Dispatch from project home, work in the checkout, and never let cockpit
+   attachment block. Transfer an existing aligned Change with
+   `/handoff <Task-ID>`; the receiver continues this Skill, and handoff is not
+   delegation.
+3. **Implement.** The full cycle—one complete work order through
+   `delegate-batch`, its run-dir `ENVELOPE.md` verified against the
+   tree—applies to every non-trivial Change. A trivial Change the owner
+   implements directly, skipping or à-la-carte-ing ceremony pieces as makes
+   sense; the bar for trivial is high, and over-firing the full cycle is
+   preferred over rationalizing a Change down to it. Use `research` for
    decision-grade evidence. Run Checks that observe changed behavior. Commit
    only green units. In-boundary state-space shrinkage or preservation is
    pre-authorized and reported in the envelope; boundary changes align.
 4. **Review.** After local verification, run fresh-context `code-review` for
-   every non-trivial Change with trust boundaries beside the threat model.
-   Verify findings, fix only confirmed in-scope failures, rerun affected Checks,
-   review every fix delta, and present the diff inline.
+   every non-trivial Change; skip only a purely mechanical Change—a deletion
+   or docs/prose edit, grep/CI-verifiable, with no trust boundary, no operator
+   state, and no external side effect. Verify findings, fix only confirmed
+   in-scope failures, rerun affected Checks, review every fix delta, and
+   present the diff inline.
 5. **Finalize, then PR.** First verify every acceptance criterion in the
    checkout, summarize the Change, mark its Task Done through Backlog's CLI,
    store-commit—not branch-commit—the status edit, and push the green finalization.
@@ -54,20 +66,15 @@ exactly one preserve-or-restore question, never an operator-input deadlock.
    rule, while later intent is new work requiring approval.
 6. **Land and retire.** On the operator's merge, and after any watch wake,
    resume, or operator message, call idempotent `qq-change land <pr> --repo
-   <checkout>`. Its engine verifies merge and ancestry and safely
-   fast-forwards the sole primary `main`; exit 2 is a rail refusal and exit 1
-   an error. Stop and preserve the Change; repeating the call is safe. Run
-   `qq-observe assemble` while the worktree lives, then dispatch
-   `<worktree>/bin/qq-delegate run --role observer --cwd <absolute-worktree>
-   --brief <absolute-run-dir>/BRIEF.md` with the procedure/package paths
-   and the `qq-observe recurrence-keys` inventory. The call blocks; validate
-   and finalize on return; use `qq-observe finalize --failed` on analysis
-   failure. Finalize this
-   guided package before calling `qq-change retire`, which refuses while it
-   is absent. Retire only with the executing owner's verified lifecycle ownership
-   and the engine's checkout, branch, workspace-absence, topology, cleanliness,
-   and focus rails; use the legacy placeholder-pane form only for legacy work
-   sessions. On refusal or error, report and preserve every session, checkout,
-   pane, and branch; never force-delete, stash, clean, reset, switch, or repair
-   delivery state. Keep the five accountable-owner gates: intent alignment,
-   plan approval, review verdict, acceptance, and merge.
+   <checkout>`; it verifies merge and ancestry and fast-forwards the sole
+   primary `main`. Assemble and finalize this Change's guided observer package
+   while the worktree lives—dispatch the observer through the `delegate-batch`
+   contract with the procedure/package paths and the `qq-observe
+   recurrence-keys` inventory—then call `qq-change retire`. The engines own
+   the refusal semantics: land ancestry, package presence and finalized state,
+   lifecycle ownership, checkout, branch, workspace-absence, topology,
+   cleanliness, focus, and bound delegate run dirs. On refusal or error,
+   report and preserve every session, checkout, pane, and branch; never
+   force-delete, stash, clean, reset, switch, or repair delivery state. Keep
+   the five accountable-owner gates: intent alignment, plan approval, review
+   verdict, acceptance, and merge.

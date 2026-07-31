@@ -41,6 +41,6 @@ navigate. For secrets, mark the paste point. If one enters chat, place it
 without repeating it and flag the exposure.
 
 This Skill governs operator-only steps. It does not run interviews: alignment
-decisions belong to `align`, and hands-on acceptance Checks belong to
-`uat-signoff`. Both may share this Skill's pre-staging discipline, but their
-protocols are their own.
+decisions belong to the accountable owner's alignment conversation, and
+hands-on acceptance Checks belong to `uat-signoff`. Both may share this
+Skill's pre-staging discipline, but their protocols are their own.
