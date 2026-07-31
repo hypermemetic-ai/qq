@@ -226,13 +226,7 @@ ln -sfn "$HOME/projects/qq/extensions" "$HOME/.pi/agent/extensions/qq"
 
 That one link mounts the Repository extension set, which is live in every Pi
 session from then on. `settings.json` no longer carries extension paths. Source-
-only changes need no install step. On first bootstrap and after a reviewed
-extension dependency-lock change, install the exact root lock from the mounted
-checkout with lifecycle scripts disabled:
-
-```bash
-npm ci --ignore-scripts
-```
+only changes need no install step.
 
 The Repository extension gives local feedback when Pi's built-in `write` or
 `edit` targets the normalized `backlog/` path of the checkout containing
@@ -273,15 +267,6 @@ fixed verdict form. The Architect records only choices settled in conversation:
 route with non-empty agreed scope or set aside current evidence. Untouched
 occurrences stay open, and a later same-key occurrence reopens automatically.
 
-JSON remains the canonical format for machine interfaces, persistence, schemas,
-receipts, JSONL, and hashes. At an explicit qq-owned model-ingress boundary,
-a measured substantial structured value may instead be presented to the model
-with deterministic TOON encoding. `/architect` is the only current qualifying
-boundary: it keeps and validates canonical parsed JSON, then encodes that value
-once for its prompt. A representative 42-finding context measured about 5.7%
-fewer estimated o200k tokens than compact JSON with TOON 4.1.0; this is shape-
-specific evidence, not a promise of universal savings.
-
 `architect_disposition` settles explicitly operator-settled findings in one
 call: `action=settle` with one decision per recurrence key — `route` with the
 agreed non-empty scope, `set_aside` with empty scope. qq-observe validates
@@ -313,7 +298,6 @@ Link the cockpit configurations whose tools read fixed `~/.config` paths:
 mkdir -p ~/.config ~/.config/glow ~/.config/herdr
 ln -s "$HOME/projects/qq/cockpit/ghostty" ~/.config/ghostty
 ln -s "$HOME/projects/qq/cockpit/glow/glow.yml" ~/.config/glow/glow.yml
-ln -s "$HOME/projects/qq/cockpit/glow/tuned.json" ~/.config/glow/tuned.json
 ln -s "$HOME/projects/qq/cockpit/herdr/config.toml" ~/.config/herdr/config.toml
 ```
 

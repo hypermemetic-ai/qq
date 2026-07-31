@@ -12,7 +12,6 @@ import assert from "node:assert/strict";
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { decode } from "@toon-format/toon";
 const [modulePath, scratch] = process.argv.slice(2);
 const { default: register } = await import(pathToFileURL(modulePath));
 function occurrence(id, key, repository, pr) {
@@ -44,7 +43,7 @@ function injectedContext(message) {
   const start = message.indexOf("\n\n") + 2;
   const end = message.indexOf("\n\n", start);
   assert.ok(start > 1 && end > start, "Architect context block is missing");
-  return decode(message.slice(start, end));
+  return JSON.parse(message.slice(start, end));
 }
 function harness(queue, options = {}) {
   const commands = new Map(), tools = new Map(), events = new Map(), calls = [], messages = [], notifications = [];
@@ -74,7 +73,7 @@ const openedContext = context();
 const h = harness([result(openedContext)]);
 await h.commands.get("architect").handler("", h.ctx);
 assert.equal(h.calls.length, 1); assert.deepEqual(h.calls[0].args, ["architect-context"]);
-assert.match(h.messages[0], /deterministic TOON/);
+assert.match(h.messages[0], /compact JSON/);
 assert.match(h.messages[0], /exact key hit in a Backlog decision record/);
 assert.match(h.messages[0], /architect_disposition action=settle/);
 assert.equal(h.messages[0].includes("awaiting affirmative"), false);

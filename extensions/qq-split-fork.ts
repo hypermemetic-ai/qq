@@ -1,8 +1,7 @@
 // @ts-nocheck
 // Adapted from https://github.com/mitsuhiko/agent-stuff, extensions/split-fork.ts (Apache-2.0).
 
-import { randomUUID } from "node:crypto";
-import { existsSync, promises as fs } from "node:fs";
+import { existsSync } from "node:fs";
 import * as path from "node:path";
 
 function shellQuote(value) {
@@ -25,48 +24,15 @@ function getPiInvocationParts() {
 }
 
 function buildPiStartupInput(sessionFile, prompt) {
-  // The prompt travels as one positional argument: pi's argument parser
-  // rejects a `--` sentinel ("Error: Unknown option: --").
-  const commandParts = [...getPiInvocationParts(), "--session", sessionFile];
+  // Native forking: pi --fork <path|id> rewrites the session into a new one at
+  // startup (stock 0.81.1 dist/cli/args.js). The prompt travels as one
+  // positional argument: pi's argument parser rejects a `--` sentinel
+  // ("Error: Unknown option: --").
+  const commandParts = [...getPiInvocationParts(), "--fork", sessionFile];
   if (prompt.length > 0) {
     commandParts.push(prompt);
   }
   return `${commandParts.map(shellQuote).join(" ")}\n`;
-}
-
-async function createForkedSession(ctx) {
-  const sessionFile = ctx.sessionManager.getSessionFile();
-  if (!sessionFile) {
-    ctx.ui.notify("Cannot fork this session because it has no persisted session file.", "warning");
-    return undefined;
-  }
-
-  const sessionDir = path.dirname(sessionFile);
-  const branchEntries = ctx.sessionManager.getBranch();
-  const currentHeader = ctx.sessionManager.getHeader();
-  const timestamp = new Date().toISOString();
-  const fileTimestamp = timestamp.replace(/[:.]/g, "-");
-  const newSessionId = randomUUID();
-  const newSessionFile = path.join(
-    sessionDir,
-    `${fileTimestamp}_${newSessionId}.jsonl`,
-  );
-  const newHeader = {
-    type: "session",
-    version: currentHeader?.version ?? 3,
-    id: newSessionId,
-    timestamp,
-    cwd: currentHeader?.cwd ?? ctx.cwd,
-    parentSession: sessionFile,
-  };
-  const lines = [
-    JSON.stringify(newHeader),
-    ...branchEntries.map((entry) => JSON.stringify(entry)),
-  ].join("\n") + "\n";
-
-  await fs.mkdir(sessionDir, { recursive: true });
-  await fs.writeFile(newSessionFile, lines, "utf8");
-  return newSessionFile;
 }
 
 function parsePaneId(stdout) {
@@ -119,10 +85,13 @@ export default function register(pi, deps = {}) {
         );
         return;
       }
-      const forkedSessionFile = await createForkedSession(ctx);
-      if (!forkedSessionFile) return;
+      const sessionFile = ctx.sessionManager.getSessionFile();
+      if (!sessionFile) {
+        ctx.ui.notify("Cannot fork this session because it has no persisted session file.", "warning");
+        return;
+      }
 
-      const startupInput = buildPiStartupInput(forkedSessionFile, prompt);
+      const startupInput = buildPiStartupInput(sessionFile, prompt);
       const manualCommand = startupInput.slice(0, -1);
       if (wasBusy) {
         ctx.ui.notify(
@@ -148,7 +117,7 @@ export default function register(pi, deps = {}) {
           notifyManualLaunch(
             ctx,
             error instanceof Error ? error.message : String(error),
-            forkedSessionFile,
+            sessionFile,
             manualCommand,
           );
           return;
@@ -158,7 +127,7 @@ export default function register(pi, deps = {}) {
           notifyManualLaunch(
             ctx,
             executionReason(splitResult, "unknown herdr split error"),
-            forkedSessionFile,
+            sessionFile,
             manualCommand,
           );
           return;
@@ -169,7 +138,7 @@ export default function register(pi, deps = {}) {
           notifyManualLaunch(
             ctx,
             executionReason(splitResult, "herdr returned no readable pane id"),
-            forkedSessionFile,
+            sessionFile,
             manualCommand,
           );
           return;
@@ -185,7 +154,7 @@ export default function register(pi, deps = {}) {
           notifyManualLaunch(
             ctx,
             executionReason(sendTextResult, "unknown herdr send-text error"),
-            forkedSessionFile,
+            sessionFile,
             manualCommand,
           );
           return;
@@ -201,14 +170,14 @@ export default function register(pi, deps = {}) {
           notifyManualLaunch(
             ctx,
             executionReason(sendKeysResult, "unknown herdr send-keys error"),
-            forkedSessionFile,
+            sessionFile,
             manualCommand,
           );
           return;
         }
 
         ctx.ui.notify(
-          `Forked to ${path.basename(forkedSessionFile)} in herdr pane ${paneId}.`,
+          `Forked to ${path.basename(sessionFile)} in herdr pane ${paneId}.`,
           "info",
         );
         return;
@@ -226,20 +195,20 @@ export default function register(pi, deps = {}) {
           notifyManualLaunch(
             ctx,
             executionReason(tmuxResult, "unknown tmux split error"),
-            forkedSessionFile,
+            sessionFile,
             manualCommand,
           );
           return;
         }
         ctx.ui.notify(
-          `Forked to ${path.basename(forkedSessionFile)} in a right-hand tmux split.`,
+          `Forked to ${path.basename(sessionFile)} in a right-hand tmux split.`,
           "info",
         );
         return;
       }
 
       ctx.ui.notify(
-        `Forked session: ${forkedSessionFile}. No herdr or tmux session is available; run manually: ${manualCommand}`,
+        `Forked session: ${sessionFile}. No herdr or tmux session is available; run manually: ${manualCommand}`,
         "warning",
       );
     },

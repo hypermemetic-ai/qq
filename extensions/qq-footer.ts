@@ -54,17 +54,6 @@ function singleLine(value) {
     .trim();
 }
 
-function textWidth(value) {
-  return [...stripAnsi(value)].length;
-}
-
-function truncate(value, width, ellipsis = "...") {
-  if (width <= 0) return "";
-  if (textWidth(value) <= width) return value;
-  if (width <= textWidth(ellipsis)) return [...ellipsis].slice(0, width).join("");
-  return [...value].slice(0, width - textWidth(ellipsis)).join("") + ellipsis;
-}
-
 function finiteNumber(value) {
   if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
   if (typeof value !== "string" || value.trim() === "") return undefined;
@@ -397,34 +386,16 @@ export default function register(pi, deps = {}) {
   const startTimeout = deps.setTimeout ?? globalThis.setTimeout;
   const stopTimeout = deps.clearTimeout ?? globalThis.clearTimeout;
   const quotaCache = new Map();
-  const unauthorizedAuth = new Map();
-  // Width semantics come from pi-tui (the host's own visibleWidth/truncateToWidth,
-  // same functions pi core's footer uses). Injected in tests; the code-point
-  // fallback exists only so render stays total if the host import ever fails.
-  const fallbackWidthKit = {
-    visibleWidth: (value) => textWidth(value),
-    truncateToWidth: (value, width, ellipsis) => truncate(value, width, ellipsis),
-  };
-  let widthKit = deps.widthKit ?? fallbackWidthKit;
+  // Width semantics come from pi-tui (the host's own visibleWidth/
+  // truncateToWidth, same functions pi core's footer uses); injected in tests.
+  let widthKit = deps.widthKit;
   let ctx;
   let tui;
   let timer;
-  let inFlight;
+  let polling = false;
 
   function repaint() {
     tui?.requestRender?.();
-  }
-
-  function cancelPoll() {
-    if (!inFlight) return;
-    const cancelled = inFlight;
-    inFlight = undefined;
-    cancelled.cancelled = true;
-    cancelled.controller?.abort();
-    if (cancelled.timeout !== undefined) {
-      stopTimeout(cancelled.timeout);
-      cancelled.timeout = undefined;
-    }
   }
 
   async function readAuth() {
@@ -438,103 +409,64 @@ export default function register(pi, deps = {}) {
   }
 
   async function pollActiveProvider() {
-    if (inFlight) return inFlight.promise;
+    if (polling) return;
     const provider = ctx?.model?.provider;
     if (!Object.hasOwn(PROVIDER_MARKS, provider)) return;
-
-    const flight = {
-      cancelled: false,
-      controller: undefined,
-      timeout: undefined,
-      promise: undefined,
-    };
-    flight.promise = (async () => {
+    polling = true;
+    try {
       let authFile;
       try {
         authFile = await readAuth();
       } catch {
-        if (!flight.cancelled) {
-          quotaCache.delete(provider);
-          repaint();
-        }
+        quotaCache.delete(provider);
+        repaint();
         return;
       }
-      if (flight.cancelled) return;
 
       const auth = authFile?.entries?.[provider];
       const providerAuth = providerRequest(provider, auth);
       if (!providerAuth) {
         quotaCache.delete(provider);
-        unauthorizedAuth.delete(provider);
         repaint();
         return;
       }
 
-      const authFingerprint = authFile.fingerprint;
-      if (unauthorizedAuth.get(provider) === authFingerprint) return;
-
-      flight.controller = new AbortController();
-      flight.timeout = startTimeout(
-        () => flight.controller.abort(),
-        REQUEST_TIMEOUT_MS,
-      );
+      const controller = new AbortController();
+      const timeout = startTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
       try {
         const response = await request(providerAuth.url, {
           method: "GET",
           headers: providerAuth.headers,
-          signal: flight.controller.signal,
+          signal: controller.signal,
         });
-        if (flight.cancelled) return;
-        if (response?.status === 401) {
-          unauthorizedAuth.set(provider, authFingerprint);
-          if (!flight.cancelled) {
-            quotaCache.delete(provider);
-            repaint();
-          }
-          return;
-        }
         if (!response || response.ok === false) {
-          if (!flight.cancelled) {
-            quotaCache.delete(provider);
-            repaint();
-          }
+          quotaCache.delete(provider);
+          repaint();
           return;
         }
         let body;
         try {
           body = await response.json();
         } catch {
-          if (!flight.cancelled) {
-            quotaCache.delete(provider);
-            repaint();
-          }
+          quotaCache.delete(provider);
+          repaint();
           return;
         }
-        if (flight.cancelled) return;
         const windows = providerAuth.parse(body);
         if (!windows) {
           quotaCache.delete(provider);
           repaint();
           return;
         }
-        unauthorizedAuth.delete(provider);
         quotaCache.set(provider, windows);
         repaint();
       } catch {
         // Keep a last-good cache on transport failure; without one, no quota is shown.
       } finally {
-        if (flight.timeout !== undefined) {
-          stopTimeout(flight.timeout);
-          flight.timeout = undefined;
-        }
+        stopTimeout(timeout);
       }
-    })();
-    inFlight = flight;
-
-    try {
-      await flight.promise;
     } finally {
-      if (inFlight === flight) inFlight = undefined;
+      polling = false;
     }
   }
 
@@ -552,23 +484,13 @@ export default function register(pi, deps = {}) {
   });
 
   pi.on("session_start", async (_event, nextCtx) => {
-    cancelPoll();
     ctx = nextCtx;
-    if (!deps.widthKit && widthKit === fallbackWidthKit) {
-      try {
-        const mod = await import("@earendil-works/pi-tui");
-        if (
-          typeof mod.visibleWidth === "function" &&
-          typeof mod.truncateToWidth === "function"
-        ) {
-          widthKit = {
-            visibleWidth: mod.visibleWidth,
-            truncateToWidth: mod.truncateToWidth,
-          };
-        }
-      } catch {
-        // pi always provides pi-tui; the fallback keeps render total regardless.
-      }
+    if (!widthKit) {
+      const mod = await import("@earendil-works/pi-tui");
+      widthKit = {
+        visibleWidth: mod.visibleWidth,
+        truncateToWidth: mod.truncateToWidth,
+      };
     }
     ctx.ui.setFooter((nextTui, theme, footerData) => {
       tui = nextTui;
@@ -582,7 +504,6 @@ export default function register(pi, deps = {}) {
   });
 
   pi.on("session_shutdown", () => {
-    cancelPoll();
     if (timer !== undefined) {
       stopInterval(timer);
       timer = undefined;

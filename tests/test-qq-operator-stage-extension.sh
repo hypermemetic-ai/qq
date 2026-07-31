@@ -59,21 +59,6 @@ function createHarness(options = {}) {
     if (args[1] === "send-text") {
       currentInputByPane.set(args[2], args[3]);
     }
-    if (args[1] === "wait-output") {
-      const [,, paneId, ...waitOptions] = args;
-      const sourceIndex = waitOptions.indexOf("--source");
-      const matchIndex = waitOptions.indexOf("--match");
-      const source = waitOptions[sourceIndex + 1];
-      const match = waitOptions[matchIndex + 1];
-      const snapshot =
-        historicalOutput +
-        (source === "recent-unwrapped" ? currentInputByPane.get(paneId) ?? "" : "");
-      return {
-        code: snapshot.includes(match) ? 0 : 1,
-        stdout: "",
-        stderr: "",
-      };
-    }
     return { code: 0, stdout: "", stderr: "" };
   };
 
@@ -136,7 +121,7 @@ async function testRegistrationAndLowDanger() {
 
   assert.deepEqual(
     operationNames(h.execCalls),
-    ["split", "rename", "send-text", "wait-output", "show"],
+    ["split", "rename", "send-text", "show"],
   );
   assert.deepEqual(h.execCalls[0].args, [
     "pane",
@@ -162,17 +147,6 @@ async function testRegistrationAndLowDanger() {
   const requiredLine = "bash -c 'printf ok'; __qq_s=$?; [ $__qq_s -eq 0 ] && exit";
   assert.deepEqual(h.execCalls[2].args, ["pane", "send-text", "wM:p4Q", requiredLine]);
   assert.deepEqual(h.execCalls[3].args, [
-    "pane",
-    "wait-output",
-    "wM:p4Q",
-    "--source",
-    "recent-unwrapped",
-    "--timeout",
-    "5000",
-    "--match",
-    requiredLine,
-  ]);
-  assert.deepEqual(h.execCalls[4].args, [
     "notification",
     "show",
     "Operator action ready",
@@ -216,7 +190,7 @@ async function testHighDanger() {
 
   assert.deepEqual(
     operationNames(h.execCalls),
-    ["split", "rename", "send-text", "wait-output", "show"],
+    ["split", "rename", "send-text", "show"],
   );
   const line = h.execCalls[2].args[3];
   assert.equal(
@@ -374,47 +348,6 @@ async function testSendFailureOwnsTeardown() {
   assert.equal(h.execCalls.some(({ args }) => args[1] === "send-keys"), false);
 }
 
-async function testWaitOutputVerifiesStaging() {
-  setHerdrPane("source-pane");
-  const h = createHarness({
-    execReply(call) {
-      if (call.args[1] === "split") {
-        return {
-          code: 0,
-          stdout: JSON.stringify({ result: { pane: { pane_id: "wM:p8R" } } }),
-          stderr: "",
-        };
-      }
-      if (call.args[1] === "wait-output") {
-        return { code: 1, stdout: "", stderr: "timeout" };
-      }
-      return { code: 0, stdout: "", stderr: "" };
-    },
-  });
-  const outcome = await h.tool.execute(
-    "unverified-staging",
-    { command: "printf expected", description: "verify staging", danger: "low" },
-    undefined,
-  );
-
-  assertErrorResult(outcome);
-  assert.match(outcome.content[0].text, /could not verify/);
-  assert.deepEqual(
-    operationNames(h.execCalls),
-    ["split", "rename", "send-text", "wait-output", "close"],
-  );
-  const waits = h.execCalls.filter(({ args }) => args[1] === "wait-output");
-  assert.equal(waits.length, 1);
-  assert.equal(waits[0].args.includes("recent-unwrapped"), true);
-  assert.equal(waits[0].args.includes("5000"), true);
-  assert.equal(
-    waits[0].args.includes("bash -c 'printf expected'; __qq_s=$?; [ $__qq_s -eq 0 ] && exit"),
-    true,
-  );
-  assert.deepEqual(h.execCalls[4].args, ["pane", "close", "wM:p8R"]);
-  assert.equal(h.execCalls.some(({ args }) => args[1] === "send-keys"), false);
-}
-
 async function testNotificationFailureOwnsTeardown() {
   setHerdrPane("source-pane");
   const h = createHarness({
@@ -441,9 +374,9 @@ async function testNotificationFailureOwnsTeardown() {
   assert.equal(outcome.details.teardown, "closed");
   assert.deepEqual(
     operationNames(h.execCalls),
-    ["split", "rename", "send-text", "wait-output", "show", "close"],
+    ["split", "rename", "send-text", "show", "close"],
   );
-  assert.deepEqual(h.execCalls[5].args, ["pane", "close", "wM:p6N"]);
+  assert.deepEqual(h.execCalls[4].args, ["pane", "close", "wM:p6N"]);
   assert.equal(h.execCalls.some(({ args }) => args[1] === "send-keys"), false);
 }
 
@@ -581,7 +514,6 @@ await testRefusalsMakeNoExecCalls();
 await testSplitFailure();
 await testUnparseablePaneId();
 await testSendFailureOwnsTeardown();
-await testWaitOutputVerifiesStaging();
 await testNotificationFailureOwnsTeardown();
 await testCloseFailureReportsOrphan();
 setHerdrPane(undefined);
