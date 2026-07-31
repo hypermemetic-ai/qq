@@ -239,6 +239,8 @@ retire_change() {
   local agents panes snapshot focused_workspace state branch_exists sole_pane
   local workspace_exists=true
   local observer_state
+  local delegate_root_input delegate_root delegate_dir delegate_cwd
+  local -a delegate_run_dirs
 
   observer_state="$("$QQ_ENGINE_JQ" -cn \
     --argjson allow_unobserved_retire "$allow_unobserved_retire" \
@@ -584,6 +586,44 @@ retire_change() {
     fi
   fi
 
+  # Delegate run dirs bound to the retiring checkout expire with it; the
+  # observer package verified above is the durable evidence. A run dir is
+  # matched only by its sealing TERMINAL record's exact cwd — dirs without
+  # TERMINAL are in-flight or foreign and are never touched. qq-delegate
+  # owns the runtime-root contract; this follows the same default.
+  delegate_run_dirs=()
+  delegate_root_input="${QQ_DISPATCH_RUNTIME_ROOT:-${XDG_STATE_HOME:-${HOME:+$HOME/.local/state}}/qq/delegate}"
+  if [[ "$delegate_root_input" == /* ]]; then
+    delegate_root="$(realpath -e -- "$delegate_root_input" 2>/dev/null || true)"
+    if [ -n "$delegate_root" ] && [ -d "$delegate_root" ]; then
+      for delegate_dir in "$delegate_root"/*; do
+        [ -d "$delegate_dir" ] && [ ! -L "$delegate_dir" ] || continue
+        [ -O "$delegate_dir" ] || continue
+        [ -f "$delegate_dir/TERMINAL" ] && [ ! -L "$delegate_dir/TERMINAL" ] || continue
+        delegate_cwd="$("$QQ_ENGINE_JQ" -er '.cwd | select(type == "string")' \
+          "$delegate_dir/TERMINAL" 2>/dev/null || true)"
+        [ "$delegate_cwd" = "$checkout_canonical" ] || continue
+        delegate_run_dirs+=("$delegate_dir")
+      done
+    fi
+  fi
+
+  # Run dirs are delegate completion evidence: without --pr no observer
+  # package was verified, so bound sealed run dirs block retirement unless
+  # the operator explicitly overrides. The with---pr path gates on
+  # verify_observer_package above.
+  if [ -z "$pull_request" ] && [ "$allow_unobserved_retire" = false ] \
+    && [ "${#delegate_run_dirs[@]}" -gt 0 ]; then
+    state="$("$QQ_ENGINE_JQ" -cn \
+      --arg workspace "$workspace" --arg checkout "$checkout_canonical" \
+      --arg branch "$branch" \
+      --argjson delegate_run_dirs "${#delegate_run_dirs[@]}" \
+      '{workspace:$workspace, checkout:$checkout, branch:$branch, delegate_run_dirs:$delegate_run_dirs, observer_package_status:"not-verified"}')"
+    qq_engine_refuse \
+      'Sealed delegate run dirs bound to the retiring checkout were found, but no observer package was verified: supply --pr so the canonical guided package is checked first, or --allow-unobserved-retire as the explicit operator override. Preserve the run dirs until their evidence is packaged.' \
+      "$state"
+  fi
+
   state="$("$QQ_ENGINE_JQ" -cn \
     --arg workspace "$workspace" --arg checkout "$checkout_canonical" \
     --arg branch "$branch" --arg branch_tip "$branch_tip" \
@@ -591,6 +631,7 @@ retire_change() {
     --argjson workspace_exists "$workspace_exists" \
     --argjson live_agent_count "$live_agent_count" \
     --argjson pane_count "$pane_count" --argjson tab_count "$tab_count" \
+    --argjson delegate_run_dirs "${#delegate_run_dirs[@]}" \
     --argjson observer "$observer_state" \
     '{
       workspace:$workspace,
@@ -602,12 +643,24 @@ retire_change() {
       focused_workspace:$focused_workspace,
       live_agent_count:$live_agent_count,
       pane_count:$pane_count,
-      tab_count:$tab_count
+      tab_count:$tab_count,
+      delegate_run_dirs:$delegate_run_dirs
     } + $observer')"
   if [ "$mode" = inspect ] || [ "$dry_run" = true ]; then
     qq_engine_done \
-      'retirement rails passed; the work session, checkout, and branch were not removed' "$state"
+      'retirement rails passed; the work session, checkout, branch, and delegate run dirs were not removed' "$state"
   fi
+
+  for delegate_dir in ${delegate_run_dirs[@]+"${delegate_run_dirs[@]}"}; do
+    if ! rm -rf -- "$delegate_dir" 2>/dev/null; then
+      state="$("$QQ_ENGINE_JQ" -cn --argjson base "$state" \
+        --arg delegate_run_dir "$delegate_dir" \
+        '$base + {delegate_run_dir:$delegate_run_dir, delegate_run_dirs_state:"removal-failed"}')"
+      qq_engine_refuse \
+        'A delegate run directory bound to the retiring checkout could not be removed unforced. Preserve the work session, checkout, and branch exactly as observed; resolve the run dir ownership without force.' \
+        "$state"
+    fi
+  done
 
   if [ "$workspace_exists" = true ]; then
     if ! "$herdr_bin" worktree remove --workspace "$workspace" \

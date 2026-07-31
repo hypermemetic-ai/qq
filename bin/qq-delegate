@@ -79,16 +79,15 @@ engine_repository_root="$(realpath -e -- "$engine_repository_root" 2>/dev/null)"
 [[ "$engine_repository_root" == "$engine_worktree" ]] || fail 64 "engine path does not resolve beneath its assigned worktree"
 engine_git_common_dir="$(realpath -e -- "$(git_query -C "$engine_worktree" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" 2>/dev/null)" || fail 67 "cannot resolve the engine Git common directory"
 
-launcher_tmp_input="${TMPDIR:-/tmp}"
-runtime_root_input="${QQ_DISPATCH_RUNTIME_ROOT:-$launcher_tmp_input/pi-subagents-uid-$(id -u)}"
-[[ "$runtime_root_input" == /* ]] || fail 68 "QQ_DISPATCH_RUNTIME_ROOT must be absolute"
+# The delegate runtime root is durable qq state, not volatile /tmp scratch:
+# run dirs hold the completion record until qq-change retire removes them
+# with the Change checkout. qq-observe and qq-change follow this same
+# default; QQ_DISPATCH_RUNTIME_ROOT overrides it.
+state_home="${XDG_STATE_HOME:-${HOME:+$HOME/.local/state}}"
+runtime_root_input="${QQ_DISPATCH_RUNTIME_ROOT:-$state_home/qq/delegate}"
+[[ "$runtime_root_input" == /* ]] || fail 68 "dispatch runtime root must be absolute"
 mkdir -p -- "$runtime_root_input" || fail 68 "cannot create the dispatch runtime root"
 runtime_root="$(realpath -e -- "$runtime_root_input" 2>/dev/null)" || fail 68 "cannot resolve the dispatch runtime root"
-system_tmp="$(realpath -e -- /tmp 2>/dev/null)" || fail 68 "cannot resolve /tmp"
-launcher_tmp="$(realpath -e -- "$launcher_tmp_input" 2>/dev/null)" || fail 68 "cannot resolve the launcher temporary directory"
-[[ -d "$launcher_tmp" ]] || fail 68 "launcher temporary path is not a directory"
-path_is_within "$runtime_root" "$system_tmp" || fail 68 "runtime root must stay beneath /tmp"
-[[ "$runtime_root" != "$system_tmp" ]] || fail 68 "runtime root may not be all of /tmp"
 
 pi_binary="$bin_dir/pi"
 [[ -f "$pi_binary" && -x "$pi_binary" && ! -L "$pi_binary" ]] || fail 70 "the worktree Pi wrapper is unavailable or linked"

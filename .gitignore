@@ -6,7 +6,6 @@
 
 # qq-local runtime state
 .qq/
-.pi-subagents/
 /node_modules/
 
 # retired knowledge-layer plugin residue — the code graph now lives out-of-repo
