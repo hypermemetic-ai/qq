@@ -120,15 +120,9 @@ async function testHerdrLaunch() {
   });
   await h.command.handler("continue the fork", h.ctx);
 
-  const files = forkedFiles(h);
-  assert.equal(files.length, 1, "herdr case did not write exactly one forked session");
-  const lines = fs.readFileSync(files[0], "utf8").trimEnd().split("\n").map(JSON.parse);
-  assert.equal(lines.length, 3);
-  assert.equal(lines[0].type, "session");
-  assert.equal(lines[0].version, sourceHeader.version);
-  assert.equal(lines[0].cwd, sourceHeader.cwd);
-  assert.equal(lines[0].parentSession, h.sessionFile);
-  assert.deepEqual(lines.slice(1), branchEntries);
+  // Native forking: the extension writes no session file; pi --fork owns the
+  // session format at startup.
+  assert.equal(forkedFiles(h).length, 0, "extension wrote a session file pi now owns");
 
   assert.equal(h.execCalls.length, 3);
   assert.deepEqual(h.execCalls[0], {
@@ -146,7 +140,8 @@ async function testHerdrLaunch() {
   });
   assert.equal(h.execCalls[1].executable, "herdr");
   assert.deepEqual(h.execCalls[1].args.slice(0, 3), ["pane", "send-text", "wM:p4A"]);
-  assert.match(h.execCalls[1].args[3], /--session/);
+  assert.match(h.execCalls[1].args[3], /--fork/);
+  assert.match(h.execCalls[1].args[3], /source\.jsonl/);
   assert.match(h.execCalls[1].args[3], /continue the fork/);
   assert.equal(
     /\s'--'\s/.test(h.execCalls[1].args[3]),
@@ -160,9 +155,9 @@ async function testHerdrLaunch() {
   });
   assert.ok(
     h.notifications.some(({ message, level }) =>
-      level === "info" && message.includes(path.basename(files[0])) && message.includes("wM:p4A")
+      level === "info" && message.includes(path.basename(h.sessionFile)) && message.includes("wM:p4A")
     ),
-    "herdr success notice did not name the forked file and pane",
+    "herdr success notice did not name the source file and pane",
   );
 }
 
@@ -171,12 +166,12 @@ async function testTmuxLaunch() {
   const h = createHarness("tmux");
   await h.command.handler("", h.ctx);
 
-  const files = forkedFiles(h);
-  assert.equal(files.length, 1, "tmux case did not write exactly one forked session");
+  assert.equal(forkedFiles(h).length, 0, "extension wrote a session file pi now owns");
   assert.equal(h.execCalls.length, 1);
   assert.equal(h.execCalls[0].executable, "tmux");
   assert.deepEqual(h.execCalls[0].args.slice(0, 4), ["split-window", "-h", "-c", h.cwd]);
-  assert.match(h.execCalls[0].args[4], /--session/);
+  assert.match(h.execCalls[0].args[4], /--fork/);
+  assert.match(h.execCalls[0].args[4], /source\.jsonl/);
   assert.equal(h.execCalls[0].args[4].endsWith("\n"), false, "tmux command retained startup newline");
   assert.ok(h.notifications.some(({ level }) => level === "info"));
 }
@@ -192,7 +187,7 @@ async function testTmuxLaunchFailure() {
   assert.equal(h.execCalls[0].executable, "tmux");
   assert.ok(
     h.notifications.some(({ message, level }) =>
-      level === "error" && message.includes("can't create pane") && message.includes("--session")
+      level === "error" && message.includes("can't create pane") && message.includes("--fork")
     ),
     "tmux failure did not surface the error and the manual command",
   );
@@ -207,14 +202,13 @@ async function testManualFallback() {
   const h = createHarness("manual");
   await h.command.handler("", h.ctx);
 
-  const files = forkedFiles(h);
-  assert.equal(files.length, 1, "manual case did not write exactly one forked session");
+  assert.equal(forkedFiles(h).length, 0, "extension wrote a session file pi now owns");
   assert.equal(h.execCalls.length, 0);
   assert.ok(
     h.notifications.some(({ message, level }) =>
-      level === "warning" && message.includes(files[0]) && message.includes("--session")
+      level === "warning" && message.includes(h.sessionFile) && message.includes("--fork")
     ),
-    "manual fallback warning did not name the forked session and command",
+    "manual fallback warning did not name the source session and command",
   );
 }
 

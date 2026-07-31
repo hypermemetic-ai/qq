@@ -37,28 +37,20 @@ function result(message, details) {
   };
 }
 
-// Root-session drift-net for ordinary commands, not a shell parser or security boundary.
-const HERDR_COMMAND = /^(?:"\$HERDR"|'\$HERDR'|\$HERDR|["']?(?:[^\s"']*\/)?herdr["']?)\s+(.+)$/i;
-const QQ_FOCUS = /^(?:["']?(?:[^\s"']*\/)?(?:qq-herdr-(?:snap|pull)["']?(?=\s|$)|qq-herdr-home["']?\s+(?:focus-board|focus-architect)(?:\s|$)))/i;
-const FOCUS_ACTION = /(?:^|\s)(?:(?:workspace|tab|agent|pane)\s+focus|plugin\s+pane\s+focus)(?:\s|$)/i;
-const NO_FOCUS_CREATION = /(?:^|\s)(?:pane\s+split|tab\s+create|workspace\s+create|worktree\s+(?:create|open)|plugin\s+pane\s+open)(?:\s|$)/i;
-const FOCUS_FLAG = /(?:^|\s)--focus(?=\s|$)/;
-const NO_FOCUS_FLAG = /(?:^|\s)--no-focus(?=\s|$)/;
+// Root-session drift-net for ordinary commands, not a shell parser or security
+// boundary: one deliberately approximate check for agent-initiated Herdr focus.
+// A miss costs one visible focus steal; a false hit costs one reworded command.
+const FOCUS_DRIFT_NET = new RegExp(
+  String.raw`(?:^|[;&|\n])\s*["']?(?:[^\s"']*\/)?(?:` +
+    String.raw`(?:\$HERDR|herdr)["']?\s+[^;&|\n]*?(?:(?:workspace|tab|agent|pane)\s+focus|--focus\b|plugin\s+pane\s+(?:focus|open)(?![^;&|\n]*--no-focus(?=\s|$|[;&|]))|(?:pane\s+split|tab\s+create|workspace\s+create|worktree\s+(?:create|open))(?![^;&|\n]*--no-focus(?=\s|$|[;&|])))` +
+    String.raw`|qq-herdr-(?:snap|pull)["']?(?=\s|$)` +
+    String.raw`|qq-herdr-home["']?\s+(?:focus-board|focus-architect)(?:\s|$)` +
+  `)`,
+  "i",
+);
 
 function requestsHerdrFocus(command) {
-  for (const segment of command.split(/[;&|\n]+/).map((part) => part.trim())) {
-    const herdrArgs = segment.match(HERDR_COMMAND)?.[1];
-    if (
-      (herdrArgs &&
-        (FOCUS_ACTION.test(herdrArgs) ||
-          FOCUS_FLAG.test(herdrArgs) ||
-          (NO_FOCUS_CREATION.test(herdrArgs) && !NO_FOCUS_FLAG.test(herdrArgs)))) ||
-      QQ_FOCUS.test(segment)
-    ) {
-      return true;
-    }
-  }
-  return false;
+  return FOCUS_DRIFT_NET.test(command);
 }
 
 function stagedLine(command, description, danger) {
@@ -223,33 +215,6 @@ export default function register(pi, deps = {}) {
       if (sent?.code !== 0) {
         return failOwnedPane(
           `operator_stage could not stage in pane ${paneId}: ${executionReason(sent, "unknown herdr send-text error")}`,
-        );
-      }
-
-      let wait;
-      try {
-        wait = await run(
-          "herdr",
-          [
-            "pane",
-            "wait-output",
-            paneId,
-            "--source",
-            "recent-unwrapped",
-            "--timeout",
-            "5000",
-            "--match",
-            line,
-          ],
-          { signal },
-        );
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        return failOwnedPane(`operator_stage could not verify pane ${paneId}: ${reason}`);
-      }
-      if (wait?.code !== 0) {
-        return failOwnedPane(
-          `operator_stage could not verify that pane ${paneId} contains the staged command.`,
         );
       }
 

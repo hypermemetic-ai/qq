@@ -11,14 +11,11 @@ same file; the shell surface is sourced straight from this checkout.
   laptop-sized IBM glyphs and margins by default, exact laptop/4K font presets,
   block cursor, and static Herdr surface normalization.
 - `ghostty/shaders/column-rails.glsl` — on the exact 3840-pixel-wide reference
-  surface, masks Herdr's session-only right edge while drawing no decorative
-  bars; other sizes pass through unchanged and the two rejected rail placements
-  remain documented as recoverable presets.
+  surface, masks Herdr's session-only right edge; other sizes pass through
+  unchanged.
 - `glow/glow.yml` — fixed-width, no-pager Glow defaults for pane rendering.
-- `glow/tuned.json` — the hand-tuned Markdown theme used by Glow.
 - `herdr/config.toml` — tokyo-night, onboarding suppressed, priority-sorted
-  agent sidebar, sidebar `$stage` token rows for the delegate status surface
-  (doc-43), direct navigation, agent-pull, and project-home snap bindings.
+  agent sidebar, direct navigation, agent-pull, and project-home snap bindings.
 - `shell/file-navigation.bash` — `QQ_HOME`, `qqroot`, focused-worktree lookup
   through `qq_space_dir`, and shell directory changes through `qqcd`.
 - `systemd/user/qq-openwiki-daily.{service,timer}` — repository-owned user
@@ -56,11 +53,6 @@ Pi's working directory and blocks normalized targets inside that checkout's
 `backlog/`, returning the Backlog-CLI guidance. It deliberately allows reads
 and Bash, including Backlog CLI commands; it is a path-only drift-net, not a
 security boundary or shell policy.
-
-The sidebar carries the delegate status surface's ambient tier: a `$stage` row
-on Space and Agent entries renders stage-boundary one-liners reported through
-`herdr workspace report-metadata` and `herdr pane report-metadata`
-(design: doc-43). The rows collapse when no stage is reported.
 
 Each Repository has one persistent project home bound to its primary `main`
 checkout. Its dedicated single-pane `backlog board` tab and operator-created

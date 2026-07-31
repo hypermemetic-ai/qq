@@ -4,12 +4,7 @@ const INSPECTION_FAILED =
   "GitHub pull-request inspection failed; no terminal notification was emitted.";
 const UNREADABLE_STATE =
   "GitHub did not return a readable pull-request state; no terminal notification was emitted.";
-const UNSUPPORTED_STATE =
-  "GitHub returned an unsupported pull-request state.";
-const INTERVAL_ERROR =
-  "--interval must be an integer from 30 through 60 seconds";
 const TERMINAL_STATES = new Set(["MERGED", "CLOSED"]);
-const KNOWN_STATES = new Set(["OPEN", ...TERMINAL_STATES]);
 
 function terminalMessage(pr, reading) {
   const urlSuffix = reading.url === "" ? "" : ` — ${reading.url}`;
@@ -87,9 +82,6 @@ export default function register(pi, deps = {}) {
       prState: response.state,
       url: typeof response.url === "string" ? response.url : "",
     };
-    if (!KNOWN_STATES.has(reading.prState)) {
-      return { ...reading, ok: false, message: UNSUPPORTED_STATE };
-    }
     return reading;
   }
 
@@ -193,33 +185,8 @@ export default function register(pi, deps = {}) {
       required: ["action", "pr"],
       additionalProperties: false,
     },
-    prepareArguments(args) {
-      if (args?.interval !== undefined && !Number.isInteger(args.interval)) {
-        const pr =
-          typeof args?.pr === "string" && args.pr !== "" ? args.pr : undefined;
-        if (pr === undefined) {
-          throw new Error(INTERVAL_ERROR);
-        }
-        throw new Error(
-          args?.action === "inspect"
-            ? inspectFailureMessage(pr, INTERVAL_ERROR)
-            : watchFailureMessage(pr, INTERVAL_ERROR),
-        );
-      }
-      return args;
-    },
     async execute(_toolCallId, params, signal) {
       const interval = params.interval ?? 30;
-      if (!Number.isInteger(interval) || interval < 30 || interval > 60) {
-        const message =
-          params.action === "inspect"
-            ? inspectFailureMessage(params.pr, INTERVAL_ERROR)
-            : watchFailureMessage(params.pr, INTERVAL_ERROR);
-        return result(
-          message,
-          details("error", params.pr, undefined, 0),
-        );
-      }
 
       if (params.action === "inspect") {
         const reading = await readPullRequest(params.pr, signal);
@@ -255,7 +222,7 @@ export default function register(pi, deps = {}) {
         return result(message, wakeDetails);
       }
 
-      const key = reading.url === "" ? params.pr : reading.url;
+      const key = params.pr;
       if (watches.has(key)) {
         return result(
           `A watch is already active for pull request ${params.pr}; no new watch was armed.`,

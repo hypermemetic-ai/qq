@@ -140,7 +140,6 @@ function createHarness(sequence = [], options = {}) {
   assert.equal(toolCount, 1, "extension did not register exactly one tool");
   assert.equal(tool?.name, "qq_pr_watch", "extension registered the wrong tool");
   assert.equal(typeof tool?.execute, "function", "tool execute handler is missing");
-  assert.equal(typeof tool?.prepareArguments, "function", "raw argument guard is missing");
   assert.equal(typeof shutdown, "function", "session_shutdown handler is missing");
   assert.deepEqual(tool.parameters.required, ["action", "pr"]);
   assert.deepEqual(tool.parameters.properties.action.enum, ["watch", "inspect"]);
@@ -229,7 +228,6 @@ async function testErrorVisibility() {
   const cases = [
     [failure(), /inspection failed/],
     [{ stdout: "not-json", stderr: "", code: 0, killed: false }, /readable pull-request state/],
-    [response("DRAFT"), /unsupported pull-request state/],
   ];
 
   for (const [reply, messagePattern] of cases) {
@@ -298,25 +296,6 @@ async function testAlreadyTerminalAndRearm() {
 }
 
 async function testIntervals() {
-  const raw = createHarness();
-  assert.throws(
-    () => raw.tool.prepareArguments({ action: "watch", pr: "17", interval: "30" }),
-    /pull request 17 watch failed: --interval must be an integer from 30 through 60 seconds/,
-    "Pi pre-validation could sanitise a string interval, and its error must name the pull request",
-  );
-  assert.throws(
-    () => raw.tool.prepareArguments({ action: "inspect", pr: "17", interval: 30.5 }),
-    /pull request 17 inspection failed: --interval must be an integer from 30 through 60 seconds/,
-    "inspect pre-validation error must name the pull request in the inspect voice",
-  );
-  assert.throws(
-    () => raw.tool.prepareArguments({ action: "watch", interval: "30" }),
-    /Error: --interval must be an integer from 30 through 60 seconds/,
-    "pre-validation error without a selector stays bare",
-  );
-  const validArguments = { action: "watch", pr: "17", interval: 30 };
-  assert.equal(raw.tool.prepareArguments(validArguments), validArguments);
-
   for (const [interval, milliseconds] of [
     [undefined, 30_000],
     [30, 30_000],
@@ -330,17 +309,6 @@ async function testIntervals() {
     await execute(h, params);
     assert.equal(h.timers.delays[0], milliseconds);
     h.shutdown();
-  }
-
-  for (const interval of [29, 61, 30.5, "30"]) {
-    const h = createHarness();
-    const refused = await execute(h, { action: "watch", pr: "17", interval });
-    assert.equal(refused.details.status, "error");
-    assert.match(refused.details.message, /integer from 30 through 60/);
-    assert.match(refused.content[0].text, /^pull request 17 watch failed: /);
-    assert.equal(h.execCalls.length, 0, "invalid interval reached gh");
-    assert.equal(h.timers.liveCount(), 0, "invalid interval armed a timer");
-    assert.equal(h.messages.length, 0, "invalid interval emitted a wake");
   }
 }
 
@@ -401,34 +369,31 @@ async function testDuplicateAndDistinctWatches() {
   );
 }
 
-async function testCanonicalDedupeBothDirections() {
-  for (const [first, second] of [
-    ["17", PR_URL],
-    [PR_URL, "17"],
-  ]) {
-    const h = createHarness([
-      response("OPEN", PR_URL),
-      response("OPEN", PR_URL),
-      response("MERGED", PR_URL),
-    ]);
-    await execute(h, { action: "watch", pr: first });
-    const refused = await execute(h, { action: "watch", pr: second });
+async function testRawSelectorDedupe() {
+  // Dedupe keys on the raw selector: the same spelling twice refuses; two
+  // spellings of one pull request arm two watches (accepted slim dedupe).
+  const h = createHarness([
+    response("OPEN", PR_URL),
+    response("OPEN", PR_URL),
+    response("OPEN", PR_URL),
+    response("MERGED", PR_URL),
+  ]);
+  await execute(h, { action: "watch", pr: "17" });
+  const refused = await execute(h, { action: "watch", pr: "17" });
+  assert.equal(refused.details.status, "refused");
+  assert.equal(
+    refused.content[0].text,
+    "A watch is already active for pull request 17; no new watch was armed.",
+  );
+  assert.equal(h.timers.liveCount(), 1, "duplicate spelling changed the original watch");
+  assert.equal(h.messages.length, 0, "duplicate spelling emitted a wake");
 
-    assert.equal(refused.details.status, "refused");
-    assert.equal(refused.details.pull_request, second);
-    assert.equal(
-      refused.content[0].text,
-      `A watch is already active for pull request ${second}; no new watch was armed.`,
-    );
-    assert.equal(h.execCalls.length, 2, "canonical duplicate did not perform one arm read");
-    assert.equal(h.timers.liveCount(), 1, "canonical duplicate changed the original watch");
-    assert.equal(h.messages.length, 0, "canonical duplicate emitted a wake");
+  await execute(h, { action: "watch", pr: PR_URL });
+  assert.equal(h.timers.liveCount(), 2, "the second spelling failed to arm its own watch");
 
-    await h.timers.advance(30_000);
-    assert.equal(h.execCalls.length, 3);
-    assert.equal(h.timers.liveCount(), 0, "canonical watch remained live after terminal state");
-    assertDoneWake(h, "MERGED", first, PR_URL);
-  }
+  await h.timers.advance(30_000);
+  assert.equal(h.timers.liveCount(), 0, "a watch remained live after terminal state");
+  assert.equal(h.messages.length, 2, "both armed watches woke at terminal state");
 }
 
 async function testFlagShapedSelector() {
@@ -484,7 +449,7 @@ await testShutdownCleanup();
 await testAlreadyTerminalAndRearm();
 await testIntervals();
 await testDuplicateAndDistinctWatches();
-await testCanonicalDedupeBothDirections();
+await testRawSelectorDedupe();
 await testFlagShapedSelector();
 await testInspect();
 
