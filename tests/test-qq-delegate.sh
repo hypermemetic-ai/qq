@@ -343,6 +343,14 @@ expect_refusal context-key 'forbids inherited CONTEXT7_API_KEY' \
   env CONTEXT7_API_KEY=secret "$fixture_engine" run --role researcher \
     --cwd "$fixture" --brief "$context_key_run/BRIEF.md"
 
+# Context7 stays vendor-only: no retired root MCP configuration, and the
+# vendor extension source is never copied into the Repository.
+[ ! -e "$ROOT/.mcp.json" ] || fail 'retired root MCP configuration still exists'
+if find "$ROOT" -path '*/node_modules' -prune -o \
+  -path '*/extensions/context7.ts' -type f -print -quit | grep -q .; then
+  fail 'vendor Context7 extension source was copied into the Repository'
+fi
+
 # Missing parent session deliberately records the all-zeros accountable UUID.
 fallback_run="$(new_run parent-fallback)"
 run_case parent-fallback reviewer "$fixture" "$fallback_run/BRIEF.md"
