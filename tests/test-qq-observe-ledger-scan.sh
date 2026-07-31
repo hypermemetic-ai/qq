@@ -223,35 +223,51 @@ assert_no_ledger() {
   [ ! -e "$ledger_dir" ] || fail 'computed Observer view created a ledger directory'
 }
 
-# The doc-backed disposition is proposed, appears pending, then settles the key.
+# One settle validates against current occurrences, derives identities
+# internally, and covers the key; the settled entry appends as one JSON line.
 "$OBSERVE" architect-context >"$tmp/context-uncovered.json"
 jq -e '
-  .schema_version == 4 and .pending_intakes == []
+  .schema_version == 5
+  and ((has("context_id") or has("pending_intakes")) | not)
   and any(.findings[]; .recurrence_key == "scan-key" and .covered == false
     and (.occurrences | length) == 2)
   and all(.findings[]; .recurrence_key != "explicit-decision-settlement-zebra-984")
 ' "$tmp/context-uncovered.json" >/dev/null \
   || fail 'Architect context did not expose the uncovered fixture key'
-context_id="$(jq -r .context_id "$tmp/context-uncovered.json")"
-jq '[.findings[] | select(.recurrence_key == "scan-key") |
-  {recurrence_key,occurrence_ids:([.occurrences[].occurrence_id]|sort),action:"set_aside",scope:"",note:"Fixture."}]
-' "$tmp/context-uncovered.json" >"$tmp/disposition-decisions.json"
-"$OBSERVE" disposition-propose --context "$context_id" \
-  --decisions "$tmp/disposition-decisions.json" >"$tmp/disposition-proposed.json"
-batch_id="$(jq -r .batch_id "$tmp/disposition-proposed.json")"
-"$OBSERVE" architect-context >"$tmp/context-pending.json"
-jq -e --arg batch "$batch_id" --arg birth "$context_id" '
-  (.pending_intakes | length) == 1 and .pending_intakes[0].batch_id == $batch
-  and .pending_intakes[0].status == "proposed"
-  and .pending_intakes[0].context_id == $birth and .context_id != $birth
-  and all(.findings[]; .recurrence_key != "scan-key")
-' "$tmp/context-pending.json" >/dev/null || fail 'doc-backed proposal lost its birth context or did not become pending'
-"$OBSERVE" disposition-confirm --context "$context_id" --batch "$batch_id" \
-  >"$tmp/disposition-confirmed.json"
+jq -cn '[
+  {recurrence_key:"scan-key",action:"set_aside",scope:"",note:"fixture note"}
+]' >"$tmp/settle-decisions.json"
+"$OBSERVE" disposition-settle --decisions "$tmp/settle-decisions.json" >"$tmp/settled.json"
+jq -e '.status == "settled" and .settled == ["scan-key"]' "$tmp/settled.json" >/dev/null \
+  || fail 'disposition-settle did not settle the fixture key'
 "$OBSERVE" architect-context >"$tmp/context-covered.json"
-jq -e '
-  .pending_intakes == [] and all(.findings[]; .recurrence_key != "scan-key")
-' "$tmp/context-covered.json" >/dev/null || fail 'settled disposition did not cover its key'
+jq -e 'all(.findings[]; .recurrence_key != "scan-key")' "$tmp/context-covered.json" >/dev/null \
+  || fail 'settled disposition did not cover its key'
+doc_file="$(grep -rl '^title: Observer dispositions$' "$repo/backlog/docs" | head -1)"
+[ -n "$doc_file" ] || fail 'dispositions document not found in the fixture store'
+jq -e '.recurrence_key == "scan-key" and .action == "set_aside"
+  and .scope == "" and .note == "fixture note"
+  and (.occurrence_ids | length) == 2 and (.settled_at | endswith("Z"))' \
+  < <(tail -n 1 "$doc_file") >/dev/null \
+  || fail 'settled entry did not append with derived occurrence identities'
+
+# Re-settling a settled key and settling an unknown key both refuse.
+set +e
+"$OBSERVE" disposition-settle --decisions "$tmp/settle-decisions.json" \
+  >"$tmp/resettle.stdout" 2>"$tmp/resettle.stderr"
+status=$?
+set -e
+assert_equal 65 "$status" 're-settling a settled key did not refuse'
+assert_file_contains "$tmp/resettle.stderr" 'no unresolved occurrences'
+jq -cn '[{recurrence_key:"never-seen-key",action:"set_aside",scope:"",note:""}]' \
+  >"$tmp/unknown-decisions.json"
+set +e
+"$OBSERVE" disposition-settle --decisions "$tmp/unknown-decisions.json" \
+  >"$tmp/unknown.stdout" 2>"$tmp/unknown.stderr"
+status=$?
+set -e
+assert_equal 65 "$status" 'settling an unknown key did not refuse'
+assert_file_contains "$tmp/unknown.stderr" 'no unresolved occurrences'
 
 # The live key inventory lists every unsettled key for observer reuse:
 # settled keys drop out; decision-covered keys stay.

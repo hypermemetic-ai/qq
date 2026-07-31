@@ -24,8 +24,7 @@ usage:
   qq-observe digest [--since ISO]
   qq-observe architect-context
   qq-observe recurrence-keys
-  qq-observe disposition-propose --context CONTEXT-ID --decisions FILE.json
-  qq-observe disposition-confirm --context CONTEXT-ID --batch BATCH-ID
+  qq-observe disposition-settle --decisions FILE.json
   qq-observe rounds
 
 facts, signals, and validate-analysis accept Pi v3 session JSONL. Signal
@@ -41,7 +40,7 @@ EOF
 case "${1:-}" in
   facts | signals | validate-analysis | \
   assemble | verify-delivery | render-doc | finalize | \
-  digest | architect-context | recurrence-keys | disposition-propose | disposition-confirm | \
+  digest | architect-context | recurrence-keys | disposition-settle | \
   rounds) command="$1"; shift ;;
   *) usage ;;
 esac
@@ -55,12 +54,12 @@ python_binary="$QQ_BIN_RESULT"
 # Package assembly and delivery commands share one embedded implementation.
 case "$command" in
   assemble | verify-delivery | render-doc | finalize | \
-  digest | architect-context | recurrence-keys | disposition-propose | disposition-confirm | \
+  digest | architect-context | recurrence-keys | disposition-settle | \
   rounds)
     observer_git=""
     observer_gh=""
     observer_backlog=""
-    if [[ "$command" == assemble || "$command" == verify-delivery || "$command" == rounds || "$command" == digest || "$command" == architect-context || "$command" == disposition-propose || "$command" == disposition-confirm ]]; then
+    if [[ "$command" == assemble || "$command" == verify-delivery || "$command" == rounds || "$command" == digest || "$command" == architect-context || "$command" == disposition-settle ]]; then
       if ! qq_resolve_bin git; then
         printf 'qq-observe: %s\n' "$QQ_BIN_ERROR" >&2
         exit 69
@@ -74,7 +73,7 @@ case "$command" in
       fi
       observer_gh="$QQ_BIN_RESULT"
     fi
-    if [[ "$command" == digest || "$command" == architect-context || "$command" == disposition-propose || "$command" == disposition-confirm || "$command" == rounds ]]; then
+    if [[ "$command" == digest || "$command" == architect-context || "$command" == disposition-settle || "$command" == rounds ]]; then
       if ! qq_resolve_bin backlog; then
         printf 'qq-observe: %s\n' "$QQ_BIN_ERROR" >&2
         exit 69
@@ -1691,46 +1690,6 @@ def qq_repository_root():
     return root
 
 
-def disposition_decision(entry):
-    return {
-        "recurrence_key": entry["recurrence_key"],
-        "action": entry["action"], "scope": entry["scope"], "note": entry["note"],
-        "occurrence_ids": entry["occurrence_ids"],
-    }
-
-
-def disposition_batch_groups(entries):
-    groups = []
-    by_batch = {}
-    closed = set()
-    previous = None
-    for entry in entries:
-        batch_id = entry["batch_id"]
-        if batch_id != previous:
-            if batch_id in closed:
-                fail(f"Observer dispositions batch is not contiguous: {batch_id}", 65)
-            if previous is not None:
-                closed.add(previous)
-            group = []
-            groups.append((batch_id, group))
-            by_batch[batch_id] = group
-            previous = batch_id
-        by_batch[batch_id].append(entry)
-    for batch_id, group in groups:
-        decisions = [disposition_decision(entry) for entry in group]
-        expected = "batch-" + hashlib.sha256(canonical_json_bytes(decisions)).hexdigest()[:32]
-        statuses = {entry["status"] for entry in group}
-        contexts = {entry["context_id"] for entry in group}
-        if (
-            expected != batch_id or len(statuses) != 1 or len(contexts) != 1
-            or len({entry["recurrence_key"] for entry in group}) != len(group)
-        ):
-            fail(f"Observer dispositions batch is malformed: {batch_id}", 65)
-        if statuses == {"settled"} and len({entry["settled_at"] for entry in group}) != 1:
-            fail(f"Observer dispositions batch has inconsistent settlement time: {batch_id}", 65)
-    return groups
-
-
 def parse_dispositions_body(body, path):
     label = f"Observer dispositions document {path}"
     if body == f"{DISPOSITIONS_PREAMBLE}\n\n(none yet)":
@@ -1738,77 +1697,54 @@ def parse_dispositions_body(body, path):
     prefix = f"{DISPOSITIONS_PREAMBLE}\n\n"
     if not body.startswith(prefix):
         fail(f"{label} has a malformed complete body", 65)
-    sections = re.split(r"\n\n(?=### )", body[len(prefix):])
     entries = []
-    for section in sections:
-        lines = section.splitlines()
-        heading = re.fullmatch(r"### (batch-[0-9a-f]{32}) — (.+)", lines[0] if lines else "")
-        if heading is None or len(lines) not in (8, 9) or lines[1] != "":
-            fail(f"{label} has a malformed disposition section", 65)
-        status = re.fullmatch(r"- status: (proposed|settled)", lines[2])
-        action = re.fullmatch(r"- action: (route|set_aside)", lines[3])
-        scope = re.fullmatch(r"- scope: (.*)", lines[4])
-        note = re.fullmatch(r"- note: (.*)", lines[5])
-        occurrences = re.fullmatch(
-            r"- occurrences: (occurrence-[0-9a-f]{32}(?:, occurrence-[0-9a-f]{32})*)",
-            lines[6],
-        )
-        context = re.fullmatch(r"- context: (context-[0-9a-f]{32})", lines[7])
-        if any(value is None for value in (status, action, scope, note, occurrences, context)):
-            fail(f"{label} has malformed disposition fields", 65)
-        expected_length = 9 if status.group(1) == "settled" else 8
-        if len(lines) != expected_length:
-            fail(f"{label} has the wrong fields for status {status.group(1)}", 65)
-        settled_at = None
-        if status.group(1) == "settled":
-            match = re.fullmatch(r"- settled_at: (.+)", lines[8])
-            if match is None:
-                fail(f"{label} has a malformed settlement timestamp", 65)
-            try:
-                time_value(match.group(1))
-            except ValueError:
-                fail(f"{label} has a malformed settlement timestamp", 65)
-            settled_at = match.group(1)
-        key = heading.group(2)
-        occurrence_ids = occurrences.group(1).split(", ")
+    keys = set()
+    for line in body[len(prefix):].splitlines():
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            fail(f"{label} has a malformed disposition entry line", 65)
+        if not isinstance(entry, dict) or sorted(entry) != [
+            "action", "note", "occurrence_ids", "recurrence_key", "scope", "settled_at",
+        ]:
+            fail(f"{label} has a malformed disposition entry", 65)
+        key = entry["recurrence_key"]
+        occurrence_ids = entry["occurrence_ids"]
         if (
             not display_text(key, nonempty=True) or "\n" in key
-            or not display_text(scope.group(1)) or not display_text(note.group(1))
+            or key in keys
+            or entry["action"] not in ("route", "set_aside")
+            or not display_text(entry["scope"]) or "\n" in entry["scope"]
+            or not display_text(entry["note"]) or "\n" in entry["note"]
+            or not isinstance(occurrence_ids, list)
+            or any(
+                not isinstance(value, str)
+                or re.fullmatch(r"occurrence-[0-9a-f]{32}", value) is None
+                for value in occurrence_ids
+            )
             or occurrence_ids != sorted(occurrence_ids)
             or len(occurrence_ids) != len(set(occurrence_ids))
-            or (action.group(1) == "route" and not scope.group(1).strip())
-            or (action.group(1) == "set_aside" and scope.group(1) != "")
+            or (entry["action"] == "route" and not entry["scope"].strip())
+            or (entry["action"] == "set_aside" and entry["scope"] != "")
         ):
             fail(f"{label} violates the disposition contract", 65)
-        entry = {
-            "batch_id": heading.group(1), "recurrence_key": key,
-            "status": status.group(1), "action": action.group(1),
-            "scope": scope.group(1), "note": note.group(1),
-            "occurrence_ids": occurrence_ids, "context_id": context.group(1),
-        }
-        if settled_at is not None:
-            entry["settled_at"] = settled_at
+        try:
+            time_value(entry["settled_at"])
+        except ValueError:
+            fail(f"{label} has a malformed settlement timestamp", 65)
+        keys.add(key)
         entries.append(entry)
-    disposition_batch_groups(entries)
     return entries
 
 
 def render_dispositions_body(entries):
     if not entries:
         return f"{DISPOSITIONS_PREAMBLE}\n\n(none yet)"
-    sections = []
-    for entry in entries:
-        lines = [
-            f"### {entry['batch_id']} — {entry['recurrence_key']}", "",
-            f"- status: {entry['status']}", f"- action: {entry['action']}",
-            f"- scope: {entry['scope']}", f"- note: {entry['note']}",
-            f"- occurrences: {', '.join(entry['occurrence_ids'])}",
-            f"- context: {entry['context_id']}",
-        ]
-        if entry["status"] == "settled":
-            lines.append(f"- settled_at: {entry['settled_at']}")
-        sections.append("\n".join(lines))
-    return f"{DISPOSITIONS_PREAMBLE}\n\n" + "\n\n".join(sections)
+    lines = [
+        json.dumps(entry, separators=(",", ":"), sort_keys=True)
+        for entry in entries
+    ]
+    return f"{DISPOSITIONS_PREAMBLE}\n\n" + "\n".join(lines)
 
 
 def load_dispositions(required=False):
@@ -1914,7 +1850,6 @@ def coverage_by_key(keys, dispositions=None):
         dispositions = load_dispositions(required=False)
     settled = {
         entry["recurrence_key"] for entry in (dispositions or {}).get("entries", [])
-        if entry["status"] == "settled"
     }
     unique = sorted(set(keys))
     for key in unique:
@@ -1937,7 +1872,6 @@ def recurrence_keys(values):
     dispositions = load_dispositions(required=False)
     settled = {
         entry["recurrence_key"] for entry in (dispositions or {}).get("entries", [])
-        if entry["status"] == "settled"
     }
     for key in sorted({
         row["recurrence_key"] for row in all_architect_occurrences()
@@ -1997,41 +1931,6 @@ def all_architect_occurrences():
         fail("Observer Architect occurrence identity collision", 65)
     return occurrences
 
-
-def valid_disposition_decisions(decisions, occurrences, require_ids=True):
-    if not isinstance(decisions, list) or not decisions:
-        return False
-    occurrence_by_id = {row.get("occurrence_id"): row for row in occurrences if isinstance(row, dict)}
-    seen_keys, seen_occurrences, seen_decisions = set(), set(), set()
-    for decision in decisions:
-        required = {"recurrence_key", "occurrence_ids", "action", "scope", "note"}
-        if require_ids:
-            required.add("decision_id")
-        if not isinstance(decision, dict) or set(decision) != required:
-            return False
-        key, selected = decision.get("recurrence_key"), decision.get("occurrence_ids")
-        if not display_text(key, nonempty=True) or key in seen_keys:
-            return False
-        if (
-            not isinstance(selected, list) or not selected
-            or selected != sorted(selected) or len(selected) != len(set(selected))
-            or any(not isinstance(value, str) or value not in occurrence_by_id or value in seen_occurrences for value in selected)
-            or any(occurrence_by_id[value].get("recurrence_key") != key for value in selected)
-        ):
-            return False
-        action, scope, note = decision.get("action"), decision.get("scope"), decision.get("note")
-        if action not in ("route", "set_aside") or not display_text(scope) or not display_text(note):
-            return False
-        if (action == "route" and not scope.strip()) or (action == "set_aside" and scope != ""):
-            return False
-        immutable = {name: decision[name] for name in ("recurrence_key", "occurrence_ids", "action", "scope", "note")}
-        expected_id = "decision-" + hashlib.sha256(canonical_json_bytes(immutable)).hexdigest()[:32]
-        if (require_ids and decision.get("decision_id") != expected_id) or expected_id in seen_decisions:
-            return False
-        seen_keys.add(key)
-        seen_occurrences.update(selected)
-        seen_decisions.add(expected_id)
-    return True
 
 
 def slim_architect_occurrence(occurrence):
@@ -2106,29 +2005,8 @@ def architect_context_state(dispositions=None):
     occurrences = all_architect_occurrences()
     observer_health = architect_health_state()
     coverage = coverage_by_key((row["recurrence_key"] for row in occurrences), dispositions)
-    occurrence_by_id = {row["occurrence_id"]: row for row in occurrences}
-    pending, pending_ids, proposed_entries = [], set(), []
-    groups = disposition_batch_groups((dispositions or {}).get("entries", []))
-    for batch_id, group in groups:
-        if group[0]["status"] != "proposed":
-            continue
-        decisions = [disposition_decision(entry) for entry in group]
-        if not valid_disposition_decisions(decisions, occurrences, require_ids=False):
-            fail(f"Observer dispositions proposal has dangling or invalid occurrences: {batch_id}", 65)
-        selected_ids = [occurrence_id for decision in decisions for occurrence_id in decision["occurrence_ids"]]
-        overlap = pending_ids & set(selected_ids)
-        if overlap:
-            fail(f"Observer dispositions proposals overlap at {sorted(overlap)[0]}", 65)
-        pending_ids.update(selected_ids)
-        proposed_entries.extend(group)
-        pending.append({
-            "batch_id": batch_id, "context_id": group[0]["context_id"], "status": "proposed",
-            "decisions": decisions,
-            "occurrences": [slim_architect_occurrence(occurrence_by_id[value]) for value in sorted(selected_ids)],
-        })
     uncovered = [
-        row for row in occurrences
-        if not coverage[row["recurrence_key"]] and row["occurrence_id"] not in pending_ids
+        row for row in occurrences if not coverage[row["recurrence_key"]]
     ]
     by_key = {}
     for occurrence in uncovered:
@@ -2148,24 +2026,20 @@ def architect_context_state(dispositions=None):
             },
         ))
     ranked.sort(key=lambda item: item[0])
-    authoritative = {
-        "occurrences": occurrences, "coverage": coverage, "proposals": proposed_entries,
-    }
-    context_id = "context-" + hashlib.sha256(canonical_json_bytes(authoritative)).hexdigest()[:32]
     findings = []
     for _, finding in ranked[:ARCHITECT_FINDING_LIMIT]:
         candidate = {
-            "schema": ARCHITECT_CONTEXT_SCHEMA, "schema_version": 4,
-            "context_id": context_id, "findings": findings + [finding],
-            "pending_intakes": pending, "observer_health": observer_health,
+            "schema": ARCHITECT_CONTEXT_SCHEMA, "schema_version": 5,
+            "findings": findings + [finding],
+            "observer_health": observer_health,
             "omitted_findings": len(ranked) - len(findings) - 1,
         }
         if len(canonical_json_bytes(candidate)) > ARCHITECT_CONTEXT_BYTE_LIMIT:
             break
         findings.append(finding)
     document = {
-        "schema": ARCHITECT_CONTEXT_SCHEMA, "schema_version": 4,
-        "context_id": context_id, "findings": findings, "pending_intakes": pending,
+        "schema": ARCHITECT_CONTEXT_SCHEMA, "schema_version": 5,
+        "findings": findings,
         "observer_health": observer_health,
         "omitted_findings": len(ranked) - len(findings),
     }
@@ -2186,62 +2060,53 @@ def architect_context(values):
     emit(architect_context_state()[0])
 
 
-def disposition_propose(values):
-    options = parse_flags(values, {"--context", "--decisions"})
-    if set(options) != {"--context", "--decisions"}:
-        fail("disposition-propose requires --context and --decisions")
-    path = canonical_existing(options["--decisions"], "Architect decisions input")
-    proposed = json_document(read_regular(path, "Architect decisions input"), "Architect decisions input")
+def disposition_settle(values):
+    options = parse_flags(values, {"--decisions"})
+    if set(options) != {"--decisions"}:
+        fail("disposition-settle requires --decisions")
+    path = canonical_existing(options["--decisions"], "settlement decisions input")
+    decisions = json_document(
+        read_regular(path, "settlement decisions input"), "settlement decisions input",
+    )
+    if not isinstance(decisions, list) or not 1 <= len(decisions) <= 50:
+        fail("settlement decisions must be an array of 1..50 decisions", 65)
+    seen = set()
+    for decision in decisions:
+        if not isinstance(decision, dict) or sorted(decision) != ["action", "note", "recurrence_key", "scope"]:
+            fail("settlement decision has a malformed shape", 65)
+        key = decision["recurrence_key"]
+        if (
+            not display_text(key, nonempty=True) or "\n" in key
+            or decision["action"] not in ("route", "set_aside")
+            or not display_text(decision["scope"]) or "\n" in decision["scope"]
+            or not display_text(decision["note"]) or "\n" in decision["note"]
+            or (decision["action"] == "route" and not decision["scope"].strip())
+            or (decision["action"] == "set_aside" and decision["scope"] != "")
+        ):
+            fail("settlement decision violates the disposition contract", 65)
+        if key in seen:
+            fail(f"settlement decision duplicates recurrence key: {key}", 65)
+        seen.add(key)
     dispositions = load_dispositions(required=True)
-    current, displayed = architect_context_state(dispositions)
-    context_id = options["--context"]
-    if context_id != current["context_id"]:
-        fail("Architect context identity is stale or mismatched", 65)
-    occurrences = list(displayed.values())
-    if not valid_disposition_decisions(proposed, occurrences, require_ids=False):
-        fail("Architect decisions schema or occurrence coverage is invalid", 65)
-    if any("\n" in decision[field] for decision in proposed for field in ("recurrence_key", "scope", "note")):
-        fail("Architect disposition recurrence key, scope, and note must each be one line", 65)
-    batch_id = "batch-" + hashlib.sha256(canonical_json_bytes(proposed)).hexdigest()[:32]
-    if any(entry["batch_id"] == batch_id for entry in dispositions["entries"]):
-        fail(f"Observer dispositions batch already exists: {batch_id}", 65)
-    entries = list(dispositions["entries"])
-    for decision in proposed:
-        entries.append({
-            "batch_id": batch_id, "recurrence_key": decision["recurrence_key"],
-            "status": "proposed", "action": decision["action"],
-            "scope": decision["scope"], "note": decision["note"],
-            "occurrence_ids": decision["occurrence_ids"], "context_id": context_id,
-        })
-    disposition_batch_groups(entries)
-    update_dispositions(dispositions, entries)
-    emit({"status": "proposed", "batch_id": batch_id, "context_id": context_id})
-
-
-def disposition_confirm(values):
-    options = parse_flags(values, {"--context", "--batch"})
-    if set(options) != {"--context", "--batch"}:
-        fail("disposition-confirm requires --context and --batch")
-    batch_id = options["--batch"]
-    if re.fullmatch(r"batch-[0-9a-f]{32}", batch_id) is None:
-        fail("--batch must be a canonical batch identity", 65)
-    dispositions = load_dispositions(required=True)
-    current, _ = architect_context_state(dispositions)
-    pending = [row for row in current["pending_intakes"] if row["batch_id"] == batch_id]
-    if len(pending) != 1:
-        fail(f"Observer dispositions batch is not proposed: {batch_id}", 65)
-    if options["--context"] != pending[0]["context_id"]:
-        fail("Architect proposal context identity is mismatched", 65)
+    settled_keys = {entry["recurrence_key"] for entry in dispositions["entries"]}
+    live_ids = {}
+    for row in all_architect_occurrences():
+        if row["recurrence_key"] not in settled_keys:
+            live_ids.setdefault(row["recurrence_key"], []).append(row["occurrence_id"])
     settled_at = utc_now()
-    entries = []
-    for entry in dispositions["entries"]:
-        if entry["batch_id"] == batch_id:
-            entries.append({**entry, "status": "settled", "settled_at": settled_at})
-        else:
-            entries.append(entry)
-    disposition_batch_groups(entries)
+    entries = list(dispositions["entries"])
+    for decision in decisions:
+        key = decision["recurrence_key"]
+        occurrence_ids = sorted(live_ids.get(key, []))
+        if not occurrence_ids:
+            fail(f"settlement decision has no unresolved occurrences: {key}", 65)
+        entries.append({
+            "action": decision["action"], "note": decision["note"],
+            "occurrence_ids": occurrence_ids, "recurrence_key": key,
+            "scope": decision["scope"], "settled_at": settled_at,
+        })
     update_dispositions(dispositions, entries)
-    emit({"status": "settled", "batch_id": batch_id})
+    emit({"status": "settled", "settled": [decision["recurrence_key"] for decision in decisions]})
 
 
 def backlog_frontmatter(path, label):
@@ -2405,8 +2270,6 @@ def digest(values):
     dispositions = load_dispositions(required=False)
     events = materialize_ledger()["events"]
     for entry in (dispositions or {}).get("entries", []):
-        if entry["status"] != "settled":
-            continue
         events.append({
             "type": "disposition", "ts": entry["settled_at"],
             "outcomes": [{
@@ -2799,10 +2662,8 @@ elif command == "architect-context":
     architect_context(args)
 elif command == "recurrence-keys":
     recurrence_keys(args)
-elif command == "disposition-propose":
-    disposition_propose(args)
-elif command == "disposition-confirm":
-    disposition_confirm(args)
+elif command == "disposition-settle":
+    disposition_settle(args)
 elif command == "rounds":
     rounds(args)
 else:
