@@ -5,87 +5,90 @@
 qq is deliberately a thin harness. It composes upstream ownership surfaces instead of maintaining a central state machine:
 
 - Git and GitHub own the Repository and Change lifecycle.
-- Backlog.md owns durable Task intent/status plus authored documents and
-  decisions.
-- Agent runtimes discover the methodology and Skills natively.
+- Backlog.md owns durable Task intent/status plus authored documents and decisions.
+- The exact patched Pi runtime discovers methodology, Skills, prompts, and extensions through root mounts.
 - OpenWiki describes the current system.
-- herdr supplies named sessions and direct agent messaging.
-- The operator owns judgment, acceptance, and merge authority, including for OpenWiki documentation Changes.
+- Herdr supplies persistent project homes and direct agent messaging.
+- The operator owns judgment, acceptance, and source-Change merge authority. On-demand OpenWiki Changes are also operator-merged; the optional scheduled service may merge only through qq's guarded exact-head path.
 
-This boundary is the result of an explicit simplification. Recent history removed the former custom gate, phase, wave, frontier, registry, activation, and orchestration machinery. The retained repository should be evaluated as a policy/knowledge/cockpit layer with a few narrow adapters—not as an incomplete workflow platform. OpenWiki maintenance begins only from an explicit on-demand or scheduled assignment and produces an ordinary operator-merged documentation pull request (`skills/openwiki-maintainer/SKILL.md:8-32`).
+The Repository is a policy, knowledge, runtime, cockpit, and adapter layer—not an incomplete workflow platform. Recent history removed custom phase, wave, registry, confinement, status, and orchestration machinery. OpenWiki maintenance requires an explicit assignment (`skills/openwiki-maintainer/SKILL.md`).
 
 ## Major surfaces
 
 ### Policy and vocabulary
 
-[`AGENTS.md`](../AGENTS.md) defines the shared operating floor: stay within the agreement, expose material uncertainty, keep scope surgical, use evidence, and preserve the operator's authority. It says to start from supplied assignment context and use available knowledge surfaces only to resolve what is missing; triggered Skills own their detailed procedures and Actor boundaries. Linked Repositories may expose the same instructions through a root-level `AGENTS.md` symlink. [`CONCEPTS.md`](../CONCEPTS.md) is the canonical vocabulary across qq and linked Repositories; Repository-specific terms may be appended in a root `CONCEPTS.local.md` but must not redefine shared terms.
+[`AGENTS.md`](../AGENTS.md) defines the shared operating floor and is mounted through Pi's global context path. Repository-local `AGENTS.md` guidance is optional additive context, not an activation marker. Triggered Skills own their detailed procedures and Actor boundaries. [`CONCEPTS.md`](../CONCEPTS.md) is canonical across qq and linked Repositories; a root `CONCEPTS.local.md` may append terms but never redefine shared vocabulary.
 
 ### Stateless capabilities
 
-Each immediate `skills/<name>/` directory with a `SKILL.md` is a capability selected by trigger. Skills guide agent behavior but do not own persistent workflow state. See the [skill catalog](skills.md).
+Each immediate `skills/<name>/` directory with a `SKILL.md` is a trigger-selected capability. Skills guide agent behavior but own no persistent workflow state. See the [skill catalog](skills.md).
 
 ### Knowledge stack
-
-Each surface answers a different question:
 
 | Surface | Question |
 |---|---|
 | `CONCEPTS.md` | What do project terms mean? |
 | Backlog Tasks | What does the operator intend, and where does work stand? |
-| `openwiki/` | What is the current system? |
+| `openwiki/` | What is the landed system? |
 | Backlog `research` documents | What evidence supports a decision? |
 | Backlog `solutions` documents | What non-obvious reusable lesson was verified? |
-| Backlog `Ideas` document | What idea should be preserved verbatim for later? |
+| Backlog `Ideas` document | What idea should be preserved verbatim? |
 | Backlog decisions | What explicit decision has been recorded? |
 
-OpenWiki is an upstream tool, not a vendored qq subsystem. Derived knowledge never outranks source files and freshly observed Checks.
+OpenWiki is an upstream tool, not a vendored qq subsystem. Derived knowledge never outranks source files and fresh Checks.
 
-### Operator layer
+### Runtime and operator layer
 
-`cockpit/` stores the human terminal surface for Herdr, yazi, broot, Glow, Pi, and shell navigation. Installation is by construction: runtimes mount the `skills/` root, Codex profiles resolve through fixed symlinks, and sourcing `cockpit/shell/file-navigation.bash` puts this checkout's `bin/` on `PATH`; fixed-path cockpit files are linked once at machine bootstrap (`README.md:49-167`). Each Repository has one persistent Herdr **project home** bound to its sole primary `main` checkout. Its accountable Pi session stays there to own alignment, Task and Change judgment, work orders, verdicts, UAT, and handoff; bounded implementation, fresh review, and research run Codex-first through `qq-dispatch` in linked-worktree **work sessions**. Claude remains a rollback runtime (`README.md:56-135`; `CONCEPTS.md:54-66`).
+qq's accountable runtime is exactly `0.81.1+qq.execution-profile.2`. `bin/qq-pi-runtime` builds, verifies, installs, and resolves immutable generations; `bin/pi` never falls back to stock or global Pi. `delegation/policies/execution-profiles.json` fixes provider, model, effort, and service class for all six roles, while canonical manifests define role tools and timeout. Repository settings, Pi defaults, caller arguments, and inherited environment cannot override this map (`README.md`; `bin/qq-pi-runtime`; `bin/qq-execution-profiles`).
 
-The retained commands are narrow stateless adapters rather than a workflow service. `qq-change` lands and retires Changes through observable Git, GitHub, and Herdr rails; `qq-dispatch` applies role profiles, timeout and artifact contracts; `qq-status` publishes best-effort delegate glass; `qq-pr-watch` emits one terminal disposition wake; and `qq-board` reconciles untracked Task records from branch/worktree/PR evidence before rendering the board (`bin/qq-change`; `bin/qq-dispatch`; `bin/qq-status`; `bin/qq-pr-watch`; `bin/qq-board`). `qq-herdr-home inspect` validates only Repository/main/home identity, while `focus-board` additionally requires and focuses the unique single-pane board tab. `qq-herdr-pull` remains an operator pane-movement tool; the accountable session is never adopted into a work session. `qq-herdr-snap` provides best-effort orchestrator/bounce navigation. Herdr organizes live interaction; Git worktrees remain the source of checkout identity and state.
+Each Repository has one persistent Herdr **project home** bound to its sole primary `main` checkout. The accountable Pi session stays there to own alignment, Task and Change judgment, work orders, verdicts, UAT, and handoff. Change checkouts are plain linked worktrees without Herdr workspaces; bounded implementation, fresh review, research, and observation run as headless child processes through the blocking, worktree-resident `qq-delegate` engine (`CONCEPTS.md`; `skills/delegate-batch/SKILL.md`).
+
+At ticket creation, the owner writes a complete `BRIEF.md` in a private durable run directory. `qq-delegate` confines child cache, configuration, sessions, output, and lifecycle state there. The child-authored `ENVELOPE.md` is the only result; the engine-authored `TERMINAL` v2 records exit, timeout, and artifact paths. Missing envelope or nonzero exit fails dispatch (`bin/qq-delegate`; `delegation/manifests/ENVELOPE.md`).
+
+The other retained commands and extensions are narrow adapters:
+
+- `qq-change` lands and retires Changes through observable merge, ancestry, Observer-package, topology, and cleanliness rails.
+- `qq-board` materializes the sole primary-main Backlog Task store into an external scratch generation and never rewrites source records.
+- `qq-reap` nominates stale documents and merged local debris, then applies only explicit nomination IDs after re-deriving evidence.
+- `/handoff` transfers an existing aligned Change to a fresh accountable Pi tab; it is distinct from child delegation.
+- `qq_pr_watch`, `operator_stage`, the Backlog guard, execution-profile binding, Architect, handoff, and session-lineage behavior live in the globally mounted `extensions/` root.
+- `qq-herdr-home`, `qq-herdr-pull`, and `qq-herdr-snap` organize project-home interaction; they do not own Repository truth.
 
 ## Data and state boundaries
 
-qq has no application database or internal service API. Durable state is intentionally distributed:
+qq has no application database or internal service API. Durable state is distributed:
 
 - Git objects, refs, branches, commits, and pull requests hold delivery state.
-- Backlog owns Task, authored-document, and decision records.
+- Backlog's operator-owned store holds Task, authored-document, and decision records; the Repository's `backlog` path is a link to it.
+- Delegate run directories hold work orders, child results, scratch, and terminal lifecycle evidence.
+- Observer runs and the append-only Observer-dispositions document hold observation and settlement evidence.
 - Herdr workspaces and named sessions hold live terminal placement, not Repository truth.
-- Agent runtime configuration and credentials live outside the Repository.
-- `qq-openwiki` uses the invocation's Git `HEAD` as its setup baseline. A per-common-directory runtime lock prevents concurrent writers; setup paths must match `HEAD`, including ignored files, and cleanup restores everything outside `openwiki/**` from that baseline (`bin/qq-openwiki:37-107`).
-- OpenWiki credentials stay under `~/.openwiki/` and must never be committed.
+- Runtime configuration, artifacts, and credentials live outside the Repository.
+- `qq-openwiki` uses invocation `HEAD` as its setup baseline, locks per Git common directory, and restores every non-`openwiki/**` path after generation (`bin/qq-openwiki`).
 
 ## Extension points
 
 ### Add or change a Skill
 
-Create or edit `skills/<name>/SKILL.md`, keep it stateless and trigger-driven, and validate it with Codex's `skill-creator` validator. Because Pi, Claude, and Codex mount the `skills/` root, additions, edits, and removals are live without a synchronization step (`README.md:51-80`; `CONCEPTS.md:107-114`).
+Keep `skills/<name>/SKILL.md` stateless and trigger-driven. Pi mounts the root, so edits are live without synchronization. Scenario-check guidance, run relevant Checks and `git diff --check`, and obtain fresh-context review for non-trivial Changes.
 
-### Add a command or cockpit surface
+### Add a command, extension, or cockpit surface
 
-Commands under `bin/` become live through the shell surface's `$QQ_HOME/bin` `PATH` entry. Fixed-path cockpit configuration is a day-0 link set: update the bootstrap instructions and `cockpit/README.md` only when adopting a new tool or path, not for ordinary content changes (`README.md:142-163`).
+Commands under `bin/` become live through the shell surface's `$QQ_HOME/bin` `PATH` entry. Source changes beneath the mounted `extensions/` root are also live; a dependency-lock change additionally requires `npm ci --ignore-scripts`. Fixed-path cockpit configuration is a day-0 link set: update bootstrap instructions and `cockpit/README.md` only when adopting a new tool or path.
 
-Claude's `.claude/settings.json` uses native deny patterns for `gh pr merge` and invokes `bin/qq-claude-backlog-hook` only for structured write tools targeting this checkout's `backlog/`; it deliberately does not parse Bash. Pi's `cockpit/pi/qq-backlog-guard.ts` likewise intercepts only built-in `write` and `edit` targets after path normalization. Both are local-feedback drift-nets with declared limits, not security boundaries (`.claude/settings.json`; `bin/qq-claude-backlog-hook`; `cockpit/pi/qq-backlog-guard.ts`; `CONCEPTS.md:94-98`).
+The mounted `extensions/qq-backlog-guard.ts` intercepts only Pi built-in `write` and `edit` calls targeting normalized Backlog paths. Reads, Bash, ordinary paths, and Backlog CLI commands remain outside it. This is a path-only local-feedback drift-net, not a security boundary (`README.md`; `CONCEPTS.md`).
 
 ### Add knowledge
 
-Use the owning surface rather than creating parallel truth. Search Backlog's
-shared index first and use `backlog doc create/update` for categorized `plans`,
-`research`, and `solutions` documents and the single root-level `Ideas`
-document; use Backlog decisions for explicit decision records. Never edit
-Backlog-managed Markdown directly. Stable vocabulary belongs in `CONCEPTS.md`;
-present-system description belongs in this wiki.
+Use the owning surface rather than creating parallel truth. Search Backlog's shared index and use its CLI for `plans`, `research`, `solutions`, `Ideas`, decisions, and managed Markdown. Stable vocabulary belongs in `CONCEPTS.md`; present-system description belongs in this wiki.
 
-### Support another runtime
+### Change the runtime
 
-Keep content runtime-neutral and expose it through each runtime's native instruction and Skill discovery. Pi, Claude, and Codex each mount the same `skills/` root; a new runtime needs equivalent native root mounting rather than per-Skill mirroring or a qq-owned compatibility engine. Role-specific execution controls belong in mounted runtime profiles and narrow dispatch adapters, not duplicated Skill trees.
+Treat every Pi upgrade as an explicit qq Change: update pinned sources and hashes, rebase and review the patch, run conformance and two-build reproducibility Checks, and install only the reviewed artifact. Do not bypass `bin/pi`, the execution-profile policy, role manifests, or `qq-delegate`; moving tags, `@latest`, global Pi, and raw overrides are not authorities (`README.md`).
 
 ## Change hazards
 
-- Historical plans can look operational but describe deleted machinery; check current source before following them.
-- Machine bootstrap changes user-level links and runtime configuration; test path identity, mounted-profile refusal, and runtime-specific drift-net behavior carefully.
-- Knowledge updates can drift from source. Ordinary source agents consume
-  OpenWiki but do not maintain it; the narrowly triggered
-  `openwiki-maintainer` Skill is the sole procedural authority.
+- Historical plans can look operational while describing deleted machinery; verify current source.
+- Runtime/bootstrap changes mutate user-level links, immutable generations, policy, and credentials; verify identity and refusal behavior deliberately.
+- Durable run records are evidence, not workflow authority; the accountable Actor verifies envelope claims against the tree.
+- Ordinary source Actors consume OpenWiki but do not maintain it; only the explicitly triggered `openwiki-maintainer` Skill owns refresh procedure.
