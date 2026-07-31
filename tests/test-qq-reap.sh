@@ -153,7 +153,6 @@ git -C "$unmerged_worktree" commit -qm unmerged-worktree
 export FAKE_REPO="$repo"
 export FAKE_CLEAN_WORKTREE="$clean_worktree"
 export XDG_STATE_HOME="$tmp/rich-state"
-export XDG_CACHE_HOME="$tmp/rich-cache"
 
 status_before="$(git -C "$repo" status --porcelain --untracked-files=all)"
 store_status_before="$(git -C "$repo/backlog" status --porcelain --untracked-files=all)"
@@ -164,7 +163,7 @@ run_reap 0 "$scan_json" scan --repo "$repo"
 jq -e '
   .status == "done"
   and (.state.report_path | type == "string" and length > 0)
-  and .state.nomination_counts == {docs:2,branches:1,worktrees:1,board_trash:0,total:4}
+  and .state.nomination_counts == {docs:2,branches:1,worktrees:1,total:4}
 ' "$scan_json" >/dev/null
 scan_report="$(jq -r '.state.report_path' "$scan_json")"
 [ -f "$scan_report" ] || fail 'scan did not write its dated report'
@@ -212,16 +211,18 @@ assert_file_contains "$scan_report" '## Fetch boundary'
 assert_file_contains "$scan_report" \
   '`git fetch --no-tags origin main` refreshes `FETCH_HEAD`'
 
-# Every qq-change retirement census rail is rechecked at apply. A live agent,
-# an extra pane, or operator focus refuses only the worktree and prints the
-# observed state; the other nominations remain independently inspectable.
+# Every retirement census rail is rechecked at apply. A live agent, an extra
+# pane, or operator focus refuses only the worktree and prints the observed
+# state; the other nominations remain independently inspectable.
+rich_ids=(doc:docs/stale.md doc:docs/mixed.md \
+  branch:refs/heads/merged-feature "worktree:$clean_worktree")
 for scan_rail in live pane focus; do
   export FAKE_HERDR_RAIL="$scan_rail"
   rail_scan_json="$tmp/$scan_rail-scan.json"
   run_reap 2 "$rail_scan_json" scan --repo "$repo"
   jq -e --arg id "worktree:$clean_worktree" '
     .status == "refused"
-    and .state.nomination_counts == {docs:2,branches:1,worktrees:0,board_trash:0,total:3}
+    and .state.nomination_counts == {docs:2,branches:1,worktrees:0,total:3}
     and any(.state.worktree_refusals[];
       .id == $id and (.observed_state | type == "object"))
   ' "$rail_scan_json" >/dev/null
@@ -231,7 +232,7 @@ done
 
 export FAKE_HERDR_RAIL=live
 live_rail_json="$tmp/live-rail.json"
-run_reap 2 "$live_rail_json" inspect apply "$scan_report" --repo "$repo"
+run_reap 2 "$live_rail_json" inspect apply "${rich_ids[@]}" --repo "$repo"
 jq -e --arg id "worktree:$clean_worktree" '
   .status == "refused"
   and .state.applied_count == 0
@@ -244,7 +245,7 @@ jq -e --arg id "worktree:$clean_worktree" '
 
 export FAKE_HERDR_RAIL=pane
 pane_rail_json="$tmp/pane-rail.json"
-run_reap 2 "$pane_rail_json" inspect apply "$scan_report" --repo "$repo"
+run_reap 2 "$pane_rail_json" inspect apply "${rich_ids[@]}" --repo "$repo"
 jq -e --arg id "worktree:$clean_worktree" '
   .status == "refused"
   and any(.state.skipped[];
@@ -255,7 +256,7 @@ jq -e --arg id "worktree:$clean_worktree" '
 
 export FAKE_HERDR_RAIL=focus
 focus_rail_json="$tmp/focus-rail.json"
-run_reap 2 "$focus_rail_json" inspect apply "$scan_report" --repo "$repo"
+run_reap 2 "$focus_rail_json" inspect apply "${rich_ids[@]}" --repo "$repo"
 jq -e --arg id "worktree:$clean_worktree" '
   .status == "refused"
   and any(.state.skipped[];
@@ -270,43 +271,37 @@ run_reap 0 "$dry_scan_json" --repo "$repo" --dry-run
 jq -e '.state.dry_run == true and .state.nomination_counts.total == 4' \
   "$dry_scan_json" >/dev/null
 inspect_json="$tmp/inspect.json"
-run_reap 0 "$inspect_json" inspect apply "$scan_report" --repo "$repo"
+run_reap 0 "$inspect_json" inspect apply "${rich_ids[@]}" --repo "$repo"
 jq -e '.state.inspect == true and .state.applied_count == 0 and .state.skipped_count == 4' \
   "$inspect_json" >/dev/null
 dry_apply_json="$tmp/dry-apply.json"
-run_reap 0 "$dry_apply_json" apply "$scan_report" --repo "$repo" --dry-run
+run_reap 0 "$dry_apply_json" apply "${rich_ids[@]}" --repo "$repo" --dry-run
 jq -e '.state.dry_run == true and .state.applied_count == 0 and .state.skipped_count == 4' \
   "$dry_apply_json" >/dev/null
-unknown_report="$tmp/unknown-report.md"
-cp "$scan_report" "$unknown_report"
-sed -i 's|branch:refs/heads/merged-feature|unknown:merged-feature|g' "$unknown_report"
+
+# Malformed, unknown, and duplicate requested ids are errors before any
+# derivation work and apply nothing.
 unknown_json="$tmp/unknown.json"
-run_reap 1 "$unknown_json" apply "$unknown_report" --repo "$repo"
+run_reap 1 "$unknown_json" apply unknown:merged-feature --repo "$repo"
 jq -e '.status == "error" and (.message | contains("unknown nomination id"))' \
   "$unknown_json" >/dev/null
 
-nul_report="$tmp/nul-report.md"
-cp "$scan_report" "$nul_report"
-printf '\0' >>"$nul_report"
-nul_json="$tmp/nul.json"
-run_reap 1 "$nul_json" apply "$nul_report" --repo "$repo"
-jq -e '.status == "error" and (.message | contains("NUL byte"))' \
-  "$nul_json" >/dev/null
+path_json="$tmp/path.json"
+run_reap 1 "$path_json" apply "$scan_report" --repo "$repo"
+jq -e '.status == "error" and (.message | contains("unknown nomination id"))' \
+  "$path_json" >/dev/null
 
-reordered_report="$tmp/reordered-report.md"
-awk '
-  /"id":"branch:refs\/heads\/merged-feature"/ { held = $0; next }
-  /"id":"doc:docs\/mixed.md"/ { print; print held; held = ""; next }
-  { print }
-  END { if (held != "") print held }
-' "$scan_report" >"$reordered_report"
-reordered_json="$tmp/reordered.json"
-run_reap 1 "$reordered_json" apply "$reordered_report" --repo "$repo"
-jq -e '
-  .status == "error"
-  and (.message | contains("nomination order violation"))
-  and (.message | contains("line "))
-' "$reordered_json" >/dev/null
+duplicate_json="$tmp/duplicate.json"
+run_reap 1 "$duplicate_json" apply \
+  doc:docs/stale.md doc:docs/stale.md --repo "$repo"
+jq -e '.status == "error" and (.message | contains("duplicate nomination id"))' \
+  "$duplicate_json" >/dev/null
+
+empty_argv_json="$tmp/empty-argv.json"
+run_reap 1 "$empty_argv_json" apply --repo "$repo"
+jq -e '.status == "error" and (.message | startswith("usage:"))' \
+  "$empty_argv_json" >/dev/null
+
 assert_equal "$status_before" \
   "$(git -C "$repo" status --porcelain --untracked-files=all)" \
   'inspection changed the primary working tree'
@@ -316,28 +311,27 @@ assert_equal "$branches_before" \
 assert_equal "$worktrees_before" "$(git -C "$repo" worktree list --porcelain)" \
   'inspection changed registered worktrees'
 
-# Delete one nomination line as the operator veto, then apply the remainder.
-veto_report="$tmp/veto-report.md"
-cp "$scan_report" "$veto_report"
-sed -i '\|"id":"doc:docs/stale.md"|d' "$veto_report"
-assert_not_contains "$(<"$veto_report")" '"id":"doc:docs/stale.md"' \
-  'veto line was not deleted'
+# Omit one id as the operator veto, then apply the remainder by name.
 head_before="$(git -C "$repo" rev-parse HEAD)"
 store_head_before="$(git -C "$repo/backlog" rev-parse HEAD)"
 apply_json="$tmp/apply.json"
-run_reap 0 "$apply_json" apply "$veto_report" --repo "$repo"
+run_reap 0 "$apply_json" apply \
+  doc:docs/mixed.md branch:refs/heads/merged-feature \
+  "worktree:$clean_worktree" --repo "$repo"
 jq -e '
   .status == "done"
   and .state.applied_count == 3
-  and .state.skipped_count == 1
-  and .state.vetoed_count == 1
+  and .state.skipped_count == 0
+  and .state.requested_count == 3
   and .state.stale_count == 0
+  and .state.unrequested_count == 1
   and (.state.report_path | type == "string" and length > 0)
 ' "$apply_json" >/dev/null
 apply_report="$(jq -r '.state.report_path' "$apply_json")"
 [ -f "$apply_report" ] || fail 'apply did not write its dated report'
-assert_file_contains "$apply_report" \
-  '{"id":"doc:docs/stale.md","reason":"vetoed"}'
+assert_file_contains "$apply_report" '## Current nominations not requested'
+assert_file_contains "$apply_report" 'doc:docs/stale.md'
+assert_file_contains "$apply_report" '- not requested: 1'
 assert_file_contains "$apply_report" \
   'Review staged store-doc deletions with `git -C '"\"$repo/backlog\""' diff --cached -- docs/`; then commit them in the store. qq-reap never commits.'
 [ -f "$repo/backlog/docs/stale.md" ] || fail 'apply deleted the vetoed doc'
@@ -369,19 +363,17 @@ git -C "$revalidate_repo" push -q origin main
 export FAKE_REPO="$revalidate_repo"
 export FAKE_CLEAN_WORKTREE=""
 export XDG_STATE_HOME="$tmp/revalidate-state"
-export XDG_CACHE_HOME="$tmp/revalidate-cache"
 revalidate_scan_json="$tmp/revalidate-scan.json"
 run_reap 0 "$revalidate_scan_json" scan --repo "$revalidate_repo"
-jq -e '.state.nomination_counts == {docs:0,branches:1,worktrees:0,board_trash:0,total:1}' \
+jq -e '.state.nomination_counts == {docs:0,branches:1,worktrees:0,total:1}' \
   "$revalidate_scan_json" >/dev/null
-revalidate_report="$(jq -r '.state.report_path' "$revalidate_scan_json")"
 git -C "$revalidate_repo" switch -q was-merged
 printf 'advanced\n' >"$revalidate_repo/advanced.txt"
 git -C "$revalidate_repo" add advanced.txt
 git -C "$revalidate_repo" commit -qm advanced
 git -C "$revalidate_repo" switch -q main
 revalidate_apply_json="$tmp/revalidate-apply.json"
-run_reap 0 "$revalidate_apply_json" apply "$revalidate_report" \
+run_reap 0 "$revalidate_apply_json" apply branch:refs/heads/was-merged \
   --repo "$revalidate_repo"
 jq -e '
   .state.applied_count == 0
@@ -423,12 +415,11 @@ git -C "$fetched_repo" config --add remote.origin.fetch \
 export FAKE_REPO="$fetched_repo"
 export FAKE_CLEAN_WORKTREE=""
 export XDG_STATE_HOME="$tmp/fetched-oid-state"
-export XDG_CACHE_HOME="$tmp/fetched-oid-cache"
 fetched_json="$tmp/fetched-oid.json"
 run_reap 0 "$fetched_json" scan --repo "$fetched_repo"
 jq -e --arg oid "$fresh_remote_oid" '
   .state.fetched_main_oid == $oid
-  and .state.nomination_counts == {docs:0,branches:1,worktrees:0,board_trash:0,total:1}
+  and .state.nomination_counts == {docs:0,branches:1,worktrees:0,total:1}
 ' "$fetched_json" >/dev/null
 fetched_report="$(jq -r '.state.report_path' "$fetched_json")"
 assert_file_contains "$fetched_report" '"id":"branch:refs/heads/fresh-feature"'
@@ -438,8 +429,8 @@ assert_equal "$stale_remote_oid" \
   "$(git -C "$fetched_repo" rev-parse refs/remotes/origin/main)" \
   'explicit main fetch unexpectedly repaired the excluded tracking ref fixture'
 
-# Without Herdr, scan refuses all worktree nominations, and apply skips every
-# authorized worktree with observed state while still applying docs/branches.
+# Without Herdr, scan refuses all worktree nominations, and apply skips the
+# requested worktree with observed state while still applying docs/branches.
 init_fixture "$tmp/no-herdr"
 no_herdr_repo="$fixture_repo"
 printf 'Dead: `live/missing-no-herdr.txt`.\n' \
@@ -458,17 +449,13 @@ git -C "$no_herdr_repo" worktree add -qb no-herdr-wt \
 export FAKE_REPO="$no_herdr_repo"
 export FAKE_CLEAN_WORKTREE="$no_herdr_worktree"
 export XDG_STATE_HOME="$tmp/no-herdr-state"
-export XDG_CACHE_HOME="$tmp/no-herdr-cache"
-no_herdr_safe_json="$tmp/no-herdr-safe.json"
-run_reap 0 "$no_herdr_safe_json" scan --repo "$no_herdr_repo"
-no_herdr_safe_report="$(jq -r '.state.report_path' "$no_herdr_safe_json")"
 
 export QQ_HERDR_BIN="$tmp/absent-herdr"
 no_herdr_scan_json="$tmp/no-herdr-scan.json"
 run_reap 2 "$no_herdr_scan_json" scan --repo "$no_herdr_repo"
 jq -e '
   .status == "refused"
-  and .state.nomination_counts == {docs:1,branches:1,worktrees:0,board_trash:0,total:2}
+  and .state.nomination_counts == {docs:1,branches:1,worktrees:0,total:2}
   and (.state.degraded_checks[0] | contains("all worktree nominations"))
 ' "$no_herdr_scan_json" >/dev/null
 no_herdr_scan_report="$(jq -r '.state.report_path' "$no_herdr_scan_json")"
@@ -476,8 +463,9 @@ assert_not_contains "$(<"$no_herdr_scan_report")" \
   '"kind":"worktree"' 'Herdr-less scan nominated a worktree'
 
 no_herdr_apply_json="$tmp/no-herdr-apply.json"
-run_reap 2 "$no_herdr_apply_json" apply "$no_herdr_safe_report" \
-  --repo "$no_herdr_repo"
+run_reap 2 "$no_herdr_apply_json" apply \
+  doc:docs/stale.md branch:refs/heads/no-herdr-merged \
+  "worktree:$no_herdr_worktree" --repo "$no_herdr_repo"
 jq -e --arg id "worktree:$no_herdr_worktree" '
   .status == "refused"
   and .state.applied_count == 2
@@ -520,10 +508,9 @@ git -C "$linked_caller" commit -qm linked-only
 export FAKE_REPO="$full_ref_repo"
 export FAKE_CLEAN_WORKTREE=""
 export XDG_STATE_HOME="$tmp/full-ref-state"
-export XDG_CACHE_HOME="$tmp/full-ref-cache"
 full_ref_scan_json="$tmp/full-ref-scan.json"
 run_reap 0 "$full_ref_scan_json" scan --repo "$linked_caller"
-jq -e '.state.nomination_counts == {docs:0,branches:1,worktrees:0,board_trash:0,total:1}' \
+jq -e '.state.nomination_counts == {docs:0,branches:1,worktrees:0,total:1}' \
   "$full_ref_scan_json" >/dev/null
 full_ref_report="$(jq -r '.state.report_path' "$full_ref_scan_json")"
 assert_file_contains "$full_ref_report" '"id":"branch:refs/heads/foo"'
@@ -531,7 +518,7 @@ assert_file_contains "$full_ref_report" '"branch":"refs/heads/foo"'
 assert_file_contains "$full_ref_report" '"command":"git branch -d foo"'
 git -C "$full_ref_repo" switch -q --detach
 missing_main_json="$tmp/missing-main.json"
-run_reap 2 "$missing_main_json" inspect apply "$full_ref_report" \
+run_reap 2 "$missing_main_json" inspect apply branch:refs/heads/foo \
   --repo "$linked_caller"
 jq -e --arg id 'branch:refs/heads/foo' '
   .status == "refused"
@@ -541,7 +528,7 @@ jq -e --arg id 'branch:refs/heads/foo' '
 ' "$missing_main_json" >/dev/null
 git -C "$full_ref_repo" switch -q main
 full_ref_apply_json="$tmp/full-ref-apply.json"
-run_reap 0 "$full_ref_apply_json" apply "$full_ref_report" \
+run_reap 0 "$full_ref_apply_json" apply branch:refs/heads/foo \
   --repo "$linked_caller"
 git -C "$full_ref_repo" show-ref --verify --quiet refs/tags/foo \
   || fail 'branch deletion removed the colliding tag'
@@ -560,10 +547,9 @@ commit_and_push_base "$empty_repo"
 export FAKE_REPO="$empty_repo"
 export FAKE_CLEAN_WORKTREE=""
 export XDG_STATE_HOME="$tmp/empty-state"
-export XDG_CACHE_HOME="$tmp/empty-cache"
 empty_json="$tmp/empty.json"
 run_reap 0 "$empty_json" --repo "$empty_repo"
-jq -e '.state.nomination_counts == {docs:0,branches:0,worktrees:0,board_trash:0,total:0}' \
+jq -e '.state.nomination_counts == {docs:0,branches:0,worktrees:0,total:0}' \
   "$empty_json" >/dev/null
 empty_report="$(jq -r '.state.report_path' "$empty_json")"
 [ -f "$empty_report" ] || fail 'empty scan did not write a dated heartbeat'
@@ -571,23 +557,22 @@ assert_file_contains "$empty_report" '- total: 0'
 [ -L "$XDG_STATE_HOME/qq-reap/reports/latest" ] \
   || fail 'empty scan did not refresh latest'
 
-# Malformed and unreadable inputs are errors, publish their state, and apply
-# nothing. A bad verb is a usage error under the shared exit vocabulary.
-bad_report="$tmp/bad-report.md"
-printf 'not a qq-reap report\n' >"$bad_report"
+# A malformed requested id publishes its heartbeat state and applies nothing.
+# A bad verb is a usage error under the shared exit vocabulary.
 empty_head_before="$(git -C "$empty_repo" rev-parse HEAD)"
 empty_status_before="$(git -C "$empty_repo" status --porcelain --untracked-files=all)"
 malformed_json="$tmp/malformed.json"
-run_reap 1 "$malformed_json" apply "$bad_report" --repo "$empty_repo"
+run_reap 1 "$malformed_json" apply 'not a qq-reap nomination id' \
+  --repo "$empty_repo"
 jq -e '.status == "error" and (.state.report_path | length > 0)' \
   "$malformed_json" >/dev/null
 [ -f "$(jq -r '.state.report_path' "$malformed_json")" ] \
-  || fail 'malformed-report error omitted its heartbeat'
+  || fail 'malformed-id error omitted its heartbeat'
 assert_equal "$empty_head_before" "$(git -C "$empty_repo" rev-parse HEAD)" \
-  'malformed report changed HEAD'
+  'malformed id changed HEAD'
 assert_equal "$empty_status_before" \
   "$(git -C "$empty_repo" status --porcelain --untracked-files=all)" \
-  'malformed report changed the working tree'
+  'malformed id changed the working tree'
 
 unreadable_json="$tmp/unreadable.json"
 run_reap 1 "$unreadable_json" scan --repo "$tmp/not-a-repo"
@@ -608,39 +593,5 @@ assert_file_not_matches "$apply_report" 'git branch -D|--force' \
   'apply report suggested a forced deletion'
 assert_file_not_matches "$FAKE_HERDR_LOG" '(^|[[:space:]])--force([[:space:]]|$)' \
   'apply used forced Herdr removal'
-
-# Board-trash expiry: only this Repository's aged entries are nominated,
-# and apply deletes them through the containment rails.
-init_fixture "$tmp/trash"
-trash_repo="$fixture_repo"
-commit_and_push_base "$trash_repo"
-export FAKE_REPO="$trash_repo"
-export FAKE_CLEAN_WORKTREE=""
-export XDG_STATE_HOME="$tmp/trash-state"
-export XDG_CACHE_HOME="$tmp/trash-cache"
-trash_key="$(printf '%s' "$trash_repo" | sha256sum | awk '{print $1}')"
-trash_dir="$tmp/trash-cache/qq/board/.trash"
-now_epoch="$(date +%s)"
-old_epoch=$((now_epoch - 691200))
-old_entry="$trash_dir/.$trash_key.gen.abc123.$old_epoch.1"
-fresh_entry="$trash_dir/.$trash_key.gen.def456.$now_epoch.2"
-foreign_entry="$trash_dir/.0000000000000000000000000000000000000000000000000000000000000000.gen.fff999.$old_epoch.3"
-mkdir -p "$old_entry" "$fresh_entry" "$foreign_entry"
-trash_scan_json="$tmp/trash-scan.json"
-run_reap 0 "$trash_scan_json" scan --repo "$trash_repo"
-jq -e '
-  .state.nomination_counts == {docs:0,branches:0,worktrees:0,board_trash:1,total:1}
-' "$trash_scan_json" >/dev/null
-trash_scan_report="$(jq -r '.state.report_path' "$trash_scan_json")"
-assert_file_contains "$trash_scan_report" "\"id\":\"board-trash:.$trash_key.gen.abc123.$old_epoch.1\""
-trash_apply_json="$tmp/trash-apply.json"
-run_reap 0 "$trash_apply_json" apply "$trash_scan_report" --repo "$trash_repo"
-jq -e '
-  .state.applied_count == 1
-  and .state.skipped_count == 0
-' "$trash_apply_json" >/dev/null
-[ ! -e "$old_entry" ] || fail 'aged board-trash entry was not reaped'
-[ -d "$fresh_entry" ] || fail 'fresh board-trash entry was reaped'
-[ -d "$foreign_entry" ] || fail 'foreign board-trash entry was reaped'
 
 printf 'test-qq-reap: pass\n'

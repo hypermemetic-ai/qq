@@ -374,9 +374,10 @@ Make `qq-reap` a weekly operator habit; for example:
 0 9 * * 1 cd <repo> && bin/qq-reap scan
 ```
 
-Read the latest report, delete nomination lines to veto them, then run
-`qq-reap apply <report>`. Every scan and apply writes a dated report, even
-when empty; a missing report is the failure signal.
+Read the latest report, then run `qq-reap apply <id>…` naming only the
+nominations to apply; every nomination left out is vetoed. Every scan and
+apply writes a dated report, even when empty; a missing report is the failure
+signal.
 
 ### On-demand or scheduled maintenance
 
