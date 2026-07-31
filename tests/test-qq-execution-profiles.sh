@@ -13,7 +13,7 @@ POLICY="$ROOT/delegation/policies/execution-profiles.json"
 
 [ -f "$EXT" ] || fail "missing extension: $EXT"
 [ -f "$POLICY" ] || fail "missing policy: $POLICY"
-[ -x "$ROOT/bin/qq-execution-profiles" ] || fail 'missing policy installer'
+[ ! -e "$ROOT/bin/qq-execution-profiles" ] || fail 'deleted policy mirror installer still exists'
 [ -x "$ROOT/bin/qq-pi-role" ] || fail 'missing accountable-role launcher'
 
 jq -e '
@@ -46,14 +46,16 @@ const expectReject = async (run, text) => {
   die(`expected rejection containing ${JSON.stringify(text)}`);
 };
 const ext = await import(pathToFileURL(process.env.EXT).href);
+assert(
+  ext.PROFILE_PATH === path.join(process.env.ROOT, "delegation", "policies", "execution-profiles.json"),
+  "default profile path is not the mounted Repository policy",
+);
+
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "qq-profiles-test-"));
-const directory = path.join(temp, "qq");
-const policyPath = path.join(directory, "execution-profiles.json");
-fs.mkdirSync(directory, { mode: 0o700 });
+const policyPath = path.join(temp, "execution-profiles.json");
 const canonical = fs.readFileSync(process.env.POLICY, "utf8");
 const writePolicy = (value) => {
-  fs.writeFileSync(policyPath, typeof value === "string" ? value : `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-  fs.chmodSync(policyPath, 0o600);
+  fs.writeFileSync(policyPath, typeof value === "string" ? value : `${JSON.stringify(value, null, 2)}\n`);
 };
 writePolicy(canonical);
 
@@ -103,21 +105,13 @@ unsupportedSibling.observer = { provider: "missing", model: "nope", effort: "hig
 writePolicy(unsupportedSibling);
 await expectReject(() => resolver({ purpose: "agent" }, {}), "unsupported test profile: missing/nope");
 
-writePolicy(canonical.replace('"architect"', '"architect"').replace('"implementer"', '"architect"'));
-await expectReject(() => resolver({ purpose: "agent" }, {}), "duplicate object key");
+writePolicy("{ not json\n");
+await expectReject(() => resolver({ purpose: "agent" }, {}), "not valid JSON");
 writePolicy({ ...parsed, extra: parsed.observer });
 await expectReject(() => resolver({ purpose: "agent" }, {}), "exactly these roles");
-writePolicy(parsed);
-fs.chmodSync(policyPath, 0o644);
-await expectReject(() => resolver({ purpose: "agent" }, {}), "mode-600 regular file");
-fs.chmodSync(policyPath, 0o600);
-fs.renameSync(policyPath, `${policyPath}.real`);
-fs.symlinkSync(`${policyPath}.real`, policyPath);
-await expectReject(() => resolver({ purpose: "agent" }, {}), "ELOOP");
-fs.unlinkSync(policyPath);
-fs.renameSync(`${policyPath}.real`, policyPath);
-await resolver({ purpose: "agent" }, {});
 
+writePolicy(canonical);
+profile = await resolver({ purpose: "agent" }, {});
 ext.acceptExecutionProfileTelemetry({
   role: "assistant",
   executionProfile: { ...parsed.orchestrator, acknowledgedServiceClass: "default", accountedServiceClass: "default" },
@@ -137,32 +131,9 @@ assert(
 fs.rmSync(temp, { recursive: true, force: true });
 NODE
 
-# The installer atomically publishes one private, byte-exact active document.
-home="$(mktemp -d)"
-trap 'rm -rf "$home" "$launcher_root"' EXIT
-HOME="$home" "$ROOT/bin/qq-execution-profiles" install >/dev/null
-active="$home/.config/qq/execution-profiles.json"
-[ "$(stat -c '%a' "$home/.config/qq")" = 700 ] || fail 'policy directory is not mode 700'
-[ "$(stat -c '%a' "$active")" = 600 ] || fail 'active policy is not mode 600'
-cmp -s "$POLICY" "$active" || fail 'installer did not publish exact Repository policy'
-HOME="$home" "$ROOT/bin/qq-execution-profiles" verify >/dev/null
-printf '{}\n' >"$active"
-chmod 600 "$active"
-if HOME="$home" "$ROOT/bin/qq-execution-profiles" verify >/dev/null 2>&1; then
-  fail 'verifier accepted a stale active policy'
-fi
-HOME="$home" "$ROOT/bin/qq-execution-profiles" install >/dev/null
-bad_home="$home/bad-home"
-unrelated="$home/unrelated-config"
-mkdir -p "$bad_home" "$unrelated"
-ln -s "$unrelated" "$bad_home/.config"
-if HOME="$bad_home" "$ROOT/bin/qq-execution-profiles" install >/dev/null 2>&1; then
-  fail 'installer followed a symlinked policy parent'
-fi
-[ ! -e "$unrelated/qq" ] || fail 'rejected symlinked policy parent was mutated'
-
 # The dedicated launcher owns the Architect assertion and rejects conflicts.
 launcher_root="$(mktemp -d)"
+trap 'rm -rf "$launcher_root"' EXIT
 mkdir -p "$launcher_root/bin"
 cp "$ROOT/bin/qq-pi-role" "$launcher_root/bin/qq-pi-role"
 cat >"$launcher_root/bin/pi" <<'FAKE_PI'
