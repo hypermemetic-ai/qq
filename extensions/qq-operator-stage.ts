@@ -42,7 +42,7 @@ function result(message, details) {
 // A miss costs one visible focus steal; a false hit costs one reworded command.
 const FOCUS_DRIFT_NET = new RegExp(
   String.raw`(?:^|[;&|\n])\s*["']?(?:[^\s"']*\/)?(?:` +
-    String.raw`(?:\$HERDR|herdr)["']?\s+[^;&|\n]*?(?:(?:workspace|tab|agent|pane)\s+focus|focus-board|focus-architect|--focus\b|plugin\s+pane\s+(?:focus|open)(?![^;&|\n]*--no-focus(?:\s|$))|(?:pane\s+split|tab\s+create|workspace\s+create|worktree\s+(?:create|open))(?![^;&|\n]*--no-focus(?:\s|$)))` +
+    String.raw`(?:\$HERDR|herdr)["']?\s+[^;&|\n]*?(?:(?:workspace|tab|agent|pane)\s+focus|--focus\b|plugin\s+pane\s+(?:focus|open)(?![^;&|\n]*--no-focus(?=\s|$|[;&|]))|(?:pane\s+split|tab\s+create|workspace\s+create|worktree\s+(?:create|open))(?![^;&|\n]*--no-focus(?=\s|$|[;&|])))` +
     String.raw`|qq-herdr-(?:snap|pull)["']?(?=\s|$)` +
     String.raw`|qq-herdr-home["']?\s+(?:focus-board|focus-architect)(?:\s|$)` +
   `)`,

@@ -389,7 +389,7 @@ async function testRawSelectorDedupe() {
   assert.equal(h.messages.length, 0, "duplicate spelling emitted a wake");
 
   await execute(h, { action: "watch", pr: PR_URL });
-  assert.equal(h.timers.liveCount(), 2, "the second spelling did not arm its own watch");
+  assert.equal(h.timers.liveCount(), 2, "the second spelling failed to arm its own watch");
 
   await h.timers.advance(30_000);
   assert.equal(h.timers.liveCount(), 0, "a watch remained live after terminal state");
