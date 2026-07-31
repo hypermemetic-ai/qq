@@ -48,8 +48,8 @@ export QQ_GH_BIN="$fake_gh"
 mkdir -p "$tmp/bin"
 cat >"$tmp/bin/backlog" <<'SH'
 #!/usr/bin/env bash
-# Fixture backlog.md stub: doc create/update, task create, decision create,
-# and decision-scoped search, over the caller's nearest backlog/ directory.
+# Fixture backlog.md stub: doc create/update, task create, and decision
+# create, over the caller's nearest backlog/ directory.
 set -euo pipefail
 fail() { printf 'backlog-stub: %s\n' "$*" >&2; exit 1; }
 
@@ -129,29 +129,6 @@ case "${1:-}" in
     printf -- "---\nid: %s\ntitle: %s\ndate: '2026-01-01 00:00'\nstatus: %s\n---\n## Context\n\n## Decision\n\n## Consequences\n" \
       "$id" "$title" "$status" >"$file"
     printf 'Path: %s\n' "$file"
-    ;;
-  search)
-    shift; type=""; key=""
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --type) type="$2"; shift 2 ;;
-        --plain) shift ;;
-        --limit) shift 2 ;;
-        *) key="$1"; shift ;;
-      esac
-    done
-    [ "$type" = "decision" ] || fail "stub supports only --type decision"
-    hits=()
-    for f in "$root/decisions"/*.md; do
-      [ -e "$f" ] || continue
-      if grep -qF -- "$key" "$f"; then hits+=("$f"); fi
-    done
-    if [ "${#hits[@]}" -eq 0 ]; then printf 'No results found.\n'; exit 0; fi
-    printf 'Decisions:\n'
-    for f in "${hits[@]}"; do
-      base="${f##*/}"
-      printf '  %s - %s [score 0.500]\n' "${base%% -*}" "$(sed -n 's/^title: //p' "$f" | head -1)"
-    done
     ;;
   *) fail "unsupported verb: ${1:-}" ;;
 esac
@@ -275,6 +252,17 @@ jq -e --arg batch "$batch_id" --arg birth "$context_id" '
 jq -e '
   .pending_intakes == [] and all(.findings[]; .recurrence_key != "scan-key")
 ' "$tmp/context-covered.json" >/dev/null || fail 'settled disposition did not cover its key'
+
+# The live key inventory lists every unsettled key for observer reuse:
+# settled keys drop out; decision-covered keys stay.
+"$OBSERVE" recurrence-keys >"$tmp/recurrence-keys.txt"
+assert_equal 1 "$(wc -l <"$tmp/recurrence-keys.txt")" \
+  'recurrence-keys did not list exactly the unsettled keys'
+grep -Fxq 'explicit-decision-settlement-zebra-984' "$tmp/recurrence-keys.txt" \
+  || fail 'recurrence-keys omitted an unsettled key'
+if grep -Fxq 'scan-key' "$tmp/recurrence-keys.txt"; then
+  fail 'recurrence-keys listed a settled key'
+fi
 
 "$OBSERVE" digest >"$tmp/digest.md"
 assert_file_contains "$tmp/digest.md" 'Run two title'

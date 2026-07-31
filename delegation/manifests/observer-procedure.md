@@ -44,6 +44,11 @@ numeric authority; transcripts supply cited context. Signals are an audit input
 only after reading has produced candidates. Pass each derived facts file to
 validation as `--facts SESSION_PATH=FACTS_PATH`.
 
+The owner embeds the live recurrence-key inventory (`qq-observe
+recurrence-keys`, run at dispatch) in the BRIEF. Keys name root machinery,
+never symptoms: when an episode's root machinery matches an inventory key,
+reuse that key; mint a new key only for a genuinely new root cause.
+
 ## Procedure
 
 ### Phase 0 — Package integrity and reading mode
