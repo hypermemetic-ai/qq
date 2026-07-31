@@ -15,9 +15,6 @@ import { pathToFileURL } from "node:url";
 import { decode } from "@toon-format/toon";
 const [modulePath, scratch] = process.argv.slice(2);
 const { default: register } = await import(pathToFileURL(modulePath));
-const contextId = `context-${"b".repeat(32)}`;
-const pendingContextId = `context-${"d".repeat(32)}`;
-const batchId = `batch-${"c".repeat(32)}`;
 function occurrence(id, key, repository, pr) {
   return { occurrence_id: `occurrence-${id.repeat(32)}`, recurrence_key: key,
     source: { run_dir: `/state/runs/${repository}/pr-${pr}`, repository, legacy: false,
@@ -34,14 +31,14 @@ const observerHealth = { rounds: [
     run_dir: "/state/runs/health/repo/pr-5", assembled_at: "2026-08-05T00:00:00Z",
     reason: "analysis is not finalized", reason_truncated: false },
 ], omitted_rounds: 0 };
-function context(id = contextId, findings = [
+function context(findings = [
   { recurrence_key: "same-key", title: "Cross source 😀", kind: "friction", confidence: "high", covered: false,
     suggested_scope: "Suggested", occurrences: [a1, a2] },
   { recurrence_key: "other-key", title: "Other", kind: "waste", confidence: "medium", covered: false,
     suggested_scope: "Other suggestion", occurrences: [b1] },
-], pending_intakes = [], observer_health = observerHealth) { return {
-  schema: "qq-observer.architect-context", schema_version: 4,
-  context_id: id, findings, pending_intakes, observer_health, omitted_findings: 0 }; }
+], observer_health = observerHealth) { return {
+  schema: "qq-observer.architect-context", schema_version: 5,
+  findings, observer_health, omitted_findings: 0 }; }
 function result(body, code = 0, stderr = "") { return { stdout: typeof body === "string" ? body : JSON.stringify(body), stderr, code, killed: false }; }
 function injectedContext(message) {
   const start = message.indexOf("\n\n") + 2;
@@ -63,96 +60,89 @@ function harness(queue, options = {}) {
   const ctx = { cwd: "/qq", hasUI: options.hasUI ?? true, mode: options.mode ?? "tui", ui: {
     notify(message, level) { notifications.push({ message, level }); }, select: forbidden, custom: forbidden, editor: forbidden,
   } };
-  async function input(text, source = "interactive") { for (const fn of events.get("input") ?? []) await fn({ text, source }, ctx); }
   async function tool(params) { return tools.get("architect_disposition").execute("id", params, undefined, undefined, ctx); }
-  return { commands, tools, calls, messages, notifications, ctx, input, tool, queue };
+  return { commands, tools, calls, messages, notifications, ctx, tool, queue };
 }
 const decisions = [
-  { recurrence_key: "same-key", occurrence_ids: [a1.occurrence_id, a2.occurrence_id].sort(), action: "route", scope: "Agreed cross-Repository scope.", note: "" },
-  { recurrence_key: "other-key", occurrence_ids: [b1.occurrence_id], action: "set_aside", scope: "", note: "Current evidence is not actionable." },
+  { recurrence_key: "same-key", action: "route", scope: "Agreed cross-Repository scope.", note: "" },
+  { recurrence_key: "other-key", action: "set_aside", scope: "", note: "Current evidence is not actionable." },
 ];
-const proposalParams = { action: "propose", context_id: contextId, decisions };
-const pendingIntake = { batch_id: batchId, context_id: contextId, status: "proposed", decisions,
-  occurrences: [a1, a2, b1] };
-const pendingContext = context(pendingContextId, [], [pendingIntake]);
 
-// /architect accepts only v4 and explains doc-backed proposals plus Backlog coverage.
+// /architect accepts only v5 and explains exact decision-record coverage plus
+// the one-call settlement conversation.
 const openedContext = context();
 const h = harness([result(openedContext)]);
 await h.commands.get("architect").handler("", h.ctx);
 assert.equal(h.calls.length, 1); assert.deepEqual(h.calls[0].args, ["architect-context"]);
-assert.match(h.messages[0], /deterministic TOON/); assert.match(h.messages[0], /Backlog search/);
-assert.match(h.messages[0], /doc-backed operator-settled dispositions awaiting affirmative/);
-assert.equal(h.messages[0].includes("starts the recipient"), false);
+assert.match(h.messages[0], /deterministic TOON/);
+assert.match(h.messages[0], /exact key hit in a Backlog decision record/);
+assert.match(h.messages[0], /architect_disposition action=settle/);
+assert.equal(h.messages[0].includes("awaiting affirmative"), false);
+assert.equal(h.messages[0].includes("batch_id"), false);
 assert.deepEqual(injectedContext(h.messages[0]), openedContext);
 const toolSchema = h.tools.get("architect_disposition").parameters;
-assert.deepEqual(toolSchema.properties.action.enum, ["propose", "confirm"]);
-assert.equal(Object.hasOwn(toolSchema.properties, "operator_confirmation"), false);
-assert.equal(toolSchema.required.includes("decisions"), false);
+assert.deepEqual(toolSchema.properties.action.enum, ["settle"]);
+assert.equal(Object.hasOwn(toolSchema.properties, "context_id"), false);
+assert.equal(Object.hasOwn(toolSchema.properties, "batch_id"), false);
+assert.equal(toolSchema.required.includes("decisions"), true);
 
-// Propose validates current occurrences, writes decisions once, and calls the doc verb.
+// Settle writes decisions once and calls the one settlement verb; occurrence
+// coverage and identities are derived engine-side.
 let writtenDecisions;
-h.queue.push(result(context()), async (call) => {
-  writtenDecisions = JSON.parse(await readFile(call.args[4], "utf8"));
-  return result({ status: "proposed", batch_id: batchId, context_id: contextId });
+h.queue.push(async (call) => {
+  writtenDecisions = JSON.parse(await readFile(call.args[2], "utf8"));
+  return result({ status: "settled", settled: ["same-key", "other-key"] });
 });
-const proposed = await h.tool(proposalParams);
-assert.equal(proposed.details.status, "proposed"); assert.equal(proposed.details.batch_id, batchId);
-assert.match(proposed.content[0].text, new RegExp(batchId)); assert.match(proposed.content[0].text, /doc-backed dispositions/);
+const settled = await h.tool({ action: "settle", decisions });
+assert.equal(settled.details.status, "settled");
+assert.deepEqual(settled.details.settled, ["same-key", "other-key"]);
+assert.match(settled.content[0].text, /Settled durable Architect dispositions/);
+assert.match(settled.content[0].text, /same-key/);
 assert.deepEqual(writtenDecisions, decisions);
-assert.deepEqual(h.calls.at(-1).args.slice(0, 4), ["disposition-propose", "--context", contextId, "--decisions"]);
+assert.deepEqual(h.calls.at(-1).args.slice(0, 2), ["disposition-settle", "--decisions"]);
 assert.equal(h.calls.some((call) => call.command === "qq-handoff"), false);
+assert.match(h.notifications.at(-1).message, /Settled durable Architect dispositions/);
 
-// Confirmation re-reads the doc-backed proposal and requires the latest clear interactive affirmative.
-await h.input(`Yes, please proceed with ${batchId}; this looks good.`);
-h.queue.push(result(pendingContext), result({ status: "settled", batch_id: batchId }));
-const confirmed = await h.tool({ action: "confirm", context_id: contextId, batch_id: batchId });
-assert.equal(confirmed.details.status, "settled");
-assert.deepEqual(h.calls.at(-1).args, ["disposition-confirm", "--context", contextId, "--batch", batchId]);
-assert.equal(h.calls.some((call) => call.command === "qq-handoff"), false);
-
-// Authority and exact-field refusals never reach disposition-confirm.
-for (const text of ["Yes, please proceed.", `Do not confirm ${batchId}.`]) {
-  const authority = harness([result(pendingContext)]); await authority.input(text);
-  const refusal = await authority.tool({ action: "confirm", context_id: contextId, batch_id: batchId });
-  assert.equal(refusal.details.status, "refused");
-  assert.equal(authority.calls.some((call) => call.args[0] === "disposition-confirm"), false);
+// Non-settle actions and identity echoes are refused before any engine call.
+for (const [params, message] of [
+  [{ action: "propose", decisions }, /Action invariant failed.*one settlement call/],
+  [{ action: "confirm", context_id: "context-" + "b".repeat(32), batch_id: "batch-" + "c".repeat(32) }, /Action invariant failed/],
+  [{ action: "settle", decisions, batch_id: "batch-" + "c".repeat(32) }, /exactly action and decisions/],
+]) {
+  const x = harness([]);
+  const refusal = await x.tool(params);
+  assert.equal(refusal.details.status, "refused"); assert.match(refusal.content[0].text, message);
+  assert.equal(x.calls.length, 0);
 }
-const extra = harness([]);
-let refusal = await extra.tool({ action: "confirm", context_id: contextId, batch_id: batchId, decisions });
-assert.equal(refusal.details.status, "refused"); assert.equal(extra.calls.length, 0);
-
-// Durable identity mismatches and stale proposal contexts are refused.
-const wrongIdentity = harness([result(pendingContext)]);
-await wrongIdentity.input(`Approve batch-${"f".repeat(32)}.`);
-refusal = await wrongIdentity.tool({ action: "confirm", context_id: contextId, batch_id: `batch-${"f".repeat(32)}` });
-assert.equal(refusal.details.status, "refused"); assert.match(refusal.content[0].text, /not in durable pending_intakes/);
-const wrongContext = harness([result(pendingContext)]);
-await wrongContext.input(`Approve ${batchId}.`);
-refusal = await wrongContext.tool({ action: "confirm", context_id: pendingContextId, batch_id: batchId });
-assert.equal(refusal.details.status, "refused"); assert.match(refusal.content[0].text, /belongs to context-/);
-const stale = harness([result(context(`context-${"e".repeat(32)}`))]);
-refusal = await stale.tool(proposalParams);
-assert.equal(refusal.details.status, "refused"); assert.match(refusal.content[0].text, /run \/architect and rebuild/);
 
 // Trust-bearing decision rejections identify their invariant before the writer.
 for (const [bad, message] of [
   [[{ ...decisions[1], scope: "not empty" }], /set_aside scope invariant.*empty string/],
-  [[decisions[0], { ...decisions[0], occurrence_ids: [b1.occurrence_id] }], /recurrence invariant.*merge duplicate-key/],
-  [[{ ...decisions[0], occurrence_ids: [a1.occurrence_id, a1.occurrence_id] }], /occurrence uniqueness invariant.*remove duplicates/],
+  [[decisions[0], decisions[0]], /recurrence invariant.*merge duplicate-key/],
+  [[{ ...decisions[0], action: "hold" }], /action invariant failed.*route or set_aside/],
 ]) {
-  const x = harness([result(context())]);
-  const rejected = await x.tool({ action: "propose", context_id: contextId, decisions: bad });
+  const x = harness([]);
+  const rejected = await x.tool({ action: "settle", decisions: bad });
   assert.equal(rejected.details.status, "refused"); assert.match(rejected.content[0].text, message);
-  assert.equal(x.calls.length, 1);
+  assert.equal(x.calls.length, 0);
 }
 
-// Malformed or v3 engine context names the failed invariant and emits no context message.
-const v3 = structuredClone(context()); v3.schema_version = 3;
+// Engine failures and identity mismatches surface as errors, never as settles.
+const failing = harness([result("", 65, "no unresolved occurrences: same-key")]);
+const failed = await failing.tool({ action: "settle", decisions });
+assert.equal(failed.details.status, "error");
+assert.match(failed.content[0].text, /no unresolved occurrences/);
+const mismatched = harness([result({ status: "settled", settled: ["other-key"] })]);
+const mismatch = await mismatched.tool({ action: "settle", decisions });
+assert.equal(mismatch.details.status, "error");
+assert.match(mismatch.content[0].text, /identity invariant failed/);
+
+// Malformed or v4 engine context names the failed invariant and emits no context message.
+const v4 = structuredClone(context()); v4.schema_version = 4;
 const malformedFinding = structuredClone(context()); delete malformedFinding.findings[0].covered;
 for (const [bad, invariant] of [
   [result("not-json"), /Architect context JSON invariant failed/],
-  [result(v3), /Architect context top-level invariant failed/],
+  [result(v4), /Architect context top-level invariant failed/],
   [result(malformedFinding), /Architect finding 0 invariant failed/],
   [result("", 65, "bad store"), /bad store/],
 ]) {
