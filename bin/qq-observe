@@ -695,11 +695,14 @@ def assemble(values):
     if worktree_root.exists() and not worktree_root.is_dir():
         fail(f"worktree root is not a directory: {worktree_root}")
 
+    # qq-delegate owns the dispatch runtime root contract; the observer
+    # follows the same default (durable qq state, not volatile /tmp).
     runtime_value = os.environ.get("QQ_DISPATCH_RUNTIME_ROOT")
     if runtime_value is None:
-        runtime_value = os.path.join(
-            os.environ.get("TMPDIR") or "/tmp", f"pi-subagents-uid-{os.getuid()}",
+        state_home = os.environ.get("XDG_STATE_HOME") or os.path.join(
+            os.path.expanduser("~"), ".local", "state"
         )
+        runtime_value = os.path.join(state_home, "qq", "delegate")
     if not os.path.isabs(runtime_value):
         fail("dispatch runtime root must be absolute", 65)
     runtime = Path(os.path.realpath(runtime_value))

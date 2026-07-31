@@ -13,9 +13,9 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 launcher_tmp="$tmp/launcher-tmp"
-runtime_root="$launcher_tmp/pi-subagents-uid-$(id -u)"
+runtime_root="$tmp/state/qq/delegate"
 test_home="$tmp/home"
-mkdir -p "$runtime_root" "$test_home/.pi/agent"
+mkdir -p "$runtime_root" "$launcher_tmp" "$test_home/.pi/agent"
 chmod 700 "$runtime_root" "$test_home"
 printf '{"token":"delegate-test"}\n' >"$test_home/.pi/agent/auth.json"
 chmod 600 "$test_home/.pi/agent/auth.json"
@@ -162,6 +162,35 @@ jq -e --arg run "$happy_run" --arg cwd "$fixture" --arg session "$parent_session
 ' "$happy_run/TERMINAL" >/dev/null
 [ ! -e "$runtime_root/async-subagent-runs" ] \
   || fail "delegate recreated the retired async-subagent-runs bridge"
+
+# Default derivation: with no QQ_DISPATCH_RUNTIME_ROOT override the engine
+# roots run dirs at $XDG_STATE_HOME/qq/delegate — durable qq state.
+xdg_root="$tmp/xdg-state"
+xdg_run="$xdg_root/qq/delegate/default-run"
+mkdir -p -- "$xdg_root/qq/delegate"
+mkdir -m 700 "$xdg_run"
+printf '%s\n' '# bounded work order' >"$xdg_run/BRIEF.md"
+run_case xdg-default reviewer "$fixture" "$xdg_run/BRIEF.md" \
+  -u QQ_DISPATCH_RUNTIME_ROOT XDG_STATE_HOME="$xdg_root"
+assert_equal 0 "$RUN_STATUS" "run beneath the XDG default root failed"
+[ -f "$xdg_run/TERMINAL" ] || fail "XDG-default run dir did not seal"
+
+# The retired /tmp-containment rail stays gone: an explicit runtime root
+# outside /tmp is accepted (the Repository tree is never beneath /tmp).
+repo_tmp="$(mktemp -d "$ROOT/tests/.delegate-root.XXXXXX")"
+trap 'rm -rf "$tmp" "$repo_tmp"' EXIT
+case "$repo_tmp" in
+  /tmp/*) fail 'fixture root unexpectedly beneath /tmp' ;;
+esac
+offtmp_run="$repo_tmp/delegate-root/off-tmp-run"
+mkdir -p -- "$repo_tmp/delegate-root"
+mkdir -m 700 "$offtmp_run"
+printf '%s\n' '# bounded work order' >"$offtmp_run/BRIEF.md"
+run_case off-tmp reviewer "$fixture" "$offtmp_run/BRIEF.md" \
+  QQ_DISPATCH_RUNTIME_ROOT="$repo_tmp/delegate-root"
+assert_equal 0 "$RUN_STATUS" "runtime root outside /tmp was refused"
+[ -f "$offtmp_run/TERMINAL" ] || fail "off-/tmp run dir did not seal"
+
 # A child failure remains the terminal run result.
 failed_run="$(new_run child-failed 'exit=3')"
 run_case child-failed reviewer "$fixture" "$failed_run/BRIEF.md"

@@ -128,8 +128,13 @@ export GH_LOG="$tmp/gh.log"
 : >"$GH_LOG"
 export MERGE_41="$merge_41" MERGE_42="$merge_42" OUTSIDE_MAIN="$outside_main"
 
-runtime="$TMPDIR/pi-subagents-uid-$(id -u)"
+runtime="$XDG_STATE_HOME/qq/delegate"
 export QQ_DISPATCH_RUNTIME_ROOT="$runtime"
+# The delegate evidence root is durable qq state: it must never sit beneath
+# the volatile TMPDIR that reboots clear.
+case "$runtime" in
+  "$TMPDIR"/*) fail 'delegate runtime root is volatile' ;;
+esac
 mkdir -p "$runtime/async-subagent-runs" "$runtime/runs" \
   "$runtime/nested-subagent-events" "$runtime/async-subagent-results" \
   "$runtime/owner-review"
@@ -270,6 +275,10 @@ assert_equal 65 "$status" 'assemble accepted a merge commit outside local main'
 assert_file_contains "$tmp/outside-main.stderr" 'not an ancestor of local main'
 [ ! -e "$qualified_runs/pr-43" ] \
   || fail 'outside-main refusal left a run directory'
+
+# A /tmp wipe (reboot semantics: contents gone, directory kept) must lose no
+# delegate evidence: every run dir lives beneath the durable state root.
+find "$TMPDIR" -mindepth 1 -delete
 
 "$OBSERVE" assemble --pr 41 --repo "$repo" >"$tmp/assembled-41.json"
 run_41="$qualified_runs/pr-41"
