@@ -23,6 +23,10 @@ refactors, or out-of-scope cleanup.
 Inspect the evidence behind material conclusions, and claim completion only
 when fresh Checks demonstrate the intended outcome.
 
+**Be intelligible.** Run one check before you talk to the operator: would
+they understand this without your context? Make yourself understood — plain
+words, the real question named. Not always; just then.
+
 ## Context
 
 Read `CONCEPTS.md` before working and use its vocabulary. Where present,
@@ -68,8 +72,8 @@ worked on.
 
 ## OpenWiki
 
-This repository uses OpenWiki for recurring code documentation. Start with `openwiki/quickstart.md`, then follow its links.
-
-OpenWiki is a derived orientation surface. Verify important conclusions in source and fresh Checks.
+This repository uses OpenWiki for recurring code documentation. It is a derived
+orientation surface: consult `openwiki/` on demand when its orientation helps,
+and verify important conclusions in source and fresh Checks.
 
 <!-- OPENWIKI:END -->
