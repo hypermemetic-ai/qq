@@ -126,6 +126,24 @@ cmp "$repo/backlog/tasks/t-1 - fixture-1.md" "$scratch/backlog/tasks/t-1 - fixtu
 assert_equal 1 "$(find "$board_parent" -mindepth 1 -maxdepth 1 -type d -name ".$key.gen.*" | wc -l)" 'changed publish left multiple generations'
 [ "$(find "$board_parent/.trash" -mindepth 1 -maxdepth 1 -type d | wc -l)" -ge 2 ] || fail 'old generation is absent from trash'
 
+# Reconcile prunes this Repository's aged trash entries by disposal epoch and
+# never touches fresh, foreign, or unkeyed entries; inspect prunes nothing.
+trash_dir="$board_parent/.trash"
+now_epoch="$(date +%s)"
+old_epoch=$((now_epoch - 691200))
+aged="$trash_dir/.$key.gen.abc123.$old_epoch.1"
+fresh="$trash_dir/.$key.gen.def456.$now_epoch.2"
+foreign="$trash_dir/.0000000000000000000000000000000000000000000000000000000000000000.gen.fff999.$old_epoch.3"
+unkeyed="$trash_dir/junk.$old_epoch.4"
+mkdir -p "$aged" "$fresh" "$foreign" "$unkeyed"
+run_board 0 inspect reconcile --repo "$repo"
+[ -d "$aged" ] || fail 'inspect reconcile pruned an aged trash entry'
+run_board 0 reconcile --repo "$repo"
+[ ! -e "$aged" ] || fail 'reconcile left an aged trash entry'
+[ -d "$fresh" ] || fail 'reconcile pruned a fresh trash entry'
+[ -d "$foreign" ] || fail 'reconcile pruned a foreign trash entry'
+[ -d "$unkeyed" ] || fail 'reconcile pruned an unkeyed trash entry'
+
 # Data rails retain their data-error exit, and a second main attachment is a
 # refusal rather than an arbitrary primary choice.
 cp "$repo/backlog/tasks/t-1 - fixture-1.md" "$tmp/task-good"
