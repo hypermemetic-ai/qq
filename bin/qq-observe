@@ -17,31 +17,27 @@ usage:
   qq-observe signals SESSION.jsonl
   qq-observe validate-analysis ANALYSIS.json SESSION.jsonl [SESSION.jsonl...] \
     --facts SESSION_PATH=FACTS_PATH [--facts SESSION_PATH=FACTS_PATH...]
-  qq-observe assemble --pr N --repo ROOT [--worktree-root DIR] [--variant guided]
-  qq-observe verify-delivery --repo ROOT [--since ISO]
-  qq-observe render-doc --run DIR
+  qq-observe assemble --pr N --repo ROOT [--worktree-root DIR]
   qq-observe finalize --run DIR (--analysis FILE | --failed REASON)
-  qq-observe digest [--since ISO]
+  qq-observe run-finalized --pr N --repository OWNER/REPO
   qq-observe architect-context
   qq-observe recurrence-keys
   qq-observe disposition-settle --decisions FILE.json
-  qq-observe rounds
 
 facts, signals, and validate-analysis accept Pi v3 session JSONL. Signal
 entries and unknown-entry citations are 1-based physical JSONL line numbers.
 validate-analysis requires one --facts SESSION_PATH=FACTS_PATH pair per session.
 facts emits token fields as integer-rounded accumulated totals (Python half-to-even);
-fields with no observed value remain null. Digest and Architect views are
-computed by scanning finalized analyses and their durable run records.
+fields with no observed value remain null. Architect views are computed by
+scanning finalized analyses and their durable run records.
 EOF
   exit 64
 }
 
 case "${1:-}" in
   facts | signals | validate-analysis | \
-  assemble | verify-delivery | render-doc | finalize | \
-  digest | architect-context | recurrence-keys | disposition-settle | \
-  rounds) command="$1"; shift ;;
+  assemble | finalize | run-finalized | \
+  architect-context | recurrence-keys | disposition-settle) command="$1"; shift ;;
   *) usage ;;
 esac
 
@@ -53,27 +49,26 @@ python_binary="$QQ_BIN_RESULT"
 
 # Package assembly and delivery commands share one embedded implementation.
 case "$command" in
-  assemble | verify-delivery | render-doc | finalize | \
-  digest | architect-context | recurrence-keys | disposition-settle | \
-  rounds)
+  assemble | finalize | run-finalized | \
+  architect-context | recurrence-keys | disposition-settle)
     observer_git=""
     observer_gh=""
     observer_backlog=""
-    if [[ "$command" == assemble || "$command" == verify-delivery || "$command" == rounds || "$command" == digest || "$command" == architect-context || "$command" == disposition-settle ]]; then
+    if [[ "$command" == assemble || "$command" == architect-context || "$command" == disposition-settle ]]; then
       if ! qq_resolve_bin git; then
         printf 'qq-observe: %s\n' "$QQ_BIN_ERROR" >&2
         exit 69
       fi
       observer_git="$QQ_BIN_RESULT"
     fi
-    if [[ "$command" == assemble || "$command" == verify-delivery ]]; then
+    if [[ "$command" == assemble ]]; then
       if ! qq_resolve_bin gh; then
         printf 'qq-observe: %s\n' "$QQ_BIN_ERROR" >&2
         exit 69
       fi
       observer_gh="$QQ_BIN_RESULT"
     fi
-    if [[ "$command" == digest || "$command" == architect-context || "$command" == disposition-settle || "$command" == rounds ]]; then
+    if [[ "$command" == architect-context || "$command" == disposition-settle ]]; then
       if ! qq_resolve_bin backlog; then
         printf 'qq-observe: %s\n' "$QQ_BIN_ERROR" >&2
         exit 69
@@ -252,9 +247,8 @@ def qualified_runs_root(runs_root, repository, create=False):
     return root
 
 
-def repository_run_dir(runs_root, repository, pr, variant="guided", create_root=False):
-    suffix = "-blind" if variant == "blind" else ""
-    return qualified_runs_root(runs_root, repository, create=create_root) / f"pr-{pr}{suffix}"
+def repository_run_dir(runs_root, repository, pr, create_root=False):
+    return qualified_runs_root(runs_root, repository, create=create_root) / f"pr-{pr}"
 
 
 def nearest_existing(path):
@@ -592,14 +586,11 @@ def append_unknown(items, path, reason):
 
 
 def assemble(values):
-    options = parse_flags(values, {"--pr", "--repo", "--worktree-root", "--variant"})
+    options = parse_flags(values, {"--pr", "--repo", "--worktree-root"})
     if "--pr" not in options or "--repo" not in options:
         fail("assemble requires --pr and --repo")
     if not re.fullmatch(r"[1-9][0-9]*", options["--pr"]):
         fail("--pr must be a positive integer")
-    variant = options.get("--variant", "guided")
-    if variant != "guided":
-        fail("--variant must be guided")
     pr = int(options["--pr"])
     repo, common = git_root(options["--repo"])
     repository = canonical_repository(repo)
@@ -648,7 +639,7 @@ def assemble(values):
 
     run_name = f"pr-{pr}"
     run_dir = repository_run_dir(
-        runs_root, repository, pr, variant, create_root=True,
+        runs_root, repository, pr, create_root=True,
     )
     ensure_directory(run_dir, runs_root)
     ensure_directory(run_dir / "sessions", runs_root)
@@ -666,7 +657,7 @@ def assemble(values):
             or package.get("repository") != repository
             or package.get("branch") != branch
             or package.get("merge_commit") != merge_commit
-            or package.get("variant", "guided") != variant
+            or package.get("variant", "guided") != "guided"
         ):
             fail(f"append-only conflict at {package_path}", 65)
         existing_package = True
@@ -1054,7 +1045,7 @@ def assemble(values):
         "merge_commit": merge_commit,
         "merged_at": merged_at_value,
         "assembled_at": utc_now(),
-        "variant": variant,
+        "variant": "guided",
         "repo": os.fspath(repo),
         "sessions": packaged_sessions,
         "warnings": warnings,
@@ -1067,7 +1058,7 @@ def assemble(values):
     emit({
         "status": "assembled", "run_dir": os.fspath(run_dir),
         "sessions": len(packaged_sessions), "warnings": len(warnings),
-        "unknown_entries": len(unknown), "variant": variant,
+        "unknown_entries": len(unknown), "variant": "guided",
     })
 
 
@@ -1095,112 +1086,6 @@ def canonical_analysis_failure_reason(path):
     ):
         return None
     return item["reason"]
-
-
-def verify_delivery(values):
-    options = parse_flags(values, {"--repo", "--since"})
-    if "--repo" not in options:
-        fail("verify-delivery requires --repo")
-    repo, _ = git_root(options["--repo"])
-    repository = canonical_repository(repo)
-    if "--since" in options:
-        since_time = parse_time(options["--since"], "--since")
-        since = options["--since"]
-    else:
-        since_time = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=7)
-        since = since_time.replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    log = checked(
-        [git_binary, "-C", os.fspath(repo), "log", "main", "--first-parent",
-         f"--since={since_time.isoformat()}", "--format=%H%x00%s"],
-        "local main history inspection",
-    )
-    commits = []
-    for raw_line in log.splitlines():
-        if not raw_line:
-            continue
-        try:
-            oid_raw, subject_raw = raw_line.split(b"\0", 1)
-            oid = oid_raw.decode("ascii")
-            subject = subject_raw.decode("utf-8")
-        except (UnicodeDecodeError, ValueError) as error:
-            fail(f"local main history is malformed or not UTF-8: {error}", 65)
-        if not re.fullmatch(r"[0-9a-f]{40,64}", oid):
-            fail(f"local main history emitted an invalid commit ID: {oid}", 65)
-        commits.append({"oid": oid, "subject": subject})
-
-    prs = set()
-    unresolved = []
-    for commit in commits:
-        subject = commit["subject"]
-        match = PR_MERGE.match(subject) or PR_SQUASH.search(subject)
-        if match is None:
-            unresolved.append(commit)
-        else:
-            prs.add(int(match.group(1)))
-    prs = sorted(prs)
-    runs_root = observer_runs_root(create=False)
-    finding_counts = {}
-    for event in materialize_ledger()["events"]:
-        if (
-            event["type"] == "finding_seen" and "variant" in event
-            and event.get("repository") == repository
-        ):
-            identity = (repository, event["pr"], event["variant"])
-            finding_counts[identity] = finding_counts.get(identity, 0) + 1
-    covered = []
-    analysis_failed = []
-    uncovered = []
-    for pr in prs:
-        run = repository_run_dir(runs_root, repository, pr)
-        analyzed = False
-        analysis_path = run / "analysis.json"
-        failure_path = run / "analysis_failed.json"
-        analysis_present = os.path.lexists(analysis_path)
-        failure_present = os.path.lexists(failure_path)
-        if regular_file(analysis_path) and not failure_present:
-            analysis = minimal_analysis(json_document(
-                read_regular(analysis_path, "finalized analysis"),
-                "finalized analysis",
-            ))
-            analyzed = (
-                finding_counts.get((repository, pr, "guided"), 0)
-                == len(analysis["episodes"])
-            )
-        failure_reason = canonical_analysis_failure_reason(failure_path)
-        if analyzed and not failure_present:
-            covered.append(pr)
-        elif (
-            failure_reason is not None
-            and not analysis_present
-        ):
-            analysis_failed.append(pr)
-        else:
-            uncovered.append(pr)
-    if unresolved:
-        status = "unparseable history present"
-    elif uncovered and analysis_failed:
-        status = "uncovered Changes and analysis failures present"
-    elif uncovered:
-        status = "uncovered Changes present"
-    elif analysis_failed:
-        status = "analysis failures present"
-    elif not commits:
-        status = "no landed Changes in window"
-    else:
-        status = "covered"
-    ok = not analysis_failed and not uncovered and not unresolved
-    report = {
-        "ok": ok,
-        "status": status,
-        "since": since,
-        "repository": repository,
-        "prs": prs,
-        "covered": covered,
-        "analysis_failed": analysis_failed,
-        "uncovered": uncovered,
-        "unresolved_commits": unresolved,
-    }
-    emit(report, 0 if ok else 1)
 
 
 def minimal_analysis(item):
@@ -1295,22 +1180,6 @@ def minimal_analysis(item):
     return item
 
 
-LEDGER_VERSION = 2
-CONFIDENCE_WEIGHT = {"high": 3, "medium": 2, "low": 1}
-VERDICT_MULTIPLIER = {"accepted": 1.5, "rejected": 0.5, "reshaped": 1.0}
-
-
-def observer_store_root(create=False):
-    runs_root = observer_runs_root(create=create)
-    root = runs_root.parent
-    if create:
-        try:
-            root = root.resolve(strict=True)
-        except (OSError, RuntimeError, ValueError) as error:
-            fail(f"cannot resolve observer store root: {error}", 65)
-    return root
-
-
 def observer_run_directories():
     runs_root = observer_runs_root(create=False)
     if not runs_root.exists():
@@ -1321,7 +1190,7 @@ def observer_run_directories():
         fail(f"cannot inspect observer runs root: {error}", 65)
     if not stat.S_ISDIR(root_info.st_mode):
         fail("observer runs root is not a directory", 65)
-    pattern = re.compile(r"^pr-[1-9][0-9]*(?:-blind)?$")
+    pattern = re.compile(r"^pr-[1-9][0-9]*$")
     run_dirs = []
 
     def real_directory(path, label):
@@ -1332,10 +1201,6 @@ def observer_run_directories():
         if not stat.S_ISDIR(info.st_mode):
             fail(f"{label} is not a real directory: {path}", 65)
 
-    for candidate in sorted(runs_root.iterdir(), key=lambda path: path.name):
-        if pattern.fullmatch(candidate.name):
-            real_directory(candidate, "legacy observer run")
-            run_dirs.append(candidate)
     qualified = runs_root / "by-repository"
     if os.path.lexists(qualified):
         real_directory(qualified, "qualified observer root")
@@ -1364,12 +1229,11 @@ def package_metadata(run_dir, require_timestamp=False):
         fail("observer package has the wrong shape", 65)
     version = package.get("schema_version")
     pr = package.get("pr")
-    variant = package.get("variant", "guided")
     timestamp = package.get("assembled_at")
     repo = package.get("repo")
     if isinstance(pr, bool) or not isinstance(pr, int) or pr <= 0:
         fail("observer package lacks a positive PR number", 65)
-    if variant not in ("guided", "blind"):
+    if package.get("variant", "guided") != "guided":
         fail("observer package has an invalid variant", 65)
     if not isinstance(repo, str) or not os.path.isabs(repo):
         fail("observer package lacks its absolute local Repository root", 65)
@@ -1377,58 +1241,26 @@ def package_metadata(run_dir, require_timestamp=False):
         if not isinstance(timestamp, str):
             fail("observer package lacks assembled_at", 65)
         parse_time(timestamp, "observer package assembled_at")
-    if version == 1:
-        if "repository" in package:
-            fail("legacy observer package carries an invented Repository identity", 65)
-        repository = None
-        legacy = True
-    elif version == 2:
-        repository = package.get("repository")
-        if not isinstance(repository, str):
-            fail("Repository-qualified package lacks repository", 65)
-        parts = repository.split("/")
-        if len(parts) != 2 or any(
-            not part or part in (".", "..") or not SAFE_COMPONENT.fullmatch(part)
-            for part in parts
-        ):
-            fail("observer package has an invalid GitHub Repository identity", 65)
-        expected = repository_run_dir(
-            observer_runs_root(create=False), repository, pr, variant,
-        )
-        if Path(os.path.realpath(run_dir)) != Path(os.path.realpath(expected)):
-            fail(f"Repository-qualified package is stored under the wrong identity: {run_dir}", 65)
-        legacy = False
-    else:
+    if version != 2:
         fail("observer package has an unsupported schema_version", 65)
+    repository = package.get("repository")
+    if not isinstance(repository, str):
+        fail("Repository-qualified package lacks repository", 65)
+    parts = repository.split("/")
+    if len(parts) != 2 or any(
+        not part or part in (".", "..") or not SAFE_COMPONENT.fullmatch(part)
+        for part in parts
+    ):
+        fail("observer package has an invalid GitHub Repository identity", 65)
+    expected = repository_run_dir(
+        observer_runs_root(create=False), repository, pr,
+    )
+    if Path(os.path.realpath(run_dir)) != Path(os.path.realpath(expected)):
+        fail(f"Repository-qualified package is stored under the wrong identity: {run_dir}", 65)
     return {
         "package": package, "repository": repository, "repo": repo,
-        "pr": pr, "variant": variant, "timestamp": timestamp, "legacy": legacy,
+        "pr": pr, "variant": "guided", "timestamp": timestamp, "legacy": False,
     }
-
-
-def package_identity(run_dir, require_timestamp=False):
-    identity = package_metadata(run_dir, require_timestamp=require_timestamp)
-    return identity["pr"], identity["variant"], identity["timestamp"]
-
-
-def package_source_fields(run_dir):
-    identity = package_metadata(run_dir)
-    if identity["legacy"]:
-        return {"legacy_repo": identity["repo"]}
-    return {"repository": identity["repository"]}
-
-
-def source_key(fields, pr):
-    if isinstance(fields.get("repository"), str):
-        return ("repository", fields["repository"], pr)
-    return ("legacy", fields.get("legacy_repo", "unknown"), pr)
-
-
-def source_label(fields, pr):
-    if isinstance(fields.get("repository"), str):
-        return f"{fields['repository']}#{pr}"
-    return f"legacy:{quote(fields.get('legacy_repo', 'unknown'), safe='/._-~')}#{pr}"
-
 
 
 def canonical_json_bytes(value):
@@ -1439,229 +1271,12 @@ def sha256_file(path, label):
     return hashlib.sha256(read_regular(path, label)).hexdigest()
 
 
-def valid_source_fields(item, version):
-    repository = item.get("repository")
-    legacy_repo = item.get("legacy_repo")
-    if version == 1:
-        return repository is None and legacy_repo is None
-    if (repository is None) == (legacy_repo is None):
-        return False
-    if repository is not None:
-        parts = repository.split("/") if isinstance(repository, str) else []
-        return len(parts) == 2 and all(
-            part and part not in (".", "..") and SAFE_COMPONENT.fullmatch(part)
-            for part in parts
-        )
-    return isinstance(legacy_repo, str) and os.path.isabs(legacy_repo)
-
-
-def valid_ledger_event(item):
-    version = item.get("schema_version") if isinstance(item, dict) else None
-    if (
-        not isinstance(item, dict)
-        or item.get("schema") != "qq-observer.ledger-event"
-        or version not in (1, 2)
-        or not isinstance(item.get("ts"), str)
-        or not isinstance(item.get("type"), str)
-    ):
-        return False
-    try:
-        time_value(item["ts"])
-    except ValueError:
-        return False
-    event_type = item["type"]
-    if event_type == "finding_seen":
-        cost = item.get("cost")
-        return (
-            valid_source_fields(item, version)
-            and isinstance(item.get("pr"), int) and not isinstance(item["pr"], bool) and item["pr"] > 0
-            and ("variant" not in item or item["variant"] in ("guided", "blind"))
-            and all(isinstance(item.get(field), str) and item[field]
-                    for field in ("recurrence_key", "kind", "title"))
-            and isinstance(item.get("rank"), int) and not isinstance(item["rank"], bool)
-            and item["rank"] > 0
-            and item.get("confidence") in CONFIDENCE_WEIGHT
-            and isinstance(item.get("no_signal"), bool)
-            and isinstance(cost, dict)
-            and all(
-                isinstance(cost.get(field), int) and not isinstance(cost[field], bool)
-                and cost[field] >= 0
-                for field in ("turns", "tokens", "duration_ms")
-            )
-        )
-    if event_type == "promoted":
-        if version == 1:
-            prs = item.get("prs")
-            sources_ok = (
-                isinstance(prs, list) and len(prs) >= 2
-                and all(isinstance(pr, int) and not isinstance(pr, bool) and pr > 0 for pr in prs)
-                and len(prs) == len(set(prs))
-            )
-        else:
-            sources = item.get("sources")
-            identities = []
-            if isinstance(sources, list):
-                for source in sources:
-                    if not isinstance(source, dict) or set(source) not in (
-                        {"repository", "pr"}, {"legacy_repo", "pr"},
-                    ) or not valid_source_fields(source, 2) or not isinstance(source.get("pr"), int) \
-                       or isinstance(source.get("pr"), bool) or source["pr"] <= 0:
-                        return False
-                    identities.append(json.dumps(source, sort_keys=True))
-            sources_ok = len(identities) >= 2 and len(identities) == len(set(identities))
-        return (
-            isinstance(item.get("recurrence_key"), str) and bool(item["recurrence_key"])
-            and isinstance(item.get("kind"), str) and bool(item["kind"])
-            and sources_ok
-        )
-    return False
-
-
-def source_names_for(item):
-    if isinstance(item.get("repository"), str):
-        return {"repository": item["repository"]}
-    if isinstance(item.get("legacy_repo"), str):
-        return {"legacy_repo": item["legacy_repo"]}
-    return {}
-
-
-
-def ledger_event(event_type, **fields):
-    return {
-        "schema": "qq-observer.ledger-event", "schema_version": LEDGER_VERSION,
-        "ts": utc_now(), "type": event_type, **fields,
-    }
-
-
-def mtime_timestamp(info):
-    seconds, nanoseconds = divmod(info.st_mtime_ns, 1_000_000_000)
-    value = dt.datetime.fromtimestamp(seconds, dt.timezone.utc) + dt.timedelta(
-        microseconds=nanoseconds // 1000,
-    )
-    return value.isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
-def replay_record_metadata(path, info, field, label):
-    record = json_document(read_regular(path, label), label)
-    timestamp = record.get(field) if isinstance(record, dict) else None
-    if timestamp is None:
-        timestamp = mtime_timestamp(info)
-    elif not isinstance(timestamp, str):
-        fail(f"invalid internal timestamp at {path}", 65)
-    try:
-        timestamp_value = time_value(timestamp)
-    except ValueError:
-        fail(f"invalid internal timestamp at {path}", 65)
-    return timestamp, timestamp_value
-
-
-def materialize_findings(
-    run_dir, events, seen_findings, seen_promotions, sources_by_key,
-    kinds_by_key,
-):
-    analysis_path = run_dir / "analysis.json"
-    raw = read_regular(analysis_path, "finalized analysis")
-    analysis = minimal_analysis(json_document(raw, "finalized analysis"))
-    pr, variant, timestamp = package_identity(run_dir, require_timestamp=True)
-    source_fields = package_source_fields(run_dir)
-    timestamp = time_value(timestamp).isoformat(timespec="milliseconds").replace(
-        "+00:00", "Z",
-    )
-    for index, episode in enumerate(analysis["episodes"], 1):
-        confidence = episode["confidence"]
-        key = episode["recurrence_key"]
-        kind = episode["kind"]
-        if confidence not in CONFIDENCE_WEIGHT:
-            fail(f"analysis episode has invalid confidence: {confidence}", 65)
-        if not key or not kind or not episode["title"]:
-            fail("analysis episode has an empty ledger identity", 65)
-        cost = episode["cost"]
-        event = ledger_event(
-            "finding_seen", ts=timestamp, pr=pr, variant=variant, **source_fields,
-            recurrence_key=key, kind=kind, title=episode["title"],
-            rank=episode.get("rank", index), confidence=confidence,
-            no_signal=episode.get("no_signal", False),
-            cost={field: cost[field] for field in ("turns", "tokens", "duration_ms")},
-        )
-        if not valid_ledger_event(event):
-            fail(f"analysis episode {index} cannot be represented as a ledger event", 65)
-        episode_digest = hashlib.sha256(
-            json.dumps(
-                {
-                    field: episode[field]
-                    for field in (
-                        "recurrence_key", "kind", "title", "what_happened",
-                        "root_cause", "root_cause_location", "remedy",
-                        "confidence", "confidence_why",
-                    )
-                } | {
-                    "evidence": [
-                        {"entries": item["entries"], "quote": item["quote"]}
-                        for item in episode["evidence"]
-                    ]
-                },
-                separators=(",", ":"), sort_keys=True,
-            ).encode("utf-8")
-        ).hexdigest()
-        identity = (source_key(source_fields, pr), key, kind, episode["title"], episode_digest)
-        if identity not in seen_findings:
-            events.append(event)
-            seen_findings.add(identity)
-        sources_by_key.setdefault(key, {})[source_key(source_fields, pr)] = {
-            **source_fields, "pr": pr,
-        }
-        kinds_by_key[key] = kind
-    for key in sorted(sources_by_key):
-        sources = [sources_by_key[key][identity] for identity in sorted(sources_by_key[key])]
-        if len(sources) >= 2 and key not in seen_promotions:
-            events.append(ledger_event(
-                "promoted", ts=timestamp, recurrence_key=key,
-                kind=kinds_by_key[key], sources=sources,
-            ))
-            seen_promotions.add(key)
-
-
-def materialize_ledger():
-    run_dirs = observer_run_directories()
-    replay_items = []
-    replayed_runs = set()
-    for run_dir in run_dirs:
-        analysis_path = run_dir / "analysis.json"
-        if (
-            regular_file(analysis_path)
-            and not os.path.lexists(run_dir / "analysis_failed.json")
-        ):
-            info = os.lstat(analysis_path)
-            timestamp, timestamp_value = replay_record_metadata(
-                analysis_path, info, "written_at", "finalized analysis",
-            )
-            pr, _, _ = package_identity(run_dir)
-            replay_items.append(((timestamp_value, pr), run_dir, timestamp))
-            replayed_runs.add(run_dir)
-    replay_items.sort(key=lambda item: item[0])
-
-    events = []
-    seen_findings = set()
-    seen_promotions = set()
-    sources_by_key = {}
-    kinds_by_key = {}
-    for _, run_dir, _ in replay_items:
-        materialize_findings(
-            run_dir, events, seen_findings, seen_promotions,
-            sources_by_key, kinds_by_key,
-        )
-
-    return {
-        "runs_seen": len(run_dirs), "runs_replayed": len(replayed_runs),
-        "events": events,
-    }
-
-
 ARCHITECT_CONTEXT_SCHEMA = "qq-observer.architect-context"
 ARCHITECT_FINDING_LIMIT = 50
 ARCHITECT_HEALTH_LIMIT = 20
 ARCHITECT_HEALTH_REASON_LIMIT = 500
 ARCHITECT_CONTEXT_BYTE_LIMIT = 131072
+CONFIDENCE_WEIGHT = {"high": 3, "medium": 2, "low": 1}
 DISPOSITIONS_TITLE = "Observer dispositions"
 DISPOSITIONS_PREAMBLE = """# Observer dispositions
 
@@ -1960,8 +1575,6 @@ def architect_health_state():
     rows = []
     for run_dir in observer_run_directories():
         identity = package_metadata(run_dir, require_timestamp=True)
-        if identity["legacy"] or identity["variant"] != "guided":
-            continue
         analysis_path = run_dir / "analysis.json"
         failure_path = run_dir / "analysis_failed.json"
         analysis_present = os.path.lexists(analysis_path)
@@ -2111,6 +1724,52 @@ def disposition_settle(values):
     emit({"status": "settled", "settled": [decision["recurrence_key"] for decision in decisions]})
 
 
+def run_finalized(values):
+    options = parse_flags(values, {"--pr", "--repository"})
+    if set(options) != {"--pr", "--repository"}:
+        fail("run-finalized requires --pr and --repository")
+    pr_value = options["--pr"]
+    if not isinstance(pr_value, str) or re.fullmatch(r"[1-9][0-9]*", pr_value) is None:
+        fail("--pr must be a positive integer", 65)
+    pr = int(pr_value)
+    repository = options["--repository"]
+    parts = repository.split("/") if isinstance(repository, str) else []
+    if len(parts) != 2 or any(
+        not part or part in (".", "..") or not SAFE_COMPONENT.fullmatch(part)
+        for part in parts
+    ):
+        fail("--repository must be a safe OWNER/REPO identity", 65)
+    run_dir = repository_run_dir(observer_runs_root(create=False), repository, pr)
+    finalized = False
+    reason = "missing-or-invalid"
+    if regular_file(run_dir / "package.json"):
+        package = json_document(
+            read_regular(run_dir / "package.json", "observer package"),
+            "observer package",
+        )
+        if (
+            isinstance(package, dict)
+            and package.get("schema") == "qq-observer.package"
+            and package.get("schema_version") == 2
+            and package.get("variant", "guided") == "guided"
+            and package.get("pr") == pr
+            and package.get("repository") == repository
+        ):
+            if os.path.lexists(run_dir / "analysis.json") \
+                and os.path.lexists(run_dir / "analysis_failed.json"):
+                fail(f"observer run has both terminal analysis records: {run_dir}", 65)
+            if regular_file(run_dir / "analysis.json"):
+                finalized, reason = True, "finalized"
+            elif canonical_analysis_failure_reason(run_dir / "analysis_failed.json") is not None:
+                finalized, reason = True, "finalized-failed"
+            else:
+                reason = "analysis-not-finalized"
+    emit({
+        "pr": pr, "repository": repository,
+        "run_dir": os.fspath(run_dir), "finalized": finalized, "reason": reason,
+    }, 0 if finalized else 1)
+
+
 def backlog_frontmatter(path, label):
     try:
         text = read_regular(path, label).decode("utf-8")
@@ -2155,191 +1814,6 @@ def backlog_frontmatter(path, label):
         fields[key] = raw.strip("'\\\"")
         index += 1
     return fields, "\n".join(lines[end + 1:])
-
-
-def observer_run_rows(since=None, dispositions=None):
-    rows, keys = [], set()
-    for run_dir in observer_run_directories():
-        identity = package_metadata(run_dir, require_timestamp=True)
-        pr, variant, timestamp = identity["pr"], identity["variant"], identity["timestamp"]
-        timestamp_value = time_value(timestamp)
-        if since is not None and timestamp_value < since:
-            continue
-        analysis_present = regular_file(run_dir / "analysis.json")
-        failed = regular_file(run_dir / "analysis_failed.json")
-        if analysis_present and failed:
-            fail(f"observer run has both terminal markers: {run_dir}", 65)
-        episode_keys = []
-        if analysis_present:
-            analysis = minimal_analysis(json_document(
-                read_regular(run_dir / "analysis.json", "rounds finalized analysis"),
-                "rounds finalized analysis",
-            ))
-            episode_keys = [episode["recurrence_key"] for episode in analysis["episodes"]]
-            keys.update(episode_keys)
-        rows.append({
-            "run_dir": os.fspath(run_dir), "repo": identity["repo"],
-            "repository": identity["repository"], "legacy": identity["legacy"],
-            "pr": pr, "variant": variant, "analyzed": analysis_present,
-            "failed": failed, "covered": False, "ts": timestamp,
-            "_episode_keys": episode_keys, "_time": timestamp_value,
-        })
-    covered = coverage_by_key(keys, dispositions)
-    for row in rows:
-        if row["analyzed"]:
-            row["covered"] = all(covered[key] for key in row["_episode_keys"])
-        row.pop("_episode_keys")
-    return rows
-
-
-
-def rounds(values):
-    if values:
-        fail(f"invalid or incomplete option: {values[0]}")
-    rows = observer_run_rows()
-    rows.sort(key=lambda row: (
-        row["covered"], -row["_time"].timestamp(), row["pr"], row["variant"],
-    ))
-    for row in rows:
-        row.pop("_time")
-    print(json.dumps(rows, separators=(",", ":"), sort_keys=True))
-
-
-def event_source(event):
-    fields = source_names_for(event)
-    if fields:
-        return source_key(fields, event["pr"]), source_label(fields, event["pr"])
-    return ("legacy-event", event["pr"]), f"legacy-event#{event['pr']}"
-
-
-def digest_score_rows(events):
-    findings = {}
-    promoted = set()
-    for position, event in enumerate(events):
-        if event["type"] == "finding_seen":
-            findings.setdefault(event["recurrence_key"], []).append((position, event))
-        elif event["type"] == "promoted":
-            promoted.add(event["recurrence_key"])
-    latest_by_key = {
-        key: max(history, key=lambda entry: entry[0])[1]
-        for key, history in findings.items()
-    }
-    kind_by_key = {key: event["kind"] for key, event in latest_by_key.items()}
-    key_verdict = {}
-    kind_verdict = {}
-    newest_first = reversed(list(enumerate(events)))
-    for _, event in newest_first:
-        if event["type"] != "disposition":
-            continue
-        for outcome in event["outcomes"]:
-            key = outcome["recurrence_key"]
-            verdict = outcome["verdict"]
-            key_verdict.setdefault(key, verdict)
-            if key in kind_by_key:
-                kind_verdict.setdefault(kind_by_key[key], verdict)
-    rows = []
-    for key, history in findings.items():
-        latest = latest_by_key[key]
-        sources = {}
-        for _, event in history:
-            identity, label = event_source(event)
-            sources[identity] = label
-        labels = [sources[identity] for identity in sorted(sources)]
-        verdict = key_verdict.get(key, kind_verdict.get(latest["kind"]))
-        multiplier = VERDICT_MULTIPLIER.get(verdict, 1.0)
-        score = len(sources) * CONFIDENCE_WEIGHT[latest["confidence"]] * multiplier
-        rows.append({
-            "key": key, "title": latest["title"], "kind": latest["kind"],
-            "confidence": [event["confidence"] for _, event in history],
-            "prs": labels, "count": len(sources), "verdict": verdict or "none",
-            "multiplier": multiplier, "score": score, "promoted": key in promoted,
-            "_latest_time": time_value(latest["ts"]),
-        })
-    rows.sort(key=lambda row: (-row["score"], row["key"]))
-    return rows
-
-
-
-def score_text(value):
-    return f"{value:.15g}"
-
-
-def digest(values):
-    options = parse_flags(values, {"--since"})
-    since = None
-    if "--since" in options:
-        since = parse_time(options["--since"], "--since")
-    dispositions = load_dispositions(required=False)
-    events = materialize_ledger()["events"]
-    for entry in (dispositions or {}).get("entries", []):
-        events.append({
-            "type": "disposition", "ts": entry["settled_at"],
-            "outcomes": [{
-                "recurrence_key": entry["recurrence_key"],
-                "verdict": "accepted" if entry["action"] == "route" else "rejected",
-                "scope": entry["scope"], "note": entry["note"],
-            }],
-        })
-    events.sort(key=lambda event: time_value(event["ts"]))
-    rows = digest_score_rows(events)
-    if since is not None:
-        rows = [row for row in rows if row["_latest_time"] >= since]
-    generated = utc_now()
-    lines = [
-        "# qq observer digest", "", f"Generated: `{generated}`", "",
-        "Scoring constants: confidence `high=3`, `medium=2`, `low=1`; "
-        "disposition `accepted=1.5`, `rejected=0.5`, default `1.0`.", "",
-    ]
-
-    def add_findings(title, selected):
-        lines.extend([
-            f"## {title}", "",
-            "| Score | Recurrences | Recurrence key | Latest title | Kind | PRs | Confidence history | Disposition |",
-            "| ---: | ---: | --- | --- | --- | --- | --- | --- |",
-        ])
-        if not selected:
-            lines.append("| — | — | None | — | — | — | — | — |")
-        for row in selected:
-            lines.append(
-                f"| {score_text(row['score'])} | {row['count']} | "
-                f"`{markdown_inline(row['key'])}` | {markdown_inline(row['title'])} | "
-                f"`{markdown_inline(row['kind'])}` | "
-                f"{', '.join(row['prs'])} | "
-                f"{', '.join(row['confidence'])} | {row['verdict']} "
-                f"(×{score_text(row['multiplier'])}) |"
-            )
-        lines.append("")
-
-    add_findings("Opportunities ledger", [row for row in rows if row["promoted"]])
-    add_findings("Open findings", [row for row in rows if not row["promoted"]])
-    lines.extend([
-        "## Signal-tuning candidates", "",
-        "| PR | Direction | Evidence | Signal kind | Episode title | Recurrence key |",
-        "| ---: | --- | --- | --- | --- | --- |",
-    ])
-    candidates = [
-        event for event in events
-        if event["type"] == "signal_tune_candidate"
-        and (since is None or time_value(event["ts"]) >= since)
-    ]
-    if not candidates:
-        lines.append("| — | None | — | — | — | — |")
-    for event in candidates:
-        lines.append(
-            f"| {source_label(source_names_for(event), event['pr']) if source_names_for(event) else 'legacy-event#' + str(event['pr'])} | {event['direction']} | {event['evidence']} | "
-            f"{markdown_inline(event.get('signal_kind', '—'))} | "
-            f"{markdown_inline(event['episode_title'])} | "
-            f"`{markdown_inline(event['recurrence_key'])}` |"
-        )
-    run_rows = observer_run_rows(since=since, dispositions=dispositions)
-    finalized = sum(row["analyzed"] for row in run_rows)
-    failed = sum(row["failed"] for row in run_rows)
-    lines.extend([
-        "", f"Coverage: {finalized} finalized, {failed} failed.",
-        "Unknown ledger entries: 0.", "",
-    ])
-    data = "\n".join(lines).encode("utf-8")
-    sys.stdout.write(data.decode("utf-8"))
 
 
 def markdown_inline(value):
@@ -2592,16 +2066,6 @@ def validated_package_analysis(run_dir, analysis_path):
     ).encode()
 
 
-def render_doc(values):
-    options = parse_flags(values, {"--run"})
-    if "--run" not in options:
-        fail("render-doc requires --run")
-    run_dir = run_directory(options["--run"])
-    data = render_bytes(run_dir)
-    atomic_append(run_dir / "analysis.md", data)
-    emit({"status": "rendered", "path": os.fspath(run_dir / "analysis.md")})
-
-
 def finalize(values):
     options = parse_flags(values, {"--run", "--analysis", "--failed"})
     if "--run" not in options:
@@ -2609,8 +2073,7 @@ def finalize(values):
     if ("--analysis" in options) == ("--failed" in options):
         fail("finalize requires exactly one of --analysis or --failed")
     run_dir = run_directory(options["--run"])
-    if package_metadata(run_dir)["legacy"]:
-        fail("legacy observer runs are read-only", 65)
+    read_regular(run_dir / "package.json", "observer package")
     writes = []
     if "--analysis" in options:
         source = canonical_existing(options["--analysis"], "temporary analysis input")
@@ -2652,22 +2115,16 @@ def finalize(values):
 
 if command == "assemble":
     assemble(args)
-elif command == "verify-delivery":
-    verify_delivery(args)
-elif command == "render-doc":
-    render_doc(args)
 elif command == "finalize":
     finalize(args)
-elif command == "digest":
-    digest(args)
+elif command == "run-finalized":
+    run_finalized(args)
 elif command == "architect-context":
     architect_context(args)
 elif command == "recurrence-keys":
     recurrence_keys(args)
 elif command == "disposition-settle":
     disposition_settle(args)
-elif command == "rounds":
-    rounds(args)
 else:
     fail(f"unknown package command: {command}")
 PY_ASSEMBLER
