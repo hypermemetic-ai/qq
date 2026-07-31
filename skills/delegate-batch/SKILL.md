@@ -40,6 +40,9 @@ in the checkout's Task.
 
 ## Dispatch and status
 
+This is the canonical dispatch contract; other skills cite it instead of
+restating it.
+
 Invoke the assigned worktree's resident engine. It resolves that checkout's Pi
 wrapper, manifests, and execution-profile policy and rejects a `--cwd` outside
 its Git common directory. For one ticket:

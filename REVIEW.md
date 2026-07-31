@@ -51,5 +51,8 @@ and evidence inspected; never improvise. They are neither finding nor pass.
   a polling loop.
 - After the hybrid Task-truth convention retires, no Task-record relocation is
   a lifecycle transition.
-- No universal review/UAT gate exists without an explicit risk trigger; the
-  decision ledger is exempt.
+- Fresh-context review is the default for every non-trivial Change; the only
+  skip is a purely mechanical Change (deletion or docs/prose edit,
+  grep/CI-verifiable, no trust boundary, no operator state, no external side
+  effect). No other universal review/UAT gate exists without an explicit risk
+  trigger; the decision ledger is exempt.
