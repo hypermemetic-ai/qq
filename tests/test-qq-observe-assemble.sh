@@ -129,7 +129,9 @@ export GH_LOG="$tmp/gh.log"
 export MERGE_41="$merge_41" MERGE_42="$merge_42" OUTSIDE_MAIN="$outside_main"
 
 runtime="$XDG_STATE_HOME/qq/delegate"
-export QQ_DISPATCH_RUNTIME_ROOT="$runtime"
+# No QQ_DISPATCH_RUNTIME_ROOT override anywhere in this suite except the
+# solo case below: $runtime IS the engine default when XDG_STATE_HOME is
+# set, so every assembly pins the default derivation qq-delegate owns.
 # The delegate evidence root is durable qq state: it must never sit beneath
 # the volatile TMPDIR that reboots clear.
 case "$runtime" in

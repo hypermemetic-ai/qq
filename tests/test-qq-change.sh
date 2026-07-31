@@ -327,6 +327,19 @@ jq -cn \
   '{schema:"qq-run-terminal",version:2,run_id:"foreign-run",agent:"reviewer",exit_code:0,timed_out:false,cwd:"/elsewhere"}' \
   >"$foreign_run/TERMINAL"
 
+# Without --pr no observer package is verified, so bound sealed run dirs
+# block retirement unless the operator explicitly overrides; every subject
+# and run dir is preserved.
+run_change 2 retire change-ws --repo "$main_checkout" --branch feature \
+  --placeholder-pane change-ws:p1
+jq -e '
+  .status == "refused"
+  and .state.delegate_run_dirs == 1
+  and (.message | contains("--allow-unobserved-retire"))
+' "$tmp/result.json" >/dev/null
+[ -d "$retire_run" ] || fail 'unverified-evidence refusal removed a run dir'
+[ -d "$change_checkout" ] || fail 'unverified-evidence refusal removed the checkout'
+
 # Inspect mirrors every retirement rail without removing anything.
 run_change 0 inspect retire change-ws --repo "$main_checkout" --branch feature \
   --pr 83 --placeholder-pane change-ws:p1
@@ -422,6 +435,30 @@ if git -C "$main_checkout" show-ref --verify --quiet \
   refs/heads/interrupted-feature; then
   fail 'checkout-qualified idempotent retirement left the merged branch'
 fi
+
+# The explicit operator override sanctions unobserved retirement: bound
+# sealed run dirs, checkout, and branch are all removed without --pr.
+override_checkout="$tmp/override-change"
+git -C "$main_checkout" worktree add -qb override-feature "$override_checkout" main
+printf 'override content\n' >"$override_checkout/override.txt"
+git -C "$override_checkout" add override.txt
+git -C "$override_checkout" -c user.name=test -c user.email=test@example.com \
+  commit -qm override-feature
+git -C "$override_checkout" push -qu origin HEAD:main
+git -C "$main_checkout" pull -q --ff-only origin main
+override_run="$delegate_root/override-run"
+mkdir -p -m 700 "$override_run"
+jq -cn --arg cwd "$(cd "$override_checkout" && pwd -P)" \
+  '{schema:"qq-run-terminal",version:2,run_id:"override-run",agent:"implementer",exit_code:0,timed_out:false,cwd:$cwd}' \
+  >"$override_run/TERMINAL"
+run_change 0 retire override-ws --repo "$main_checkout" \
+  --branch override-feature --checkout "$override_checkout" \
+  --workspace-absent-owned --allow-unobserved-retire
+jq -e '.state.delegate_run_dirs == 1' "$tmp/result.json" >/dev/null \
+  || fail 'override retirement did not report the bound delegate run dir'
+[ ! -e "$override_run" ] || fail 'override retirement left its bound run dir'
+[ ! -e "$override_checkout" ] || fail 'override retirement left the checkout'
+[ -d "$foreign_run" ] || fail 'override retirement removed a foreign run dir'
 
 if grep -Eq -- '(^| )(--force|-D)( |$)' "$FAKE_HERDR_LOG"; then
   fail 'retirement used a forced removal flag'

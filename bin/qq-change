@@ -608,6 +608,22 @@ retire_change() {
     fi
   fi
 
+  # Run dirs are delegate completion evidence: without --pr no observer
+  # package was verified, so bound sealed run dirs block retirement unless
+  # the operator explicitly overrides. The with---pr path gates on
+  # verify_observer_package above.
+  if [ -z "$pull_request" ] && [ "$allow_unobserved_retire" = false ] \
+    && [ "${#delegate_run_dirs[@]}" -gt 0 ]; then
+    state="$("$QQ_ENGINE_JQ" -cn \
+      --arg workspace "$workspace" --arg checkout "$checkout_canonical" \
+      --arg branch "$branch" \
+      --argjson delegate_run_dirs "${#delegate_run_dirs[@]}" \
+      '{workspace:$workspace, checkout:$checkout, branch:$branch, delegate_run_dirs:$delegate_run_dirs, observer_package_status:"not-verified"}')"
+    qq_engine_refuse \
+      'Sealed delegate run dirs bound to the retiring checkout were found, but no observer package was verified: supply --pr so the canonical guided package is checked first, or --allow-unobserved-retire as the explicit operator override. Preserve the run dirs until their evidence is packaged.' \
+      "$state"
+  fi
+
   state="$("$QQ_ENGINE_JQ" -cn \
     --arg workspace "$workspace" --arg checkout "$checkout_canonical" \
     --arg branch "$branch" --arg branch_tip "$branch_tip" \
