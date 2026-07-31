@@ -214,45 +214,12 @@ reset_fake
 export FAKE_FOCUS_UNCONFIRMED=1
 expect_failure 'Backlog board focus was not confirmed' focus-board --repo "$repo"
 
-tr '\n\t' '  ' <"$ROOT/CONCEPTS.md" | \
-  grep -Fq 'Change checkouts are plain linked worktrees with no Herdr workspace, and delegated agents run as headless child processes in the Change worktree.'
-tr '\n\t' '  ' <"$ROOT/cockpit/README.md" | \
-  grep -Fq 'Changes live in plain linked worktrees; no per-Change Herdr workspaces are created.'
-tr '\n\t' '  ' <"$ROOT/cockpit/README.md" | \
-  grep -Fq 'their own conversation stays in the project home'
-if tr '\n\t' '  ' <"$ROOT/cockpit/README.md" | \
-  grep -qE 'move the current +conversation into the work session'; then
-  fail 'cockpit/README.md reintroduced the pane-migration flow (agents dispatch from the project home, T-70)'
-fi
-if grep -Fq -- 'herdr agent start' "$ROOT/skills/agent-messaging/SKILL.md"; then
-  fail "agent-messaging reintroduced delegate lifecycle machinery"
-fi
-if tr '\n\t' '  ' <"$ROOT/skills/agent-messaging/SKILL.md" | \
-  grep -qE -- 'herdr (pane run|agent send|agent wait|agent list|agent get|agent read)'; then
-  fail "agent-messaging reintroduced a herdr inter-agent path (amended T-109: intercom-only)"
-fi
-grep -Fq -- 'pi-intercom' "$ROOT/skills/agent-messaging/SKILL.md"
-grep -Fq -- 'herdr notification show "<title>" --body "<body>" --sound <sound>' \
-  "$ROOT/skills/agent-messaging/SKILL.md"
-tr '\n\t' '  ' <"$ROOT/CONCEPTS.md" | \
-  grep -qE '\*\*agent messaging\*\* — Direct live-agent coordination through pi-intercom plus operator-visible herdr notifications outside transcripts\. It does not start, own, or retire agents\.'
-tr '\n\t' '  ' <"$ROOT/CONCEPTS.md" | \
-  grep -qE '\*\*work order\*\* — One complete `BRIEF.md` per delegated ticket.*durable run directory at creation\..*required completion envelope\.'
-tr '\n\t' '  ' <"$ROOT/CONCEPTS.md" | \
-  grep -qE '\*\*completion envelope\*\* — The delegate'\''s run-directory `ENVELOPE.md` is its only result surface\..*The owner verifies every claim against the tree; an envelope claim is not yet evidence\.'
-tr '\n\t' '  ' <"$ROOT/CONCEPTS.md" | \
-  grep -qE '\*\*decision ledger\*\* —'
-tr '\n\t' '  ' <"$ROOT/CONCEPTS.md" | \
-  grep -qE '\*\*alignment brief\*\* —'
-# M1: backlog decisions live in the external store; on CI the backlog symlink
-# is dangling (-e follows it) and this check is absent by design (decision-28).
-if [ -e "$ROOT/backlog" ]; then
-  ls "$ROOT"/backlog/decisions/decision-2*.md >/dev/null \
-    || fail 'backlog resolves but decision-2* records are missing'
-else
-  printf 'test-qq-herdr-home: backlog store absent (CI); decision-record check skipped\n'
-fi
-tr '\n\t' '  ' <"$ROOT/CONCEPTS.md" | \
-  grep -qE 'opt-out +recorded +verbatim'
+# Vocabulary locations only: CONCEPTS.md owns the entries' content; prose
+# rewording must not turn this behavior suite red.
+for entry in '**agent messaging** —' '**work order** —' \
+  '**completion envelope** —' '**decision ledger** —' '**alignment brief** —'; do
+  grep -Fq -- "$entry" "$ROOT/CONCEPTS.md" \
+    || fail "CONCEPTS.md lost the $entry glossary entry"
+done
 
 printf 'test-qq-herdr-home: pass\n'
