@@ -18,11 +18,9 @@ usage:
   qq-observe validate-analysis ANALYSIS.json SESSION.jsonl [SESSION.jsonl...] \
     --facts SESSION_PATH=FACTS_PATH [--facts SESSION_PATH=FACTS_PATH...]
   qq-observe assemble --pr N --repo ROOT [--worktree-root DIR] [--variant guided]
-  qq-observe materialize --run DIR
   qq-observe verify-delivery --repo ROOT [--since ISO]
   qq-observe render-doc --run DIR
-  qq-observe finalize --run DIR \
-    (--analysis FILE --analyst-trace FILE | --failed REASON [--analyst-trace FILE])
+  qq-observe finalize --run DIR (--analysis FILE | --failed REASON)
   qq-observe digest [--since ISO]
   qq-observe architect-context
   qq-observe disposition-propose --context CONTEXT-ID --decisions FILE.json
@@ -41,7 +39,7 @@ EOF
 
 case "${1:-}" in
   facts | signals | validate-analysis | \
-  assemble | materialize | verify-delivery | render-doc | finalize | \
+  assemble | verify-delivery | render-doc | finalize | \
   digest | architect-context | disposition-propose | disposition-confirm | \
   rounds) command="$1"; shift ;;
   *) usage ;;
@@ -55,7 +53,7 @@ python_binary="$QQ_BIN_RESULT"
 
 # Package assembly and delivery commands share one embedded implementation.
 case "$command" in
-  assemble | materialize | verify-delivery | render-doc | finalize | \
+  assemble | verify-delivery | render-doc | finalize | \
   digest | architect-context | disposition-propose | disposition-confirm | \
   rounds)
     observer_git=""
@@ -94,6 +92,7 @@ import re
 import stat
 import subprocess
 import sys
+import tempfile
 from urllib.parse import quote
 
 self_path, command, git_binary, gh_binary, backlog_binary, *args = sys.argv[1:]
@@ -928,18 +927,76 @@ def assemble(values):
         warnings.append("no delegate runs have explicit named-branch terminal lineage")
 
     session_rows.sort(key=lambda row: (0 if row["role"] == "accountable" else 1, row["label"]))
+
+    # The audit unit is a Change: an accountable member is packaged as the
+    # suffix from the Change's first dispatch plus the originating operator
+    # brief (the last user entry before that dispatch), never the whole
+    # cross-Change session. Delegate sessions are Change-scoped by
+    # construction and copied whole.
+    earliest_started = None
+    for run_id in selected_runs:
+        started = terminal_records[run_id]["started"]
+        if earliest_started is None or started < earliest_started:
+            earliest_started = started
+
+    def change_bounded(raw):
+        lines = raw.splitlines(keepends=True)
+        bound = None
+        for index, line in enumerate(lines):
+            try:
+                entry = json.loads(line)
+                stamp = time_value(entry.get("timestamp")) if isinstance(entry, dict) else None
+            except (ValueError, RecursionError):
+                continue
+            if stamp is not None and stamp >= earliest_started:
+                bound = index
+                break
+        if bound is None or bound == 0:
+            return raw, bound, None
+        brief = None
+        for index in range(bound - 1, 0, -1):
+            try:
+                entry = json.loads(lines[index])
+            except (ValueError, RecursionError):
+                continue
+            if (
+                isinstance(entry, dict) and entry.get("type") == "message"
+                and isinstance(entry.get("message"), dict)
+                and entry["message"].get("role") == "user"
+            ):
+                brief = index
+                break
+        included = [lines[0]]
+        if brief is not None:
+            included.append(lines[brief])
+        included.extend(lines[bound:])
+        return b"".join(included), bound, brief
+
     packaged_sessions = []
     for row in session_rows:
         label = row["label"]
         source = row["source"]
         session_rel = f"sessions/{label}.jsonl"
-        atomic_append(run_dir / session_rel, read_regular(source, "selected session transcript"))
+        data = read_regular(source, "selected session transcript")
+        bound = brief = None
+        if row["role"] == "accountable" and earliest_started is not None:
+            data, bound, brief = change_bounded(data)
+            if bound is None:
+                warnings.append(
+                    f"accountable session {label} could not be Change-bounded: "
+                    "no entries at or after the first dispatch"
+                )
+        atomic_append(run_dir / session_rel, data)
         package_row = {
             "label": label,
             "source_path": os.fspath(source),
             "role": row["role"],
             "evidence": row["evidence"],
         }
+        if bound:
+            package_row["bounded_from_entry"] = bound
+            if brief is not None:
+                package_row["bounded_brief_entry"] = brief
         if "run_id" in row:
             package_row["run_id"] = row["run_id"]
         packaged_sessions.append(package_row)
@@ -987,18 +1044,6 @@ def assemble(values):
         (json.dumps(inventory, separators=(",", ":"), sort_keys=True) + "\n").encode(),
     )
 
-    corpus_paths = []
-    root_paths = set(git_paths(repo, merge_commit, "AGENTS.md", "CONCEPTS.md", "REVIEW.md"))
-    corpus_paths.extend(sorted(root_paths))
-    corpus_paths.extend(skill_paths)
-    corpus_paths.extend(sorted(
-        path for path in all_paths
-        if path.startswith("delegation/manifests/") and path.endswith(".md")
-    ))
-    for path in dict.fromkeys(corpus_paths):
-        atomic_append(run_dir / "corpus" / Path(*PurePosixPath(path).parts),
-                      git_blob(repo, merge_commit, path))
-
     unknown.sort(key=lambda row: (row["path"], row["reason"]))
     warnings = list(dict.fromkeys(warnings))
     package = {
@@ -1024,101 +1069,6 @@ def assemble(values):
         "status": "assembled", "run_dir": os.fspath(run_dir),
         "sessions": len(packaged_sessions), "warnings": len(warnings),
         "unknown_entries": len(unknown), "variant": variant,
-    })
-
-
-def materialize(values):
-    options = parse_flags(values, {"--run"})
-    if set(options) != {"--run"}:
-        fail("materialize requires --run")
-    run_dir = run_directory(options["--run"])
-    package_path = run_dir / "package.json"
-    package = json_document(
-        read_regular(package_path, f"observer package in run {run_dir}"),
-        f"observer package in run {run_dir}",
-    )
-    if not isinstance(package, dict) or package.get("schema") != "qq-observer.package":
-        fail(f"observer package has the wrong shape in run {run_dir}", 65)
-    version = package.get("schema_version")
-    if version == 1:
-        fail(f"cannot materialize legacy v1 observer package in run {run_dir}", 65)
-    if isinstance(version, bool) or version != 2:
-        fail(f"observer package has an unsupported schema_version in run {run_dir}", 65)
-    identity = package_metadata(run_dir)
-    variant = identity["variant"]
-    sessions = package.get("sessions")
-    if not isinstance(sessions, list):
-        fail(f"observer package has no session list in run {run_dir}", 65)
-
-    labels = set()
-    for row in sessions:
-        if not isinstance(row, dict):
-            fail(f"observer package session has the wrong shape in run {run_dir}", 65)
-        label = row.get("label")
-        if (
-            not isinstance(label, str)
-            or not SAFE_COMPONENT.fullmatch(label)
-            or label in (".", "..")
-            or label in labels
-        ):
-            fail(f"observer package session has an unsafe or duplicate label in run {run_dir}", 65)
-        labels.add(label)
-        session_path = run_dir / "sessions" / f"{label}.jsonl"
-        if not regular_file(session_path):
-            fail(f"session transcript is missing for {label} in run {run_dir}", 65)
-        derivatives = [("facts", run_dir / "facts" / f"{label}.json")]
-        if variant == "guided":
-            derivatives.append(("signals", run_dir / "signals" / f"{label}.json"))
-        for subcommand, destination in derivatives:
-            process = run_process(
-                [self_path, subcommand, os.fspath(session_path)],
-                f"qq-observe {subcommand}", cwd=Path(identity["repo"]),
-            )
-            if process.returncode != 0:
-                detail = process.stderr.decode("utf-8", "replace").strip()
-                fail(
-                    f"qq-observe {subcommand} failed for session {label} in run {run_dir}"
-                    f"{': ' + detail if detail else ''}",
-                    65,
-                )
-            try:
-                json.loads(
-                    process.stdout.decode("utf-8"),
-                    parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
-                )
-            except (UnicodeDecodeError, ValueError, RecursionError) as error:
-                fail(
-                    f"qq-observe {subcommand} emitted invalid JSON for session {label} "
-                    f"in run {run_dir}: {error}",
-                    65,
-                )
-            atomic_append(destination, process.stdout)
-        row["facts"] = os.fspath(run_dir / "facts" / f"{label}.json")
-        if variant == "guided":
-            row["signals"] = os.fspath(run_dir / "signals" / f"{label}.json")
-        else:
-            row.pop("signals", None)
-
-    package_data = canonical_json_bytes(package)
-    temporary = package_path.with_name(
-        f".{package_path.name}.materialize-{os.getpid()}-{os.urandom(8).hex()}"
-    )
-    try:
-        atomic_append(temporary, package_data)
-        os.replace(temporary, package_path)
-        directory = os.open(package_path.parent, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
-    finally:
-        try:
-            os.unlink(temporary)
-        except FileNotFoundError:
-            pass
-    emit({
-        "status": "materialized", "run_dir": os.fspath(run_dir),
-        "sessions": len(sessions),
     })
 
 
@@ -2518,14 +2468,6 @@ def digest(values):
         "Unknown ledger entries: 0.", "",
     ])
     data = "\n".join(lines).encode("utf-8")
-    root = observer_store_root(create=True)
-    suffix = 1
-    while True:
-        suffix_text = "" if suffix == 1 else f"-{suffix}"
-        path = root / "digests" / f"{generated}{suffix_text}.md"
-        if atomic_append(path, data, content_idempotent=False):
-            break
-        suffix += 1
     sys.stdout.write(data.decode("utf-8"))
 
 
@@ -2537,38 +2479,25 @@ def compact_value(value):
     return json.dumps(value, separators=(",", ":"), sort_keys=True)
 
 
-def require_materialized_package(package):
-    if not isinstance(package, dict) or not isinstance(package.get("sessions"), list):
-        fail("observer package has the wrong shape", 65)
-    for row in package["sessions"]:
-        if not isinstance(row, dict):
-            fail("observer package session has the wrong shape", 65)
-        facts = row.get("facts")
-        if not isinstance(facts, str) or not facts:
-            fail(
-                "package is not materialized; run "
-                "`qq-observe materialize --run <dir>`",
-                65,
-            )
-
-
 def render_bytes(run_dir, analysis=None):
     package = json_document(read_regular(run_dir / "package.json", "observer package"), "observer package")
     if not isinstance(package, dict) or not isinstance(package.get("sessions"), list):
         fail("observer package has the wrong shape")
-    require_materialized_package(package)
     if analysis is None:
         analysis = json_document(read_regular(run_dir / "analysis.json", "analysis JSON"), "analysis JSON")
     analysis = minimal_analysis(analysis)
-    facts_rows = []
+    labels = []
     for row in sorted(package["sessions"], key=lambda item: item.get("label", "")):
         label = row.get("label")
         if not isinstance(label, str) or not SAFE_COMPONENT.fullmatch(label):
             fail("observer package session has an unsafe label")
-        path = Path(row["facts"])
-        expected_path = run_dir / "facts" / f"{label}.json"
-        if not path.is_absolute() or Path(os.path.realpath(path)) != expected_path:
-            fail(f"observer package facts path has the wrong identity: {label}")
+        labels.append(label)
+    if not labels:
+        fail("observer package contains no sessions")
+    scratch, derived = derive_session_facts(run_dir, labels)
+    facts_rows = []
+    for label in labels:
+        path = derived[label]
         facts = json_document(read_regular(path, "facts JSON"), f"facts JSON {path}")
         required = {
             "entries": int, "turns_by_role": dict, "token_usage": dict,
@@ -2587,8 +2516,6 @@ def render_bytes(run_dir, analysis=None):
         ):
             fail(f"facts JSON has the wrong shape: {path}")
         facts_rows.append((label, facts))
-    if not facts_rows:
-        fail("facts directory contains no facts JSON")
 
     pr = package.get("pr")
     generated = package.get("assembled_at")
@@ -2688,6 +2615,46 @@ def run_directory(value):
     return run_dir
 
 
+def derive_session_facts(run_dir, labels):
+    """Derive facts for packaged sessions into a scratch directory.
+
+    Facts are derivable-on-read views of the packaged transcripts; the run
+    dir stores only the transcripts they recompute from. Returns the
+    scratch directory (the caller keeps it alive) and a {label: path} map.
+    """
+    scratch = tempfile.TemporaryDirectory(prefix="qq-observe-facts-")
+    derived = {}
+    for label in labels:
+        session = run_dir / "sessions" / f"{label}.jsonl"
+        process = run_process(
+            [self_path, "facts", os.fspath(session)], "qq-observe facts",
+        )
+        if process.returncode != 0:
+            detail = process.stderr.decode("utf-8", "replace").strip()
+            scratch.cleanup()
+            fail(
+                f"qq-observe facts failed for session {label} in run {run_dir}"
+                f"{': ' + detail if detail else ''}",
+                65,
+            )
+        try:
+            json.loads(
+                process.stdout.decode("utf-8"),
+                parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
+            )
+        except (UnicodeDecodeError, ValueError, RecursionError) as error:
+            scratch.cleanup()
+            fail(
+                f"qq-observe facts emitted invalid JSON for session {label} "
+                f"in run {run_dir}: {error}",
+                65,
+            )
+        fact = Path(scratch.name) / f"{label}.json"
+        fact.write_bytes(process.stdout)
+        derived[label] = fact
+    return scratch, derived
+
+
 def validated_package_analysis(run_dir, analysis_path):
     package = json_document(
         read_regular(run_dir / "package.json", "observer package"),
@@ -2695,13 +2662,11 @@ def validated_package_analysis(run_dir, analysis_path):
     )
     if not isinstance(package, dict) or not isinstance(package.get("sessions"), list):
         fail("observer package has the wrong shape", 65)
-    require_materialized_package(package)
     repo_value = package.get("repo")
     if not isinstance(repo_value, str):
         fail("observer package lacks its Repository root", 65)
     repo = canonical_directory(repo_value, "package Repository root")
     sessions = []
-    facts = []
     labels = set()
     for row in package["sessions"]:
         if not isinstance(row, dict):
@@ -2715,25 +2680,19 @@ def validated_package_analysis(run_dir, analysis_path):
             fail("observer package session has an unsafe or duplicate label", 65)
         labels.add(label)
         session = run_dir / "sessions" / f"{label}.jsonl"
-        fact_value = row["facts"]
-        fact = Path(fact_value)
-        expected_fact = run_dir / "facts" / f"{label}.json"
-        if (
-            not fact.is_absolute()
-            or Path(os.path.realpath(fact)) != expected_fact
-            or not regular_file(session)
-            or not regular_file(fact)
-        ):
+        if not regular_file(session):
             fail(f"observer package session inputs are incomplete: {label}", 65)
-        sessions.append(session)
-        facts.append(fact)
+        sessions.append((label, session))
     if not sessions:
         fail("observer package contains no sessions", 65)
 
+    # Facts are derived lazily at validation time; the package stores only
+    # the transcripts they recompute from.
     validation = [self_path, "validate-analysis", os.fspath(analysis_path)]
-    validation.extend(map(os.fspath, sessions))
-    for session, fact in zip(sessions, facts):
-        validation.extend(("--facts", f"{session}={fact}"))
+    validation.extend(os.fspath(session) for _, session in sessions)
+    scratch, derived = derive_session_facts(run_dir, [label for label, _ in sessions])
+    for label, session in sessions:
+        validation.extend(("--facts", f"{session}={derived[label]}"))
     process = run_process(validation, "analysis validation", cwd=repo)
     if process.returncode != 0:
         reason = "validator refused the analysis"
@@ -2773,24 +2732,15 @@ def render_doc(values):
 
 
 def finalize(values):
-    options = parse_flags(values, {"--run", "--analysis", "--failed", "--analyst-trace"})
+    options = parse_flags(values, {"--run", "--analysis", "--failed"})
     if "--run" not in options:
         fail("finalize requires --run")
     if ("--analysis" in options) == ("--failed" in options):
         fail("finalize requires exactly one of --analysis or --failed")
-    if "--analysis" in options and "--analyst-trace" not in options:
-        fail("--analyst-trace is required with --analysis")
     run_dir = run_directory(options["--run"])
     if package_metadata(run_dir)["legacy"]:
         fail("legacy observer runs are read-only", 65)
     writes = []
-    trace_data = None
-    if "--analyst-trace" in options:
-        trace = canonical_existing(options["--analyst-trace"], "analyst trace")
-        valid, reason = pi_first_record(trace)
-        if not valid:
-            fail(f"analyst trace is not Pi v3: {reason}")
-        trace_data = read_regular(trace, "analyst trace")
     if "--analysis" in options:
         source = canonical_existing(options["--analysis"], "temporary analysis input")
         if within(source, run_dir):
@@ -2820,8 +2770,6 @@ def finalize(values):
             run_dir / "analysis_failed.json",
             (json.dumps(failure, separators=(",", ":"), sort_keys=True) + "\n").encode(),
         ))
-    if trace_data is not None:
-        writes.append((run_dir / "analyst-trace.jsonl", trace_data))
     for path, data in writes:
         preflight_append(path, data)
     changed = []
@@ -2833,8 +2781,6 @@ def finalize(values):
 
 if command == "assemble":
     assemble(args)
-elif command == "materialize":
-    materialize(args)
 elif command == "verify-delivery":
     verify_delivery(args)
 elif command == "render-doc":

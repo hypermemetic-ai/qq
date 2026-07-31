@@ -316,26 +316,24 @@ assert_no_ledger
 # create any ledger-side marker or event store.
 finalize_run="$runs/pr-4"
 write_package 4 2026-01-04T00:00:00Z
-mkdir -p "$finalize_run/sessions" "$finalize_run/facts"
+mkdir -p "$finalize_run/sessions"
 session="$finalize_run/sessions/observer.jsonl"
 cat >"$session" <<'JSONL'
 {"type":"session","version":3,"timestamp":"2026-01-04T00:00:00Z"}
 {"type":"message","timestamp":"2026-01-04T00:00:01Z","message":{"role":"user","content":"fixture"}}
 JSONL
-"$OBSERVE" facts "$session" >"$finalize_run/facts/observer.json"
-facts="$finalize_run/facts/observer.json"
-jq --arg facts "$facts" '.sessions=[{label:"observer",facts:$facts}]' \
+jq '.sessions=[{label:"observer"}]' \
   "$finalize_run/package.json" >"$tmp/finalize-package.json"
 mv "$tmp/finalize-package.json" "$finalize_run/package.json"
 cat >"$tmp/finalize-analysis.json" <<JSON
 {"schema":"qq-observer.analysis","schema_version":1,"run":{"change":"fixture/scan#4","sessions":["$session"]},"episodes":[],"dropped_signals":[],"limitations":"Fixture."}
 JSON
-cp "$session" "$tmp/analyst-trace.jsonl"
 "$OBSERVE" finalize --run "$finalize_run" \
-  --analysis "$tmp/finalize-analysis.json" --analyst-trace "$tmp/analyst-trace.jsonl" \
-  >"$tmp/finalize.json"
-jq -e '.status == "finalized" and (.written | sort) == ["analysis.json","analysis.md","analyst-trace.jsonl"]' \
+  --analysis "$tmp/finalize-analysis.json" >"$tmp/finalize.json"
+jq -e '.status == "finalized" and (.written | sort) == ["analysis.json","analysis.md"]' \
   "$tmp/finalize.json" >/dev/null || fail 'successful finalize lost its output contract'
+[ ! -e "$finalize_run/analyst-trace.jsonl" ] \
+  || fail 'finalize persisted a derivable analyst trace'
 legacy_suffix=applied
 [ ! -e "$finalize_run/.ledger-$legacy_suffix" ] \
   || fail 'finalize wrote a retired application marker'
@@ -376,20 +374,11 @@ if grep -q '^1 .*`solo-key`' "$tmp/sections.txt"; then
 fi
 assert_no_ledger
 
-# (2) digest --since windowing and the stored digest file.
+# (2) digest --since windowing; digests are derivable-on-read and never
+# persisted.
 "$OBSERVE" digest --since 2026-06-01T00:00:00Z >"$tmp/digest-windowed.md"
 assert_file_contains "$tmp/digest-windowed.md" '| — | — | None'
-digest_dir="$observer_root/digests"
-[ -d "$digest_dir" ] || fail 'digest did not persist into the digests store'
-stored_count="$(find "$digest_dir" -maxdepth 1 -name '*.md' | wc -l)"
-[ "$stored_count" -ge 1 ] || fail 'no stored digest file written'
-latest="$(ls -t "$digest_dir"/*.md | head -1)"
-cmp "$latest" "$tmp/digest-windowed.md" \
-  || fail 'stored digest does not match the emitted digest'
-"$OBSERVE" digest --since 2026-06-01T00:00:00Z >"$tmp/digest-windowed-2.md"
-stored_count_2="$(find "$digest_dir" -maxdepth 1 -name '*.md' | wc -l)"
-[ "$stored_count_2" -gt "$stored_count" ] \
-  || fail 'repeated digest did not suffix a new stored digest'
+[ ! -e "$observer_root/digests" ] || fail 'digest persisted into a digests store'
 assert_no_ledger
 
 printf 'test-qq-observe-ledger-scan: pass\n'

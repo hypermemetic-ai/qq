@@ -57,8 +57,7 @@ exactly one preserve-or-restore question, never an operator-input deadlock.
    <checkout>`. Its engine verifies merge and ancestry and safely
    fast-forwards the sole primary `main`; exit 2 is a rail refusal and exit 1
    an error. Stop and preserve the Change; repeating the call is safe. Run
-   `qq-observe assemble` while the worktree lives, then
-   `qq-observe materialize --run <run-dir>`, then dispatch
+   `qq-observe assemble` while the worktree lives, then dispatch
    `<worktree>/bin/qq-delegate run --role observer --cwd <absolute-worktree>
    --brief <absolute-run-dir>/BRIEF.md` with its brief-contained procedure/package
    paths. The call blocks; validate and finalize its analysis on return; use

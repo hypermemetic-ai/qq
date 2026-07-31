@@ -19,7 +19,7 @@ status=$?
 set -e
 assert_equal 64 "$status" "missing command did not return usage"
 assert_file_contains "$tmp/usage" 'qq-observe facts SESSION.jsonl'
-assert_file_contains "$tmp/usage" 'qq-observe materialize --run DIR'
+assert_file_contains "$tmp/usage" 'qq-observe finalize --run DIR'
 assert_file_contains "$tmp/usage" 'qq-observe architect-context'
 
 printf 'test-qq-observe: pass\n'

@@ -151,8 +151,13 @@ collision_parent_b="$tmp/collision-b/parent-session.jsonl"
 mkdir -p "$parent_strong_dir" "$(dirname "$collision_parent_a")" \
   "$(dirname "$collision_parent_b")"
 cat >"$parent_strong" <<'JSONL'
-{"type":"session","version":3,"timestamp":"2026-07-20T10:00:00Z","branch":"feature"}
-{"type":"message","timestamp":"2026-07-20T10:00:01Z","message":{"role":"user","content":"work feature"}}
+{"type":"session","version":3,"timestamp":"2026-07-19T09:00:00Z","branch":"feature"}
+{"type":"message","timestamp":"2026-07-19T09:00:01Z","message":{"role":"user","content":"capture PR 39 — an earlier Change"}}
+{"type":"message","timestamp":"2026-07-19T09:05:00Z","message":{"role":"assistant","content":[{"type":"text","text":"earlier change work"}]}}
+{"type":"message","timestamp":"2026-07-20T09:59:58Z","message":{"role":"user","content":"originating brief for PR 41"}}
+{"type":"message","timestamp":"2026-07-20T09:59:59Z","message":{"role":"assistant","content":[{"type":"text","text":"dispatching strong-run"}]}}
+{"type":"message","timestamp":"2026-07-20T10:00:00Z","message":{"role":"assistant","content":[{"type":"text","text":"strong-run dispatched"}]}}
+{"type":"message","timestamp":"2026-07-20T10:02:00Z","message":{"role":"assistant","content":[{"type":"text","text":"post-dispatch accountable work"}]}}
 JSONL
 cat >"$parent_weak" <<'JSONL'
 {"type":"session","version":3,"timestamp":"2026-07-20T10:00:00Z"}
@@ -168,6 +173,16 @@ for collision_parent in "$collision_parent_a" "$collision_parent_b"; do
 {"type":"message","timestamp":"2026-07-20T10:00:01Z","message":{"role":"user","content":"distinct accountable session with a shared basename"}}
 JSONL
 done
+stale_uuid='5a1e7c20-0000-4000-8000-000000000042'
+stale_parent_dir="$HOME/.pi/agent/sessions/--fixture-stale--"
+stale_parent="$stale_parent_dir/2026-07-19T00-00-00_${stale_uuid}.jsonl"
+mkdir -p "$stale_parent_dir"
+# Every entry predates the Change's first dispatch: the accountable member
+# cannot be Change-bounded, so it is copied whole with a warning.
+cat >"$stale_parent" <<'JSONL'
+{"type":"session","version":3,"timestamp":"2026-07-19T09:00:00Z"}
+{"type":"message","timestamp":"2026-07-19T09:00:01Z","message":{"role":"user","content":"stale session with no dispatch-era entries"}}
+JSONL
 make_run() {
   local run_id="$1" cwd="$2" parent="$3" session_hash="$4" transcript_text="${5:-delegate $1}"
   local run_dir="$runtime/$run_id"
@@ -205,6 +220,7 @@ make_run weak-missing-run "$worktree_root/retired-missing" "$parent_weak_missing
   weak-missing-hash 'delegate feature work'
 weak_missing_session_file="$runtime/weak-missing-run/sessions/run-0/session.jsonl"
 rm "$weak_missing_session_file"
+make_run stale-run "$strong_worktree" "$stale_uuid" stale-hash
 nested_quoted_session="$strong_session_dir/session.jsonl"
 cat >"$nested_quoted_session" <<'JSONL'
 {"type":"session","version":3,"timestamp":"2026-07-20T10:30:00Z"}
@@ -301,7 +317,7 @@ jq -e --arg repo "$(realpath "$repo")" \
   and .variant == "guided"
   and ([.sessions[] | select(
     .role == "delegate" and .evidence == "named-branch-terminal-lineage"
-  )] | length) == 5
+  )] | length) == 6
   and ([.sessions[] | select(
     .role == "accountable" and .source_path == $parent_strong and .label == $accountable_strong
   )] | length) == 1
@@ -312,7 +328,7 @@ jq -e --arg repo "$(realpath "$repo")" \
     .source_path == $collision_parent_b and .label == $collision_parent_b_label
   )] | length) == 1
   and ([.sessions[].label] | length) == ([.sessions[].label] | unique | length)
-  and ([.sessions[] | select(.role == "accountable" and .evidence == "parent-of-delegate")] | length) == 3
+  and ([.sessions[] | select(.role == "accountable" and .evidence == "parent-of-delegate")] | length) == 4
   and ([.sessions[] | select(.role == "delegate" and .run_id == "ambiguous-run")] | length) == 1
   and ([.sessions[] | select(.role == "delegate" and .run_id == "parent-zero-run")] | length) == 1
   and ([.sessions[] | select(.source_path | contains($ambiguous_uuid))] | length) == 0
@@ -334,102 +350,66 @@ jq -e --arg repo "$(realpath "$repo")" \
   and ([.sessions[] | has("facts") or has("signals")] | any | not)
   and any(.warnings[]; contains("outside the explicit named-branch lineage"))
   and any(.warnings[]; contains("parent-zero-run accountable session is unavailable"))
+  and any(.warnings[]; contains("could not be Change-bounded"))
 ' "$run_41/package.json" >/dev/null \
   || fail 'explicit terminal/run-parent lineage was not the sole package membership source'
 [ -f "$run_41/inventory.json" ] || fail 'inventory was not written'
-[ -f "$run_41/corpus/skills/fixture/SKILL.md" ] || fail 'merge-time corpus was not snapshotted'
-[ -f "$run_41/corpus/delegation/manifests/agents/implementer.md" ] \
-  || fail 'nested canonical agent manifest was omitted from the corpus'
-assert_file_contains "$run_41/corpus/skills/fixture/SKILL.md" 'timeoutMs:1800000' \
-  'package corpus lost the shorter Skill timeout from the exact Change snapshot'
-assert_file_contains \
-  "$run_41/corpus/delegation/manifests/agents/implementer.md" \
-  'timeoutMs: 2700000' \
-  'package corpus lost the authoritative role timeout from the exact Change snapshot'
+# The corpus and the facts/signals derivatives are derivable-on-read views;
+# the package stores only transcripts and the merge-time inventory.
+[ ! -e "$run_41/corpus" ] || fail 'assemble persisted a derivable corpus'
 assert_file_contains "$run_41/sessions/delegate-strong-run-primary.jsonl" \
   'killed at exactly 1800000ms' \
   'package transcript lost exact runtime timeout evidence'
-assert_file_not_matches "$run_41/corpus/skills/fixture/SKILL.md" 'timeoutMs:600000' \
-  'package corpus read the later working tree instead of the Change snapshot'
 jq -e '.skills == [{name:"fixture",description:"Fixture skill at merge time."}]' \
   "$run_41/inventory.json" >/dev/null || fail 'skill inventory did not preserve the merge-time description'
-assert_equal 8 "$(find "$run_41/sessions" -type f | wc -l)" 'session transcript count is wrong'
+# Accountable members are Change-bounded: the suffix from the Change's first
+# dispatch plus the originating operator brief, never the cross-Change whole.
+accountable_session="$run_41/sessions/accountable-$parent_uuid.jsonl"
+assert_equal 4 "$(wc -l <"$accountable_session")" \
+  'bounded accountable member has the wrong shape'
+assert_file_contains "$accountable_session" 'originating brief for PR 41' \
+  'bounded accountable member lost the originating operator brief'
+assert_file_contains "$accountable_session" 'strong-run dispatched' \
+  'bounded accountable member lost the dispatch-era suffix'
+assert_file_contains "$accountable_session" 'post-dispatch accountable work' \
+  'bounded accountable member lost the post-dispatch suffix'
+assert_file_not_matches "$accountable_session" 'earlier change work' \
+  'bounded accountable member kept the pre-Change prefix'
+assert_file_not_matches "$accountable_session" 'dispatching strong-run' \
+  'bounded accountable member kept pre-dispatch entries'
+jq -e --arg label "accountable-$parent_uuid" '
+  [.sessions[] | select(.label == $label
+    and .bounded_from_entry == 5 and .bounded_brief_entry == 3)]
+  | length == 1
+' "$run_41/package.json" >/dev/null || fail 'bounded provenance was not recorded'
+# An accountable session with no dispatch-era entries is copied whole.
+assert_equal 2 "$(wc -l <"$run_41/sessions/accountable-$stale_uuid.jsonl")" \
+  'unbounded accountable member was not copied whole'
+assert_equal 10 "$(find "$run_41/sessions" -type f | wc -l)" 'session transcript count is wrong'
 [ ! -e "$run_41/facts" ] || fail 'assemble eagerly created a facts directory'
 [ ! -e "$run_41/signals" ] || fail 'assemble eagerly created a signals directory'
+
+# render-doc renders finalized analyses; before finalization there is none.
 set +e
 "$OBSERVE" render-doc --run "$run_41" \
-  >"$tmp/unmaterialized-render.stdout" 2>"$tmp/unmaterialized-render.stderr"
+  >"$tmp/unfinalized-render.stdout" 2>"$tmp/unfinalized-render.stderr"
 status=$?
 set -e
-assert_equal 65 "$status" 'render-doc accepted an unmaterialized package'
-assert_file_contains "$tmp/unmaterialized-render.stderr" \
-  'package is not materialized; run `qq-observe materialize --run <dir>`'
-expected_facts="$tmp/expected-facts"
-expected_signals="$tmp/expected-signals"
-mkdir "$expected_facts" "$expected_signals"
-while IFS=$'\t' read -r label session; do
-  "$OBSERVE" facts "$session" >"$expected_facts/$label.json"
-  "$OBSERVE" signals "$session" >"$expected_signals/$label.json"
-done < <(jq -r '.sessions[] | [.label, ("'"$run_41"'/sessions/" + .label + ".jsonl")] | @tsv' \
-  "$run_41/package.json")
-"$OBSERVE" materialize --run "$run_41" >"$tmp/materialized-41.json"
-jq -e '.status == "materialized" and .sessions == 8' "$tmp/materialized-41.json" >/dev/null \
-  || fail 'guided package did not materialize'
-for expected in "$expected_facts"/*.json; do
-  cmp "$expected" "$run_41/facts/$(basename "$expected")" \
-    || fail 'materialized facts differ from direct qq-observe facts output'
-done
-for expected in "$expected_signals"/*.json; do
-  cmp "$expected" "$run_41/signals/$(basename "$expected")" \
-    || fail 'materialized signals differ from direct qq-observe signals output'
-done
-jq -e '[.sessions[] | has("facts") and has("signals")] | all' \
-  "$run_41/package.json" >/dev/null \
-  || fail 'guided materialization omitted derivative pointers'
-cp "$run_41/package.json" "$tmp/materialized-package.json"
-"$OBSERVE" materialize --run "$run_41" >"$tmp/rematerialized-41.json"
-cmp "$tmp/materialized-package.json" "$run_41/package.json" \
-  || fail 'materialize was not content-idempotent'
+assert_equal 64 "$status" 'render-doc accepted a run without a finalized analysis'
+assert_file_contains "$tmp/unfinalized-render.stderr" 'analysis JSON'
+[ ! -e "$run_41/analysis.md" ] || fail 'unfinalized render wrote analysis.md'
 
 missing_package_run="$qualified_runs/pr-96"
 mkdir "$missing_package_run"
 set +e
-"$OBSERVE" materialize --run "$missing_package_run" \
+"$OBSERVE" finalize --run "$missing_package_run" --failed 'no package' \
   >"$tmp/missing-package.stdout" 2>"$tmp/missing-package.stderr"
 status=$?
 set -e
-assert_equal 64 "$status" 'materialize accepted a run without package.json'
+assert_equal 64 "$status" 'finalize accepted a run without package.json'
 assert_file_contains "$tmp/missing-package.stderr" "$missing_package_run"
 rmdir "$missing_package_run"
-legacy_run="$XDG_STATE_HOME/qq/observer/runs/pr-95"
-mkdir "$legacy_run"
-jq -cn --arg repo "$(realpath "$repo")" '{
-  schema:"qq-observer.package",schema_version:1,pr:95,variant:"guided",
-  repo:$repo,sessions:[]
-}' >"$legacy_run/package.json"
-set +e
-"$OBSERVE" materialize --run "$legacy_run" \
-  >"$tmp/legacy-materialize.stdout" 2>"$tmp/legacy-materialize.stderr"
-status=$?
-set -e
-assert_equal 65 "$status" 'materialize accepted a legacy v1 package'
-assert_file_contains "$tmp/legacy-materialize.stderr" "$legacy_run"
-rm -rf "$legacy_run"
-bad_facts_run="$qualified_runs/pr-94"
-mkdir -p "$bad_facts_run/sessions"
-printf '{"not":"pi-v3"}\n' >"$bad_facts_run/sessions/fixture.jsonl"
-jq -cn --arg repo "$(realpath "$repo")" '{
-  schema:"qq-observer.package",schema_version:2,repository:"fixture/repo",
-  pr:94,variant:"guided",repo:$repo,sessions:[{label:"fixture"}]
-}' >"$bad_facts_run/package.json"
-set +e
-"$OBSERVE" materialize --run "$bad_facts_run" \
-  >"$tmp/bad-facts.stdout" 2>"$tmp/bad-facts.stderr"
-status=$?
-set -e
-assert_equal 65 "$status" 'materialize accepted a transcript that facts refused'
-assert_file_contains "$tmp/bad-facts.stderr" "$bad_facts_run"
-rm -rf "$bad_facts_run"
+
 
 # Equal PR numbers in another multi-remote Repository remain distinct and every
 # GitHub lookup carries the canonical primary-main tracking Repository.
@@ -492,7 +472,8 @@ assert_file_contains "$tmp/outside-finalize.stderr" 'outside observer runs root'
 # A finalized successful analysis must pass the full package validator before
 # rendering. Its run session set and episode costs come from the assembled package.
 session_path="$run_41/sessions/delegate-strong-run-primary.jsonl"
-facts_path="$run_41/facts/delegate-strong-run-primary.json"
+facts_path="$tmp/facts-strong-run.json"
+"$OBSERVE" facts "$session_path" >"$facts_path"
 run_sessions="$(find "$run_41/sessions" -type f -print | sort | jq -Rsc 'split("\n")[:-1]')"
 turns="$(jq '[.turns_by_role[]] | add' "$facts_path")"
 tokens="$(jq '(.token_usage.input // 0) + (.token_usage.output // 0)' "$facts_path")"
@@ -518,7 +499,7 @@ jq -n --arg session "$session_path" --argjson sessions "$run_sessions" \
 jq '.episodes[0].cost.turns += 1' "$analysis" >"$tmp/invalid-analysis.json"
 set +e
 "$OBSERVE" finalize --run "$run_41" --analysis "$tmp/invalid-analysis.json" \
-  --analyst-trace "$parent_strong" >"$tmp/invalid-finalize.stdout" \
+  >"$tmp/invalid-finalize.stdout" \
   2>"$tmp/invalid-finalize.stderr"
 status=$?
 set -e
@@ -528,20 +509,13 @@ for absent in analysis.json analysis.md analyst-trace.jsonl; do
   [ ! -e "$run_41/$absent" ] || fail "invalid finalize wrote $absent"
 done
 
-set +e
 "$OBSERVE" finalize --run "$run_41" --analysis "$analysis" \
-  >"$tmp/missing-trace.stdout" 2>"$tmp/missing-trace.stderr"
-status=$?
-set -e
-assert_equal 64 "$status" 'finalize accepted successful analysis without analyst trace'
-assert_file_contains "$tmp/missing-trace.stderr" '--analyst-trace is required'
-[ ! -e "$run_41/analysis.json" ] || fail 'missing-trace refusal wrote analysis.json'
-
-"$OBSERVE" finalize --run "$run_41" --analysis "$analysis" \
-  --analyst-trace "$parent_strong" >"$tmp/finalized-41.json"
+  >"$tmp/finalized-41.json"
+[ ! -e "$run_41/analyst-trace.jsonl" ] \
+  || fail 'finalize persisted a derivable analyst trace'
 set +e
 "$OBSERVE" finalize --run "$run_41" --analysis "$run_41/analysis.json" \
-  --analyst-trace "$parent_strong" >"$tmp/run-analysis-input.stdout" \
+  >"$tmp/run-analysis-input.stdout" \
   2>"$tmp/run-analysis-input.stderr"
 status=$?
 set -e
@@ -565,13 +539,12 @@ assert_file_contains "$run_41/analysis.md" '### 1. Fixture episode'
 assert_file_contains "$run_41/analysis.md" '## Dropped signals'
 assert_file_contains "$run_41/analysis.md" 'Fixture limitation.'
 "$OBSERVE" finalize --run "$run_41" --analysis "$analysis" \
-  --analyst-trace "$parent_strong" >"$tmp/finalized-identical.json"
+  >"$tmp/finalized-identical.json"
 jq -e '.written == []' "$tmp/finalized-identical.json" >/dev/null \
   || fail 'identical finalize was not a no-op'
 jq '.episodes[0].title = "Differing episode"' "$analysis" >"$tmp/differing-analysis.json"
 set +e
 "$OBSERVE" finalize --run "$run_41" --analysis "$tmp/differing-analysis.json" \
-  --analyst-trace "$parent_strong" \
   >"$tmp/differing.stdout" 2>"$tmp/differing.stderr"
 status=$?
 set -e
@@ -589,9 +562,9 @@ jq -e '.ok == false and .uncovered == [42]' "$tmp/gap.json" >/dev/null \
   || fail 'gap report did not identify PR 42'
 
 "$OBSERVE" finalize --run "$run_42" --failed 'observer fixture failed' \
-  --analyst-trace "$solo_session" >"$tmp/failed-42.json"
-cmp "$solo_session" "$run_42/analyst-trace.jsonl" \
-  || fail 'analyst trace was not copied byte-for-byte'
+  >"$tmp/failed-42.json"
+[ ! -e "$run_42/analyst-trace.jsonl" ] \
+  || fail 'finalize persisted a derivable analyst trace'
 jq -e '
   .schema == "qq-observer.analysis" and .schema_version == 1
   and .status == "analysis_failed" and .reason == "observer fixture failed"
