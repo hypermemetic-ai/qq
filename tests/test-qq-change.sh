@@ -71,6 +71,7 @@ SH
 chmod +x "$fake_gh"
 export QQ_GH_BIN="$fake_gh"
 export FAKE_MERGE_OID="$merge_oid"
+export QQ_QQ_OBSERVE_BIN="$ROOT/bin/qq-observe"
 
 real_git="$(command -v git)"
 fake_git="$tmp/git"
@@ -253,28 +254,45 @@ jq -e '
 rm -- "$change_task"
 rmdir -- "$change_checkout/backlog/tasks" "$change_checkout/backlog"
 
-observer_package="$XDG_STATE_HOME/qq/observer/runs/by-repository/fixture/repo/pr-83/package.json"
+observer_run_dir="$XDG_STATE_HOME/qq/observer/runs/by-repository/fixture/repo/pr-83"
+observer_package="$observer_run_dir/package.json"
 
-# A known merged PR refuses retirement until its canonical guided observer
-# package is a regular file with the matching schema and identity.
+# A known merged PR refuses retirement while its canonical guided observer
+# run is missing, invalid, or unfinalized; the state names the run dir.
 run_change 2 retire change-ws --repo "$main_checkout" --branch feature --pr 83 \
   --placeholder-pane change-ws:p1
-jq -e --arg package "$observer_package" '
+jq -e --arg run_dir "$observer_run_dir" '
   .status == "refused"
-  and .state.observer_package == $package
+  and .state.observer_package == $run_dir
+  and .state.observer_package_status == "missing-invalid-or-unfinalized"
   and (.message | contains("qq-observe assemble --pr 83 --repo"))
 ' "$tmp/result.json" >/dev/null
 [ -d "$change_checkout" ] || fail 'missing-observer refusal removed the checkout'
 
-mkdir -p "$(dirname "$observer_package")"
+mkdir -p "$observer_run_dir"
 printf '%s\n' '{"schema":"wrong","pr":83,"repository":"fixture/repo"}' \
   >"$observer_package"
 run_change 2 retire change-ws --repo "$main_checkout" --branch feature --pr 83 \
   --placeholder-pane change-ws:p1
-jq -e '.status == "refused" and .state.observer_package_status == "missing-or-invalid"' \
-  "$tmp/result.json" >/dev/null
+jq -e '
+  .status == "refused"
+  and .state.observer_package_status == "missing-invalid-or-unfinalized"
+' "$tmp/result.json" >/dev/null
 
-# The sole explicit operator override bypasses only the package check, is
+# A schema-valid package without a terminal analysis record is still
+# unfinalized and refuses the same way.
+printf '%s\n' \
+  '{"schema":"qq-observer.package","schema_version":2,"pr":83,"repository":"fixture/repo"}' \
+  >"$observer_package"
+run_change 2 retire change-ws --repo "$main_checkout" --branch feature --pr 83 \
+  --placeholder-pane change-ws:p1
+jq -e '
+  .status == "refused"
+  and .state.observer_package_status == "missing-invalid-or-unfinalized"
+' "$tmp/result.json" >/dev/null
+[ -d "$change_checkout" ] || fail 'unfinalized-observer refusal removed the checkout'
+
+# The sole explicit operator override bypasses only the run check, is
 # visible in result state, and inspect still leaves every subject intact.
 run_change 0 inspect retire change-ws --repo "$main_checkout" --branch feature \
   --pr 83 --allow-unobserved-retire --placeholder-pane change-ws:p1
@@ -285,9 +303,11 @@ jq -e '
 ' "$tmp/result.json" >/dev/null
 [ -d "$change_checkout" ] || fail 'observer override inspect removed the checkout'
 
+# A failed-but-final run carries the canonical analysis_failed.json marker
+# and satisfies the observer rail from here on.
 printf '%s\n' \
-  '{"schema":"qq-observer.package","schema_version":2,"pr":83,"repository":"fixture/repo"}' \
-  >"$observer_package"
+  '{"reason":"fixture analysis failed","schema":"qq-observer.analysis","schema_version":1,"status":"analysis_failed"}' \
+  >"$observer_run_dir/analysis_failed.json"
 
 # Retirement refuses while any live delegate remains and changes nothing.
 export FAKE_LIVE_AGENT=1

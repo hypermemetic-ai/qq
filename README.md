@@ -268,8 +268,7 @@ delegation through `qq-delegate`.
 
 Architect findings use a separate typed accountable-intake route. Observer v2
 runs are Repository-qualified beneath
-`observer/runs/by-repository/<owner>/<repo>/pr-<N>[-blind]`; legacy flat v1
-package evidence remains visibly legacy and is never rewritten. `/architect`
+`observer/runs/by-repository/<owner>/<repo>/pr-<N>`. `/architect`
 directly opens one bounded global digest of new and still-unsettled finding
 occurrences across source rounds and Repositories. It carries slim provenance
 for at most 50 ranked findings; detailed evidence stays in cited analyses and

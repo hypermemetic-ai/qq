@@ -294,22 +294,29 @@ retire_change() {
     if [ -z "$state_home" ] || [[ "$state_home" != /* ]]; then
       qq_engine_error 'HOME is required and the observer state home must be absolute.'
     fi
-    package="$state_home/qq/observer/runs/by-repository/$repository/pr-$pull_request/package.json"
     if [ "$allow_unobserved_retire" = true ]; then
       package_status=override
-    elif [ ! -f "$package" ] || [ -L "$package" ] \
-      || ! "$QQ_ENGINE_JQ" -e --argjson pr "$pull_request" --arg repository "$repository" \
-        '.schema == "qq-observer.package" and .pr == $pr and .repository == $repository' \
-        "$package" >/dev/null 2>&1; then
-      state="$("$QQ_ENGINE_JQ" -cn --arg pull_request "$pull_request" \
-        --arg repository "$repository" --arg observer_package "$package" \
-        --argjson allow_unobserved_retire false \
-        '{pull_request:$pull_request, repository:$repository, observer_package:$observer_package, observer_package_status:"missing-or-invalid", allow_unobserved_retire:$allow_unobserved_retire}')"
-      qq_engine_refuse \
-        "The canonical guided observer package is missing or invalid: $package. Assemble it before retirement with: qq-observe assemble --pr $pull_request --repo $repo_root" \
-        "$state"
+      package=""
     else
-      package_status=present
+      if ! qq_resolve_bin qq-observe; then
+        qq_engine_error "$QQ_BIN_ERROR"
+      fi
+      observe_bin="$QQ_BIN_RESULT"
+      run_state="$("$observe_bin" run-finalized --pr "$pull_request" \
+        --repository "$repository" 2>/dev/null || true)"
+      finalized="$("$QQ_ENGINE_JQ" -er '.finalized | select(type == "boolean")' \
+        <<<"$run_state" 2>/dev/null || true)"
+      package="$("$QQ_ENGINE_JQ" -r '.run_dir // ""' <<<"$run_state" 2>/dev/null || true)"
+      if [ "$finalized" != true ]; then
+        state="$("$QQ_ENGINE_JQ" -cn --arg pull_request "$pull_request" \
+          --arg repository "$repository" --arg observer_package "$package" \
+          --argjson allow_unobserved_retire false \
+          '{pull_request:$pull_request, repository:$repository, observer_package:$observer_package, observer_package_status:"missing-invalid-or-unfinalized", allow_unobserved_retire:$allow_unobserved_retire}')"
+        qq_engine_refuse \
+          "The canonical guided observer run is missing, invalid, or not finalized: $package. Assemble and finalize it before retirement with: qq-observe assemble --pr $pull_request --repo $repo_root" \
+          "$state"
+      fi
+      package_status=finalized
     fi
     observer_state="$("$QQ_ENGINE_JQ" -cn --argjson base "$observer_state" \
       --arg pull_request "$pull_request" --arg repository "$repository" \

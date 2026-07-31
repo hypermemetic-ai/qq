@@ -217,11 +217,6 @@ printf '%s\n' \
   '{"reason":"fixture failure","schema":"qq-observer.analysis","schema_version":1,"status":"analysis_failed"}' \
   >"$runs/pr-3/analysis_failed.json"
 
-observer_root="$XDG_STATE_HOME/qq/observer"
-ledger_dir="$observer_root/ledger"
-assert_no_ledger() {
-  [ ! -e "$ledger_dir" ] || fail 'computed Observer view created a ledger directory'
-}
 
 # One settle validates against current occurrences, derives identities
 # internally, and covers the key; the settled entry appends as one JSON line.
@@ -280,44 +275,7 @@ if grep -Fxq 'scan-key' "$tmp/recurrence-keys.txt"; then
   fail 'recurrence-keys listed a settled key'
 fi
 
-"$OBSERVE" digest >"$tmp/digest.md"
-assert_file_contains "$tmp/digest.md" 'Run two title'
-assert_file_contains "$tmp/digest.md" 'fixture/scan#1, fixture/scan#2'
-assert_file_contains "$tmp/digest.md" 'rejected (×0.5)'
-assert_file_contains "$tmp/digest.md" 'Coverage: 2 finalized, 1 failed.'
-assert_no_ledger
-rm -rf "$ledger_dir"
-
-"$OBSERVE" rounds >"$tmp/rounds.json"
-jq -e --arg run "$runs/pr-2" '
-  any(.[]; .run_dir == $run and .analyzed == true and .failed == false and .covered == true
-    and (has("discussed")|not) and (has("handoff")|not) and (has("task_ids")|not))
-' "$tmp/rounds.json" >/dev/null || fail 'rounds did not use doc-backed run coverage'
-assert_no_ledger
-
-# Delivery coverage is computed from the same live analysis scan.
-set +e
-"$OBSERVE" verify-delivery --repo "$repo" --since 2025-01-01T00:00:00Z \
-  >"$tmp/covered.json"
-status=$?
-set -e
-assert_equal 0 "$status" 'finalized analyses did not cover landed Changes'
-jq -e '.covered == [1,2] and .uncovered == []' "$tmp/covered.json" >/dev/null \
-  || fail 'delivery coverage did not count computed findings'
-mv "$runs/pr-2/analysis.json" "$tmp/pr-2-analysis.json"
-set +e
-"$OBSERVE" verify-delivery --repo "$repo" --since 2025-01-01T00:00:00Z \
-  >"$tmp/uncovered.json"
-status=$?
-set -e
-assert_equal 1 "$status" 'missing finalized analysis remained covered'
-jq -e '.covered == [1] and .uncovered == [2]' "$tmp/uncovered.json" >/dev/null \
-  || fail 'delivery coverage did not expose the missing finalized analysis'
-mv "$tmp/pr-2-analysis.json" "$runs/pr-2/analysis.json"
-assert_no_ledger
-
-# Successful finalize remains the sole writer of analysis outputs and does not
-# create any ledger-side marker or event store.
+# Successful finalize remains the sole writer of analysis outputs.
 finalize_run="$runs/pr-4"
 write_package 4 2026-01-04T00:00:00Z
 mkdir -p "$finalize_run/sessions"
@@ -338,12 +296,8 @@ jq -e '.status == "finalized" and (.written | sort) == ["analysis.json","analysi
   "$tmp/finalize.json" >/dev/null || fail 'successful finalize lost its output contract'
 [ ! -e "$finalize_run/analyst-trace.jsonl" ] \
   || fail 'finalize persisted a derivable analyst trace'
-legacy_suffix=applied
-[ ! -e "$finalize_run/.ledger-$legacy_suffix" ] \
-  || fail 'finalize wrote a retired application marker'
-assert_no_ledger
 
-for retired in record id summarize read-session; do
+for retired in record id summarize read-session verify-delivery render-doc digest rounds; do
   set +e
   "$OBSERVE" "$retired" fixture >"$tmp/$retired.out" 2>"$tmp/$retired.err"
   status=$?
@@ -351,38 +305,5 @@ for retired in record id summarize read-session; do
   assert_equal 64 "$status" "$retired command remains available"
   assert_file_contains "$tmp/$retired.err" 'usage:'
 done
-
-# F-1 regression coverage: behaviors that survived the store deletion keep
-# their Checks here (review finding, T-186.9).
-
-# (1) A recurrence key seen in two or more sources is promoted; the digest
-# sections promoted rows under "Opportunities ledger" and the rest under
-# "Open findings". The shared scan-key spans pr-1 and pr-2 above.
-write_package 5 2026-01-05T00:00:00Z
-jq '.episodes = [(.episodes[0] | .recurrence_key = "solo-key")]' \
-  "$runs/pr-2/analysis.json" >"$tmp/pr-5-analysis.json"
-mkdir -p "$runs/pr-5"
-cp "$tmp/pr-5-analysis.json" "$runs/pr-5/analysis.json"
-"$OBSERVE" digest >"$tmp/digest-sectioned.md"
-awk '/^## Opportunities ledger$/{s=1} /^## Open findings$/{s=2} {print s, $0}' \
-  "$tmp/digest-sectioned.md" >"$tmp/sections.txt"
-grep -q '^1 .*`scan-key`' "$tmp/sections.txt" \
-  || fail 'promoted key missing from Opportunities ledger'
-if grep -q '^2 .*`scan-key`' "$tmp/sections.txt"; then
-  fail 'promoted key also rendered under Open findings'
-fi
-grep -q '^2 .*`solo-key`' "$tmp/sections.txt" \
-  || fail 'single-source key missing from Open findings'
-if grep -q '^1 .*`solo-key`' "$tmp/sections.txt"; then
-  fail 'single-source key promoted with one source'
-fi
-assert_no_ledger
-
-# (2) digest --since windowing; digests are derivable-on-read and never
-# persisted.
-"$OBSERVE" digest --since 2026-06-01T00:00:00Z >"$tmp/digest-windowed.md"
-assert_file_contains "$tmp/digest-windowed.md" '| — | — | None'
-[ ! -e "$observer_root/digests" ] || fail 'digest persisted into a digests store'
-assert_no_ledger
 
 printf 'test-qq-observe-ledger-scan: pass\n'

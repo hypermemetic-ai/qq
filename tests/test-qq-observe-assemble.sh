@@ -389,16 +389,6 @@ assert_equal 10 "$(find "$run_41/sessions" -type f | wc -l)" 'session transcript
 [ ! -e "$run_41/facts" ] || fail 'assemble eagerly created a facts directory'
 [ ! -e "$run_41/signals" ] || fail 'assemble eagerly created a signals directory'
 
-# render-doc renders finalized analyses; before finalization there is none.
-set +e
-"$OBSERVE" render-doc --run "$run_41" \
-  >"$tmp/unfinalized-render.stdout" 2>"$tmp/unfinalized-render.stderr"
-status=$?
-set -e
-assert_equal 64 "$status" 'render-doc accepted a run without a finalized analysis'
-assert_file_contains "$tmp/unfinalized-render.stderr" 'analysis JSON'
-[ ! -e "$run_41/analysis.md" ] || fail 'unfinalized render wrote analysis.md'
-
 missing_package_run="$qualified_runs/pr-96"
 mkdir "$missing_package_run"
 set +e
@@ -522,18 +512,6 @@ set -e
 assert_equal 65 "$status" 'finalize accepted the run analysis path as analyst capture input'
 assert_file_contains "$tmp/run-analysis-input.stderr" 'sole writer' \
   'run analysis path refusal did not identify finalize as sole writer'
-"$OBSERVE" render-doc --run "$run_41" >"$tmp/rendered-41.json"
-jq -e '.status == "rendered"' "$tmp/rendered-41.json" >/dev/null \
-  || fail 'render-doc did not accept a run inside the observer store'
-outside_render="$tmp/outside-render"
-cp -a "$run_41" "$outside_render"
-set +e
-"$OBSERVE" render-doc --run "$outside_render" \
-  >"$tmp/outside-render.stdout" 2>"$tmp/outside-render.stderr"
-status=$?
-set -e
-assert_equal 65 "$status" 'render-doc accepted a run outside the observer store'
-assert_file_contains "$tmp/outside-render.stderr" 'outside observer runs root'
 assert_file_contains "$run_41/analysis.md" '## Session facts'
 assert_file_contains "$run_41/analysis.md" '### 1. Fixture episode'
 assert_file_contains "$run_41/analysis.md" '## Dropped signals'
@@ -551,16 +529,6 @@ set -e
 assert_equal 65 "$status" 'differing finalized analysis did not hit append-only refusal'
 assert_file_contains "$tmp/differing.stderr" 'append-only conflict'
 
-# Delivery is incomplete until every local landed Change has a terminal marker.
-set +e
-"$OBSERVE" verify-delivery --repo "$repo" --since 2026-07-01T00:00:00Z \
-  >"$tmp/gap.json"
-status=$?
-set -e
-assert_equal 1 "$status" 'verify-delivery did not report the uncovered PR'
-jq -e '.ok == false and .uncovered == [42]' "$tmp/gap.json" >/dev/null \
-  || fail 'gap report did not identify PR 42'
-
 "$OBSERVE" finalize --run "$run_42" --failed 'observer fixture failed' \
   >"$tmp/failed-42.json"
 [ ! -e "$run_42/analyst-trace.jsonl" ] \
@@ -569,16 +537,37 @@ jq -e '
   .schema == "qq-observer.analysis" and .schema_version == 1
   and .status == "analysis_failed" and .reason == "observer fixture failed"
 ' "$run_42/analysis_failed.json" >/dev/null || fail 'analysis_failed marker has the wrong shape'
+# run-finalized reports terminal observer state for the retire rail:
+# finalized, finalized-failed, not-yet-finalized, and missing runs.
 set +e
-"$OBSERVE" verify-delivery --repo "$repo" --since 2026-07-01T00:00:00Z \
-  >"$tmp/covered.json"
+"$OBSERVE" run-finalized --pr 41 --repository fixture/repo >"$tmp/finalized-41.json"
 status=$?
 set -e
-assert_equal 1 "$status" 'analysis failure reported healthy delivery'
-jq -e '
-  .ok == false and .status == "analysis failures present"
-  and .covered == [41] and .analysis_failed == [42] and .uncovered == []
-' "$tmp/covered.json" >/dev/null \
-  || fail 'failed analysis masqueraded as successful coverage'
+assert_equal 0 "$status" 'run-finalized did not accept the finalized run'
+jq -e '.finalized == true and .reason == "finalized"' "$tmp/finalized-41.json" >/dev/null \
+  || fail 'run-finalized misreported the finalized run'
+set +e
+"$OBSERVE" run-finalized --pr 42 --repository fixture/repo >"$tmp/finalized-42.json"
+status=$?
+set -e
+assert_equal 0 "$status" 'run-finalized did not accept the failed-but-final run'
+jq -e '.finalized == true and .reason == "finalized-failed"' "$tmp/finalized-42.json" >/dev/null \
+  || fail 'run-finalized misreported the failed analysis'
+mv "$run_41/analysis.json" "$tmp/analysis-41.json"
+set +e
+"$OBSERVE" run-finalized --pr 41 --repository fixture/repo >"$tmp/unfinalized-41.json"
+status=$?
+set -e
+assert_equal 1 "$status" 'run-finalized accepted an unfinalized run'
+jq -e '.finalized == false and .reason == "analysis-not-finalized"' "$tmp/unfinalized-41.json" >/dev/null \
+  || fail 'run-finalized did not expose the missing analysis'
+mv "$tmp/analysis-41.json" "$run_41/analysis.json"
+set +e
+"$OBSERVE" run-finalized --pr 99 --repository fixture/repo >"$tmp/missing-99.json"
+status=$?
+set -e
+assert_equal 1 "$status" 'run-finalized accepted a missing run'
+jq -e '.finalized == false and .reason == "missing-or-invalid"' "$tmp/missing-99.json" >/dev/null \
+  || fail 'run-finalized did not expose the missing run'
 
 printf 'test-qq-observe-assemble: pass\n'

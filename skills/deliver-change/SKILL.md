@@ -62,7 +62,7 @@ exactly one preserve-or-restore question, never an operator-input deadlock.
    --brief <absolute-run-dir>/BRIEF.md` with the procedure/package paths
    and the `qq-observe recurrence-keys` inventory. The call blocks; validate
    and finalize on return; use `qq-observe finalize --failed` on analysis
-   failure. `qq-observe verify-delivery` remains advisory. Finalize this
+   failure. Finalize this
    guided package before calling `qq-change retire`, which refuses while it
    is absent. Retire only with the executing owner's verified lifecycle ownership
    and the engine's checkout, branch, workspace-absence, topology, cleanliness,
