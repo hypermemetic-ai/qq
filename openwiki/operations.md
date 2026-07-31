@@ -2,55 +2,65 @@
 
 ## Bootstrap the live surfaces
 
-qq is installed by construction: Pi, Claude, and Codex each mount this checkout's `skills/` root, Codex's three role-profile links resolve into `codex-profiles/`, and `. "$HOME/projects/qq/cockpit/shell/file-navigation.bash"` prepends `$QQ_HOME/bin` to `PATH`. Adding, changing, or removing a Skill or command is therefore live without an install step (`README.md:49-93`, `137-147`).
+qq is installed by construction around the exact patched Pi identity `0.81.1+qq.execution-profile.2`. `bin/qq-pi-runtime` fetches, builds, inspects, installs, verifies, and atomically rolls between immutable generations; `bin/pi` never falls back to stock or global Pi. Pi mounts this checkout's global context, Skill, prompt, and extension roots, while sourcing `cockpit/shell/file-navigation.bash` prepends `$QQ_HOME/bin` to `PATH`. Install and verify the six-role policy with `bin/qq-execution-profiles`; ordinary source changes beneath mounted roots need no reinstall.
 
-On a new machine, follow [`README.md`](../README.md#install-qq) for the exact root mounts, Pi 0.80.10+ with native `kimi-coding/k3` max-thinking defaults, the absolute Pi Backlog-guard extension path, and the fixed yazi/Glow/Herdr configuration links. Those cockpit file links are day-0 bootstrap, not a synchronization surface. Bootstrap does not manage Repository instruction files; a linked Repository may point its own root `AGENTS.md` symlink to qq's canonical file.
+Follow [`README.md`](../README.md#install-qq) for exact artifact construction, provider login, role-policy installation, extension dependencies, root links, and fixed Ghostty/Glow/Herdr links. Canonical guidance is mounted at `~/.pi/agent/AGENTS.md`; Repository-local guidance is optional additive context. Credentials and runtime artifacts remain outside the Repository and must never be reported.
 
 ## Cockpit
 
 `cockpit/` is the source of truth for the operator terminal surface:
 
-- yazi provides pane-first file navigation and Markdown opening;
-- Glow/mdcat render Markdown in-pane;
-- broot provides a tree view;
-- shell helpers define `QQ_HOME`, generic navigation wrappers, and qq-focused commands;
-- herdr supplies the themed, priority-sorted agent surface and pane bindings.
+- Ghostty supplies the terminal profile;
+- Glow renders Markdown;
+- file browsing lives inside Pi through `@tmustier/pi-files-widget`, while external opening follows `xdg-open`;
+- shell helpers define `QQ_HOME`, put qq commands on `PATH`, and provide `qqcd` for focused-worktree or fuzzy directory changes;
+- Herdr supplies persistent project homes, the agent surface, and pane bindings;
+- systemd user units provide the optional scheduled OpenWiki service.
 
-Typical flow: `prefix+f` and `prefix+shift+f` open fixed 74×29 session-modal `qqy`/`qqbr` popups rooted at the focused Herdr workspace's checkout, falling back to `QQ_HOME`; quitting closes the popup without reflowing the tiled layout. `prefix+F<N>` pulls the Nth agent into focus, `prefix+0` pulls the agent most needing attention, and `prefix+d` shows the current Repository's delegate-detail snapshot. `alt+up/down` moves between workspaces, `alt+left/right` moves between tabs, and `alt+o` snaps to the preferred orchestrator or bounces back. See [`cockpit/README.md`](../cockpit/README.md).
+`prefix+F<N>` pulls the Nth agent into focus, `prefix+0` pulls the agent most needing attention, and `alt+o` snaps to project-home Pi or bounces back. `alt+up/down` moves between workspaces and `alt+left/right` moves between tabs. See [`cockpit/README.md`](../cockpit/README.md).
 
-## Herdr homes and pane movement
+## Herdr project homes and pane movement
 
-A Repository's persistent **project home** is the Herdr workspace for its sole primary `main` checkout. Its dedicated Backlog-board tab and accountable Pi session remain there with general operator tabs. Each linked-worktree workspace grouped beneath it is a **work session**, identified by an Actor-chosen, operator-renameable recognizable UI handle matching `[A-Za-z0-9-]{1,15}` and unique among siblings. It owns one Change checkout, its root placeholder, and delegated agents; the accountable session dispatches from project home and never moves into it (`CONCEPTS.md:54-66`; `skills/deliver-change/SKILL.md:24-53`).
+A Repository's persistent **project home** is bound to its sole primary `main` checkout. Its dedicated Backlog-board tab, accountable Pi session, Architect tab, and general operator tabs remain there. Change checkouts are plain linked worktrees with no Herdr workspace; the accountable session dispatches from project home, and delegates run as headless child processes in assigned worktrees (`CONCEPTS.md`; `skills/deliver-change/SKILL.md`).
 
-`qq-herdr-home inspect --repo <path>` resolves the registered `main` checkout, requires exactly one matching non-linked Herdr home, and verifies its Repository key against Git's common directory. `focus-board` adds board discovery: it requires the unique dedicated single-pane board tab, focuses it, and confirms focus without moving or closing work-session panes (`bin/qq-herdr-home`). `deliver-change` uses inspection before creating or opening a labeled work session beneath the returned home. Ending a Change never invokes `focus-board`: guarded retirement of a verified merged Change leaves operator focus untouched, while a tripped rail or non-merged disposition preserves the session for the operator (`skills/deliver-change/SKILL.md:141-180`).
+`qq-herdr-home inspect --repo <path>` requires exactly one matching non-linked project home and verifies its Repository key against Git's common directory. `focus-board` additionally requires and focuses the unique dedicated single-pane board; `focus-architect` focuses the Architect tab. Change delivery validates the home but never creates a per-Change workspace (`bin/qq-herdr-home`).
 
-The dedicated board pane runs `qq-board watch --interval 3`. Before each `backlog board` render, it derives Task status from matching `*/t-N-*` branches, worktrees, origin refs, and available pull-request state. Reconciliation writes only untracked in-flight Task records; tracked records are reported but never rewritten, preserving the primary checkout's fast-forward rail. Watch mode suppresses reconciliation failures and keeps rendering the board, so discovery failure leaves a stale-but-live view. Use `qq-board inspect reconcile --repo <path>` or `--dry-run` as the fail-closed diagnostic path; trackedness and source-discovery errors surface there (`bin/qq-board`; `tests/test-qq-board.sh`).
+The board pane runs `qq-board watch --interval 3`. `qq-board` reads the sole primary-main Backlog Task store, materializes it into an external scratch generation, and renders only that single-home view. It never derives source Task state from Change branches or rewrites source records. Reconciliation prunes obsolete board scratch safely (`bin/qq-board`; `tests/test-qq-board.sh`).
 
-`qq-herdr-pull <N|next>` identifies the focused pane, selects an agent from `herdr agent list`, moves that pane into the focused tab, and closes the old pane only after a successful move. Numeric selection is 1-based. `next` prioritizes blocked, then working, then idle agents while excluding the current pane.
-
-The command requires `jq`. qq wrappers resolve external tools consistently: an absolute executable set through `QQ_<TOOL>_BIN` (for example `QQ_HERDR_BIN`), then `PATH`, then known Linuxbrew/Homebrew directories; a fallback directory is prepended to child `PATH` so subprocess lookup remains coherent (`bin/lib/qq-bin.sh:6-65`). Operator mode runs detached, so errors are best-effort notifications and exit successfully. Use a dry run before testing layout mutation:
+`qq-herdr-pull <N|next>` selects an agent from the live Herdr list, moves that pane into the focused tab, and closes the old pane only after a successful move. Numeric selection is one-based; `next` prioritizes blocked, then working, then idle while excluding the current pane. Use dry run before testing live layout mutation:
 
 ```bash
 QQ_HERDR_PULL_DRY=1 HERDR_PANE_ID=<pane-id> qq-herdr-pull next
 ```
 
-`qq-herdr-pull --workspace <workspace-id>` remains available for explicit operator-directed pane movement. It resolves the caller's live pane identity, safely no-ops if already present, otherwise accepts only the target workspace's sole idle non-agent shell, confirms Herdr reported a changed move, and only then closes the placeholder (`bin/qq-herdr-pull`). It is not part of `deliver-change`; the accountable Pi session remains in project home.
+`qq-herdr-snap`, behind `alt+o`, prefers Pi in the Repository project home and otherwise Pi in the focused workspace; a second invocation on the target returns to the recorded origin. `QQ_HERDR_SNAP_DRY=1` prints resolution without focusing (`bin/qq-herdr-pull`; `bin/qq-herdr-snap`).
 
-`qq-herdr-snap` is the best-effort operator helper behind `alt+o`. It prefers project-home Pi, then project-home Claude; within the focused linked-worktree session it falls back to Pi, then Claude, then the first agent in sidebar order. A second invocation on the target returns to the recorded origin pane, including across workspaces. State is keyed by target workspace under `XDG_RUNTIME_DIR` (or the temporary directory); `QQ_HERDR_SNAP_DRY=1` prints resolution without focusing. Unlike `qq-herdr-home`, snap does not require a running Backlog board (`bin/qq-herdr-snap:1-140`; `tests/test-qq-herdr-snap.sh`).
+qq wrappers resolve external tools consistently: absolute `QQ_<TOOL>_BIN`, then `PATH`, then known package-manager paths. A selected fallback directory is prepended to child `PATH` so subprocess lookup remains coherent (`bin/lib/qq-bin.sh`).
 
 ## Assigned OpenWiki maintenance
 
-OpenWiki refresh is explicit rather than merge-triggered. An on-demand or scheduled assignment starts the dedicated maintainer in the long-lived `openwiki/update` worktree. The maintainer fetches and resets to fresh `origin/main`, runs `qq-openwiki --update`, checks the documentation diff, obtains fresh-context review, then opens or refreshes an ordinary docs-only pull request. The operator reviews and merges it; the maintainer never self-merges, publishes directly to `main`, or uses activation markers or retry protocols (`skills/openwiki-maintainer/SKILL.md:8-32`; `README.md:106-123`).
+OpenWiki refresh is explicit rather than merge-triggered. An assigned maintainer resets the long-lived `openwiki/update` worktree to fresh `origin/main`, runs `qq-openwiki --update`, checks the docs-only diff, obtains fresh-context review, and opens or refreshes the pull request. The operator merges on-demand refreshes.
+
+The optional systemd user timer runs daily at 03:00 local with `Persistent=false`, no retry, and a six-hour timeout. A no-change run writes a private completion receipt and opens no PR. A changed scheduled run must contain one generated `openwiki/**` commit, pass deterministic Checks and fresh review, and reach exact-head `shell-tests`. Only then may the service marker invoke `qq-openwiki-merge`, which revalidates the fixed Repository/branch/PR, generated paths, Checks, review threads, mergeability, and `qqp-bot` identity. Install, inspect, or disable it with:
+
+```bash
+bin/qq-openwiki-schedule install
+bin/qq-openwiki-schedule inspect
+bin/qq-openwiki-schedule disable
+```
+
+No mode publishes directly to `main` or enables native auto-merge (`README.md`; `skills/openwiki-maintainer/SKILL.md`; `bin/qq-openwiki-merge`).
 
 ## Knowledge maintenance
 
-OpenWiki is installed separately. qq commands resolve from the checkout whose cockpit shell surface set `QQ_HOME` and prepended `$QQ_HOME/bin`; inspect that environment and the resolved executable when behavior appears to come from the wrong checkout. The README describes upstream runtime setup.
+OpenWiki is installed separately. qq commands resolve from the checkout whose shell surface set `QQ_HOME`; inspect that environment and the resolved executable when behavior appears to come from the wrong checkout.
 
-`qq-openwiki` validates command mode, provider, runtime, and required tools, then acquires a per-Git-common-directory runtime lock. It refuses to run when `AGENTS.md`, `CLAUDE.md`, or the generated workflow deviates from `HEAD`, including untracked or ignored setup. It shadows instruction symlinks with local regular files during generation; cleanup removes generated setup and restores every path outside `openwiki/**` from the invocation's Git baseline. `--update` requires a clean dedicated `openwiki/update` branch exactly equal to `origin/main`; `--correct` requires a fully staged baseline confined to `openwiki/` (`bin/qq-openwiki`; `tests/test-qq-openwiki.sh`).
+`qq-openwiki` validates mode, provider, runtime, and tools, then acquires a per-Git-common-directory lock. It guards landed `AGENTS.md` and `.github/workflows/openwiki-update.yml` state, shadows an `AGENTS.md` symlink with a local regular file during generation, and restores every path outside `openwiki/**` to invocation `HEAD`. `--update` requires a clean dedicated `openwiki/update` branch exactly equal to `origin/main`; `--correct` requires a fully staged baseline confined to `openwiki/` (`bin/qq-openwiki`; `tests/test-qq-openwiki.sh`).
 
-Ordinary source agents only consume the wiki, and the `openwiki-maintainer` Skill is the sole maintenance procedure.
+## Weekly reaping
+
+`qq-reap scan` nominates stale Backlog documents plus merged local branches and clean merged worktrees, then writes a dated report even when empty. Review it and run `qq-reap apply <id>…` with only explicitly authorized nomination IDs; omitted IDs are vetoed. Apply re-derives evidence before mutation, so stale nominations refuse (`README.md`; `bin/qq-reap`).
 
 ## Local documentation ownership
 
-Ordinary source agents neither assess nor generate OpenWiki changes. The
-narrowly triggered `openwiki-maintainer` Skill is the sole procedural authority.
+Ordinary source Actors neither assess nor generate OpenWiki changes. The narrowly triggered `openwiki-maintainer` Skill is the sole procedural authority.
