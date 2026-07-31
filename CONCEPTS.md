@@ -17,12 +17,17 @@ and delivery state.
 **Task** — Backlog.md's durable record of operator intent, acceptance criteria,
 dependencies, and work status.
 
-**Task umbrella** — A parent Task grouping one outcome. Its direct children are
-membership, not sequence or prerequisite claims.
+**Task umbrella** — A parent Task grouping one outcome, used only when that
+outcome needs multiple independently deliverable Changes. Its direct children
+are membership, not sequence or prerequisite claims, and their decimal
+suffixes are stable, non-ordinal identities.
 
 **Task child** — One independently deliverable, coherent Change under an
 umbrella. qq supports one direct child level only; smaller steps stay in that
-child's plan or checklist.
+child's plan or checklist. Parentage records membership; `depends_on` records
+genuine prerequisites only. No durable `parallel_with` relation exists. An
+external child stays in its owning Repository under its native Task identity,
+linked by a qualified `owner/repository:<Task-ID>` coordinate.
 
 **ready frontier** — Incomplete Task children whose genuine prerequisites are
 satisfied. Frontier membership permits consideration for overlap; accountable
