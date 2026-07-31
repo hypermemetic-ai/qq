@@ -25,7 +25,7 @@ once to `backlog doc update --content`; never hand-edit it. Confirmation
 re-reads that document and needs only the proposal identity plus a clear
 operator affirmative.
 
-A settled entry covers its recurrence key. Otherwise only a decision-record
-hit from `backlog search --type decision <key>` covers it; hits in Tasks, plans,
-documents, or any other surface never cover. Routing and set-aside record only
+A settled entry covers its recurrence key. Otherwise only an exact key hit
+in a Backlog decision record covers it; hits in Tasks, plans, documents, or
+any other surface never cover. Routing and set-aside record only
 the settled disposition; they do not create Tasks or start another Actor.

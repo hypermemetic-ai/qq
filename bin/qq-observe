@@ -23,6 +23,7 @@ usage:
   qq-observe finalize --run DIR (--analysis FILE | --failed REASON)
   qq-observe digest [--since ISO]
   qq-observe architect-context
+  qq-observe recurrence-keys
   qq-observe disposition-propose --context CONTEXT-ID --decisions FILE.json
   qq-observe disposition-confirm --context CONTEXT-ID --batch BATCH-ID
   qq-observe rounds
@@ -40,7 +41,7 @@ EOF
 case "${1:-}" in
   facts | signals | validate-analysis | \
   assemble | verify-delivery | render-doc | finalize | \
-  digest | architect-context | disposition-propose | disposition-confirm | \
+  digest | architect-context | recurrence-keys | disposition-propose | disposition-confirm | \
   rounds) command="$1"; shift ;;
   *) usage ;;
 esac
@@ -54,7 +55,7 @@ python_binary="$QQ_BIN_RESULT"
 # Package assembly and delivery commands share one embedded implementation.
 case "$command" in
   assemble | verify-delivery | render-doc | finalize | \
-  digest | architect-context | disposition-propose | disposition-confirm | \
+  digest | architect-context | recurrence-keys | disposition-propose | disposition-confirm | \
   rounds)
     observer_git=""
     observer_gh=""
@@ -81,7 +82,6 @@ case "$command" in
       observer_backlog="$QQ_BIN_RESULT"
     fi
     exec "$python_binary" - "$self" "$command" "$observer_git" "$observer_gh" "$observer_backlog" "$@" <<'PY_ASSEMBLER'
-import concurrent.futures
 import datetime as dt
 import hashlib
 import json
@@ -1669,8 +1669,8 @@ DISPOSITIONS_PREAMBLE = """# Observer dispositions
 The operator-settled dispositions of Observer Architect findings. Append
 only through `backlog doc update --content` with the complete body
 (qq-observe owns the append; never hand-edit). Coverage of a recurrence
-key = a settled entry here, or a Backlog decision-record hit for the key
-(Task, plan, and doc mentions never settle).
+key = a settled entry here, or an exact-substring hit for the key in a
+Backlog decision record (Task, plan, and doc mentions never settle).
 
 ## Entries"""
 
@@ -1884,34 +1884,29 @@ def update_dispositions(document, entries):
         fail("Backlog Observer dispositions update did not persist the complete body", 65)
 
 
-def backlog_search_covers(key):
+def decision_record_texts():
+    decisions_root = qq_repository_root() / "backlog" / "decisions"
+    if not os.path.lexists(decisions_root):
+        fail("Backlog decisions directory is absent", 65)
     try:
-        process = subprocess.run(
-            [backlog_binary, "search", "--type", "decision", key, "--plain", "--limit", "1000"],
-            cwd=qq_repository_root(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            check=False, timeout=15,
-        )
-    except subprocess.TimeoutExpired:
-        fail(f"Backlog decision coverage search timed out for recurrence key {key}", 65)
+        info = os.lstat(decisions_root)
     except OSError as error:
-        fail(f"cannot run Backlog decision coverage search: {error}", 65)
-    if process.returncode != 0:
-        detail = process.stderr.decode("utf-8", "replace").strip()
-        fail(f"Backlog decision coverage search failed for recurrence key {key}{': ' + detail if detail else ''}", 65)
+        fail(f"cannot inspect Backlog decisions directory: {error}", 65)
+    if not stat.S_ISDIR(info.st_mode):
+        fail("Backlog decisions path is not a directory", 65)
     try:
-        lines = process.stdout.decode("utf-8").splitlines()
-    except UnicodeDecodeError as error:
-        fail(f"Backlog decision coverage search emitted invalid UTF-8: {error}", 65)
-    hit = False
-    for line in lines:
-        if not line:
-            continue
-        if line in ("Decisions:", "No results found."):
-            continue
-        if not line.startswith("  decision-") or re.search(r"\[score [0-9]+(?:\.[0-9]+)?\]$", line) is None:
-            fail("Backlog decision coverage search emitted an unrecognized result shape", 65)
-        hit = True
-    return hit
+        candidates = sorted(decisions_root.rglob("*.md"), key=lambda path: os.fspath(path))
+    except OSError as error:
+        fail(f"cannot scan Backlog decision records: {error}", 65)
+    texts = []
+    for candidate in candidates:
+        if not regular_file(candidate):
+            fail(f"Backlog decision record is not a regular file: {candidate}", 65)
+        try:
+            texts.append(read_regular(candidate, "Backlog decision record").decode("utf-8"))
+        except UnicodeDecodeError as error:
+            fail(f"Backlog decision record is not UTF-8: {error}", 65)
+    return texts
 
 
 def coverage_by_key(keys, dispositions=None):
@@ -1924,19 +1919,30 @@ def coverage_by_key(keys, dispositions=None):
     unique = sorted(set(keys))
     for key in unique:
         if not display_text(key, nonempty=True) or "\n" in key:
-            fail("Observer recurrence key is unsafe for Backlog search", 65)
-    # One CLI call per key is the semantic unit; per-process startup dominates,
-    # so searches run concurrently (bounded). Doc-settled keys never spawn a
-    # process. Failure order stays deterministic (sorted keys), matching the
-    # sequential fail-closed contract.
-    searches = [key for key in unique if key not in settled]
-    results = {}
-    if searches:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(searches))) as pool:
-            futures = {key: pool.submit(backlog_search_covers, key) for key in searches}
-            for key in searches:
-                results[key] = futures[key].result()
-    return {key: True if key in settled else results[key] for key in unique}
+            fail("Observer recurrence key is unsafe for coverage matching", 65)
+    # Coverage is one exact-substring pass over the local decision records:
+    # a settled disposition entry or a verbatim key hit in a decision file.
+    pending = [key for key in unique if key not in settled]
+    covered = {key: True for key in unique if key in settled}
+    if pending:
+        corpus = decision_record_texts()
+        for key in pending:
+            covered[key] = any(key in text for text in corpus)
+    return covered
+
+
+def recurrence_keys(values):
+    if values:
+        fail("recurrence-keys takes no arguments", 64)
+    dispositions = load_dispositions(required=False)
+    settled = {
+        entry["recurrence_key"] for entry in (dispositions or {}).get("entries", [])
+        if entry["status"] == "settled"
+    }
+    for key in sorted({
+        row["recurrence_key"] for row in all_architect_occurrences()
+    } - settled):
+        print(key)
 
 
 def architect_round_identity(run_dir, identity):
@@ -2791,6 +2797,8 @@ elif command == "digest":
     digest(args)
 elif command == "architect-context":
     architect_context(args)
+elif command == "recurrence-keys":
+    recurrence_keys(args)
 elif command == "disposition-propose":
     disposition_propose(args)
 elif command == "disposition-confirm":
