@@ -95,25 +95,23 @@ jq -n --arg a "$session_a" --arg b "$session_b" '
     limitations:"Fixture analysis."
   }
 ' >"$valid"
-not_materialized_run="$XDG_STATE_HOME/qq/observer/runs/by-repository/fixture/repo/pr-101"
-mkdir -p "$not_materialized_run/sessions"
-cp "$session_a" "$not_materialized_run/sessions/fixture.jsonl"
+incomplete_run="$XDG_STATE_HOME/qq/observer/runs/by-repository/fixture/repo/pr-101"
+mkdir -p "$incomplete_run/sessions"
 jq -cn --arg repo "$ROOT" '{
   schema:"qq-observer.package",schema_version:2,repository:"fixture/repo",
   pr:101,variant:"guided",assembled_at:"2026-07-23T00:00:00Z",repo:$repo,
   sessions:[{label:"fixture",role:"accountable",evidence:"fixture"}]
-}' >"$not_materialized_run/package.json"
+}' >"$incomplete_run/package.json"
 set +e
-"$OBSERVE" finalize --run "$not_materialized_run" --analysis "$valid" \
-  --analyst-trace "$session_a" \
-  >"$tmp/not-materialized.stdout" 2>"$tmp/not-materialized.stderr"
-not_materialized_status=$?
+"$OBSERVE" finalize --run "$incomplete_run" --analysis "$valid" \
+  >"$tmp/incomplete.stdout" 2>"$tmp/incomplete.stderr"
+incomplete_status=$?
 set -e
-assert_equal 65 "$not_materialized_status" \
-  'finalize accepted a package without per-session facts paths'
-assert_file_contains "$tmp/not-materialized.stderr" \
-  'package is not materialized; run `qq-observe materialize --run <dir>`' \
-  'unmaterialized refusal omitted the materialize remedy'
+assert_equal 65 "$incomplete_status" \
+  'finalize accepted a package with a missing session transcript'
+assert_file_contains "$tmp/incomplete.stderr" \
+  'session inputs are incomplete' \
+  'incomplete-inputs refusal did not name the missing input'
 roundtrip_analysis="$tmp/roundtrip-analysis.json"
 jq -n --arg session "$roundtrip_session" --slurpfile facts "$roundtrip_facts" '
   {

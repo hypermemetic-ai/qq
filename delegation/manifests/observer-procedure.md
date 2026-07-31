@@ -26,10 +26,14 @@ local `repo` root and explicit GitHub `repository` (`owner/name`), and lives at
 `runs/by-repository/<owner>/<repo>/pr-<N>/`. Legacy v1 flat packages are
 read-only evidence: inspect them in place, label them legacy, and never infer a
 GitHub Repository or rewrite/copy them. A guided package declares `variant:
-"guided"` in `package.json` and contains a `facts.json` and `signals.json` for
-every session, the corresponding session transcripts, the qq tool and skill
-inventory, and the live instruction corpus (including AGENTS.md, CONCEPTS.md,
-skills, and manifests).
+"guided"` in `package.json` and contains the session transcripts (the
+accountable member bounded to the Change's first dispatch plus its originating
+operator brief; delegate sessions whole), the qq tool and skill inventory, and
+the merge commit. Per-session facts and signals are **derived by the analyst**
+from the packaged transcripts (`qq-observe facts|signals <session>` into the
+analysis scratch); the live instruction corpus (AGENTS.md, CONCEPTS.md, skills,
+and manifests) is read at the merge commit
+(`git -C <repo> show <merge_commit>:<path>`, guided by the inventory).
 
 Paths in the analysis must name sessions in that package. The observer writes
 canonical absolute paths; validation canonicalizes all package and analysis
@@ -37,19 +41,23 @@ paths defensively before identity comparisons. The analyst captures JSON only
 to its temporary child/runtime input. `qq-observe finalize --analysis` validates
 that input and is the sole writer of the run's `analysis.json`. Facts are the
 numeric authority; transcripts supply cited context. Signals are an audit input
-only after reading has produced candidates. Pass each facts file to validation
-as `--facts SESSION_PATH=FACTS_PATH`.
+only after reading has produced candidates. Pass each derived facts file to
+validation as `--facts SESSION_PATH=FACTS_PATH`.
 
 ## Procedure
 
 ### Phase 0 — Package integrity and reading mode
 
-The package is materialized by the owner before dispatch (`qq-observe materialize --run <dir>`); a package without per-session `facts` paths is not analyzable.
+The package is assembled by the owner before dispatch (`qq-observe assemble
+--pr <N> --repo <root>`). Derive one facts file and one signals file per
+packaged session into your analysis scratch (`qq-observe facts|signals
+<run>/sessions/<label>.jsonl`); a session whose derivation fails is not
+analyzable.
 
 Load every package member and verify its schema and session membership. Require
-`package.variant` to be exactly `guided`, with one facts file and one signals
-file per session. Verify every pre-pass citation resolves to a 1-based physical
-transcript entry. Integrity validation may inspect signal shape and citations
+`package.variant` to be exactly `guided`. Verify every pre-pass citation in the
+derived signals resolves to a 1-based physical transcript entry. Integrity
+validation may inspect signal shape and citations
 mechanically, but do not use signal kinds or windows to form candidates yet.
 
 Select one reading mode from the total byte length of all packaged session
@@ -60,12 +68,12 @@ transcripts:
 - Above it, use **faceted** mode. For every session read the head and tail, every
   operator↔agent exchange required by the seam walk, every region that its
   complete-session facts mark as an outlier, and—after initial candidates
-  exist—every available signal window. Read every facts file in either mode;
+  exist—every available signal window. Read every derived facts file in either mode;
   facts retain the global counts, so transcript chunking never becomes a source
   of statistics.
 
 The analysis `limitations` names the selected mode. If any required file,
-schema, session, variant rule, or citation is invalid, emit only:
+schema, session, variant rule, derivation, or citation is invalid, emit only:
 
 ```json
 {"schema":"qq-observer.analysis","schema_version":1,"status":"analysis_failed","reason":"specific reason"}
@@ -210,7 +218,8 @@ episodes. Findings remain proposals for the operator.
 
 ## Seven hard rules
 
-1. Never recompute an analytic number; cite complete-session `facts.json`.
+1. Never recompute an analytic number by hand; cite the deterministic
+   complete-session facts derived from the packaged transcripts.
    Mechanical byte totals select reading mode only.
 2. Every emitted episode has at least one resolving evidence citation whose
    quote is verbatim from its cited entries. Drop an uncited candidate before
