@@ -7,9 +7,9 @@ same file; the shell surface is sourced straight from this checkout.
 
 ## Files
 
-- `ghostty/config` — the portable terminal profile: console-derived palette,
-  laptop-sized IBM glyphs and margins by default, exact laptop/4K font presets,
-  block cursor, and static Herdr surface normalization.
+- `ghostty/config` and `ghostty/profiles/` — the shared terminal profile plus
+  exact laptop/4K geometry: console-derived palette, IBM glyphs, block cursor,
+  and static Herdr surface normalization.
 - `ghostty/shaders/column-rails.glsl` — on the exact 3840-pixel-wide reference
   surface, masks Herdr's session-only right edge; other sizes pass through
   unchanged.
@@ -25,10 +25,14 @@ The Ghostty profile expects the locally installed `MxPlus IBM VGA 8x16` font,
 with `BigBlue TerminalPlus` as its fallback. Font binaries remain external
 dependencies rather than Repository-owned assets.
 
-The default 12-point size uses MxPlus IBM VGA 8x16's native 16-pixel laptop
-grid. `ctrl+shift+f12` selects the exact 24-point/32-pixel 2× 4K fullscreen
-couch preset; `ctrl+shift+f11` returns to the laptop preset. The 12-unit
-horizontal margin remains usable in ordinary windows at either font size.
+The laptop profile uses MxPlus IBM VGA 8x16's native 12-point/16-pixel grid
+with 12-point horizontal margins. `qq-ghostty-profile 4k` selects the exact
+24-point/32-pixel 2× grid with 480-point margins, producing a centered
+160×67-cell terminal field on the 3840×2160 reference display;
+`qq-ghostty-profile laptop` selects the portable geometry again. Selection is
+an external symlink under `$XDG_CONFIG_HOME/qq`, so switching never edits the
+Repository. Reload Ghostty with `ctrl+shift+,` after selecting; Ghostty applies
+padding changes only to new terminal surfaces.
 
 ## Flow
 

@@ -305,6 +305,12 @@ These file links are day-0 bootstrap, not a sync surface: content is live
 through each link, and the set changes only when a new cockpit tool is
 adopted. Nothing needs re-running when Skills or commands change.
 
+Ghostty defaults to the portable laptop geometry. Use
+`qq-ghostty-profile 4k` for the centered, more-square living-room field and
+`qq-ghostty-profile laptop` to return. The selection is external to the
+Repository. Reload Ghostty with `ctrl+shift+,` after selecting; padding applies
+to newly opened terminal surfaces.
+
 Bootstrap mounts canonical qq guidance globally through
 `~/.pi/agent/AGENTS.md`. A Repository may add its own local `AGENTS.md` as
 additional project context; that file is not a qq activation marker.
