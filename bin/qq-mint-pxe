@@ -1,0 +1,434 @@
+#!/usr/bin/env python3
+"""Stage and run a one-time, router-safe Linux Mint PXE service."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import ipaddress
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
+from typing import Any
+
+
+PROGRAM = "qq-mint-pxe"
+EXPECTED_ISO_SHA256 = "a081ab202cfda17f6924128dbd2de8b63518ac0531bcfe3f1a1b88097c459bd4"
+DEFAULT_ISO = Path.home() / "Downloads" / "linuxmint-22.3-cinnamon-64bit.iso"
+STATE_ROOT = Path(
+    os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local" / "state"))
+) / "qq" / "migration" / "mint-pxe"
+HTTP_UNIT = "qq-mint-pxe-http.service"
+DNSMASQ_UNIT = "qq-mint-pxe-dnsmasq.service"
+FIREWALL_COMMENT = "qq-mint-pxe"
+
+
+class PxeError(RuntimeError):
+    pass
+
+
+def fail(message: str) -> None:
+    raise PxeError(message)
+
+
+def run(
+    argv: list[str], *, check: bool = True, capture: bool = True
+) -> subprocess.CompletedProcess[str]:
+    try:
+        result = subprocess.run(
+            argv,
+            check=False,
+            capture_output=capture,
+            text=True,
+        )
+    except OSError as exc:
+        fail(f"cannot run {argv[0]}: {exc}")
+    if check and result.returncode != 0:
+        fail(
+            f"command failed ({' '.join(argv)}): "
+            f"{result.stderr.strip() or result.stdout.strip() or result.returncode}"
+        )
+    return result
+
+
+def require_commands(*commands: str) -> None:
+    missing = [command for command in commands if shutil.which(command) is None]
+    if missing:
+        fail(f"required commands are missing: {', '.join(missing)}")
+
+
+def read_json_output(argv: list[str]) -> Any:
+    result = run(argv)
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        fail(f"invalid JSON from {' '.join(argv)}: {exc}")
+
+
+def network_identity() -> tuple[str, ipaddress.IPv4Interface]:
+    routes = read_json_output(["ip", "-json", "route", "show", "default"])
+    candidates = [
+        route
+        for route in routes
+        if isinstance(route, dict)
+        and isinstance(route.get("dev"), str)
+        and route.get("dev") != "tailscale0"
+    ]
+    if not candidates:
+        fail("cannot find a default LAN interface")
+    route = min(candidates, key=lambda item: item.get("metric", 0))
+    interface = route["dev"]
+    addresses = read_json_output(["ip", "-json", "address", "show", "dev", interface])
+    ipv4 = [
+        entry
+        for device in addresses
+        for entry in device.get("addr_info", [])
+        if entry.get("family") == "inet" and entry.get("scope") == "global"
+    ]
+    if len(ipv4) != 1:
+        fail(f"expected one global IPv4 address on {interface}, found {len(ipv4)}")
+    return interface, ipaddress.ip_interface(
+        f"{ipv4[0]['local']}/{ipv4[0]['prefixlen']}"
+    )
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def private_directory(path: Path) -> None:
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if path.is_symlink():
+        fail(f"state directory may not be a symlink: {path}")
+    path.chmod(0o700)
+
+
+def atomic_copy(source: Path, target: Path) -> None:
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as handle:
+        temporary = Path(handle.name)
+        with source.open("rb") as source_handle:
+            shutil.copyfileobj(source_handle, handle)
+    temporary.chmod(0o644)
+    os.replace(temporary, target)
+
+
+def atomic_extract(iso: Path, member: str, target: Path) -> None:
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as handle:
+        temporary = Path(handle.name)
+        result = subprocess.run(
+            ["7z", "e", "-so", str(iso), member],
+            check=False,
+            stdout=handle,
+            stderr=subprocess.PIPE,
+            text=False,
+        )
+    if result.returncode != 0:
+        fail(
+            f"cannot extract {member}: "
+            f"{result.stderr.decode(errors='replace').strip()}"
+        )
+    temporary.chmod(0o644)
+    os.replace(temporary, target)
+
+
+def write_text(path: Path, content: str, mode: int = 0o600) -> None:
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=path.parent, delete=False
+    ) as handle:
+        temporary = Path(handle.name)
+        handle.write(content)
+    temporary.chmod(mode)
+    os.replace(temporary, path)
+
+
+def grub_config(address: str) -> str:
+    base = f"(http,{address}:8088)"
+    iso_url = f"http://{address}:8088/linuxmint.iso"
+    return f"""set default=0
+set timeout=3
+
+menuentry 'Linux Mint 22.3 Cinnamon — erase target only in installer' {{
+    insmod efinet
+    insmod net
+    insmod http
+    net_bootp
+    linux {base}/vmlinuz boot=casper ip=dhcp iso-url={iso_url} quiet splash ---
+    initrd {base}/initrd.lz
+}}
+"""
+
+
+def dnsmasq_config(
+    interface: str, address: ipaddress.IPv4Interface, tftp_root: Path
+) -> str:
+    network = address.network
+    return f"""# Generated by qq-mint-pxe. Router DHCP remains authoritative.
+port=0
+interface={interface}
+bind-dynamic
+user={Path.home().name}
+group={Path.home().name}
+log-dhcp
+dhcp-no-override
+dhcp-range={network.network_address},proxy,{network.netmask}
+enable-tftp
+tftp-root={tftp_root}
+pxe-prompt=Qq Linux Mint one-time installer,2
+pxe-service=BC_EFI,Linux Mint 22.3 signed UEFI boot,bootx64.efi
+pxe-service=x86-64_EFI,Linux Mint 22.3 signed UEFI boot,bootx64.efi
+dhcp-boot=bootx64.efi
+"""
+
+
+def metadata() -> dict[str, Any]:
+    path = STATE_ROOT / "stage.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        fail(f"PXE state is not staged: {exc}")
+
+
+def stage(iso: Path) -> dict[str, Any]:
+    require_commands("7z", "dnsmasq", "ip", "sbverify", "systemd-run")
+    iso = iso.expanduser().resolve()
+    if not iso.is_file():
+        fail(f"Mint ISO is missing: {iso}")
+    actual_hash = sha256_file(iso)
+    if actual_hash != EXPECTED_ISO_SHA256:
+        fail(f"Mint ISO SHA-256 differs: {actual_hash}")
+
+    interface, address = network_identity()
+    private_directory(STATE_ROOT)
+    tftp = STATE_ROOT / "tftp"
+    http = STATE_ROOT / "http"
+    private_directory(tftp)
+    private_directory(http)
+
+    signed_files = {
+        Path("/usr/lib/shim/shimx64.efi.signed.latest"): tftp / "bootx64.efi",
+        Path("/usr/lib/grub/x86_64-efi-signed/grubnetx64.efi.signed"): tftp
+        / "grubx64.efi",
+        Path("/usr/lib/shim/mmx64.efi"): tftp / "mmx64.efi",
+    }
+    for source, target in signed_files.items():
+        if not source.is_file():
+            fail(f"signed UEFI component is missing: {source}")
+        signature = run(["sbverify", "--list", str(source)], check=False)
+        if signature.returncode != 0 or "signature 1" not in (
+            signature.stdout + signature.stderr
+        ):
+            fail(f"UEFI component has no verifiable signature: {source}")
+        atomic_copy(source, target)
+
+    atomic_extract(iso, "casper/vmlinuz", http / "vmlinuz")
+    atomic_extract(iso, "casper/initrd.lz", http / "initrd.lz")
+    iso_link = http / "linuxmint.iso"
+    if os.path.lexists(iso_link):
+        if not iso_link.is_symlink() or iso_link.resolve() != iso:
+            fail(f"refusing to replace unexpected ISO link: {iso_link}")
+    else:
+        os.symlink(iso, iso_link)
+    write_text(http / "health.txt", "qq-mint-pxe ready\n", 0o644)
+
+    grub = grub_config(str(address.ip))
+    write_text(tftp / "grub" / "grub.cfg", grub, 0o644)
+    write_text(tftp / "grub.cfg", grub, 0o644)
+    dnsmasq_path = STATE_ROOT / "dnsmasq.conf"
+    write_text(dnsmasq_path, dnsmasq_config(interface, address, tftp), 0o600)
+    run(["sudo", "dnsmasq", "--test", f"--conf-file={dnsmasq_path}"])
+
+    result = {
+        "address": str(address.ip),
+        "captured_interface": interface,
+        "iso": str(iso),
+        "iso_sha256": actual_hash,
+        "network": str(address.network),
+        "schema": "qq.mint-pxe-stage",
+        "schema_version": 1,
+    }
+    write_text(STATE_ROOT / "stage.json", json.dumps(result, indent=2) + "\n")
+    return result
+
+
+def service_active(unit: str, *, user: bool) -> bool:
+    argv = ["systemctl"]
+    if user:
+        argv.append("--user")
+    argv.extend(["is-active", "--quiet", unit])
+    return run(argv, check=False).returncode == 0
+
+
+def remove_firewall_rules() -> None:
+    status = run(["sudo", "ufw", "status", "numbered"], check=False)
+    numbers = []
+    for line in status.stdout.splitlines():
+        if f"# {FIREWALL_COMMENT}" not in line:
+            continue
+        match = re.match(r"^\[\s*(\d+)\]", line.strip())
+        if match:
+            numbers.append(int(match.group(1)))
+    for number in sorted(numbers, reverse=True):
+        run(["sudo", "ufw", "--force", "delete", str(number)])
+
+
+def add_firewall_rules(interface: str, network: str) -> None:
+    status = run(["sudo", "ufw", "status"], check=False)
+    if "Status: active" not in status.stdout:
+        return
+    remove_firewall_rules()
+    for port, protocol in ((67, "udp"), (69, "udp"), (4011, "udp"), (8088, "tcp")):
+        run(
+            [
+                "sudo",
+                "ufw",
+                "allow",
+                "in",
+                "on",
+                interface,
+                "from",
+                network,
+                "to",
+                "any",
+                "port",
+                str(port),
+                "proto",
+                protocol,
+                "comment",
+                FIREWALL_COMMENT,
+            ]
+        )
+
+
+def stop() -> None:
+    run(["systemctl", "--user", "stop", HTTP_UNIT], check=False)
+    run(["sudo", "systemctl", "stop", DNSMASQ_UNIT], check=False)
+    remove_firewall_rules()
+
+
+def start(iso: Path) -> None:
+    require_commands("systemctl", "systemd-run", "ufw")
+    current = stage(iso)
+    stop()
+    add_firewall_rules(current["captured_interface"], current["network"])
+    http = STATE_ROOT / "http"
+    dnsmasq_path = STATE_ROOT / "dnsmasq.conf"
+    try:
+        run(
+            [
+                "systemd-run",
+                "--user",
+                "--collect",
+                f"--unit={HTTP_UNIT.removesuffix('.service')}",
+                f"--property=WorkingDirectory={http}",
+                "/usr/bin/python3",
+                "-m",
+                "http.server",
+                "8088",
+                "--bind",
+                current["address"],
+            ]
+        )
+        run(
+            [
+                "sudo",
+                "systemd-run",
+                "--collect",
+                f"--unit={DNSMASQ_UNIT.removesuffix('.service')}",
+                "/usr/sbin/dnsmasq",
+                "--keep-in-foreground",
+                "--log-facility=-",
+                f"--conf-file={dnsmasq_path}",
+            ]
+        )
+        for _ in range(20):
+            if service_active(HTTP_UNIT, user=True) and service_active(
+                DNSMASQ_UNIT, user=False
+            ):
+                try:
+                    with urllib.request.urlopen(
+                        f"http://{current['address']}:8088/health.txt", timeout=1
+                    ) as response:
+                        if response.read() == b"qq-mint-pxe ready\n":
+                            break
+                except OSError:
+                    pass
+            time.sleep(0.25)
+        else:
+            fail("PXE services did not become healthy")
+    except Exception:
+        stop()
+        raise
+    print(
+        f"PXE ready on {current['captured_interface']} {current['address']} "
+        f"for {current['network']}"
+    )
+    print("Boot the ThinkCentre's signed UEFI network entry; router DHCP is unchanged.")
+
+
+def status() -> int:
+    try:
+        current = metadata()
+    except PxeError as exc:
+        print(f"staged=no ({exc})")
+        return 1
+    http_active = service_active(HTTP_UNIT, user=True)
+    dnsmasq_active = service_active(DNSMASQ_UNIT, user=False)
+    print(f"staged=yes interface={current['captured_interface']} address={current['address']}")
+    print(f"http={'active' if http_active else 'inactive'}")
+    print(f"proxy_dhcp={'active' if dnsmasq_active else 'inactive'}")
+    return 0 if http_active and dnsmasq_active else 1
+
+
+def parser() -> argparse.ArgumentParser:
+    result = argparse.ArgumentParser(
+        prog=PROGRAM,
+        description="Serve verified Mint through signed UEFI PXE without owning LAN DHCP.",
+    )
+    commands = result.add_subparsers(dest="command", required=True)
+    stage_parser = commands.add_parser("stage", help="verify and prepare signed PXE assets")
+    stage_parser.add_argument("--iso", type=Path, default=DEFAULT_ISO)
+    start_parser = commands.add_parser("start", help="stage and start the one-time service")
+    start_parser.add_argument("--iso", type=Path, default=DEFAULT_ISO)
+    commands.add_parser("stop", help="stop services and remove their firewall rules")
+    commands.add_parser("status", help="show staging and service status")
+    return result
+
+
+def main() -> int:
+    try:
+        args = parser().parse_args()
+        if args.command == "stage":
+            current = stage(args.iso)
+            print(
+                f"staged signed UEFI PXE for {current['captured_interface']} "
+                f"{current['address']}"
+            )
+        elif args.command == "start":
+            start(args.iso)
+        elif args.command == "stop":
+            stop()
+            print("PXE stopped and qq-mint-pxe firewall rules removed")
+        else:
+            return status()
+        return 0
+    except (PxeError, OSError) as exc:
+        print(f"{PROGRAM}: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -5,7 +5,8 @@
   "versioned_roots": [
     {"path": "cockpit", "class": "git", "reason": "portable non-secret runtime and terminal configuration"},
     {"path": "machine", "class": "git", "reason": "package declarations, state boundary, and cutover procedure"},
-    {"path": "bin/qq-machine-migrate", "class": "git", "reason": "capture, transfer, verification, and reconstruction logic"}
+    {"path": "bin/qq-machine-migrate", "class": "git", "reason": "capture, transfer, verification, and reconstruction logic"},
+    {"path": "bin/qq-mint-pxe", "class": "git", "reason": "signed UEFI proxy-DHCP/TFTP/HTTP service lifecycle"}
   ],
   "repositories": [
     {"path": "projects/deciq", "remote": "git@github.com:hypermemetic-ai/deciq.git"},

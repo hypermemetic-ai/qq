@@ -4,6 +4,7 @@ bats
 build-essential
 cmake
 curl
+dnsmasq-base
 docker-compose-v2
 docker.io
 ffmpeg
@@ -11,9 +12,14 @@ fzf
 gh
 git
 git-lfs
+grub-efi-amd64-signed
+ipxe
 jq
 openssh-server
 python3-venv
 rsync
+7zip
+sbsigntool
 shellcheck
+shim-signed
 sqlite3

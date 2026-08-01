@@ -135,33 +135,51 @@ signature from fingerprint
 a081ab202cfda17f6924128dbd2de8b63518ac0531bcfe3f1a1b88097c459bd4
 ```
 
-The intended boot chain is:
+The implemented primary boot chain is:
 
 ```text
 ThinkCentre UEFI network boot
   -> dnsmasq proxyDHCP + TFTP on the old machine
-  -> UEFI iPXE
+  -> Microsoft-signed shim + Canonical-signed network GRUB
   -> Mint kernel/initrd and ISO over local HTTP
   -> interactive Mint installer on the ThinkCentre
 ```
 
-ProxyDHCP leaves the router as the LAN's address authority. The iPXE entry uses
-Mint casper's `boot=casper ip=dhcp iso-url=http://SOURCE/...iso` form. The
-regular 22.3 image is the first choice; the HWE image is a fallback only if the
-regular image cannot boot the ThinkCentre hardware.
+ProxyDHCP leaves the router as the LAN's address authority. Signed shim/GRUB is
+the first path so Secure Boot can remain enabled; the installed iPXE payload is
+an unsigned diagnostic fallback. GRUB loads Mint casper with
+`boot=casper ip=dhcp iso-url=http://SOURCE/...iso`. The regular 22.3 image is the
+first choice; the HWE image is a fallback only if it cannot boot the hardware.
 
-Do not start the PXE responder or touch the target disk until these are known:
+`bin/qq-mint-pxe` owns the complete one-time service lifecycle. `stage` verifies
+the entire ISO again, verifies both EFI signatures, extracts the ISO kernel and
+initrd, and syntax-checks a non-authoritative dnsmasq configuration. `start`
+adds narrowly scoped, tagged UFW rules and starts transient HTTP and proxy-DHCP
+services. `stop` removes the services and every tagged firewall rule.
 
-1. the exact ThinkCentre model and its Windows hostname or LAN address;
-2. whether Windows may be erased, must remain dual-bootable, or must first be
-   imaged to recoverable storage;
-3. whether BitLocker/device encryption is enabled and its recovery key is
-   safely available;
-4. whether its firmware accepts unsigned UEFI iPXE with Secure Boot enabled.
+```bash
+bin/qq-mint-pxe stage
+bin/qq-mint-pxe start
+bin/qq-mint-pxe status
+# Keep it running through installation, then:
+bin/qq-mint-pxe stop
+```
 
-The target is booted with Lenovo's one-time startup-device menu (commonly F12),
-and the graphical installer remains interactive. No unattended partitioning or
-disk erasure is part of this procedure.
+The Windows OOBE/Microsoft-account flow never needs to complete. Power the
+ThinkCentre off, start it while tapping Lenovo's one-time boot-menu key (usually
+F12), and select its UEFI IPv4/PXE Ethernet entry.
+
+Before touching the target disk, these must be known:
+
+1. the booted live environment is visibly the ThinkCentre, not the old laptop;
+2. the operator's explicit disk disposition is recorded;
+3. the old laptop remains intact as the complete rollback source.
+
+The operator authorized erasing Windows and using the full ThinkCentre disk on
+2026-08-01. The graphical installer remains interactive, so the physical disk
+selection is still visible before it commits. No unattended partitioning is
+part of this procedure. Exact model/firmware inspection is needed only if the
+generic signed UEFI path does not appear or does not boot.
 
 Primary references: the [Mint 22.3 download page](https://linuxmint.com/download.php),
 [Cinnamon edition page](https://linuxmint.com/edition.php?id=326),
