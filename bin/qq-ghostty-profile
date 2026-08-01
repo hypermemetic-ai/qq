@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Select qq's laptop or 4K Ghostty geometry without modifying the Repository.
+set -euo pipefail
+
+die() {
+  printf 'qq-ghostty-profile: %s\n' "$*" >&2
+  exit 1
+}
+
+[ "$#" -eq 1 ] || die 'usage: qq-ghostty-profile {laptop|4k}'
+case "$1" in
+  laptop | 4k) profile_name="$1" ;;
+  *) die 'usage: qq-ghostty-profile {laptop|4k}' ;;
+esac
+
+self="$(readlink -f -- "${BASH_SOURCE[0]}")"
+root="$(cd -- "$(dirname -- "$self")/.." && pwd -P)"
+profile="$root/cockpit/ghostty/profiles/$profile_name"
+if [ ! -f "$profile" ] || [ -L "$profile" ]; then
+  die "profile is unavailable: $profile_name"
+fi
+
+config_home="${XDG_CONFIG_HOME:-${HOME:?HOME is required}/.config}"
+selector_dir="$config_home/qq"
+selector="$selector_dir/ghostty-profile"
+if [ -e "$selector" ] && [ ! -L "$selector" ]; then
+  die "refusing to replace non-symlink selector: $selector"
+fi
+
+mkdir -p -- "$selector_dir"
+ln -sfn -- "$profile" "$selector"
+printf 'Ghostty profile selected: %s\n' "$profile_name"
+printf 'Reload Ghostty (Ctrl+Shift+,), then open a new terminal surface.\n'

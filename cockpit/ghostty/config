@@ -1,5 +1,6 @@
 # Framebuffer Deluxe: the local virtual console's palette and IBM-derived
-# letterforms. Start at the laptop size; the exact 4K couch size is bound below.
+# letterforms. Start at the laptop size; an external selector may load one of
+# the exact display profiles after this base configuration.
 font-family = MxPlus IBM VGA 8x16
 font-family = BigBlue TerminalPlus
 # MxPlus's 12pt/16px size is its native laptop grid.
@@ -52,9 +53,9 @@ custom-shader = ~/.config/ghostty/shaders/column-rails.glsl
 # The normalization is static and must not force a continuous render loop.
 custom-shader-animation = false
 
-# Exact display presets: laptop/default and 4K fullscreen/couch.
-keybind = ctrl+shift+f11=set_font_size:12
-keybind = ctrl+shift+f12=set_font_size:24
+# The selector is a runtime symlink managed by qq-ghostty-profile. Its absence
+# deliberately leaves the portable laptop defaults above in effect.
+config-file = ?../qq/ghostty-profile
 
 # Ctrl+C copies when text is selected, otherwise passes through (SIGINT).
 keybind = performable:ctrl+c=copy_to_clipboard
