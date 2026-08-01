@@ -16,8 +16,15 @@ same file; the shell surface is sourced straight from this checkout.
 - `glow/glow.yml` — fixed-width, no-pager Glow defaults for pane rendering.
 - `herdr/config.toml` — tokyo-night, onboarding suppressed, priority-sorted
   agent sidebar, direct navigation, agent-pull, and project-home snap bindings.
+- `pi/` — non-secret Pi settings, keybindings, sandbox, and trust policy.
+  Authentication, package state, histories, and sessions remain private.
+- `codex/config.toml` — portable Codex policy and Qq trust roots. Authentication,
+  sessions, archives, history, goals, memories, and SQLite state remain private.
+- `bd/config.yaml`, `git/ignore`, and `homebrew/trust.json` — small non-secret
+  CLI preferences that previously lived only in the operator home.
 - `shell/file-navigation.bash` — `QQ_HOME`, `qqroot`, focused-worktree lookup
   through `qq_space_dir`, and shell directory changes through `qqcd`.
+- `shell/aliases.bash` — the interactive Pi launcher's terminal reset wrapper.
 - `systemd/user/qq-openwiki-daily.{service,timer}` — repository-owned user
   units for the non-persistent 03:00 local OpenWiki assessment.
 
@@ -29,6 +36,11 @@ The default 12-point size uses MxPlus IBM VGA 8x16's native 16-pixel laptop
 grid. `ctrl+shift+f12` selects the exact 24-point/32-pixel 2× 4K fullscreen
 couch preset; `ctrl+shift+f11` returns to the laptop preset. The 12-unit
 horizontal margin remains usable in ordinary windows at either font size.
+
+`bin/qq-machine-migrate install-config` previews the complete config-link set;
+its `--apply` mode installs it and retains timestamped backups of displaced
+files. The exact-state transfer and resumable-session procedure live in
+[`machine/README.md`](../machine/README.md).
 
 ## Flow
 

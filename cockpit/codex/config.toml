@@ -1,0 +1,32 @@
+sandbox_mode = "danger-full-access"
+approval_policy = "never"
+personality = "friendly"
+model = "gpt-5.6-sol"
+model_reasoning_effort = "xhigh"
+approvals_reviewer = "user"
+service_tier = "default"
+
+[projects."/home/qqp"]
+trust_level = "trusted"
+
+[projects."/home/qqp/projects"]
+trust_level = "trusted"
+
+[tui]
+pet = "disabled"
+alternate_screen = "always"
+animations = true
+terminal_title = ["project"]
+
+[features]
+hooks = true
+fast_mode = true
+
+[otel]
+exporter = { otlp-http = { endpoint = "http://localhost:4000", protocol = "json" } }
+
+[notice]
+hide_rate_limit_model_nudge = true
+
+[mcp_servers.openaiDeveloperDocs]
+url = "https://developers.openai.com/mcp"

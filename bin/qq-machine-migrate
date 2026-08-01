@@ -1,0 +1,820 @@
+#!/usr/bin/env python3
+"""Capture, transfer, verify, and reconstruct a Qq workstation cockpit."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import socket
+import subprocess
+import sys
+from typing import Any
+
+
+PROGRAM = "qq-machine-migrate"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_MANIFEST = REPO_ROOT / "machine" / "migration-manifest.json"
+
+
+class MigrationError(RuntimeError):
+    pass
+
+
+def fail(message: str) -> None:
+    raise MigrationError(message)
+
+
+def read_json(path: Path) -> Any:
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        fail(f"cannot read JSON from {path}: {exc}")
+
+
+def write_private_json(path: Path, value: Any) -> None:
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.chmod(0o600)
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def load_manifest(path: Path) -> dict[str, Any]:
+    manifest = read_json(path)
+    if not isinstance(manifest, dict):
+        fail(f"manifest is not an object: {path}")
+    if manifest.get("schema") != "qq.machine-migration" or manifest.get("schema_version") != 1:
+        fail(f"unsupported migration manifest: {path}")
+    required_home = manifest.get("required_home")
+    if not isinstance(required_home, str) or not Path(required_home).is_absolute():
+        fail("manifest required_home must be an absolute path")
+    # These were added without changing the on-disk schema because old private
+    # captures remain valid transfer evidence and do not need config install.
+    manifest.setdefault("versioned_roots", [])
+    manifest.setdefault("config_links", [])
+    for key in (
+        "repositories",
+        "versioned_roots",
+        "exact_roots",
+        "session_roots",
+        "config_links",
+        "rsync_excludes",
+    ):
+        if not isinstance(manifest.get(key), list):
+            fail(f"manifest {key} must be a list")
+    for collection in ("repositories", "versioned_roots", "exact_roots"):
+        for item in manifest[collection]:
+            if not isinstance(item, dict):
+                fail(f"manifest {collection} entries must be objects")
+            validate_relative_path(item.get("path"), f"manifest {collection} path")
+    for value in manifest["session_roots"]:
+        validate_relative_path(value, "manifest session root")
+    for mapping in manifest["config_links"]:
+        if not isinstance(mapping, dict):
+            fail("manifest config_links entries must be objects")
+        validate_relative_path(mapping.get("source"), "config source")
+        validate_relative_path(mapping.get("target"), "config target")
+    return manifest
+
+
+def validate_relative_path(value: Any, description: str) -> None:
+    if not isinstance(value, str) or not value:
+        fail(f"{description} must be a non-empty string")
+    path = Path(value)
+    if path.is_absolute() or ".." in path.parts:
+        fail(f"{description} must stay relative: {value}")
+
+
+def ensure_home(home: Path, manifest: dict[str, Any]) -> Path:
+    home = home.expanduser().resolve()
+    required = Path(manifest["required_home"])
+    if home != required:
+        fail(f"this capture requires home {required}, not {home}")
+    return home
+
+
+def state_root(home: Path) -> Path:
+    xdg = os.environ.get("XDG_STATE_HOME")
+    base = Path(xdg).expanduser() if xdg else home / ".local" / "state"
+    return base / "qq" / "migration"
+
+
+def safe_capture_dir(home: Path, requested: str | None) -> Path:
+    root = state_root(home)
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if root.is_symlink():
+        fail(f"migration state root may not be a symlink: {root}")
+    root.chmod(0o700)
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    target = Path(requested).expanduser() if requested else root / f"capture-{stamp}-{os.getpid()}"
+    if not target.is_absolute():
+        target = Path.cwd() / target
+    resolved_root = root.resolve()
+    resolved_target = target.resolve(strict=False)
+    if resolved_target == resolved_root or resolved_root not in resolved_target.parents:
+        fail(f"capture output must be below {resolved_root}")
+    cursor = target
+    while cursor != root and cursor != cursor.parent:
+        if cursor.exists() and cursor.is_symlink():
+            fail(f"capture path may not contain a symlink: {cursor}")
+        cursor = cursor.parent
+    try:
+        target.mkdir(mode=0o700, parents=False, exist_ok=False)
+    except OSError as exc:
+        fail(f"cannot create capture directory {target}: {exc}")
+    target.chmod(0o700)
+    return target
+
+
+def run(
+    argv: list[str], *, cwd: Path | None = None, check: bool = True, text: bool = True
+) -> subprocess.CompletedProcess[Any]:
+    try:
+        result = subprocess.run(
+            argv,
+            cwd=cwd,
+            check=False,
+            capture_output=True,
+            text=text,
+        )
+    except OSError as exc:
+        fail(f"cannot run {argv[0]}: {exc}")
+    if check and result.returncode != 0:
+        stderr = result.stderr.strip() if text else result.stderr.decode(errors="replace").strip()
+        fail(f"command failed ({' '.join(argv)}): {stderr or f'exit {result.returncode}'}")
+    return result
+
+
+def run_json(argv: list[str]) -> Any:
+    result = run(argv)
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        fail(f"invalid JSON from {' '.join(argv)}: {exc}")
+
+
+def snapshot_payload(document: Any) -> dict[str, Any]:
+    if isinstance(document, dict) and isinstance(document.get("result"), dict):
+        result = document["result"]
+        if isinstance(result.get("snapshot"), dict):
+            return result["snapshot"]
+    if isinstance(document, dict) and isinstance(document.get("snapshot"), dict):
+        return document["snapshot"]
+    if isinstance(document, dict) and isinstance(document.get("workspaces"), list):
+        return document
+    fail("Herdr snapshot has an unsupported shape")
+
+
+def cockpit_from_snapshot(document: Any) -> dict[str, Any]:
+    snapshot = snapshot_payload(document)
+    workspaces = snapshot.get("workspaces", [])
+    tabs = snapshot.get("tabs", [])
+    panes = snapshot.get("panes", [])
+    agents = snapshot.get("agents", [])
+    if not all(isinstance(value, list) for value in (workspaces, tabs, panes, agents)):
+        fail("Herdr snapshot is missing workspace, tab, or pane arrays")
+
+    panes_by_tab: dict[str, list[dict[str, Any]]] = {}
+    for pane in panes:
+        if isinstance(pane, dict) and isinstance(pane.get("tab_id"), str):
+            panes_by_tab.setdefault(pane["tab_id"], []).append(pane)
+    agents_by_pane = {
+        agent["pane_id"]: agent
+        for agent in agents
+        if isinstance(agent, dict) and isinstance(agent.get("pane_id"), str)
+    }
+
+    result_workspaces: list[dict[str, Any]] = []
+    for workspace in sorted(workspaces, key=lambda item: item.get("number", 0)):
+        workspace_id = workspace.get("workspace_id")
+        workspace_tabs = sorted(
+            [tab for tab in tabs if tab.get("workspace_id") == workspace_id],
+            key=lambda item: item.get("number", 0),
+        )
+        worktree = workspace.get("worktree") or {}
+        workspace_cwd = worktree.get("checkout_path")
+        tab_records: list[dict[str, Any]] = []
+        for tab in workspace_tabs:
+            tab_panes = sorted(panes_by_tab.get(tab.get("tab_id"), []), key=lambda item: item.get("pane_id", ""))
+            if len(tab_panes) != 1:
+                fail(
+                    f"restore currently requires one pane per tab; {workspace.get('label')}/{tab.get('label')} has {len(tab_panes)}"
+                )
+            pane = tab_panes[0]
+            agent_record = agents_by_pane.get(pane.get("pane_id"), {})
+            session = pane.get("agent_session") or agent_record.get("agent_session")
+            agent = pane.get("agent") or agent_record.get("agent")
+            label = tab.get("label", "")
+            if agent in ("pi", "codex") and isinstance(session, dict):
+                kind = agent
+            elif label == "board":
+                kind = "board"
+            else:
+                kind = "shell"
+            tab_records.append(
+                {
+                    "active": tab.get("tab_id") == workspace.get("active_tab_id"),
+                    "agent_name": pane.get("name") or agent_record.get("name"),
+                    "cwd": pane.get("cwd") or pane.get("foreground_cwd") or workspace_cwd,
+                    "focused": tab.get("tab_id") == snapshot.get("focused_tab_id"),
+                    "kind": kind,
+                    "label": label,
+                    "session": session if kind in ("pi", "codex") else None,
+                }
+            )
+        result_workspaces.append(
+            {
+                "cwd": workspace_cwd or (tab_records[0].get("cwd") if tab_records else None),
+                "focused": workspace_id == snapshot.get("focused_workspace_id"),
+                "label": workspace.get("label", ""),
+                "tabs": tab_records,
+            }
+        )
+    return {
+        "schema": "qq.open-cockpit",
+        "schema_version": 1,
+        "workspaces": result_workspaces,
+    }
+
+
+def git_lines(repo: Path, *arguments: str, check: bool = True) -> list[str]:
+    result = run(["git", "-C", str(repo), *arguments], check=check)
+    if result.returncode != 0:
+        return []
+    return result.stdout.splitlines()
+
+
+def parse_worktree_porcelain(lines: list[str]) -> list[dict[str, str | bool]]:
+    records: list[dict[str, str | bool]] = []
+    current: dict[str, str | bool] = {}
+    for line in lines + [""]:
+        if not line:
+            if current:
+                records.append(current)
+                current = {}
+            continue
+        key, _, value = line.partition(" ")
+        current[key] = value if value else True
+    return records
+
+
+def repo_state(home: Path, manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    for item in manifest["repositories"]:
+        relative = item.get("path")
+        if not isinstance(relative, str):
+            fail("repository manifest entry has no path")
+        repo = home / relative
+        if not repo.exists():
+            output.append({"path": relative, "missing": True})
+            continue
+        common_dir = run(["git", "-C", str(repo), "rev-parse", "--git-common-dir"]).stdout.strip()
+        worktrees = parse_worktree_porcelain(
+            git_lines(repo, "worktree", "list", "--porcelain")
+        )
+        captured_worktrees: list[dict[str, Any]] = []
+        for worktree in worktrees:
+            raw_path = worktree.get("worktree")
+            if not isinstance(raw_path, str):
+                continue
+            path = Path(raw_path)
+            captured_worktrees.append(
+                {
+                    "branch": (git_lines(path, "symbolic-ref", "--quiet", "--short", "HEAD", check=False) or [None])[0],
+                    "head": (git_lines(path, "rev-parse", "HEAD") or [None])[0],
+                    "path": raw_path,
+                    "status": git_lines(path, "status", "--porcelain=v1", "--untracked-files=all"),
+                }
+            )
+        branches = git_lines(
+            repo,
+            "for-each-ref",
+            "--sort=refname",
+            "--format=%(refname:short) %(objectname)",
+            "refs/heads",
+        )
+        output.append(
+            {
+                "branches": branches,
+                "common_dir": str((repo / common_dir).resolve()) if not Path(common_dir).is_absolute() else common_dir,
+                "path": relative,
+                "remote": item.get("remote"),
+                "worktrees": captured_worktrees,
+            }
+        )
+    return output
+
+
+def session_state(home: Path, manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for relative_root in manifest["session_roots"]:
+        root = home / relative_root
+        if not root.exists():
+            fail(f"session root is missing: {root}")
+        paths = sorted(item for item in root.rglob("*") if item.is_file())
+        for path in paths:
+            before = path.stat()
+            digest = sha256_file(path)
+            after = path.stat()
+            if (before.st_size, before.st_mtime_ns, before.st_ino) != (
+                after.st_size,
+                after.st_mtime_ns,
+                after.st_ino,
+            ):
+                fail(f"session file changed while it was being captured: {path}")
+            records.append(
+                {
+                    "mtime_ns": after.st_mtime_ns,
+                    "path": str(path.relative_to(home)),
+                    "sha256": digest,
+                    "size": after.st_size,
+                }
+            )
+        after_paths = sorted(item for item in root.rglob("*") if item.is_file())
+        if paths != after_paths:
+            fail(f"session tree changed while it was being captured: {root}")
+    return records
+
+
+def tool_versions() -> dict[str, str | None]:
+    commands = {
+        "brew": ["brew", "--version"],
+        "codex": ["codex", "--version"],
+        "git": ["git", "--version"],
+        "herdr": ["herdr", "--version"],
+        "node": ["node", "--version"],
+        "npm": ["npm", "--version"],
+        "pi": ["pi", "--version"],
+        "python": ["python3", "--version"],
+        "rsync": ["rsync", "--version"],
+    }
+    versions: dict[str, str | None] = {}
+    for name, argv in commands.items():
+        if shutil.which(argv[0]) is None:
+            versions[name] = None
+            continue
+        result = run(argv, check=False)
+        stream = result.stdout or result.stderr
+        versions[name] = stream.splitlines()[0] if stream else None
+    return versions
+
+
+def write_capture_hashes(directory: Path) -> None:
+    lines = []
+    for path in sorted(item for item in directory.iterdir() if item.is_file() and item.name != "SHA256SUMS"):
+        lines.append(f"{sha256_file(path)}  {path.name}")
+    checksums = directory / "SHA256SUMS"
+    checksums.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    checksums.chmod(0o600)
+
+
+def verify_capture_hashes(directory: Path) -> None:
+    checksum_file = directory / "SHA256SUMS"
+    try:
+        lines = checksum_file.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        fail(f"cannot read {checksum_file}: {exc}")
+    for line in lines:
+        expected, separator, name = line.partition("  ")
+        if not separator or Path(name).name != name:
+            fail(f"invalid checksum entry in {checksum_file}: {line}")
+        path = directory / name
+        if not path.is_file() or sha256_file(path) != expected:
+            fail(f"capture integrity check failed: {path}")
+
+
+def cmd_capture(args: argparse.Namespace) -> None:
+    manifest_path = Path(os.environ.get("QQ_MACHINE_MANIFEST", args.manifest)).expanduser()
+    manifest = load_manifest(manifest_path)
+    home = ensure_home(Path(args.home), manifest)
+    directory = safe_capture_dir(home, args.output)
+    herdr = os.environ.get("QQ_MACHINE_HERDR", "herdr")
+
+    if args.topology_from:
+        previous = Path(args.topology_from).expanduser().resolve()
+        verify_capture_hashes(previous)
+        topology = read_json(previous / "herdr-snapshot.json")
+        probe = run([herdr, "api", "snapshot"], check=False)
+        if probe.returncode == 0:
+            fail("Herdr is still running; stop it before the quiesced capture")
+        phase = "quiesced"
+        topology_source = str(previous)
+    else:
+        topology = run_json([herdr, "api", "snapshot"])
+        phase = "live"
+        topology_source = "live-herdr"
+
+    missing_roots = [
+        item["path"]
+        for item in manifest["exact_roots"]
+        if not os.path.lexists(home / item["path"])
+    ]
+    if missing_roots:
+        fail(f"required exact-transfer roots are missing: {', '.join(missing_roots)}")
+    capture_metadata = {
+        "captured_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "home": str(home),
+        "manifest_sha256": sha256_file(manifest_path),
+        "missing_roots": missing_roots,
+        "phase": phase,
+        "schema": "qq.machine-capture",
+        "schema_version": 1,
+        "topology_source": topology_source,
+    }
+    write_private_json(directory / "capture.json", capture_metadata)
+    write_private_json(directory / "herdr-snapshot.json", topology)
+    write_private_json(directory / "open-cockpit.json", cockpit_from_snapshot(topology))
+    write_private_json(directory / "repo-state.json", repo_state(home, manifest))
+    write_private_json(directory / "session-files.json", session_state(home, manifest))
+    write_private_json(directory / "tool-versions.json", tool_versions())
+    write_private_json(directory / "migration-manifest.json", manifest)
+    write_capture_hashes(directory)
+    print(directory)
+
+
+def snapshot_bundle(path: str) -> tuple[Path, dict[str, Any], dict[str, Any]]:
+    directory = Path(path).expanduser().resolve()
+    if not directory.is_dir():
+        fail(f"not a capture directory: {directory}")
+    verify_capture_hashes(directory)
+    manifest = load_manifest(directory / "migration-manifest.json")
+    capture = read_json(directory / "capture.json")
+    if capture.get("schema") != "qq.machine-capture" or capture.get("schema_version") != 1:
+        fail(f"unsupported capture: {directory}")
+    return directory, manifest, capture
+
+
+def cmd_sync(args: argparse.Namespace) -> None:
+    directory, manifest, capture = snapshot_bundle(args.snapshot)
+    home = ensure_home(Path(args.home), manifest)
+    if args.phase == "final" and capture.get("phase") != "quiesced":
+        fail("final sync requires a quiesced capture made after Herdr was stopped")
+    required_user = Path(manifest["required_home"]).name
+    target_pattern = rf"{re.escape(required_user)}@(?:[A-Za-z0-9][A-Za-z0-9.-]*|\[[0-9A-Fa-f:]+\])"
+    if not re.fullmatch(target_pattern, args.target):
+        fail(f"target must be an explicit {required_user}@hostname or {required_user}@address")
+    host = args.target.split("@", 1)[1].strip("[]").lower()
+    local_names = {
+        "localhost",
+        "localhost.localdomain",
+        socket.gethostname().lower(),
+        socket.getfqdn().lower(),
+    }
+    if host in local_names or host == "::1" or host.startswith("127."):
+        fail(f"refusing to sync this machine onto itself: {args.target}")
+    rsync = os.environ.get("QQ_MACHINE_RSYNC", "rsync")
+    argv = [
+        rsync,
+        "-aHAX",
+        "--relative",
+        "--protect-args",
+        "--partial",
+        "--itemize-changes",
+    ]
+    if args.dry_run:
+        argv.append("--dry-run")
+    for pattern in manifest["rsync_excludes"]:
+        argv.extend(["--exclude", f"/{pattern}"])
+    present = []
+    for item in manifest["exact_roots"]:
+        relative = item["path"]
+        source = home / relative
+        if os.path.lexists(source):
+            present.append(f"{home}/./{relative}")
+        else:
+            print(f"warning: source root is absent: {source}", file=sys.stderr)
+    if not present:
+        fail("none of the manifest roots exist")
+    argv.extend(present)
+    argv.append(f"{args.target}:{manifest['required_home']}/")
+    print(f"{args.phase} sync from capture {directory}", file=sys.stderr)
+    result = subprocess.run(argv, check=False)
+    if result.returncode != 0:
+        fail(f"rsync failed with exit {result.returncode}")
+
+
+def verify_sessions(home: Path, directory: Path) -> int:
+    records = read_json(directory / "session-files.json")
+    if not isinstance(records, list):
+        fail("session-files.json is not an array")
+    for record in records:
+        path = home / record["path"]
+        if not path.is_file():
+            fail(f"session file is missing: {path}")
+        if path.stat().st_size != record["size"]:
+            fail(f"session file size differs: {path}")
+        if sha256_file(path) != record["sha256"]:
+            fail(f"session file hash differs: {path}")
+    return len(records)
+
+
+def verify_session_references(home: Path, cockpit: dict[str, Any]) -> None:
+    codex_root = home / ".codex"
+    for workspace in cockpit["workspaces"]:
+        for tab in workspace["tabs"]:
+            session = tab.get("session") or {}
+            if tab["kind"] == "pi":
+                value = session.get("value")
+                if not isinstance(value, str) or not Path(value).is_file():
+                    fail(f"referenced Pi session is missing: {value}")
+            elif tab["kind"] == "codex":
+                value = session.get("value")
+                if not isinstance(value, str):
+                    fail("Codex tab has no session id")
+                if not any(codex_root.glob(f"**/*{value}*.jsonl")):
+                    fail(f"referenced Codex session is missing: {value}")
+
+
+def current_worktree_state(path: Path) -> dict[str, Any]:
+    return {
+        "branch": (git_lines(path, "symbolic-ref", "--quiet", "--short", "HEAD", check=False) or [None])[0],
+        "head": (git_lines(path, "rev-parse", "HEAD") or [None])[0],
+        "path": str(path),
+        "status": git_lines(path, "status", "--porcelain=v1", "--untracked-files=all"),
+    }
+
+
+def verify_repos(home: Path, directory: Path) -> int:
+    expected = read_json(directory / "repo-state.json")
+    checked = 0
+    for repo in expected:
+        if repo.get("missing"):
+            continue
+        path = home / repo["path"]
+        if not path.is_dir():
+            fail(f"repository is missing: {path}")
+        actual_branches = git_lines(
+            path,
+            "for-each-ref",
+            "--sort=refname",
+            "--format=%(refname:short) %(objectname)",
+            "refs/heads",
+        )
+        if actual_branches != repo["branches"]:
+            fail(f"local branches differ: {path}")
+        for expected_worktree in repo["worktrees"]:
+            worktree_path = Path(expected_worktree["path"])
+            if not worktree_path.is_dir():
+                fail(f"Git worktree is missing: {worktree_path}")
+            if current_worktree_state(worktree_path) != expected_worktree:
+                fail(f"Git worktree state differs: {worktree_path}")
+            checked += 1
+    return checked
+
+
+def cmd_verify(args: argparse.Namespace) -> None:
+    directory, manifest, capture = snapshot_bundle(args.snapshot)
+    home = ensure_home(Path(args.home), manifest)
+    if capture.get("missing_roots"):
+        fail("capture was made with missing exact-transfer roots")
+    for item in manifest["exact_roots"]:
+        path = home / item["path"]
+        if not os.path.lexists(path):
+            fail(f"exact-transfer root is missing: {path}")
+    sessions = verify_sessions(home, directory)
+    cockpit = read_json(directory / "open-cockpit.json")
+    verify_session_references(home, cockpit)
+    worktrees = verify_repos(home, directory)
+    if args.live:
+        herdr = os.environ.get("QQ_MACHINE_HERDR", "herdr")
+        live = cockpit_from_snapshot(run_json([herdr, "api", "snapshot"]))
+        if live != cockpit:
+            fail("live Herdr cockpit differs from the captured cockpit")
+    counts = ", ".join(
+        f"{workspace['label']}={len(workspace['tabs'])}"
+        for workspace in cockpit["workspaces"]
+    )
+    tab_count = sum(len(item["tabs"]) for item in cockpit["workspaces"])
+    print(
+        f"verified {sessions} session files, {worktrees} worktrees, "
+        f"and {tab_count} open tabs ({counts})"
+    )
+
+
+def restore_plan(cockpit: dict[str, Any]) -> list[str]:
+    lines = [
+        "# Run only after qq-machine-migrate verify succeeds.",
+        "# The apply mode resolves the new Herdr workspace/tab/pane IDs at runtime.",
+    ]
+    for workspace in cockpit["workspaces"]:
+        lines.append(
+            f"# workspace {workspace['label']!r}: cwd={workspace['cwd']} "
+            f"tabs={len(workspace['tabs'])}"
+        )
+        for tab in workspace["tabs"]:
+            session = tab.get("session") or {}
+            descriptor = tab["kind"]
+            if tab["kind"] in ("pi", "codex"):
+                descriptor += f" session={session.get('value')}"
+            lines.append(
+                f"#   tab {tab['label']!r}: cwd={tab['cwd']} kind={descriptor}"
+            )
+    focused = next((workspace["label"] for workspace in cockpit["workspaces"] if workspace["focused"]), None)
+    lines.append(f"# Final focus: workspace {focused!r}")
+    return lines
+
+
+def find_string_key(value: Any, key: str) -> str | None:
+    if isinstance(value, dict):
+        candidate = value.get(key)
+        if isinstance(candidate, str):
+            return candidate
+        for child in value.values():
+            found = find_string_key(child, key)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for child in value:
+            found = find_string_key(child, key)
+            if found:
+                return found
+    return None
+
+
+def pane_for_tab(herdr: str, tab_id: str) -> str:
+    listing = run_json([herdr, "pane", "list"])
+    payload = listing.get("result", listing) if isinstance(listing, dict) else {}
+    panes = payload.get("panes", []) if isinstance(payload, dict) else []
+    candidates = [pane.get("pane_id") for pane in panes if pane.get("tab_id") == tab_id]
+    candidates = [candidate for candidate in candidates if isinstance(candidate, str)]
+    if len(candidates) != 1:
+        fail(f"expected one pane in restored tab {tab_id}, found {len(candidates)}")
+    return candidates[0]
+
+
+def restore_tab(herdr: str, pane_id: str, tab: dict[str, Any], index: int) -> None:
+    kind = tab["kind"]
+    if kind == "board":
+        run([herdr, "pane", "run", pane_id, "qq-board"])
+    elif kind in ("pi", "codex"):
+        session = tab.get("session") or {}
+        value = session.get("value")
+        name = tab.get("agent_name") or f"restored-{kind}-{index}"
+        argv = [herdr, "agent", "start", name, "--kind", kind, "--pane", pane_id, "--"]
+        argv.extend(["--session", value] if kind == "pi" else ["resume", value])
+        run(argv)
+
+
+def apply_restore(cockpit: dict[str, Any], herdr: str) -> None:
+    live = snapshot_payload(run_json([herdr, "api", "snapshot"]))
+    if live.get("workspaces"):
+        fail("restore requires a fresh Herdr session with zero workspaces")
+
+    workspace_ids: dict[str, str] = {}
+    tab_ids: dict[tuple[str, int], str] = {}
+    for workspace in cockpit["workspaces"]:
+        created = run_json(
+            [herdr, "workspace", "create", "--cwd", workspace["cwd"], "--label", workspace["label"], "--no-focus"]
+        )
+        workspace_id = find_string_key(created, "workspace_id")
+        tab_id = find_string_key(created, "active_tab_id") or find_string_key(created, "tab_id")
+        if not workspace_id or not tab_id:
+            fail(f"could not resolve IDs for restored workspace {workspace['label']}")
+        workspace_ids[workspace["label"]] = workspace_id
+        for index, tab in enumerate(workspace["tabs"]):
+            if index:
+                created_tab = run_json(
+                    [herdr, "tab", "create", "--workspace", workspace_id, "--cwd", tab["cwd"], "--label", tab["label"], "--no-focus"]
+                )
+                tab_id = find_string_key(created_tab, "tab_id")
+                if not tab_id:
+                    fail(f"could not resolve ID for restored tab {tab['label']}")
+            tab_ids[(workspace["label"], index)] = tab_id
+            pane_id = pane_for_tab(herdr, tab_id)
+            restore_tab(herdr, pane_id, tab, index)
+            run([herdr, "tab", "rename", tab_id, tab["label"]])
+
+    for workspace in cockpit["workspaces"]:
+        active_index = next((i for i, tab in enumerate(workspace["tabs"]) if tab["active"]), 0)
+        run([herdr, "tab", "focus", tab_ids[(workspace["label"], active_index)]])
+    focused_workspace = next(
+        (workspace for workspace in cockpit["workspaces"] if workspace["focused"]),
+        cockpit["workspaces"][0],
+    )
+    focused_index = next((i for i, tab in enumerate(focused_workspace["tabs"]) if tab["focused"]), 0)
+    run([herdr, "workspace", "focus", workspace_ids[focused_workspace["label"]]])
+    run([herdr, "tab", "focus", tab_ids[(focused_workspace["label"], focused_index)]])
+
+
+def cmd_restore_layout(args: argparse.Namespace) -> None:
+    directory, manifest, _capture = snapshot_bundle(args.snapshot)
+    home = ensure_home(Path(args.home), manifest)
+    cockpit = read_json(directory / "open-cockpit.json")
+    verify_session_references(home, cockpit)
+    if not args.apply:
+        print("\n".join(restore_plan(cockpit)))
+        return
+    herdr = os.environ.get("QQ_MACHINE_HERDR", "herdr")
+    apply_restore(cockpit, herdr)
+    print("restored Herdr cockpit; run verify --live to confirm it")
+
+
+def config_link_state(source: Path, target: Path) -> str:
+    if target.is_symlink():
+        return "managed" if target.resolve(strict=False) == source.resolve() else "conflict"
+    if not target.exists():
+        return "missing"
+    if target.is_file() and sha256_file(target) == sha256_file(source):
+        return "adoptable"
+    return "conflict"
+
+
+def cmd_install_config(args: argparse.Namespace) -> None:
+    manifest_path = Path(os.environ.get("QQ_MACHINE_MANIFEST", args.manifest)).expanduser()
+    manifest = load_manifest(manifest_path)
+    home = ensure_home(Path(args.home), manifest)
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    for mapping in manifest["config_links"]:
+        source = REPO_ROOT / mapping["source"]
+        target = home / mapping["target"]
+        if not source.is_file():
+            fail(f"versioned config source is missing: {source}")
+        state = config_link_state(source, target)
+        if not args.apply:
+            print(f"{state:9} {target} -> {source}")
+            continue
+        if state == "managed":
+            print(f"managed   {target}")
+            continue
+        if target.exists() and target.is_dir() and not target.is_symlink():
+            fail(f"config target is a directory: {target}")
+        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if os.path.lexists(target):
+            backup = target.with_name(f"{target.name}.qq-pre-portability-{stamp}")
+            if os.path.lexists(backup):
+                backup = target.with_name(
+                    f"{target.name}.qq-pre-portability-{stamp}-{os.getpid()}"
+                )
+            os.replace(target, backup)
+            print(f"backup    {target} -> {backup}")
+        os.symlink(source, target)
+        print(f"linked    {target} -> {source}")
+
+
+def parser() -> argparse.ArgumentParser:
+    result = argparse.ArgumentParser(
+        prog=PROGRAM,
+        description="Move the exact Qq cockpit between machines without putting private state in Git.",
+    )
+    result.add_argument("--manifest", default=str(DEFAULT_MANIFEST), help="versioned migration manifest")
+    commands = result.add_subparsers(dest="command", required=True)
+
+    capture = commands.add_parser("capture", help="capture topology, Git state, and session hashes")
+    capture.add_argument("--home", default=str(Path.home()))
+    capture.add_argument("--output")
+    capture.add_argument("--topology-from", help="reuse a live topology after Herdr is stopped")
+    capture.set_defaults(function=cmd_capture)
+
+    sync = commands.add_parser("sync", help="rsync every exact root over SSH")
+    sync.add_argument("snapshot")
+    sync.add_argument("target")
+    sync.add_argument("--phase", choices=("warm", "final"), required=True)
+    sync.add_argument("--home", default=str(Path.home()))
+    sync.add_argument("--dry-run", action="store_true")
+    sync.set_defaults(function=cmd_sync)
+
+    verify = commands.add_parser("verify", help="verify sessions, Git state, and optionally live topology")
+    verify.add_argument("snapshot")
+    verify.add_argument("--home", default=str(Path.home()))
+    verify.add_argument("--live", action="store_true")
+    verify.set_defaults(function=cmd_verify)
+
+    restore = commands.add_parser("restore-layout", help="print or apply a Herdr cockpit restore plan")
+    restore.add_argument("snapshot")
+    restore.add_argument("--home", default=str(Path.home()))
+    restore.add_argument("--apply", action="store_true")
+    restore.set_defaults(function=cmd_restore_layout)
+
+    install = commands.add_parser(
+        "install-config", help="link versioned cockpit config into a home"
+    )
+    install.add_argument("--home", default=str(Path.home()))
+    install.add_argument("--apply", action="store_true")
+    install.set_defaults(function=cmd_install_config)
+    return result
+
+
+def main() -> int:
+    try:
+        args = parser().parse_args()
+        args.function(args)
+        return 0
+    except (MigrationError, OSError) as exc:
+        print(f"{PROGRAM}: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

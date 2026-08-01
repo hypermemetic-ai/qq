@@ -1,0 +1,2 @@
+litellm[proxy]==1.86.2
+git+https://github.com/github/spec-kit.git@c6afe4cde12a4d417e699b3fc7d602d9ece8d759

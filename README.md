@@ -36,6 +36,8 @@ wiring needed to expose it.
 - herdr provides persistent `main` project homes, named agents, and direct
   agent-to-agent messaging.
 - `cockpit/` contains the operator's terminal configuration.
+- `machine/` contains the reviewed workstation manifest, package declarations,
+  LAN-install notes, and exact-state migration procedure.
 - `delegation/` contains the delegate role manifests, completion envelope
   template, and execution-profile policy.
 - `bin/` holds the qq commands — mounted on `PATH` by the cockpit shell
@@ -54,6 +56,11 @@ Installation is by construction: every runtime surface mounts this checkout
 directly, so day-to-day changes — adding, editing, or removing a Skill, command,
 or extension source file — are live everywhere with no install step. A machine
 is bootstrapped once.
+
+For a machine replacement, including linked worktrees, private Pi and Codex
+session history, and reconstruction of the open Herdr cockpit, follow
+[`machine/README.md`](./machine/README.md). The versioned manifest defines what
+must move; private state itself never enters Git.
 
 qq's accountable runtime is the exact patched Pi identity
 `0.81.1+qq.execution-profile.2` on Linux x64. `bin/qq-pi-runtime` is the sole

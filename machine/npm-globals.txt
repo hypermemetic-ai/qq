@@ -1,0 +1,7 @@
+@beads/bd@1.1.0
+@openai/codex@0.145.0
+agent-browser@0.27.0
+backlog.md@1.48.0
+corepack@0.34.6
+npm@10.9.8
+openwiki@0.1.2
