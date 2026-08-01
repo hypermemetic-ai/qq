@@ -20,8 +20,8 @@ same file; the shell surface is sourced straight from this checkout.
   Authentication, package state, histories, and sessions remain private.
 - `codex/config.toml` — portable Codex policy and Qq trust roots. Authentication,
   sessions, archives, history, goals, memories, and SQLite state remain private.
-- `bd/config.yaml`, `git/ignore`, and `homebrew/trust.json` — small non-secret
-  CLI preferences that previously lived only in the operator home.
+- `git/ignore` and `homebrew/trust.json` — small non-secret CLI preferences
+  that previously lived only in the operator home.
 - `shell/file-navigation.bash` — `QQ_HOME`, `qqroot`, focused-worktree lookup
   through `qq_space_dir`, and shell directory changes through `qqcd`.
 - `shell/aliases.bash` — the interactive Pi launcher's terminal reset wrapper.

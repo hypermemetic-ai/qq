@@ -58,9 +58,10 @@ The sync uses SSH plus archive/hard-link/ACL/xattr-preserving rsync, retains
 relative paths, and does not use `--delete`. It transfers primary repositories,
 all linked worktrees and their uncommitted files, local-only branches, ignored
 project assets/caches, the external Backlog store, Pi/Codex/Herdr state, browser
-profiles, project notes, and explicitly inventoried credentials. The target's
-`.ssh/authorized_keys` is excluded so the migration cannot remove its access
-path.
+profiles used by Pi, and explicitly inventoried credentials. It does not sweep
+`Desktop`, `Documents`, `Downloads`, or `.local/bin`; operator launchers resolve
+from Qq's versioned `bin/` directory. The target's `.ssh/authorized_keys` is
+excluded so the migration cannot remove its access path.
 
 The final pass must run from a plain terminal after every agent has finished
 writing. This cannot be done from one of the sessions being preserved.
