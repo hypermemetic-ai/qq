@@ -2,9 +2,9 @@
 
 ## Bootstrap the live surfaces
 
-qq is installed by construction around the exact patched Pi identity `0.81.1+qq.execution-profile.2`. `bin/qq-pi-runtime` fetches, builds, inspects, installs, verifies, and atomically rolls between immutable generations; `bin/pi` never falls back to stock or global Pi. Pi mounts this checkout's global context, Skill, prompt, and extension roots, while sourcing `cockpit/shell/file-navigation.bash` prepends `$QQ_HOME/bin` to `PATH`. Install and verify the six-role policy with `bin/qq-execution-profiles`; ordinary source changes beneath mounted roots need no reinstall.
+Bootstrap stock Pi `0.81.1` once with `npm install --global --ignore-scripts @earendil-works/pi-coding-agent@0.81.1`. The checkout-owned `bin/pi` resolves the standard global package through `npm root -g`, executes its stock `dist/cli.js`, and forwards arguments unchanged; it refuses clearly when npm, the package, or CLI is absent. Pi mounts this checkout's global context, Skill, prompt, and extension roots, while sourcing `cockpit/shell/file-navigation.bash` prepends `$QQ_HOME/bin` to `PATH`. The six-role execution policy is read directly by `qq-delegate`; ordinary source changes beneath mounted roots need no reinstall.
 
-Follow [`README.md`](../README.md#install-qq) for exact artifact construction, provider login, role-policy installation, extension dependencies, root links, and fixed Ghostty/Glow/Herdr links. Canonical guidance is mounted at `~/.pi/agent/AGENTS.md`; Repository-local guidance is optional additive context. Credentials and runtime artifacts remain outside the Repository and must never be reported.
+Follow [`README.md`](../README.md#install-qq) for the exact Pi and researcher-only Context7 pins, provider login, root mounts, and fixed Ghostty/Glow/Herdr links. Canonical guidance is mounted at `~/.pi/agent/AGENTS.md`; Repository-local guidance is optional additive context. Credentials and installed runtime dependencies remain outside the Repository and must never be reported.
 
 ## Cockpit
 
@@ -17,7 +17,7 @@ Follow [`README.md`](../README.md#install-qq) for exact artifact construction, p
 - Herdr supplies persistent project homes, the agent surface, and pane bindings;
 - systemd user units provide the optional scheduled OpenWiki service.
 
-`prefix+F<N>` pulls the Nth agent into focus, `prefix+0` pulls the agent most needing attention, and `alt+o` snaps to project-home Pi or bounces back. `alt+up/down` moves between workspaces and `alt+left/right` moves between tabs. See [`cockpit/README.md`](../cockpit/README.md).
+`prefix+F<N>` pulls the Nth agent into focus, `prefix+0` pulls the agent most needing attention, and `alt+o` snaps to project-home Pi or bounces back. `alt+up/down` moves between workspaces and `alt+left/right` moves between tabs. Select terminal geometry with `qq-ghostty-profile laptop` or `qq-ghostty-profile 4k`; the command updates an external selector symlink rather than Repository files. Reload Ghostty with `ctrl+shift+,` and open a new terminal surface for padding changes. See [`cockpit/README.md`](../cockpit/README.md).
 
 ## Herdr project homes and pane movement
 

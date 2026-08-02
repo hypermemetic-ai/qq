@@ -1,6 +1,6 @@
 # qq OpenWiki quickstart
 
-qq is an operator-owned harness for agentic software development. It is not an application server or autonomous workflow engine: it supplies shared language, operating guidance, stateless Skills, durable knowledge surfaces, a verified patched Pi runtime, bounded delegation, terminal preferences, and narrow workflow adapters. The human operator retains intent, judgment, acceptance, and source-Change merge authority. On-demand OpenWiki refreshes remain operator-merged; the optional scheduled service may merge only through qq's guarded exact-head path. See [`README.md`](../README.md), [`CONCEPTS.md`](../CONCEPTS.md), and [`AGENTS.md`](../AGENTS.md).
+qq is an operator-owned harness for agentic software development. It is not an application server or autonomous workflow engine: it supplies shared language, operating guidance, stateless Skills, durable knowledge surfaces, a stock Pi entrypoint, bounded delegation, terminal preferences, and narrow workflow adapters. The human operator retains intent, judgment, acceptance, and source-Change merge authority. On-demand OpenWiki refreshes remain operator-merged; the optional scheduled service may merge only through qq's guarded exact-head path. See [`README.md`](../README.md), [`CONCEPTS.md`](../CONCEPTS.md), and [`AGENTS.md`](../AGENTS.md).
 
 ## The model
 
@@ -44,7 +44,7 @@ The shared operating floor is in [`AGENTS.md`](../AGENTS.md); it does not mandat
 - `cockpit/` — source-controlled human terminal configuration.
 - `delegation/` — canonical role manifests, completion-envelope contract, Observer procedure, and execution-profile policy.
 - `extensions/` — the globally mounted Pi extension set.
-- `bin/` — the verified Pi launcher plus stateless Change, delegation, execution-profile, handoff, Observer, board/reaper, OpenWiki, and Herdr adapters.
+- `bin/` — the stock Pi launcher plus stateless Change, delegation, handoff, Observer, board/reaper, OpenWiki, Ghostty-profile, and Herdr adapters.
 
 ## Authority and historical context
 
