@@ -8,7 +8,6 @@ TEST_NAME="test-qq-delegate-watch-extension"
 source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd -- "$TESTS_DIR/.." && pwd -P)"
 WATCH_EXTENSION="$ROOT/extensions/qq-delegate-watch.ts"
-FOOTER_EXTENSION="$ROOT/extensions/qq-footer.ts"
 INDEX="$ROOT/extensions/index.ts"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -18,13 +17,11 @@ command -v node >/dev/null 2>&1 || fail 'node is required to test the Pi extensi
 cp -- "$WATCH_EXTENSION" "$TMP/qq-delegate-watch.ts"
 cp -- "$WATCH_EXTENSION" "$TMP/qq-delegate-watch-a.ts"
 cp -- "$WATCH_EXTENSION" "$TMP/qq-delegate-watch-b.ts"
-cp -- "$FOOTER_EXTENSION" "$TMP/qq-footer.mjs"
 
 if ! node --experimental-strip-types --input-type=module - \
   "$TMP/qq-delegate-watch.ts" \
   "$TMP/qq-delegate-watch-a.ts" \
   "$TMP/qq-delegate-watch-b.ts" \
-  "$TMP/qq-footer.mjs" \
   "$WATCH_EXTENSION" <<'JS'
 import assert from "node:assert/strict";
 import { watch as fsWatch } from "node:fs";
@@ -38,15 +35,15 @@ import net from "node:net";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [watchPath, watchAPath, watchBPath, footerPath, sourcePath] =
-  process.argv.slice(2);
+const [watchPath, watchAPath, watchBPath, sourcePath] = process.argv.slice(2);
 const watchModule = await import(pathToFileURL(watchPath));
 const watchModuleA = await import(pathToFileURL(watchAPath));
 const watchModuleB = await import(pathToFileURL(watchBPath));
-const { default: registerFooter } = await import(pathToFileURL(footerPath));
 const source = await readFile(sourcePath, "utf8");
 assert.doesNotMatch(source, /setInterval|setTimeout\([^,]+,\s*[1-9][0-9]*\s*\).*scan/s,
   "delegate discovery contains production polling");
+assert.doesNotMatch(source, /getDelegateRows|subscribeDelegateRows|rowListeners/,
+  "watcher retained the old footer publication API");
 
 const tmp = dirname(watchPath);
 
@@ -58,10 +55,11 @@ async function waitFor(predicate, message, timeout = 2500) {
   }
 }
 
-async function makeRun(root, name) {
+async function makeRun(root, name, pane) {
   const run = join(root, name);
   await mkdir(run, { recursive: true, mode: 0o700 });
   await writeFile(join(run, "BRIEF.md"), "# bounded work order\n");
+  if (pane !== undefined) await writeFile(join(run, "PANE"), `${pane}\n`);
   return run;
 }
 
@@ -81,9 +79,11 @@ function createWatcherHarness(
   module,
   deps,
   execImpl = async () => assert.fail("test watcher attempted the real herdr command"),
+  hasUI = true,
 ) {
   const events = new Map();
   const warnings = [];
+  const widgetCalls = [];
   const pi = {
     on(name, handler) {
       events.set(name, handler);
@@ -94,15 +94,28 @@ function createWatcherHarness(
   assert.equal(typeof events.get("session_start"), "function");
   assert.equal(typeof events.get("session_shutdown"), "function");
   const ctx = {
+    hasUI,
     ui: {
       notify(message, level) {
         warnings.push({ message, level });
+      },
+      setWidget(...args) {
+        widgetCalls.push({
+          key: args[0],
+          content: args[1],
+          options: args[2],
+          argumentCount: args.length,
+        });
       },
     },
   };
   return {
     events,
     warnings,
+    widgetCalls,
+    latestWidget() {
+      return widgetCalls.at(-1);
+    },
     async start() {
       await events.get("session_start")({ type: "session_start" }, ctx);
     },
@@ -110,6 +123,17 @@ function createWatcherHarness(
       events.get("session_shutdown")({ type: "session_shutdown" }, ctx);
     },
   };
+}
+
+function assertDefaultWidgetCall(call) {
+  assert.equal(call.key, "qq-delegates");
+  assert.equal(call.options, undefined);
+  assert.equal(call.argumentCount, 2, "setWidget passed placement/options instead of using above-editor default");
+}
+
+function widgetText(harness) {
+  const content = harness.latestWidget()?.content;
+  return Array.isArray(content) ? content.join("\n") : "";
 }
 
 function encoded(message) {
@@ -169,15 +193,25 @@ async function fakeBroker(socketPath, sessions) {
   };
 }
 
-// Initial discovery is BRIEF-gated across both roots. Existing completions are
-// not replayed as wakes when a session starts.
+// Initial discovery is BRIEF-gated across both roots, but presentation is
+// fail-closed to exact validated pane identity. Existing completions are not
+// replayed as wakes when a session starts.
 const initialRoot = join(tmp, "initial-durable");
 const initialLegacy = join(tmp, "initial-legacy");
 await mkdir(initialRoot, { recursive: true });
 await mkdir(initialLegacy, { recursive: true });
-const initialDurableRun = await makeRun(initialRoot, "implementer-T-192-alpha");
-const unsafeNamedRun = await makeRun(initialLegacy, "researcher-task\nunsafe");
-const alreadyComplete = await makeRun(initialRoot, "reviewer-already-complete");
+await makeRun(initialRoot, "implementer-current-pane", "pane:current");
+await makeRun(initialRoot, "observer-other-pane", "pane:other");
+await makeRun(initialRoot, "observer-missing-pane");
+const malformedPaneRun = await makeRun(initialRoot, "observer-malformed-pane");
+await writeFile(join(malformedPaneRun, "PANE"), "unsafe pane\n");
+await makeRun(initialLegacy, "researcher-task\nunsafe", "pane:current");
+await makeRun(initialLegacy, "unrelated-other-root", "pane:other");
+const alreadyComplete = await makeRun(
+  initialRoot,
+  "reviewer-already-complete",
+  "pane:current",
+);
 await writeTerminal(alreadyComplete, 0, false);
 await mkdir(join(initialRoot, "vendor-without-brief"));
 await writeFile(join(initialRoot, "ordinary-file"), "ignore\n");
@@ -185,47 +219,86 @@ const initialFallbacks = [];
 const initial = createWatcherHarness(watchModule, {
   durableRoot: initialRoot,
   legacyRoot: initialLegacy,
+  currentPane: "pane:current",
   brokerSocketPath: join(tmp, "absent-initial.sock"),
   herdrNotify: async (notice) => initialFallbacks.push(notice),
 });
 await initial.start();
-let rows = watchModule.getDelegateRows();
-assert.equal(rows.length, 2, "initial scan did not find both BRIEF-only roots");
-assert.deepEqual(
-  rows.map((row) => row.path),
-  [initialDurableRun, unsafeNamedRun],
-  "initial rows did not preserve durable-then-legacy first-seen order",
+assertDefaultWidgetCall(initial.latestWidget());
+assert.deepEqual(initial.latestWidget().content, [
+  "● qq delegates",
+  "├─ implementer-current-pane",
+  "└─ researcher-task unsafe",
+]);
+assert.doesNotMatch(
+  widgetText(initial),
+  /other-pane|missing-pane|malformed-pane|unrelated-other-root/,
+  "widget leaked a run without exact validated current-pane identity",
 );
-assert.ok(rows.every((row) => !/[\x00-\x1f\x7f]/.test(row.name)));
 assert.equal(initialFallbacks.length, 0, "initial scan replayed an old completion");
-
-const eventRun = await makeRun(initialRoot, "observer-new-fs-event");
-await waitFor(
-  () => watchModule.getDelegateRows().some((row) => row.path === eventRun),
-  "fs event did not add a newly created run",
-);
-await writeTerminal(eventRun, 3, false);
-await waitFor(
-  () =>
-    !watchModule.getDelegateRows().some((row) => row.path === eventRun) &&
-    initialFallbacks.length === 1,
-  "TERMINAL event did not remove its row and wake",
-);
-assert.match(initialFallbacks[0].body, /exit 3, timed out: no/);
-assert.match(initialFallbacks[0].body, new RegExp(eventRun.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 initial.shutdown();
 
+// A BRIEF-only run remains hidden until a later PANE fs event. Its TERMINAL
+// event then clears the widget and retains the completion wake.
+const eventRoot = join(tmp, "event-durable");
+const eventLegacy = join(tmp, "event-legacy");
+await mkdir(eventRoot, { recursive: true });
+await mkdir(eventLegacy, { recursive: true });
+const eventWatchedPaths = new Set();
+function eventTrackedWatch(path, options, callback) {
+  eventWatchedPaths.add(path);
+  return fsWatch(path, options, callback);
+}
+const eventFallbacks = [];
+const eventWatcher = createWatcherHarness(watchModule, {
+  durableRoot: eventRoot,
+  legacyRoot: eventLegacy,
+  currentPane: "pane:event",
+  watch: eventTrackedWatch,
+  brokerSocketPath: join(tmp, "absent-event.sock"),
+  herdrNotify: async (notice) => eventFallbacks.push(notice),
+});
+await eventWatcher.start();
+assertDefaultWidgetCall(eventWatcher.latestWidget());
+assert.equal(eventWatcher.latestWidget().content, undefined);
+const eventRun = await makeRun(eventRoot, "observer-brief-before-pane");
+await waitFor(
+  () => eventWatchedPaths.has(eventRun),
+  "new BRIEF run was not armed for child filesystem events",
+);
+assert.doesNotMatch(widgetText(eventWatcher), /observer-brief-before-pane/);
+await writeFile(join(eventRun, "PANE"), "pane:event\n");
+await waitFor(
+  () => widgetText(eventWatcher).includes("observer-brief-before-pane"),
+  "later PANE event did not add its current-pane run to the widget",
+);
+assertDefaultWidgetCall(eventWatcher.latestWidget());
+assert.deepEqual(eventWatcher.latestWidget().content, [
+  "● qq delegates",
+  "└─ observer-brief-before-pane",
+]);
+await writeTerminal(eventRun, 3, false);
+await waitFor(
+  () => eventWatcher.latestWidget()?.content === undefined && eventFallbacks.length === 1,
+  "TERMINAL event did not clear its widget and wake",
+);
+assertDefaultWidgetCall(eventWatcher.latestWidget());
+assert.match(eventFallbacks[0].body, /exit 3, timed out: no/);
+assert.match(eventFallbacks[0].body, new RegExp(eventRun.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+eventWatcher.shutdown();
+
 // Independent qq sessions race on one TERMINAL; the exclusive marker permits
-// exactly one fallback while both instances observe and remove the row.
+// exactly one fallback while both instances observe and clear the row.
 const raceRoot = join(tmp, "race-durable");
 const raceLegacy = join(tmp, "race-legacy");
 await mkdir(raceRoot, { recursive: true });
 await mkdir(raceLegacy, { recursive: true });
-const raceRun = await makeRun(raceRoot, "implementer-race");
+const raceRun = await makeRun(raceRoot, "implementer-race", "pane:race");
 const raceFallbacks = [];
 const raceDeps = {
   durableRoot: raceRoot,
   legacyRoot: raceLegacy,
+  currentPane: "pane:race",
   brokerSocketPath: join(tmp, "absent-race.sock"),
   herdrNotify: async (notice) => raceFallbacks.push(notice),
 };
@@ -233,13 +306,13 @@ const raceA = createWatcherHarness(watchModuleA, raceDeps);
 const raceB = createWatcherHarness(watchModuleB, raceDeps);
 await raceA.start();
 await raceB.start();
-assert.equal(watchModuleA.getDelegateRows().length, 1);
-assert.equal(watchModuleB.getDelegateRows().length, 1);
+assert.match(widgetText(raceA), /implementer-race/);
+assert.match(widgetText(raceB), /implementer-race/);
 await writeTerminal(raceRun, 4, false);
 await waitFor(
   () =>
-    watchModuleA.getDelegateRows().length === 0 &&
-    watchModuleB.getDelegateRows().length === 0 &&
+    raceA.latestWidget()?.content === undefined &&
+    raceB.latestWidget()?.content === undefined &&
     raceFallbacks.length === 1,
   "two watcher instances did not settle one completion wake",
 );
@@ -272,6 +345,7 @@ const brokerFallbacks = [];
 const brokerWatcher = createWatcherHarness(watchModule, {
   durableRoot: brokerRoot,
   legacyRoot: brokerLegacy,
+  currentPane: "pane:ABC_7",
   brokerSocketPath: brokerPath,
   herdrNotify: async (notice) => brokerFallbacks.push(notice),
 });
@@ -313,6 +387,7 @@ const fallbacks = [];
 const fallbackWatcher = createWatcherHarness(watchModule, {
   durableRoot: fallbackRoot,
   legacyRoot: fallbackLegacy,
+  currentPane: undefined,
   brokerSocketPath: fallbackBrokerPath,
   herdrNotify: async (notice) => fallbacks.push(notice),
 });
@@ -339,7 +414,7 @@ const herdrFailedRun = await makeRun(herdrRoot, "implementer-herdr-failed");
 const herdrCalls = [];
 const herdrWatcher = createWatcherHarness(
   watchModule,
-  { durableRoot: herdrRoot, legacyRoot: herdrLegacy },
+  { durableRoot: herdrRoot, legacyRoot: herdrLegacy, currentPane: undefined },
   async (command, args, options) => {
     herdrCalls.push({ command, args, options });
     return { code: herdrCalls.length === 1 ? 0 : 127, killed: false };
@@ -362,12 +437,13 @@ assert.equal(herdrWatcher.warnings[0].level, "warning");
 assert.match(herdrWatcher.warnings[0].message, /Herdr notification failed/);
 herdrWatcher.shutdown();
 
-// Shutdown closes every root/run watcher and drops row listeners.
+// Shutdown clears the widget, closes every root/run watcher, and ignores later
+// filesystem activity.
 const cleanupRoot = join(tmp, "cleanup-durable");
 const cleanupLegacy = join(tmp, "cleanup-legacy");
 await mkdir(cleanupRoot, { recursive: true });
 await mkdir(cleanupLegacy, { recursive: true });
-await makeRun(cleanupRoot, "researcher-cleanup");
+await makeRun(cleanupRoot, "researcher-cleanup", "pane:cleanup");
 let createdWatchers = 0;
 let closedWatchers = 0;
 function trackedWatch(path, options, callback) {
@@ -387,126 +463,87 @@ function trackedWatch(path, options, callback) {
 const cleanup = createWatcherHarness(watchModule, {
   durableRoot: cleanupRoot,
   legacyRoot: cleanupLegacy,
+  currentPane: "pane:cleanup",
   watch: trackedWatch,
   herdrNotify: async () => {},
 });
 await cleanup.start();
-let rowUpdates = 0;
-const unsubscribe = watchModule.subscribeDelegateRows(() => {
-  rowUpdates += 1;
-});
-await makeRun(cleanupRoot, "researcher-cleanup-event");
-await waitFor(() => rowUpdates > 0, "row listener did not observe an fs event");
+assert.match(widgetText(cleanup), /researcher-cleanup/);
 cleanup.shutdown();
+assertDefaultWidgetCall(cleanup.latestWidget());
+assert.equal(cleanup.latestWidget().content, undefined, "shutdown did not clear widget");
 cleanup.shutdown();
 assert.equal(closedWatchers, createdWatchers, "shutdown leaked fs watchers");
-const updatesAfterShutdown = rowUpdates;
-await makeRun(cleanupRoot, "researcher-after-shutdown");
+const widgetCallsAfterShutdown = cleanup.widgetCalls.length;
+await makeRun(cleanupRoot, "researcher-after-shutdown", "pane:cleanup");
 await new Promise((resolve) => setImmediate(resolve));
-assert.equal(rowUpdates, updatesAfterShutdown, "shutdown retained row listeners");
-unsubscribe();
-
-// qq-footer remains the sole setFooter owner and composes capped delegate rows
-// above its existing context/quota row.
-const footerRoot = join(tmp, "footer-durable");
-const footerLegacy = join(tmp, "footer-legacy");
-await mkdir(footerRoot, { recursive: true });
-await mkdir(footerLegacy, { recursive: true });
-const footerRuns = [];
-for (let index = 0; index < 10; index += 1) {
-  footerRuns.push(await makeRun(footerRoot, `implementer-footer-${String(index).padStart(2, "0")}`));
-}
-const footerFallbacks = [];
-const footerWatcher = createWatcherHarness(watchModule, {
-  durableRoot: footerRoot,
-  legacyRoot: footerLegacy,
-  herdrNotify: async (notice) => footerFallbacks.push(notice),
-});
-await footerWatcher.start();
-const authPath = join(tmp, "footer-auth.json");
-await writeFile(authPath, JSON.stringify({
-  "openai-codex": { access: "fixture-token", accountId: "fixture-account" },
-}));
-const footerEvents = new Map();
-const intervals = [];
-let footer;
-let renderCount = 0;
-const tui = { requestRender() { renderCount += 1; } };
-const theme = { fg(_color, text) { return text; } };
-const footerData = {
-  getGitBranch: () => "main",
-  getExtensionStatuses: () => new Map(),
-  onBranchChange: () => () => {},
-};
-const footerCtx = {
-  cwd: "/worktree",
-  model: { provider: "openai-codex", contextWindow: 200000 },
-  getContextUsage: () => ({ contextWindow: 200000, percent: 10 }),
-  ui: {
-    setFooter(factory) {
-      if (factory === undefined) {
-        footer = undefined;
-      } else {
-        footer = factory(tui, theme, footerData);
-      }
-    },
-  },
-};
-const footerPi = {
-  on(name, handler) { footerEvents.set(name, handler); },
-  registerCommand() {},
-  getSessionName: () => "pane-session",
-};
-const widthKit = {
-  visibleWidth: (value) => [...String(value)].length,
-  truncateToWidth(value, width, ellipsis = "...") {
-    const chars = [...String(value)];
-    if (chars.length <= width) return chars.join("");
-    if (width <= ellipsis.length) return ellipsis.slice(0, width);
-    return chars.slice(0, width - ellipsis.length).join("") + ellipsis;
-  },
-};
-registerFooter(footerPi, {
-  authPath,
-  widthKit,
-  fetch: async () => ({
-    ok: true,
-    async json() {
-      return {
-        rate_limit: {
-          primary_window: { used_percent: 50, limit_window_seconds: 604800 },
-          secondary_window: null,
-        },
-      };
-    },
-  }),
-  setInterval(_callback, delay) {
-    intervals.push(delay);
-    return intervals.length;
-  },
-  clearInterval() {},
-  setTimeout(callback, delay) { return { callback, delay }; },
-  clearTimeout() {},
-});
-await footerEvents.get("session_start")({ type: "session_start" }, footerCtx);
-await waitFor(() => renderCount > 0, "footer quota fetch did not repaint");
-const lines = footer.render(160);
-assert.equal(lines.length, 10, "footer did not cap 10 delegates at 8 plus overflow");
-assert.match(lines[0], /^├─ implementer-footer-00 · \d+[smhd]$/);
-assert.match(lines[8], /^└─ \+2 more$/);
-assert.ok(lines[9].includes("CX ▓▓▓▓░░░░ wk"), "existing quota bar disappeared");
-assert.ok(lines.slice(0, 9).every((line) => !line.includes("CX ")),
-  "quota row was not below delegate rows");
-assert.deepEqual(intervals, [300000], "footer quota polling behavior changed");
-const beforeDelegateRepaint = renderCount;
-await writeTerminal(footerRuns[0], 0, false);
-await waitFor(
-  () => renderCount > beforeDelegateRepaint,
-  "delegate fs event did not repaint the composed footer",
+assert.equal(
+  cleanup.widgetCalls.length,
+  widgetCallsAfterShutdown,
+  "shutdown retained filesystem-driven widget updates",
 );
-footer.dispose();
-footerEvents.get("session_shutdown")({ type: "session_shutdown" }, footerCtx);
-footerWatcher.shutdown();
+
+// Widget output is bounded to eight matching runs plus one overflow row.
+const overflowRoot = join(tmp, "overflow-durable");
+const overflowLegacy = join(tmp, "overflow-legacy");
+await mkdir(overflowRoot, { recursive: true });
+await mkdir(overflowLegacy, { recursive: true });
+for (let index = 0; index < 10; index += 1) {
+  await makeRun(
+    overflowRoot,
+    `implementer-widget-${String(index).padStart(2, "0")}`,
+    "pane:overflow",
+  );
+}
+const overflow = createWatcherHarness(watchModule, {
+  durableRoot: overflowRoot,
+  legacyRoot: overflowLegacy,
+  currentPane: "pane:overflow",
+  herdrNotify: async () => {},
+});
+await overflow.start();
+assertDefaultWidgetCall(overflow.latestWidget());
+assert.equal(overflow.latestWidget().content.length, 10);
+assert.equal(overflow.latestWidget().content[0], "● qq delegates");
+assert.equal(overflow.latestWidget().content[1], "├─ implementer-widget-00");
+assert.equal(overflow.latestWidget().content[8], "├─ implementer-widget-07");
+assert.equal(overflow.latestWidget().content[9], "└─ +2 more");
+assert.doesNotMatch(widgetText(overflow), /implementer-widget-(08|09)/);
+overflow.shutdown();
+
+// Missing or malformed current pane identity fails closed rather than showing
+// the global active set, and non-UI sessions never call setWidget.
+const closedRoot = join(tmp, "closed-durable");
+const closedLegacy = join(tmp, "closed-legacy");
+await mkdir(closedRoot, { recursive: true });
+await mkdir(closedLegacy, { recursive: true });
+await makeRun(closedRoot, "implementer-global-hidden", "pane:valid");
+for (const currentPane of [undefined, "unsafe pane"]) {
+  const closed = createWatcherHarness(watchModule, {
+    durableRoot: closedRoot,
+    legacyRoot: closedLegacy,
+    currentPane,
+    herdrNotify: async () => {},
+  });
+  await closed.start();
+  assertDefaultWidgetCall(closed.latestWidget());
+  assert.equal(closed.latestWidget().content, undefined);
+  closed.shutdown();
+}
+const noUi = createWatcherHarness(
+  watchModule,
+  {
+    durableRoot: closedRoot,
+    legacyRoot: closedLegacy,
+    currentPane: "pane:valid",
+    herdrNotify: async () => {},
+  },
+  undefined,
+  false,
+);
+await noUi.start();
+noUi.shutdown();
+assert.equal(noUi.widgetCalls.length, 0, "ctx.hasUI=false still called setWidget");
 
 JS
 then
