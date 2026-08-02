@@ -98,6 +98,7 @@ tree_supervisor="$bin_dir/lib/qq-process-tree-supervisor.py"
 
 invoking_home="${HOME:-}"
 inherited_parent_session="${PI_SUBAGENT_PARENT_SESSION:-}"
+inherited_herdr_pane="${HERDR_PANE_ID:-}"
 zero_session_id="00000000-0000-0000-0000-000000000000"
 if [[ "$inherited_parent_session" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
   # Canonicalize to lowercase: bin/qq-observe's SESSION_UUID is lowercase-only.
@@ -205,7 +206,7 @@ execute_ticket() {
   shopt -u nullglob dotglob
   for run_entry in "${run_entries[@]}"; do
     case "${run_entry##*/}" in
-      BRIEF.md|ENVELOPE.md|cache|pi-config|sessions|.system-prompt.md) ;;
+      BRIEF.md|ENVELOPE.md|PANE|cache|pi-config|sessions|.system-prompt.md) ;;
       *) fail 68 "dispatch run directory contains unexpected entry: $run_entry" ;;
     esac
   done
@@ -353,6 +354,30 @@ PY
   if [[ -v QQ_DISPATCH_TIMEOUT ]]; then
     timeout_spec="$QQ_DISPATCH_TIMEOUT"
     [[ "$timeout_spec" =~ ^(0\.[0-9]+|[1-9][0-9]*(\.[0-9]+)?)([smhd])?$ ]] || fail 71 "invalid QQ_DISPATCH_TIMEOUT '$timeout_spec'"
+  fi
+
+  if [[ "$inherited_herdr_pane" =~ ^[A-Za-z0-9:_-]{1,64}$ ]]; then
+    if ! "$python_binary" - "$run_dir/PANE" "$inherited_herdr_pane" <<'PY'
+import os, sys
+from pathlib import Path
+
+target = Path(sys.argv[1])
+temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+try:
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "wb") as output:
+        output.write((sys.argv[2] + "\n").encode("ascii"))
+    os.replace(temporary, target)
+    os.chmod(target, 0o600)
+finally:
+    try:
+        temporary.unlink()
+    except FileNotFoundError:
+        pass
+PY
+    then
+      fail 68 "cannot record the spawning herdr pane"
+    fi
   fi
 
   if [[ -n "$metadata_file" ]]; then
