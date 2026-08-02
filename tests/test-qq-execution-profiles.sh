@@ -18,10 +18,10 @@ POLICY="$ROOT/delegation/policies/execution-profiles.json"
 
 jq -e '
   (keys == ["architect", "implementer", "observer", "orchestrator", "researcher", "reviewer"])
-  and ([.architect, .orchestrator, .reviewer] | all(
+  and ([.orchestrator, .reviewer] | all(
     . == {provider:"kimi-coding", model:"k3", effort:"max", serviceClass:"provider-default"}
   ))
-  and ([.implementer, .observer, .researcher] | all(
+  and ([.architect, .implementer, .observer, .researcher] | all(
     . == {provider:"openai-codex", model:"gpt-5.6-sol", effort:"xhigh", serviceClass:"provider-default"}
   ))
 ' "$POLICY" >/dev/null || fail 'six-role policy does not match the operator-settled map'

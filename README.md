@@ -200,10 +200,10 @@ and keep the file private:
 chmod 600 ~/.pi/agent/auth.json
 ```
 
-`delegation/policies/execution-profiles.json` assigns Orchestrator, Architect,
-and Reviewer to `kimi-coding/k3:max`; Implementer, Researcher, and Observer use
-`openai-codex/gpt-5.6-sol:xhigh`. All six request the provider
-default service class. The mounted extension reads this Repository file
+`delegation/policies/execution-profiles.json` assigns Orchestrator and Reviewer
+to `kimi-coding/k3:max`; Architect, Implementer, Researcher, and Observer use
+`openai-codex/gpt-5.6-sol:xhigh`. All six request the provider-default service
+class. The mounted extension reads this Repository file
 directly — there is no mirrored copy to install or reconcile. Repository
 settings, Pi defaults, manifests, caller arguments, fallbacks, and inherited
 environment values cannot override this map. The resolver rereads it before
