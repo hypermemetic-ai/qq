@@ -15,10 +15,9 @@ import { createConnection } from "node:net";
 
 const BROKER_TIMEOUT_MS = 2_000;
 const MAX_FRAME_BYTES = 1024 * 1024;
+const MAX_WIDGET_RUNS = 8;
 const PANE_TOKEN = /^[A-Za-z0-9:_-]{1,64}$/;
-
-let visibleState = [];
-const rowListeners = new Set();
+const WIDGET_KEY = "qq-delegates";
 
 function stripAnsi(value) {
   return value.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
@@ -33,52 +32,6 @@ function singleLine(value) {
 
 function safeRunName(path) {
   return singleLine(basename(path)) || "delegate";
-}
-
-function compactAge(milliseconds) {
-  const seconds = Math.max(0, Math.floor(milliseconds / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.floor(hours / 24)}d`;
-}
-
-function publish(rows) {
-  const ordered = [...rows].sort((left, right) => left.order - right.order);
-  const changed =
-    ordered.length !== visibleState.length ||
-    ordered.some(
-      (row, index) =>
-        row.path !== visibleState[index]?.path ||
-        row.name !== visibleState[index]?.name ||
-        row.startedAt !== visibleState[index]?.startedAt,
-    );
-  if (!changed) return;
-  visibleState = ordered;
-  for (const listener of [...rowListeners]) {
-    try {
-      listener();
-    } catch {
-      // A footer listener cannot break delegate discovery.
-    }
-  }
-}
-
-export function getDelegateRows() {
-  const current = Date.now();
-  return visibleState.map((row) => ({
-    name: row.name,
-    path: row.path,
-    age: compactAge(current - row.startedAt),
-  }));
-}
-
-export function subscribeDelegateRows(listener) {
-  if (typeof listener !== "function") return () => {};
-  rowListeners.add(listener);
-  return () => rowListeners.delete(listener);
 }
 
 function frame(message) {
@@ -326,9 +279,15 @@ export default function register(pi, deps = {}) {
   const roots = [...new Set([durableRoot, legacyRoot])];
   const brokerSocketPath =
     deps.brokerSocketPath ?? join(homedir(), ".pi", "agent", "intercom", "broker.sock");
+  const currentPaneSource = Object.hasOwn(deps, "currentPane")
+    ? deps.currentPane
+    : process.env.HERDR_PANE_ID;
+  const currentPane =
+    typeof currentPaneSource === "string" && PANE_TOKEN.test(currentPaneSource)
+      ? currentPaneSource
+      : undefined;
   const watch = deps.watch ?? watchFs;
   const makeDirectory = deps.mkdir ?? mkdir;
-  const now = deps.now ?? Date.now;
   const brokerSend = deps.sendThroughBroker ?? sendThroughBroker;
   const records = new Map();
   const completedSeen = new Set();
@@ -337,6 +296,7 @@ export default function register(pi, deps = {}) {
   let nextOrder = 0;
   let active = false;
   let ctx;
+  let lastWidgetSignature;
   let pending = Promise.resolve();
 
   function warning(message) {
@@ -348,12 +308,34 @@ export default function register(pi, deps = {}) {
     }
   }
 
-  function currentRows() {
-    return [...records.values()];
-  }
+  function updateWidget() {
+    if (!ctx?.hasUI) return;
+    const matching = currentPane
+      ? [...records.values()]
+          .filter((record) => record.pane === currentPane)
+          .sort((left, right) => left.order - right.order)
+      : [];
+    if (matching.length === 0) {
+      if (lastWidgetSignature === "") return;
+      ctx.ui.setWidget(WIDGET_KEY, undefined);
+      lastWidgetSignature = "";
+      return;
+    }
 
-  function updateRows() {
-    publish(currentRows());
+    const shown = matching.slice(0, MAX_WIDGET_RUNS);
+    const overflow = matching.length - shown.length;
+    const lines = [
+      "● qq delegates",
+      ...shown.map((record, index) => {
+        const last = index === shown.length - 1 && overflow === 0;
+        return `${last ? "└─" : "├─"} ${record.name}`;
+      }),
+    ];
+    if (overflow > 0) lines.push(`└─ +${overflow} more`);
+    const signature = JSON.stringify(lines);
+    if (lastWidgetSignature === signature) return;
+    ctx.ui.setWidget(WIDGET_KEY, lines);
+    lastWidgetSignature = signature;
   }
 
   function closeWatcher(map, path) {
@@ -369,7 +351,7 @@ export default function register(pi, deps = {}) {
 
   function removeRecord(path) {
     if (!records.delete(path)) return;
-    updateRows();
+    updateWidget();
   }
 
   function enqueue(operation) {
@@ -470,18 +452,22 @@ export default function register(pi, deps = {}) {
     }
 
     completedSeen.delete(runDir);
-    if (!records.has(runDir)) {
-      records.set(runDir, {
-        path: runDir,
-        name: safeRunName(runDir),
-        startedAt:
-          Number.isFinite(brief.mtimeMs) && brief.mtimeMs > 0
-            ? brief.mtimeMs
-            : now(),
-        order: nextOrder++,
-      });
-      updateRows();
+    const pane = await paneFor(runDir);
+    const existing = records.get(runDir);
+    if (existing) {
+      if (existing.pane !== pane) {
+        existing.pane = pane;
+        updateWidget();
+      }
+      return;
     }
+    records.set(runDir, {
+      path: runDir,
+      name: safeRunName(runDir),
+      order: nextOrder++,
+      pane,
+    });
+    updateWidget();
   }
 
   function watchDirectory(runDir) {
@@ -559,7 +545,8 @@ export default function register(pi, deps = {}) {
     records.clear();
     completedSeen.clear();
     nextOrder = 0;
-    publish([]);
+    lastWidgetSignature = undefined;
+    updateWidget();
     try {
       await makeDirectory(durableRoot, { recursive: true, mode: 0o700 });
     } catch (error) {
@@ -590,8 +577,8 @@ export default function register(pi, deps = {}) {
     }
     records.clear();
     completedSeen.clear();
-    publish([]);
-    rowListeners.clear();
+    lastWidgetSignature = undefined;
+    updateWidget();
     ctx = undefined;
   }
 

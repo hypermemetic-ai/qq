@@ -18,25 +18,6 @@ const PROVIDER_MARKS = {
   "openai-codex": "CX",
   anthropic: "A",
 };
-const MAX_DELEGATE_ROWS = 8;
-const EMPTY_DELEGATE_ROWS = {
-  getDelegateRows: () => [],
-  subscribeDelegateRows: () => () => {},
-};
-let delegateRowsPromise;
-
-async function delegateRowsApi() {
-  if (!delegateRowsPromise) {
-    delegateRowsPromise = import("./qq-delegate-watch.ts").catch((error) => {
-      // A copied standalone footer is used by its hermetic unit test. The real
-      // extension mount always includes the watcher sibling; other load errors
-      // remain visible instead of silently replacing delegate visibility.
-      if (error?.code === "ERR_MODULE_NOT_FOUND") return EMPTY_DELEGATE_ROWS;
-      throw error;
-    });
-  }
-  return delegateRowsPromise;
-}
 
 function compactNumber(value) {
   if (!Number.isFinite(value)) return "?";
@@ -321,29 +302,12 @@ function rightAlignedLine(left, right, width, measure, cut) {
   );
 }
 
-function createFooter(
-  pi,
-  ctx,
-  tui,
-  theme,
-  footerData,
-  quotaCache,
-  widthKit,
-  delegates,
-) {
+function createFooter(pi, ctx, tui, theme, footerData, quotaCache, widthKit) {
   const repaint = () => tui.requestRender();
   const unsubscribeBranch = footerData.onBranchChange?.(repaint);
-  const unsubscribeDelegates = delegates.subscribeDelegateRows(repaint);
   const measure = (value) => widthKit.visibleWidth(stripAnsi(value));
   const cut = (value, width, ellipsis = "...") =>
     widthKit.truncateToWidth(stripAnsi(value), width, ellipsis);
-
-  function delegateLine(row, prefix, width) {
-    const label = `${prefix} ${singleLine(row.name)}`;
-    const age = singleLine(row.age);
-    const withAge = age === "" ? label : `${label} · ${age}`;
-    return cut(measure(withAge) <= width ? withAge : label, width);
-  }
 
   return {
     render(width) {
@@ -370,23 +334,11 @@ function createFooter(
         cut,
       );
 
-      const running = delegates.getDelegateRows();
-      const shown = running.slice(0, MAX_DELEGATE_ROWS);
-      const overflow = Math.max(0, running.length - shown.length);
-      const delegateLines = shown.map((row, index) => {
-        const isLast = index === shown.length - 1 && overflow === 0;
-        return theme.fg("dim", delegateLine(row, isLast ? "└─" : "├─", w));
-      });
-      if (overflow > 0) {
-        delegateLines.push(theme.fg("dim", cut(`└─ +${overflow} more`, w)));
-      }
-      delegateLines.push(theme.fg("dim", line));
-      return delegateLines;
+      return [theme.fg("dim", line)];
     },
     invalidate() {},
     dispose() {
       if (typeof unsubscribeBranch === "function") unsubscribeBranch();
-      if (typeof unsubscribeDelegates === "function") unsubscribeDelegates();
     },
   };
 }
@@ -494,7 +446,6 @@ export default function register(pi, deps = {}) {
 
   pi.on("session_start", async (_event, nextCtx) => {
     ctx = nextCtx;
-    const delegates = await delegateRowsApi();
     if (!widthKit) {
       const mod = await import("@earendil-works/pi-tui");
       widthKit = {
@@ -512,7 +463,6 @@ export default function register(pi, deps = {}) {
         footerData,
         quotaCache,
         widthKit,
-        delegates,
       );
     });
     if (timer !== undefined) stopInterval(timer);

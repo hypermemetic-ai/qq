@@ -20,11 +20,18 @@ printf '{}\n' >"$TMP/no-auth.json"
 
 if ! node --experimental-strip-types --input-type=module - "$module" "$AUTH_FIXTURE" "$TMP/no-auth.json" <<'JS'
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
 
 const [modulePath, authPath, noAuthPath] = process.argv.slice(2);
 const { default: register } = await import(pathToFileURL(modulePath));
+const source = await readFile(modulePath, "utf8");
+assert.doesNotMatch(
+  source,
+  /qq-delegate|getDelegateRows|subscribeDelegateRows|delegateRows|setWidget/i,
+  "footer retained delegate watcher/widget coupling",
+);
 
 const kimiBody = {
   usage: { limit: "100", used: "87", remaining: "13", resetTime: "later" },
@@ -202,7 +209,11 @@ function createHarness({
     intervals,
     ctx,
     footerData,
-    render: (width = 120) => footer.render(width),
+    render(width = 120) {
+      const lines = footer.render(width);
+      assert.equal(lines.length, 1, "footer rendered more than its sole information row");
+      return lines;
+    },
     get footer() {
       return footer;
     },
