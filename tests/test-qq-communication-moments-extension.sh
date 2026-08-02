@@ -31,6 +31,9 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const [modulePath, doctrinePath, temporary] = process.argv.slice(2);
+// The extension's operator-facing computation reads this marker; pin a clean
+// baseline so the suite is deterministic even inside a delegate's Checks.
+delete process.env.QQ_DISPATCH_RUN_DIR;
 const { default: register } = await import(pathToFileURL(modulePath));
 const doctrine = await readFile(doctrinePath, "utf8");
 const FIXED_TIME = "2026-08-01T12:34:56.000Z";
@@ -51,6 +54,8 @@ function createHarness({
   doctrine = doctrinePath,
   logPath,
   pane = "pane-17",
+  operatorFacing,
+  expectTool = true,
 } = {}) {
   const events = new Map();
   const warnings = [];
@@ -82,14 +87,22 @@ function createHarness({
       events.set(name, handler);
     },
   };
-  register(pi, {
+  const deps = {
     doctrinePath: doctrine,
     logPath,
     ui: injectedUi,
     pane,
     now: () => FIXED_TIME,
-  });
-  assert.equal(toolCount, 1, "extension did not register exactly one tool");
+  };
+  if (operatorFacing !== undefined) deps.operatorFacing = operatorFacing;
+  register(pi, deps);
+  assert.equal(
+    toolCount,
+    expectTool ? 1 : 0,
+    expectTool
+      ? "extension did not register exactly one tool"
+      : "non-operator-facing session still registered the tool",
+  );
   return { events, tool, ui: injectedUi, warnings };
 }
 
@@ -318,6 +331,53 @@ assert.equal(missingResult.details.outcome, "answered");
 assert.equal(missingResult.details.full_doctrine_fallback, true);
 assert.match(missingResult.details.follow_up_doctrine, /doctrine unavailable/i);
 assert.equal((await markerLines(missingLog)).length, 1);
+
+// Non-operator-facing sessions stay fully inert (operator ruling 2026-08-02, T-204).
+const inert = createHarness({
+  logPath: join(temporary, "inert", "markers.jsonl"),
+  operatorFacing: false,
+  expectTool: false,
+});
+assert.equal(inert.events.size, 0, "inert session registered event handlers");
+
+// The delegate marker computes inert by default.
+process.env.QQ_DISPATCH_RUN_DIR = join(temporary, "delegate-run");
+try {
+  const delegated = createHarness({
+    logPath: join(temporary, "delegated", "markers.jsonl"),
+    expectTool: false,
+  });
+  assert.equal(delegated.events.size, 0, "delegate session registered event handlers");
+} finally {
+  delete process.env.QQ_DISPATCH_RUN_DIR;
+}
+
+// A headless --print invocation computes inert by default.
+process.argv.push("--print");
+try {
+  const headless = createHarness({
+    logPath: join(temporary, "headless", "markers.jsonl"),
+    expectTool: false,
+  });
+  assert.equal(headless.events.size, 0, "headless session registered event handlers");
+} finally {
+  process.argv.pop();
+}
+
+// Backstop: an operator-facing session whose UI cannot pose dialogs injects nothing.
+const noDialog = createHarness({
+  logPath: join(temporary, "no-dialog", "markers.jsonl"),
+  ui: { notify() {} },
+});
+noDialog.events.get("session_start")({ type: "session_start" }, { ui: noDialog.ui });
+assert.equal(
+  noDialog.events.get("before_agent_start")(
+    { systemPrompt: "base" },
+    { ui: noDialog.ui },
+  ),
+  undefined,
+  "dialog-less UI still received the doctrine injection",
+);
 
 console.log("test-qq-communication-moments-extension: pass");
 JS
