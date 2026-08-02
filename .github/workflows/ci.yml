@@ -19,11 +19,11 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.3
-      - name: Install Pi 0.80.10 for extension checks
+      - name: Install Pi 0.81.1 for extension checks
         shell: bash
         run: |
           npm install --prefix "$RUNNER_TEMP/qq-pi" --no-save --ignore-scripts \
-            @earendil-works/pi-coding-agent@0.80.10
+            @earendil-works/pi-coding-agent@0.81.1
           echo "$RUNNER_TEMP/qq-pi/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Run shell tests
         run: tools/test.sh

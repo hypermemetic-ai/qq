@@ -16,7 +16,6 @@ command -v node >/dev/null 2>&1 || fail 'node is required to test the Pi extensi
 
 module="$TMP/qq-footer.mjs"
 cp -- "$EXTENSION" "$module"
-cp -- "$ROOT/extensions/qq-execution-profiles.ts" "$TMP/qq-execution-profiles.ts"
 printf '{}\n' >"$TMP/no-auth.json"
 
 if ! node --experimental-strip-types --input-type=module - "$module" "$AUTH_FIXTURE" "$TMP/no-auth.json" <<'JS'
@@ -237,6 +236,7 @@ const kimi = createHarness({
 });
 assert.equal(typeof kimi.events.get("session_start"), "function");
 assert.equal(typeof kimi.events.get("session_shutdown"), "function");
+assert.equal(kimi.events.has("message_end"), false, "footer retained profile telemetry handling");
 assert.equal(typeof kimi.commands.get("qq-footer-refresh")?.handler, "function");
 await kimi.events.get("session_start")({ type: "session_start" }, kimi.ctx);
 await waitFor(() => kimi.renderCount > 0, "Kimi quota fetch did not repaint");
@@ -260,10 +260,11 @@ assert.ok(!kimiLines[0].includes("hunk"));
 assert.ok(!kimiLines[0].includes("merge ready"));
 assert.ok(
   kimiLines[0].endsWith(
-    "14.2%/200k • K ▓░░░░░░░ 5h · ▓▓▓▓▓▓▓░ wk • (kimi-coding) kimi-k2 • high",
+    "14.2%/200k • K ▓░░░░░░░ 5h · ▓▓▓▓▓▓▓░ wk",
   ),
-  "compact context/quota/provider/model/thinking group was missing or out of order",
+  "compact context/quota group was missing or out of order",
 );
+assert.doesNotMatch(kimiLines[0], /kimi-coding|kimi-k2|thinking| • high/);
 assert.doesNotMatch(kimiLines[0], /\$|\(sub\)/);
 assert.equal(testWidthKit.visibleWidth(kimiLines[0]), 200, "compact group was not right-aligned");
 assert.doesNotMatch(kimiLines[0], /↑|↓|(?:^| )R\d|(?:^| )W\d|CH\d/);
@@ -309,8 +310,8 @@ assert.match(codex.fetches[0].options.headers.Authorization, /^Bearer test-codex
 assert.equal(codex.fetches[0].options.headers["ChatGPT-Account-Id"], "test-account");
 assert.ok(codexLine.includes("CX ▓▓▓░░░░░ wk"), "34% did not round to three filled cells");
 assert.ok(!codexLine.includes(" · "), "null Codex secondary window was not skipped");
-assert.ok(codexLine.endsWith("gpt-5.6-codex • thinking off"));
-assert.ok(!codexLine.includes("(openai-codex)"), "single-provider prefix was not omitted");
+assert.ok(codexLine.endsWith("14.2%/200k • CX ▓▓▓░░░░░ wk"));
+assert.doesNotMatch(codexLine, /openai-codex|gpt-5\.6-codex|thinking off/);
 
 const noAuth = createHarness({
   provider: "anthropic",
@@ -359,8 +360,8 @@ compacted.ctx.getContextUsage = () => ({ tokens: 0, contextWindow: 200000, perce
 await compacted.events.get("session_start")({ type: "session_start" }, compacted.ctx);
 const compactedLines = compacted.render();
 assert.equal(compactedLines.length, 1);
-assert.ok(compactedLines[0].endsWith("?/200k • (unsupported-provider) plain-model"));
-assert.doesNotMatch(compactedLines[0], /\$|\(sub\)/);
+assert.ok(compactedLines[0].endsWith("?/200k"));
+assert.doesNotMatch(compactedLines[0], /unsupported-provider|plain-model|\$|\(sub\)/);
 
 const cjk = createHarness({
   provider: "kimi-coding",

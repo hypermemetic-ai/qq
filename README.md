@@ -55,61 +55,19 @@ directly, so day-to-day changes — adding, editing, or removing a Skill, comman
 or extension source file — are live everywhere with no install step. A machine
 is bootstrapped once.
 
-qq's accountable runtime is the exact patched Pi identity
-`0.81.1+qq.execution-profile.2` on Linux x64. `bin/qq-pi-runtime` is the sole
-builder, artifact verifier, generation installer, and runtime resolver;
-`bin/pi` is the PATH-level command. It never falls back to a stock or global
-Pi. A missing, corrupt, writable, foreign-owned, unpatched, or stale generation
-therefore refuses launch instead of silently selecting another executable.
-
-Only `fetch` performs network work. It downloads the manifest-pinned Pi source,
-Node/npm, and Bun archives, verifies their SHA-256 digests, and hydrates the npm
-cache from the exact upstream locks without lifecycle scripts. Because the
-release source omits its generated model-data directory, fetch also verifies
-and caches that directory from the exact `@earendil-works/pi-ai@0.81.1`
-tarball named by the release's install lock and pinned in the durable manifest;
-it never refreshes a live model catalog. `build` consumes those inputs offline,
-applies the durable patch, and emits a deterministic, self-describing artifact.
-Keep artifacts outside the Repository; they are derived machine state and must
-not be committed.
+qq runs stock Pi from the standard global npm installation. Bootstrap the
+selected 0.81.1 release without lifecycle scripts:
 
 ```bash
-artifact="${XDG_CACHE_HOME:-$HOME/.cache}/qq/pi-runtime/pi-0.81.1-qq.tar.gz"
-bin/qq-pi-runtime fetch
-bin/qq-pi-runtime build --output "$artifact"
-bin/qq-pi-runtime inspect-artifact "$artifact"
-bin/qq-pi-runtime install "$artifact"
-bin/qq-pi-runtime verify
+npm install --global --ignore-scripts @earendil-works/pi-coding-agent@0.81.1
 ```
 
-Installation publishes an immutable content-addressed generation, atomically
-moves `current`, and retains exactly the preceding known-good generation as
-`previous`. The manifest accepts only its current provenance and explicitly
-listed exact prior-provenance digests, so a reviewed runtime upgrade and its
-rollback generation remain executable without admitting arbitrary historical
-artifacts. Reinstalling the identical active artifact is idempotent. Verify an
-active runtime at any time, or exchange `current` and `previous` atomically;
-running rollback again rolls forward. A source-Change rollback must also revert
-that Change's policy/manifests before using its older runtime:
-
-```bash
-bin/qq-pi-runtime verify
-bin/qq-pi-runtime rollback
-```
-
-After this Change is merged, the agent-owned activation procedure runs the
-install and verify commands, sources the cockpit shell, confirms that
-`command -v pi` is this checkout's `bin/pi`, checks the exact `pi --version`,
-and reruns
-`herdr integration install pi` so future root and architect tabs inherit the
-verified wrapper. Ticket implementation and tests do not mutate the live
-installation or Herdr integration.
-
-Every Pi upgrade is an explicit qq Change: update the pinned source and
-Linux-x64 toolchain hashes, rebase and review the patch, rerun conformance and
-two-build reproducibility Checks, then install only the reviewed artifact.
-Moving tags, `@latest`, global Pi, and raw-binary overrides are not runtime
-authorities.
+`bin/pi` is the checkout-owned PATH entrypoint. It asks `npm root -g` for the
+global package location and executes the package's stock `dist/cli.js` with the
+caller's arguments unchanged. It refuses clearly when npm, the package, or the
+CLI is absent. After bootstrap, Pi updates use the ordinary `pi update`
+command. Ticket implementation and tests do not install or update the live
+operator runtime; activation is performed separately after the Change lands.
 
 ### Researcher-only native Context7
 
@@ -202,20 +160,19 @@ chmod 600 ~/.pi/agent/auth.json
 
 `delegation/policies/execution-profiles.json` assigns Orchestrator and Reviewer
 to `kimi-coding/k3:max`; Architect, Implementer, Researcher, and Observer use
-`openai-codex/gpt-5.6-sol:xhigh`. All six request the provider-default service
-class. The mounted extension reads this Repository file
-directly — there is no mirrored copy to install or reconcile. Repository
-settings, Pi defaults, manifests, caller arguments, fallbacks, and inherited
-environment values cannot override this map. The resolver rereads it before
-each logical request and rejects invalid, unsupported, or conflicting state
-before authentication or network activity.
+`openai-codex/gpt-5.6-sol:xhigh`. All six currently request the provider-default
+service class. `qq-delegate` reads the selected delegated role from this policy
+and passes its provider, model, and non-default thinking level through Pi's
+native CLI flags.
 
-Start the dedicated Architect root through its role-binding launcher; ordinary
-Pi roots are Orchestrators:
-
-```bash
-bin/qq-pi-role architect
-```
+A delegated route may instead select `auto`, `default`, `flex`, or `priority`
+service class when its requested provider is `openai` or `openai-codex`.
+`qq-delegate` validates that choice before launch and explicitly loads its
+private service-class extension; unsupported fallback payload shapes are left
+unchanged. Requested provider/model selection may silently fall back. The
+`provider` and `model` fields on persisted assistant messages in Pi session
+JSONL are authoritative for who served; footer state and `model_change` entries
+only describe selection and are not serving-provider evidence.
 
 The accountable agent creates the global `qq` extension link once per machine:
 
@@ -280,8 +237,8 @@ On a machine with the retired Skill mount, remove it if it exists (after
 checking it points into this checkout): `rm -r ~/.codex/skills`.
 
 Source the shell surface from `.bashrc`; it prepends `bin/` to `PATH`, making
-qq's verified `bin/pi` wrapper authoritative ahead of any stock/global Pi, and
-provides the cockpit navigation helpers:
+qq's `bin/pi` stock-package entrypoint authoritative, and provides the cockpit
+navigation helpers:
 
 ```bash
 . "$HOME/projects/qq/cockpit/shell/file-navigation.bash"
