@@ -9,6 +9,7 @@ source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd "$TESTS_DIR/.." && pwd -P)"
 ENGINE="$ROOT/bin/qq-delegate"
 SUPERVISOR="$ROOT/bin/lib/qq-process-tree-supervisor.py"
+SERVICE_EXTENSION="$ROOT/delegation/extensions/qq-service-class.ts"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
@@ -31,6 +32,7 @@ unset QQ_DISPATCH_RUN_DIR QQ_DISPATCH_TIMEOUT CONTEXT7_API_KEY PI_SUBAGENT_PAREN
 
 [ -x "$ENGINE" ] || fail "missing engine: $ENGINE"
 [ -x "$SUPERVISOR" ] || fail "missing process-tree supervisor: $SUPERVISOR"
+[ -f "$SERVICE_EXTENSION" ] || fail "missing delegate service-class extension: $SERVICE_EXTENSION"
 
 fake_pi="$tmp/fake-pi"
 cat >"$fake_pi" <<'SH'
@@ -60,7 +62,7 @@ chmod +x "$fake_pi"
 
 fixture="$tmp/fixture"
 mkdir -p "$fixture/bin/lib" "$fixture/delegation/manifests/agents" \
-  "$fixture/delegation/policies"
+  "$fixture/delegation/policies" "$fixture/delegation/extensions"
 git init -q -b main "$fixture"
 git -C "$fixture" -c user.name=test -c user.email=test@example.invalid \
   -c commit.gpgSign=false commit --allow-empty -qm base
@@ -70,10 +72,12 @@ cp "$fake_pi" "$fixture/bin/pi"
 cp "$ROOT"/delegation/manifests/agents/*.md "$fixture/delegation/manifests/agents/"
 cp "$ROOT/delegation/policies/execution-profiles.json" \
   "$fixture/delegation/policies/execution-profiles.json"
+cp "$SERVICE_EXTENSION" "$fixture/delegation/extensions/qq-service-class.ts"
 chmod +x "$fixture/bin/qq-delegate" "$fixture/bin/pi" \
   "$fixture/bin/lib/qq-process-tree-supervisor.py"
 fixture_engine="$fixture/bin/qq-delegate"
 policy="$fixture/delegation/policies/execution-profiles.json"
+fixture_service_extension="$fixture/delegation/extensions/qq-service-class.ts"
 
 new_run() {
   local name="$1"
@@ -108,8 +112,7 @@ happy_run="$(new_run happy)"
 run_case happy reviewer "$fixture" "$happy_run/BRIEF.md" \
   PI_SUBAGENT_PARENT_SESSION="$parent_session" \
   PI_SUBAGENT_CHILD_AGENT=reviewer \
-  QQ_EXECUTION_PROFILE_LAUNCHER=/bad/launcher \
-  QQ_EXECUTION_PROFILE_LAUNCHER_ROLE=reviewer \
+  QQ_DELEGATE_SERVICE_CLASS=priority \
   QQ_DISPATCH_RUN_DIR=/inherited/wrong
 assert_equal 0 "$RUN_STATUS" "happy delegate run failed"
 assert_file_contains "$RUN_STDERR" "[qq-delegate] role=reviewer timeout=2700s run-dir=$happy_run"
@@ -147,9 +150,15 @@ grep -Fxq "XDG_CACHE_HOME=$happy_run/cache" "$happy_run/child.env" || fail "cach
 grep -Fxq "PI_CODING_AGENT_DIR=$happy_run/pi-config" "$happy_run/child.env" || fail "Pi config was not redirected"
 grep -Fxq "PI_CODING_AGENT_SESSION_DIR=$happy_run/sessions" "$happy_run/child.env" || fail "sessions were not redirected"
 grep -Fxq 'PI_OFFLINE=1' "$happy_run/child.env" || fail "offline mode was not exported"
-if grep -Eq '^(PI_SUBAGENT_|QQ_EXECUTION_PROFILE_LAUNCHER|QQ_DISPATCH_RUN_DIR=/inherited)' "$happy_run/child.env"; then
-  fail "child inherited a scrubbed variable"
+if grep -Eq '^(PI_SUBAGENT_|QQ_DELEGATE_SERVICE_CLASS=|QQ_DISPATCH_RUN_DIR=/inherited)' "$happy_run/child.env"; then
+  fail "default-class child inherited a scrubbed variable"
 fi
+python3 - "$happy_run/argv.nul" <<'PY'
+from pathlib import Path
+import sys
+args = Path(sys.argv[1]).read_bytes().split(b"\0")
+assert b"--extension" not in args, args
+PY
 assert_file_contains "$happy_run/output.jsonl" '"event":"fixture-output"'
 assert_file_contains "$happy_run/stderr.log" 'fixture-stderr'
 jq -e --arg run "$happy_run" --arg cwd "$fixture" --arg session "$parent_session" '
@@ -225,6 +234,19 @@ expect_refusal() {
   fail_closed_count=$((fail_closed_count + 1))
 }
 
+expect_policy_refusal() {
+  local label="$1"
+  local message="$2"
+  shift 2
+  set +e
+  "$@" >"$tmp/$label.refusal.stdout" 2>"$tmp/$label.refusal.stderr"
+  local status=$?
+  set -e
+  assert_equal 66 "$status" "$label did not use the policy refusal status"
+  assert_file_contains "$tmp/$label.refusal.stderr" "$message"
+  fail_closed_count=$((fail_closed_count + 1))
+}
+
 missing_dir="$runtime_root/missing"
 mkdir -m 700 "$missing_dir"
 expect_refusal missing-brief 'brief must exist' \
@@ -281,17 +303,66 @@ malformed_policy_run="$(new_run malformed-policy)"
 expect_refusal malformed-policy 'policy is malformed' \
   "$fixture_engine" run --role reviewer --cwd "$fixture" --brief "$malformed_policy_run/BRIEF.md"
 cp "$tmp/policy.original" "$policy"
-python3 - "$policy" serviceClass flex <<'PY'
+python3 - "$policy" <<'PY'
 import json
 from pathlib import Path
 import sys
 path = Path(sys.argv[1]); value = json.loads(path.read_text())
-value["reviewer"][sys.argv[2]] = sys.argv[3]
+value["implementer"]["serviceClass"] = "realtime"
 path.write_text(json.dumps(value))
 PY
-flex_run="$(new_run flex-service)"
-expect_refusal flex-service 'serviceClass' \
-  "$fixture_engine" run --role reviewer --cwd "$fixture" --brief "$flex_run/BRIEF.md"
+invalid_class_run="$(new_run invalid-service-class)"
+expect_policy_refusal invalid-service-class 'serviceClass for implementer is unsupported' \
+  "$fixture_engine" run --role implementer --cwd "$fixture" --brief "$invalid_class_run/BRIEF.md"
+
+cp "$tmp/policy.original" "$policy"
+python3 - "$policy" <<'PY'
+import json
+from pathlib import Path
+import sys
+path = Path(sys.argv[1]); value = json.loads(path.read_text())
+value["reviewer"]["serviceClass"] = "flex"
+path.write_text(json.dumps(value))
+PY
+unsupported_provider_run="$(new_run unsupported-service-provider)"
+expect_policy_refusal unsupported-service-provider 'unsupported for requested provider kimi-coding' \
+  "$fixture_engine" run --role reviewer --cwd "$fixture" --brief "$unsupported_provider_run/BRIEF.md"
+
+# Every allowed non-default class reaches only the explicit delegate extension
+# and the validated private child environment for OpenAI requested providers.
+for service_spec in auto:openai default:openai-codex flex:openai-codex priority:openai-codex; do
+  service_class="${service_spec%%:*}"
+  service_provider="${service_spec#*:}"
+  python3 - "$tmp/policy.original" "$policy" "$service_class" "$service_provider" <<'PY'
+import json
+from pathlib import Path
+import sys
+source, target = map(Path, sys.argv[1:3])
+value = json.loads(source.read_text())
+value["implementer"]["serviceClass"] = sys.argv[3]
+value["implementer"]["provider"] = sys.argv[4]
+target.write_text(json.dumps(value))
+PY
+  service_run="$(new_run "service-$service_class")"
+  run_case "service-$service_class" implementer "$fixture" "$service_run/BRIEF.md" \
+    QQ_DELEGATE_SERVICE_CLASS=inherited-invalid
+  assert_equal 0 "$RUN_STATUS" "$service_class service-class dispatch failed"
+  SERVICE_CLASS="$service_class" SERVICE_PROVIDER="$service_provider" \
+    SERVICE_EXTENSION="$fixture_service_extension" \
+    python3 - "$service_run/argv.nul" <<'PY'
+import os
+from pathlib import Path
+import sys
+args = Path(sys.argv[1]).read_bytes().split(b"\0")
+assert args[args.index(b"--provider") + 1].decode() == os.environ["SERVICE_PROVIDER"], args
+index = args.index(b"--no-extensions")
+assert args[index + 1:index + 3] == [b"--extension", os.environ["SERVICE_EXTENSION"].encode()], args
+assert args.count(b"--extension") == 1, args
+PY
+  grep -Fxq "QQ_DELEGATE_SERVICE_CLASS=$service_class" "$service_run/child.env" \
+    || fail "$service_class was not exported as the selected private service class"
+done
+
 cp "$tmp/policy.original" "$policy"
 python3 - "$policy" effort ludicrous <<'PY'
 import json
@@ -338,6 +409,32 @@ assert args[n + 1].decode() == os.environ["CONTEXT7"]
 tools = args[args.index(b"--tools") + 1].decode().split(",")
 assert "resolve-library-id" in tools and "query-docs" in tools, tools
 PY
+
+python3 - "$tmp/policy.original" "$policy" <<'PY'
+import json
+from pathlib import Path
+import sys
+source, target = map(Path, sys.argv[1:])
+value = json.loads(source.read_text())
+value["researcher"]["serviceClass"] = "priority"
+target.write_text(json.dumps(value))
+PY
+research_service_run="$(new_run researcher-service)"
+run_case researcher-service researcher "$fixture" "$research_service_run/BRIEF.md"
+assert_equal 0 "$RUN_STATUS" "researcher service-class dispatch failed"
+CONTEXT7="$context7" SERVICE_EXTENSION="$fixture_service_extension" \
+  python3 - "$research_service_run/argv.nul" <<'PY'
+import os
+from pathlib import Path
+import sys
+args = Path(sys.argv[1]).read_bytes().split(b"\0")
+extensions = [args[index + 1].decode() for index, value in enumerate(args) if value == b"--extension"]
+assert extensions == [os.environ["SERVICE_EXTENSION"], os.environ["CONTEXT7"]], extensions
+PY
+grep -Fxq 'QQ_DELEGATE_SERVICE_CLASS=priority' "$research_service_run/child.env" \
+  || fail 'researcher did not receive its validated private service class'
+cp "$tmp/policy.original" "$policy"
+
 context_key_run="$(new_run context-key)"
 expect_refusal context-key 'forbids inherited CONTEXT7_API_KEY' \
   env CONTEXT7_API_KEY=secret "$fixture_engine" run --role researcher \
@@ -441,6 +538,6 @@ printf '[{"role":"reviewer","cwd":"%s"}]\n' "$fixture" >"$missing_key_batch"
 expect_refusal missing-key-batch 'exact keys role,cwd,brief' \
   "$fixture_engine" batch "$missing_key_batch"
 
-assert_equal 17 "$fail_closed_count" "fail-closed test count changed"
+assert_equal 18 "$fail_closed_count" "fail-closed test count changed"
 printf 'test-qq-delegate: fail-closed cases: %s\n' "$fail_closed_count"
 printf 'test-qq-delegate: pass\n'

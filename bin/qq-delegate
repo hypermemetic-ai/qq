@@ -226,6 +226,7 @@ execute_ticket() {
 
   local manifest="$engine_worktree/delegation/manifests/agents/$role.md"
   local policy="$engine_worktree/delegation/policies/execution-profiles.json"
+  local service_class_extension="$engine_worktree/delegation/extensions/qq-service-class.ts"
   local config_file="$runtime_root/.qq-delegate-config-$run_id"
   local system_prompt="$run_dir/.system-prompt.md"
   local parse_error parse_status
@@ -300,14 +301,18 @@ if not isinstance(policy, dict) or role not in policy or not isinstance(policy[r
 profile = policy[role]
 keys = ("provider", "model", "effort", "serviceClass")
 if any(not isinstance(profile.get(key), str) for key in keys): refuse(f"execution-profile policy for {role} has invalid fields")
-if profile["serviceClass"] != "provider-default": refuse(f"execution-profile serviceClass for {role} must be provider-default", 66)
+service_class = profile["serviceClass"]
+if service_class not in {"provider-default", "auto", "default", "flex", "priority"}:
+    refuse(f"execution-profile serviceClass for {role} is unsupported: {service_class}", 66)
+if service_class != "provider-default" and profile["provider"] not in {"openai", "openai-codex"}:
+    refuse(f"execution-profile serviceClass for {role} is unsupported for requested provider {profile['provider']}", 66)
 effort = profile["effort"]
 if effort != "provider-default" and effort not in {
     "off", "minimal", "low", "medium", "high", "xhigh", "max"
 }:
     refuse(f"execution-profile effort for {role} is unsupported: {effort}", 66)
 values = [timeout_spec, ",".join(tools), profile["provider"], profile["model"],
-          effort, extension_path]
+          effort, service_class, extension_path]
 if any("\0" in value for value in values): refuse(f"execution-profile or extension value for {role} contains NUL")
 config_path.write_bytes(b"\0".join(value.encode() for value in values) + b"\0")
 os.chmod(config_path, 0o600)
@@ -333,13 +338,18 @@ PY
   local -a dispatch_config
   mapfile -d '' -t dispatch_config <"$config_file"
   rm -f -- "$config_file"
-  [[ "${#dispatch_config[@]}" -eq 6 ]] || fail 71 "manifest and execution-profile parser returned malformed data"
+  [[ "${#dispatch_config[@]}" -eq 7 ]] || fail 71 "manifest and execution-profile parser returned malformed data"
   local timeout_spec="${dispatch_config[0]}"
   local tools_csv="${dispatch_config[1]}"
   local provider="${dispatch_config[2]}"
   local model="${dispatch_config[3]}"
   local effort="${dispatch_config[4]}"
-  local extension_path="${dispatch_config[5]}"
+  local service_class="${dispatch_config[5]}"
+  local extension_path="${dispatch_config[6]}"
+  if [[ "$service_class" != provider-default ]]; then
+    [[ -f "$service_class_extension" && ! -L "$service_class_extension" ]] || fail 71 "delegate service-class extension is unavailable"
+    [[ "$(realpath -e -- "$service_class_extension" 2>/dev/null)" == "$service_class_extension" ]] || fail 71 "delegate service-class extension does not resolve exactly"
+  fi
   if [[ -v QQ_DISPATCH_TIMEOUT ]]; then
     timeout_spec="$QQ_DISPATCH_TIMEOUT"
     [[ "$timeout_spec" =~ ^(0\.[0-9]+|[1-9][0-9]*(\.[0-9]+)?)([smhd])?$ ]] || fail 71 "invalid QQ_DISPATCH_TIMEOUT '$timeout_spec'"
@@ -357,6 +367,9 @@ PY
     child_argv+=(--thinking "$effort")
   fi
   child_argv+=(--tools "$tools_csv" --no-extensions)
+  if [[ "$service_class" != provider-default ]]; then
+    child_argv+=(--extension "$service_class_extension")
+  fi
   if [[ -n "$extension_path" ]]; then
     child_argv+=(--extension "$extension_path")
   fi
@@ -393,9 +406,11 @@ PY
     while IFS= read -r inherited_name; do
       unset "$inherited_name"
     done < <(compgen -A variable PI_SUBAGENT_ || true)
-    unset QQ_EXECUTION_PROFILE_LAUNCHER QQ_EXECUTION_PROFILE_LAUNCHER_ROLE
-    unset QQ_DISPATCH_RUN_DIR
+    unset QQ_DISPATCH_RUN_DIR QQ_DELEGATE_SERVICE_CLASS
     export QQ_DISPATCH_RUN_DIR="$run_dir"
+    if [[ "$service_class" != provider-default ]]; then
+      export QQ_DELEGATE_SERVICE_CLASS="$service_class"
+    fi
     export XDG_CACHE_HOME="$run_dir/cache"
     export PI_CODING_AGENT_DIR="$pi_config_dir"
     export PI_CODING_AGENT_SESSION_DIR="$run_dir/sessions"

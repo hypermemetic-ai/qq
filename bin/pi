@@ -1,3 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
-exec "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/qq-pi-runtime" exec -- "$@"
+
+fail() {
+  printf 'pi: %s\n' "$*" >&2
+  exit 69
+}
+
+command -v npm >/dev/null 2>&1 || fail 'npm is unavailable; cannot locate stock Pi'
+if ! npm_root="$(npm root -g 2>/dev/null)" || [[ -z "$npm_root" || "$npm_root" != /* ]]; then
+  fail 'cannot resolve the global npm package root'
+fi
+package="$npm_root/@earendil-works/pi-coding-agent"
+[[ -d "$package" ]] || fail 'the global @earendil-works/pi-coding-agent package is unavailable'
+cli="$package/dist/cli.js"
+[[ -f "$cli" && -x "$cli" ]] || fail 'the global Pi package executable dist/cli.js is unavailable'
+exec "$cli" "$@"
