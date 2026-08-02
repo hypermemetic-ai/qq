@@ -195,12 +195,13 @@ export default function register(pi, deps = {}) {
     : (process.env.HERDR_PANE_ID ?? null);
   // Moments exist only where the operator can answer (operator ruling
   // 2026-08-02, T-204): delegate runs carry QQ_DISPATCH_RUN_DIR and headless
-  // runs pass --print; neither is operator-facing, so the extension stays
-  // fully inert there — no tool, no doctrine injection.
+  // runs pass --print or its alias -p; neither is operator-facing, so the
+  // extension stays fully inert there — no tool, no doctrine injection.
   const operatorFacing = Object.hasOwn(deps, "operatorFacing")
     ? deps.operatorFacing === true
     : process.env.QQ_DISPATCH_RUN_DIR === undefined &&
-      !process.argv.includes("--print");
+      !process.argv.includes("--print") &&
+      !process.argv.includes("-p");
   if (!operatorFacing) return;
   let doctrine = "";
   let alignmentPending = false;
@@ -352,7 +353,10 @@ export default function register(pi, deps = {}) {
 
   pi.on("session_start", (_event, ctx) => {
     // Backstop: a session whose UI cannot pose operator dialogs is not
-    // operator-facing even if it slipped past the register-time gate.
+    // operator-facing even if it slipped past the register-time gate. Prefer
+    // pi's declared dialog capability; fall back to probing the UI surface
+    // (print/json modes bind no-op select/input that pass a bare typeof).
+    if (ctx?.hasUI === false) return;
     const ui = deps.ui ?? ctx?.ui;
     if (typeof ui?.select !== "function" || typeof ui?.input !== "function") {
       return;

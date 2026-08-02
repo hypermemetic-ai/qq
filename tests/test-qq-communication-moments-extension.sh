@@ -364,6 +364,18 @@ try {
   process.argv.pop();
 }
 
+// The -p short alias computes inert too (bin/qq-delegate launches pi with -p).
+process.argv.push("-p");
+try {
+  const shortFlag = createHarness({
+    logPath: join(temporary, "short-flag", "markers.jsonl"),
+    expectTool: false,
+  });
+  assert.equal(shortFlag.events.size, 0, "-p session registered event handlers");
+} finally {
+  process.argv.pop();
+}
+
 // Backstop: an operator-facing session whose UI cannot pose dialogs injects nothing.
 const noDialog = createHarness({
   logPath: join(temporary, "no-dialog", "markers.jsonl"),
@@ -377,6 +389,23 @@ assert.equal(
   ),
   undefined,
   "dialog-less UI still received the doctrine injection",
+);
+
+// The backstop prefers pi's declared dialog capability when present.
+const noCapability = createHarness({
+  logPath: join(temporary, "no-capability", "markers.jsonl"),
+});
+noCapability.events.get("session_start")(
+  { type: "session_start" },
+  { ui: noCapability.ui, hasUI: false },
+);
+assert.equal(
+  noCapability.events.get("before_agent_start")(
+    { systemPrompt: "base" },
+    { ui: noCapability.ui },
+  ),
+  undefined,
+  "hasUI=false session still received the doctrine injection",
 );
 
 console.log("test-qq-communication-moments-extension: pass");

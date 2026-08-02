@@ -14,6 +14,10 @@ trap 'rm -rf "$TMP"' EXIT
 
 command -v node >/dev/null 2>&1 || fail 'node is required to test the Pi extension mount'
 
+# qq-communication-moments registers nothing in delegate/headless contexts by
+# design (T-204); this suite asserts direct-registration shape in a clean env.
+unset QQ_DISPATCH_RUN_DIR
+
 if ! node --input-type=module - "$INDEX" <<'JS'
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
