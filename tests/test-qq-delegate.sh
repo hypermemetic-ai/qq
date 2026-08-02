@@ -28,7 +28,7 @@ export HOME="$test_home"
 export TMPDIR="$launcher_tmp"
 export QQ_DISPATCH_RUNTIME_ROOT="$runtime_root"
 export PYTHONDONTWRITEBYTECODE=1
-unset QQ_DISPATCH_RUN_DIR QQ_DISPATCH_TIMEOUT CONTEXT7_API_KEY PI_SUBAGENT_PARENT_SESSION
+unset QQ_DISPATCH_RUN_DIR QQ_DISPATCH_TIMEOUT CONTEXT7_API_KEY PI_SUBAGENT_PARENT_SESSION HERDR_PANE_ID
 
 [ -x "$ENGINE" ] || fail "missing engine: $ENGINE"
 [ -x "$SUPERVISOR" ] || fail "missing process-tree supervisor: $SUPERVISOR"
@@ -111,6 +111,7 @@ parent_session="12345678-1234-4abc-8def-1234567890ab"
 happy_run="$(new_run happy)"
 run_case happy reviewer "$fixture" "$happy_run/BRIEF.md" \
   PI_SUBAGENT_PARENT_SESSION="$parent_session" \
+  HERDR_PANE_ID=herdr:reviewer_T192 \
   PI_SUBAGENT_CHILD_AGENT=reviewer \
   QQ_DELEGATE_SERVICE_CLASS=priority \
   QQ_DISPATCH_RUN_DIR=/inherited/wrong
@@ -143,6 +144,9 @@ assert Path(sys.argv[2]).read_text() == "".join(lines[close + 1:])
 PY
 [ "$(stat -c %a "$happy_run/.system-prompt.md")" = 600 ] || fail "system prompt mode is not 600"
 [ "$(stat -c %a "$happy_run/pi-config/auth.json")" = 600 ] || fail "staged auth mode is not 600"
+assert_equal 'herdr:reviewer_T192' "$(cat "$happy_run/PANE")" \
+  "valid HERDR_PANE_ID was not recorded exactly"
+[ "$(stat -c %a "$happy_run/PANE")" = 600 ] || fail "recorded PANE mode is not 600"
 cmp "$test_home/.pi/agent/auth.json" "$happy_run/pi-config/auth.json" >/dev/null \
   || fail "staged auth differs"
 grep -Fxq "QQ_DISPATCH_RUN_DIR=$happy_run" "$happy_run/child.env" || fail "run dir was not exported"
@@ -171,6 +175,29 @@ jq -e --arg run "$happy_run" --arg cwd "$fixture" --arg session "$parent_session
 ' "$happy_run/TERMINAL" >/dev/null
 [ ! -e "$runtime_root/async-subagent-runs" ] \
   || fail "delegate recreated the retired async-subagent-runs bridge"
+
+# PANE is a sanctioned preflight entry and a valid inherited pane replaces it
+# atomically. Malformed and absent pane identity never fail dispatch or create
+# a targeting record.
+pane_allowlisted_run="$(new_run pane-allowlisted)"
+printf '%s\n' 'old:pane' >"$pane_allowlisted_run/PANE"
+chmod 600 "$pane_allowlisted_run/PANE"
+run_case pane-allowlisted reviewer "$fixture" "$pane_allowlisted_run/BRIEF.md" \
+  HERDR_PANE_ID=pane:new-42
+assert_equal 0 "$RUN_STATUS" "allowlisted PANE entry was refused"
+assert_equal 'pane:new-42' "$(cat "$pane_allowlisted_run/PANE")" \
+  "allowlisted PANE was not atomically replaced"
+
+malformed_pane_run="$(new_run malformed-pane)"
+run_case malformed-pane reviewer "$fixture" "$malformed_pane_run/BRIEF.md" \
+  HERDR_PANE_ID=$'bad\npane'
+assert_equal 0 "$RUN_STATUS" "malformed pane identity changed dispatch behavior"
+[ ! -e "$malformed_pane_run/PANE" ] || fail "malformed pane identity was recorded"
+
+absent_pane_run="$(new_run absent-pane)"
+run_case absent-pane reviewer "$fixture" "$absent_pane_run/BRIEF.md"
+assert_equal 0 "$RUN_STATUS" "absent pane identity changed dispatch behavior"
+[ ! -e "$absent_pane_run/PANE" ] || fail "absent pane identity created PANE"
 
 # Default derivation: with no QQ_DISPATCH_RUNTIME_ROOT override the engine
 # roots run dirs at $XDG_STATE_HOME/qq/delegate — durable qq state.
