@@ -266,6 +266,38 @@ navigation helpers:
 `fzf`. File browsing lives inside Pi through `@tmustier/pi-files-widget`.
 Outside Pi, the system's `xdg-open` associations own MIME opening.
 
+### Direct-upstream fzf
+
+`qqcd <pattern>` is qq's only fzf consumer. This machine owns fzf through the
+exact official upstream 0.74.2 amd64 `.deb`, not through an added apt repository
+or an unpinned channel. Its official signed annotated tag and release are
+[`v0.74.2`](https://github.com/junegunn/fzf/releases/tag/v0.74.2): the verified
+GitHub tag object `af100a6dc94777b949c6217744d787ac5b8f9f8d`, signed by key ID
+`D9770615D226D94C`, points to commit
+`3337be9d450cd349e99273a2d3985ceaf5f3753f`.
+
+The exact asset is `fzf_0.74.2_amd64.deb`, with SHA-256
+`a220553bd9d847bd62ac09a6834d529ebe3898344cd5d730dc0ec1929e9bc5ae`. Its
+package identity is package `fzf`, version `0.74.2`, architecture `amd64`. A
+promotion or rollback may proceed only when the planned transaction names
+exactly one package, `fzf`. Each upstream payload path must be owned by the
+currently installed `fzf` package or be unowned. The preverified upstream
+payload is `/usr/bin/fzf`, `/usr/share/doc/fzf/copyright`, and
+`/usr/share/man/man1/fzf.1`.
+
+Before promotion, download and preserve the exact Ubuntu rollback asset
+`fzf_0.44.1-1ubuntu0.3_amd64.deb`, and verify its apt-metadata SHA-256
+`345ab0b82c0a2dfc364d1da4404b61c438413fc6881daf8acecd9e3821578258`. After
+verifying both local files, controlled promotion and exact Ubuntu rollback are:
+
+```bash
+sudo apt install ./fzf_0.74.2_amd64.deb
+sudo apt install --allow-downgrades ./fzf_0.44.1-1ubuntu0.3_amd64.deb
+```
+
+These commands act only on the preserved local `.deb` files; neither operation
+adds or modifies an apt source or repository.
+
 Link the Repository-owned cockpit configurations whose tools read fixed
 `~/.config` paths:
 
