@@ -862,13 +862,16 @@ def command_probe_request(args: argparse.Namespace) -> None:
         "source": {"pull_request": "probe", "pr_url": None, "merge_commit": head,
                    "source_branch": "probe", "probe_id": probe["probe_id"]},
     }
-    staged = json.loads(run([
-        os.fspath(Path(__file__).resolve(strict=True)), "stage", "--runtime-root", os.fspath(root),
-    ], input_bytes=json.dumps(payload).encode()))
-    armed = json.loads(run([
-        os.fspath(Path(__file__).resolve(strict=True)), "arm", "--runtime-root", os.fspath(root),
-        "--run-id", staged["run_id"],
-    ]))
+    try:
+        staged = json.loads(run([
+            os.fspath(Path(__file__).resolve(strict=True)), "stage", "--runtime-root", os.fspath(root),
+        ], input_bytes=json.dumps(payload).encode()))
+        armed = json.loads(run([
+            os.fspath(Path(__file__).resolve(strict=True)), "arm", "--runtime-root", os.fspath(root),
+            "--run-id", staged["run_id"],
+        ]))
+    except json.JSONDecodeError as error:
+        raise Refusal("live probe activation lifecycle returned malformed data") from error
     json_output(armed)
 
 
