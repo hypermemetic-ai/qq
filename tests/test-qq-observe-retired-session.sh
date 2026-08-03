@@ -344,7 +344,15 @@ write_receipt "$started_receipt" coordinator "$started_session" retirement-still
 "$OBSERVE" retire-session --role coordinator --session "$started_session" --repo "$repo" \
   --retirement "$started_receipt" >"$tmp/still-started.json"
 
-"$OBSERVE" architect-context >"$tmp/architect-context.json"
+# architect-context also reads recurrence coverage from qq's mounted Backlog.
+# Run an exact temporary source copy against an empty local Backlog tree so CI
+# proves the projection without depending on the operator's managed mount.
+context_root="$tmp/context-root"
+mkdir -p "$context_root/bin/lib" "$context_root/backlog/docs" \
+  "$context_root/backlog/decisions"
+cp "$OBSERVE" "$context_root/bin/qq-observe"
+cp "$ROOT/bin/lib/qq-bin.sh" "$context_root/bin/lib/qq-bin.sh"
+"$context_root/bin/qq-observe" architect-context >"$tmp/architect-context.json"
 jq -e '
   any(.observer_health.rounds[]; .audit_unit.kind == "accountable_session" and .status == "started")
   and any(.observer_health.rounds[]; .audit_unit.kind == "accountable_session" and .status == "completed")
