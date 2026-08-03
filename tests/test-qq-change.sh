@@ -66,7 +66,7 @@ jq -cn \
   --arg state "$state" \
   --arg head_ref "${FAKE_PR_HEAD:-feature}" \
   --arg oid "${FAKE_MERGE_OID:-}" \
-  '{number:$number,state:$state,headRefName:$head_ref,mergedAt:(if $state == "MERGED" then "2026-07-18T00:00:00Z" else null end),mergeCommit:(if $state == "MERGED" then {oid:$oid} else null end),url:"https://example.test/pr/83"}'
+  '{number:$number,state:$state,headRefName:$head_ref,body:"T-83 — fixture Change",mergedAt:(if $state == "MERGED" then "2026-07-18T00:00:00Z" else null end),mergeCommit:(if $state == "MERGED" then {oid:$oid} else null end),url:"https://example.test/pr/83"}'
 SH
 chmod +x "$fake_gh"
 export QQ_GH_BIN="$fake_gh"
@@ -226,11 +226,20 @@ assert_not_contains "$(git -C "$main_checkout" rev-parse HEAD)" "$merge_oid" \
 rm -- "$managed_task"
 rmdir -- "$main_checkout/backlog/tasks" "$main_checkout/backlog"
 run_change 0 land 83 --repo "$change_checkout"
+expected_fingerprint="$(git -C "$main_checkout" ls-tree -rz --full-tree "$merge_oid" -- \
+  AGENTS.md skills extensions .pi/prompts/bro.md .pi/prompts/check-in.md | sha256sum | awk '{print $1}')"
 jq -e '
   .status == "done"
   and .state.pr_state == "MERGED"
   and .state.merge_commit == $oid
-' --arg oid "$merge_oid" "$tmp/result.json" >/dev/null
+  and .state.before_tree != .state.landed_tree
+  and .state.activation.action == "none"
+  and .state.activation.resource_fingerprint == $fingerprint
+  and .state.activation.changed_loaded_resources == []
+  and .state.activation.reason == "no globally loaded qq resources changed"
+  and .state.activation_targets == []
+  and .state.activation_armed == false
+' --arg oid "$merge_oid" --arg fingerprint "$expected_fingerprint" "$tmp/result.json" >/dev/null
 assert_equal "$merge_oid" "$(git -C "$main_checkout" rev-parse HEAD)" \
   'land did not synchronize main to the merge commit'
 assert_file_not_matches "$FAKE_GIT_LOG" '(^|[[:space:]])pull([[:space:]]|$)' \
@@ -238,6 +247,44 @@ assert_file_not_matches "$FAKE_GIT_LOG" '(^|[[:space:]])pull([[:space:]]|$)' \
 
 # Land is idempotent when main already contains the verified merge.
 run_change 0 land 83 --repo "$main_checkout"
+
+# A second landed Change touching the globally mounted extension tree is
+# classified and armed through the same fast-forward rail. Empty discovery is
+# a valid exact census, not an excuse to omit the activation record.
+loaded_checkout="$tmp/loaded-change"
+git -C "$main_checkout" worktree add -qb loaded-feature "$loaded_checkout" main
+mkdir -p "$loaded_checkout/extensions"
+printf 'export default function fixture() {}\n' >"$loaded_checkout/extensions/fixture.ts"
+git -C "$loaded_checkout" add extensions/fixture.ts
+git -C "$loaded_checkout" -c user.name=test -c user.email=test@example.com \
+  commit -qm loaded-feature
+loaded_oid="$(git -C "$loaded_checkout" rev-parse HEAD)"
+git -C "$loaded_checkout" push -qu origin HEAD:main
+export FAKE_MERGE_OID="$loaded_oid"
+run_change 0 land 83 --repo "$loaded_checkout"
+jq -e '
+  .status == "done"
+  and .state.activation.action == "reload"
+  and .state.activation.changed_loaded_resources == ["extensions/fixture.ts"]
+  and .state.activation_targets == []
+  and .state.activation_armed == true
+  and (.state.activation_run_dir | type == "string")
+' "$tmp/result.json" >/dev/null
+activation_run_dir="$(jq -r '.state.activation_run_dir' "$tmp/result.json")"
+[ -f "$activation_run_dir/REQUEST.json" ] || fail 'land did not arm its activation request'
+[ ! -e "$activation_run_dir/REQUEST.pending" ] || fail 'land left a pending activation request after synchronization'
+run_change 0 land 83 --repo "$main_checkout"
+jq -e --arg run_dir "$activation_run_dir" '
+  .status == "done"
+  and .state.activation.action == "reload"
+  and .state.activation_run_dir == $run_dir
+  and .state.activation_armed == true
+  and .state.retried_activation_targets == []
+' "$tmp/result.json" >/dev/null
+
+# Restore the original PR merge identity used by retirement fixtures. The
+# feature branch remains an ancestor after this later loaded Change lands.
+export FAKE_MERGE_OID="$merge_oid"
 
 # An uncommitted record in the Change checkout also fails the common clean
 # worktree rail before retirement can remove any lifecycle subject.
