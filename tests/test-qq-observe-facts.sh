@@ -56,6 +56,20 @@ jq -e '
 ' "$tmp/pi-reasoning-signals.json" >/dev/null \
   || fail 'reasoning thresholds or consecutive-message citations changed'
 
+accountable_fixture="$FIXTURES/pi-accountable-session.jsonl"
+"$OBSERVE" facts "$accountable_fixture" >"$tmp/accountable-facts.json"
+jq -e '
+  .skill_evidence == {
+    phases:{
+      alignment:{trigger_entries:[2],fire_entries:[]},
+      realignment:{trigger_entries:[4,5],fire_entries:[5]},
+      operator_facing:{trigger_entries:[],fire_entries:[]}
+    },
+    repair_entries:[2],compaction_entries:[10]
+  }
+' "$tmp/accountable-facts.json" >/dev/null \
+  || fail 'whole-session facts did not mechanically derive phase fire/no-fire, /bro, and compaction evidence'
+
 jq -e '
   .unknown_entries.total == 1
   and .unknown_entries.by_shape == {"pi:future_pi_entry":1}

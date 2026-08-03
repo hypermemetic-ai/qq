@@ -18,6 +18,10 @@ usage:
   qq-observe validate-analysis ANALYSIS.json SESSION.jsonl [SESSION.jsonl...] \
     --facts SESSION_PATH=FACTS_PATH [--facts SESSION_PATH=FACTS_PATH...]
   qq-observe assemble --pr N --repo ROOT [--worktree-root DIR]
+  qq-observe retire-session --role architect|coordinator --session SESSION.jsonl \
+    --repo ROOT --retirement RETIREMENT.json
+  qq-observe session-status --role architect|coordinator --session SESSION.jsonl \
+    --repository OWNER/REPO
   qq-observe finalize --run DIR (--analysis FILE | --failed REASON)
   qq-observe run-finalized --pr N --repository OWNER/REPO
   qq-observe architect-context
@@ -36,7 +40,7 @@ EOF
 
 case "${1:-}" in
   facts | signals | validate-analysis | \
-  assemble | finalize | run-finalized | \
+  assemble | retire-session | session-status | finalize | run-finalized | \
   architect-context | recurrence-keys | disposition-settle) command="$1"; shift ;;
   *) usage ;;
 esac
@@ -49,24 +53,32 @@ python_binary="$QQ_BIN_RESULT"
 
 # Package assembly and delivery commands share one embedded implementation.
 case "$command" in
-  assemble | finalize | run-finalized | \
+  assemble | retire-session | session-status | finalize | run-finalized | \
   architect-context | recurrence-keys | disposition-settle)
     observer_git=""
     observer_gh=""
     observer_backlog=""
-    if [[ "$command" == assemble || "$command" == architect-context || "$command" == disposition-settle ]]; then
+    observer_delegate=""
+    if [[ "$command" == assemble || "$command" == retire-session || "$command" == architect-context || "$command" == disposition-settle ]]; then
       if ! qq_resolve_bin git; then
         printf 'qq-observe: %s\n' "$QQ_BIN_ERROR" >&2
         exit 69
       fi
       observer_git="$QQ_BIN_RESULT"
     fi
-    if [[ "$command" == assemble ]]; then
+    if [[ "$command" == assemble || "$command" == retire-session ]]; then
       if ! qq_resolve_bin gh; then
         printf 'qq-observe: %s\n' "$QQ_BIN_ERROR" >&2
         exit 69
       fi
       observer_gh="$QQ_BIN_RESULT"
+    fi
+    if [[ "$command" == retire-session ]]; then
+      if ! qq_resolve_bin qq-delegate; then
+        printf 'qq-observe: %s\n' "$QQ_BIN_ERROR" >&2
+        exit 69
+      fi
+      observer_delegate="$QQ_BIN_RESULT"
     fi
     if [[ "$command" == architect-context || "$command" == disposition-settle ]]; then
       if ! qq_resolve_bin backlog; then
@@ -75,7 +87,7 @@ case "$command" in
       fi
       observer_backlog="$QQ_BIN_RESULT"
     fi
-    exec "$python_binary" - "$self" "$command" "$observer_git" "$observer_gh" "$observer_backlog" "$@" <<'PY_ASSEMBLER'
+    exec "$python_binary" - "$self" "$command" "$observer_git" "$observer_gh" "$observer_backlog" "$observer_delegate" "$@" <<'PY_ASSEMBLER'
 import datetime as dt
 import hashlib
 import json
@@ -89,7 +101,7 @@ import sys
 import tempfile
 from urllib.parse import quote
 
-self_path, command, git_binary, gh_binary, backlog_binary, *args = sys.argv[1:]
+self_path, command, git_binary, gh_binary, backlog_binary, delegate_binary, *args = sys.argv[1:]
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.fspath(Path(self_path).resolve().parent / "lib"))
 SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -98,6 +110,9 @@ PR_MERGE = re.compile(r"^Merge pull request #(\d+)\b")
 PR_SQUASH = re.compile(r"(?:^|\s)\(#(\d+)\)$")
 STATUS_CAP = 1024 * 1024
 FIRST_LINE_CAP = 1024 * 1024
+ACCOUNTABLE_SESSION_CAP = 16 * 1024 * 1024
+ACCOUNTABLE_ROLES = ("architect", "coordinator")
+LENS_NAMES = ("Simplicity", "Fidelity", "Trustworthiness", "Efficiency")
 
 
 def fail(message, status=64):
@@ -249,6 +264,21 @@ def qualified_runs_root(runs_root, repository, create=False):
 
 def repository_run_dir(runs_root, repository, pr, create_root=False):
     return qualified_runs_root(runs_root, repository, create=create_root) / f"pr-{pr}"
+
+
+def accountable_run_token(repository, role, session_path):
+    identity = f"{repository}\0{role}\0{os.path.realpath(session_path)}".encode()
+    return hashlib.sha256(identity).hexdigest()[:32]
+
+
+def accountable_run_name(repository, role, session_path):
+    return f"session-{role}-{accountable_run_token(repository, role, session_path)}"
+
+
+def accountable_run_dir(runs_root, repository, role, session_path, create_root=False):
+    return qualified_runs_root(
+        runs_root, repository, create=create_root,
+    ) / accountable_run_name(repository, role, session_path)
 
 
 def nearest_existing(path):
@@ -651,13 +681,18 @@ def assemble(values):
             not isinstance(package, dict)
             or package.get("schema") != "qq-observer.package"
             or isinstance(package.get("schema_version"), bool)
-            or package.get("schema_version") != 2
+            or package.get("schema_version") != 3
             or package.get("pr") != pr
             or package.get("repo") != os.fspath(repo)
             or package.get("repository") != repository
             or package.get("branch") != branch
             or package.get("merge_commit") != merge_commit
             or package.get("variant", "guided") != "guided"
+            or package.get("audit_unit") != {
+                "kind": "delivered_change", "repository": repository,
+                "pr": pr, "branch": branch, "merge_commit": merge_commit,
+                "merged_at": merged_at_value,
+            }
         ):
             fail(f"append-only conflict at {package_path}", 65)
         existing_package = True
@@ -1038,7 +1073,12 @@ def assemble(values):
     warnings = list(dict.fromkeys(warnings))
     package = {
         "schema": "qq-observer.package",
-        "schema_version": 2,
+        "schema_version": 3,
+        "audit_unit": {
+            "kind": "delivered_change", "repository": repository,
+            "pr": pr, "branch": branch, "merge_commit": merge_commit,
+            "merged_at": merged_at_value,
+        },
         "repository": repository,
         "pr": pr,
         "branch": branch,
@@ -1062,6 +1102,370 @@ def assemble(values):
     })
 
 
+def accountable_session_document(raw, label):
+    if len(raw) > ACCOUNTABLE_SESSION_CAP:
+        raise ValueError(
+            f"{label} exceeds the {ACCOUNTABLE_SESSION_CAP}-byte accountable-session limit"
+        )
+    entries = []
+    for number, line in enumerate(raw.splitlines(), 1):
+        if not line.strip():
+            raise ValueError(f"{label} has a blank JSONL entry at line {number}")
+        try:
+            entry = json.loads(
+                line.decode("utf-8-sig" if number == 1 else "utf-8"),
+                parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
+            )
+        except (UnicodeDecodeError, ValueError, RecursionError) as error:
+            raise ValueError(f"{label} has malformed JSONL at line {number}: {error}") from error
+        entries.append(entry)
+    if not entries:
+        raise ValueError(f"{label} is empty")
+    if (
+        not isinstance(entries[0], dict)
+        or entries[0].get("type") != "session"
+        or entries[0].get("version") != 3
+    ):
+        raise ValueError(f"{label} does not begin with a Pi v3 session header")
+    return entries
+
+
+def observer_failure_bytes(reason, version=2):
+    return canonical_json_bytes({
+        "schema": "qq-observer.analysis", "schema_version": version,
+        "status": "analysis_failed", "reason": reason,
+    })
+
+
+def record_observer_failure(run_dir, reason, version=2):
+    target = run_dir / "analysis_failed.json"
+    data = observer_failure_bytes(reason, version=version)
+    if os.path.lexists(run_dir / "analysis.json"):
+        fail("run already contains analysis.json", 65)
+    atomic_append(target, data)
+
+
+def retirement_package_failure(
+    runs_root, repository, repo, role, session_path, retirement_id, reason,
+):
+    run_dir = accountable_run_dir(
+        runs_root, repository, role, session_path, create_root=True,
+    )
+    ensure_directory(run_dir, runs_root)
+    package = {
+        "schema": "qq-observer.package", "schema_version": 3,
+        "repository": repository, "variant": "guided", "repo": os.fspath(repo),
+        "assembled_at": utc_now(), "integrity_status": "failed",
+        "audit_unit": {
+            "kind": "accountable_session", "repository": repository,
+            "role": role, "session_path": os.fspath(session_path),
+            "retirement_id": retirement_id, "whole_session": True,
+        },
+        "sessions": [], "warnings": [reason], "unknown_entries": [],
+    }
+    package_path = run_dir / "package.json"
+    if not os.path.lexists(package_path):
+        atomic_append(package_path, canonical_json_bytes(package))
+    else:
+        existing = json_document(
+            read_regular(package_path, "observer package"), "observer package",
+        )
+        if (
+            not isinstance(existing, dict)
+            or existing.get("schema") != "qq-observer.package"
+            or existing.get("schema_version") != 3
+            or existing.get("audit_unit", {}).get("kind") != "accountable_session"
+            or existing.get("audit_unit", {}).get("repository") != repository
+            or existing.get("audit_unit", {}).get("role") != role
+            or existing.get("audit_unit", {}).get("session_path") != os.fspath(session_path)
+        ):
+            fail(f"append-only conflict at {package_path}", 65)
+    record_observer_failure(run_dir, reason, version=2)
+    print(f"qq-observe: accountable-session observation failed: {reason}", file=sys.stderr)
+    raise SystemExit(65)
+
+
+def validate_retirement_receipt(path, role, session_path):
+    raw = read_regular(path, "retirement receipt")
+    receipt = json_document(raw, "retirement receipt")
+    expected = {
+        "schema", "schema_version", "retirement_id", "role", "session", "state",
+        "retired_at", "whole_session", "compaction_count", "succession_ready",
+        "retirement_boundary", "pane_closure_independent",
+    }
+    if not isinstance(receipt, dict) or set(receipt) != expected:
+        raise ValueError("retirement receipt has a malformed or range-selecting shape")
+    retirement_id = receipt.get("retirement_id")
+    if (
+        receipt.get("schema") != "qq-accountable-session.retirement"
+        or receipt.get("schema_version") != 1
+        or not isinstance(retirement_id, str)
+        or not SAFE_COMPONENT.fullmatch(retirement_id)
+        or retirement_id in (".", "..")
+        or receipt.get("role") != role
+        or not isinstance(receipt.get("session"), str)
+        or not os.path.isabs(receipt["session"])
+        or Path(os.path.realpath(receipt["session"])) != session_path
+        or receipt.get("state") != "retired"
+        or receipt.get("whole_session") is not True
+        or isinstance(receipt.get("compaction_count"), bool)
+        or not isinstance(receipt.get("compaction_count"), int)
+        or receipt["compaction_count"] not in (0, 1)
+        or receipt.get("succession_ready") is not True
+        or receipt.get("retirement_boundary") != {
+            "architect": "alignment_transaction_drained",
+            "coordinator": "atomic_swap_complete",
+        }[role]
+        or receipt.get("pane_closure_independent") is not True
+    ):
+        raise ValueError("retirement receipt does not prove one verified whole-session retirement")
+    if not isinstance(receipt.get("retired_at"), str):
+        raise ValueError("retirement receipt lacks retired_at")
+    try:
+        time_value(receipt["retired_at"])
+    except ValueError as error:
+        raise ValueError(f"retirement receipt retired_at {error}") from error
+    return receipt
+
+
+def observer_dispatch_runtime():
+    value = os.environ.get("QQ_DISPATCH_RUNTIME_ROOT")
+    if value is None:
+        state_home = os.environ.get("XDG_STATE_HOME")
+        if state_home is None:
+            home = os.environ.get("HOME")
+            if not home:
+                fail("HOME is required when XDG_STATE_HOME is unset", 65)
+            state_home = os.path.join(home, ".local", "state")
+        value = os.path.join(state_home, "qq", "delegate")
+    if not os.path.isabs(value):
+        fail("dispatch runtime root must be absolute", 65)
+    root = Path(os.path.realpath(value))
+    ensure_directory(root)
+    return root.resolve(strict=True)
+
+
+def retirement_brief(run_dir, session_path):
+    return f"""# Accountable-session Observer work order
+
+Analyze only the accountable-session audit package at `{run_dir}` under
+`delegation/manifests/observer-procedure.md`. The package binds the frozen
+whole Pi transcript at `{session_path}` by canonical path, byte count, and
+SHA-256; it contains no transcript copy and permits no selected range.
+
+Derive facts and signals from that source, emit `qq-observer.analysis` v2 with
+all four required lenses, and finalize through:
+
+`qq-observe finalize --run {run_dir} --analysis <temporary-analysis.json>`
+
+On any package, binding, evidence, or semantic failure, preserve reproducible
+mechanical facts and finalize the run through:
+
+`qq-observe finalize --run {run_dir} --failed <specific-reason>`
+
+Analysis is asynchronous. Succession and pane closure are external and must
+not be awaited or changed. Write only the final result to this delegate run's
+`ENVELOPE.md` following `delegation/manifests/ENVELOPE.md`.
+"""
+
+
+def retire_session(values):
+    options = parse_flags(values, {"--role", "--session", "--repo", "--retirement"})
+    if set(options) != {"--role", "--session", "--repo", "--retirement"}:
+        fail("retire-session requires --role, --session, --repo, and --retirement")
+    role = options["--role"]
+    if role not in ACCOUNTABLE_ROLES:
+        fail("--role must be architect or coordinator")
+    if not os.path.isabs(options["--session"]):
+        fail("--session must be an absolute path")
+    session_path = Path(os.path.realpath(options["--session"]))
+    repo, _ = git_root(options["--repo"])
+    repository = canonical_repository(repo)
+    runs_root = observer_runs_root(create=True)
+    receipt_path_value = options["--retirement"]
+    retirement_id = "unverified"
+    try:
+        if not os.path.isabs(receipt_path_value):
+            raise ValueError("--retirement must be an absolute path")
+        receipt_path = Path(receipt_path_value).resolve(strict=True)
+        receipt = validate_retirement_receipt(receipt_path, role, session_path)
+        retirement_id = receipt["retirement_id"]
+        if not regular_file(Path(options["--session"])):
+            raise ValueError("accountable session is missing, linked, or not a regular file")
+        source_raw = read_regular(session_path, "accountable session")
+        entries = accountable_session_document(source_raw, "accountable session")
+        compactions = sum(
+            isinstance(entry, dict) and entry.get("type") == "compaction"
+            for entry in entries
+        )
+        if compactions != receipt["compaction_count"]:
+            raise ValueError(
+                "retirement receipt contradicts the transcript compaction count"
+            )
+    except SystemExit:
+        retirement_package_failure(
+            runs_root, repository, repo, role, session_path, retirement_id,
+            "retirement receipt or accountable session is missing or malformed",
+        )
+    except (OSError, RuntimeError, ValueError) as error:
+        retirement_package_failure(
+            runs_root, repository, repo, role, session_path, retirement_id, str(error),
+        )
+
+    source_sha256 = hashlib.sha256(source_raw).hexdigest()
+    source_size = len(source_raw)
+    run_dir = accountable_run_dir(
+        runs_root, repository, role, session_path, create_root=True,
+    )
+    ensure_directory(run_dir, runs_root)
+    package = {
+        "schema": "qq-observer.package", "schema_version": 3,
+        "repository": repository, "variant": "guided", "repo": os.fspath(repo),
+        "assembled_at": utc_now(), "integrity_status": "bound",
+        "audit_unit": {
+            "kind": "accountable_session", "repository": repository,
+            "role": role, "session_path": os.fspath(session_path),
+            "retirement_id": receipt["retirement_id"],
+            "retired_at": receipt["retired_at"], "whole_session": True,
+            "compaction_count": receipt["compaction_count"],
+            "retirement_boundary": receipt["retirement_boundary"],
+        },
+        "sessions": [{
+            "label": "accountable-session", "source_path": os.fspath(session_path),
+            "role": "accountable", "evidence": "verified-retirement-whole-session",
+            "storage": "external-bound", "sha256": source_sha256,
+            "size_bytes": source_size, "entries": len(entries),
+        }],
+        "warnings": [], "unknown_entries": [],
+    }
+    package_path = run_dir / "package.json"
+    if os.path.lexists(package_path):
+        existing = json_document(
+            read_regular(package_path, "observer package"), "observer package",
+        )
+        comparable = dict(package)
+        comparable.pop("assembled_at")
+        existing_comparable = dict(existing) if isinstance(existing, dict) else {}
+        existing_comparable.pop("assembled_at", None)
+        if existing_comparable != comparable:
+            fail(f"conflicting duplicate retirement trigger at {package_path}", 65)
+    else:
+        atomic_append(package_path, canonical_json_bytes(package))
+
+    if os.path.lexists(run_dir / "analysis.json"):
+        emit({"status": "completed", "run_dir": os.fspath(run_dir)})
+    if os.path.lexists(run_dir / "analysis_failed.json"):
+        emit({"status": "failed", "run_dir": os.fspath(run_dir)})
+
+    runtime = observer_dispatch_runtime()
+    dispatch_dir = runtime / f"observer-{accountable_run_token(repository, role, session_path)}"
+    ensure_directory(dispatch_dir, runtime)
+    brief_path = dispatch_dir / "BRIEF.md"
+    brief_data = retirement_brief(run_dir, session_path).encode()
+    atomic_append(brief_path, brief_data)
+    terminal_path = dispatch_dir / "TERMINAL"
+    if os.path.lexists(terminal_path):
+        reason = "Observer delegate terminated before finalizing accountable-session analysis"
+        if not regular_file(terminal_path):
+            reason = "Observer delegate left an invalid terminal record"
+        record_observer_failure(run_dir, reason, version=2)
+        fail(reason, 65)
+    launch_path = dispatch_dir / "LAUNCH"
+    if os.path.lexists(launch_path):
+        if not regular_file(launch_path):
+            reason = "Observer delegate left an invalid launch record"
+            record_observer_failure(run_dir, reason, version=2)
+            fail(reason, 65)
+        emit({
+            "status": "started", "run_dir": os.fspath(run_dir),
+            "dispatch_run_dir": os.fspath(dispatch_dir), "duplicate": True,
+        })
+
+    process = run_process([
+        delegate_binary, "start", "--role", "observer", "--cwd", os.fspath(repo),
+        "--brief", os.fspath(brief_path),
+    ], "asynchronous Observer dispatch", cwd=repo)
+    if process.returncode != 0:
+        detail = process.stderr.decode("utf-8", "replace").strip()
+        reason = f"asynchronous Observer dispatch failed{': ' + detail if detail else ''}"
+        record_observer_failure(run_dir, reason, version=2)
+        fail(reason, 65)
+    try:
+        receipt_out = json.loads(
+            process.stdout.decode("utf-8"),
+            parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
+        )
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        reason = "asynchronous Observer dispatch returned invalid JSON"
+        record_observer_failure(run_dir, reason, version=2)
+        fail(reason, 65)
+    if (
+        not isinstance(receipt_out, dict)
+        or receipt_out.get("schema") != "qq-run-start"
+        or receipt_out.get("version") != 1
+        or receipt_out.get("state") != "accepted"
+        or receipt_out.get("run_dir") != os.fspath(dispatch_dir)
+    ):
+        reason = "asynchronous Observer dispatch returned a malformed acceptance receipt"
+        record_observer_failure(run_dir, reason, version=2)
+        fail(reason, 65)
+    emit({
+        "status": "started", "run_dir": os.fspath(run_dir),
+        "dispatch_run_dir": os.fspath(dispatch_dir),
+        "dispatch_run_id": receipt_out.get("run_id"), "duplicate": False,
+    })
+
+
+def session_status(values):
+    options = parse_flags(values, {"--role", "--session", "--repository"})
+    if set(options) != {"--role", "--session", "--repository"}:
+        fail("session-status requires --role, --session, and --repository")
+    role = options["--role"]
+    if role not in ACCOUNTABLE_ROLES:
+        fail("--role must be architect or coordinator")
+    session_value = options["--session"]
+    if not os.path.isabs(session_value):
+        fail("--session must be an absolute path")
+    repository = options["--repository"]
+    parts = repository.split("/")
+    if len(parts) != 2 or any(
+        not part or part in (".", "..") or not SAFE_COMPONENT.fullmatch(part)
+        for part in parts
+    ):
+        fail("--repository must be a safe OWNER/REPO identity")
+    session_path = Path(os.path.realpath(session_value))
+    run_dir = accountable_run_dir(
+        observer_runs_root(create=False), repository, role, session_path,
+    )
+    state = "missing"
+    reason = "observer package is absent"
+    if regular_file(run_dir / "package.json"):
+        state, reason = "started", "analysis is not finalized"
+        try:
+            package = json_document(
+                read_regular(run_dir / "package.json", "observer package"),
+                "observer package",
+            )
+            issue = accountable_binding_issue(package)
+        except SystemExit:
+            issue = "package or transcript binding is invalid"
+        except (OSError, RuntimeError, ValueError) as error:
+            issue = f"package or transcript binding is invalid: {error}"
+        if issue:
+            state, reason = "failed", issue
+        elif os.path.lexists(run_dir / "analysis.json") and os.path.lexists(run_dir / "analysis_failed.json"):
+            state, reason = "failed", "observer run has contradictory terminal records"
+        elif regular_file(run_dir / "analysis.json"):
+            state, reason = "completed", "analysis finalized"
+        elif os.path.lexists(run_dir / "analysis_failed.json"):
+            failure_reason = canonical_analysis_failure_reason(run_dir / "analysis_failed.json")
+            state, reason = "failed", failure_reason or "analysis failure record is invalid"
+    emit({
+        "state": state, "reason": reason, "repository": repository, "role": role,
+        "session": os.fspath(session_path), "run_dir": os.fspath(run_dir),
+    }, 0 if state != "missing" else 1)
+
+
 def canonical_analysis_failure_reason(path):
     if not regular_file(path):
         return None
@@ -1078,7 +1482,7 @@ def canonical_analysis_failure_reason(path):
         or set(item) != {"schema", "schema_version", "status", "reason"}
         or item.get("schema") != "qq-observer.analysis"
         or isinstance(item.get("schema_version"), bool)
-        or item.get("schema_version") != 1
+        or item.get("schema_version") not in (1, 2)
         or item.get("status") != "analysis_failed"
         or not isinstance(item.get("reason"), str)
         or not item["reason"]
@@ -1088,15 +1492,71 @@ def canonical_analysis_failure_reason(path):
     return item["reason"]
 
 
+def minimal_analysis_v2(item):
+    required = {
+        "schema", "schema_version", "audit_unit", "run", "lenses", "entity_audit",
+        "fidelity", "skill_conformity", "episodes", "dropped_signals", "limitations",
+    }
+    if set(item) not in (required, required | {"taxonomy_exception"}):
+        fail("analysis schema violation: v2 success analysis has the wrong fields")
+    audit = item.get("audit_unit")
+    if not isinstance(audit, dict) or audit.get("kind") not in (
+        "delivered_change", "accountable_session",
+    ):
+        fail("analysis schema violation: audit_unit has the wrong shape")
+    run = item.get("run")
+    if (
+        not isinstance(run, dict)
+        or not isinstance(run.get("id"), str) or not run["id"]
+        or not isinstance(run.get("sessions"), list) or not run["sessions"]
+        or not all(isinstance(value, str) and value for value in run["sessions"])
+    ):
+        fail("analysis schema violation: run has the wrong shape")
+    lenses = item.get("lenses")
+    if (
+        not isinstance(lenses, list) or len(lenses) != 4
+        or [row.get("name") for row in lenses if isinstance(row, dict)] != list(LENS_NAMES)
+        or any(row.get("status") not in ("clear", "finding", "unverifiable") for row in lenses)
+    ):
+        fail("analysis schema violation: four ordered lenses are required")
+    episodes = item.get("episodes")
+    if not isinstance(episodes, list):
+        fail("analysis schema violation: episodes must be an array")
+    for index, episode in enumerate(episodes):
+        if not isinstance(episode, dict) or episode.get("primary_lens") not in LENS_NAMES:
+            fail(f"analysis schema violation: episodes[{index}] lacks one primary lens")
+        if not isinstance(episode.get("recurrence_key"), str) or not episode["recurrence_key"]:
+            fail(f"analysis schema violation: episodes[{index}] lacks recurrence_key")
+    if "taxonomy_exception" in item:
+        exception = item["taxonomy_exception"]
+        if not isinstance(exception, dict) or not isinstance(exception.get("recurrence_key"), str):
+            fail("analysis schema violation: taxonomy_exception has the wrong shape")
+    if not isinstance(item.get("dropped_signals"), list):
+        fail("analysis schema violation: dropped_signals must be an array")
+    if not isinstance(item.get("limitations"), str):
+        fail("analysis schema violation: limitations must be a string")
+    return item
+
+
 def minimal_analysis(item):
     if not isinstance(item, dict):
         fail("analysis schema violation: top level must be an object")
+    if item.get("status") == "analysis_failed":
+        if (
+            item.get("schema") == "qq-observer.analysis"
+            and item.get("schema_version") in (1, 2)
+            and set(item) == {"schema", "schema_version", "status", "reason"}
+            and isinstance(item.get("reason"), str)
+        ):
+            fail("rendering requires a successful analysis")
     if (
         item.get("schema") != "qq-observer.analysis"
         or isinstance(item.get("schema_version"), bool)
-        or item.get("schema_version") != 1
+        or item.get("schema_version") not in (1, 2)
     ):
         fail("analysis schema violation: unsupported schema or schema_version")
+    if item.get("schema_version") == 2:
+        return minimal_analysis_v2(item)
     if item.get("status") == "analysis_failed":
         fail("rendering requires a successful analysis")
     if not isinstance(item.get("run"), dict):
@@ -1190,7 +1650,9 @@ def observer_run_directories():
         fail(f"cannot inspect observer runs root: {error}", 65)
     if not stat.S_ISDIR(root_info.st_mode):
         fail("observer runs root is not a directory", 65)
-    pattern = re.compile(r"^pr-[1-9][0-9]*$")
+    pattern = re.compile(
+        r"(?:^pr-[1-9][0-9]*$)|(?:^session-(?:architect|coordinator)-[0-9a-f]{32}$)"
+    )
     run_dirs = []
 
     def real_directory(path, label):
@@ -1220,6 +1682,50 @@ def observer_run_directories():
     return run_dirs
 
 
+def accountable_binding_issue(package):
+    if not isinstance(package, dict):
+        return "observer package is not an object"
+    audit = package.get("audit_unit")
+    if not isinstance(audit, dict) or audit.get("kind") != "accountable_session":
+        return None
+    if package.get("integrity_status") != "bound":
+        return "accountable-session package integrity did not bind"
+    sessions = package.get("sessions")
+    if not isinstance(sessions, list) or len(sessions) != 1:
+        return "accountable-session package does not name exactly one whole session"
+    row = sessions[0]
+    if (
+        not isinstance(row, dict)
+        or row.get("storage") != "external-bound"
+        or row.get("evidence") != "verified-retirement-whole-session"
+        or not isinstance(row.get("source_path"), str)
+        or not os.path.isabs(row["source_path"])
+        or Path(os.path.realpath(row["source_path"])) != Path(audit.get("session_path", ""))
+        or not isinstance(row.get("sha256"), str)
+        or re.fullmatch(r"[0-9a-f]{64}", row["sha256"]) is None
+        or isinstance(row.get("size_bytes"), bool)
+        or not isinstance(row.get("size_bytes"), int)
+        or row["size_bytes"] < 0
+        or row["size_bytes"] > ACCOUNTABLE_SESSION_CAP
+    ):
+        return "accountable-session package binding has the wrong shape"
+    path = Path(row["source_path"])
+    if not regular_file(path):
+        return "bound accountable session is missing or not a regular file"
+    try:
+        raw = read_regular(path, "bound accountable session")
+        entries = accountable_session_document(raw, "bound accountable session")
+    except (SystemExit, ValueError) as error:
+        return f"bound accountable session is invalid: {error}"
+    if len(raw) != row["size_bytes"]:
+        return "bound accountable session byte count changed"
+    if hashlib.sha256(raw).hexdigest() != row["sha256"]:
+        return "bound accountable session SHA-256 changed"
+    if row.get("entries") != len(entries):
+        return "bound accountable session entry count changed"
+    return None
+
+
 def package_metadata(run_dir, require_timestamp=False):
     package = json_document(
         read_regular(run_dir / "package.json", "observer package"),
@@ -1228,11 +1734,8 @@ def package_metadata(run_dir, require_timestamp=False):
     if not isinstance(package, dict) or package.get("schema") != "qq-observer.package":
         fail("observer package has the wrong shape", 65)
     version = package.get("schema_version")
-    pr = package.get("pr")
     timestamp = package.get("assembled_at")
     repo = package.get("repo")
-    if isinstance(pr, bool) or not isinstance(pr, int) or pr <= 0:
-        fail("observer package lacks a positive PR number", 65)
     if package.get("variant", "guided") != "guided":
         fail("observer package has an invalid variant", 65)
     if not isinstance(repo, str) or not os.path.isabs(repo):
@@ -1241,7 +1744,7 @@ def package_metadata(run_dir, require_timestamp=False):
         if not isinstance(timestamp, str):
             fail("observer package lacks assembled_at", 65)
         parse_time(timestamp, "observer package assembled_at")
-    if version != 2:
+    if version not in (2, 3):
         fail("observer package has an unsupported schema_version", 65)
     repository = package.get("repository")
     if not isinstance(repository, str):
@@ -1252,14 +1755,39 @@ def package_metadata(run_dir, require_timestamp=False):
         for part in parts
     ):
         fail("observer package has an invalid GitHub Repository identity", 65)
-    expected = repository_run_dir(
-        observer_runs_root(create=False), repository, pr,
-    )
+
+    audit = package.get("audit_unit") if version == 3 else None
+    if version == 2:
+        pr = package.get("pr")
+        audit = {
+            "kind": "delivered_change", "repository": repository, "pr": pr,
+            "branch": package.get("branch"), "merge_commit": package.get("merge_commit"),
+            "merged_at": package.get("merged_at"),
+        }
+    if not isinstance(audit, dict) or audit.get("repository") != repository:
+        fail("observer package lacks a valid audit_unit", 65)
+    kind = audit.get("kind")
+    pr = audit.get("pr") if kind == "delivered_change" else None
+    if kind == "delivered_change":
+        if isinstance(pr, bool) or not isinstance(pr, int) or pr <= 0:
+            fail("delivered-Change package lacks a positive PR number", 65)
+        expected = repository_run_dir(observer_runs_root(create=False), repository, pr)
+    elif kind == "accountable_session":
+        role = audit.get("role")
+        session_path = audit.get("session_path")
+        if role not in ACCOUNTABLE_ROLES or not isinstance(session_path, str) or not os.path.isabs(session_path):
+            fail("accountable-session package has an invalid identity", 65)
+        expected = accountable_run_dir(
+            observer_runs_root(create=False), repository, role, session_path,
+        )
+    else:
+        fail("observer package audit_unit kind is invalid", 65)
     if Path(os.path.realpath(run_dir)) != Path(os.path.realpath(expected)):
         fail(f"Repository-qualified package is stored under the wrong identity: {run_dir}", 65)
     return {
         "package": package, "repository": repository, "repo": repo,
         "pr": pr, "variant": "guided", "timestamp": timestamp, "legacy": False,
+        "audit_unit": audit,
     }
 
 
@@ -1497,12 +2025,17 @@ def recurrence_keys(values):
 
 
 def architect_round_identity(run_dir, identity):
-    return {
+    source = {
         "run_dir": os.fspath(run_dir), "repo": identity["repo"],
         "repository": identity["repository"], "legacy": identity["legacy"],
         "pr": identity["pr"], "variant": identity["variant"],
         "assembled_at": identity["timestamp"],
     }
+    # Preserve historical v2 source bytes/occurrence identities. Only new v3
+    # packages add the explicit audit-unit discriminator.
+    if identity["package"].get("schema_version") == 3:
+        source["audit_unit"] = identity["audit_unit"]
+    return source
 
 
 def occurrence_episode(episode, position):
@@ -1521,6 +2054,9 @@ def all_architect_occurrences():
     occurrences = []
     for run_dir in observer_run_directories():
         identity = package_metadata(run_dir, require_timestamp=True)
+        if identity["audit_unit"]["kind"] == "accountable_session" \
+            and accountable_binding_issue(identity["package"]) is not None:
+            continue
         if identity["variant"] != "guided" or not regular_file(run_dir / "analysis.json"):
             continue
         analysis_raw = read_regular(run_dir / "analysis.json", "Architect source analysis")
@@ -1528,7 +2064,15 @@ def all_architect_occurrences():
         analysis_sha256 = hashlib.sha256(analysis_raw).hexdigest()
         package_sha256 = sha256_file(run_dir / "package.json", "Architect source package")
         source = architect_round_identity(run_dir, identity)
-        for position, source_episode in enumerate(analysis["episodes"], 1):
+        source_findings = list(analysis["episodes"])
+        if analysis.get("schema_version") == 2 and "taxonomy_exception" in analysis:
+            exception = dict(analysis["taxonomy_exception"])
+            exception.setdefault("title", "Taxonomy exception")
+            exception.setdefault("kind", "taxonomy-exception")
+            exception.setdefault("confidence", "low")
+            exception.setdefault("remedy", {"smallest_change": "Reopen the four-lens contract."})
+            source_findings.append(exception)
+        for position, source_episode in enumerate(source_findings, 1):
             episode = occurrence_episode(source_episode, position)
             occurrence_id = occurrence_identity(source, package_sha256, analysis_sha256, episode)
             occurrences.append({
@@ -1541,7 +2085,7 @@ def all_architect_occurrences():
     occurrences.sort(key=lambda row: (
         row["recurrence_key"], row["source"]["assembled_at"],
         row["source"]["repository"] or row["source"]["repo"],
-        row["source"]["pr"], row["occurrence_id"],
+        row["source"]["pr"] or 0, row["occurrence_id"],
     ))
     identities = [row["occurrence_id"] for row in occurrences]
     if len(identities) != len(set(identities)):
@@ -1552,14 +2096,17 @@ def all_architect_occurrences():
 
 def slim_architect_occurrence(occurrence):
     source = occurrence["source"]
+    slim_source = {
+        name: source[name] for name in (
+            "run_dir", "repository", "legacy", "pr", "variant", "assembled_at",
+        )
+    }
+    if "audit_unit" in source:
+        slim_source["audit_unit"] = source["audit_unit"]
     return {
         "occurrence_id": occurrence["occurrence_id"],
         "recurrence_key": occurrence["recurrence_key"],
-        "source": {
-            name: source[name] for name in (
-                "run_dir", "repository", "legacy", "pr", "variant", "assembled_at",
-            )
-        },
+        "source": slim_source,
     }
 
 
@@ -1575,30 +2122,48 @@ def architect_health_state():
     rows = []
     for run_dir in observer_run_directories():
         identity = package_metadata(run_dir, require_timestamp=True)
+        package = identity["package"]
+        audit = identity["audit_unit"]
+        session_unit = audit["kind"] == "accountable_session"
         analysis_path = run_dir / "analysis.json"
         failure_path = run_dir / "analysis_failed.json"
         analysis_present = os.path.lexists(analysis_path)
         failure_present = os.path.lexists(failure_path)
-        if analysis_present and failure_present:
-            fail(f"observer run has both terminal analysis records: {run_dir}", 65)
+        terminal_issue = (
+            "observer run has contradictory terminal analysis records"
+            if analysis_present and failure_present else None
+        )
+        if terminal_issue is not None and not session_unit:
+            fail(f"{terminal_issue}: {run_dir}", 65)
 
-        status = "pending"
+        status = "started" if session_unit else "pending"
         reason = "analysis is not finalized"
         reason_truncated = False
+        binding_issue = terminal_issue or (
+            accountable_binding_issue(package) if session_unit else None
+        )
         failure_reason = canonical_analysis_failure_reason(failure_path)
-        if failure_reason is not None:
-            status = "analysis_failed"
+        if binding_issue is not None:
+            status = "failed" if session_unit else "analysis_failed"
+            reason, reason_truncated = bounded_architect_health_reason(binding_issue)
+        elif failure_reason is not None:
+            status = "failed" if session_unit else "analysis_failed"
             reason, reason_truncated = bounded_architect_health_reason(failure_reason)
         elif failure_present:
+            status = "failed" if session_unit else "analysis_failed"
             reason = "analysis failure record is invalid; inspect analysis_failed.json"
             reason_truncated = True
         elif regular_file(analysis_path):
-            continue
+            if not session_unit:
+                continue
+            status = "completed"
+            reason = "analysis finalized"
 
         rows.append({
             "status": status,
             "repository": identity["repository"],
             "pr": identity["pr"],
+            "audit_unit": audit,
             "run_dir": os.fspath(run_dir),
             "assembled_at": identity["timestamp"],
             "reason": reason,
@@ -1606,7 +2171,7 @@ def architect_health_state():
         })
     rows.sort(key=lambda row: (
         -time_value(row["assembled_at"]).timestamp(), row["repository"],
-        row["pr"], row["run_dir"],
+        row["pr"] or 0, row["run_dir"],
     ))
     return {
         "rounds": rows[:ARCHITECT_HEALTH_LIMIT],
@@ -1750,7 +2315,7 @@ def run_finalized(values):
         if (
             isinstance(package, dict)
             and package.get("schema") == "qq-observer.package"
-            and package.get("schema_version") == 2
+            and package.get("schema_version") in (2, 3)
             and package.get("variant", "guided") == "guided"
             and package.get("pr") == pr
             and package.get("repository") == repository
@@ -1831,15 +2396,12 @@ def render_bytes(run_dir, analysis=None):
     if analysis is None:
         analysis = json_document(read_regular(run_dir / "analysis.json", "analysis JSON"), "analysis JSON")
     analysis = minimal_analysis(analysis)
-    labels = []
-    for row in sorted(package["sessions"], key=lambda item: item.get("label", "")):
-        label = row.get("label")
-        if not isinstance(label, str) or not SAFE_COMPONENT.fullmatch(label):
-            fail("observer package session has an unsafe label")
-        labels.append(label)
+    session_rows = packaged_session_paths(run_dir, package)
+    labels = [label for label, _ in sorted(session_rows)]
     if not labels:
         fail("observer package contains no sessions")
-    scratch, derived = derive_session_facts(run_dir, labels)
+    source_paths = dict(session_rows)
+    scratch, derived = derive_session_facts(run_dir, labels, source_paths)
     facts_rows = []
     for label in labels:
         path = derived[label]
@@ -1864,16 +2426,30 @@ def render_bytes(run_dir, analysis=None):
 
     pr = package.get("pr")
     generated = package.get("assembled_at")
-    if not isinstance(pr, int) or isinstance(pr, bool) or not isinstance(generated, str):
-        fail("observer package lacks pr or assembled_at")
+    audit = package.get("audit_unit", {})
+    if not isinstance(generated, str):
+        fail("observer package lacks assembled_at")
+    if audit.get("kind") == "accountable_session":
+        heading = (
+            "# qq observer analysis — "
+            f"{audit.get('role', 'accountable')} session {audit.get('retirement_id', '')}"
+        )
+    elif isinstance(pr, int) and not isinstance(pr, bool):
+        heading = f"# qq observer analysis — PR #{pr}"
+    else:
+        fail("delivered-Change observer package lacks pr")
     lines = [
-        f"# qq observer analysis — PR #{pr}", "",
+        heading, "",
         f"- Generated at: `{generated}`",
-        f"- Change: `{analysis['run']['change']}`",
+        f"- Audit unit: `{analysis['run'].get('id', analysis['run'].get('change'))}`",
         "- Sessions:",
     ]
     for session in analysis["run"]["sessions"]:
         lines.append(f"  - `{session}`")
+    if analysis.get("schema_version") == 2:
+        lines.extend(["", "## Four lenses", ""])
+        for lens in analysis["lenses"]:
+            lines.append(f"- **{lens['name']}** — `{lens['status']}`: {lens['summary']}")
     lines.extend([
         "", "## Session facts", "",
         "| Session | Entries | Turns by role | Token usage | Tool calls | Tool errors | Duration ms | Unknown entries |",
@@ -1900,6 +2476,7 @@ def render_bytes(run_dir, analysis=None):
         lines.extend([
             f"### {rank}. {episode['title']}", "",
             f"- Kind: `{episode['kind']}`",
+            *([f"- Primary lens: `{episode['primary_lens']}`"] if "primary_lens" in episode else []),
             "- Sessions: " + ", ".join(f"`{value}`" for value in episode["sessions"]),
             f"- Confidence: `{episode['confidence']}` — {episode['confidence_why']}",
             f"- Recurrence key: `{episode['recurrence_key']}`", "",
@@ -1960,7 +2537,40 @@ def run_directory(value):
     return run_dir
 
 
-def derive_session_facts(run_dir, labels):
+def packaged_session_paths(run_dir, package):
+    rows = package.get("sessions") if isinstance(package, dict) else None
+    if not isinstance(rows, list):
+        fail("observer package has the wrong session shape", 65)
+    if package.get("audit_unit", {}).get("kind") == "accountable_session":
+        issue = accountable_binding_issue(package)
+        if issue is not None:
+            fail(issue, 65)
+    sessions = []
+    labels = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            fail("observer package session has the wrong shape", 65)
+        label = row.get("label")
+        if (
+            not isinstance(label, str) or not SAFE_COMPONENT.fullmatch(label)
+            or label in labels
+        ):
+            fail("observer package session has an unsafe or duplicate label", 65)
+        labels.add(label)
+        if row.get("storage") == "external-bound":
+            source = row.get("source_path")
+            if not isinstance(source, str) or not os.path.isabs(source):
+                fail("external-bound session lacks its canonical source", 65)
+            session = Path(source)
+        else:
+            session = run_dir / "sessions" / f"{label}.jsonl"
+        if not regular_file(session):
+            fail(f"observer package session inputs are incomplete: {label}", 65)
+        sessions.append((label, session))
+    return sessions
+
+
+def derive_session_facts(run_dir, labels, source_paths=None):
     """Derive facts for packaged sessions into a scratch directory.
 
     Facts are derivable-on-read views of the packaged transcripts; the run
@@ -1970,7 +2580,10 @@ def derive_session_facts(run_dir, labels):
     scratch = tempfile.TemporaryDirectory(prefix="qq-observe-facts-")
     derived = {}
     for label in labels:
-        session = run_dir / "sessions" / f"{label}.jsonl"
+        session = (
+            source_paths[label] if source_paths is not None
+            else run_dir / "sessions" / f"{label}.jsonl"
+        )
         process = run_process(
             [self_path, "facts", os.fspath(session)], "qq-observe facts",
         )
@@ -2011,23 +2624,7 @@ def validated_package_analysis(run_dir, analysis_path):
     if not isinstance(repo_value, str):
         fail("observer package lacks its Repository root", 65)
     repo = canonical_directory(repo_value, "package Repository root")
-    sessions = []
-    labels = set()
-    for row in package["sessions"]:
-        if not isinstance(row, dict):
-            fail("observer package session has the wrong shape", 65)
-        label = row.get("label")
-        if (
-            not isinstance(label, str)
-            or not SAFE_COMPONENT.fullmatch(label)
-            or label in labels
-        ):
-            fail("observer package session has an unsafe or duplicate label", 65)
-        labels.add(label)
-        session = run_dir / "sessions" / f"{label}.jsonl"
-        if not regular_file(session):
-            fail(f"observer package session inputs are incomplete: {label}", 65)
-        sessions.append((label, session))
+    sessions = packaged_session_paths(run_dir, package)
     if not sessions:
         fail("observer package contains no sessions", 65)
 
@@ -2035,7 +2632,9 @@ def validated_package_analysis(run_dir, analysis_path):
     # the transcripts they recompute from.
     validation = [self_path, "validate-analysis", os.fspath(analysis_path)]
     validation.extend(os.fspath(session) for _, session in sessions)
-    scratch, derived = derive_session_facts(run_dir, [label for label, _ in sessions])
+    scratch, derived = derive_session_facts(
+        run_dir, [label for label, _ in sessions], dict(sessions),
+    )
     for label, session in sessions:
         validation.extend(("--facts", f"{session}={derived[label]}"))
     process = run_process(validation, "analysis validation", cwd=repo)
@@ -2060,7 +2659,30 @@ def validated_package_analysis(run_dir, analysis_path):
     ranked = json_document(process.stdout, "validated analysis output")
     if isinstance(ranked, dict) and ranked.get("status") == "analysis_failed":
         fail("successful finalization requires findings; use --failed instead", 65)
+    if not isinstance(ranked, dict) or ranked.get("schema_version") != 2:
+        fail("newly finalized analysis must use the four-lens v2 contract", 65)
     ranked = minimal_analysis(ranked)
+    package_audit = package.get("audit_unit")
+    if package.get("schema_version") == 2:
+        package_audit = {
+            "kind": "delivered_change", "repository": package.get("repository"),
+            "pr": package.get("pr"), "branch": package.get("branch"),
+            "merge_commit": package.get("merge_commit"), "merged_at": package.get("merged_at"),
+        }
+    if ranked.get("audit_unit") != package_audit:
+        fail("analysis audit_unit does not match the immutable observer package", 65)
+    if "taxonomy_exception" in ranked:
+        recurrence_key = ranked["taxonomy_exception"]["recurrence_key"]
+        previous = {
+            row["recurrence_key"] for row in all_architect_occurrences()
+            if row["source"]["run_dir"] != os.fspath(run_dir)
+        }
+        if recurrence_key in previous:
+            fail(
+                "taxonomy_exception recurrence reopens the four-lens contract; "
+                "it cannot be finalized as another exception",
+                65,
+            )
     return (
         json.dumps(ranked, separators=(",", ":"), sort_keys=True) + "\n"
     ).encode()
@@ -2096,8 +2718,13 @@ def finalize(values):
             fail("--failed requires a non-empty reason")
         if os.path.lexists(run_dir / "analysis.json"):
             fail("run already contains analysis.json", 65)
+        package = json_document(
+            read_regular(run_dir / "package.json", "observer package"),
+            "observer package",
+        )
         failure = {
-            "schema": "qq-observer.analysis", "schema_version": 1,
+            "schema": "qq-observer.analysis",
+            "schema_version": 2 if package.get("schema_version") == 3 else 1,
             "status": "analysis_failed", "reason": reason,
         }
         writes.append((
@@ -2115,6 +2742,10 @@ def finalize(values):
 
 if command == "assemble":
     assemble(args)
+elif command == "retire-session":
+    retire_session(args)
+elif command == "session-status":
+    session_status(args)
 elif command == "finalize":
     finalize(args)
 elif command == "run-finalized":
@@ -2199,15 +2830,38 @@ ANALYSIS_ROOT_CAUSE_LOCATIONS = {
     "harness-design",
 }
 ANALYSIS_CONFIDENCE = {"high": 3, "medium": 2, "low": 1}
+ANALYSIS_LENSES = ("Simplicity", "Fidelity", "Trustworthiness", "Efficiency")
+LENS_STATUSES = {"clear", "finding", "unverifiable"}
+DELIVERED_FIDELITY_PHASES = (
+    "alignment", "realignments", "execution", "review", "merged_outcome",
+    "promised_proof",
+)
+DELIVERED_FIDELITY_CLASSIFICATIONS = {
+    "legitimate_agent_owned_detail", "genuine_realignment", "silent_stakes_drift",
+    "foreseeable_stakes_drift", "unverifiable",
+}
+ROLE_FIDELITY_CATEGORIES = {
+    "architect": (
+        "stakes_clarity", "ask_comprehensibility", "alignment_timing_truth",
+        "operator_decisions", "scope_control", "correction",
+    ),
+    "coordinator": (
+        "admission", "authority", "overlap", "recovery", "handoff", "pipeline",
+        "retirement",
+    ),
+}
+ROLE_FIDELITY_ASSESSMENTS = {"conformant", "violation", "unverifiable"}
+SKILL_PHASES = ("alignment", "realignment", "operator_facing")
 # Sane-session bound: rejects absurd magnitudes before cost arithmetic.
 SANE_SESSION_BOUND = 10 ** 15
 analysis_validation_mode = False
+analysis_failure_version = 1
 
 
 def analysis_failed(message):
     print(json.dumps({
         "schema": "qq-observer.analysis",
-        "schema_version": 1,
+        "schema_version": analysis_failure_version,
         "status": "analysis_failed",
         "reason": str(message),
     }, separators=(",", ":"), sort_keys=True))
@@ -2475,6 +3129,57 @@ def utc_text(value):
     return value.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def normalized_skill_phase(moment):
+    return {
+        "alignment": "alignment", "realignment": "realignment",
+        "operator-action-ask": "operator_facing",
+        "judgment-reserved-delivery": "operator_facing",
+    }.get(moment)
+
+
+def operator_ask_moment(call):
+    if call["name"] != "operator_ask":
+        return None
+    try:
+        arguments = json.loads(call["arguments"])
+    except (TypeError, ValueError, RecursionError):
+        return None
+    return arguments.get("moment") if isinstance(arguments, dict) else None
+
+
+def mechanical_skill_evidence(analysis):
+    phases = {
+        name: {"trigger_entries": [], "fire_entries": []}
+        for name in ("alignment", "realignment", "operator_facing")
+    }
+    if analysis["users"]:
+        phases["alignment"]["trigger_entries"].append(analysis["users"][0][0])
+    phases["realignment"]["trigger_entries"].extend(
+        line for line, text in analysis["users"] if CORRECTION.search(text)
+    )
+    for call in analysis["calls"]:
+        if operator_request_call(call):
+            phases["operator_facing"]["trigger_entries"].append(call["line"])
+        phase = normalized_skill_phase(operator_ask_moment(call))
+        if phase is not None:
+            phases[phase]["trigger_entries"].append(call["line"])
+            phases[phase]["fire_entries"].append(call["line"])
+    for line, text in analysis["assistant_texts"]:
+        if COMPLETION_CLAIM_IDIOMS.search(text):
+            phases["operator_facing"]["trigger_entries"].append(line)
+    repair_entries = [
+        line for line, text in analysis["users"] + analysis["assistant_texts"]
+        if re.search(r"(?<!\S)/bro(?!\S)", text)
+    ]
+    for values in phases.values():
+        values["trigger_entries"] = sorted(set(values["trigger_entries"]))
+        values["fire_entries"] = sorted(set(values["fire_entries"]))
+    return {
+        "phases": phases, "repair_entries": sorted(set(repair_entries)),
+        "compaction_entries": sorted(analysis["compactions"]),
+    }
+
+
 def session_facts(analysis):
     start, end = min(analysis["observed"]), max(analysis["observed"])
     duration = round((end - start).total_seconds() * 1000)
@@ -2533,6 +3238,7 @@ def session_facts(analysis):
             "by_shape": dict(sorted(unknown_shapes.items())),
             "entries": unknown_rows,
         },
+        "skill_evidence": mechanical_skill_evidence(analysis),
     }
 
 
@@ -2776,13 +3482,314 @@ def canonical_source(value):
     return f"{prefix}{separator}{canonical_path(path)}"
 
 
+def validate_v2_evidence(value, label, minimum=1):
+    if not isinstance(value, list) or len(value) < minimum:
+        fail(f"analysis schema violation: {label} must contain at least {minimum} citations")
+    for index, citation in enumerate(value):
+        citation_label = f"{label}[{index}]"
+        analysis_object(citation, {"session", "entries", "quote"}, citation_label)
+        analysis_string(citation["session"], f"{citation_label}.session", nonempty=True)
+        citation["session"] = canonical_path(citation["session"])
+        analysis_entry_array(citation["entries"], f"{citation_label}.entries")
+        if len(citation["entries"]) != 1:
+            fail(
+                f"analysis schema violation: {citation_label}.entries must contain "
+                "exactly one entry; use separate evidence objects per entry"
+            )
+        analysis_string(citation["quote"], f"{citation_label}.quote", maximum=200)
+
+
+def validate_v2_unverifiable(value, label, unverifiable):
+    if unverifiable:
+        analysis_string(value.get("unverifiable_reason"), f"{label}.unverifiable_reason", nonempty=True)
+    elif "unverifiable_reason" in value:
+        fail(f"analysis schema violation: {label}.unverifiable_reason is only valid when unverifiable")
+
+
+def validate_v2_episode(episode, label):
+    fields = {
+        "kind", "primary_lens", "title", "sessions", "evidence", "what_happened",
+        "root_cause", "root_cause_location", "cost", "remedy", "confidence",
+        "confidence_why", "recurrence_key",
+    }
+    analysis_object(episode, fields, label, optional={"rank", "no_signal"})
+    if "rank" in episode:
+        analysis_integer(episode["rank"], f"{label}.rank", minimum=1)
+    if "no_signal" in episode and not isinstance(episode["no_signal"], bool):
+        fail(f"analysis schema violation: {label}.no_signal must be a boolean")
+    analysis_string(episode["kind"], f"{label}.kind")
+    if episode["kind"] not in ANALYSIS_KINDS:
+        fail(f"analysis schema violation: {label}.kind is not in the taxonomy")
+    if episode.get("primary_lens") not in ANALYSIS_LENSES:
+        fail(f"analysis schema violation: {label}.primary_lens must name one required lens")
+    analysis_string(episode["title"], f"{label}.title", nonempty=True)
+    analysis_string_array(episode["sessions"], f"{label}.sessions", minimum=1)
+    episode["sessions"] = list(map(canonical_path, episode["sessions"]))
+    refuse_duplicates(episode["sessions"], "duplicate session in episode.sessions")
+    validate_v2_evidence(episode["evidence"], f"{label}.evidence")
+    for field in ("what_happened", "root_cause"):
+        analysis_string(episode[field], f"{label}.{field}", nonempty=True)
+    if episode.get("root_cause_location") not in ANALYSIS_ROOT_CAUSE_LOCATIONS:
+        fail(f"analysis schema violation: {label}.root_cause_location is invalid")
+    cost = episode["cost"]
+    analysis_object(cost, {"turns", "tokens", "duration_ms", "source"}, f"{label}.cost")
+    for field in ("turns", "tokens", "duration_ms"):
+        analysis_integer(cost[field], f"{label}.cost.{field}", minimum=0, maximum=SANE_SESSION_BOUND)
+    analysis_string(cost["source"], f"{label}.cost.source", nonempty=True)
+    cost["source"] = canonical_source(cost["source"])
+    remedy = episode["remedy"]
+    analysis_object(remedy, {"type", "smallest_change"}, f"{label}.remedy")
+    analysis_string(remedy["type"], f"{label}.remedy.type", nonempty=True)
+    analysis_string(remedy["smallest_change"], f"{label}.remedy.smallest_change", nonempty=True)
+    if episode.get("confidence") not in ANALYSIS_CONFIDENCE:
+        fail(f"analysis schema violation: {label}.confidence is invalid")
+    analysis_string(episode["confidence_why"], f"{label}.confidence_why")
+    analysis_string(episode["recurrence_key"], f"{label}.recurrence_key", nonempty=True)
+
+
+def validate_taxonomy_exception(exception):
+    label = "taxonomy_exception"
+    analysis_object(exception, {
+        "title", "evidence", "operator_objective", "materiality", "non_fits",
+        "root_cause", "root_cause_location", "remedy", "confidence",
+        "confidence_why", "recurrence_key",
+    }, label)
+    analysis_string(exception["title"], f"{label}.title", nonempty=True)
+    validate_v2_evidence(exception["evidence"], f"{label}.evidence")
+    for field in ("operator_objective", "materiality"):
+        value = exception[field]
+        analysis_object(value, {"summary", "evidence"}, f"{label}.{field}")
+        analysis_string(value["summary"], f"{label}.{field}.summary", nonempty=True)
+        validate_v2_evidence(value["evidence"], f"{label}.{field}.evidence")
+    non_fits = exception["non_fits"]
+    if not isinstance(non_fits, list) or len(non_fits) != 4:
+        fail("analysis schema violation: taxonomy_exception.non_fits requires four lenses")
+    for index, row in enumerate(non_fits):
+        analysis_object(row, {"lens", "why"}, f"{label}.non_fits[{index}]")
+        if row.get("lens") != ANALYSIS_LENSES[index]:
+            fail("analysis schema violation: taxonomy_exception.non_fits has the wrong lens order")
+        analysis_string(row["why"], f"{label}.non_fits[{index}].why", nonempty=True)
+    analysis_string(exception["root_cause"], f"{label}.root_cause", nonempty=True)
+    if exception.get("root_cause_location") not in ANALYSIS_ROOT_CAUSE_LOCATIONS:
+        fail(f"analysis schema violation: {label}.root_cause_location is invalid")
+    remedy = exception["remedy"]
+    analysis_object(remedy, {"type", "smallest_change"}, f"{label}.remedy")
+    analysis_string(remedy["type"], f"{label}.remedy.type", nonempty=True)
+    analysis_string(remedy["smallest_change"], f"{label}.remedy.smallest_change", nonempty=True)
+    if exception.get("confidence") not in ANALYSIS_CONFIDENCE:
+        fail(f"analysis schema violation: {label}.confidence is invalid")
+    analysis_string(exception["confidence_why"], f"{label}.confidence_why")
+    key = exception["recurrence_key"]
+    if not isinstance(key, str) or re.fullmatch(r"[a-z0-9][a-z0-9._-]*", key) is None:
+        fail("analysis schema violation: taxonomy_exception.recurrence_key is not stable")
+
+
+def validate_analysis_shape_v2(item):
+    fields = {
+        "schema", "schema_version", "audit_unit", "run", "lenses", "entity_audit",
+        "fidelity", "skill_conformity", "episodes", "dropped_signals", "limitations",
+    }
+    analysis_object(item, fields, "success analysis", optional={"taxonomy_exception"})
+    audit = item["audit_unit"]
+    if not isinstance(audit, dict):
+        fail("analysis schema violation: audit_unit must be an object")
+    kind = audit.get("kind")
+    if kind == "delivered_change":
+        analysis_object(audit, {
+            "kind", "repository", "pr", "branch", "merge_commit", "merged_at",
+        }, "audit_unit")
+        analysis_integer(audit["pr"], "audit_unit.pr", minimum=1)
+        for field in ("repository", "branch", "merge_commit", "merged_at"):
+            analysis_string(audit[field], f"audit_unit.{field}", nonempty=True)
+    elif kind == "accountable_session":
+        analysis_object(audit, {
+            "kind", "repository", "role", "session_path", "retirement_id", "retired_at",
+            "whole_session", "compaction_count", "retirement_boundary",
+        }, "audit_unit")
+        if audit.get("role") not in ROLE_FIDELITY_CATEGORIES:
+            fail("analysis schema violation: audit_unit.role must be architect or coordinator")
+        for field in ("repository", "session_path", "retirement_id", "retired_at"):
+            analysis_string(audit[field], f"audit_unit.{field}", nonempty=True)
+        audit["session_path"] = canonical_path(audit["session_path"])
+        compaction_count = audit.get("compaction_count")
+        if (
+            audit.get("whole_session") is not True
+            or isinstance(compaction_count, bool)
+            or not isinstance(compaction_count, int)
+            or compaction_count not in (0, 1)
+        ):
+            fail(
+                "analysis schema violation: accountable_session must bind one whole "
+                "retired session with at most one compaction"
+            )
+        if audit.get("retirement_boundary") != {
+            "architect": "alignment_transaction_drained",
+            "coordinator": "atomic_swap_complete",
+        }[audit["role"]]:
+            fail("analysis schema violation: accountable_session has the wrong role retirement boundary")
+    else:
+        fail("analysis schema violation: audit_unit.kind is invalid")
+
+    run = item["run"]
+    analysis_object(run, {"id", "sessions"}, "run")
+    analysis_string(run["id"], "run.id", nonempty=True)
+    analysis_string_array(run["sessions"], "run.sessions", minimum=1)
+    run["sessions"] = list(map(canonical_path, run["sessions"]))
+    refuse_duplicates(run["sessions"], "duplicate session in run.sessions")
+
+    lenses = item["lenses"]
+    if not isinstance(lenses, list) or len(lenses) != 4:
+        fail("analysis schema violation: lenses must contain exactly four items")
+    for index, lens in enumerate(lenses):
+        label = f"lenses[{index}]"
+        analysis_object(lens, {"name", "status", "summary", "evidence"}, label,
+                        optional={"unverifiable_reason"})
+        if lens.get("name") != ANALYSIS_LENSES[index]:
+            fail("analysis schema violation: lenses have the wrong names or order")
+        if lens.get("status") not in LENS_STATUSES:
+            fail(f"analysis schema violation: {label}.status is invalid")
+        analysis_string(lens["summary"], f"{label}.summary", nonempty=True)
+        unverifiable = lens["status"] == "unverifiable"
+        validate_v2_evidence(lens["evidence"], f"{label}.evidence", 0 if unverifiable else 1)
+        validate_v2_unverifiable(lens, label, unverifiable)
+
+    entity_audit = item["entity_audit"]
+    if not isinstance(entity_audit, list) or not entity_audit:
+        fail("analysis schema violation: entity_audit must contain at least one entry")
+    entity_duplicate = False
+    entity_unverifiable = False
+    for index, row in enumerate(entity_audit):
+        label = f"entity_audit[{index}]"
+        analysis_object(row, {
+            "entity", "function", "authority", "state", "lifecycle", "assessment",
+            "evidence",
+        }, label, optional={"unverifiable_reason"})
+        for field in ("entity", "function", "authority", "state", "lifecycle"):
+            analysis_string(row[field], f"{label}.{field}", nonempty=True)
+        if row.get("assessment") not in ("necessary", "duplicate", "unverifiable"):
+            fail(f"analysis schema violation: {label}.assessment is invalid")
+        unverifiable = row["assessment"] == "unverifiable"
+        entity_duplicate |= row["assessment"] == "duplicate"
+        entity_unverifiable |= unverifiable
+        validate_v2_evidence(row["evidence"], f"{label}.evidence", 0 if unverifiable else 1)
+        validate_v2_unverifiable(row, label, unverifiable)
+
+    fidelity = item["fidelity"]
+    fidelity_violation = False
+    fidelity_unverifiable = False
+    if kind == "delivered_change":
+        analysis_object(fidelity, {"kind", "walk"}, "fidelity")
+        if fidelity.get("kind") != kind:
+            fail("analysis schema violation: fidelity kind does not match audit_unit")
+        expected_steps = DELIVERED_FIDELITY_PHASES
+        classifications = DELIVERED_FIDELITY_CLASSIFICATIONS
+        walk = fidelity["walk"]
+        if not isinstance(walk, list) or len(walk) != len(expected_steps):
+            fail("analysis schema violation: delivered-Change Fidelity walk is incomplete")
+        for index, row in enumerate(walk):
+            label = f"fidelity.walk[{index}]"
+            analysis_object(row, {"phase", "classification", "summary", "evidence"}, label,
+                            optional={"unverifiable_reason"})
+            if row.get("phase") != expected_steps[index] or row.get("classification") not in classifications:
+                fail("analysis schema violation: delivered-Change Fidelity walk has the wrong order or classification")
+            analysis_string(row["summary"], f"{label}.summary", nonempty=True)
+            unverifiable = row["classification"] == "unverifiable"
+            fidelity_unverifiable |= unverifiable
+            fidelity_violation |= row["classification"] in (
+                "silent_stakes_drift", "foreseeable_stakes_drift",
+            )
+            validate_v2_evidence(row["evidence"], f"{label}.evidence", 0 if unverifiable else 1)
+            validate_v2_unverifiable(row, label, unverifiable)
+    else:
+        analysis_object(fidelity, {"kind", "role", "walk"}, "fidelity")
+        role = audit["role"]
+        if fidelity.get("kind") != kind or fidelity.get("role") != role:
+            fail("analysis schema violation: role Fidelity identity does not match audit_unit")
+        expected_steps = ROLE_FIDELITY_CATEGORIES[role]
+        walk = fidelity["walk"]
+        if not isinstance(walk, list) or len(walk) != len(expected_steps):
+            fail("analysis schema violation: accountable-session Fidelity walk is incomplete")
+        for index, row in enumerate(walk):
+            label = f"fidelity.walk[{index}]"
+            analysis_object(row, {"category", "assessment", "summary", "evidence"}, label,
+                            optional={"unverifiable_reason"})
+            if row.get("category") != expected_steps[index] or row.get("assessment") not in ROLE_FIDELITY_ASSESSMENTS:
+                fail("analysis schema violation: role Fidelity walk has the wrong order or assessment")
+            analysis_string(row["summary"], f"{label}.summary", nonempty=True)
+            unverifiable = row["assessment"] == "unverifiable"
+            fidelity_unverifiable |= unverifiable
+            fidelity_violation |= row["assessment"] == "violation"
+            validate_v2_evidence(row["evidence"], f"{label}.evidence", 0 if unverifiable else 1)
+            validate_v2_unverifiable(row, label, unverifiable)
+
+    skill = item["skill_conformity"]
+    if not isinstance(skill, list) or len(skill) != 3:
+        fail("analysis schema violation: skill_conformity requires three phases")
+    for index, row in enumerate(skill):
+        label = f"skill_conformity[{index}]"
+        analysis_object(row, {"phase", "assessment", "summary", "facts_sessions", "evidence"}, label,
+                        optional={"unverifiable_reason"})
+        if row.get("phase") != SKILL_PHASES[index] or row.get("assessment") not in ROLE_FIDELITY_ASSESSMENTS:
+            fail("analysis schema violation: skill_conformity has the wrong phase order or assessment")
+        analysis_string(row["summary"], f"{label}.summary", nonempty=True)
+        analysis_string_array(row["facts_sessions"], f"{label}.facts_sessions", minimum=1)
+        row["facts_sessions"] = list(map(canonical_path, row["facts_sessions"]))
+        refuse_duplicates(row["facts_sessions"], f"duplicate session in {label}.facts_sessions")
+        unverifiable = row["assessment"] == "unverifiable"
+        fidelity_unverifiable |= unverifiable
+        fidelity_violation |= row["assessment"] == "violation"
+        validate_v2_evidence(row["evidence"], f"{label}.evidence", 0 if unverifiable else 1)
+        validate_v2_unverifiable(row, label, unverifiable)
+
+    episodes = item["episodes"]
+    if not isinstance(episodes, list) or len(episodes) > 5:
+        fail("analysis schema violation: episodes must be an array with at most 5 items")
+    for index, episode in enumerate(episodes):
+        validate_v2_episode(episode, f"episodes[{index}]")
+    counts = Counter(episode["primary_lens"] for episode in episodes)
+    for index, lens in enumerate(lenses):
+        has_findings = counts[lens["name"]] > 0
+        if (lens["status"] == "finding") != has_findings:
+            fail(f"analysis schema violation: {lens['name']} status disagrees with primary findings")
+    if entity_duplicate != (counts["Simplicity"] > 0):
+        fail("analysis schema violation: Simplicity findings disagree with the entity audit")
+    if entity_unverifiable and not entity_duplicate and lenses[0]["status"] != "unverifiable":
+        fail("analysis schema violation: unverifiable entity audit requires unverifiable Simplicity")
+    if fidelity_violation != (counts["Fidelity"] > 0):
+        fail("analysis schema violation: Fidelity findings disagree with the required walks")
+    if fidelity_unverifiable and not fidelity_violation and lenses[1]["status"] != "unverifiable":
+        fail("analysis schema violation: unverifiable Fidelity evidence requires unverifiable Fidelity")
+
+    for row in skill:
+        if set(row["facts_sessions"]) != set(run["sessions"]):
+            fail("analysis schema violation: skill_conformity must cite facts for every packaged session")
+    if "taxonomy_exception" in item:
+        validate_taxonomy_exception(item["taxonomy_exception"])
+        if item["taxonomy_exception"]["recurrence_key"] in {
+            episode["recurrence_key"] for episode in episodes
+        }:
+            fail("analysis schema violation: taxonomy_exception duplicates a classified finding")
+
+    dropped = item["dropped_signals"]
+    if not isinstance(dropped, list):
+        fail("analysis schema violation: dropped_signals must be an array")
+    for index, signal in enumerate(dropped):
+        label = f"dropped_signals[{index}]"
+        analysis_object(signal, {"kind", "entries", "why"}, label)
+        analysis_string(signal["kind"], f"{label}.kind", nonempty=True)
+        analysis_entry_array(signal["entries"], f"{label}.entries")
+        analysis_string(signal["why"], f"{label}.why", nonempty=True)
+    analysis_string(item["limitations"], "limitations")
+    return "success"
+
+
 def validate_analysis_shape(item):
     if not isinstance(item, dict):
         fail("analysis schema violation: top level must be an object")
     if (
         item.get("schema") != "qq-observer.analysis"
         or isinstance(item.get("schema_version"), bool)
-        or item.get("schema_version") != 1
+        or item.get("schema_version") not in (1, 2)
     ):
         fail("analysis schema violation: unsupported schema or schema_version")
 
@@ -2790,8 +3797,13 @@ def validate_analysis_shape(item):
         analysis_object(
             item, {"schema", "schema_version", "status", "reason"}, "failure analysis",
         )
-        analysis_string(item["reason"], "reason")
+        analysis_string(
+            item["reason"], "reason", nonempty=item.get("schema_version") == 2,
+        )
         return "failure"
+
+    if item.get("schema_version") == 2:
+        return validate_analysis_shape_v2(item)
 
     analysis_object(
         item,
@@ -2944,11 +3956,41 @@ def load_cost_facts(path, session):
     bounded_integer(
         duration, f"{prefix} wall_clock.duration_ms", minimum=0, maximum=SANE_SESSION_BOUND,
     )
+    skill = item.get("skill_evidence")
+    if skill is not None:
+        if not isinstance(skill, dict) or set(skill) != {
+            "phases", "repair_entries", "compaction_entries",
+        }:
+            fail(f"{prefix} skill_evidence has the wrong shape")
+        phases = skill["phases"]
+        if not isinstance(phases, dict) or set(phases) != set(SKILL_PHASES):
+            fail(f"{prefix} skill_evidence.phases has the wrong shape")
+        for phase in SKILL_PHASES:
+            row = phases[phase]
+            if not isinstance(row, dict) or set(row) != {"trigger_entries", "fire_entries"}:
+                fail(f"{prefix} skill_evidence phase has the wrong shape")
+            for name in ("trigger_entries", "fire_entries"):
+                values = row[name]
+                if (
+                    not isinstance(values, list)
+                    or any(isinstance(value, bool) or not isinstance(value, int) or value < 1 for value in values)
+                    or values != sorted(set(values))
+                ):
+                    fail(f"{prefix} skill_evidence {phase}.{name} is invalid")
+        for name in ("repair_entries", "compaction_entries"):
+            values = skill[name]
+            if (
+                not isinstance(values, list)
+                or any(isinstance(value, bool) or not isinstance(value, int) or value < 1 for value in values)
+                or values != sorted(set(values))
+            ):
+                fail(f"{prefix} skill_evidence.{name} is invalid")
     return {
         "turns": sum(turns.values()),
         "tokens": token_total,
         "tokens_verifiable": usage_records > 0,
         "duration_ms": duration,
+        "skill_evidence": skill,
     }
 
 
@@ -3053,10 +4095,12 @@ def validate_episode_cost(episode, facts):
 
 
 def validate_and_rank_analysis(values):
-    global analysis_validation_mode
+    global analysis_validation_mode, analysis_failure_version
     analysis_validation_mode = True
     analysis_path, supplied, facts_paths = parse_analysis_package(values)
     item = load_json_document(analysis_path, "analysis JSON")
+    if isinstance(item, dict) and item.get("schema_version") == 2:
+        analysis_failure_version = 2
 
     session_lines = {}
     facts = {}
@@ -3078,28 +4122,59 @@ def validate_and_rank_analysis(values):
     declared = item["run"]["sessions"]
     if set(declared) != set(supplied) or len(declared) != len(supplied):
         fail("analysis run.sessions does not match the supplied session package")
+
+    def validate_citation(citation):
+        session = citation["session"]
+        if session not in session_lines:
+            fail(f"citation references unknown session: {session}")
+        entry = citation["entries"][0]
+        if entry not in session_lines[session]:
+            fail(f"citation entry {entry} does not exist in session: {session}")
+        cited_text = normalized_whitespace(
+            quotable_entry_text(session_lines[session][entry])
+        )
+        if not cited_text:
+            fail("citation carries no quotable text")
+        quote = normalized_whitespace(citation["quote"])
+        if not quote:
+            fail("citation quote is empty after whitespace normalization")
+        if quote not in cited_text:
+            fail("citation quote is not verbatim in the cited entries")
+
+    citations = []
+    if item.get("schema_version") == 2:
+        if any(facts[session]["skill_evidence"] is None for session in declared):
+            fail("v2 analysis requires mechanically derived skill_evidence in every facts file")
+        if item["audit_unit"]["kind"] == "accountable_session":
+            if item["audit_unit"]["session_path"] not in declared:
+                fail("accountable-session audit_unit does not name a packaged session")
+            observed_compactions = sum(
+                len(facts[session]["skill_evidence"]["compaction_entries"])
+                for session in declared
+            )
+            if observed_compactions != item["audit_unit"]["compaction_count"]:
+                fail("accountable-session audit_unit contradicts mechanical compaction facts")
+        for lens in item["lenses"]:
+            citations.extend(lens["evidence"])
+        for row in item["entity_audit"]:
+            citations.extend(row["evidence"])
+        for row in item["fidelity"]["walk"]:
+            citations.extend(row["evidence"])
+        for row in item["skill_conformity"]:
+            citations.extend(row["evidence"])
+        if "taxonomy_exception" in item:
+            exception = item["taxonomy_exception"]
+            citations.extend(exception["evidence"])
+            citations.extend(exception["operator_objective"]["evidence"])
+            citations.extend(exception["materiality"]["evidence"])
     for episode in item["episodes"]:
         for session in episode["sessions"]:
             if session not in session_lines:
                 fail(f"episode references unknown session: {session}")
-        for citation in episode["evidence"]:
-            session = citation["session"]
-            if session not in session_lines:
-                fail(f"citation references unknown session: {session}")
-            entry = citation["entries"][0]
-            if entry not in session_lines[session]:
-                fail(f"citation entry {entry} does not exist in session: {session}")
-            cited_text = normalized_whitespace(
-                quotable_entry_text(session_lines[session][entry])
-            )
-            if not cited_text:
-                fail("citation carries no quotable text")
-            quote = normalized_whitespace(citation["quote"])
-            if not quote:
-                fail("citation quote is empty after whitespace normalization")
-            if quote not in cited_text:
-                fail("citation quote is not verbatim in the cited entries")
+        citations.extend(episode["evidence"])
         validate_episode_cost(episode, facts)
+    for citation in citations:
+        validate_citation(citation)
 
     ranked = sorted(
         item["episodes"],

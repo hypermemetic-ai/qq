@@ -19,6 +19,8 @@ status=$?
 set -e
 assert_equal 64 "$status" "missing command did not return usage"
 assert_file_contains "$tmp/usage" 'qq-observe facts SESSION.jsonl'
+assert_file_contains "$tmp/usage" 'qq-observe retire-session --role architect|coordinator'
+assert_file_contains "$tmp/usage" 'qq-observe session-status --role architect|coordinator'
 assert_file_contains "$tmp/usage" 'qq-observe finalize --run DIR'
 assert_file_contains "$tmp/usage" 'qq-observe architect-context'
 

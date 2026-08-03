@@ -287,9 +287,22 @@ JSONL
 jq '.sessions=[{label:"observer"}]' \
   "$finalize_run/package.json" >"$tmp/finalize-package.json"
 mv "$tmp/finalize-package.json" "$finalize_run/package.json"
-cat >"$tmp/finalize-analysis.json" <<JSON
-{"schema":"qq-observer.analysis","schema_version":1,"run":{"change":"fixture/scan#4","sessions":["$session"]},"episodes":[],"dropped_signals":[],"limitations":"Fixture."}
-JSON
+jq -n --arg session "$session" '
+  def cite: [{session:$session,entries:[2],quote:"fixture"}];
+  def lens($name): {name:$name,status:"clear",summary:"Fixture clear.",evidence: cite};
+  def walk($phase): {phase:$phase,classification:"legitimate_agent_owned_detail",summary:"Fixture walk.",evidence: cite};
+  def skill($phase): {phase:$phase,assessment:"conformant",summary:"Facts inspected.",facts_sessions:[$session],evidence: cite};
+  {
+    schema:"qq-observer.analysis",schema_version:2,
+    audit_unit:{kind:"delivered_change",repository:"fixture/scan",pr:4,branch:"fixture",merge_commit:"aaaaaaaa",merged_at:"2026-01-04T00:00:00Z"},
+    run:{id:"fixture/scan#4",sessions:[$session]},
+    lenses:[lens("Simplicity"),lens("Fidelity"),lens("Trustworthiness"),lens("Efficiency")],
+    entity_audit:[{entity:"Fixture",function:"Test",authority:"fixture",state:"one",lifecycle:"test",assessment:"necessary",evidence: cite}],
+    fidelity:{kind:"delivered_change",walk:(["alignment","realignments","execution","review","merged_outcome","promised_proof"]|map(walk(.)))},
+    skill_conformity:(["alignment","realignment","operator_facing"]|map(skill(.))),
+    episodes:[],dropped_signals:[],limitations:"Fixture."
+  }
+' >"$tmp/finalize-analysis.json"
 "$OBSERVE" finalize --run "$finalize_run" \
   --analysis "$tmp/finalize-analysis.json" >"$tmp/finalize.json"
 jq -e '.status == "finalized" and (.written | sort) == ["analysis.json","analysis.md"]' \
