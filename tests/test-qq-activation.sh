@@ -481,6 +481,335 @@ set -e
 assert_equal 2 "$retirement_malformed_status" "activation retirement accepted malformed private state"
 [ -d "$malformed_retirement_root/.qq-activation/malformed" ] || fail 'malformed retirement refusal removed its run'
 
+# An incomplete exact run may retire only through a unique, same-Task,
+# contiguous chain whose terminal request strictly covers the old target set.
+# These fixtures use only isolated private roots and a Herdr executable that
+# records any accidental attempt to settle absence during supersession.
+python3 - "$HELPER" "$TMP/successor-retirement" <<'PY'
+import copy
+import hashlib
+import json
+import os
+from pathlib import Path
+import stat
+import subprocess
+import sys
+
+helper = Path(sys.argv[1])
+suite = Path(sys.argv[2])
+suite.mkdir(mode=0o700)
+herdr_marker = suite / "herdr-called"
+herdr = suite / "herdr-never"
+herdr.write_text(
+    "#!/usr/bin/env bash\n"
+    f"printf called >{herdr_marker!s}\n"
+    "exit 91\n"
+)
+herdr.chmod(0o700)
+next_pr = 700
+absent_reason = "target absent from fresh Herdr interactive Pi discovery"
+
+
+def target(pane="qq:p1", session="/sessions/qq.jsonl"):
+    token = hashlib.sha256(f"{pane}\0{session}".encode()).hexdigest()[:32]
+    return {
+        "token": token, "pane_id": pane, "tab_id": "qq:t1", "workspace_id": "qq",
+        "session_path": session, "cwd": "/work/qq", "name": "qq-owner",
+        "observed_status": "idle",
+        "replacement_launch": {
+            "kind": "pi", "contract": "pi-session-cwd-v1", "args": ["--session", session],
+        },
+    }
+
+
+old_target = target()
+extra_target = target("other:p1", "/sessions/other.jsonl")
+
+
+def write_json(path, value):
+    path.write_text(json.dumps(value, separators=(",", ":"), sort_keys=True) + "\n")
+    path.chmod(0o600)
+
+
+def root_for(name):
+    root = suite / name
+    activation = root / ".qq-activation"
+    activation.mkdir(parents=True, mode=0o700)
+    root.chmod(0o700)
+    activation.chmod(0o700)
+    return root
+
+
+def write_run(root, run_id, before, landed, *, targets=None, task_id="T-209.2",
+              branch=None, pull_request=None, pending=False):
+    global next_pr
+    if pull_request is None:
+        pull_request = str(next_pr)
+        next_pr += 1
+    if branch is None:
+        branch = f"{run_id}-branch"
+    run_dir = root / ".qq-activation" / run_id
+    run_dir.mkdir(mode=0o700)
+    request = {
+        "schema": "qq.activation-request", "version": 1, "run_id": run_id,
+        "action": "reload", "before_tree": before, "landed_tree": landed,
+        "resource_fingerprint": hashlib.sha256(run_id.encode()).hexdigest(),
+        "changed_loaded_resources": ["extensions/demo.ts"], "replacement_resources": [],
+        "replacement": None, "reason": "successor retirement fixture", "citation": None,
+        "task_id": task_id, "pull_request": pull_request,
+        "pr_url": f"https://example.test/{pull_request}", "merge_commit": landed,
+        "source_branch": branch, "expected_watcher_version": "qq-activation-watch-v1",
+        "created_at": "2026-01-01T00:00:00Z", "targets": copy.deepcopy(list(targets or [])),
+        "probe_id": None,
+    }
+    request_path = run_dir / ("REQUEST.pending" if pending else "REQUEST.json")
+    write_json(request_path, request)
+    return {"dir": run_dir, "request": request, "path": request_path,
+            "branch": branch, "pr": pull_request}
+
+
+def write_receipt(run, receipt_target, status="activated", **overrides):
+    receipts = run["dir"] / "receipts"
+    receipts.mkdir(mode=0o700, exist_ok=True)
+    if status == "absent":
+        proof = {
+            "reason": absent_reason, "source_watcher_version": None,
+            "running_watcher_version": None, "process_id": None,
+        }
+    else:
+        proof = {
+            "reason": "fixture activation", "source_watcher_version": "qq-activation-watch-v0",
+            "running_watcher_version": "qq-activation-watch-v1", "process_id": 900,
+        }
+    receipt = {
+        "schema": "qq.activation-receipt", "version": 1,
+        "run_id": run["request"]["run_id"], "target": receipt_target["token"],
+        "pane_id": receipt_target["pane_id"], "session_path": receipt_target["session_path"],
+        "status": status, "action": run["request"]["action"],
+        "resource_fingerprint": run["request"]["resource_fingerprint"],
+        "recorded_at": "2026-01-01T00:00:00Z", **proof,
+    }
+    receipt.update(overrides)
+    path = receipts / f"{receipt_target['token']}.json"
+    write_json(path, receipt)
+    return path
+
+
+def retire(old, *, inspect=False, accepted=True, error_contains=None):
+    command = [
+        str(helper), "retire-change", "--runtime-root", str(old["dir"].parents[1]),
+        "--source-branch", old["branch"], "--pull-request", old["pr"],
+        "--herdr-bin", str(herdr),
+    ]
+    if inspect:
+        command.append("--inspect")
+    result = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if accepted:
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout)
+    assert result.returncode == 2, (result.returncode, result.stdout, result.stderr)
+    if error_contains is not None:
+        assert error_contains in result.stderr, result.stderr
+    return None
+
+
+def snapshot(path):
+    result = {}
+    for entry in [path, *sorted(path.rglob("*"))]:
+        relative = "." if entry == path else entry.relative_to(path).as_posix()
+        mode = stat.S_IMODE(entry.lstat().st_mode)
+        if entry.is_dir():
+            result[relative] = ("directory", mode)
+        else:
+            result[relative] = ("file", mode, entry.read_bytes())
+    return result
+
+
+# A normally complete request wins before any successor interpretation, even
+# if incomplete direct-successor state would otherwise be ambiguous.
+root = root_for("ordinary")
+old = write_run(root, "ordinary-old", "1" * 40, "2" * 40, targets=[old_target])
+write_receipt(old, old_target)
+fork_a = write_run(root, "ordinary-fork-a", "2" * 40, "3" * 40, targets=[old_target])
+fork_b = write_run(root, "ordinary-fork-b", "2" * 40, "4" * 40, targets=[old_target])
+forks_before = (snapshot(fork_a["dir"]), snapshot(fork_b["dir"]))
+result = retire(old)
+assert result["retirement_kind"] == "ordinary"
+assert result["successor_chain"] == []
+assert result["terminal_successor_run_id"] is None
+assert not old["dir"].exists()
+assert forks_before == (snapshot(fork_a["dir"]), snapshot(fork_b["dir"]))
+
+# One exact hop accepts activated proof, ignores an unrelated safe run, and
+# removes only the selected old run.
+root = root_for("one-hop")
+old = write_run(root, "one-old", "1" * 40, "2" * 40, targets=[old_target])
+successor = write_run(root, "one-terminal", "2" * 40, "3" * 40, targets=[old_target])
+write_receipt(successor, old_target)
+unrelated = write_run(root, "one-unrelated", "8" * 40, "9" * 40, targets=[extra_target])
+successors_before = (snapshot(successor["dir"]), snapshot(unrelated["dir"]))
+result = retire(old)
+assert result["retirement_kind"] == "superseded"
+assert [item["run_id"] for item in result["successor_chain"]] == ["one-old", "one-terminal"]
+assert result["terminal_successor_run_id"] == "one-terminal"
+assert not old["dir"].exists()
+assert successors_before == (snapshot(successor["dir"]), snapshot(unrelated["dir"]))
+
+# A D5-shaped multi-hop chain does not require the intermediate run or extra
+# terminal targets to complete. Strict absent proof covers the old target.
+root = root_for("multi-hop")
+old = write_run(root, "multi-old", "1" * 40, "2" * 40, targets=[old_target])
+intermediate = write_run(root, "multi-intermediate", "2" * 40, "3" * 40,
+                         targets=[old_target, extra_target])
+terminal = write_run(root, "multi-terminal", "3" * 40, "4" * 40,
+                     targets=[old_target, extra_target])
+write_receipt(terminal, old_target, "absent")
+whole_before = snapshot(root)
+result = retire(old, inspect=True)
+assert result["status"] == "eligible" and result["retired"] is False
+assert result["retirement_kind"] == "superseded"
+assert [item["run_id"] for item in result["successor_chain"]] == [
+    "multi-old", "multi-intermediate", "multi-terminal",
+]
+assert result["terminal_successor_run_id"] == "multi-terminal"
+assert result["terminal_successor_run_dir"] == str(terminal["dir"])
+assert whole_before == snapshot(root)
+intermediate_before = snapshot(intermediate["dir"])
+terminal_before = snapshot(terminal["dir"])
+result = retire(old)
+assert result["status"] == "retired" and result["retirement_kind"] == "superseded"
+assert not old["dir"].exists()
+assert intermediate_before == snapshot(intermediate["dir"])
+assert terminal_before == snapshot(terminal["dir"])
+assert not (intermediate["dir"] / "receipts").exists()
+assert not (terminal["dir"] / "receipts" / f"{extra_target['token']}.json").exists()
+
+
+def chain_case(name, *, old_before="1", old_landed="2", successor_before="2",
+               successor_landed="3", old_task="T-209.2", successor_task="T-209.2",
+               successor_targets=None, pending=False):
+    root = root_for(name)
+    old = write_run(root, f"{name}-old", old_before * 40, old_landed * 40,
+                    targets=[old_target], task_id=old_task)
+    successor = write_run(root, f"{name}-successor", successor_before * 40,
+                          successor_landed * 40, targets=(successor_targets
+                          if successor_targets is not None else [old_target]),
+                          task_id=successor_task, pending=pending)
+    return root, old, successor
+
+
+# Link authority refuses different or null Tasks, a tree gap, a fork, pending
+# links, cycles, and self-reference.
+for name, old_task, successor_task in (
+    ("different-task", "T-209.2", "T-210"),
+    ("null-old-task", None, "T-209.2"),
+    ("null-successor-task", "T-209.2", None),
+):
+    _root, old, _successor = chain_case(name, old_task=old_task, successor_task=successor_task)
+    retire(old, accepted=False, error_contains="exact same non-null Task identity")
+    assert old["dir"].exists()
+
+root, old, _successor = chain_case("tree-gap", successor_before="3")
+write_receipt(old, old_target, "failed")
+retire(old, accepted=False, error_contains="failed target receipt")
+assert old["dir"].exists()
+
+root, old, successor = chain_case("ambiguous-fork")
+write_run(root, "ambiguous-fork-second", "2" * 40, "4" * 40, targets=[old_target])
+retire(old, accepted=False, error_contains="ambiguous direct successor")
+
+root, old, successor = chain_case("pending-link", pending=True)
+retire(old, accepted=False, error_contains="pending successor")
+
+root = root_for("cycle")
+old = write_run(root, "cycle-old", "4" * 40, "2" * 40, targets=[old_target])
+write_run(root, "cycle-successor", "2" * 40, "4" * 40, targets=[old_target])
+retire(old, accepted=False, error_contains="cycle")
+
+root = root_for("self-reference")
+old = write_run(root, "self-old", "2" * 40, "2" * 40, targets=[old_target])
+retire(old, accepted=False, error_contains="self-reference")
+
+# Terminal target identity must be exact. A malformed token is rejected by the
+# request's existing strict target authority before it can act as coverage.
+root, old, successor = chain_case("missing-target", successor_targets=[])
+retire(old, accepted=False, error_contains="missing or drifted")
+
+for name, drifted in (
+    ("pane-drift", target("qq:p2", old_target["session_path"])),
+    ("session-drift", target(old_target["pane_id"], "/sessions/drifted.jsonl")),
+):
+    root, old, successor = chain_case(name, successor_targets=[drifted])
+    retire(old, accepted=False, error_contains="missing or drifted")
+
+root, old, successor = chain_case("token-drift")
+successor["request"]["targets"][0]["token"] = "0" * 32
+write_json(successor["path"], successor["request"])
+retire(old, accepted=False, error_contains="target authority is malformed")
+
+# Only strict existing terminal receipts cover an old target.
+root, old, successor = chain_case("missing-receipt")
+retire(old, accepted=False, error_contains="exact target receipt is missing")
+
+root, old, successor = chain_case("failed-receipt")
+write_receipt(successor, old_target, "failed")
+retire(old, accepted=False, error_contains="failed target receipt")
+
+root, old, successor = chain_case("malformed-receipt")
+path = write_receipt(successor, old_target)
+malformed = json.loads(path.read_text())
+malformed.pop("process_id")
+write_json(path, malformed)
+retire(old, accepted=False, error_contains="unexpected schema shape")
+
+root, old, successor = chain_case("malformed-watcher")
+write_receipt(successor, old_target, source_watcher_version="bad/version")
+retire(old, accepted=False, error_contains="watcher or process proof is malformed")
+
+root, old, successor = chain_case("stale-watcher")
+write_receipt(successor, old_target, running_watcher_version="qq-activation-watch-v0")
+retire(old, accepted=False, error_contains="proof is stale")
+
+root, old, successor = chain_case("stale-fingerprint")
+write_receipt(successor, old_target, resource_fingerprint="0" * 64)
+retire(old, accepted=False, error_contains="authority is contradictory")
+
+root, old, successor = chain_case("claiming-absence")
+write_receipt(successor, old_target, "absent", source_watcher_version="qq-activation-watch-v1")
+retire(old, accepted=False, error_contains="claims watcher or process authority")
+
+# Receipts on an intermediate node never truncate a longer chain.
+root = root_for("terminal-only")
+old = write_run(root, "terminal-only-old", "1" * 40, "2" * 40, targets=[old_target])
+intermediate = write_run(root, "terminal-only-intermediate", "2" * 40, "3" * 40,
+                         targets=[old_target])
+write_receipt(intermediate, old_target)
+write_run(root, "terminal-only-terminal", "3" * 40, "4" * 40, targets=[old_target])
+retire(old, accepted=False, error_contains="exact target receipt is missing")
+
+# Malformed or ambiguous selected requests and malformed root authority are
+# never rescued by otherwise plausible successor state.
+root, old, successor = chain_case("malformed-request")
+old["request"].pop("reason")
+write_json(old["path"], old["request"])
+retire(old, accepted=False, error_contains="unexpected schema shape")
+
+root = root_for("ambiguous-selected")
+old = write_run(root, "ambiguous-selected-old-a", "1" * 40, "2" * 40,
+                targets=[old_target], branch="same-branch", pull_request="999")
+write_run(root, "ambiguous-selected-old-b", "5" * 40, "6" * 40,
+          targets=[old_target], branch="same-branch", pull_request="999")
+retire(old, accepted=False, error_contains="more than one exact request")
+
+root, old, successor = chain_case("malformed-root")
+(root / ".qq-activation").chmod(0o755)
+retire(old, accepted=False, error_contains="must be mode 0700")
+(root / ".qq-activation").chmod(0o700)
+
+assert not herdr_marker.exists(), "supersession attempted to settle absence through Herdr"
+print("test-qq-activation successor retirement: pass")
+PY
+
 cp -- "$WATCHER" "$TMP/qq-activation-watch-a.ts"
 cp -- "$WATCHER" "$TMP/qq-activation-watch-b.ts"
 

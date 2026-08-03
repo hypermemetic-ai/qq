@@ -454,7 +454,8 @@ jq -e '
 ' "$tmp/result.json" >/dev/null
 
 # The engine retires only the one complete activation request matching the
-# supplied branch and PR identity, then reports an idempotent exact absence.
+# supplied branch and PR identity, passes through its ordinary-completion
+# evidence, then reports an idempotent exact absence.
 export FAKE_PR_HEAD=loaded-feature
 run_change 0 retire loaded-ws --repo "$main_checkout" --branch loaded-feature \
   --pr 84 --checkout "$loaded_checkout" --workspace-absent-owned \
@@ -463,6 +464,9 @@ jq -e --arg run_id "$(basename "$activation_run_dir")" '
   .state.activation_retirement.status == "retired"
   and .state.activation_retirement.retired == true
   and .state.activation_retirement.run_id == $run_id
+  and .state.activation_retirement.retirement_kind == "ordinary"
+  and .state.activation_retirement.successor_chain == []
+  and .state.activation_retirement.terminal_successor_run_id == null
 ' "$tmp/result.json" >/dev/null
 [ ! -e "$activation_run_dir" ] || fail 'qq-change retire left its exact complete activation run'
 [ -d "$foreign_run" ] || fail 'activation retirement removed a foreign delegate run'

@@ -543,41 +543,45 @@ def request_source_relation(request: dict[str, Any], branch: str, pull_request: 
     return branch_matches and pr_matches
 
 
+def validate_target_receipt(run_dir: Path, request: dict[str, Any], target: dict[str, Any]) -> None:
+    receipt_path = run_dir / "receipts" / f"{target['token']}.json"
+    if not os.path.lexists(receipt_path):
+        raise Refusal("activation request is pending because an exact target receipt is missing")
+    receipt = load_json(receipt_path, "activation receipt")
+    if not isinstance(receipt, dict) or set(receipt) != RECEIPT_KEYS:
+        raise Refusal("activation receipt has an unexpected schema shape")
+    if receipt.get("status") == "failed":
+        raise Refusal("activation request has a failed target receipt")
+    if (receipt.get("schema") != "qq.activation-receipt" or receipt.get("version") != 1
+            or receipt.get("run_id") != request["run_id"] or receipt.get("target") != target["token"]
+            or receipt.get("pane_id") != target["pane_id"]
+            or receipt.get("session_path") != target["session_path"]
+            or receipt.get("action") != request["action"]
+            or receipt.get("resource_fingerprint") != request["resource_fingerprint"]):
+        raise Refusal("activation receipt authority is contradictory")
+    if receipt.get("status") == "absent":
+        if (receipt.get("reason") != ABSENT_REASON
+                or receipt.get("source_watcher_version") is not None
+                or receipt.get("running_watcher_version") is not None
+                or receipt.get("process_id") is not None
+                or not isinstance(receipt.get("recorded_at"), str)):
+            raise Refusal("absent activation receipt claims watcher or process authority")
+        return
+    if receipt.get("status") != "activated":
+        raise Refusal("activation receipt authority is contradictory")
+    if (not isinstance(receipt.get("source_watcher_version"), str)
+            or not SAFE_ID.fullmatch(receipt["source_watcher_version"])
+            or not isinstance(receipt.get("process_id"), int) or receipt["process_id"] <= 0
+            or not isinstance(receipt.get("reason"), str)
+            or not isinstance(receipt.get("recorded_at"), str)):
+        raise Refusal("activation receipt watcher or process proof is malformed")
+    if receipt.get("running_watcher_version") != request["expected_watcher_version"]:
+        raise Refusal("activation receipt watcher or fingerprint proof is stale")
+
+
 def validate_completed_request(run_dir: Path, request: dict[str, Any]) -> None:
     for target in request["targets"]:
-        receipt_path = run_dir / "receipts" / f"{target['token']}.json"
-        if not os.path.lexists(receipt_path):
-            raise Refusal("activation request is pending because an exact target receipt is missing")
-        receipt = load_json(receipt_path, "activation receipt")
-        if not isinstance(receipt, dict) or set(receipt) != RECEIPT_KEYS:
-            raise Refusal("activation receipt has an unexpected schema shape")
-        if receipt.get("status") == "failed":
-            raise Refusal("activation request has a failed target receipt")
-        if (receipt.get("schema") != "qq.activation-receipt" or receipt.get("version") != 1
-                or receipt.get("run_id") != request["run_id"] or receipt.get("target") != target["token"]
-                or receipt.get("pane_id") != target["pane_id"]
-                or receipt.get("session_path") != target["session_path"]
-                or receipt.get("action") != request["action"]
-                or receipt.get("resource_fingerprint") != request["resource_fingerprint"]):
-            raise Refusal("activation receipt authority is contradictory")
-        if receipt.get("status") == "absent":
-            if (receipt.get("reason") != ABSENT_REASON
-                    or receipt.get("source_watcher_version") is not None
-                    or receipt.get("running_watcher_version") is not None
-                    or receipt.get("process_id") is not None
-                    or not isinstance(receipt.get("recorded_at"), str)):
-                raise Refusal("absent activation receipt claims watcher or process authority")
-            continue
-        if receipt.get("status") != "activated":
-            raise Refusal("activation receipt authority is contradictory")
-        if (not isinstance(receipt.get("source_watcher_version"), str)
-                or not SAFE_ID.fullmatch(receipt["source_watcher_version"])
-                or not isinstance(receipt.get("process_id"), int) or receipt["process_id"] <= 0
-                or not isinstance(receipt.get("reason"), str)
-                or not isinstance(receipt.get("recorded_at"), str)):
-            raise Refusal("activation receipt watcher or process proof is malformed")
-        if receipt.get("running_watcher_version") != request["expected_watcher_version"]:
-            raise Refusal("activation receipt watcher or fingerprint proof is stale")
+        validate_target_receipt(run_dir, request, target)
 
 
 def write_absent_receipt(run_dir: Path, request: dict[str, Any], target: dict[str, Any]) -> None:
@@ -638,6 +642,58 @@ def settle_absent_targets(run_dir: Path, request: dict[str, Any], herdr: str) ->
         # The exact target remains live and therefore pending at its watcher-owned boundary.
 
 
+def exact_successor_chain(
+    runs: list[tuple[Path, dict[str, Any], bool]],
+    selected: tuple[Path, dict[str, Any], bool],
+) -> list[tuple[Path, dict[str, Any], bool]]:
+    chain: list[tuple[Path, dict[str, Any], bool]] = []
+    current = selected
+    visited = {selected[0]}
+    while True:
+        current_request = current[1]
+        if current_request["before_tree"] == current_request["landed_tree"]:
+            raise Refusal("activation supersession chain contains a self-reference")
+        candidates = [
+            item for item in runs
+            if item[1]["before_tree"] == current_request["landed_tree"]
+        ]
+        if not candidates:
+            return chain
+        if len(candidates) != 1:
+            raise Refusal("activation supersession chain has an ambiguous direct successor")
+        successor = candidates[0]
+        if successor[0] in visited:
+            raise Refusal("activation supersession chain contains a cycle")
+        if (current_request["task_id"] is None
+                or successor[1]["task_id"] != current_request["task_id"]):
+            raise Refusal("activation supersession successor lacks the exact same non-null Task identity")
+        if successor[2]:
+            raise Refusal("activation supersession refuses a pending successor request")
+        chain.append(successor)
+        visited.add(successor[0])
+        current = successor
+
+
+def validate_successor_coverage(
+    selected_request: dict[str, Any],
+    terminal_dir: Path,
+    terminal_request: dict[str, Any],
+) -> None:
+    for old_target in selected_request["targets"]:
+        identity = (old_target["token"], old_target["pane_id"], old_target["session_path"])
+        matches = [
+            target for target in terminal_request["targets"]
+            if (target["token"], target["pane_id"], target["session_path"]) == identity
+        ]
+        if len(matches) != 1:
+            raise Refusal("terminal activation successor is missing or drifted from an old target identity")
+        validate_target_receipt(terminal_dir, terminal_request, matches[0])
+
+
+def retirement_chain_record(run: tuple[Path, dict[str, Any], bool]) -> dict[str, str]:
+    return {"run_id": run[1]["run_id"], "run_dir": os.fspath(run[0])}
+
+
 def command_retire_change(args: argparse.Namespace) -> None:
     branch = args.source_branch
     pull_request = args.pull_request
@@ -648,9 +704,12 @@ def command_retire_change(args: argparse.Namespace) -> None:
     runtime_path = Path(args.runtime_root)
     if not os.path.lexists(runtime_path) or not os.path.lexists(runtime_path / ".qq-activation"):
         json_output({"status": "not-found", "matched": False, "retired": False,
-                     "source_branch": branch, "pull_request": pull_request, "run_id": None})
+                     "source_branch": branch, "pull_request": pull_request, "run_id": None,
+                     "retirement_kind": None, "successor_chain": [],
+                     "terminal_successor_run_id": None, "terminal_successor_run_dir": None})
         return
     _runtime, root = activation_root(args.runtime_root, create=False)
+    runs: list[tuple[Path, dict[str, Any], bool]] = []
     matches: list[tuple[Path, dict[str, Any], bool]] = []
     for candidate in safe_children(root, "activation lifecycle root"):
         if candidate.is_symlink() or not candidate.is_dir():
@@ -665,19 +724,37 @@ def command_retire_change(args: argparse.Namespace) -> None:
         if has_armed and has_pending:
             raise Refusal("activation run contains contradictory armed and pending requests")
         request = validate_request_shape(load_json(armed_path if has_armed else pending_path, "activation request"))
+        run_record = (run_dir, request, has_pending)
+        runs.append(run_record)
         if request_source_relation(request, branch, pull_request):
-            matches.append((run_dir, request, has_pending))
+            matches.append(run_record)
     if len(matches) > 1:
         raise Refusal("activation retirement matched more than one exact request")
     if not matches:
         json_output({"status": "not-found", "matched": False, "retired": False,
-                     "source_branch": branch, "pull_request": pull_request, "run_id": None})
+                     "source_branch": branch, "pull_request": pull_request, "run_id": None,
+                     "retirement_kind": None, "successor_chain": [],
+                     "terminal_successor_run_id": None, "terminal_successor_run_dir": None})
         return
-    run_dir, request, pending = matches[0]
+    selected = matches[0]
+    run_dir, request, pending = selected
     if pending:
         raise Refusal("activation retirement refuses a pending request")
-    settle_absent_targets(run_dir, request, args.herdr_bin)
-    validate_completed_request(run_dir, request)
+
+    retirement_kind = "ordinary"
+    successor_chain: list[tuple[Path, dict[str, Any], bool]] = []
+    try:
+        validate_completed_request(run_dir, request)
+    except Refusal:
+        successor_chain = exact_successor_chain(runs, selected)
+        if successor_chain:
+            terminal_dir, terminal_request, _terminal_pending = successor_chain[-1]
+            validate_successor_coverage(request, terminal_dir, terminal_request)
+            retirement_kind = "superseded"
+        else:
+            settle_absent_targets(run_dir, request, args.herdr_bin)
+            validate_completed_request(run_dir, request)
+
     if args.inspect:
         status = "eligible"
         retired = False
@@ -688,10 +765,16 @@ def command_retire_change(args: argparse.Namespace) -> None:
             raise Refusal("exact activation run could not be retired") from error
         status = "retired"
         retired = True
+    terminal = successor_chain[-1] if successor_chain else None
     json_output({
         "status": status, "matched": True, "retired": retired,
         "source_branch": branch, "pull_request": pull_request,
         "run_id": request["run_id"], "run_dir": os.fspath(run_dir),
+        "retirement_kind": retirement_kind,
+        "successor_chain": [retirement_chain_record(item) for item in [selected, *successor_chain]]
+        if successor_chain else [],
+        "terminal_successor_run_id": terminal[1]["run_id"] if terminal else None,
+        "terminal_successor_run_dir": os.fspath(terminal[0]) if terminal else None,
     })
 
 
