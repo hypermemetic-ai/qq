@@ -1,12 +1,22 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "qq observer analysis",
+  "title": "qq observer analysis (historical v1 and four-lens v2)",
   "oneOf": [
-    { "$ref": "#/$defs/success" },
-    { "$ref": "#/$defs/failure" }
+    {
+      "$ref": "#/$defs/success_v1"
+    },
+    {
+      "$ref": "#/$defs/failure_v1"
+    },
+    {
+      "$ref": "#/$defs/success_v2"
+    },
+    {
+      "$ref": "#/$defs/failure_v2"
+    }
   ],
   "$defs": {
-    "success": {
+    "success_v1": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -18,42 +28,310 @@
         "limitations"
       ],
       "properties": {
-        "schema": { "const": "qq-observer.analysis" },
-        "schema_version": { "const": 1 },
+        "schema": {
+          "const": "qq-observer.analysis"
+        },
+        "schema_version": {
+          "const": 1
+        },
         "run": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["change", "sessions"],
+          "required": [
+            "change",
+            "sessions"
+          ],
           "properties": {
-            "change": { "type": "string", "minLength": 1 },
+            "change": {
+              "type": "string",
+              "minLength": 1
+            },
             "sessions": {
               "type": "array",
               "minItems": 1,
-              "items": { "type": "string", "minLength": 1 }
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           }
         },
         "episodes": {
           "type": "array",
           "maxItems": 5,
-          "items": { "$ref": "#/$defs/episode" }
+          "items": {
+            "$ref": "#/$defs/episode"
+          }
         },
         "dropped_signals": {
           "type": "array",
-          "items": { "$ref": "#/$defs/dropped_signal" }
+          "items": {
+            "$ref": "#/$defs/dropped_signal"
+          }
         },
-        "limitations": { "type": "string" }
+        "limitations": {
+          "type": "string"
+        }
       }
     },
-    "failure": {
+    "failure_v1": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema", "schema_version", "status", "reason"],
+      "required": [
+        "schema",
+        "schema_version",
+        "status",
+        "reason"
+      ],
       "properties": {
-        "schema": { "const": "qq-observer.analysis" },
-        "schema_version": { "const": 1 },
-        "status": { "const": "analysis_failed" },
-        "reason": { "type": "string" }
+        "schema": {
+          "const": "qq-observer.analysis"
+        },
+        "schema_version": {
+          "const": 1
+        },
+        "status": {
+          "const": "analysis_failed"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "success_v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "schema_version",
+        "audit_unit",
+        "run",
+        "lenses",
+        "entity_audit",
+        "fidelity",
+        "skill_conformity",
+        "episodes",
+        "dropped_signals",
+        "limitations"
+      ],
+      "properties": {
+        "schema": {
+          "const": "qq-observer.analysis"
+        },
+        "schema_version": {
+          "const": 2
+        },
+        "audit_unit": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/audit_change"
+            },
+            {
+              "$ref": "#/$defs/audit_session"
+            }
+          ]
+        },
+        "run": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "sessions"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sessions": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "lenses": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "prefixItems": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/lens"
+                },
+                {
+                  "properties": {
+                    "name": {
+                      "const": "Simplicity"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/lens"
+                },
+                {
+                  "properties": {
+                    "name": {
+                      "const": "Fidelity"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/lens"
+                },
+                {
+                  "properties": {
+                    "name": {
+                      "const": "Trustworthiness"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/lens"
+                },
+                {
+                  "properties": {
+                    "name": {
+                      "const": "Efficiency"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "items": false
+        },
+        "entity_audit": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/entity_audit"
+          }
+        },
+        "fidelity": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/delivered_fidelity"
+            },
+            {
+              "$ref": "#/$defs/architect_fidelity"
+            },
+            {
+              "$ref": "#/$defs/coordinator_fidelity"
+            }
+          ]
+        },
+        "skill_conformity": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "prefixItems": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/skill_conformity"
+                },
+                {
+                  "properties": {
+                    "phase": {
+                      "const": "alignment"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/skill_conformity"
+                },
+                {
+                  "properties": {
+                    "phase": {
+                      "const": "realignment"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/skill_conformity"
+                },
+                {
+                  "properties": {
+                    "phase": {
+                      "const": "operator_facing"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "items": false
+        },
+        "episodes": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "$ref": "#/$defs/episode_v2"
+          }
+        },
+        "taxonomy_exception": {
+          "$ref": "#/$defs/taxonomy_exception"
+        },
+        "dropped_signals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dropped_signal"
+          }
+        },
+        "limitations": {
+          "type": "string"
+        }
+      }
+    },
+    "failure_v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "schema_version",
+        "status",
+        "reason"
+      ],
+      "properties": {
+        "schema": {
+          "const": "qq-observer.analysis"
+        },
+        "schema_version": {
+          "const": 2
+        },
+        "status": {
+          "const": "analysis_failed"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "episode": {
@@ -96,21 +374,40 @@
             "operator-seam.abandonment"
           ]
         },
-        "title": { "type": "string", "minLength": 1 },
-        "rank": { "type": "integer", "minimum": 1 },
-        "no_signal": { "type": "boolean" },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rank": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "no_signal": {
+          "type": "boolean"
+        },
         "sessions": {
           "type": "array",
           "minItems": 1,
-          "items": { "type": "string", "minLength": 1 }
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         },
         "evidence": {
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/$defs/evidence" }
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
         },
-        "what_happened": { "type": "string", "minLength": 1 },
-        "root_cause": { "type": "string", "minLength": 1 },
+        "what_happened": {
+          "type": "string",
+          "minLength": 1
+        },
+        "root_cause": {
+          "type": "string",
+          "minLength": 1
+        },
         "root_cause_location": {
           "type": "string",
           "enum": [
@@ -126,11 +423,28 @@
         "cost": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["turns", "tokens", "duration_ms", "source"],
+          "required": [
+            "turns",
+            "tokens",
+            "duration_ms",
+            "source"
+          ],
           "properties": {
-            "turns": { "type": "integer", "minimum": 0, "maximum": 1000000000000000 },
-            "tokens": { "type": "integer", "minimum": 0, "maximum": 1000000000000000 },
-            "duration_ms": { "type": "integer", "minimum": 0, "maximum": 1000000000000000 },
+            "turns": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000000000
+            },
+            "tokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000000000
+            },
+            "duration_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000000000
+            },
             "source": {
               "type": "string",
               "minLength": 1,
@@ -141,32 +455,222 @@
         "remedy": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "smallest_change"],
+          "required": [
+            "type",
+            "smallest_change"
+          ],
           "properties": {
-            "type": { "type": "string", "minLength": 1 },
-            "smallest_change": { "type": "string", "minLength": 1 }
+            "type": {
+              "type": "string",
+              "minLength": 1
+            },
+            "smallest_change": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         },
         "confidence": {
           "type": "string",
-          "enum": ["high", "medium", "low"]
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
         },
-        "confidence_why": { "type": "string" },
-        "recurrence_key": { "type": "string", "minLength": 1 }
+        "confidence_why": {
+          "type": "string"
+        },
+        "recurrence_key": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "episode_v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "primary_lens",
+        "title",
+        "sessions",
+        "evidence",
+        "what_happened",
+        "root_cause",
+        "root_cause_location",
+        "cost",
+        "remedy",
+        "confidence",
+        "confidence_why",
+        "recurrence_key"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "tool-gap.capability-unknown",
+            "tool-gap.tool-missing",
+            "instruction-conflict",
+            "instruction-deficiency",
+            "tool-misuse",
+            "friction",
+            "waste",
+            "failure",
+            "substrate",
+            "design-question",
+            "operator-seam.unconfirmed-assumption",
+            "operator-seam.unseen-request",
+            "operator-seam.misread-direction",
+            "operator-seam.misleading-claim",
+            "operator-seam.stale-world",
+            "operator-seam.cross-session",
+            "operator-seam.abandonment"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rank": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "no_signal": {
+          "type": "boolean"
+        },
+        "sessions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "what_happened": {
+          "type": "string",
+          "minLength": 1
+        },
+        "root_cause": {
+          "type": "string",
+          "minLength": 1
+        },
+        "root_cause_location": {
+          "type": "string",
+          "enum": [
+            "work-order",
+            "skill",
+            "instruction",
+            "tool",
+            "agent-behavior",
+            "substrate",
+            "harness-design"
+          ]
+        },
+        "cost": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "turns",
+            "tokens",
+            "duration_ms",
+            "source"
+          ],
+          "properties": {
+            "turns": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000000000
+            },
+            "tokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000000000
+            },
+            "duration_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000000000
+            },
+            "source": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The validator canonicalizes the path, requires exactly facts:<sessions[0] canonical path>, and grounds all cost fields in supplied facts JSON."
+            }
+          }
+        },
+        "remedy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "smallest_change"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "minLength": 1
+            },
+            "smallest_change": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "confidence_why": {
+          "type": "string"
+        },
+        "recurrence_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "primary_lens": {
+          "type": "string",
+          "enum": [
+            "Simplicity",
+            "Fidelity",
+            "Trustworthiness",
+            "Efficiency"
+          ]
+        }
       }
     },
     "evidence": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["session", "entries", "quote"],
+      "required": [
+        "session",
+        "entries",
+        "quote"
+      ],
       "properties": {
-        "session": { "type": "string" },
+        "session": {
+          "type": "string"
+        },
         "entries": {
           "type": "array",
           "minItems": 1,
           "maxItems": 1,
           "description": "Exactly one transcript entry. Use separate evidence objects for separate entries.",
-          "items": { "type": "integer", "minimum": 1 }
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
         },
         "quote": {
           "type": "string",
@@ -178,15 +682,1052 @@
     "dropped_signal": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "entries", "why"],
+      "required": [
+        "kind",
+        "entries",
+        "why"
+      ],
       "properties": {
-        "kind": { "type": "string", "minLength": 1 },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
         "entries": {
           "type": "array",
           "minItems": 1,
-          "items": { "type": "integer", "minimum": 1 }
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
         },
-        "why": { "type": "string", "minLength": 1 }
+        "why": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "lens": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "status",
+        "summary",
+        "evidence"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": [
+            "Simplicity",
+            "Fidelity",
+            "Trustworthiness",
+            "Efficiency"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "clear",
+            "finding",
+            "unverifiable"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "unverifiable_reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "unverifiable"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "unverifiable_reason"
+            ]
+          },
+          "else": {
+            "properties": {
+              "evidence": {
+                "minItems": 1
+              }
+            },
+            "not": {
+              "required": [
+                "unverifiable_reason"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "entity_audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entity",
+        "function",
+        "authority",
+        "state",
+        "lifecycle",
+        "assessment",
+        "evidence"
+      ],
+      "properties": {
+        "entity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "assessment": {
+          "type": "string",
+          "enum": [
+            "necessary",
+            "duplicate",
+            "unverifiable"
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "unverifiable_reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "function": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authority": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lifecycle": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "assessment": {
+                "const": "unverifiable"
+              }
+            },
+            "required": [
+              "assessment"
+            ]
+          },
+          "then": {
+            "required": [
+              "unverifiable_reason"
+            ]
+          },
+          "else": {
+            "properties": {
+              "evidence": {
+                "minItems": 1
+              }
+            },
+            "not": {
+              "required": [
+                "unverifiable_reason"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "delivered_fidelity_step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "phase",
+        "classification",
+        "summary",
+        "evidence"
+      ],
+      "properties": {
+        "phase": {
+          "type": "string",
+          "enum": [
+            "alignment",
+            "realignments",
+            "execution",
+            "review",
+            "merged_outcome",
+            "promised_proof"
+          ]
+        },
+        "classification": {
+          "type": "string",
+          "enum": [
+            "legitimate_agent_owned_detail",
+            "genuine_realignment",
+            "silent_stakes_drift",
+            "foreseeable_stakes_drift",
+            "unverifiable"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "unverifiable_reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "classification": {
+                "const": "unverifiable"
+              }
+            },
+            "required": [
+              "classification"
+            ]
+          },
+          "then": {
+            "required": [
+              "unverifiable_reason"
+            ]
+          },
+          "else": {
+            "properties": {
+              "evidence": {
+                "minItems": 1
+              }
+            },
+            "not": {
+              "required": [
+                "unverifiable_reason"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "role_fidelity_step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "category",
+        "assessment",
+        "summary",
+        "evidence"
+      ],
+      "properties": {
+        "category": {
+          "type": "string",
+          "enum": [
+            "stakes_clarity",
+            "ask_comprehensibility",
+            "alignment_timing_truth",
+            "operator_decisions",
+            "scope_control",
+            "correction",
+            "admission",
+            "authority",
+            "overlap",
+            "recovery",
+            "handoff",
+            "pipeline",
+            "retirement"
+          ]
+        },
+        "assessment": {
+          "type": "string",
+          "enum": [
+            "conformant",
+            "violation",
+            "unverifiable"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "unverifiable_reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "assessment": {
+                "const": "unverifiable"
+              }
+            },
+            "required": [
+              "assessment"
+            ]
+          },
+          "then": {
+            "required": [
+              "unverifiable_reason"
+            ]
+          },
+          "else": {
+            "properties": {
+              "evidence": {
+                "minItems": 1
+              }
+            },
+            "not": {
+              "required": [
+                "unverifiable_reason"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "skill_conformity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "phase",
+        "assessment",
+        "summary",
+        "facts_sessions",
+        "evidence"
+      ],
+      "properties": {
+        "phase": {
+          "type": "string",
+          "enum": [
+            "alignment",
+            "realignment",
+            "operator_facing"
+          ]
+        },
+        "assessment": {
+          "type": "string",
+          "enum": [
+            "conformant",
+            "violation",
+            "unverifiable"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "unverifiable_reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "facts_sessions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "assessment": {
+                "const": "unverifiable"
+              }
+            },
+            "required": [
+              "assessment"
+            ]
+          },
+          "then": {
+            "required": [
+              "unverifiable_reason"
+            ]
+          },
+          "else": {
+            "properties": {
+              "evidence": {
+                "minItems": 1
+              }
+            },
+            "not": {
+              "required": [
+                "unverifiable_reason"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "audit_change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "repository",
+        "pr",
+        "branch",
+        "merge_commit",
+        "merged_at"
+      ],
+      "properties": {
+        "kind": {
+          "const": "delivered_change"
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pr": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "merge_commit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "merged_at": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "audit_session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "repository",
+        "role",
+        "session_path",
+        "retirement_id",
+        "retired_at",
+        "whole_session",
+        "compaction_count",
+        "retirement_boundary"
+      ],
+      "properties": {
+        "kind": {
+          "const": "accountable_session"
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "enum": [
+            "architect",
+            "coordinator"
+          ]
+        },
+        "session_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "retirement_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "retired_at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "whole_session": {
+          "const": true
+        },
+        "compaction_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "retirement_boundary": {
+          "enum": [
+            "alignment_transaction_drained",
+            "atomic_swap_complete"
+          ]
+        }
+      }
+    },
+    "delivered_fidelity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "walk"
+      ],
+      "properties": {
+        "kind": {
+          "const": "delivered_change"
+        },
+        "walk": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "prefixItems": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/delivered_fidelity_step"
+                },
+                {
+                  "properties": {
+                    "phase": {
+                      "const": "alignment"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/delivered_fidelity_step"
+                },
+                {
+                  "properties": {
+                    "phase": {
+                      "const": "realignments"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/delivered_fidelity_step"
+                },
+                {
+                  "properties": {
+                    "phase": {
+                      "const": "execution"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/delivered_fidelity_step"
+                },
+                {
+                  "properties": {
+                    "phase": {
+                      "const": "review"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/delivered_fidelity_step"
+                },
+                {
+                  "properties": {
+                    "phase": {
+                      "const": "merged_outcome"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/delivered_fidelity_step"
+                },
+                {
+                  "properties": {
+                    "phase": {
+                      "const": "promised_proof"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "items": false
+        }
+      }
+    },
+    "architect_fidelity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "role",
+        "walk"
+      ],
+      "properties": {
+        "kind": {
+          "const": "accountable_session"
+        },
+        "role": {
+          "const": "architect"
+        },
+        "walk": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "prefixItems": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/role_fidelity_step"
+                },
+                {
+                  "properties": {
+                    "category": {
+                      "const": "stakes_clarity"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/role_fidelity_step"
+                },
+                {
+                  "properties": {
+                    "category": {
+                      "const": "ask_comprehensibility"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/role_fidelity_step"
+                },
+                {
+                  "properties": {
+                    "category": {
+                      "const": "alignment_timing_truth"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/role_fidelity_step"
+                },
+                {
+                  "properties": {
+                    "category": {
+                      "const": "operator_decisions"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/role_fidelity_step"
+                },
+                {
+                  "properties": {
+                    "category": {
+                      "const": "scope_control"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/role_fidelity_step"
+                },
+                {
+                  "properties": {
+                    "category": {
+                      "const": "correction"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "items": false
+        }
+      }
+    },
+    "coordinator_fidelity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "role",
+        "walk"
+      ],
+      "properties": {
+        "kind": {
+          "const": "accountable_session"
+        },
+        "role": {
+          "const": "coordinator"
+        },
+        "walk": {
+          "type": "array",
+          "minItems": 7,
+          "maxItems": 7,
+          "prefixItems": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/role_fidelity_step"
+                },
+                {
+                  "properties": {
+                    "category": {
+                      "const": "admission"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/role_fidelity_step"
+                },
+                {
+                  "properties": {
+                    "category": {
+                      "const": "authority"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/role_fidelity_step"
+                },
+                {
+                  "properties": {
+                    "category": {
+                      "const": "overlap"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/role_fidelity_step"
+                },
+                {
+                  "properties": {
+                    "category": {
+                      "const": "recovery"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/role_fidelity_step"
+                },
+                {
+                  "properties": {
+                    "category": {
+                      "const": "handoff"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/role_fidelity_step"
+                },
+                {
+                  "properties": {
+                    "category": {
+                      "const": "pipeline"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/role_fidelity_step"
+                },
+                {
+                  "properties": {
+                    "category": {
+                      "const": "retirement"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "items": false
+        }
+      }
+    },
+    "cited_text": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "evidence"
+      ],
+      "properties": {
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "non_fit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lens",
+        "why"
+      ],
+      "properties": {
+        "lens": {
+          "enum": [
+            "Simplicity",
+            "Fidelity",
+            "Trustworthiness",
+            "Efficiency"
+          ]
+        },
+        "why": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "taxonomy_exception": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "evidence",
+        "operator_objective",
+        "materiality",
+        "non_fits",
+        "root_cause",
+        "root_cause_location",
+        "remedy",
+        "confidence",
+        "confidence_why",
+        "recurrence_key"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          },
+          "minItems": 1
+        },
+        "operator_objective": {
+          "$ref": "#/$defs/cited_text"
+        },
+        "materiality": {
+          "$ref": "#/$defs/cited_text"
+        },
+        "non_fits": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "prefixItems": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/non_fit"
+                },
+                {
+                  "properties": {
+                    "lens": {
+                      "const": "Simplicity"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/non_fit"
+                },
+                {
+                  "properties": {
+                    "lens": {
+                      "const": "Fidelity"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/non_fit"
+                },
+                {
+                  "properties": {
+                    "lens": {
+                      "const": "Trustworthiness"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/non_fit"
+                },
+                {
+                  "properties": {
+                    "lens": {
+                      "const": "Efficiency"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "items": false
+        },
+        "root_cause": {
+          "type": "string",
+          "minLength": 1
+        },
+        "root_cause_location": {
+          "type": "string",
+          "enum": [
+            "work-order",
+            "skill",
+            "instruction",
+            "tool",
+            "agent-behavior",
+            "substrate",
+            "harness-design"
+          ]
+        },
+        "remedy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "smallest_change"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "minLength": 1
+            },
+            "smallest_change": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "confidence_why": {
+          "type": "string"
+        },
+        "recurrence_key": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        }
       }
     }
   }

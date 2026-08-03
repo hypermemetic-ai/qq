@@ -315,6 +315,289 @@
           }
         }
       }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "schema_version",
+        "handoff_id",
+        "kind",
+        "batch_id",
+        "context_id",
+        "decisions",
+        "occurrences",
+        "created_at",
+        "source_hashes"
+      ],
+      "properties": {
+        "schema": {
+          "const": "qq-observer.handoff"
+        },
+        "schema_version": {
+          "const": 3
+        },
+        "handoff_id": {
+          "type": "string",
+          "pattern": "^handoff-[0-9a-f]{32}$"
+        },
+        "kind": {
+          "const": "global_decision_batch"
+        },
+        "batch_id": {
+          "type": "string",
+          "pattern": "^batch-[0-9a-f]{32}$"
+        },
+        "context_id": {
+          "type": "string",
+          "pattern": "^context-[0-9a-f]{32}$"
+        },
+        "decisions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "decision_id",
+              "recurrence_key",
+              "occurrence_ids",
+              "action",
+              "scope",
+              "note"
+            ],
+            "properties": {
+              "decision_id": {
+                "type": "string",
+                "pattern": "^decision-[0-9a-f]{32}$"
+              },
+              "recurrence_key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "occurrence_ids": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^occurrence-[0-9a-f]{32}$"
+                }
+              },
+              "action": {
+                "enum": [
+                  "route",
+                  "set_aside"
+                ]
+              },
+              "scope": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "occurrences": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "occurrence_id",
+              "recurrence_key",
+              "source",
+              "package_sha256",
+              "analysis_sha256",
+              "episode"
+            ],
+            "properties": {
+              "occurrence_id": {
+                "type": "string",
+                "pattern": "^occurrence-[0-9a-f]{32}$"
+              },
+              "recurrence_key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "run_dir",
+                  "repo",
+                  "repository",
+                  "legacy",
+                  "pr",
+                  "variant",
+                  "assembled_at",
+                  "audit_unit"
+                ],
+                "properties": {
+                  "run_dir": {
+                    "type": "string"
+                  },
+                  "repo": {
+                    "type": "string"
+                  },
+                  "repository": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
+                  },
+                  "legacy": {
+                    "type": "boolean"
+                  },
+                  "pr": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1
+                  },
+                  "variant": {
+                    "const": "guided"
+                  },
+                  "assembled_at": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "audit_unit": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "kind",
+                          "repository",
+                          "pr",
+                          "branch",
+                          "merge_commit",
+                          "merged_at"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "const": "delivered_change"
+                          },
+                          "repository": {
+                            "type": "string"
+                          },
+                          "pr": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "branch": {
+                            "type": "string"
+                          },
+                          "merge_commit": {
+                            "type": "string"
+                          },
+                          "merged_at": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "kind",
+                          "repository",
+                          "role",
+                          "session_path",
+                          "retirement_id",
+                          "retired_at",
+                          "whole_session",
+                          "compaction_count",
+                          "retirement_boundary"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "const": "accountable_session"
+                          },
+                          "repository": {
+                            "type": "string"
+                          },
+                          "role": {
+                            "enum": [
+                              "architect",
+                              "coordinator"
+                            ]
+                          },
+                          "session_path": {
+                            "type": "string"
+                          },
+                          "retirement_id": {
+                            "type": "string"
+                          },
+                          "retired_at": {
+                            "type": "string"
+                          },
+                          "whole_session": {
+                            "const": true
+                          },
+                          "compaction_count": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "retirement_boundary": {
+                            "enum": [
+                              "alignment_transaction_drained",
+                              "atomic_swap_complete"
+                            ]
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              "package_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "analysis_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "episode": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "source_hashes": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "package_sha256",
+              "analysis_sha256"
+            ],
+            "properties": {
+              "package_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "analysis_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

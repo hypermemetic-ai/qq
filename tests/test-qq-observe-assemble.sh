@@ -311,7 +311,11 @@ jq -e --arg repo "$(realpath "$repo")" \
   --arg nested_quoted "$nested_quoted_session" \
   --arg weak_invalid_uuid "$weak_invalid_uuid" \
   --arg runtime "$runtime" '
-  .schema == "qq-observer.package" and .schema_version == 2
+  .schema == "qq-observer.package" and .schema_version == 3
+  and .audit_unit == {
+    kind:"delivered_change",repository:"fixture/repo",pr:41,branch:"feature",
+    merge_commit:.merge_commit,merged_at:.merged_at
+  }
   and .repository == "fixture/repo"
   and .pr == 41 and .branch == "feature" and .repo == $repo
   and .variant == "guided"
@@ -411,7 +415,8 @@ git -C "$repo_other" config branch.main.remote origin
 "$OBSERVE" assemble --pr 41 --repo "$repo_other" >"$tmp/assembled-other-41.json"
 other_run="$XDG_STATE_HOME/qq/observer/runs/by-repository/fixture/other/pr-41"
 jq -e --arg repo "$(realpath "$repo_other")" '
-  .schema_version == 2 and .repository == "fixture/other" and .repo == $repo and .pr == 41
+  .schema_version == 3 and .audit_unit.kind == "delivered_change"
+  and .repository == "fixture/other" and .repo == $repo and .pr == 41
 ' "$other_run/package.json" >/dev/null || fail 'second Repository package identity was conflated'
 [ "$other_run" != "$run_41" ] || fail 'equal PR numbers shared one run identity'
 assert_file_contains "$GH_LOG" 'pr view 41 --repo fixture/repo --json'
@@ -469,22 +474,33 @@ turns="$(jq '[.turns_by_role[]] | add' "$facts_path")"
 tokens="$(jq '(.token_usage.input // 0) + (.token_usage.output // 0)' "$facts_path")"
 duration="$(jq '.wall_clock.duration_ms' "$facts_path")"
 analysis="$tmp/analysis.json"
+audit_unit="$(jq -c .audit_unit "$run_41/package.json")"
 jq -n --arg session "$session_path" --argjson sessions "$run_sessions" \
-  --argjson turns "$turns" --argjson tokens "$tokens" --argjson duration "$duration" '{
-  schema:"qq-observer.analysis",schema_version:1,
-  run:{change:"PR-41",sessions:$sessions},
-  episodes:[{
-    kind:"friction",title:"Fixture episode",sessions:[$session],
-    evidence:[{session:$session,entries:[2],quote:"delegate strong-run"}],
-    what_happened:"Fixture behavior happened.",root_cause:"Fixture root cause.",
-    root_cause_location:"instruction",
-    cost:{turns:$turns,tokens:$tokens,duration_ms:$duration,source:("facts:"+$session)},
-    remedy:{type:"process",smallest_change:"Use the fixture remedy."},
-    confidence:"high",confidence_why:"Direct fixture evidence.",recurrence_key:"fixture-key"
-  }],
-  dropped_signals:[{kind:"compaction",entries:[2],why:"Not relevant."}],
-  limitations:"Fixture limitation."
-}' >"$analysis"
+  --argjson audit "$audit_unit" --argjson turns "$turns" --argjson tokens "$tokens" \
+  --argjson duration "$duration" '
+  def cite: [{session:$session,entries:[2],quote:"delegate strong-run"}];
+  def lens($name;$status): {name:$name,status:$status,summary:"Fixture lens walk.",evidence: cite};
+  def walk($phase): {phase:$phase,classification:"legitimate_agent_owned_detail",summary:"No drift in fixture.",evidence: cite};
+  def skill($phase): {phase:$phase,assessment:"conformant",summary:"Mechanical facts inspected.",facts_sessions:$sessions,evidence: cite};
+  {
+    schema:"qq-observer.analysis",schema_version:2,audit_unit:$audit,
+    run:{id:"fixture/repo#41",sessions:$sessions},
+    lenses:[lens("Simplicity";"clear"),lens("Fidelity";"clear"),lens("Trustworthiness";"clear"),lens("Efficiency";"finding")],
+    entity_audit:[{entity:"Observer package",function:"Bind the audit unit",authority:"package.json",state:"append-only",lifecycle:"existing run",assessment:"necessary",evidence: cite}],
+    fidelity:{kind:"delivered_change",walk:(["alignment","realignments","execution","review","merged_outcome","promised_proof"]|map(walk(.)))},
+    skill_conformity:(["alignment","realignment","operator_facing"]|map(skill(.))),
+    episodes:[{
+      kind:"friction",primary_lens:"Efficiency",title:"Fixture episode",sessions:[$session],
+      evidence: cite,what_happened:"Fixture behavior happened.",root_cause:"Fixture root cause.",
+      root_cause_location:"instruction",
+      cost:{turns:$turns,tokens:$tokens,duration_ms:$duration,source:("facts:"+$session)},
+      remedy:{type:"process",smallest_change:"Use the fixture remedy."},
+      confidence:"high",confidence_why:"Direct fixture evidence.",recurrence_key:"fixture-key"
+    }],
+    dropped_signals:[{kind:"compaction",entries:[2],why:"Not relevant."}],
+    limitations:"Fixture limitation."
+  }
+' >"$analysis"
 
 jq '.episodes[0].cost.turns += 1' "$analysis" >"$tmp/invalid-analysis.json"
 set +e
@@ -534,7 +550,7 @@ assert_file_contains "$tmp/differing.stderr" 'append-only conflict'
 [ ! -e "$run_42/analyst-trace.jsonl" ] \
   || fail 'finalize persisted a derivable analyst trace'
 jq -e '
-  .schema == "qq-observer.analysis" and .schema_version == 1
+  .schema == "qq-observer.analysis" and .schema_version == 2
   and .status == "analysis_failed" and .reason == "observer fixture failed"
 ' "$run_42/analysis_failed.json" >/dev/null || fail 'analysis_failed marker has the wrong shape'
 # run-finalized reports terminal observer state for the retire rail:

@@ -8,6 +8,7 @@ TEST_NAME="test-qq-observe-validate-analysis"
 source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd "$TESTS_DIR/.." && pwd -P)"
 OBSERVE="$ROOT/bin/qq-observe"
+FIXTURES="$TESTS_DIR/fixtures/observer"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -186,7 +187,7 @@ expect_analysis_failure() {
   [ ! -s "$tmp/$name.stderr" ] || fail "$name emitted stderr instead of failure JSON"
   jq -e '
     .schema == "qq-observer.analysis"
-    and .schema_version == 1
+    and (.schema_version == 1 or .schema_version == 2)
     and .status == "analysis_failed"
     and (.reason | type) == "string"
   ' "$tmp/$name.stdout" >/dev/null || fail "$name did not emit analysis_failed JSON"
@@ -469,6 +470,144 @@ expect_analysis_failure long-quote "$tmp/long-quote.json"
 
 jq '.episodes[0].rank = 0' "$valid" >"$tmp/bad-rank.json"
 expect_analysis_failure bad-rank "$tmp/bad-rank.json"
+
+# New analyses use v2: exactly four ordered lenses, one primary lens per
+# finding, the delivered alignment walk, role walks, whole-session identity,
+# facts-backed skill phases, and the narrow taxonomy repair shape.
+actual_facts_a="$tmp/actual-facts-a.json"
+"$OBSERVE" facts "$session_a" >"$actual_facts_a"
+v2_clear="$tmp/v2-clear.json"
+jq -n --arg session "$session_a" '
+  def cite: [{session:$session,entries:[2],quote:"expected"}];
+  def lens($name): {name:$name,status:"clear",summary:"Required walk is clear.",evidence: cite};
+  def walk($phase): {phase:$phase,classification:"legitimate_agent_owned_detail",summary:"No material drift.",evidence: cite};
+  def skill($phase): {phase:$phase,assessment:"conformant",summary:"Mechanical facts inspected.",facts_sessions:[$session],evidence: cite};
+  {
+    schema:"qq-observer.analysis",schema_version:2,
+    audit_unit:{kind:"delivered_change",repository:"fixture/repo",pr:7,branch:"feature",merge_commit:"abcdef12",merged_at:"2026-07-23T00:00:00Z"},
+    run:{id:"fixture/repo#7",sessions:[$session]},
+    lenses:[lens("Simplicity"),lens("Fidelity"),lens("Trustworthiness"),lens("Efficiency")],
+    entity_audit:[{entity:"Change",function:"Deliver fixture",authority:"merged tree",state:"merged",lifecycle:"existing",assessment:"necessary",evidence: cite}],
+    fidelity:{kind:"delivered_change",walk:(["alignment","realignments","execution","review","merged_outcome","promised_proof"]|map(walk(.)))},
+    skill_conformity:(["alignment","realignment","operator_facing"]|map(skill(.))),
+    episodes:[],dropped_signals:[],limitations:"full-read"
+  }
+' >"$v2_clear"
+expect_analysis_success v2-four-lenses "$v2_clear" \
+  "$session_a" --facts "$session_a=$actual_facts_a"
+
+v2_finding="$tmp/v2-finding.json"
+turns_a="$(jq '[.turns_by_role[]]|add' "$actual_facts_a")"
+duration_a="$(jq '.wall_clock.duration_ms' "$actual_facts_a")"
+jq --arg session "$session_a" --argjson turns "$turns_a" --argjson duration "$duration_a" '
+  .lenses[1].status="finding"
+  | .fidelity.walk[0].classification="silent_stakes_drift"
+  | .episodes=[{
+      kind:"operator-seam.misread-direction",primary_lens:"Fidelity",
+      title:"Silent fixture drift",sessions:[$session],
+      evidence:[{session:$session,entries:[2],quote:"expected"}],
+      what_happened:"Execution missed the aligned fixture.",root_cause:"The direction was not retained.",
+      root_cause_location:"agent-behavior",
+      cost:{turns:$turns,tokens:0,duration_ms:$duration,source:("facts:"+$session)},
+      remedy:{type:"process",smallest_change:"Retain the settled direction."},
+      confidence:"high",confidence_why:"Direct citation.",recurrence_key:"v2-silent-fixture"
+    }]
+' "$v2_clear" >"$v2_finding"
+expect_analysis_success v2-primary-lens "$v2_finding" \
+  "$session_a" --facts "$session_a=$actual_facts_a"
+jq '.lenses[1].status="clear"' "$v2_finding" >"$tmp/v2-status-disagreement.json"
+expect_analysis_failure v2-status-disagreement "$tmp/v2-status-disagreement.json" \
+  "$session_a" --facts "$session_a=$actual_facts_a"
+jq 'del(.episodes[0].primary_lens)' "$v2_finding" >"$tmp/v2-missing-primary.json"
+expect_analysis_failure v2-missing-primary "$tmp/v2-missing-primary.json" \
+  "$session_a" --facts "$session_a=$actual_facts_a"
+jq '.lenses |= [.[1],.[0],.[2],.[3]]' "$v2_clear" >"$tmp/v2-lens-order.json"
+expect_analysis_failure v2-lens-order "$tmp/v2-lens-order.json" \
+  "$session_a" --facts "$session_a=$actual_facts_a"
+jq '.lenses[0].status="other"' "$v2_clear" >"$tmp/v2-fifth-status.json"
+expect_analysis_failure v2-fifth-status "$tmp/v2-fifth-status.json" \
+  "$session_a" --facts "$session_a=$actual_facts_a"
+
+v2_exception="$tmp/v2-exception.json"
+jq --arg session "$session_a" '
+  .taxonomy_exception={
+    title:"Taxonomy repair proposal",
+    evidence:[{session:$session,entries:[2],quote:"expected"}],
+    operator_objective:{summary:"A named Task objective.",evidence:[{session:$session,entries:[2],quote:"expected"}]},
+    materiality:{summary:"The resulting system is materially affected.",evidence:[{session:$session,entries:[2],quote:"expected"}]},
+    non_fits:[
+      {lens:"Simplicity",why:"No economy objective failed."},
+      {lens:"Fidelity",why:"No aligned outcome failed."},
+      {lens:"Trustworthiness",why:"No truth objective failed."},
+      {lens:"Efficiency",why:"No cost objective failed."}
+    ],
+    root_cause:"The required lens contract has a demonstrated gap.",
+    root_cause_location:"harness-design",
+    remedy:{type:"harness-redesign",smallest_change:"Reopen the four-lens contract."},
+    confidence:"low",confidence_why:"First occurrence only.",
+    recurrence_key:"taxonomy-fixture-gap"
+  }
+' "$v2_clear" >"$v2_exception"
+expect_analysis_success v2-taxonomy-exception "$v2_exception" \
+  "$session_a" --facts "$session_a=$actual_facts_a"
+jq '.taxonomy_exception.non_fits[3].lens="Other"' "$v2_exception" >"$tmp/v2-taxonomy-other.json"
+expect_analysis_failure v2-taxonomy-other "$tmp/v2-taxonomy-other.json" \
+  "$session_a" --facts "$session_a=$actual_facts_a"
+
+accountable="$FIXTURES/pi-accountable-session.jsonl"
+accountable_facts="$tmp/accountable-facts.json"
+"$OBSERVE" facts "$accountable" >"$accountable_facts"
+accountable_analysis="$tmp/accountable-analysis.json"
+jq -n --arg session "$accountable" '
+  def cite: [{session:$session,entries:[2],quote:"/bro"}];
+  def lens($name): {name:$name,status:"clear",summary:"Role walk is clear.",evidence: cite};
+  def role($category): {category:$category,assessment:"conformant",summary:"Cited role evidence.",evidence: cite};
+  def skill($phase): {phase:$phase,assessment:"conformant",summary:"Mechanical phase facts inspected.",facts_sessions:[$session],evidence: cite};
+  {
+    schema:"qq-observer.analysis",schema_version:2,
+    audit_unit:{kind:"accountable_session",repository:"fixture/repo",role:"architect",session_path:$session,retirement_id:"retirement-fixture",retired_at:"2026-08-03T00:00:11Z",whole_session:true,compaction_count:1,retirement_boundary:"alignment_transaction_drained"},
+    run:{id:"architect-retirement-fixture",sessions:[$session]},
+    lenses:[lens("Simplicity"),lens("Fidelity"),lens("Trustworthiness"),lens("Efficiency")],
+    entity_audit:[{entity:"Retired session",function:"Preserve accountable evidence",authority:"original Pi transcript",state:"frozen",lifecycle:"existing Observer run",assessment:"necessary",evidence: cite}],
+    fidelity:{kind:"accountable_session",role:"architect",walk:(["stakes_clarity","ask_comprehensibility","alignment_timing_truth","operator_decisions","scope_control","correction"]|map(role(.)))},
+    skill_conformity:(["alignment","realignment","operator_facing"]|map(skill(.))),
+    episodes:[],dropped_signals:[],limitations:"full-read whole session"
+  }
+' >"$accountable_analysis"
+expect_analysis_success v2-architect-role "$accountable_analysis" \
+  "$accountable" --facts "$accountable=$accountable_facts"
+zero_accountable="$tmp/zero-compaction-accountable.jsonl"
+grep -v '"type":"compaction"' "$accountable" >"$zero_accountable"
+zero_accountable_facts="$tmp/zero-compaction-accountable-facts.json"
+"$OBSERVE" facts "$zero_accountable" >"$zero_accountable_facts"
+jq --arg session "$zero_accountable" '
+  .audit_unit.session_path=$session
+  | .audit_unit.compaction_count=0
+  | .run.id="architect-zero-compaction-fixture"
+  | .run.sessions=[$session]
+  | walk(if type == "object" and has("session") then .session=$session else . end)
+  | .skill_conformity[].facts_sessions=[$session]
+' "$accountable_analysis" >"$tmp/zero-compaction-analysis.json"
+expect_analysis_success v2-architect-zero-compaction \
+  "$tmp/zero-compaction-analysis.json" \
+  "$zero_accountable" --facts "$zero_accountable=$zero_accountable_facts"
+jq '
+  .audit_unit.role="coordinator"
+  | .audit_unit.retirement_boundary="atomic_swap_complete"
+  | .run.id="coordinator-retirement-fixture"
+  | .fidelity.role="coordinator"
+  | .fidelity.walk=( ["admission","authority","overlap","recovery","handoff","pipeline","retirement"] | map({category:.,assessment:"conformant",summary:"Cited role evidence.",evidence:[{session:$session,entries:[2],quote:"/bro"}]}) )
+' --arg session "$accountable" "$accountable_analysis" >"$tmp/coordinator-analysis.json"
+expect_analysis_success v2-coordinator-role "$tmp/coordinator-analysis.json" \
+  "$accountable" --facts "$accountable=$accountable_facts"
+
+jq -e '
+  (.["$defs"].success_v2.properties.lenses.prefixItems
+    | map(.allOf[1].properties.name.const))
+    == ["Simplicity","Fidelity","Trustworthiness","Efficiency"]
+  and (.["$defs"].episode_v2.required | index("primary_lens")) != null
+' "$ROOT/delegation/manifests/observer-analysis.schema.json" >/dev/null \
+  || fail 'v2 JSON schema lost ordered lenses or primary lens'
 
 failed_input="$tmp/failed-input.json"
 cat >"$failed_input" <<'JSON'
