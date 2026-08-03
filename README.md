@@ -35,7 +35,9 @@ wiring needed to expose it.
   historical designs, cited investigations, and reusable lessons.
 - herdr provides persistent `main` project homes, named agents, and direct
   agent-to-agent messaging.
-- `cockpit/` contains the operator's terminal configuration.
+- `cockpit/` contains Repository-owned terminal configuration, templates, and
+  helpers; ignored operator-local `cockpit/herdr/config.toml` is not
+  Repository-owned content.
 - `delegation/` contains the delegate role manifests, completion envelope
   template, and execution-profile policy.
 - `bin/` holds the qq commands — mounted on `PATH` by the cockpit shell
@@ -264,18 +266,30 @@ navigation helpers:
 `fzf`. File browsing lives inside Pi through `@tmustier/pi-files-widget`.
 Outside Pi, the system's `xdg-open` associations own MIME opening.
 
-Link the cockpit configurations whose tools read fixed `~/.config` paths:
+Link the Repository-owned cockpit configurations whose tools read fixed
+`~/.config` paths:
 
 ```bash
-mkdir -p ~/.config ~/.config/glow ~/.config/herdr
+mkdir -p ~/.config ~/.config/glow
 ln -s "$HOME/projects/qq/cockpit/ghostty" ~/.config/ghostty
 ln -s "$HOME/projects/qq/cockpit/glow/glow.yml" ~/.config/glow/glow.yml
-ln -s "$HOME/projects/qq/cockpit/herdr/config.toml" ~/.config/herdr/config.toml
 ```
 
-These file links are day-0 bootstrap, not a sync surface: content is live
-through each link, and the set changes only when a new cockpit tool is
-adopted. Nothing needs re-running when Skills or commands change.
+`cockpit/herdr/config.toml` is ignored operator-local state,
+not Repository-owned content. If that file exists separately on the machine,
+its Herdr link is optional:
+
+```bash
+herdr_config="$HOME/projects/qq/cockpit/herdr/config.toml"
+if [ -f "$herdr_config" ]; then
+  mkdir -p ~/.config/herdr
+  ln -s "$herdr_config" ~/.config/herdr/config.toml
+fi
+```
+
+The tracked cockpit links and optional operator-local Herdr link are day-0
+bootstrap, not a sync surface: content is live through each link. Nothing needs
+re-running when Skills or commands change.
 
 Ghostty defaults to the portable laptop geometry. Use
 `qq-ghostty-profile 4k` for the centered, more-square living-room field and
