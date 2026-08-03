@@ -10,6 +10,7 @@ import {
   open,
   readFile,
   readdir,
+  realpath,
   rename,
   rm,
   writeFile,
@@ -52,13 +53,20 @@ async function safeLstat(path) {
 async function exactDirectory(path, label, create = false) {
   if (create) await mkdir(path, { recursive: true, mode: 0o700 });
   const state = await safeLstat(path);
+  let observedPath;
+  try {
+    observedPath = await realpath(path);
+  } catch (error) {
+    throw new Error(`${label} cannot be resolved exactly: ${error instanceof Error ? error.message : String(error)}`);
+  }
   if (
     !state?.isDirectory() ||
     state.isSymbolicLink() ||
     state.uid !== process.getuid?.() ||
-    (state.mode & 0o777) !== 0o700
+    (state.mode & 0o777) !== 0o700 ||
+    observedPath !== path
   ) {
-    throw new Error(`${label} must be an operator-owned mode-0700 non-symlink directory`);
+    throw new Error(`${label} must be an operator-owned mode-0700 exact non-symlink directory`);
   }
   return path;
 }
@@ -202,15 +210,82 @@ function defaultAuthority(target) {
   return true;
 }
 
-function defaultReplace(runDir, token, processId) {
+export function defaultReplace(runDir, token, processId, request, target) {
   const helper = resolve(dirname(fileURLToPath(import.meta.url)), "../bin/lib/qq-activation.py");
-  const child = spawn(helper, ["replace", "--run", runDir, "--target", token, "--old-pid", String(processId)], {
-    detached: true,
-    stdio: "ignore",
-    cwd: "/",
-    env: process.env,
+  const child = spawn(
+    helper,
+    ["replace", "--run", runDir, "--target", token, "--old-pid", String(processId), "--accept-fd", "3"],
+    { detached: true, stdio: ["ignore", "ignore", "ignore", "pipe"], cwd: "/", env: process.env },
+  );
+  const acceptance = child.stdio[3];
+  return new Promise((resolveLaunch, rejectLaunch) => {
+    let settled = false;
+    let body = Buffer.alloc(0);
+    const finish = (error, record) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      child.off("error", onError);
+      child.off("exit", onExit);
+      acceptance?.off("data", onData);
+      acceptance?.off("error", onPipeError);
+      acceptance?.destroy();
+      if (error) {
+        let failure = error;
+        try {
+          if (child.pid && !child.killed) child.kill("SIGTERM");
+        } catch (killError) {
+          failure = new Error(`${error.message}; replacement helper termination failed: ${killError instanceof Error ? killError.message : String(killError)}`);
+        }
+        rejectLaunch(failure);
+        return;
+      }
+      child.unref();
+      resolveLaunch(record);
+    };
+    const onError = (error) => finish(new Error(`replacement helper launch failed: ${error.message}`));
+    const onExit = (code, signal) => finish(new Error(`replacement helper exited before acceptance (${code ?? signal ?? "unknown"})`));
+    const onPipeError = (error) => finish(new Error(`replacement helper acceptance failed: ${error.message}`));
+    const onData = (chunk) => {
+      body = Buffer.concat([body, chunk]);
+      if (body.length > 8192) {
+        finish(new Error("replacement helper acceptance exceeded its size bound"));
+        return;
+      }
+      const newline = body.indexOf(0x0a);
+      if (newline < 0) return;
+      let record;
+      try {
+        if (body.subarray(newline + 1).toString("utf8").trim()) throw new Error("trailing acceptance data");
+        record = JSON.parse(body.subarray(0, newline).toString("utf8"));
+      } catch (error) {
+        finish(new Error(`replacement helper acceptance is malformed: ${error instanceof Error ? error.message : String(error)}`));
+        return;
+      }
+      if (
+        record?.schema !== "qq.activation-replacement-acceptance" ||
+        record?.version !== 1 ||
+        record?.status !== "accepted" ||
+        record?.run_id !== request.run_id ||
+        record?.target !== token ||
+        record?.pane_id !== target.pane_id ||
+        record?.old_pid !== processId ||
+        !Number.isInteger(record?.helper_pid) || record.helper_pid <= 0 ||
+        record?.expected_watcher_version !== request.expected_watcher_version ||
+        record?.resource_fingerprint !== request.resource_fingerprint
+      ) {
+        finish(new Error("replacement helper acceptance does not own the exact request and target"));
+        return;
+      }
+      finish(undefined, record);
+    };
+    const timeout = setTimeout(() => finish(new Error("replacement helper did not accept the exact request within 3000ms")), 3000);
+    child.once("error", onError);
+    child.once("exit", onExit);
+    acceptance?.on("data", onData);
+    acceptance?.once("error", onPipeError);
+    if (!acceptance) finish(new Error("replacement helper acceptance pipe is unavailable"));
   });
-  child.unref();
 }
 
 export default function register(pi, deps = {}) {
@@ -231,15 +306,18 @@ export default function register(pi, deps = {}) {
   const replaceProcess = deps.replaceProcess ?? defaultReplace;
   const processId = deps.processId ?? process.pid;
   const runtimeNonce = randomUUID();
+  const blockerEventsAvailable = typeof pi.events?.on === "function";
   const runWatchers = new Map();
   const pendingCommands = new Map();
   const queued = new Set();
+  const blockerDeferred = new Set();
   const warned = new Set();
   let rootWatcher;
   let ctx;
   let active = false;
   let activeTools = 0;
-  let lifecycleBlocked = false;
+  let blockerInvalid = !blockerEventsAvailable;
+  let blockerLabels = [];
   let pending = Promise.resolve();
   let startReason = "startup";
 
@@ -259,16 +337,59 @@ export default function register(pi, deps = {}) {
     return pending;
   }
 
+  function closeWatcher(watcher, label) {
+    if (!watcher) return;
+    try {
+      watcher.close();
+    } catch (error) {
+      warning(`${label} could not close: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  function updateBlocker(data) {
+    if (!active) return;
+    if (!data || typeof data.active !== "boolean") {
+      blockerInvalid = true;
+      warning("qq activation blocker lifecycle is malformed and remains blocked");
+      return;
+    }
+    const label = typeof data.label === "string" && data.label.trim() ? singleLine(data.label) : undefined;
+    if (data.active) {
+      blockerLabels.push(label);
+      return;
+    }
+    if (blockerLabels.length === 0) {
+      blockerInvalid = true;
+      warning("qq activation blocker lifecycle underflowed and remains blocked");
+      return;
+    }
+    if (label === undefined) {
+      blockerLabels.pop();
+      return;
+    }
+    const matchingLabel = blockerLabels.lastIndexOf(label);
+    if (matchingLabel < 0) {
+      blockerInvalid = true;
+      warning("qq activation blocker release contradicted the active labels and remains blocked");
+      return;
+    }
+    blockerLabels.splice(matchingLabel, 1);
+  }
+
   function sessionPath() {
     const value = ctx?.sessionManager?.getSessionFile?.();
     return typeof value === "string" && value.startsWith("/") ? value : undefined;
+  }
+
+  function extensionBlocked() {
+    return blockerInvalid || blockerLabels.length > 0 || deps.isBlocked?.();
   }
 
   function safeBoundary() {
     if (!ctx?.isIdle?.()) return "Pi is busy or has a queued continuation";
     if (ctx?.hasPendingMessages?.()) return "Pi has a queued continuation";
     if (activeTools !== 0) return "a tool turn is active";
-    if (lifecycleBlocked || deps.isBlocked?.()) return "an extension-blocked or atomic operation is active";
+    if (extensionBlocked()) return "an extension-blocked or atomic operation is active";
     return undefined;
   }
 
@@ -367,6 +488,8 @@ export default function register(pi, deps = {}) {
   }
 
   async function claimAndQueue(runDir, request, target) {
+    const key = `${request.run_id}:${target.token}`;
+    if (blockerDeferred.has(key)) return;
     const blocked = safeBoundary();
     if (blocked) {
       const key = `${request.run_id}:${target.token}:${blocked}`;
@@ -418,7 +541,6 @@ export default function register(pi, deps = {}) {
       resource_fingerprint: observed, recorded_at: new Date().toISOString(),
     };
     await atomicJson(join(attempts, `${target.token}.json`), attempt);
-    const key = `${request.run_id}:${target.token}`;
     pendingCommands.set(key, { runDir, request, target, attempt });
     queued.add(key);
     void pi.sendUserMessage(`/qq-activate ${request.run_id} ${target.token}`, { deliverAs: "followUp" }).catch(async (error) => {
@@ -428,7 +550,7 @@ export default function register(pi, deps = {}) {
 
   async function inspectRun(runDir) {
     const state = await safeLstat(runDir);
-    if (!state?.isDirectory() || state.isSymbolicLink() || (state.mode & 0o777) !== 0o700) return;
+    if (!state?.isDirectory() || state.isSymbolicLink() || state.uid !== process.getuid?.() || (state.mode & 0o777) !== 0o700) return;
     const requestState = await safeLstat(join(runDir, "REQUEST.json"));
     if (!requestState) return;
     const request = validateRequest(await readJson(join(runDir, "REQUEST.json"), "activation request"));
@@ -450,7 +572,7 @@ export default function register(pi, deps = {}) {
       const watcher = watch(runDir, { persistent: false }, () => void enqueue(() => inspectRun(runDir)));
       watcher.on?.("error", (error) => {
         runWatchers.delete(runDir);
-        try { watcher.close(); } catch {}
+        closeWatcher(watcher, "qq activation run watcher");
         warning(`qq activation run watcher died: ${singleLine(error?.message ?? error)}`);
       });
       runWatchers.set(runDir, watcher);
@@ -462,12 +584,12 @@ export default function register(pi, deps = {}) {
   async function scan() {
     const entries = await readdir(activationRoot, { withFileTypes: true });
     entries.sort((left, right) => left.name.localeCompare(right.name));
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+    await Promise.all(entries.map((entry) => {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) return Promise.resolve();
       const runDir = join(activationRoot, entry.name);
       watchRun(runDir);
-      await inspectRun(runDir);
-    }
+      return inspectRun(runDir);
+    }));
   }
 
   async function writeProbeEvidence(reason) {
@@ -500,7 +622,9 @@ export default function register(pi, deps = {}) {
     ctx = nextCtx;
     startReason = event?.reason ?? "startup";
     active = true;
-    lifecycleBlocked = false;
+    blockerInvalid = !blockerEventsAvailable;
+    blockerLabels = [];
+    blockerDeferred.clear();
     activeTools = 0;
     await exactDirectory(runtimeRoot, "dispatch runtime root", true);
     await exactDirectory(activationRoot, "activation lifecycle root", true);
@@ -508,7 +632,7 @@ export default function register(pi, deps = {}) {
     await scan();
     rootWatcher = watch(activationRoot, { persistent: false }, () => void enqueue(scan));
     rootWatcher.on?.("error", (error) => {
-      try { rootWatcher?.close(); } catch {}
+      closeWatcher(rootWatcher, "qq activation root watcher");
       rootWatcher = undefined;
       warning(`qq activation root watcher died: ${singleLine(error?.message ?? error)}`);
     });
@@ -518,13 +642,14 @@ export default function register(pi, deps = {}) {
 
   function shutdown() {
     active = false;
-    lifecycleBlocked = true;
-    try { rootWatcher?.close(); } catch {}
+    blockerInvalid = true;
+    closeWatcher(rootWatcher, "qq activation root watcher");
     rootWatcher = undefined;
     for (const watcher of runWatchers.values()) {
-      try { watcher.close(); } catch {}
+      closeWatcher(watcher, "qq activation run watcher");
     }
     runWatchers.clear();
+    blockerDeferred.clear();
     ctx = undefined;
   }
 
@@ -538,6 +663,16 @@ export default function register(pi, deps = {}) {
       queued.delete(key);
       const blocked = safeBoundary();
       if (blocked) {
+        if (extensionBlocked()) {
+          pendingCommands.delete(key);
+          blockerDeferred.add(key);
+          await Promise.all([
+            rm(join(item.runDir, "claims", `${token}.json`), { force: true }),
+            rm(join(item.runDir, "attempts", `${token}.json`), { force: true }),
+          ]);
+          warning(`qq activation ${item.request.run_id} remains pending: ${blocked}`);
+          return;
+        }
         await recordFailure(item.runDir, item.request, item.target, `internal activation command crossed an unsafe boundary: ${blocked}`);
         return;
       }
@@ -545,7 +680,12 @@ export default function register(pi, deps = {}) {
       item.attempt.recorded_at = new Date().toISOString();
       await atomicJson(join(item.runDir, "attempts", `${token}.json`), item.attempt, true);
       if (item.request.action === "replace") {
-        replaceProcess(item.runDir, token, processId);
+        try {
+          await replaceProcess(item.runDir, token, processId, item.request, item.target);
+        } catch (error) {
+          await recordFailure(item.runDir, item.request, item.target, `replacement helper launch was not accepted: ${error instanceof Error ? error.message : String(error)}`);
+          return;
+        }
         commandCtx.shutdown();
         return;
       }
@@ -558,9 +698,13 @@ export default function register(pi, deps = {}) {
     },
   });
 
+  pi.events?.on?.("herdr:blocked", updateBlocker);
   pi.on("tool_execution_start", () => { activeTools += 1; });
   pi.on("tool_execution_end", () => { activeTools = Math.max(0, activeTools - 1); });
-  pi.on("agent_settled", async () => { await enqueue(scan); });
+  pi.on("agent_settled", async () => {
+    if (!extensionBlocked()) blockerDeferred.clear();
+    await enqueue(scan);
+  });
   pi.on("session_start", async (event, nextCtx) => {
     try {
       await start(event, nextCtx);

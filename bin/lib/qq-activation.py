@@ -14,7 +14,6 @@ import shutil
 import stat
 import subprocess
 import sys
-import time
 import uuid
 from typing import Any, NoReturn
 
@@ -31,8 +30,13 @@ REPLACEMENT_ONLY_PATHS = ("bin/pi", "package.json", "package-lock.json")
 OID = re.compile(r"[0-9a-f]{40}")
 TASK_ID = re.compile(r"T-[1-9][0-9]*(?:\.[1-9][0-9]*)*")
 SAFE_ID = re.compile(r"[A-Za-z0-9:_-]{1,128}")
+BRANCH = re.compile(
+    r"(?!/)(?!.*(?:^|/)\.)(?!.*\.\.)(?!.*@\{)(?!.*[~^:?*\\\[\x00-\x20\x7f])"
+    r"(?!.*//)(?!.*(?:/|\.lock)$).{1,240}"
+)
 CITATION = re.compile(r"decision-[1-9][0-9]*")
 RESOURCE = re.compile(r"(?!/)(?!.*(?:^|/)\.\.(?:/|$))(?!.*[\r\n\x00]).{1,240}")
+HASH = re.compile(r"[0-9a-f]{64}")
 MAX_RECORD = 256 * 1024
 
 
@@ -305,7 +309,8 @@ def command_targets(_args: argparse.Namespace) -> None:
         status = required_string(agent, "agent_status")
         if status not in {"idle", "working", "blocked"}:
             continue
-        if agent.get("interactive_ready") is not True:
+        interactive_ready = agent.get("interactive_ready")
+        if not isinstance(interactive_ready, bool) or not interactive_ready:
             raise Refusal("Herdr Pi target is not verifiably interactive-ready")
         session_value = agent.get("agent_session")
         if not isinstance(session_value, dict) or set(session_value) < {"agent", "kind", "source", "value"}:
@@ -405,6 +410,13 @@ def activation_root(runtime_value: str, *, create: bool) -> tuple[Path, Path]:
     return runtime, activation
 
 
+def valid_resource_list(value: Any) -> bool:
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        return False
+    resources: list[str] = value
+    return resources == sorted(set(resources)) and all(RESOURCE.fullmatch(item) for item in resources)
+
+
 def validate_request_shape(request: Any) -> dict[str, Any]:
     expected = {
         "schema", "version", "run_id", "action", "before_tree", "landed_tree",
@@ -417,12 +429,52 @@ def validate_request_shape(request: Any) -> dict[str, Any]:
         raise Refusal("activation request has an unexpected schema shape")
     if request.get("schema") != "qq.activation-request" or request.get("version") != 1:
         raise Refusal("activation request schema is unsupported")
-    if request.get("action") not in {"reload", "replace"}:
+    action = request.get("action")
+    if action not in {"reload", "replace"}:
         raise Refusal("activation request action is unsupported")
-    if not SAFE_ID.fullmatch(str(request.get("run_id", ""))):
+    run_id = request.get("run_id")
+    before_tree = request.get("before_tree")
+    landed_tree = request.get("landed_tree")
+    merge_commit = request.get("merge_commit")
+    resource_fingerprint = request.get("resource_fingerprint")
+    source_branch = request.get("source_branch")
+    pull_request = request.get("pull_request")
+    pr_url = request.get("pr_url")
+    task_id = request.get("task_id")
+    probe_id = request.get("probe_id")
+    reason = request.get("reason")
+    citation = request.get("citation")
+    replacement = request.get("replacement")
+    changed_resources = request.get("changed_loaded_resources")
+    replacement_resources = request.get("replacement_resources")
+    if not isinstance(run_id, str) or not SAFE_ID.fullmatch(run_id):
         raise Refusal("activation request identity is unsafe")
-    if not OID.fullmatch(str(request.get("landed_tree", ""))) or not re.fullmatch(r"[0-9a-f]{64}", str(request.get("resource_fingerprint", ""))):
+    if (not isinstance(before_tree, str) or not OID.fullmatch(before_tree)
+            or not isinstance(landed_tree, str) or not OID.fullmatch(landed_tree)
+            or not isinstance(merge_commit, str) or not OID.fullmatch(merge_commit)
+            or not isinstance(resource_fingerprint, str) or not HASH.fullmatch(resource_fingerprint)):
         raise Refusal("activation request source identity is malformed")
+    if not isinstance(source_branch, str) or not BRANCH.fullmatch(source_branch):
+        raise Refusal("activation request source branch is malformed")
+    if not isinstance(pull_request, str) or (pull_request != "probe" and not re.fullmatch(r"[1-9][0-9]*", pull_request)):
+        raise Refusal("activation request pull-request identity is malformed")
+    if pr_url is not None and (not isinstance(pr_url, str) or not pr_url.startswith("https://")):
+        raise Refusal("activation request pull-request URL is malformed")
+    if task_id is not None and (not isinstance(task_id, str) or not TASK_ID.fullmatch(task_id)):
+        raise Refusal("activation request Task identity is malformed")
+    if probe_id is not None and (not isinstance(probe_id, str) or not SAFE_ID.fullmatch(probe_id)):
+        raise Refusal("activation request probe identity is malformed")
+    if not isinstance(reason, str) or not 1 <= len(reason) <= 500 or reason.strip() != reason:
+        raise Refusal("activation request reason is malformed")
+    if not valid_resource_list(changed_resources):
+        raise Refusal("activation request loaded resources are malformed")
+    if not valid_resource_list(replacement_resources):
+        raise Refusal("activation request replacement resources are malformed")
+    if action == "replace":
+        if replacement != "pi-session-cwd-v1" or not isinstance(citation, str) or not CITATION.fullmatch(citation):
+            raise Refusal("activation request replacement authority is malformed")
+    elif replacement is not None or replacement_resources or citation is not None:
+        raise Refusal("reload activation request contains contradictory replacement authority")
     if request.get("expected_watcher_version") != WATCHER_VERSION:
         raise Refusal("activation request expects a stale or unknown watcher version")
     targets = request.get("targets")
@@ -443,10 +495,12 @@ def validate_request_shape(request: Any) -> dict[str, Any]:
         token = target.get("token")
         name = target.get("name")
         launch = target.get("replacement_launch")
-        if (not all(isinstance(item, str) and SAFE_ID.fullmatch(item) for item in (pane, tab, workspace))
+        if (not isinstance(pane, str) or not SAFE_ID.fullmatch(pane)
+                or not isinstance(tab, str) or not SAFE_ID.fullmatch(tab)
+                or not isinstance(workspace, str) or not SAFE_ID.fullmatch(workspace)
                 or not isinstance(session, str) or not os.path.isabs(session)
                 or not isinstance(cwd, str) or not os.path.isabs(cwd)
-                or token != target_token(pane, session)
+                or not isinstance(token, str) or token != target_token(pane, session)
                 or token in seen_tokens or pane in seen_panes or session in seen_sessions
                 or target.get("observed_status") not in {"idle", "working", "blocked"}
                 or (name is not None and (not isinstance(name, str) or not SAFE_ID.fullmatch(name)))
@@ -458,55 +512,107 @@ def validate_request_shape(request: Any) -> dict[str, Any]:
     return request
 
 
-def retire_completed_runs(root: Path) -> list[str]:
-    retired: list[str] = []
-    for candidate in sorted(root.iterdir()):
+def safe_children(directory: Path, label: str) -> list[Path]:
+    try:
+        return sorted(directory.iterdir(), key=lambda path: path.name)
+    except OSError as error:
+        raise Refusal(f"{label} cannot be inspected") from error
+
+
+def request_source_relation(request: dict[str, Any], branch: str, pull_request: str | None) -> bool:
+    branch_matches = request["source_branch"] == branch
+    if pull_request is None:
+        return branch_matches
+    pr_matches = request["pull_request"] == pull_request
+    if branch_matches != pr_matches:
+        raise Refusal("activation request source branch and pull request are contradictory")
+    return branch_matches and pr_matches
+
+
+def validate_completed_request(run_dir: Path, request: dict[str, Any]) -> None:
+    receipt_keys = {
+        "schema", "version", "run_id", "target", "pane_id", "session_path", "status",
+        "reason", "action", "source_watcher_version", "running_watcher_version",
+        "resource_fingerprint", "process_id", "recorded_at",
+    }
+    for target in request["targets"]:
+        receipt_path = run_dir / "receipts" / f"{target['token']}.json"
+        if not os.path.lexists(receipt_path):
+            raise Refusal("activation request is pending because an exact target receipt is missing")
+        receipt = load_json(receipt_path, "activation receipt")
+        if not isinstance(receipt, dict) or set(receipt) != receipt_keys:
+            raise Refusal("activation receipt has an unexpected schema shape")
+        if receipt.get("status") == "failed":
+            raise Refusal("activation request has a failed target receipt")
+        if (receipt.get("schema") != "qq.activation-receipt" or receipt.get("version") != 1
+                or receipt.get("status") != "activated" or receipt.get("run_id") != request["run_id"]
+                or receipt.get("target") != target["token"] or receipt.get("pane_id") != target["pane_id"]
+                or receipt.get("session_path") != target["session_path"] or receipt.get("action") != request["action"]):
+            raise Refusal("activation receipt authority is contradictory")
+        if (receipt.get("resource_fingerprint") != request["resource_fingerprint"]
+                or receipt.get("running_watcher_version") != request["expected_watcher_version"]
+                or receipt.get("source_watcher_version") != request["expected_watcher_version"]):
+            raise Refusal("activation receipt watcher or fingerprint proof is stale")
+
+
+def command_retire_change(args: argparse.Namespace) -> None:
+    branch = args.source_branch
+    pull_request = args.pull_request
+    if not BRANCH.fullmatch(branch):
+        raise Refusal("activation retirement source branch is malformed")
+    if pull_request is not None and not re.fullmatch(r"[1-9][0-9]*", pull_request):
+        raise Refusal("activation retirement pull-request identity is malformed")
+    runtime_path = Path(args.runtime_root)
+    if not os.path.lexists(runtime_path) or not os.path.lexists(runtime_path / ".qq-activation"):
+        json_output({"status": "not-found", "matched": False, "retired": False,
+                     "source_branch": branch, "pull_request": pull_request, "run_id": None})
+        return
+    _runtime, root = activation_root(args.runtime_root, create=False)
+    matches: list[tuple[Path, dict[str, Any], bool]] = []
+    for candidate in safe_children(root, "activation lifecycle root"):
         if candidate.is_symlink() or not candidate.is_dir():
             continue
-        try:
-            run_dir = safe_directory(candidate, "activation run")
-            request_path = run_dir / "REQUEST.json"
-            if not request_path.exists():
-                continue
-            request = validate_request_shape(load_json(request_path, "activation request"))
-            complete = True
-            for target in request["targets"]:
-                receipt_path = run_dir / "receipts" / f"{target['token']}.json"
-                if not receipt_path.exists():
-                    complete = False
-                    break
-                receipt = load_json(receipt_path, "activation receipt")
-                if (receipt.get("schema") != "qq.activation-receipt"
-                        or receipt.get("run_id") != request["run_id"]
-                        or receipt.get("target") != target["token"]
-                        or receipt.get("status") != "activated"
-                        or receipt.get("resource_fingerprint") != request["resource_fingerprint"]
-                        or receipt.get("running_watcher_version") != request["expected_watcher_version"]):
-                    complete = False
-                    break
-            if complete:
-                shutil.rmtree(run_dir)
-                retired.append(request["run_id"])
-        except (OSError, Refusal):
-            # Untrusted or malformed entries remain visible; cleanup never
-            # guesses ownership or follows them.
+        run_dir = safe_directory(candidate, "activation run")
+        armed_path = run_dir / "REQUEST.json"
+        pending_path = run_dir / "REQUEST.pending"
+        has_armed = os.path.lexists(armed_path)
+        has_pending = os.path.lexists(pending_path)
+        if not has_armed and not has_pending:
             continue
-    return retired
-
-
-def command_retire_completed(args: argparse.Namespace) -> None:
-    runtime = safe_directory(Path(args.runtime_root), "dispatch runtime root")
-    activation = runtime / ".qq-activation"
-    if not os.path.lexists(activation):
-        json_output({"retired": []})
+        if has_armed and has_pending:
+            raise Refusal("activation run contains contradictory armed and pending requests")
+        request = validate_request_shape(load_json(armed_path if has_armed else pending_path, "activation request"))
+        if request_source_relation(request, branch, pull_request):
+            matches.append((run_dir, request, has_pending))
+    if len(matches) > 1:
+        raise Refusal("activation retirement matched more than one exact request")
+    if not matches:
+        json_output({"status": "not-found", "matched": False, "retired": False,
+                     "source_branch": branch, "pull_request": pull_request, "run_id": None})
         return
-    root = safe_directory(activation, "activation lifecycle root")
-    json_output({"retired": retire_completed_runs(root)})
+    run_dir, request, pending = matches[0]
+    if pending:
+        raise Refusal("activation retirement refuses a pending request")
+    validate_completed_request(run_dir, request)
+    if args.inspect:
+        status = "eligible"
+        retired = False
+    else:
+        try:
+            shutil.rmtree(run_dir)
+        except OSError as error:
+            raise Refusal("exact activation run could not be retired") from error
+        status = "retired"
+        retired = True
+    json_output({
+        "status": status, "matched": True, "retired": retired,
+        "source_branch": branch, "pull_request": pull_request,
+        "run_id": request["run_id"], "run_dir": os.fspath(run_dir),
+    })
 
 
 def command_stage(args: argparse.Namespace) -> None:
     _runtime, root = activation_root(args.runtime_root, create=True)
-    retire_completed_runs(root)
     try:
         payload = json.load(sys.stdin)
     except (UnicodeError, json.JSONDecodeError) as error:
@@ -597,7 +703,7 @@ def command_recover_pending(args: argparse.Namespace) -> None:
         return
     _runtime, root = activation_root(args.runtime_root, create=False)
     matches: list[tuple[Path, dict[str, Any]]] = []
-    for candidate in sorted(root.iterdir()):
+    for candidate in safe_children(root, "activation lifecycle root"):
         if candidate.is_symlink() or not candidate.is_dir():
             continue
         pending = candidate / "REQUEST.pending"
@@ -623,7 +729,7 @@ def command_recover_existing(args: argparse.Namespace) -> None:
         return
     _runtime, root = activation_root(args.runtime_root, create=False)
     matches: list[tuple[Path, dict[str, Any]]] = []
-    for candidate in sorted(root.iterdir()):
+    for candidate in safe_children(root, "activation lifecycle root"):
         if candidate.is_symlink() or not candidate.is_dir():
             continue
         armed = candidate / "REQUEST.json"
@@ -767,18 +873,24 @@ def command_probe_request(args: argparse.Namespace) -> None:
 
 
 def command_probe_verify(args: argparse.Namespace) -> None:
-    root, _probe = validate_probe(args.runtime_root)
+    root, probe = validate_probe(args.runtime_root)
+    if os.environ.get("QQ_DISPATCH_RUNTIME_ROOT") != os.fspath(root):
+        raise Refusal("probe verification runtime root is not the exact exported identity")
+    if (os.environ.get("QQ_ACTIVATION_PROBE_ID") != probe["probe_id"]
+            or os.environ.get("QQ_ACTIVATION_EXPECTED_WATCHER_VERSION") != probe["expected_watcher_version"]
+            or probe["expected_watcher_version"] != WATCHER_VERSION):
+        raise Refusal("probe verification environment does not bind the exported probe and watcher identity")
     activation = safe_directory(root / ".qq-activation", "probe activation root")
     receipts: list[dict[str, Any]] = []
     watchers: list[dict[str, Any]] = []
-    for run_dir in activation.iterdir():
+    for run_dir in safe_children(activation, "probe activation root"):
         if run_dir.is_symlink() or not run_dir.is_dir():
             continue
         request_path = run_dir / "REQUEST.json"
         if not request_path.exists():
             continue
         request = validate_request_shape(load_json(request_path, "probe activation request"))
-        if request.get("probe_id") != os.environ.get("QQ_ACTIVATION_PROBE_ID", request.get("probe_id")):
+        if request.get("probe_id") != probe["probe_id"]:
             continue
         for target in request["targets"]:
             receipt_path = run_dir / "receipts" / f"{target['token']}.json"
@@ -789,14 +901,16 @@ def command_probe_verify(args: argparse.Namespace) -> None:
     watchers_root = root / ".qq-activation-watchers"
     if watchers_root.exists():
         watchers_root = safe_directory(watchers_root, "probe watcher evidence")
-        for path in watchers_root.iterdir():
+        for path in safe_children(watchers_root, "probe watcher evidence"):
             if path.is_file() and not path.is_symlink():
                 record = load_json(path, "probe watcher evidence")
-                if record.get("running_watcher_version") == WATCHER_VERSION:
+                if (record.get("probe_id") == probe["probe_id"]
+                        and record.get("expected_watcher_version") == WATCHER_VERSION
+                        and record.get("running_watcher_version") == WATCHER_VERSION):
                     watchers.append(record)
     for receipt in receipts:
         if not any(
-            watcher.get("probe_id") == _probe["probe_id"]
+            watcher.get("probe_id") == probe["probe_id"]
             and watcher.get("process_id") == receipt.get("process_id")
             and watcher.get("session_path") == receipt.get("session_path")
             and watcher.get("start_reason") == "reload"
@@ -810,12 +924,26 @@ def command_probe_verify(args: argparse.Namespace) -> None:
     json_output({"status": "verified", "expected_watcher_version": WATCHER_VERSION, "receipts": receipts, "watchers": watchers})
 
 
-def write_helper(run_dir: Path, token: str, value: dict[str, Any]) -> None:
+def write_helper(run_dir: Path, token: str, value: dict[str, Any], *, replace: bool) -> None:
     helpers = run_dir / "helpers"
-    if not helpers.exists():
-        helpers.mkdir(mode=0o700)
+    try:
+        helpers.mkdir(mode=0o700, exist_ok=True)
+    except OSError as error:
+        raise Refusal("replacement helper record directory cannot be created") from error
     helpers = safe_directory(helpers, "replacement helper records")
-    atomic_json(helpers / f"{token}.json", value, replace=True)
+    atomic_json(helpers / f"{token}.json", value, replace=replace)
+
+
+def write_helper_acceptance(descriptor: int, value: dict[str, Any]) -> None:
+    if descriptor < 3:
+        raise Refusal("replacement helper acceptance descriptor is unsafe")
+    body = (json.dumps(value, separators=(",", ":"), sort_keys=True) + "\n").encode()
+    try:
+        with os.fdopen(descriptor, "wb", closefd=True) as stream:
+            stream.write(body)
+            stream.flush()
+    except OSError as error:
+        raise Refusal("replacement helper could not acknowledge launch ownership") from error
 
 
 def command_replace(args: argparse.Namespace) -> None:
@@ -831,14 +959,28 @@ def command_replace(args: argparse.Namespace) -> None:
     status = {
         "schema": "qq.activation-replacement", "version": 1, "run_id": request["run_id"],
         "target": args.target, "pane_id": pane, "old_pid": args.old_pid,
-        "status": "waiting-for-graceful-shutdown", "expected_watcher_version": WATCHER_VERSION,
+        "helper_pid": os.getpid(), "status": "waiting-for-graceful-shutdown",
+        "expected_watcher_version": WATCHER_VERSION,
         "resource_fingerprint": request["resource_fingerprint"], "updated_at": now(),
     }
-    write_helper(run_dir, args.target, status)
+    owns_request = False
     try:
         herdr = shutil.which("herdr")
         if not herdr:
             raise Refusal("herdr is unavailable to the replacement lifecycle")
+        try:
+            write_helper(run_dir, args.target, status, replace=False)
+        except FileExistsError as error:
+            raise Refusal("replacement helper ownership is already claimed") from error
+        owns_request = True
+        if args.accept_fd is not None:
+            write_helper_acceptance(args.accept_fd, {
+                "schema": "qq.activation-replacement-acceptance", "version": 1,
+                "status": "accepted", "run_id": request["run_id"], "target": args.target,
+                "pane_id": pane, "old_pid": args.old_pid, "helper_pid": os.getpid(),
+                "expected_watcher_version": WATCHER_VERSION,
+                "resource_fingerprint": request["resource_fingerprint"],
+            })
         run([herdr, "agent", "wait", pane, "--until", "unknown", "--timeout", "30000"], timeout=35)
         pane_doc = json.loads(run([herdr, "pane", "get", pane]).decode())
         observed = pane_doc.get("result", {}).get("pane", {})
@@ -855,16 +997,14 @@ def command_replace(args: argparse.Namespace) -> None:
         started = json.loads(output)
         result = started.get("result", {})
         agent = result.get("agent", {})
-        if result.get("type") not in {"agent_started", "agent_start"} and agent.get("pane_id") != pane:
-            # Herdr versions vary in their success type; exact post-start watcher
-            # evidence remains the terminal proof, but unreadable identity fails.
-            if agent.get("pane_id") != pane:
-                raise Refusal("Herdr replacement start did not identify the exact pane")
+        if result.get("type") not in {"agent_started", "agent_start"} or agent.get("pane_id") != pane:
+            raise Refusal("Herdr replacement start did not return a recognized result for the exact pane")
         status.update({"status": "started", "updated_at": now()})
-        write_helper(run_dir, args.target, status)
+        write_helper(run_dir, args.target, status, replace=True)
     except (Refusal, json.JSONDecodeError, OSError) as error:
-        status.update({"status": "failed", "error": str(error)[:500], "updated_at": now()})
-        write_helper(run_dir, args.target, status)
+        if owns_request:
+            status.update({"status": "failed", "error": str(error)[:500], "updated_at": now()})
+            write_helper(run_dir, args.target, status, replace=True)
         raise
 
 
@@ -895,9 +1035,12 @@ def parser() -> argparse.ArgumentParser:
     recover_existing.add_argument("--landed-tree", required=True)
     recover_existing.add_argument("--merge-commit", required=True)
     recover_existing.set_defaults(function=command_recover_existing)
-    retire_completed = commands.add_parser("retire-completed")
-    retire_completed.add_argument("--runtime-root", required=True)
-    retire_completed.set_defaults(function=command_retire_completed)
+    retire_change = commands.add_parser("retire-change")
+    retire_change.add_argument("--runtime-root", required=True)
+    retire_change.add_argument("--source-branch", required=True)
+    retire_change.add_argument("--pull-request")
+    retire_change.add_argument("--inspect", action="store_true")
+    retire_change.set_defaults(function=command_retire_change)
     prepare = commands.add_parser("probe-prepare")
     prepare.add_argument("--runtime-root", required=True)
     prepare.set_defaults(function=command_probe_prepare)
@@ -917,6 +1060,7 @@ def parser() -> argparse.ArgumentParser:
     replace.add_argument("--run", required=True)
     replace.add_argument("--target", required=True)
     replace.add_argument("--old-pid", type=int, required=True)
+    replace.add_argument("--accept-fd", type=int)
     replace.set_defaults(function=command_replace)
     return result
 

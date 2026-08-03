@@ -142,6 +142,28 @@ exports="$($PROBE prepare "$probe_root")"
 eval "$exports"
 assert_equal 700 "$(stat -c %a "$probe_root")" "probe root mode"
 "$PROBE" validate "$probe_root" >/dev/null
+saved_probe_id="$QQ_ACTIVATION_PROBE_ID"
+saved_probe_version="$QQ_ACTIVATION_EXPECTED_WATCHER_VERSION"
+unset QQ_ACTIVATION_PROBE_ID
+set +e
+"$PROBE" verify "$probe_root" --minimum 0 >/dev/null 2>"$TMP/probe-verify-absent.err"
+probe_verify_absent_status=$?
+set -e
+assert_equal 2 "$probe_verify_absent_status" "probe verification accepted an absent exported probe identity"
+export QQ_ACTIVATION_PROBE_ID=wrong-probe
+set +e
+"$PROBE" verify "$probe_root" --minimum 0 >/dev/null 2>"$TMP/probe-verify-mismatch.err"
+probe_verify_mismatch_status=$?
+set -e
+assert_equal 2 "$probe_verify_mismatch_status" "probe verification accepted a mismatched exported probe identity"
+export QQ_ACTIVATION_PROBE_ID="$saved_probe_id"
+export QQ_ACTIVATION_EXPECTED_WATCHER_VERSION=wrong-version
+set +e
+"$PROBE" verify "$probe_root" --minimum 0 >/dev/null 2>"$TMP/probe-verify-version.err"
+probe_verify_version_status=$?
+set -e
+assert_equal 2 "$probe_verify_version_status" "probe verification accepted a mismatched exported watcher identity"
+export QQ_ACTIVATION_EXPECTED_WATCHER_VERSION="$saved_probe_version"
 set +e
 "$PROBE" prepare "$probe_root" >/dev/null 2>"$TMP/reused.err"
 reused_status=$?
@@ -204,7 +226,13 @@ printf '%s\\n' "\$*" >>"$TMP/replacement-herdr.log"
 case "\${1:-} \${2:-}" in
   'agent wait') printf '%s\\n' '{"result":{"status":"unknown"}}' ;;
   'pane get') printf '%s\\n' '{"result":{"pane":{"pane_id":"qq:p1","tab_id":"qq:t1","workspace_id":"qq","cwd":"$replacement_cwd"}}}' ;;
-  'agent start') printf '%s\\n' '{"result":{"type":"agent_started","agent":{"pane_id":"qq:p1"}}}' ;;
+  'agent start')
+    if [ "\${FAKE_START_WRONG_PANE:-}" = 1 ]; then
+      printf '%s\\n' '{"result":{"type":"agent_started","agent":{"pane_id":"wrong:pane"}}}'
+    else
+      printf '%s\\n' '{"result":{"type":"agent_started","agent":{"pane_id":"qq:p1"}}}'
+    fi
+    ;;
   *) exit 2 ;;
 esac
 EOF
@@ -213,19 +241,125 @@ PATH="$TMP:$PATH" "$HELPER" replace --run "$replacement_run" --target "$replacem
 jq -e '.status == "started" and .old_pid == 4242' "$replacement_run/helpers/$replacement_token.json" >/dev/null
 assert_file_contains "$TMP/replacement-herdr.log" "agent start qq-owner --kind pi --pane qq:p1 --timeout 30000 -- --session $replacement_session"
 assert_file_not_matches "$TMP/replacement-herdr.log" 'focus|prompt|send-keys|send-text' 'replacement helper used a focus/editor/model path'
+rm -- "$replacement_run/helpers/$replacement_token.json"
+set +e
+FAKE_START_WRONG_PANE=1 PATH="$TMP:$PATH" "$HELPER" replace --run "$replacement_run" \
+  --target "$replacement_token" --old-pid 4243 >/dev/null 2>"$TMP/replacement-wrong-pane.err"
+wrong_pane_status=$?
+set -e
+assert_equal 2 "$wrong_pane_status" "recognized replacement start type with the wrong pane was accepted"
+jq -e '.status == "failed" and (.error | contains("exact pane"))' \
+  "$replacement_run/helpers/$replacement_token.json" >/dev/null
+
+# Staging a later activation never raw-retires an earlier completed run.
+retirement_root="$TMP/retirement-runtime"
+mkdir -m 700 "$retirement_root"
+jq -cn --argjson classification "$(cat "$TMP/reload.json")" --argjson targets "$(cat "$TMP/replacement-target.json")" '
+  {classification:$classification,targets:$targets,source:{pull_request:"51",pr_url:"https://example.test/51",merge_commit:$classification.landed_tree,source_branch:"prior-feature",probe_id:null}}
+' | "$HELPER" stage --runtime-root "$retirement_root" >"$TMP/retirement-prior-stage.json"
+retirement_prior_id="$(jq -r .run_id "$TMP/retirement-prior-stage.json")"
+retirement_prior_run="$(jq -r .run_dir "$TMP/retirement-prior-stage.json")"
+"$HELPER" arm --runtime-root "$retirement_root" --run-id "$retirement_prior_id" >/dev/null
+mkdir -m 700 "$retirement_prior_run/receipts"
+retirement_fingerprint="$(jq -r .resource_fingerprint "$TMP/reload.json")"
+jq -cn --arg run "$retirement_prior_id" --arg token "$replacement_token" --arg fingerprint "$retirement_fingerprint" \
+  --arg session "$replacement_session" '
+  {schema:"qq.activation-receipt",version:1,run_id:$run,target:$token,pane_id:"qq:p1",session_path:$session,
+   status:"activated",reason:"fixture activation",action:"reload",source_watcher_version:"qq-activation-watch-v1",
+   running_watcher_version:"qq-activation-watch-v1",resource_fingerprint:$fingerprint,process_id:500,recorded_at:"2026-01-01T00:00:00Z"}
+' >"$retirement_prior_run/receipts/$replacement_token.json"
+chmod 600 "$retirement_prior_run/receipts/$replacement_token.json"
+jq -cn --argjson classification "$(cat "$TMP/extension-replace.json")" '
+  {classification:$classification,targets:[],source:{pull_request:"52",pr_url:"https://example.test/52",merge_commit:$classification.landed_tree,source_branch:"later-feature",probe_id:null}}
+' | "$HELPER" stage --runtime-root "$retirement_root" >"$TMP/retirement-later-stage.json"
+retirement_later_run="$(jq -r .run_dir "$TMP/retirement-later-stage.json")"
+[ -f "$retirement_prior_run/REQUEST.json" ] || fail 'later staging deleted a completed prior activation run'
+set +e
+"$HELPER" retire-change --runtime-root "$retirement_root" --source-branch later-feature \
+  --pull-request 52 >/dev/null 2>"$TMP/retirement-pending.err"
+retirement_pending_status=$?
+set -e
+assert_equal 2 "$retirement_pending_status" "activation retirement accepted a pending exact request"
+[ -d "$retirement_later_run" ] || fail 'pending retirement refusal removed its run'
+"$HELPER" retire-change --runtime-root "$retirement_root" --source-branch prior-feature \
+  --pull-request 51 >"$TMP/retirement-complete.json"
+jq -e '.status == "retired" and .matched == true and .retired == true' "$TMP/retirement-complete.json" >/dev/null
+[ ! -e "$retirement_prior_run" ] || fail 'exact complete activation retirement left its run'
+[ -d "$retirement_later_run" ] || fail 'exact activation retirement removed a foreign run'
+"$HELPER" retire-change --runtime-root "$retirement_root" --source-branch prior-feature \
+  --pull-request 51 >"$TMP/retirement-repeated.json"
+jq -e '.status == "not-found" and .matched == false and .retired == false' "$TMP/retirement-repeated.json" >/dev/null
+
+failed_retirement_root="$TMP/failed-retirement-runtime"
+mkdir -m 700 "$failed_retirement_root"
+jq -cn --argjson classification "$(cat "$TMP/reload.json")" --argjson targets "$(cat "$TMP/replacement-target.json")" '
+  {classification:$classification,targets:$targets,source:{pull_request:"53",pr_url:"https://example.test/53",merge_commit:$classification.landed_tree,source_branch:"failed-feature",probe_id:null}}
+' | "$HELPER" stage --runtime-root "$failed_retirement_root" >"$TMP/failed-retirement-stage.json"
+failed_retirement_id="$(jq -r .run_id "$TMP/failed-retirement-stage.json")"
+failed_retirement_run="$(jq -r .run_dir "$TMP/failed-retirement-stage.json")"
+"$HELPER" arm --runtime-root "$failed_retirement_root" --run-id "$failed_retirement_id" >/dev/null
+mkdir -m 700 "$failed_retirement_run/receipts"
+jq -cn --arg run "$failed_retirement_id" --arg token "$replacement_token" --arg fingerprint "$retirement_fingerprint" \
+  --arg session "$replacement_session" '
+  {schema:"qq.activation-receipt",version:1,run_id:$run,target:$token,pane_id:"qq:p1",session_path:$session,
+   status:"failed",reason:"fixture refusal",action:"reload",source_watcher_version:"qq-activation-watch-v1",
+   running_watcher_version:"qq-activation-watch-v1",resource_fingerprint:$fingerprint,process_id:501,recorded_at:"2026-01-01T00:00:00Z"}
+' >"$failed_retirement_run/receipts/$replacement_token.json"
+chmod 600 "$failed_retirement_run/receipts/$replacement_token.json"
+set +e
+"$HELPER" retire-change --runtime-root "$failed_retirement_root" --source-branch failed-feature \
+  --pull-request 53 >/dev/null 2>"$TMP/retirement-failed.err"
+retirement_failed_status=$?
+set -e
+assert_equal 2 "$retirement_failed_status" "activation retirement accepted a failed target"
+[ -d "$failed_retirement_run" ] || fail 'failed retirement refusal removed its run'
+jq '.status = "activated" | .resource_fingerprint = ("0" * 64)' \
+  "$failed_retirement_run/receipts/$replacement_token.json" \
+  >"$failed_retirement_run/receipts/$replacement_token.json.tmp"
+mv "$failed_retirement_run/receipts/$replacement_token.json.tmp" \
+  "$failed_retirement_run/receipts/$replacement_token.json"
+chmod 600 "$failed_retirement_run/receipts/$replacement_token.json"
+set +e
+"$HELPER" retire-change --runtime-root "$failed_retirement_root" --source-branch failed-feature \
+  --pull-request 53 >/dev/null 2>"$TMP/retirement-stale.err"
+retirement_stale_status=$?
+set -e
+assert_equal 2 "$retirement_stale_status" "activation retirement accepted stale fingerprint proof"
+rm -- "$failed_retirement_run/receipts/$replacement_token.json"
+set +e
+"$HELPER" retire-change --runtime-root "$failed_retirement_root" --source-branch failed-feature \
+  --pull-request 53 >/dev/null 2>"$TMP/retirement-missing.err"
+retirement_missing_status=$?
+set -e
+assert_equal 2 "$retirement_missing_status" "activation retirement accepted a missing target receipt"
+[ -d "$failed_retirement_run" ] || fail 'missing-receipt retirement refusal removed its run'
+
+malformed_retirement_root="$TMP/malformed-retirement-runtime"
+mkdir -m 700 "$malformed_retirement_root" "$malformed_retirement_root/.qq-activation"
+mkdir -m 700 "$malformed_retirement_root/.qq-activation/malformed"
+printf '%s\n' '{"schema":"qq.activation-request","source_branch":"malformed-feature"}' \
+  >"$malformed_retirement_root/.qq-activation/malformed/REQUEST.json"
+chmod 600 "$malformed_retirement_root/.qq-activation/malformed/REQUEST.json"
+set +e
+"$HELPER" retire-change --runtime-root "$malformed_retirement_root" --source-branch malformed-feature \
+  --pull-request 54 >/dev/null 2>"$TMP/retirement-malformed.err"
+retirement_malformed_status=$?
+set -e
+assert_equal 2 "$retirement_malformed_status" "activation retirement accepted malformed private state"
+[ -d "$malformed_retirement_root/.qq-activation/malformed" ] || fail 'malformed retirement refusal removed its run'
 
 cp -- "$WATCHER" "$TMP/qq-activation-watch-a.ts"
 cp -- "$WATCHER" "$TMP/qq-activation-watch-b.ts"
 
 node --experimental-strip-types --input-type=module - \
-  "$TMP/qq-activation-watch-a.ts" "$TMP/qq-activation-watch-b.ts" "$TMP" <<'JS'
+  "$TMP/qq-activation-watch-a.ts" "$TMP/qq-activation-watch-b.ts" "$TMP" "$WATCHER" <<'JS'
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [watchAPath, watchBPath, tmp] = process.argv.slice(2);
+const [watchAPath, watchBPath, tmp, productionWatchPath] = process.argv.slice(2);
 const source = await readFile(watchAPath, "utf8");
 assert.doesNotMatch(source, /herdr[^\n]*(?:focus|send-text|send-keys)|setEditorText|sendMessage\s*\(|triggerTurn\s*:\s*true/i,
   "activation watcher can focus/type or trigger a model turn");
@@ -234,6 +368,7 @@ assert.match(source, /await commandCtx\.reload\(\);\s*return;/,
 assert.doesNotMatch(source, /setInterval\s*\(/, "activation watcher contains production polling");
 const moduleA = await import(pathToFileURL(watchAPath));
 const moduleB = await import(pathToFileURL(watchBPath));
+const productionModule = await import(pathToFileURL(productionWatchPath));
 const fingerprint = "a".repeat(64);
 
 async function waitFor(predicate, message, timeout = 2000) {
@@ -280,6 +415,7 @@ async function fixture(name, overrides = {}) {
 
 function harness(module, fixture, options = {}) {
   const events = new Map();
+  const integrationEvents = new Map();
   const commands = new Map();
   const messages = [];
   const warnings = [];
@@ -292,6 +428,12 @@ function harness(module, fixture, options = {}) {
     ui: { notify: (message, level) => warnings.push({ message, level }) },
   };
   const pi = {
+    events: {
+      on(name, handler) {
+        if (!integrationEvents.has(name)) integrationEvents.set(name, []);
+        integrationEvents.get(name).push(handler);
+      },
+    },
     registerCommand(name, command) { commands.set(name, command); },
     on(name, handler) {
       if (!events.has(name)) events.set(name, []);
@@ -320,6 +462,9 @@ function harness(module, fixture, options = {}) {
     setPending(value) { pending = value; },
     async fire(name, event = {}) {
       for (const handler of events.get(name) ?? []) await handler(event, ctx);
+    },
+    fireIntegration(name, event = {}) {
+      for (const handler of integrationEvents.get(name) ?? []) handler(event);
     },
     async start(reason = "startup") { await this.fire("session_start", { reason }); },
     async shutdown(reason = "reload") { await this.fire("session_shutdown", { reason }); },
@@ -354,6 +499,48 @@ await atomic.start();
 assert.equal(atomic.messages.length, 0);
 assert.ok(atomic.warnings.some(({ message }) => /atomic operation/.test(message)));
 await atomic.shutdown();
+
+// Production blocker events are balanced through pi.events. Release alone does
+// not activate; a later ordinary settled event owns reconciliation.
+const productionBlockedFixture = await fixture("production-blocked");
+const productionBlocked = harness(moduleA, productionBlockedFixture, { idle: false });
+await productionBlocked.start();
+productionBlocked.fireIntegration("herdr:blocked", { active: true, label: "atomic write" });
+productionBlocked.setIdle(true);
+await productionBlocked.fire("agent_settled");
+assert.equal(productionBlocked.messages.length, 0);
+productionBlocked.fireIntegration("herdr:blocked", { active: false, label: "atomic write" });
+assert.equal(productionBlocked.messages.length, 0, "blocker release activated without an ordinary reconciliation event");
+await productionBlocked.fire("agent_settled");
+await waitFor(() => productionBlocked.messages.length === 1, "released production blocker did not reconcile at settlement");
+await productionBlocked.shutdown();
+
+const underflowFixture = await fixture("blocker-underflow");
+const underflow = harness(moduleA, underflowFixture, { idle: false });
+await underflow.start();
+underflow.fireIntegration("herdr:blocked", { active: false, label: "missing blocker" });
+underflow.setIdle(true);
+await underflow.fire("agent_settled");
+assert.equal(underflow.messages.length, 0, "contradictory blocker release was sanitized into unblocked");
+assert.ok(underflow.warnings.some(({ message }) => /underflowed/.test(message)));
+await underflow.shutdown();
+
+const lateBlockFixture = await fixture("late-production-block");
+const lateBlock = harness(moduleA, lateBlockFixture);
+await lateBlock.start();
+await waitFor(() => lateBlock.messages.length === 1, "late-block fixture was not queued");
+lateBlock.fireIntegration("herdr:blocked", { active: true, label: "late atomic write" });
+await lateBlock.commands.get("qq-activate").handler(`${lateBlockFixture.runId} ${lateBlockFixture.target.token}`, {
+  reload: async () => assert.fail("late blocker allowed reload"), shutdown() {},
+});
+assert.equal(await exists(join(lateBlockFixture.run, "receipts", `${lateBlockFixture.target.token}.json`)), false,
+  "late blocker converted a pending activation into terminal failure");
+lateBlock.fireIntegration("herdr:blocked", { active: false, label: "late atomic write" });
+assert.equal(lateBlock.messages.length, 1, "late blocker release retried without ordinary settlement");
+await lateBlock.fire("agent_settled");
+await waitFor(() => lateBlock.messages.length === 2, "late blocker did not retry after release and settlement");
+await lateBlock.shutdown();
+
 const blockedFixture = await fixture("extension-blocked");
 const blocked = harness(moduleA, blockedFixture, { authorityError: "live Herdr target is blocked" });
 await blocked.start();
@@ -450,21 +637,46 @@ assert.equal(staleReceipt.status, "failed");
 assert.match(staleReceipt.reason, /version|stale/);
 await staleNew.shutdown();
 
+// The production one-shot helper protocol returns only after the child has
+// written exclusive exact-request acceptance through its inherited pipe.
+const productionReplaceFixture = await fixture("production-replace-acceptance", { action: "replace" });
+process.env.PATH = `${tmp}:${process.env.PATH}`;
+const productionAcceptance = await productionModule.defaultReplace(
+  productionReplaceFixture.run,
+  productionReplaceFixture.target.token,
+  199,
+  productionReplaceFixture.request,
+  productionReplaceFixture.target,
+);
+assert.equal(productionAcceptance.status, "accepted");
+assert.equal(productionAcceptance.run_id, productionReplaceFixture.runId);
+assert.equal(productionAcceptance.target, productionReplaceFixture.target.token);
+assert.equal(productionAcceptance.old_pid, 199);
+
 // Explicit replacement uses graceful shutdown plus durable session/cwd launch; only the new process proves success.
 const replaceFixture = await fixture("replace", { action: "replace" });
 let replacement;
+let acceptReplacement;
+const replacementAccepted = new Promise((resolve) => { acceptReplacement = resolve; });
 const replaceOld = harness(moduleA, replaceFixture, {
   processId: 200,
-  replaceProcess(run, token, pid) { replacement = { run, token, pid }; },
+  replaceProcess(run, token, pid) {
+    replacement = { run, token, pid };
+    return replacementAccepted;
+  },
 });
 await replaceOld.start();
 await waitFor(() => replaceOld.messages.length === 1, "replacement was not queued");
 let shutdownCalls = 0;
-await replaceOld.commands.get("qq-activate").handler(`${replaceFixture.runId} ${replaceFixture.target.token}`, {
+const replaceCommand = replaceOld.commands.get("qq-activate").handler(`${replaceFixture.runId} ${replaceFixture.target.token}`, {
   reload: async () => assert.fail("replacement silently downgraded to reload"),
   shutdown: () => { shutdownCalls += 1; },
 });
+await waitFor(() => replacement !== undefined, "replacement launch was not requested");
 assert.deepEqual(replacement, { run: replaceFixture.run, token: replaceFixture.target.token, pid: 200 });
+assert.equal(shutdownCalls, 0, "old session shut down before helper launch acceptance");
+acceptReplacement({ status: "accepted" });
+await replaceCommand;
 assert.equal(shutdownCalls, 1);
 await replaceOld.shutdown("quit");
 await mkdir(join(replaceFixture.run, "helpers"), { mode: 0o700 });
@@ -482,6 +694,24 @@ assert.equal(replaceReceipt.status, "activated");
 assert.equal(replaceReceipt.action, "replace");
 assert.equal(replaceReceipt.process_id, 201);
 await replaceNew.shutdown();
+
+// Launch rejection is terminally recorded while the old session remains alive.
+const rejectedFixture = await fixture("replace-launch-rejected", { action: "replace" });
+const rejected = harness(moduleA, rejectedFixture, {
+  replaceProcess: async () => { throw new Error("fixture launch rejection"); },
+});
+await rejected.start();
+await waitFor(() => rejected.messages.length === 1, "rejected replacement was not queued");
+let rejectedShutdowns = 0;
+await rejected.commands.get("qq-activate").handler(`${rejectedFixture.runId} ${rejectedFixture.target.token}`, {
+  reload: async () => assert.fail("replacement launch rejection downgraded to reload"),
+  shutdown: () => { rejectedShutdowns += 1; },
+});
+assert.equal(rejectedShutdowns, 0, "rejected helper launch shut down the old session");
+const rejectedReceipt = JSON.parse(await readFile(join(rejectedFixture.run, "receipts", `${rejectedFixture.target.token}.json`), "utf8"));
+assert.equal(rejectedReceipt.status, "failed");
+assert.match(rejectedReceipt.reason, /launch was not accepted|fixture launch rejection/);
+await rejected.shutdown();
 
 console.log("test-qq-activation node: pass");
 JS

@@ -261,7 +261,8 @@ git -C "$loaded_checkout" -c user.name=test -c user.email=test@example.com \
 loaded_oid="$(git -C "$loaded_checkout" rev-parse HEAD)"
 git -C "$loaded_checkout" push -qu origin HEAD:main
 export FAKE_MERGE_OID="$loaded_oid"
-run_change 0 land 83 --repo "$loaded_checkout"
+export FAKE_PR_HEAD=loaded-feature
+run_change 0 land 84 --repo "$loaded_checkout"
 jq -e '
   .status == "done"
   and .state.activation.action == "reload"
@@ -273,7 +274,7 @@ jq -e '
 activation_run_dir="$(jq -r '.state.activation_run_dir' "$tmp/result.json")"
 [ -f "$activation_run_dir/REQUEST.json" ] || fail 'land did not arm its activation request'
 [ ! -e "$activation_run_dir/REQUEST.pending" ] || fail 'land left a pending activation request after synchronization'
-run_change 0 land 83 --repo "$main_checkout"
+run_change 0 land 84 --repo "$main_checkout"
 jq -e --arg run_dir "$activation_run_dir" '
   .status == "done"
   and .state.activation.action == "reload"
@@ -285,6 +286,7 @@ jq -e --arg run_dir "$activation_run_dir" '
 # Restore the original PR merge identity used by retirement fixtures. The
 # feature branch remains an ancestor after this later loaded Change lands.
 export FAKE_MERGE_OID="$merge_oid"
+unset FAKE_PR_HEAD
 
 # An uncommitted record in the Change checkout also fails the common clean
 # worktree rail before retirement can remove any lifecycle subject.
@@ -423,11 +425,16 @@ if git -C "$main_checkout" show-ref --verify --quiet refs/heads/feature; then
   fail 'retire left the local Change branch'
 fi
 assert_file_contains "$FAKE_HERDR_LOG" 'worktree remove --workspace change-ws'
-jq -e '.state.delegate_run_dirs == 1' "$tmp/result.json" >/dev/null \
-  || fail 'retire did not report the bound delegate run dir'
+jq -e '
+  .state.delegate_run_dirs == 1
+  and .state.activation_retirement.status == "not-found"
+  and .state.activation_retirement.retired == false
+' "$tmp/result.json" >/dev/null \
+  || fail 'retire did not report delegate and activation retirement state'
 [ ! -e "$retire_run" ] || fail 'retire left a delegate run dir bound to the checkout'
 [ -d "$foreign_run" ] || fail 'retire removed a foreign delegate run dir'
 [ -d "$unsealed_run" ] || fail 'retire removed an unsealed delegate run dir'
+[ -d "$activation_run_dir" ] || fail 'retire removed a foreign Change activation run'
 
 # Retirement is idempotent once both subjects are absent.
 run_change 0 retire change-ws --repo "$main_checkout" --branch feature
@@ -435,7 +442,28 @@ jq -e '
   .status == "done"
   and .state.workspace_state == "absent"
   and .state.branch_exists == false
+  and .state.activation_retirement.status == "not-found"
 ' "$tmp/result.json" >/dev/null
+
+# The engine retires only the one complete activation request matching the
+# supplied branch and PR identity, then reports an idempotent exact absence.
+export FAKE_PR_HEAD=loaded-feature
+run_change 0 retire loaded-ws --repo "$main_checkout" --branch loaded-feature \
+  --pr 84 --checkout "$loaded_checkout" --workspace-absent-owned \
+  --allow-unobserved-retire
+jq -e --arg run_id "$(basename "$activation_run_dir")" '
+  .state.activation_retirement.status == "retired"
+  and .state.activation_retirement.retired == true
+  and .state.activation_retirement.run_id == $run_id
+' "$tmp/result.json" >/dev/null
+[ ! -e "$activation_run_dir" ] || fail 'qq-change retire left its exact complete activation run'
+[ -d "$foreign_run" ] || fail 'activation retirement removed a foreign delegate run'
+run_change 0 retire loaded-ws --repo "$main_checkout" --branch loaded-feature --pr 84
+jq -e '
+  .state.activation_retirement.status == "not-found"
+  and .state.activation_retirement.retired == false
+' "$tmp/result.json" >/dev/null
+unset FAKE_PR_HEAD
 
 # A legitimately operator-closed work session uses the explicit lifecycle
 # ownership assertion and unforced git worktree removal.

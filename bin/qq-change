@@ -122,7 +122,7 @@ fi
 
 land_change() {
   local pr="$subject"
-  local response pr_state pr_url merge_oid source_branch pr_body state
+  local response pr_number pr_state pr_url merge_oid source_branch pr_body state
   local main_status_file status_record status_code status_path unsafe_main_line
   local before_tree landed_tree pr_body_file classification classification_error action targets targets_error agent_list
   local runtime_root_input stage_payload staged activation_run_id activation_run_dir armed
@@ -143,12 +143,14 @@ land_change() {
   fi
   gh_bin="$QQ_BIN_RESULT"
   if ! response="$(cd "$repo_root" && "$gh_bin" pr view \
-    --json state,mergedAt,mergeCommit,url,headRefName,body -- "$pr" 2>/dev/null)"; then
+    --json number,state,mergedAt,mergeCommit,url,headRefName,body -- "$pr" 2>/dev/null)"; then
     qq_engine_error 'GitHub pull-request inspection failed.'
   fi
-  if ! pr_state="$("$QQ_ENGINE_JQ" -er '.state | select(type == "string" and length > 0)' \
-    <<<"$response" 2>/dev/null)"; then
-    qq_engine_error 'GitHub did not return a readable pull-request disposition.'
+  if ! pr_number="$("$QQ_ENGINE_JQ" -er '.number | select(type == "number" and floor == . and . > 0) | tostring' \
+    <<<"$response" 2>/dev/null)" \
+    || ! pr_state="$("$QQ_ENGINE_JQ" -er '.state | select(type == "string" and length > 0)' \
+      <<<"$response" 2>/dev/null)"; then
+    qq_engine_error 'GitHub did not return a readable pull-request identity and disposition.'
   fi
   pr_url="$("$QQ_ENGINE_JQ" -r '.url // ""' <<<"$response" 2>/dev/null || true)"
   merge_oid="$("$QQ_ENGINE_JQ" -r '.mergeCommit.oid // ""' <<<"$response" 2>/dev/null || true)"
@@ -156,7 +158,7 @@ land_change() {
   pr_body="$("$QQ_ENGINE_JQ" -r '.body // ""' <<<"$response" 2>/dev/null || true)"
   if [ "$pr_state" != MERGED ] || [ -z "$merge_oid" ]; then
     state="$("$QQ_ENGINE_JQ" -cn \
-      --arg pull_request "$pr" --arg pr_state "$pr_state" --arg url "$pr_url" \
+      --arg pull_request "$pr_number" --arg pr_state "$pr_state" --arg url "$pr_url" \
       --arg merge_commit "$merge_oid" \
       '{pull_request:$pull_request, pr_state:$pr_state, url:$url, merge_commit:$merge_commit}')"
     qq_engine_refuse \
@@ -177,7 +179,7 @@ land_change() {
   if ! "$git_bin" -C "$repo_root" merge-base --is-ancestor \
     "$merge_oid" origin/main >/dev/null 2>&1; then
     state="$("$QQ_ENGINE_JQ" -cn \
-      --arg pull_request "$pr" --arg pr_state "$pr_state" \
+      --arg pull_request "$pr_number" --arg pr_state "$pr_state" \
       --arg merge_commit "$merge_oid" --arg main_checkout "$main_checkout" \
       '{pull_request:$pull_request, pr_state:$pr_state, merge_commit:$merge_commit, main_checkout:$main_checkout}')"
     qq_engine_refuse \
@@ -233,7 +235,7 @@ land_change() {
       targets="$("$QQ_ENGINE_JQ" -c '.targets' <<<"$request")"
       activation_run_id="$("$QQ_ENGINE_JQ" -r '.run_id' <<<"$recovery_record")"
       activation_run_dir="$("$QQ_ENGINE_JQ" -r '.run_dir' <<<"$recovery_record")"
-      state="$("$QQ_ENGINE_JQ" -cn --arg pull_request "$pr" --arg pr_state "$pr_state" \
+      state="$("$QQ_ENGINE_JQ" -cn --arg pull_request "$pr_number" --arg pr_state "$pr_state" \
         --arg url "$pr_url" --arg merge_commit "$merge_oid" --arg source_branch "$source_branch" \
         --arg repo_root "$repo_root" --arg main_checkout "$main_checkout" \
         --arg before_tree "$before_tree" --arg landed_tree "$landed_tree" \
@@ -262,7 +264,7 @@ land_change() {
       activation_run_id="$("$QQ_ENGINE_JQ" -r '.run_id' <<<"$existing_record")"
       activation_run_dir="$("$QQ_ENGINE_JQ" -r '.run_dir' <<<"$existing_record")"
       retried_targets="$("$QQ_ENGINE_JQ" -c '.retried_targets' <<<"$existing_record")"
-      state="$("$QQ_ENGINE_JQ" -cn --arg pull_request "$pr" --arg pr_state "$pr_state" \
+      state="$("$QQ_ENGINE_JQ" -cn --arg pull_request "$pr_number" --arg pr_state "$pr_state" \
         --arg url "$pr_url" --arg merge_commit "$merge_oid" --arg source_branch "$source_branch" \
         --arg repo_root "$repo_root" --arg main_checkout "$main_checkout" \
         --arg before_tree "$before_tree" --arg landed_tree "$landed_tree" \
@@ -287,7 +289,7 @@ land_change() {
     --pr-body-file "$pr_body_file" 2>"$pr_body_file.error")"; then
     classification_error="$(head -c 1000 -- "$pr_body_file.error" 2>/dev/null || true)"
     rm -f -- "$pr_body_file" "$pr_body_file.error"
-    state="$("$QQ_ENGINE_JQ" -cn --arg pull_request "$pr" --arg merge_commit "$merge_oid" \
+    state="$("$QQ_ENGINE_JQ" -cn --arg pull_request "$pr_number" --arg merge_commit "$merge_oid" \
       --arg before_tree "$before_tree" --arg landed_tree "$landed_tree" \
       --arg classification_error "$classification_error" \
       '{pull_request:$pull_request,merge_commit:$merge_commit,before_tree:$before_tree,landed_tree:$landed_tree,activation:{action:"unresolved",reason:$classification_error}}')"
@@ -324,7 +326,7 @@ land_change() {
     rm -f -- "${TMPDIR:-/tmp}/qq-change-targets.$$.error"
     if [ "$mode" != inspect ] && [ "$dry_run" != true ]; then
       stage_payload="$("$QQ_ENGINE_JQ" -cn --argjson classification "$classification" \
-        --argjson targets "$targets" --arg pull_request "$pr" --arg pr_url "$pr_url" \
+        --argjson targets "$targets" --arg pull_request "$pr_number" --arg pr_url "$pr_url" \
         --arg merge_commit "$merge_oid" --arg source_branch "$source_branch" \
         '{classification:$classification,targets:$targets,source:{pull_request:$pull_request,pr_url:$pr_url,merge_commit:$merge_commit,source_branch:$source_branch,probe_id:null}}')"
       if ! staged="$(printf '%s' "$stage_payload" | "$python_bin" "$activation_helper" stage \
@@ -337,7 +339,7 @@ land_change() {
   fi
 
   state="$("$QQ_ENGINE_JQ" -cn \
-    --arg pull_request "$pr" --arg pr_state "$pr_state" --arg url "$pr_url" \
+    --arg pull_request "$pr_number" --arg pr_state "$pr_state" --arg url "$pr_url" \
     --arg merge_commit "$merge_oid" --arg source_branch "$source_branch" \
     --arg repo_root "$repo_root" --arg main_checkout "$main_checkout" \
     --arg before_tree "$before_tree" --arg landed_tree "$landed_tree" \
@@ -391,7 +393,8 @@ retire_change() {
   local workspace_exists=true
   local observer_state
   local delegate_root_input delegate_root delegate_dir delegate_cwd
-  local -a delegate_run_dirs
+  local activation_helper activation_runtime_root activation_retirement activation_retirement_error python_bin
+  local -a delegate_run_dirs activation_retirement_command
 
   observer_state="$("$QQ_ENGINE_JQ" -cn \
     --argjson allow_unobserved_retire "$allow_unobserved_retire" \
@@ -475,11 +478,50 @@ retire_change() {
       '$base + {pull_request:$pull_request, repository:$repository, observer_package:$observer_package, observer_package_status:$observer_package_status}')"
   }
 
+  retire_activation_request() {
+    activation_retirement_command=(
+      "$python_bin" "$activation_helper" retire-change
+      --runtime-root "$activation_runtime_root" --source-branch "$branch"
+    )
+    if [ -n "$pull_request" ]; then
+      activation_retirement_command+=(--pull-request "$pull_request")
+    fi
+    if [ "$mode" = inspect ] || [ "$dry_run" = true ]; then
+      activation_retirement_command+=(--inspect)
+    fi
+    if ! activation_retirement="$("${activation_retirement_command[@]}" 2>&1)" \
+      || ! "$QQ_ENGINE_JQ" -e '
+        .status == "not-found" or .status == "eligible" or .status == "retired"
+      ' <<<"$activation_retirement" >/dev/null 2>&1; then
+      activation_retirement_error="$(printf '%s' "$activation_retirement" | head -c 1000)"
+      state="$("$QQ_ENGINE_JQ" -cn --argjson base "$state" \
+        --arg error "$activation_retirement_error" \
+        '$base + {activation_retirement:{status:"refused",error:$error}}')"
+      qq_engine_refuse \
+        'The exact activation request for this Change is pending, failed, malformed, stale, ambiguous, or contradictory. Preserve every activation run and all Change lifecycle subjects for Coordinator recovery.' \
+        "$state"
+    fi
+    state="$("$QQ_ENGINE_JQ" -cn --argjson base "$state" \
+      --argjson activation_retirement "$activation_retirement" \
+      '$base + {activation_retirement:$activation_retirement}')"
+  }
+
   [ -n "$branch" ] || qq_engine_error 'retire requires --branch <branch>'
   "$git_bin" check-ref-format --branch "$branch" >/dev/null 2>&1 \
     || qq_engine_error "invalid branch name: $branch"
   [ "$branch" != main ] || qq_engine_refuse \
     'refs/heads/main is the destination, never a retire target. Leave every checkout and branch untouched.'
+  activation_helper="$(dirname "$self")/lib/qq-activation.py"
+  [ -f "$activation_helper" ] && [ -x "$activation_helper" ] && [ ! -L "$activation_helper" ] \
+    || qq_engine_error 'The qq activation retirement helper is unavailable.'
+  if ! qq_resolve_bin python3; then
+    qq_engine_error "$QQ_BIN_ERROR"
+  fi
+  python_bin="$QQ_BIN_RESULT"
+  activation_runtime_root="${QQ_DISPATCH_RUNTIME_ROOT:-${XDG_STATE_HOME:-${HOME:+$HOME/.local/state}}/qq/delegate}"
+  if [ -z "$activation_runtime_root" ] || [[ "$activation_runtime_root" != /* ]]; then
+    qq_engine_error 'The activation runtime root must be absolute during Change retirement.'
+  fi
   if ! qq_resolve_bin herdr; then
     qq_engine_error "$QQ_BIN_ERROR"
   fi
@@ -509,6 +551,7 @@ retire_change() {
     if [ "$branch_exists" = false ] \
       && { [ -z "$checkout_arg" ] \
         || { [ ! -e "$checkout_arg" ] && [ ! -L "$checkout_arg" ]; }; }; then
+      retire_activation_request
       qq_engine_done 'work session and local branch are already absent; retirement is complete' "$state"
     fi
     if [ "$branch_exists" = false ]; then
@@ -543,6 +586,7 @@ retire_change() {
         --arg branch "$branch" --arg branch_tip "$branch_tip" \
         --argjson observer "$observer_state" \
         '{workspace:$workspace, workspace_state:"absent", checkout_state:"absent", branch:$branch, branch_tip:$branch_tip, merged_into_origin_main:true} + $observer')"
+      retire_activation_request
       if [ "$mode" = inspect ] || [ "$dry_run" = true ]; then
         qq_engine_done \
           'branch-only retirement rails passed; the merged local branch was not deleted' "$state"
@@ -804,6 +848,7 @@ retire_change() {
       tab_count:$tab_count,
       delegate_run_dirs:$delegate_run_dirs
     } + $observer')"
+  retire_activation_request
   if [ "$mode" = inspect ] || [ "$dry_run" = true ]; then
     qq_engine_done \
       'retirement rails passed; the work session, checkout, branch, and delegate run dirs were not removed' "$state"
