@@ -35,7 +35,9 @@ wiring needed to expose it.
   historical designs, cited investigations, and reusable lessons.
 - herdr provides persistent `main` project homes, named agents, and direct
   agent-to-agent messaging.
-- `cockpit/` contains the operator's terminal configuration.
+- `cockpit/` contains Repository-owned terminal configuration, templates, and
+  helpers; ignored operator-local `cockpit/herdr/config.toml` is not
+  Repository-owned content.
 - `delegation/` contains the delegate role manifests, completion envelope
   template, and execution-profile policy.
 - `bin/` holds the qq commands — mounted on `PATH` by the cockpit shell
@@ -264,18 +266,62 @@ navigation helpers:
 `fzf`. File browsing lives inside Pi through `@tmustier/pi-files-widget`.
 Outside Pi, the system's `xdg-open` associations own MIME opening.
 
-Link the cockpit configurations whose tools read fixed `~/.config` paths:
+### Direct-upstream fzf
+
+`qqcd <pattern>` is qq's only fzf consumer. This machine owns fzf through the
+exact official upstream 0.74.2 amd64 `.deb`, not through an added apt repository
+or an unpinned channel. Its official signed annotated tag and release are
+[`v0.74.2`](https://github.com/junegunn/fzf/releases/tag/v0.74.2): the verified
+GitHub tag object `af100a6dc94777b949c6217744d787ac5b8f9f8d`, signed by key ID
+`D9770615D226D94C`, points to commit
+`3337be9d450cd349e99273a2d3985ceaf5f3753f`.
+
+The exact asset is `fzf_0.74.2_amd64.deb`, with SHA-256
+`a220553bd9d847bd62ac09a6834d529ebe3898344cd5d730dc0ec1929e9bc5ae`. Its
+package identity is package `fzf`, version `0.74.2`, architecture `amd64`. A
+promotion or rollback may proceed only when the planned transaction names
+exactly one package, `fzf`. Each upstream payload path must be owned by the
+currently installed `fzf` package or be unowned. The preverified upstream
+payload is `/usr/bin/fzf`, `/usr/share/doc/fzf/copyright`, and
+`/usr/share/man/man1/fzf.1`.
+
+Before promotion, download and preserve the exact Ubuntu rollback asset
+`fzf_0.44.1-1ubuntu0.3_amd64.deb`, and verify its apt-metadata SHA-256
+`345ab0b82c0a2dfc364d1da4404b61c438413fc6881daf8acecd9e3821578258`. After
+verifying both local files, controlled promotion and exact Ubuntu rollback are:
 
 ```bash
-mkdir -p ~/.config ~/.config/glow ~/.config/herdr
-ln -s "$HOME/projects/qq/cockpit/ghostty" ~/.config/ghostty
-ln -s "$HOME/projects/qq/cockpit/glow/glow.yml" ~/.config/glow/glow.yml
-ln -s "$HOME/projects/qq/cockpit/herdr/config.toml" ~/.config/herdr/config.toml
+sudo apt install ./fzf_0.74.2_amd64.deb
+sudo apt install --allow-downgrades ./fzf_0.44.1-1ubuntu0.3_amd64.deb
 ```
 
-These file links are day-0 bootstrap, not a sync surface: content is live
-through each link, and the set changes only when a new cockpit tool is
-adopted. Nothing needs re-running when Skills or commands change.
+These commands act only on the preserved local `.deb` files; neither operation
+adds or modifies an apt source or repository.
+
+Link the Repository-owned cockpit configurations whose tools read fixed
+`~/.config` paths:
+
+```bash
+mkdir -p ~/.config ~/.config/glow
+ln -s "$HOME/projects/qq/cockpit/ghostty" ~/.config/ghostty
+ln -s "$HOME/projects/qq/cockpit/glow/glow.yml" ~/.config/glow/glow.yml
+```
+
+`cockpit/herdr/config.toml` is ignored operator-local state,
+not Repository-owned content. If that file exists separately on the machine,
+its Herdr link is optional:
+
+```bash
+herdr_config="$HOME/projects/qq/cockpit/herdr/config.toml"
+if [ -f "$herdr_config" ]; then
+  mkdir -p ~/.config/herdr
+  ln -s "$herdr_config" ~/.config/herdr/config.toml
+fi
+```
+
+The tracked cockpit links and optional operator-local Herdr link are day-0
+bootstrap, not a sync surface: content is live through each link. Nothing needs
+re-running when Skills or commands change.
 
 Ghostty defaults to the portable laptop geometry. Use
 `qq-ghostty-profile 4k` for the centered, more-square living-room field and

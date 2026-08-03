@@ -1,241 +1,272 @@
-# Observer v0 procedure
+# Observer v1 procedure — four required learning lenses
 
-The observer is a read-only harness analyst. It audits only the assigned run
-package, proposes harness improvements, and never applies a proposal.
-Deterministic signals are the audit skeptic, not the analyst's agenda.
+The Observer is a read-only harness analyst. It audits one assigned
+`qq-observer.package`, proposes the smallest resulting-system remedies, and
+never applies a proposal. Deterministic facts and signals are the audit skeptic,
+not the analyst's agenda.
 
-Named reading threshold:
+New successful output uses `qq-observer.analysis` **v2**. Finalized v1 analyses
+and v2 Change packages are immutable historical evidence and remain readable;
+they are never rewritten into the new contract.
+
+Named limits:
 
 ```text
 FULL_READ_MAX_BYTES = 400000
+ACCOUNTABLE_SESSION_MAX_BYTES = 16777216
 ```
+
+## Audit units and lifecycle
+
+A v3 guided package has exactly one `audit_unit`:
+
+- `delivered_change` binds Repository, PR, branch, merge commit, merge time, and
+  Change-bounded accountable plus whole delegate transcript copies. Its run is
+  `runs/by-repository/<owner>/<repo>/pr-<N>/`.
+- `accountable_session` binds one retired Architect or Coordinator Pi v3
+  transcript by canonical source path, byte count, entry count, and SHA-256.
+  The original is the authority; the package contains **no transcript copy**.
+  The unit is the whole session from its header because no authoritative
+  activation marker exists. No caller-selected start/end flag or range is
+  accepted. Its Repository-qualified run name is deterministic and distinct
+  from PR runs.
+
+`qq-observe retire-session` is the one retirement-facing seam. It accepts only
+a verified retirement receipt: role identity agrees, succession is ready,
+zero or one compaction is present, the session is frozen whole, and pane
+closure is declared independent. The first compaction starts replacement and a
+second is forbidden; retirement may also occur at an earlier eligible
+boundary. The role boundary is explicit: an Architect has drained only its
+current alignment transaction; a Coordinator completed the atomic swap after
+continuing coordination (admission paused only for that swap). It packages
+first and uses `qq-delegate start --role observer`, returning as soon as the
+headless dispatch is accepted. Replacement availability and pane closure are
+external succession responsibilities and never wait on Observer analysis.
+The command is idempotent for an identical trigger and rejects a conflicting
+duplicate. Missing, malformed, linked, oversized, contradictory, prematurely
+closed, range-selecting, or multiply compacted input records a canonical
+`analysis_failed.json` rather than leaving a plausible pending run. Dispatch
+setup failure does the same.
+
+No Task or Change is required for an accountable-session package. Thus a
+no-Task/no-Change Architect or Coordinator session remains analyzable.
+
+Lifecycle is a projection, never another event store:
+
+- a valid `package.json` without a terminal record projects `started`;
+- a valid `analysis.json` projects `completed`; and
+- a canonical `analysis_failed.json`, invalid binding, or contradictory terminal
+  records project `failed`.
+
+`qq-observe session-status` and `architect-context` expose that projection.
+A semantic failure is a Trustworthiness health fact: it makes all four semantic
+lenses unavailable, but does not discard the immutable package identity or
+independently reproducible transcript facts.
 
 ## Division of labor
 
-| Part | Owner | Contract |
-| --- | --- | --- |
-| Count turns, tokens, tool calls, durations, retries, reasoning volume, and other global transcript facts | Deterministic code | Emit facts for the complete session; the observer never recomputes an analytic number from chunks. |
-| Detect conservative structural signals | Deterministic code | Emit signals with 1-based physical transcript entry citations; do not infer intent, assumptions, or meaning. |
-| Read the run, walk the operator↔agent seam, classify episodes, find root causes, and propose remedies | Observer LLM | Form candidates from reading before consulting signals and make judgments only when anchored to cited package evidence. |
-| Validate citations, facts-grounded costs, and schema; enforce the five-episode cap; and rank | Deterministic code | Reject a broken analysis whole; rank valid episodes by the declared rule. |
+- **Deterministic `qq-observe facts`** owns complete-session turns, tokens, tool
+  calls, durations, reasoning, compactions, `/bro`, communication-phase
+  triggers, and `operator_ask` fires. Its `skill_evidence` lists alignment,
+  realignment, operator-facing trigger/fire entries, repair entries, and
+  compactions without judging whether firing was required.
+- **Deterministic `qq-observe signals`** emits conservative structural signals
+  with 1-based physical transcript citations and does not infer intent.
+- **Observer LLM** reads first, walks the seam and four lenses, finds root
+  causes, and proposes remedies grounded in cited package evidence and facts.
+- **Deterministic validator/finalizer** checks schema, identity, binding,
+  citations, cost, four lenses, Fidelity walks, and taxonomy exceptions. It
+  rejects a broken analysis whole and is the sole writer of terminal Observer
+  records.
 
-## Input package
+## Phase 0 — integrity, facts, and reading mode
 
-A new guided package uses `qq-observer.package` v2, carries both its canonical
-local `repo` root and explicit GitHub `repository` (`owner/name`), and lives at
-`runs/by-repository/<owner>/<repo>/pr-<N>/`. Legacy v1 flat packages are
-read-only evidence: inspect them in place, label them legacy, and never infer a
-GitHub Repository or rewrite/copy them. A guided package declares `variant:
-"guided"` in `package.json` and contains the session transcripts (the
-accountable member bounded to the Change's first dispatch plus its originating
-operator brief; delegate sessions whole), the qq tool and skill inventory, and
-the merge commit. Per-session facts and signals are **derived by the analyst**
-from the packaged transcripts (`qq-observe facts|signals <session>` into the
-analysis scratch); the live instruction corpus (AGENTS.md, CONCEPTS.md, skills,
-and manifests) is read at the merge commit
-(`git -C <repo> show <merge_commit>:<path>`, guided by the inventory).
+Load every package member. Require `variant: guided`. For an external-bound
+session, recheck canonical path, regular-file identity, byte count, entry count,
+and SHA-256 before analysis and again at finalization. Derive one facts and one
+signals file per packaged session into analysis scratch. Pass every facts file
+to `validate-analysis` as `--facts SESSION=FACTS`. Do not persist facts or
+signals in a second store.
 
-Paths in the analysis must name sessions in that package. The observer writes
-canonical absolute paths; validation canonicalizes all package and analysis
-paths defensively before identity comparisons. The analyst captures JSON only
-to its temporary child/runtime input. `qq-observe finalize --analysis` validates
-that input and is the sole writer of the run's `analysis.json`. Facts are the
-numeric authority; transcripts supply cited context. Signals are an audit input
-only after reading has produced candidates. Pass each derived facts file to
-validation as `--facts SESSION_PATH=FACTS_PATH`.
+At or below `FULL_READ_MAX_BYTES`, full-read every transcript. Above it, use
+faceted reading: every head and tail, every operator exchange needed by the
+walks below, complete-session fact outliers, and—only after candidates
+exist—every signal window. Name the mode in `limitations`. The accountable
+session's 16 MiB binding cap is a hard refusal, not a reason to select a
+favorable range.
 
-The owner embeds the live recurrence-key inventory (`qq-observe
-recurrence-keys`, run at dispatch) in the BRIEF. Keys name root machinery,
-never symptoms: when an episode's root machinery matches an inventory key,
-reuse that key; mint a new key only for a genuinely new root cause.
+If a required member, receipt, source binding, schema, derivation, or citation
+is missing, contradictory, malformed, oversized, or mutated, finalize only a
+specific `analysis_failed` record. Never salvage semantic findings from a
+broken package.
 
-## Procedure
+## Phase 1 — reading first, seam walk, and skill evidence
 
-### Phase 0 — Package integrity and reading mode
+Form specifically named candidates from reading before consulting signals.
+Each evidence object cites exactly one physical transcript entry and a
+non-empty whitespace-normalized verbatim quote of at most 200 characters.
+Reasoning may explain an understanding; only outcome evidence establishes an
+external result.
 
-The package is assembled by the owner before dispatch (`qq-observe assemble
---pr <N> --repo <root>`). Derive one facts file and one signals file per
-packaged session into your analysis scratch (`qq-observe facts|signals
-<run>/sessions/<label>.jsonl`); a session whose derivation fails is not
-analyzable.
+Classify every user entry and operator-directed request tool call as clean or
+as an existing `operator-seam.*` class. Unclassifiable exchanges go in
+`limitations` with session and entry. Reconcile every signal after the initial
+candidate set: absorb it into a candidate or record one `dropped_signals`
+reason. Set `no_signal: true` on retained findings with no matching signal.
 
-Load every package member and verify its schema and session membership. Require
-`package.variant` to be exactly `guided`. Verify every pre-pass citation in the
-derived signals resolves to a 1-based physical transcript entry. Integrity
-validation may inspect signal shape and citations
-mechanically, but do not use signal kinds or windows to form candidates yet.
+Read `facts.skill_evidence` for **every** packaged transcript and judge, under
+Fidelity and in this exact order:
 
-Select one reading mode from the total byte length of all packaged session
-transcripts:
+1. alignment;
+2. realignment; and
+3. operator-facing asks or proof/judgment delivery.
 
-- At or below `FULL_READ_MAX_BYTES`, use **full-read** mode and read every
-  session in full.
-- Above it, use **faceted** mode. For every session read the head and tail, every
-  operator↔agent exchange required by the seam walk, every region that its
-  complete-session facts mark as an outlier, and—after initial candidates
-  exist—every available signal window. Read every derived facts file in either mode;
-  facts retain the global counts, so transcript chunking never becomes a source
-  of statistics.
+A phase's mechanical trigger or absence of an `operator_ask` fire is evidence,
+not a verdict. Decide whether the communication contract required a fire,
+whether a fire occurred in the wrong phase, and whether `/bro` was an explicit
+repair. A required no-fire or wrong-phase fire is primarily Fidelity. Do not
+add a recorder or read a separate communication-moment log.
 
-The analysis `limitations` names the selected mode. If any required file,
-schema, session, variant rule, derivation, or citation is invalid, emit only:
+## Phase 2 — exactly four required lenses
 
-```json
-{"schema":"qq-observer.analysis","schema_version":1,"status":"analysis_failed","reason":"specific reason"}
-```
+Emit these top-level lens rows in exactly this order:
 
-Stop. A broken package never produces a salvaged finding.
+1. **Simplicity** — is this the smallest resulting system, with unique
+   functions and the fewest owned entities and lifecycle obligations?
+2. **Fidelity** — did the unit honor the operator-aligned outcome, decisions,
+   boundaries, role contract, realignments, and promised proof?
+3. **Trustworthiness** — are evidence, durable truth, reliability, recovery,
+   safety, authority, and boundary behavior honest and dependable?
+4. **Efficiency** — what waiting, rework, context, tool, compute, storage, or
+   operator-attention cost can be removed without weakening the first three?
 
-### Phase 1 — Reading-first open coding and seam walk
+Each status is exactly `clear`, `finding`, or `unverifiable`. `finding` means
+one or more retained episodes name that lens as `primary_lens`; the validator
+requires exact agreement in both directions. `unverifiable` requires a
+specific `unverifiable_reason` and may cite the contradiction; absent evidence
+is never converted to a plausible pass. The statuses are not scores and are
+never weighted or collapsed.
 
-Read according to the selected mode and form specifically named episode
-candidates from that reading, anchored to transcript entries. Do this before
-consulting the deterministic signal list. Never call a candidate merely
-"inefficient." Each evidence object cites exactly one transcript entry; use
-separate evidence objects for separate entries. Its `quote` must be verbatim
-from that entry; whitespace may differ only by collapsed runs. Reasoning can
-explain how the
-agent understood a problem; it cannot establish that an external action
-succeeded or failed.
+Every retained episode has exactly one `primary_lens`, selected by the failed
+operator-owned objective. Secondary effects stay in reasoning; do not duplicate
+the episode under another lens. Existing v1 `kind`, open-text root cause,
+root-cause location, open-text smallest remedy, confidence, cost, and recurrence
+key remain.
 
-During the reading, perform one bounded, exhaustive **seam walk**. Classify every
-user-role entry and every operator-directed request tool call in the run tree as
-clean or as one of the `operator-seam.*` classes. Examine enough surrounding
-entries to classify the exchange, but do not infer operator intent from code or
-from a deterministic signal. Retain supported failures as candidates.
-Unclassifiable exchanges go in `limitations`, one line per exchange with a
-session and entry citation. Clean exchanges need no emitted episode.
+### Simplicity: entity/function/authority/state/lifecycle first
 
-Only after the initial candidate set exists, reconcile it against the available
-deterministic signals:
+Before proposing a remedy, inventory every role, record, state, status, queue,
+schema, projection, service, process, tool, view, authority, and lifecycle
+introduced or retained. For every `entity_audit` row name its function, sole
+authority, state, lifecycle cost, evidence, and assessment: `necessary`,
+`duplicate`, or `unverifiable`. Ask whether an existing owner already performs
+the function, whether it can be lazily derived, whether it duplicates truth or
+reconciliation, and what creation/migration/retention/recovery/deletion cost it
+imposes. A `duplicate` requires a primary Simplicity finding.
 
-- absorb every matching signal into a candidate; or
-- dismiss it in `dropped_signals` with its kind, entries, and a one-line reason.
+### Delivered-Change Fidelity: ordered alignment-integrity walk
 
-Every guided signal must resolve through one of those two paths. Mark every
-retained episode with no matching signal as `no_signal: true`, so later digests
-can identify recall gaps. Signals may challenge the reading, but never define
-its candidate agenda.
+Walk these rows in order, each with citations:
 
-Treat `reasoning_volume` and `reasoning_contortion` as prompts to inspect whether
-a harness rule forced disproportionate or contorted work. The seam signals are
-structural prompts only: the analyst decides whether an exchange was clean and,
-if not, which seam class the cited context supports.
+1. `alignment`: Task outcome, acceptance criteria, Definition of Done, approved
+   plan, and decision ledger;
+2. `realignments`: every recorded reopening and operator disposition;
+3. `execution`: work orders, execution choices, and delegate envelopes;
+4. `review`: findings and in-scope fixes;
+5. `merged_outcome`: the delivered tree and behavior; and
+6. `promised_proof`: the exact promised Checks/evidence.
 
-### Phase 2 — Axial coding
+Classify each row/material difference as
+`legitimate_agent_owned_detail`, `genuine_realignment`,
+`silent_stakes_drift`, `foreseeable_stakes_drift`, or `unverifiable`.
+Legitimate detail is inside the settled boundary among cheap/equivalent
+options. Genuine realignment stopped mutation, obtained operator disposition,
+and durably resumed the same Change. Silent drift changed outcome, proof,
+foundation, undo cost, or operator commitment without disposition. Foreseeable
+drift left a visible Alignment stake for execution to settle silently. Honest
+realignment is Fidelity, not failure. Missing binding evidence is
+`unverifiable`; plausibility is not evidence.
 
-Merge candidates that share one underlying episode. Split candidates that
-conflate separate causes. Drop candidates whose citations do not support them.
-Record merges, splits, and candidate drops briefly in `limitations`; reserve
-`dropped_signals` for reconciled deterministic signals. Do not impose a
-within-run recurrence threshold: cross-run recurrence belongs to the later
-digest.
+### Accountable-session role Fidelity
 
-### Phase 3 — Root cause
+For an Architect, walk in this exact order:
 
-Navigate from symptom to the smallest supported harness cause:
+- stakes clarity;
+- ask comprehensibility;
+- timing and truth of Alignment (including premature or false Alignment);
+- operator decisions and omissions;
+- scope control/creep; and
+- correction after non-alignment or misunderstanding.
 
-| Symptom | Inspect first |
-| --- | --- |
-| Operator-seam failure | The request/direction, its acknowledgment boundary, stale-world evidence, completion gate, and any cross-session handoff |
-| Delegate friction | Work-order ambiguity, skill gap, missing tool, or conflicting instruction |
-| Accountable-session friction | Alignment churn, ticket split, or harness procedure |
-| Error text paired with success | Tool contract and silent-failure path |
-| Re-reading or re-derivation | Missing orientation, unsurfaced capability, or non-durable context |
-| Hesitation or backtracking | Competing live instructions |
-| Disproportionate reasoning contortion | The harness rule or system design that created the tight spot |
+For a Coordinator, walk in this exact order:
 
-Cross-reference the inventories. If an existing tool or skill would have
-collapsed the work, classify `tool-gap.capability-unknown`; if none exists,
-classify `tool-gap.tool-missing`. For an instruction conflict, name both live
-instructions with file and line. For a design question, name the responsible
-harness rule and use `harness-design` when that is the supported root-cause
-location. Do not classify a structural seam signal by its name alone.
+- admission;
+- authority;
+- overlap;
+- recovery;
+- handoff;
+- pipeline; and
+- retirement.
 
-### Phase 4 — Remedies
+Each row is `conformant`, `violation`, or `unverifiable`, with cited reasoning.
+The audit covers the whole accountable session, including one that produced no
+Task or Change.
 
-Propose one smallest-resulting-system remedy per episode. `remedy.type` is open
-text. Common guidance is `new-tool`, `surface-tool`, `edit-instruction`,
-`edit-skill`, `process`, or `harness-redesign`; these examples are not an enum.
-Every remedy includes `smallest_change`. A design-question proposal may reach
-any harness level, but remains cited, smallest-remedy-framed, ranked, and for
-operator disposition. Nothing auto-applies.
+### Trustworthiness and Efficiency
 
-### Phase 5 — Emit
+Trustworthiness checks source/result agreement, silent failure, authority
+contradictions, append-only/rebuild guarantees, review independence, recovery,
+stale state, safety boundaries, and honest claims. Efficiency measures the
+complete applicable flow: waiting, blocked/paused time, repeated work, context
+pressure, calls, compute, storage, and operator attention. It cannot recommend
+a faster route that weakens Simplicity, Fidelity, or Trustworthiness.
 
-Emit only JSON conforming to `observer-analysis.schema.json`: package identity,
-zero to five episodes, reconciled one-line signal dismissals, and honest
-limitations. Cost is fixed from the episode's `sessions`:
+## Phase 3 — axial coding, cause, remedy, and cost
 
-- `turns` is the sum of every `turns_by_role` value in those sessions' facts;
-- `tokens` is the sum of `token_usage.input` and `token_usage.output`, treating
-  null fields as zero and excluding sessions with zero usage records; when no
-  episode session has usage records, only the token field is unverifiable and
-  left unchecked;
-- `duration_ms` is exactly the sum of `wall_clock.duration_ms`; and
-- `source` is exactly `facts:<sessions[0]>`.
+Merge candidates sharing one episode; split conflated causes; drop candidates
+whose citations do not support them. Record those operations briefly in
+`limitations`. Find the smallest supported harness cause. Reuse a recurrence
+key only when root machinery matches the dispatch inventory. Propose one
+smallest-resulting-system remedy and apply nothing.
 
-The validator's sane-session bound rejects `turns`, `tokens`, or `duration_ms`
-values above 10^15 before arithmetic. Duplicate episode sessions are invalid
-rather than deduplicated. An evidence object with zero or multiple entries is
-invalid; use separate evidence objects for separate entries.
+Episode cost remains grounded in complete-session facts:
 
-After emission, `qq-observe validate-analysis` resolves verbatim citations,
-grounds costs using the supplied facts, rejects invalid output, and ranks valid
-episodes. Findings remain proposals for the operator.
+- turns = sum of all `turns_by_role` values for episode sessions;
+- tokens = sum of input + output where usage records exist (unchecked only if
+  none of those sessions has any usage record);
+- duration = exact sum of `wall_clock.duration_ms`; and
+- source = exactly `facts:<episodes.sessions[0]>`.
 
-## Taxonomy v1
+Duplicate sessions and values above 10^15 are refused. Emit at most five
+classified episodes.
 
-- **tool-gap.capability-unknown** — an existing qq tool or skill would collapse
-  manual work but was not surfaced.
-- **tool-gap.tool-missing** — repeated manual multi-step work has no collapsing
-  capability in the inventory.
-- **instruction-conflict** — two live instructions pull against each other near
-  waste or visible hesitation.
-- **instruction-deficiency** — an ambiguous or missing instruction causes
-  misrouting or rework.
-- **tool-misuse** — the wrong tool or parameters were used when a better
-  available path existed.
-- **friction** — operator correction, restatement, direction change, or
-  frustration as felt in-session.
-- **waste** — retry loops, re-derivation, scope creep, or incomplete-then-redo
-  work.
-- **failure** — the run failed its own assigned goal.
-- **substrate** — an infrastructure episode, distinguished from agent behavior.
-- **design-question** — the harness's own system design forced contorted or
-  disproportionate work. Cite the reasoning contortion or volume signal, cite
-  outcome evidence where an outcome is claimed, name the responsible harness
-  rule, and analyze it as a harness architect.
-- **operator-seam.unconfirmed-assumption** — the agent proceeded on an
-  operator-owned choice or fact without supported confirmation.
-- **operator-seam.unseen-request** — an operator direction or request was not
-  noticed or incorporated.
-- **operator-seam.misread-direction** — the agent noticed a direction but acted
-  on a materially different reading.
-- **operator-seam.misleading-claim** — an agent claim overstated completion,
-  verification, or readiness at an operator gate.
-- **operator-seam.stale-world** — the exchange relied on world state that cited
-  external-change evidence had invalidated.
-- **operator-seam.cross-session** — operator context, authority, or direction
-  was lost or distorted across a session boundary.
-- **operator-seam.abandonment** — an operator-directed exchange was left without
-  supported resolution when the run moved on or ended.
+## Narrow taxonomy-repair exception
 
-## Seven hard rules
+The four lenses are exhaustive by default. At most one top-level
+`taxonomy_exception` may be emitted **outside** findings/lens statuses only
+when all of these are cited and validated:
 
-1. Never recompute an analytic number by hand; cite the deterministic
-   complete-session facts derived from the packaged transcripts.
-   Mechanical byte totals select reading mode only.
-2. Every emitted episode has at least one resolving evidence citation whose
-   quote is verbatim from its cited entries. Drop an uncited candidate before
-   emission; the validator rejects, rather than salvages, an analysis containing
-   an unresolved or non-verbatim citation.
-3. Emit no more than five episodes. Keep `dropped_signals` for deterministic
-   signal reconciliation, not overflow candidates.
-4. Reasoning informs root cause but is not outcome evidence; outcomes come from
-   tool results.
-5. On any package, schema, variant, or validation failure, emit
-   `analysis_failed` and never salvage findings.
-6. Findings are proposals only; apply nothing.
-7. Represent uncertainty honestly. Label weak evidence low-confidence or
-   tentative and never rank it up by assertion.
+1. a named operator-owned objective from a Task or decision;
+2. material effect on the resulting system;
+3. four ordered, non-empty explanations for why Simplicity, Fidelity,
+   Trustworthiness, and Efficiency each do not fit; and
+4. a stable lowercase recurrence key, evidence, root cause, and smallest remedy.
+
+It has no `primary_lens`, is not a finding, is not `other`, taste, a broad v1
+kind escape, or a fifth lens. Its key may not duplicate a classified finding.
+If the key already exists in the Observer corpus, finalization refuses another
+exception: recurrence reopens the four-lens contract for operator alignment.
+
+## Finalization
+
+Emit only schema-conforming JSON. `qq-observe validate-analysis` canonicalizes
+paths, resolves every citation, grounds episode costs, requires facts coverage
+for skill conformity, enforces the ordered lens and walk contracts, and ranks
+classified episodes by confidence, token cost, then title. `qq-observe
+finalize` additionally checks package identity and whole-session binding and is
+the sole append-only terminal writer.
+
+On any semantic failure, finalize `analysis_failed` with a specific reason.
+Mechanical facts remain reproducible from the bound transcript even when the
+four semantic lenses are unavailable. Findings and taxonomy repair are
+proposals only; apply nothing.
