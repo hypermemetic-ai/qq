@@ -108,6 +108,23 @@ async function atomicJson(path, value, replace = false) {
   }
 }
 
+function validReplacementLaunch(value, sessionPath) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const keys = Object.keys(value).sort();
+  return (
+    keys.length === 3 &&
+    keys[0] === "args" &&
+    keys[1] === "contract" &&
+    keys[2] === "kind" &&
+    value.kind === "pi" &&
+    value.contract === "pi-session-cwd-v1" &&
+    Array.isArray(value.args) &&
+    value.args.length === 2 &&
+    value.args[0] === "--session" &&
+    value.args[1] === sessionPath
+  );
+}
+
 function validateRequest(value) {
   const keys = [
     "schema", "version", "run_id", "action", "before_tree", "landed_tree",
@@ -152,7 +169,7 @@ function validateRequest(value) {
       !target.cwd.startsWith("/") ||
       !["idle", "working", "blocked"].includes(target.observed_status) ||
       (target.name !== null && !PANE_TOKEN.test(target.name ?? "")) ||
-      JSON.stringify(target.replacement_launch) !== JSON.stringify({ kind: "pi", contract: "pi-session-cwd-v1", args: ["--session", target.session_path] }) ||
+      !validReplacementLaunch(target.replacement_launch, target.session_path) ||
       targetTokens.has(target.token) || targetPanes.has(target.pane_id) || targetSessions.has(target.session_path)
     ) {
       throw new Error("activation request target authority is malformed");

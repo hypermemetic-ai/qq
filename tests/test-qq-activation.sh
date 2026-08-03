@@ -485,14 +485,15 @@ cp -- "$WATCHER" "$TMP/qq-activation-watch-a.ts"
 cp -- "$WATCHER" "$TMP/qq-activation-watch-b.ts"
 
 node --experimental-strip-types --input-type=module - \
-  "$TMP/qq-activation-watch-a.ts" "$TMP/qq-activation-watch-b.ts" "$TMP" "$WATCHER" <<'JS'
+  "$TMP/qq-activation-watch-a.ts" "$TMP/qq-activation-watch-b.ts" "$TMP" "$WATCHER" \
+  "$replacement_run/REQUEST.json" <<'JS'
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [watchAPath, watchBPath, tmp, productionWatchPath] = process.argv.slice(2);
+const [watchAPath, watchBPath, tmp, productionWatchPath, pythonRequestPath] = process.argv.slice(2);
 const source = await readFile(watchAPath, "utf8");
 assert.doesNotMatch(source, /herdr[^\n]*(?:focus|send-text|send-keys)|setEditorText|sendUserMessage|sendMessage\s*\(|triggerTurn\s*:\s*true/i,
   "activation watcher can focus/type or trigger a model/user turn");
@@ -533,6 +534,7 @@ async function fixture(name, overrides = {}) {
     observed_status: "idle",
     replacement_launch: { kind: "pi", contract: "pi-session-cwd-v1", args: ["--session", "/sessions/qq.jsonl"] },
   };
+  if (Object.hasOwn(overrides, "replacementLaunch")) target.replacement_launch = overrides.replacementLaunch;
   const request = {
     schema: "qq.activation-request", version: 1, run_id: runId,
     action: overrides.action ?? "reload", before_tree: "1".repeat(40), landed_tree: "2".repeat(40),
@@ -546,6 +548,16 @@ async function fixture(name, overrides = {}) {
   };
   await writeFile(join(run, "REQUEST.json"), `${JSON.stringify(request)}\n`, { mode: 0o600 });
   return { runtime, run, runId, request, target };
+}
+
+async function serializedFixture(name, body) {
+  const request = JSON.parse(body);
+  const runtime = join(tmp, name);
+  const runId = request.run_id;
+  const run = join(runtime, ".qq-activation", runId);
+  await mkdir(run, { recursive: true, mode: 0o700 });
+  await writeFile(join(run, "REQUEST.json"), body, { mode: 0o600 });
+  return { runtime, run, runId, request, target: request.targets[0] };
 }
 
 function harness(module, fixture, options = {}) {
@@ -651,6 +663,49 @@ assert.throws(
 delete process.env.FAKE_PROMPT_PANE;
 delete process.env.PROMPT_LOG;
 process.env.PATH = originalPath;
+
+// The actual production Python serializer writes replacement-launch keys in
+// lexical order. The watcher accepts that order without weakening the closed
+// launch-authority schema.
+const pythonRequestBody = await readFile(pythonRequestPath, "utf8");
+const pythonFixture = await serializedFixture("python-serialized-request", pythonRequestBody);
+assert.deepEqual(Object.keys(pythonFixture.target.replacement_launch), ["args", "contract", "kind"]);
+const pythonWatcher = harness(moduleA, pythonFixture, {
+  cwd: pythonFixture.target.cwd,
+  session: pythonFixture.target.session_path,
+  fingerprint: pythonFixture.request.resource_fingerprint,
+});
+await pythonWatcher.start();
+await waitFor(() => pythonWatcher.submissions.length === 1, "Python-serialized request was not accepted");
+await pythonWatcher.shutdown();
+
+async function assertReplacementLaunchRefused(name, replacementLaunch) {
+  const refusedFixture = await fixture(name, { replacementLaunch });
+  const refused = harness(moduleA, refusedFixture);
+  await refused.start();
+  assert.equal(refused.submissions.length, 0, `${name} replacement launch was accepted`);
+  assert.ok(refused.warnings.some(({ message }) => /target authority is malformed/.test(message)),
+    `${name} replacement launch did not fail as malformed authority`);
+  assert.equal(await exists(join(refusedFixture.run, "claims", `${refusedFixture.target.token}.json`)), false,
+    `${name} replacement launch created a claim`);
+  await refused.shutdown();
+}
+
+const exactReplacementLaunch = {
+  args: ["--session", "/sessions/qq.jsonl"], contract: "pi-session-cwd-v1", kind: "pi",
+};
+await assertReplacementLaunchRefused("replacement-launch-missing", {
+  args: exactReplacementLaunch.args, kind: exactReplacementLaunch.kind,
+});
+await assertReplacementLaunchRefused("replacement-launch-extra", { ...exactReplacementLaunch, extra: true });
+await assertReplacementLaunchRefused("replacement-launch-null", null);
+await assertReplacementLaunchRefused("replacement-launch-array", []);
+await assertReplacementLaunchRefused("replacement-launch-extra-arg", {
+  ...exactReplacementLaunch, args: [...exactReplacementLaunch.args, "extra"],
+});
+await assertReplacementLaunchRefused("replacement-launch-contradictory", {
+  ...exactReplacementLaunch, args: ["--session", "/sessions/other.jsonl"],
+});
 
 // Busy, queued-continuation, tool, and injected atomic blockers all retain the request until safe.
 const busyFixture = await fixture("busy");
