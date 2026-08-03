@@ -45,30 +45,29 @@ restating it.
 
 Invoke the assigned worktree's resident engine. It resolves that checkout's Pi
 wrapper, manifests, and execution-profile policy and rejects a `--cwd` outside
-its Git common directory. For one ticket:
+its Git common directory. For one ticket, use the prompt-returning path:
 
 ```sh
-<assigned-worktree>/bin/qq-delegate run --role implementer \
+<assigned-worktree>/bin/qq-delegate start --role implementer \
   --cwd <absolute-worktree> --brief <absolute-run-dir>/BRIEF.md
 ```
 
 For fan-out, make `<absolute-batch.json>` a JSON array of
-`{"role","cwd","brief"}` tickets:
+`{"role","cwd","brief"}` tickets and start its ready frontier:
 
 ```sh
-<assigned-worktree>/bin/qq-delegate batch <absolute-batch.json>
+<assigned-worktree>/bin/qq-delegate start-batch <absolute-batch.json>
 ```
 
-Calls block through child lifecycles; the engine writes `TERMINAL` v2
-(`exit_code`, `timed_out`, artifact paths) per child. Run returns child code;
-batch returns zero if and only if all do. The delegate's only result is
-`<absolute-run-dir>/ENVELOPE.md`; a nonzero exit or missing envelope fails
-dispatch. For dispatch-infrastructure failure—engine refusal, timeout, or
-substrate
-failure—resume once in a fresh run directory with the same `BRIEF.md`. The
-engine rejects the spent directory, which is sealed or has prior output. Use
-the source manifest's recorded `timeoutMs`, never an override; a second failure
-is `inconclusive-under-substrate`, never an operator restatement.
+Acceptance emits exact run ID/directory and returns the prompt. Retain both;
+never scan by ID. Exact-path `status` is bounded/nonwaiting; `wait` is the only
+lifecycle wait; `collect` verifies exact `TERMINAL` v2 and `ENVELOPE.md`,
+preserving child exit. `run` and `batch` remain blocking compatibility.
+
+A nonzero terminal or refused/missing envelope fails. On infrastructure failure
+(engine refusal, timeout, or substrate), retry once in a fresh directory with
+that brief. Spent directories are refused. Use manifest `timeoutMs`; a second
+failure is `inconclusive-under-substrate`, never an operator restatement.
 
 After the first recognized `/dev/fd` or equivalent substrate failure, record
 the Check once as `inconclusive-under-substrate` and do not rerun it in the

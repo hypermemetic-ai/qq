@@ -140,18 +140,25 @@ refuses to guess. The report reconciles the complete landed inventory with the
 Repository Backlog and shows resulting system changes plus active/next work.
 
 Delegation launches through the worktree-resident `bin/qq-delegate` engine. The
-engine is blocking and resolves each canonical role manifest into explicit Pi
-arguments before launch; there is no separate vendor runtime or activation
-configuration. The assigned Git worktree is the delegate's only boundary.
+canonical `start` and `start-batch` paths validate and accept each ticket, emit
+one JSON line with its exact run ID and directory, and return without waiting
+for child completion. `status` takes one absolute run directory and returns one
+bounded snapshot without a scan or wait; `wait` is the explicit lifecycle wait,
+and `collect` validates and returns the exact terminal outcome and completion
+envelope. The older `run` and `batch` verbs remain blocking compatibility paths.
+The engine resolves each canonical role manifest into explicit Pi arguments
+before launch; there is no separate vendor runtime or activation configuration.
+The assigned Git worktree is the delegate's only boundary.
 
 At delegated-ticket creation, the owner creates one operator-owned mode-700 run
 directory beneath `QQ_DISPATCH_RUNTIME_ROOT` or the assigned worktree and writes
 its complete `BRIEF.md`. The engine validates the worktree, run directory,
 canonical role manifest, timeout, and declared role tools, then places child
 cache, Pi configuration, and session state beneath that directory. The run
-directory holds `BRIEF.md`, the child-authored `ENVELOPE.md`, and the
-engine-authored `TERMINAL`. `ENVELOPE.md` is the child's only result; a missing
-envelope is not complete, and a child ending on a user message fails. Open
+directory holds `BRIEF.md`, the private schema-versioned `LAUNCH` identity, the
+child-authored `ENVELOPE.md`, and the engine-authored atomic `TERMINAL` v2.
+`ENVELOPE.md` is the child's only result; a missing envelope is not complete,
+and a child ending on a user message fails. Open
 egress remains the decision-8 posture, so role and Skill privacy rules govern
 what may leave the worktree.
 
@@ -209,8 +216,9 @@ confirmation and pane-read-back outcome validation remain in the pane.
 
 The accountable Pi session stays in the Repository project home and owns
 alignment, Task and Change judgment, work orders, verdicts, UAT, and handoff.
-Bounded implementation, fresh review, and research run through the blocking
-`qq-delegate` engine.
+Bounded implementation, fresh review, and research use prompt-returning
+`qq-delegate start` so the accountable session retains its turn while the
+private run continues.
 
 For an existing aligned Change, `/handoff <Task-ID>` is the standard transfer
 to a fresh accountable Pi tab. It resolves the Task's unique linked checkout,

@@ -29,14 +29,14 @@ the Change and code without inheriting the author's conclusions.
    outside its Git common directory:
 
    ```sh
-   <assigned-worktree>/bin/qq-delegate run --role reviewer \
+   <assigned-worktree>/bin/qq-delegate start --role reviewer \
      --cwd <absolute-worktree> --brief <absolute-run-dir>/BRIEF.md
    ```
 
-   It blocks through child exit, writes `TERMINAL` v2 (`exit_code`, `timed_out`,
-   artifact paths), and returns child code. A nonzero exit or missing
-   `ENVELOPE.md` fails dispatch. The brief completes orientation—no further
-   broad intent search or full-suite rerun.
+   Acceptance returns the prompt and exact run identity. Use `delegate-batch`'s
+   exact-path `status`, `wait`, and `collect` contract. A nonzero terminal or
+   refused/missing envelope fails dispatch; `run` is blocking compatibility.
+   The brief completes orientation—no broad intent search or full-suite rerun.
 5. The reviewer tests responsibilities against the brief, exact diff, callers,
    tests, and suspected failure paths. Review moves and deletions by invariant.
    A hole reports the missing or contradictory fact, why it controls the

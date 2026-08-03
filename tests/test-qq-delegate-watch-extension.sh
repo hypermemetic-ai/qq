@@ -26,12 +26,11 @@ if ! node --experimental-strip-types --input-type=module - \
 import assert from "node:assert/strict";
 import { watch as fsWatch } from "node:fs";
 import {
+  lstat,
   mkdir,
   readFile,
-  unlink,
   writeFile,
 } from "node:fs/promises";
-import net from "node:net";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -40,10 +39,38 @@ const watchModule = await import(pathToFileURL(watchPath));
 const watchModuleA = await import(pathToFileURL(watchAPath));
 const watchModuleB = await import(pathToFileURL(watchBPath));
 const source = await readFile(sourcePath, "utf8");
-assert.doesNotMatch(source, /setInterval|setTimeout\([^,]+,\s*[1-9][0-9]*\s*\).*scan/s,
-  "delegate discovery contains production polling");
-assert.doesNotMatch(source, /getDelegateRows|subscribeDelegateRows|rowListeners/,
-  "watcher retained the old footer publication API");
+assert.doesNotMatch(
+  source,
+  /\bset(?:Interval|Timeout)\s*\(/,
+  "delegate discovery contains production polling",
+);
+assert.doesNotMatch(
+  source,
+  /node:net|createConnection|sendThroughBroker|brokerSocketPath|BROKER_TIMEOUT|MAX_FRAME_BYTES|randomUUID|herdrNotify|notification\", \"show|pi\.exec\s*\(/i,
+  "watcher retained remote completion transport or fallback state",
+);
+assert.doesNotMatch(
+  source,
+  /getDelegateRows|subscribeDelegateRows|rowListeners/,
+  "watcher retained the old footer publication API",
+);
+const wakeSource = source.slice(
+  source.indexOf("async function wake"),
+  source.indexOf("async function inspectDirectory"),
+);
+assert.ok(wakeSource.length > 0, "wake implementation was not found");
+assert.ok(
+  wakeSource.indexOf("await paneFor(runDir)") < wakeSource.indexOf("await open("),
+  "completion was claimed before its PANE was read",
+);
+assert.ok(
+  wakeSource.indexOf("pane !== currentPane") < wakeSource.indexOf("await open("),
+  "completion was claimed before exact local ownership was checked",
+);
+assert.ok(
+  wakeSource.indexOf("await open(") < wakeSource.indexOf("await terminalSummary(runDir)"),
+  "terminal summary was read before ownership and exclusive claim",
+);
 
 const tmp = dirname(watchPath);
 
@@ -52,6 +79,16 @@ async function waitFor(predicate, message, timeout = 2500) {
   while (!predicate()) {
     if (Date.now() >= deadline) assert.fail(message);
     await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+async function fileExists(path) {
+  try {
+    await lstat(path);
+    return true;
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
   }
 }
 
@@ -75,26 +112,25 @@ async function writeTerminal(run, exitCode = 0, timedOut = false) {
   );
 }
 
-function createWatcherHarness(
-  module,
-  deps,
-  execImpl = async () => assert.fail("test watcher attempted the real herdr command"),
-  hasUI = true,
-) {
+function createWatcherHarness(module, deps, options = {}) {
   const events = new Map();
   const warnings = [];
   const widgetCalls = [];
+  const messages = [];
   const pi = {
     on(name, handler) {
       events.set(name, handler);
     },
-    exec: execImpl,
+    sendMessage(message, sendOptions) {
+      messages.push({ message, options: sendOptions });
+      return options.sendImpl?.(message, sendOptions);
+    },
   };
   module.default(pi, deps);
   assert.equal(typeof events.get("session_start"), "function");
   assert.equal(typeof events.get("session_shutdown"), "function");
   const ctx = {
-    hasUI,
+    hasUI: options.hasUI ?? true,
     ui: {
       notify(message, level) {
         warnings.push({ message, level });
@@ -113,6 +149,7 @@ function createWatcherHarness(
     events,
     warnings,
     widgetCalls,
+    messages,
     latestWidget() {
       return widgetCalls.at(-1);
     },
@@ -128,7 +165,7 @@ function createWatcherHarness(
 function assertDefaultWidgetCall(call) {
   assert.equal(call.key, "qq-delegates");
   assert.equal(call.options, undefined);
-  assert.equal(call.argumentCount, 2, "setWidget passed placement/options instead of using above-editor default");
+  assert.equal(call.argumentCount, 2, "setWidget did not use the above-editor default");
 }
 
 function widgetText(harness) {
@@ -136,71 +173,67 @@ function widgetText(harness) {
   return Array.isArray(content) ? content.join("\n") : "";
 }
 
-function encoded(message) {
-  const payload = Buffer.from(JSON.stringify(message));
-  const header = Buffer.alloc(4);
-  header.writeUInt32BE(payload.length);
-  return Buffer.concat([header, payload]);
-}
-
-async function fakeBroker(socketPath, sessions) {
-  await mkdir(dirname(socketPath), { recursive: true });
-  await unlink(socketPath).catch(() => {});
-  const received = [];
-  const sockets = new Set();
-  const server = net.createServer((socket) => {
-    sockets.add(socket);
-    socket.on("close", () => sockets.delete(socket));
-    let buffer = Buffer.alloc(0);
-    socket.on("data", (chunk) => {
-      buffer = Buffer.concat([buffer, chunk]);
-      while (buffer.length >= 4) {
-        const length = buffer.readUInt32BE(0);
-        if (buffer.length < length + 4) return;
-        const message = JSON.parse(buffer.subarray(4, length + 4).toString("utf8"));
-        buffer = buffer.subarray(length + 4);
-        received.push(message);
-        if (message.type === "register") {
-          socket.write(encoded({ type: "registered", sessionId: "watcher-id" }));
-        } else if (message.type === "list") {
-          socket.write(encoded({
-            type: "sessions",
-            requestId: message.requestId,
-            sessions,
-          }));
-        } else if (message.type === "send") {
-          socket.write(encoded({
-            type: "delivered",
-            messageId: message.message.id,
-          }));
-        } else if (message.type === "unregister") {
-          socket.end();
-        }
-      }
-    });
-  });
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(socketPath, resolve);
-  });
+function trackedWatchState() {
+  const created = new Set();
+  const closed = new Set();
+  let createdCount = 0;
+  let closedCount = 0;
   return {
-    received,
-    async close() {
-      for (const socket of sockets) socket.destroy();
-      await new Promise((resolve) => server.close(resolve));
-      await unlink(socketPath).catch(() => {});
+    created,
+    closed,
+    get createdCount() {
+      return createdCount;
+    },
+    get closedCount() {
+      return closedCount;
+    },
+    watch(path, options, callback) {
+      const watcher = fsWatch(path, options, callback);
+      const close = watcher.close.bind(watcher);
+      let didClose = false;
+      watcher.close = () => {
+        if (!didClose) {
+          didClose = true;
+          closed.add(path);
+          closedCount += 1;
+        }
+        return close();
+      };
+      created.add(path);
+      createdCount += 1;
+      return watcher;
     },
   };
 }
 
-// Initial discovery is BRIEF-gated across both roots, but presentation is
-// fail-closed to exact validated pane identity. Existing completions are not
-// replayed as wakes when a session starts.
+function expectedWake(run, name, exitCode, timedOut) {
+  return {
+    message: {
+      customType: "qq-delegate-complete",
+      content: `Delegate ${name} completed (exit ${exitCode}, timed out: ${timedOut}). Run: ${run}`,
+      display: true,
+      details: {
+        run_directory: run,
+        exit_code: exitCode,
+        timed_out: timedOut,
+      },
+    },
+    options: { triggerTurn: true, deliverAs: "followUp" },
+  };
+}
+
+// Initial discovery is BRIEF-gated across durable and legacy roots. Exact pane
+// identity filters the widget, and existing completions are neither replayed
+// nor claimed when a session starts.
 const initialRoot = join(tmp, "initial-durable");
 const initialLegacy = join(tmp, "initial-legacy");
 await mkdir(initialRoot, { recursive: true });
 await mkdir(initialLegacy, { recursive: true });
-await makeRun(initialRoot, "implementer-current-pane", "pane:current");
+const initialCurrent = await makeRun(
+  initialRoot,
+  "implementer-current-pane",
+  "pane:current",
+);
 await makeRun(initialRoot, "observer-other-pane", "pane:other");
 await makeRun(initialRoot, "observer-missing-pane");
 const malformedPaneRun = await makeRun(initialRoot, "observer-malformed-pane");
@@ -215,13 +248,12 @@ const alreadyComplete = await makeRun(
 await writeTerminal(alreadyComplete, 0, false);
 await mkdir(join(initialRoot, "vendor-without-brief"));
 await writeFile(join(initialRoot, "ordinary-file"), "ignore\n");
-const initialFallbacks = [];
+const initialWatches = trackedWatchState();
 const initial = createWatcherHarness(watchModule, {
   durableRoot: initialRoot,
   legacyRoot: initialLegacy,
   currentPane: "pane:current",
-  brokerSocketPath: join(tmp, "absent-initial.sock"),
-  herdrNotify: async (notice) => initialFallbacks.push(notice),
+  watch: initialWatches.watch.bind(initialWatches),
 });
 await initial.start();
 assertDefaultWidgetCall(initial.latestWidget());
@@ -235,35 +267,32 @@ assert.doesNotMatch(
   /other-pane|missing-pane|malformed-pane|unrelated-other-root/,
   "widget leaked a run without exact validated current-pane identity",
 );
-assert.equal(initialFallbacks.length, 0, "initial scan replayed an old completion");
+assert.equal(initial.messages.length, 0, "initial scan replayed an old completion");
+assert.equal(await fileExists(join(alreadyComplete, ".wake-claimed")), false);
+assert.ok(initialWatches.created.has(initialRoot), "durable root watch was not armed");
+assert.ok(initialWatches.created.has(initialLegacy), "legacy root watch was not armed");
+assert.ok(initialWatches.created.has(initialCurrent), "run watch was not armed");
 initial.shutdown();
 
-// A BRIEF-only run remains hidden until a later PANE fs event. Its TERMINAL
-// event then clears the widget and retains the completion wake.
+// A BRIEF-only run remains hidden until a later PANE event. Its matching
+// TERMINAL clears the widget and sends the exact local custom message.
 const eventRoot = join(tmp, "event-durable");
 const eventLegacy = join(tmp, "event-legacy");
 await mkdir(eventRoot, { recursive: true });
 await mkdir(eventLegacy, { recursive: true });
-const eventWatchedPaths = new Set();
-function eventTrackedWatch(path, options, callback) {
-  eventWatchedPaths.add(path);
-  return fsWatch(path, options, callback);
-}
-const eventFallbacks = [];
+const eventWatches = trackedWatchState();
 const eventWatcher = createWatcherHarness(watchModule, {
   durableRoot: eventRoot,
   legacyRoot: eventLegacy,
   currentPane: "pane:event",
-  watch: eventTrackedWatch,
-  brokerSocketPath: join(tmp, "absent-event.sock"),
-  herdrNotify: async (notice) => eventFallbacks.push(notice),
+  watch: eventWatches.watch.bind(eventWatches),
 });
 await eventWatcher.start();
 assertDefaultWidgetCall(eventWatcher.latestWidget());
 assert.equal(eventWatcher.latestWidget().content, undefined);
 const eventRun = await makeRun(eventRoot, "observer-brief-before-pane");
 await waitFor(
-  () => eventWatchedPaths.has(eventRun),
+  () => eventWatches.created.has(eventRun),
   "new BRIEF run was not armed for child filesystem events",
 );
 assert.doesNotMatch(widgetText(eventWatcher), /observer-brief-before-pane/);
@@ -279,28 +308,30 @@ assert.deepEqual(eventWatcher.latestWidget().content, [
 ]);
 await writeTerminal(eventRun, 3, false);
 await waitFor(
-  () => eventWatcher.latestWidget()?.content === undefined && eventFallbacks.length === 1,
-  "TERMINAL event did not clear its widget and wake",
+  () =>
+    eventWatcher.latestWidget()?.content === undefined &&
+    eventWatcher.messages.length === 1,
+  "matching TERMINAL did not clear its widget and wake locally",
 );
 assertDefaultWidgetCall(eventWatcher.latestWidget());
-assert.match(eventFallbacks[0].body, /exit 3, timed out: no/);
-assert.match(eventFallbacks[0].body, new RegExp(eventRun.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+assert.deepEqual(
+  eventWatcher.messages,
+  [expectedWake(eventRun, "observer-brief-before-pane", "3", "no")],
+);
+assert.equal(await fileExists(join(eventRun, ".wake-claimed")), true);
 eventWatcher.shutdown();
 
-// Independent qq sessions race on one TERMINAL; the exclusive marker permits
-// exactly one fallback while both instances observe and clear the row.
+// Duplicate watcher instances for the same pane race through one exclusive
+// marker, so exactly one local Pi instance sends the completion.
 const raceRoot = join(tmp, "race-durable");
 const raceLegacy = join(tmp, "race-legacy");
 await mkdir(raceRoot, { recursive: true });
 await mkdir(raceLegacy, { recursive: true });
 const raceRun = await makeRun(raceRoot, "implementer-race", "pane:race");
-const raceFallbacks = [];
 const raceDeps = {
   durableRoot: raceRoot,
   legacyRoot: raceLegacy,
   currentPane: "pane:race",
-  brokerSocketPath: join(tmp, "absent-race.sock"),
-  herdrNotify: async (notice) => raceFallbacks.push(notice),
 };
 const raceA = createWatcherHarness(watchModuleA, raceDeps);
 const raceB = createWatcherHarness(watchModuleB, raceDeps);
@@ -313,129 +344,155 @@ await waitFor(
   () =>
     raceA.latestWidget()?.content === undefined &&
     raceB.latestWidget()?.content === undefined &&
-    raceFallbacks.length === 1,
-  "two watcher instances did not settle one completion wake",
+    raceA.messages.length + raceB.messages.length === 1,
+  "two local watcher instances did not settle one completion wake",
 );
-assert.equal(raceFallbacks.length, 1, "claim file allowed duplicate wakes");
-assert.ok(await readFile(join(raceRun, ".wake-claimed"), "utf8").then(() => true));
+assert.deepEqual(
+  [...raceA.messages, ...raceB.messages],
+  [expectedWake(raceRun, "implementer-race", "4", "no")],
+);
+assert.equal(await fileExists(join(raceRun, ".wake-claimed")), true);
 raceA.shutdown();
 raceB.shutdown();
 
-// The broker test speaks the installed intercom framing and message shapes.
-const brokerRoot = join(tmp, "broker-durable");
-const brokerLegacy = join(tmp, "broker-legacy");
-await mkdir(brokerRoot, { recursive: true });
-await mkdir(brokerLegacy, { recursive: true });
-const brokerRun = await makeRun(brokerRoot, "reviewer-pane-target");
-await writeFile(join(brokerRun, "PANE"), "pane:ABC_7\n");
-const brokerPath = join(tmp, "intercom", "broker.sock");
-const broker = await fakeBroker(brokerPath, [
-  {
-    id: "target-session-id",
-    name: "PANE:abc_7",
-    cwd: "/target",
-    model: "fixture",
-    pid: 12,
-    startedAt: 1,
-    lastActivity: 2,
-    status: "idle",
-  },
-]);
-const brokerFallbacks = [];
-const brokerWatcher = createWatcherHarness(watchModule, {
-  durableRoot: brokerRoot,
-  legacyRoot: brokerLegacy,
-  currentPane: "pane:ABC_7",
-  brokerSocketPath: brokerPath,
-  herdrNotify: async (notice) => brokerFallbacks.push(notice),
-});
-await brokerWatcher.start();
-await writeTerminal(brokerRun, 124, true);
-await waitFor(
-  () => broker.received.some((message) => message.type === "send"),
-  "exact pane-named intercom target did not receive completion",
-);
-const protocol = broker.received.map((message) => message.type);
-assert.deepEqual(protocol.slice(0, 3), ["register", "list", "send"]);
-const sent = broker.received.find((message) => message.type === "send");
-assert.equal(sent.to, "target-session-id", "watcher did not target the listed session id");
-assert.match(sent.message.content.text, /reviewer-pane-target/);
-assert.match(sent.message.content.text, /exit 124, timed out: yes/);
-assert.match(sent.message.content.text, new RegExp(brokerRun.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-await waitFor(
-  () => broker.received.some((message) => message.type === "unregister"),
-  "temporary intercom presence did not unregister",
-);
-assert.equal(brokerFallbacks.length, 0, "successful intercom delivery also used herdr");
-brokerWatcher.shutdown();
-await broker.close();
+// Other-pane, missing-PANE, malformed-PANE, and absent/invalid current-pane
+// watchers all observe TERMINAL but neither send nor consume the claim. A
+// malformed terminal is used to prove unknown summaries cannot bypass owner
+// matching.
+async function assertUnownedCompletion({ name, runPane, rawPane, currentPane }) {
+  const root = join(tmp, `${name}-durable`);
+  const legacy = join(tmp, `${name}-legacy`);
+  await mkdir(root, { recursive: true });
+  await mkdir(legacy, { recursive: true });
+  const run = await makeRun(root, name, runPane);
+  if (rawPane !== undefined) await writeFile(join(run, "PANE"), rawPane);
+  const watches = trackedWatchState();
+  const watcher = createWatcherHarness(watchModule, {
+    durableRoot: root,
+    legacyRoot: legacy,
+    currentPane,
+    watch: watches.watch.bind(watches),
+  });
+  await watcher.start();
+  assert.ok(watches.created.has(run), `${name} run watch was not armed`);
+  await writeFile(join(run, "TERMINAL"), "malformed terminal\n");
+  await waitFor(
+    () => watches.closed.has(run),
+    `${name} TERMINAL event was not classified`,
+  );
+  // A later root event cannot arm this run until the serialized TERMINAL
+  // operation (including its ownership check) has returned.
+  const flushRun = await makeRun(root, `${name}-flush`);
+  await waitFor(
+    () => watches.created.has(flushRun),
+    `${name} ownership check did not settle before the next root event`,
+  );
+  assert.equal(watcher.messages.length, 0, `${name} sent a completion`);
+  assert.equal(
+    await fileExists(join(run, ".wake-claimed")),
+    false,
+    `${name} consumed the completion claim`,
+  );
+  watcher.shutdown();
+}
 
-// Missing pane target, missing broker, and missing PANE each degrade through
-// the injected operator-visible herdr notification exactly once.
-const fallbackRoot = join(tmp, "fallback-durable");
-const fallbackLegacy = join(tmp, "fallback-legacy");
-await mkdir(fallbackRoot, { recursive: true });
-await mkdir(fallbackLegacy, { recursive: true });
-const missingTargetRun = await makeRun(fallbackRoot, "observer-missing-target");
-const missingBrokerRun = await makeRun(fallbackRoot, "observer-missing-broker");
-const missingPaneRun = await makeRun(fallbackRoot, "observer-missing-pane");
-await writeFile(join(missingTargetRun, "PANE"), "pane:missing\n");
-await writeFile(join(missingBrokerRun, "PANE"), "pane:offline\n");
-const fallbackBrokerPath = join(tmp, "fallback-intercom", "broker.sock");
-const noTargetBroker = await fakeBroker(fallbackBrokerPath, []);
-const fallbacks = [];
-const fallbackWatcher = createWatcherHarness(watchModule, {
-  durableRoot: fallbackRoot,
-  legacyRoot: fallbackLegacy,
+await assertUnownedCompletion({
+  name: "other-pane",
+  runPane: "pane:other",
+  currentPane: "pane:owner",
+});
+await assertUnownedCompletion({
+  name: "missing-pane",
+  currentPane: "pane:owner",
+});
+await assertUnownedCompletion({
+  name: "malformed-pane",
+  rawPane: "unsafe pane\n",
+  currentPane: "pane:owner",
+});
+await assertUnownedCompletion({
+  name: "missing-current-pane",
+  runPane: "pane:owner",
   currentPane: undefined,
-  brokerSocketPath: fallbackBrokerPath,
-  herdrNotify: async (notice) => fallbacks.push(notice),
 });
-await fallbackWatcher.start();
-await writeTerminal(missingTargetRun, 5, false);
-await waitFor(() => fallbacks.length === 1, "missing target did not use herdr once");
-await noTargetBroker.close();
-await writeTerminal(missingBrokerRun, 6, false);
-await waitFor(() => fallbacks.length === 2, "missing broker did not use herdr once");
-await writeFile(join(missingPaneRun, "TERMINAL"), "malformed terminal\n");
-await waitFor(() => fallbacks.length === 3, "missing PANE did not use herdr once");
-assert.equal(fallbacks.length, 3);
-assert.match(fallbacks[2].body, /exit unknown, timed out: unknown/);
-fallbackWatcher.shutdown();
+await assertUnownedCompletion({
+  name: "invalid-current-pane",
+  runPane: "pane:owner",
+  currentPane: "unsafe pane",
+});
 
-// The production fallback invokes the exact herdr notification surface and a
-// missing herdr binary becomes a local warning rather than a session failure.
-const herdrRoot = join(tmp, "herdr-durable");
-const herdrLegacy = join(tmp, "herdr-legacy");
-await mkdir(herdrRoot, { recursive: true });
-await mkdir(herdrLegacy, { recursive: true });
-const herdrGoodRun = await makeRun(herdrRoot, "implementer-herdr-good");
-const herdrFailedRun = await makeRun(herdrRoot, "implementer-herdr-failed");
-const herdrCalls = [];
-const herdrWatcher = createWatcherHarness(
+// Once pane ownership matches, a malformed TERMINAL retains the bounded
+// unknown summary and still uses the exact direct message shape.
+const malformedRoot = join(tmp, "malformed-terminal-durable");
+const malformedLegacy = join(tmp, "malformed-terminal-legacy");
+await mkdir(malformedRoot, { recursive: true });
+await mkdir(malformedLegacy, { recursive: true });
+const malformedRun = await makeRun(
+  malformedRoot,
+  "reviewer-malformed-terminal",
+  "pane:malformed",
+);
+const malformed = createWatcherHarness(watchModule, {
+  durableRoot: malformedRoot,
+  legacyRoot: malformedLegacy,
+  currentPane: "pane:malformed",
+});
+await malformed.start();
+await writeFile(join(malformedRun, "TERMINAL"), "malformed terminal\n");
+await waitFor(
+  () => malformed.messages.length === 1,
+  "owned malformed TERMINAL did not wake",
+);
+assert.deepEqual(
+  malformed.messages,
+  [
+    expectedWake(
+      malformedRun,
+      "reviewer-malformed-terminal",
+      "unknown",
+      "unknown",
+    ),
+  ],
+);
+malformed.shutdown();
+
+// A direct local send exception is contained as one warning after the claim;
+// it never escapes through the event queue or invokes another transport.
+const throwRoot = join(tmp, "throw-durable");
+const throwLegacy = join(tmp, "throw-legacy");
+await mkdir(throwRoot, { recursive: true });
+await mkdir(throwLegacy, { recursive: true });
+const throwRun = await makeRun(throwRoot, "implementer-send-throw", "pane:throw");
+const throwing = createWatcherHarness(
   watchModule,
-  { durableRoot: herdrRoot, legacyRoot: herdrLegacy, currentPane: undefined },
-  async (command, args, options) => {
-    herdrCalls.push({ command, args, options });
-    return { code: herdrCalls.length === 1 ? 0 : 127, killed: false };
+  {
+    durableRoot: throwRoot,
+    legacyRoot: throwLegacy,
+    currentPane: "pane:throw",
+  },
+  {
+    sendImpl() {
+      throw new Error("fixture direct send failed");
+    },
   },
 );
-await herdrWatcher.start();
-await writeTerminal(herdrGoodRun, 0, false);
-await waitFor(() => herdrCalls.length === 1, "default herdr fallback did not run");
-assert.equal(herdrCalls[0].command, "herdr");
-assert.deepEqual(herdrCalls[0].args.slice(0, 2), ["notification", "show"]);
-assert.deepEqual(herdrCalls[0].args.slice(-2), ["--sound", "request"]);
-assert.ok(herdrCalls[0].args.includes("--body"));
-assert.equal(herdrCalls[0].options.timeout, 5000);
-await writeTerminal(herdrFailedRun, 8, false);
+await throwing.start();
+await writeTerminal(throwRun, 8, false);
 await waitFor(
-  () => herdrCalls.length === 2 && herdrWatcher.warnings.length === 1,
-  "unavailable herdr did not surface one local warning",
+  () => throwing.messages.length === 1 && throwing.warnings.length === 1,
+  "direct send exception was not contained as one local warning",
 );
-assert.equal(herdrWatcher.warnings[0].level, "warning");
-assert.match(herdrWatcher.warnings[0].message, /Herdr notification failed/);
-herdrWatcher.shutdown();
+await new Promise((resolve) => setTimeout(resolve, 25));
+assert.equal(throwing.warnings.length, 1, "direct send exception warned more than once");
+assert.equal(throwing.warnings[0].level, "warning");
+assert.match(throwing.warnings[0].message, /completion wake failed/);
+assert.match(throwing.warnings[0].message, /fixture direct send failed/);
+assert.deepEqual(
+  throwing.messages,
+  [expectedWake(throwRun, "implementer-send-throw", "8", "no")],
+);
+assert.equal(await fileExists(join(throwRun, ".wake-claimed")), true);
+throwing.shutdown();
 
 // Shutdown clears the widget, closes every root/run watcher, and ignores later
 // filesystem activity.
@@ -444,28 +501,12 @@ const cleanupLegacy = join(tmp, "cleanup-legacy");
 await mkdir(cleanupRoot, { recursive: true });
 await mkdir(cleanupLegacy, { recursive: true });
 await makeRun(cleanupRoot, "researcher-cleanup", "pane:cleanup");
-let createdWatchers = 0;
-let closedWatchers = 0;
-function trackedWatch(path, options, callback) {
-  const watcher = fsWatch(path, options, callback);
-  const close = watcher.close.bind(watcher);
-  let closed = false;
-  watcher.close = () => {
-    if (!closed) {
-      closed = true;
-      closedWatchers += 1;
-    }
-    return close();
-  };
-  createdWatchers += 1;
-  return watcher;
-}
+const cleanupWatches = trackedWatchState();
 const cleanup = createWatcherHarness(watchModule, {
   durableRoot: cleanupRoot,
   legacyRoot: cleanupLegacy,
   currentPane: "pane:cleanup",
-  watch: trackedWatch,
-  herdrNotify: async () => {},
+  watch: cleanupWatches.watch.bind(cleanupWatches),
 });
 await cleanup.start();
 assert.match(widgetText(cleanup), /researcher-cleanup/);
@@ -473,7 +514,11 @@ cleanup.shutdown();
 assertDefaultWidgetCall(cleanup.latestWidget());
 assert.equal(cleanup.latestWidget().content, undefined, "shutdown did not clear widget");
 cleanup.shutdown();
-assert.equal(closedWatchers, createdWatchers, "shutdown leaked fs watchers");
+assert.equal(
+  cleanupWatches.closedCount,
+  cleanupWatches.createdCount,
+  "shutdown leaked filesystem watchers",
+);
 const widgetCallsAfterShutdown = cleanup.widgetCalls.length;
 await makeRun(cleanupRoot, "researcher-after-shutdown", "pane:cleanup");
 await new Promise((resolve) => setImmediate(resolve));
@@ -499,7 +544,6 @@ const overflow = createWatcherHarness(watchModule, {
   durableRoot: overflowRoot,
   legacyRoot: overflowLegacy,
   currentPane: "pane:overflow",
-  herdrNotify: async () => {},
 });
 await overflow.start();
 assertDefaultWidgetCall(overflow.latestWidget());
@@ -511,35 +555,20 @@ assert.equal(overflow.latestWidget().content[9], "└─ +2 more");
 assert.doesNotMatch(widgetText(overflow), /implementer-widget-(08|09)/);
 overflow.shutdown();
 
-// Missing or malformed current pane identity fails closed rather than showing
-// the global active set, and non-UI sessions never call setWidget.
-const closedRoot = join(tmp, "closed-durable");
-const closedLegacy = join(tmp, "closed-legacy");
-await mkdir(closedRoot, { recursive: true });
-await mkdir(closedLegacy, { recursive: true });
-await makeRun(closedRoot, "implementer-global-hidden", "pane:valid");
-for (const currentPane of [undefined, "unsafe pane"]) {
-  const closed = createWatcherHarness(watchModule, {
-    durableRoot: closedRoot,
-    legacyRoot: closedLegacy,
-    currentPane,
-    herdrNotify: async () => {},
-  });
-  await closed.start();
-  assertDefaultWidgetCall(closed.latestWidget());
-  assert.equal(closed.latestWidget().content, undefined);
-  closed.shutdown();
-}
+// Non-UI sessions retain discovery and cleanup without calling setWidget.
+const noUiRoot = join(tmp, "no-ui-durable");
+const noUiLegacy = join(tmp, "no-ui-legacy");
+await mkdir(noUiRoot, { recursive: true });
+await mkdir(noUiLegacy, { recursive: true });
+await makeRun(noUiRoot, "implementer-no-ui", "pane:no-ui");
 const noUi = createWatcherHarness(
   watchModule,
   {
-    durableRoot: closedRoot,
-    legacyRoot: closedLegacy,
-    currentPane: "pane:valid",
-    herdrNotify: async () => {},
+    durableRoot: noUiRoot,
+    legacyRoot: noUiLegacy,
+    currentPane: "pane:no-ui",
   },
-  undefined,
-  false,
+  { hasUI: false },
 );
 await noUi.start();
 noUi.shutdown();
