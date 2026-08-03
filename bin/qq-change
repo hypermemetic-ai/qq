@@ -482,6 +482,7 @@ retire_change() {
     activation_retirement_command=(
       "$python_bin" "$activation_helper" retire-change
       --runtime-root "$activation_runtime_root" --source-branch "$branch"
+      --herdr-bin "$herdr_bin"
     )
     if [ -n "$pull_request" ]; then
       activation_retirement_command+=(--pull-request "$pull_request")

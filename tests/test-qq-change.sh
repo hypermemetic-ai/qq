@@ -125,6 +125,11 @@ case "${1:-} ${2:-}" in
   "agent list")
     if [ "${FAKE_LIVE_AGENT:-}" = 1 ]; then
       printf '%s\n' '{"result":{"agents":[{"workspace_id":"change-ws","agent":"other-agent"}]}}'
+    elif [ "${FAKE_ACTIVATION_AGENT:-}" = 1 ]; then
+      jq -cn --arg cwd "$FAKE_MAIN_CHECKOUT" '
+        {result:{agents:[{agent:"pi",pane_id:"loaded-ws:p2",tab_id:"loaded-ws:t1",workspace_id:"loaded-ws",
+          agent_status:"idle",interactive_ready:true,cwd:$cwd,foreground_cwd:$cwd,
+          agent_session:{agent:"pi",kind:"path",source:"herdr:pi",value:"/sessions/loaded.jsonl"},name:"loaded-agent"}]}}'
     else
       printf '%s\n' '{"result":{"agents":[]}}'
     fi
@@ -262,12 +267,15 @@ loaded_oid="$(git -C "$loaded_checkout" rev-parse HEAD)"
 git -C "$loaded_checkout" push -qu origin HEAD:main
 export FAKE_MERGE_OID="$loaded_oid"
 export FAKE_PR_HEAD=loaded-feature
+export FAKE_ACTIVATION_AGENT=1
 run_change 0 land 84 --repo "$loaded_checkout"
+unset FAKE_ACTIVATION_AGENT
 jq -e '
   .status == "done"
   and .state.activation.action == "reload"
   and .state.activation.changed_loaded_resources == ["extensions/fixture.ts"]
-  and .state.activation_targets == []
+  and (.state.activation_targets | length) == 1
+  and .state.activation_targets[0].pane_id == "loaded-ws:p2"
   and .state.activation_armed == true
   and (.state.activation_run_dir | type == "string")
 ' "$tmp/result.json" >/dev/null

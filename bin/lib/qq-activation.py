@@ -38,6 +38,12 @@ CITATION = re.compile(r"decision-[1-9][0-9]*")
 RESOURCE = re.compile(r"(?!/)(?!.*(?:^|/)\.\.(?:/|$))(?!.*[\r\n\x00]).{1,240}")
 HASH = re.compile(r"[0-9a-f]{64}")
 MAX_RECORD = 256 * 1024
+ABSENT_REASON = "target absent from fresh Herdr interactive Pi discovery"
+RECEIPT_KEYS = {
+    "schema", "version", "run_id", "target", "pane_id", "session_path", "status",
+    "reason", "action", "source_watcher_version", "running_watcher_version",
+    "resource_fingerprint", "process_id", "recorded_at",
+}
 
 
 class Refusal(Exception):
@@ -230,9 +236,13 @@ def command_classify(args: argparse.Namespace) -> None:
         raise Refusal("pull-request body cannot be read") from error
     loaded = changed_paths(repo, before, after, LOADED_PATHS)
     all_changes = changed_paths(repo, before, after)
-    task_id = task_from_pr_body(body)
-    exception = replacement_exception(repo, task_id) if task_id else None
     replacement_only = [path for path in all_changes if path in REPLACEMENT_ONLY_PATHS]
+    changed_extensions = [path for path in loaded if path == "extensions" or path.startswith("extensions/")]
+    needs_replacement_identity = bool(replacement_only or changed_extensions)
+    task_id = task_from_pr_body(body) if needs_replacement_identity else None
+    if changed_extensions and task_id is None:
+        raise Refusal("loaded extension change lacks an unambiguous owning Task identity")
+    exception = replacement_exception(repo, task_id) if task_id else None
 
     if exception is not None:
         declared = exception["resources"]
@@ -287,11 +297,7 @@ def target_token(pane: str, session: str) -> str:
     return hashlib.sha256(f"{pane}\0{session}".encode()).hexdigest()[:32]
 
 
-def command_targets(_args: argparse.Namespace) -> None:
-    try:
-        document = json.load(sys.stdin)
-    except (UnicodeError, json.JSONDecodeError) as error:
-        raise Refusal("Herdr agent discovery is malformed") from error
+def targets_from_discovery(document: Any) -> list[dict[str, Any]]:
     agents = document.get("result", {}).get("agents") if isinstance(document, dict) else None
     if not isinstance(agents, list):
         raise Refusal("Herdr agent discovery lacks an agents array")
@@ -342,7 +348,15 @@ def command_targets(_args: argparse.Namespace) -> None:
             }
         )
     targets.sort(key=lambda item: (item["workspace_id"], item["tab_id"], item["pane_id"]))
-    json_output(targets)
+    return targets
+
+
+def command_targets(_args: argparse.Namespace) -> None:
+    try:
+        document = json.load(sys.stdin)
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise Refusal("Herdr agent discovery is malformed") from error
+    json_output(targets_from_discovery(document))
 
 
 def safe_directory(path: Path, label: str, *, create: bool = False) -> Path:
@@ -530,29 +544,87 @@ def request_source_relation(request: dict[str, Any], branch: str, pull_request: 
 
 
 def validate_completed_request(run_dir: Path, request: dict[str, Any]) -> None:
-    receipt_keys = {
-        "schema", "version", "run_id", "target", "pane_id", "session_path", "status",
-        "reason", "action", "source_watcher_version", "running_watcher_version",
-        "resource_fingerprint", "process_id", "recorded_at",
-    }
     for target in request["targets"]:
         receipt_path = run_dir / "receipts" / f"{target['token']}.json"
         if not os.path.lexists(receipt_path):
             raise Refusal("activation request is pending because an exact target receipt is missing")
         receipt = load_json(receipt_path, "activation receipt")
-        if not isinstance(receipt, dict) or set(receipt) != receipt_keys:
+        if not isinstance(receipt, dict) or set(receipt) != RECEIPT_KEYS:
             raise Refusal("activation receipt has an unexpected schema shape")
         if receipt.get("status") == "failed":
             raise Refusal("activation request has a failed target receipt")
         if (receipt.get("schema") != "qq.activation-receipt" or receipt.get("version") != 1
-                or receipt.get("status") != "activated" or receipt.get("run_id") != request["run_id"]
-                or receipt.get("target") != target["token"] or receipt.get("pane_id") != target["pane_id"]
-                or receipt.get("session_path") != target["session_path"] or receipt.get("action") != request["action"]):
+                or receipt.get("run_id") != request["run_id"] or receipt.get("target") != target["token"]
+                or receipt.get("pane_id") != target["pane_id"]
+                or receipt.get("session_path") != target["session_path"]
+                or receipt.get("action") != request["action"]
+                or receipt.get("resource_fingerprint") != request["resource_fingerprint"]):
             raise Refusal("activation receipt authority is contradictory")
-        if (receipt.get("resource_fingerprint") != request["resource_fingerprint"]
-                or receipt.get("running_watcher_version") != request["expected_watcher_version"]
-                or receipt.get("source_watcher_version") != request["expected_watcher_version"]):
+        if receipt.get("status") == "absent":
+            if (receipt.get("reason") != ABSENT_REASON
+                    or receipt.get("source_watcher_version") is not None
+                    or receipt.get("running_watcher_version") is not None
+                    or receipt.get("process_id") is not None
+                    or not isinstance(receipt.get("recorded_at"), str)):
+                raise Refusal("absent activation receipt claims watcher or process authority")
+            continue
+        if receipt.get("status") != "activated":
+            raise Refusal("activation receipt authority is contradictory")
+        if (not isinstance(receipt.get("source_watcher_version"), str)
+                or not SAFE_ID.fullmatch(receipt["source_watcher_version"])
+                or not isinstance(receipt.get("process_id"), int) or receipt["process_id"] <= 0
+                or not isinstance(receipt.get("reason"), str)
+                or not isinstance(receipt.get("recorded_at"), str)):
+            raise Refusal("activation receipt watcher or process proof is malformed")
+        if receipt.get("running_watcher_version") != request["expected_watcher_version"]:
             raise Refusal("activation receipt watcher or fingerprint proof is stale")
+
+
+def write_absent_receipt(run_dir: Path, request: dict[str, Any], target: dict[str, Any]) -> None:
+    receipts_path = run_dir / "receipts"
+    if not os.path.lexists(receipts_path):
+        try:
+            receipts_path.mkdir(mode=0o700)
+        except OSError as error:
+            raise Refusal("activation receipts cannot be created") from error
+    receipts = safe_directory(receipts_path, "activation receipts")
+    atomic_json(receipts / f"{target['token']}.json", {
+        "schema": "qq.activation-receipt", "version": 1, "run_id": request["run_id"],
+        "target": target["token"], "pane_id": target["pane_id"],
+        "session_path": target["session_path"], "status": "absent", "reason": ABSENT_REASON,
+        "action": request["action"], "source_watcher_version": None,
+        "running_watcher_version": None, "resource_fingerprint": request["resource_fingerprint"],
+        "process_id": None, "recorded_at": now(),
+    })
+
+
+def settle_absent_targets(run_dir: Path, request: dict[str, Any], herdr: str) -> None:
+    if not os.path.isabs(herdr) or not os.path.isfile(herdr) or not os.access(herdr, os.X_OK):
+        raise Refusal("passed Herdr discovery authority is not an absolute executable file")
+    for target in request["targets"]:
+        receipt_path = run_dir / "receipts" / f"{target['token']}.json"
+        if os.path.lexists(receipt_path):
+            continue
+        raw = run([herdr, "agent", "list"])
+        try:
+            discovery = json.loads(raw)
+        except (UnicodeError, json.JSONDecodeError) as error:
+            raise Refusal("fresh Herdr agent discovery is malformed") from error
+        live = targets_from_discovery(discovery)
+        pane_matches = [item for item in live if item["pane_id"] == target["pane_id"]]
+        session_matches = [item for item in live if item["session_path"] == target["session_path"]]
+        if not pane_matches and not session_matches:
+            write_absent_receipt(run_dir, request, target)
+            continue
+        if (len(pane_matches) != 1 or len(session_matches) != 1
+                or pane_matches[0] is not session_matches[0]):
+            raise Refusal("fresh Herdr discovery contradicts activation target pane/session authority")
+        observed = pane_matches[0]
+        if (observed["tab_id"] != target["tab_id"]
+                or observed["workspace_id"] != target["workspace_id"]
+                or os.path.normpath(observed["cwd"]) != os.path.normpath(target["cwd"])):
+            raise Refusal("fresh Herdr discovery contradicts activation target tab/workspace/cwd authority")
+        # The exact target remains live and therefore pending at its watcher-owned boundary.
 
 
 def command_retire_change(args: argparse.Namespace) -> None:
@@ -593,6 +665,7 @@ def command_retire_change(args: argparse.Namespace) -> None:
     run_dir, request, pending = matches[0]
     if pending:
         raise Refusal("activation retirement refuses a pending request")
+    settle_absent_targets(run_dir, request, args.herdr_bin)
     validate_completed_request(run_dir, request)
     if args.inspect:
         status = "eligible"
@@ -1042,6 +1115,7 @@ def parser() -> argparse.ArgumentParser:
     retire_change.add_argument("--runtime-root", required=True)
     retire_change.add_argument("--source-branch", required=True)
     retire_change.add_argument("--pull-request")
+    retire_change.add_argument("--herdr-bin", required=True)
     retire_change.add_argument("--inspect", action="store_true")
     retire_change.set_defaults(function=command_retire_change)
     prepare = commands.add_parser("probe-prepare")

@@ -34,11 +34,23 @@ printf '' >"$TMP/body"
   --pr-body-file "$TMP/body" >"$TMP/none.json"
 jq -e '.action == "none" and .changed_loaded_resources == [] and (.reason | contains("no globally loaded"))' \
   "$TMP/none.json" >/dev/null
+printf 'T-1 docs owner\n\nT-2 unrelated reference\n' >"$TMP/body"
+"$HELPER" classify --repo "$repo" --before "$base" --after "$docs" \
+  --pr-body-file "$TMP/body" >"$TMP/none-ambiguous.json"
+jq -e '.action == "none" and .task_id == null' "$TMP/none-ambiguous.json" >/dev/null
+printf '' >"$TMP/body"
 
 printf 'compatible change\n' >>"$repo/extensions/demo.ts"
 git -C "$repo" add extensions/demo.ts
 git -C "$repo" commit -qm reload
 reload="$(git -C "$repo" rev-parse HEAD)"
+set +e
+"$HELPER" classify --repo "$repo" --before "$docs" --after "$reload" \
+  --pr-body-file "$TMP/body" >/dev/null 2>"$TMP/extension-missing-task.err"
+extension_missing_task_status=$?
+set -e
+assert_equal 2 "$extension_missing_task_status" "loaded extension without owning Task identity was accepted"
+printf 'T-7 compatible extension\n' >"$TMP/body"
 "$HELPER" classify --repo "$repo" --before "$docs" --after "$reload" \
   --pr-body-file "$TMP/body" >"$TMP/reload.json"
 expected_fingerprint="$(git -C "$repo" ls-tree -rz --full-tree "$reload" -- \
@@ -63,6 +75,14 @@ unresolved_status=$?
 set -e
 assert_equal 2 "$unresolved_status" "runtime change without aligned exception did not fail closed"
 assert_file_contains "$TMP/unresolved.err" 'without a machine-verifiable aligned exception'
+printf 'T-41 replacement owner\nT-42.1 related replacement\n' >"$TMP/body"
+set +e
+"$HELPER" classify --repo "$repo" --before "$reload" --after "$runtime" \
+  --pr-body-file "$TMP/body" >/dev/null 2>"$TMP/replacement-ambiguous.err"
+replacement_ambiguous_status=$?
+set -e
+assert_equal 2 "$replacement_ambiguous_status" "ambiguous replacement Task identity was accepted"
+assert_file_contains "$TMP/replacement-ambiguous.err" 'ambiguous Task identity'
 
 store="$TMP/store"
 mkdir -p "$store/tasks" "$store/decisions"
@@ -109,6 +129,15 @@ PY
   --pr-body-file "$TMP/body" >"$TMP/extension-replace.json"
 jq -e '.action == "replace" and .changed_loaded_resources == ["extensions/demo.ts"] and .replacement_resources == ["extensions/demo.ts"]' \
   "$TMP/extension-replace.json" >/dev/null
+printf 'T-42.1 extension owner\nT-43 incompatible extension context\n' >"$TMP/body"
+set +e
+"$HELPER" classify --repo "$repo" --before "$runtime" --after "$incompatible_extension" \
+  --pr-body-file "$TMP/body" >/dev/null 2>"$TMP/extension-ambiguous.err"
+extension_ambiguous_status=$?
+set -e
+assert_equal 2 "$extension_ambiguous_status" "ambiguous incompatible-extension Task identity was accepted"
+assert_file_contains "$TMP/extension-ambiguous.err" 'ambiguous Task identity'
+printf 'T-42.1 — aligned runtime replacement\n' >"$TMP/body"
 
 # Herdr target census binds exact pane/session authority across qq and a second Product.
 cat >"$TMP/agents.json" <<'EOF'
@@ -224,6 +253,7 @@ cat >"$TMP/herdr" <<EOF
 set -euo pipefail
 printf '%s\\n' "\$*" >>"$TMP/replacement-herdr.log"
 case "\${1:-} \${2:-}" in
+  'agent list') cat "$TMP/replacement-agents.json" ;;
   'agent wait') printf '%s\\n' '{"result":{"status":"unknown"}}' ;;
   'pane get') printf '%s\\n' '{"result":{"pane":{"pane_id":"qq:p1","tab_id":"qq:t1","workspace_id":"qq","cwd":"$replacement_cwd"}}}' ;;
   'agent start')
@@ -265,7 +295,7 @@ retirement_fingerprint="$(jq -r .resource_fingerprint "$TMP/reload.json")"
 jq -cn --arg run "$retirement_prior_id" --arg token "$replacement_token" --arg fingerprint "$retirement_fingerprint" \
   --arg session "$replacement_session" '
   {schema:"qq.activation-receipt",version:1,run_id:$run,target:$token,pane_id:"qq:p1",session_path:$session,
-   status:"activated",reason:"fixture activation",action:"reload",source_watcher_version:"qq-activation-watch-v1",
+   status:"activated",reason:"fixture activation",action:"reload",source_watcher_version:"qq-activation-watch-v0",
    running_watcher_version:"qq-activation-watch-v1",resource_fingerprint:$fingerprint,process_id:500,recorded_at:"2026-01-01T00:00:00Z"}
 ' >"$retirement_prior_run/receipts/$replacement_token.json"
 chmod 600 "$retirement_prior_run/receipts/$replacement_token.json"
@@ -276,18 +306,18 @@ retirement_later_run="$(jq -r .run_dir "$TMP/retirement-later-stage.json")"
 [ -f "$retirement_prior_run/REQUEST.json" ] || fail 'later staging deleted a completed prior activation run'
 set +e
 "$HELPER" retire-change --runtime-root "$retirement_root" --source-branch later-feature \
-  --pull-request 52 >/dev/null 2>"$TMP/retirement-pending.err"
+  --pull-request 52 --herdr-bin "$TMP/herdr" >/dev/null 2>"$TMP/retirement-pending.err"
 retirement_pending_status=$?
 set -e
 assert_equal 2 "$retirement_pending_status" "activation retirement accepted a pending exact request"
 [ -d "$retirement_later_run" ] || fail 'pending retirement refusal removed its run'
 "$HELPER" retire-change --runtime-root "$retirement_root" --source-branch prior-feature \
-  --pull-request 51 >"$TMP/retirement-complete.json"
+  --pull-request 51 --herdr-bin "$TMP/herdr" >"$TMP/retirement-complete.json"
 jq -e '.status == "retired" and .matched == true and .retired == true' "$TMP/retirement-complete.json" >/dev/null
 [ ! -e "$retirement_prior_run" ] || fail 'exact complete activation retirement left its run'
 [ -d "$retirement_later_run" ] || fail 'exact activation retirement removed a foreign run'
 "$HELPER" retire-change --runtime-root "$retirement_root" --source-branch prior-feature \
-  --pull-request 51 >"$TMP/retirement-repeated.json"
+  --pull-request 51 --herdr-bin "$TMP/herdr" >"$TMP/retirement-repeated.json"
 jq -e '.status == "not-found" and .matched == false and .retired == false' "$TMP/retirement-repeated.json" >/dev/null
 
 failed_retirement_root="$TMP/failed-retirement-runtime"
@@ -308,7 +338,7 @@ jq -cn --arg run "$failed_retirement_id" --arg token "$replacement_token" --arg 
 chmod 600 "$failed_retirement_run/receipts/$replacement_token.json"
 set +e
 "$HELPER" retire-change --runtime-root "$failed_retirement_root" --source-branch failed-feature \
-  --pull-request 53 >/dev/null 2>"$TMP/retirement-failed.err"
+  --pull-request 53 --herdr-bin "$TMP/herdr" >/dev/null 2>"$TMP/retirement-failed.err"
 retirement_failed_status=$?
 set -e
 assert_equal 2 "$retirement_failed_status" "activation retirement accepted a failed target"
@@ -321,18 +351,121 @@ mv "$failed_retirement_run/receipts/$replacement_token.json.tmp" \
 chmod 600 "$failed_retirement_run/receipts/$replacement_token.json"
 set +e
 "$HELPER" retire-change --runtime-root "$failed_retirement_root" --source-branch failed-feature \
-  --pull-request 53 >/dev/null 2>"$TMP/retirement-stale.err"
+  --pull-request 53 --herdr-bin "$TMP/herdr" >/dev/null 2>"$TMP/retirement-stale.err"
 retirement_stale_status=$?
 set -e
 assert_equal 2 "$retirement_stale_status" "activation retirement accepted stale fingerprint proof"
 rm -- "$failed_retirement_run/receipts/$replacement_token.json"
 set +e
 "$HELPER" retire-change --runtime-root "$failed_retirement_root" --source-branch failed-feature \
-  --pull-request 53 >/dev/null 2>"$TMP/retirement-missing.err"
+  --pull-request 53 --herdr-bin "$TMP/herdr" >/dev/null 2>"$TMP/retirement-missing.err"
 retirement_missing_status=$?
 set -e
-assert_equal 2 "$retirement_missing_status" "activation retirement accepted a missing target receipt"
-[ -d "$failed_retirement_run" ] || fail 'missing-receipt retirement refusal removed its run'
+assert_equal 2 "$retirement_missing_status" "activation retirement accepted an exact live target without a receipt"
+[ -d "$failed_retirement_run" ] || fail 'live-target retirement refusal removed its run'
+[ ! -e "$failed_retirement_run/receipts/$replacement_token.json" ] \
+  || fail 'exact live target was rewritten as absent'
+
+fresh_herdr="$TMP/fresh-herdr"
+cat >"$fresh_herdr" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "$*" = "agent list" ] || exit 64
+case "${FRESH_DISCOVERY_MODE:-file}" in
+  fail) exit 74 ;;
+  malformed) printf 'not-json\n' ;;
+  file) cat "$FRESH_DISCOVERY_FILE" ;;
+  *) exit 65 ;;
+esac
+SH
+chmod +x "$fresh_herdr"
+printf '%s\n' '{"result":{"agents":[]}}' >"$TMP/agents-absent.json"
+jq '.result.agents[0].agent_session.value = "/sessions/reused-pane.jsonl"' \
+  "$TMP/replacement-agents.json" >"$TMP/agents-pane-reused.json"
+jq '.result.agents[0].pane_id = "qq:reused-pane"' \
+  "$TMP/replacement-agents.json" >"$TMP/agents-session-reused.json"
+
+make_receiptless_retirement() {
+  local root="$1" branch="$2" pr="$3"
+  mkdir -m 700 "$root"
+  jq -cn --argjson classification "$(cat "$TMP/reload.json")" \
+    --argjson targets "$(cat "$TMP/replacement-target.json")" \
+    --arg branch "$branch" --arg pr "$pr" '
+      {classification:$classification,targets:$targets,source:{pull_request:$pr,pr_url:"https://example.test/absent",merge_commit:$classification.landed_tree,source_branch:$branch,probe_id:null}}
+    ' | "$HELPER" stage --runtime-root "$root" >"$root-stage.json"
+  RECEIPTLESS_RUN_ID="$(jq -r .run_id "$root-stage.json")"
+  RECEIPTLESS_RUN="$(jq -r .run_dir "$root-stage.json")"
+  "$HELPER" arm --runtime-root "$root" --run-id "$RECEIPTLESS_RUN_ID" >/dev/null
+}
+
+absent_root="$TMP/absent-retirement-runtime"
+make_receiptless_retirement "$absent_root" absent-target-feature 61
+absent_run="$RECEIPTLESS_RUN"
+FRESH_DISCOVERY_FILE="$TMP/agents-absent.json" "$HELPER" retire-change \
+  --runtime-root "$absent_root" --source-branch absent-target-feature --pull-request 61 \
+  --herdr-bin "$fresh_herdr" --inspect >"$TMP/retirement-absent-inspect.json"
+jq -e '.status == "eligible" and .retired == false' "$TMP/retirement-absent-inspect.json" >/dev/null
+jq -e --arg run "$RECEIPTLESS_RUN_ID" --arg token "$replacement_token" \
+  --arg session "$replacement_session" --arg fingerprint "$retirement_fingerprint" '
+    keys == ["action","pane_id","process_id","reason","recorded_at","resource_fingerprint","run_id","running_watcher_version","schema","session_path","source_watcher_version","status","target","version"]
+    and .schema == "qq.activation-receipt" and .version == 1 and .run_id == $run
+    and .target == $token and .pane_id == "qq:p1" and .session_path == $session
+    and .status == "absent" and .action == "reload" and .resource_fingerprint == $fingerprint
+    and (.reason | contains("fresh Herdr interactive Pi discovery"))
+    and .source_watcher_version == null and .running_watcher_version == null and .process_id == null
+  ' "$absent_run/receipts/$replacement_token.json" >/dev/null
+FRESH_DISCOVERY_FILE="$TMP/agents-absent.json" "$HELPER" retire-change \
+  --runtime-root "$absent_root" --source-branch absent-target-feature --pull-request 61 \
+  --herdr-bin "$fresh_herdr" >"$TMP/retirement-absent.json"
+jq -e '.status == "retired" and .retired == true' "$TMP/retirement-absent.json" >/dev/null
+
+pane_reuse_root="$TMP/pane-reuse-retirement-runtime"
+make_receiptless_retirement "$pane_reuse_root" pane-reuse-feature 62
+set +e
+FRESH_DISCOVERY_FILE="$TMP/agents-pane-reused.json" "$HELPER" retire-change \
+  --runtime-root "$pane_reuse_root" --source-branch pane-reuse-feature --pull-request 62 \
+  --herdr-bin "$fresh_herdr" >/dev/null 2>"$TMP/retirement-pane-reuse.err"
+pane_reuse_status=$?
+set -e
+assert_equal 2 "$pane_reuse_status" "reused target pane was classified absent"
+assert_file_contains "$TMP/retirement-pane-reuse.err" 'contradicts activation target pane/session authority'
+
+session_reuse_root="$TMP/session-reuse-retirement-runtime"
+make_receiptless_retirement "$session_reuse_root" session-reuse-feature 63
+set +e
+FRESH_DISCOVERY_FILE="$TMP/agents-session-reused.json" "$HELPER" retire-change \
+  --runtime-root "$session_reuse_root" --source-branch session-reuse-feature --pull-request 63 \
+  --herdr-bin "$fresh_herdr" >/dev/null 2>"$TMP/retirement-session-reuse.err"
+session_reuse_status=$?
+set -e
+assert_equal 2 "$session_reuse_status" "reused target session was classified absent"
+assert_file_contains "$TMP/retirement-session-reuse.err" 'contradicts activation target pane/session authority'
+
+discovery_failure_root="$TMP/discovery-failure-retirement-runtime"
+make_receiptless_retirement "$discovery_failure_root" discovery-failure-feature 64
+discovery_failure_run="$RECEIPTLESS_RUN"
+set +e
+FRESH_DISCOVERY_MODE=fail "$HELPER" retire-change \
+  --runtime-root "$discovery_failure_root" --source-branch discovery-failure-feature --pull-request 64 \
+  --herdr-bin "$fresh_herdr" >/dev/null 2>"$TMP/retirement-discovery-failure.err"
+discovery_failure_status=$?
+set -e
+assert_equal 2 "$discovery_failure_status" "failed fresh Herdr discovery retired a target"
+[ ! -e "$discovery_failure_run/receipts/$replacement_token.json" ] \
+  || fail 'failed fresh discovery wrote an absent receipt'
+
+malformed_discovery_root="$TMP/malformed-discovery-retirement-runtime"
+make_receiptless_retirement "$malformed_discovery_root" malformed-discovery-feature 65
+malformed_discovery_run="$RECEIPTLESS_RUN"
+set +e
+FRESH_DISCOVERY_MODE=malformed "$HELPER" retire-change \
+  --runtime-root "$malformed_discovery_root" --source-branch malformed-discovery-feature --pull-request 65 \
+  --herdr-bin "$fresh_herdr" >/dev/null 2>"$TMP/retirement-discovery-malformed.err"
+malformed_discovery_status=$?
+set -e
+assert_equal 2 "$malformed_discovery_status" "malformed fresh Herdr discovery retired a target"
+[ ! -e "$malformed_discovery_run/receipts/$replacement_token.json" ] \
+  || fail 'malformed fresh discovery wrote an absent receipt'
 
 malformed_retirement_root="$TMP/malformed-retirement-runtime"
 mkdir -m 700 "$malformed_retirement_root" "$malformed_retirement_root/.qq-activation"
@@ -342,7 +475,7 @@ printf '%s\n' '{"schema":"qq.activation-request","source_branch":"malformed-feat
 chmod 600 "$malformed_retirement_root/.qq-activation/malformed/REQUEST.json"
 set +e
 "$HELPER" retire-change --runtime-root "$malformed_retirement_root" --source-branch malformed-feature \
-  --pull-request 54 >/dev/null 2>"$TMP/retirement-malformed.err"
+  --pull-request 54 --herdr-bin "$TMP/herdr" >/dev/null 2>"$TMP/retirement-malformed.err"
 retirement_malformed_status=$?
 set -e
 assert_equal 2 "$retirement_malformed_status" "activation retirement accepted malformed private state"
@@ -361,8 +494,10 @@ import { pathToFileURL } from "node:url";
 
 const [watchAPath, watchBPath, tmp, productionWatchPath] = process.argv.slice(2);
 const source = await readFile(watchAPath, "utf8");
-assert.doesNotMatch(source, /herdr[^\n]*(?:focus|send-text|send-keys)|setEditorText|sendMessage\s*\(|triggerTurn\s*:\s*true/i,
-  "activation watcher can focus/type or trigger a model turn");
+assert.doesNotMatch(source, /herdr[^\n]*(?:focus|send-text|send-keys)|setEditorText|sendUserMessage|sendMessage\s*\(|triggerTurn\s*:\s*true/i,
+  "activation watcher can focus/type or trigger a model/user turn");
+assert.match(source, /spawnSync\("herdr", \["agent", "prompt", target\.pane_id, command\]/,
+  "production activation submission does not use exact Herdr agent prompt arguments");
 assert.match(source, /await commandCtx\.reload\(\);\s*return;/,
   "reload is not terminal for the old command handler");
 assert.doesNotMatch(source, /setInterval\s*\(/, "activation watcher contains production polling");
@@ -417,15 +552,26 @@ function harness(module, fixture, options = {}) {
   const events = new Map();
   const integrationEvents = new Map();
   const commands = new Map();
-  const messages = [];
+  const submissions = [];
   const warnings = [];
   let idle = options.idle ?? true;
   let pending = options.pending ?? false;
+  let editorText = options.editorText ?? "";
+  const ui = {
+    notify: (message, level) => warnings.push({ message, level }),
+    setEditorText: () => assert.fail("activation mutated the Pi editor"),
+    pasteToEditor: () => assert.fail("activation pasted into the Pi editor"),
+  };
+  if (!options.editorUnavailable) {
+    ui.getEditorText = () => {
+      if (options.editorUnreadable) throw new Error("fixture editor inspection failure");
+      return editorText;
+    };
+  }
   const ctx = {
-    mode: "tui", hasUI: true, cwd: options.cwd ?? "/work/qq",
+    mode: "tui", hasUI: options.hasUI ?? true, cwd: options.cwd ?? "/work/qq",
     sessionManager: { getSessionFile: () => options.session ?? "/sessions/qq.jsonl" },
-    isIdle: () => idle, hasPendingMessages: () => pending,
-    ui: { notify: (message, level) => warnings.push({ message, level }) },
+    isIdle: () => idle, hasPendingMessages: () => pending, ui,
   };
   const pi = {
     events: {
@@ -439,9 +585,8 @@ function harness(module, fixture, options = {}) {
       if (!events.has(name)) events.set(name, []);
       events.get(name).push(handler);
     },
-    sendUserMessage(text, sendOptions) {
-      messages.push({ text, options: sendOptions });
-      return Promise.resolve();
+    sendUserMessage() {
+      assert.fail("activation called Pi's void model/user-message API");
     },
   };
   module.default(pi, {
@@ -455,11 +600,17 @@ function harness(module, fixture, options = {}) {
     processId: options.processId ?? 100,
     isBlocked: () => options.blocked ?? false,
     replaceProcess: options.replaceProcess,
+    submitCommand: async (target, command) => {
+      submissions.push({ pane_id: target.pane_id, command });
+      if (options.submitError) throw new Error(options.submitError);
+      return { type: "agent_prompted", agent: { pane_id: target.pane_id } };
+    },
   });
   return {
-    messages, warnings, commands,
+    submissions, warnings, commands,
     setIdle(value) { idle = value; },
     setPending(value) { pending = value; },
+    setEditorText(value) { editorText = value; },
     async fire(name, event = {}) {
       for (const handler of events.get(name) ?? []) await handler(event, ctx);
     },
@@ -471,32 +622,99 @@ function harness(module, fixture, options = {}) {
   };
 }
 
+// The production adapter invokes exactly `herdr agent prompt <pane> <command>`
+// and accepts only agent_prompted output bound to that exact pane.
+const originalPath = process.env.PATH;
+const promptBin = join(tmp, "prompt-bin");
+const promptLog = join(tmp, "prompt-herdr.log");
+await mkdir(promptBin, { mode: 0o700 });
+await writeFile(join(promptBin, "herdr"), `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$@" >>"$PROMPT_LOG"
+pane="\${FAKE_PROMPT_PANE:-\${3:-}}"
+printf '{"result":{"type":"agent_prompted","agent":{"pane_id":"%s"}}}\\n' "$pane"
+`, { mode: 0o755 });
+process.env.PATH = `${promptBin}:${originalPath}`;
+process.env.PROMPT_LOG = promptLog;
+const exactCommand = `/qq-activate land-production ${"b".repeat(32)}`;
+const prompted = productionModule.defaultSubmitCommand({ pane_id: "qq:p1" }, exactCommand);
+assert.equal(prompted.type, "agent_prompted");
+assert.deepEqual((await readFile(promptLog, "utf8")).trim().split("\n"), [
+  "agent", "prompt", "qq:p1", exactCommand,
+]);
+process.env.FAKE_PROMPT_PANE = "wrong:pane";
+assert.throws(
+  () => productionModule.defaultSubmitCommand({ pane_id: "qq:p1" }, exactCommand),
+  /exact pane/,
+  "production submission accepted Herdr output for a different pane",
+);
+delete process.env.FAKE_PROMPT_PANE;
+delete process.env.PROMPT_LOG;
+process.env.PATH = originalPath;
+
 // Busy, queued-continuation, tool, and injected atomic blockers all retain the request until safe.
 const busyFixture = await fixture("busy");
 const busy = harness(moduleA, busyFixture, { idle: false });
 await busy.start();
-assert.equal(busy.messages.length, 0);
+assert.equal(busy.submissions.length, 0);
 busy.setIdle(true);
 busy.setPending(true);
 await busy.fire("agent_settled");
-assert.equal(busy.messages.length, 0);
+assert.equal(busy.submissions.length, 0);
 busy.setPending(false);
 await busy.fire("tool_execution_start");
 await busy.fire("agent_settled");
-assert.equal(busy.messages.length, 0);
+assert.equal(busy.submissions.length, 0);
 await busy.fire("tool_execution_end");
 await busy.fire("agent_settled");
-await waitFor(() => busy.messages.length === 1, "settled request was not queued");
-assert.deepEqual(busy.messages[0], {
-  text: `/qq-activate ${busyFixture.runId} ${busyFixture.target.token}`,
-  options: { deliverAs: "followUp" },
+await waitFor(() => busy.submissions.length === 1, "settled request was not queued");
+assert.deepEqual(busy.submissions[0], {
+  pane_id: "qq:p1",
+  command: `/qq-activate ${busyFixture.runId} ${busyFixture.target.token}`,
 });
 assert.ok(busy.warnings.some(({ message }) => /pending/.test(message)));
+
+// Editor inspection is read-only and exact: missing, unreadable, or nonempty
+// input remains pending. The empty check and Herdr submission are intentionally
+// separate operations, preserving the operator-accepted small typing race.
+const editorFixture = await fixture("editor-nonempty");
+const editorPending = harness(moduleA, editorFixture, { editorText: "operator draft" });
+await editorPending.start();
+assert.equal(editorPending.submissions.length, 0);
+assert.equal(await exists(join(editorFixture.run, "claims", `${editorFixture.target.token}.json`)), false);
+editorPending.setEditorText("");
+await editorPending.fire("agent_settled");
+await waitFor(() => editorPending.submissions.length === 1, "empty editor did not permit command submission");
+await editorPending.shutdown();
+
+const unavailableEditorFixture = await fixture("editor-unavailable");
+const unavailableEditor = harness(moduleA, unavailableEditorFixture, { editorUnavailable: true });
+await unavailableEditor.start();
+assert.equal(unavailableEditor.submissions.length, 0);
+assert.ok(unavailableEditor.warnings.some(({ message }) => /editor state is unavailable/.test(message)));
+await unavailableEditor.shutdown();
+
+const unreadableEditorFixture = await fixture("editor-unreadable");
+const unreadableEditor = harness(moduleA, unreadableEditorFixture, { editorUnreadable: true });
+await unreadableEditor.start();
+assert.equal(unreadableEditor.submissions.length, 0);
+assert.ok(unreadableEditor.warnings.some(({ message }) => /editor state is unreadable/.test(message)));
+await unreadableEditor.shutdown();
+
+const submissionFailureFixture = await fixture("submission-failure");
+const submissionFailure = harness(moduleA, submissionFailureFixture, { submitError: "fixture Herdr refusal" });
+await submissionFailure.start();
+const submissionFailureReceipt = JSON.parse(await readFile(
+  join(submissionFailureFixture.run, "receipts", `${submissionFailureFixture.target.token}.json`), "utf8",
+));
+assert.equal(submissionFailureReceipt.status, "failed");
+assert.match(submissionFailureReceipt.reason, /command submission failed|fixture Herdr refusal/);
+await submissionFailure.shutdown();
 
 const atomicFixture = await fixture("atomic");
 const atomic = harness(moduleA, atomicFixture, { blocked: true });
 await atomic.start();
-assert.equal(atomic.messages.length, 0);
+assert.equal(atomic.submissions.length, 0);
 assert.ok(atomic.warnings.some(({ message }) => /atomic operation/.test(message)));
 await atomic.shutdown();
 
@@ -508,11 +726,11 @@ await productionBlocked.start();
 productionBlocked.fireIntegration("herdr:blocked", { active: true, label: "atomic write" });
 productionBlocked.setIdle(true);
 await productionBlocked.fire("agent_settled");
-assert.equal(productionBlocked.messages.length, 0);
+assert.equal(productionBlocked.submissions.length, 0);
 productionBlocked.fireIntegration("herdr:blocked", { active: false, label: "atomic write" });
-assert.equal(productionBlocked.messages.length, 0, "blocker release activated without an ordinary reconciliation event");
+assert.equal(productionBlocked.submissions.length, 0, "blocker release activated without an ordinary reconciliation event");
 await productionBlocked.fire("agent_settled");
-await waitFor(() => productionBlocked.messages.length === 1, "released production blocker did not reconcile at settlement");
+await waitFor(() => productionBlocked.submissions.length === 1, "released production blocker did not reconcile at settlement");
 await productionBlocked.shutdown();
 
 const underflowFixture = await fixture("blocker-underflow");
@@ -521,14 +739,14 @@ await underflow.start();
 underflow.fireIntegration("herdr:blocked", { active: false, label: "missing blocker" });
 underflow.setIdle(true);
 await underflow.fire("agent_settled");
-assert.equal(underflow.messages.length, 0, "contradictory blocker release was sanitized into unblocked");
+assert.equal(underflow.submissions.length, 0, "contradictory blocker release was sanitized into unblocked");
 assert.ok(underflow.warnings.some(({ message }) => /underflowed/.test(message)));
 await underflow.shutdown();
 
 const lateBlockFixture = await fixture("late-production-block");
 const lateBlock = harness(moduleA, lateBlockFixture);
 await lateBlock.start();
-await waitFor(() => lateBlock.messages.length === 1, "late-block fixture was not queued");
+await waitFor(() => lateBlock.submissions.length === 1, "late-block fixture was not queued");
 lateBlock.fireIntegration("herdr:blocked", { active: true, label: "late atomic write" });
 await lateBlock.commands.get("qq-activate").handler(`${lateBlockFixture.runId} ${lateBlockFixture.target.token}`, {
   reload: async () => assert.fail("late blocker allowed reload"), shutdown() {},
@@ -536,15 +754,15 @@ await lateBlock.commands.get("qq-activate").handler(`${lateBlockFixture.runId} $
 assert.equal(await exists(join(lateBlockFixture.run, "receipts", `${lateBlockFixture.target.token}.json`)), false,
   "late blocker converted a pending activation into terminal failure");
 lateBlock.fireIntegration("herdr:blocked", { active: false, label: "late atomic write" });
-assert.equal(lateBlock.messages.length, 1, "late blocker release retried without ordinary settlement");
+assert.equal(lateBlock.submissions.length, 1, "late blocker release retried without ordinary settlement");
 await lateBlock.fire("agent_settled");
-await waitFor(() => lateBlock.messages.length === 2, "late blocker did not retry after release and settlement");
+await waitFor(() => lateBlock.submissions.length === 2, "late blocker did not retry after release and settlement");
 await lateBlock.shutdown();
 
 const blockedFixture = await fixture("extension-blocked");
 const blocked = harness(moduleA, blockedFixture, { authorityError: "live Herdr target is blocked" });
 await blocked.start();
-assert.equal(blocked.messages.length, 0);
+assert.equal(blocked.submissions.length, 0);
 assert.ok(blocked.warnings.some(({ message }) => /blocked/.test(message)));
 await blocked.shutdown();
 
@@ -557,7 +775,7 @@ await busy.commands.get("qq-activate").handler(`${busyFixture.runId} ${busyFixtu
 assert.equal(reloadCalls, 1);
 const busyAttempt = JSON.parse(await readFile(join(busyFixture.run, "attempts", `${busyFixture.target.token}.json`), "utf8"));
 assert.equal(busyAttempt.phase, "requested", JSON.stringify(busyAttempt));
-assert.equal(busy.messages.length, 1, "activation command created an extra user/model message");
+assert.equal(busy.submissions.length, 1, "activation command created an extra user/model message");
 await busy.shutdown();
 const postReload = harness(moduleB, busyFixture, { processId: 100 });
 await postReload.start("reload");
@@ -576,7 +794,7 @@ const duplicateFixture = await fixture("duplicate");
 const duplicateA = harness(moduleA, duplicateFixture);
 const duplicateB = harness(moduleB, duplicateFixture);
 await Promise.all([duplicateA.start(), duplicateB.start()]);
-await waitFor(() => duplicateA.messages.length + duplicateB.messages.length === 1, "duplicate watchers did not deduplicate delivery");
+await waitFor(() => duplicateA.submissions.length + duplicateB.submissions.length === 1, "duplicate watchers did not deduplicate delivery");
 await duplicateA.shutdown();
 await duplicateB.shutdown();
 
@@ -584,24 +802,64 @@ await duplicateB.shutdown();
 const deathFixture = await fixture("death");
 const dying = harness(moduleA, deathFixture, { processId: 300 });
 await dying.start();
-await waitFor(() => dying.messages.length === 1, "dying watcher did not claim the request");
+await waitFor(() => dying.submissions.length === 1, "dying watcher did not claim the request");
 await dying.shutdown("quit");
 const recovered = harness(moduleB, deathFixture, { processId: 301 });
 await recovered.start("startup");
-await waitFor(() => recovered.messages.length === 1, "new process did not recover a pre-command activation claim");
+await waitFor(() => recovered.submissions.length === 1, "new process did not recover a pre-command activation claim");
 await recovered.shutdown();
+
+// Crash window 1: an exclusive claim with no attempt is validated, removed by
+// a foreign runtime, and reclaimed rather than wedging forever.
+const orphanClaimFixture = await fixture("orphan-claim");
+await mkdir(join(orphanClaimFixture.run, "claims"), { mode: 0o700 });
+await writeFile(join(orphanClaimFixture.run, "claims", `${orphanClaimFixture.target.token}.json`), JSON.stringify({
+  schema: "qq.activation-claim", version: 1, run_id: orphanClaimFixture.runId,
+  target: orphanClaimFixture.target.token, pane_id: orphanClaimFixture.target.pane_id,
+  session_path: orphanClaimFixture.target.session_path, process_id: 390,
+  runtime_nonce: "foreign-runtime", watcher_version: moduleA.WATCHER_VERSION,
+  claimed_at: new Date().toISOString(),
+}) + "\n", { mode: 0o600 });
+const orphanRecovered = harness(moduleB, orphanClaimFixture, { processId: 391 });
+await orphanRecovered.start();
+await waitFor(() => orphanRecovered.submissions.length === 1, "orphan claim without attempt was not reclaimed");
+const reclaimedAttempt = JSON.parse(await readFile(
+  join(orphanClaimFixture.run, "attempts", `${orphanClaimFixture.target.token}.json`), "utf8",
+));
+assert.equal(reclaimedAttempt.process_id, 391);
+await orphanRecovered.shutdown();
+
+// Crash window 2: a replacement requested by a dead process but lacking its
+// first helper record becomes a durable failed receipt for ordinary recovery.
+const helperGapFixture = await fixture("replacement-helper-gap", { action: "replace" });
+await mkdir(join(helperGapFixture.run, "attempts"), { mode: 0o700 });
+await writeFile(join(helperGapFixture.run, "attempts", `${helperGapFixture.target.token}.json`), JSON.stringify({
+  schema: "qq.activation-attempt", version: 1, run_id: helperGapFixture.runId,
+  target: helperGapFixture.target.token, pane_id: helperGapFixture.target.pane_id,
+  session_path: helperGapFixture.target.session_path, action: "replace", phase: "requested",
+  process_id: 400, runtime_nonce: "dead-runtime", watcher_version: moduleA.WATCHER_VERSION,
+  resource_fingerprint: fingerprint, recorded_at: new Date().toISOString(),
+}) + "\n", { mode: 0o600 });
+const helperGapRecovered = harness(moduleB, helperGapFixture, { processId: 401 });
+await helperGapRecovered.start();
+const helperGapReceipt = JSON.parse(await readFile(
+  join(helperGapFixture.run, "receipts", `${helperGapFixture.target.token}.json`), "utf8",
+));
+assert.equal(helperGapReceipt.status, "failed");
+assert.match(helperGapReceipt.reason, /helper record is absent|claiming runtime ended/);
+await helperGapRecovered.shutdown();
 
 // Missing/mismatched pane and session authority neither consume nor satisfy a target.
 const missingFixture = await fixture("missing");
 const missing = harness(moduleA, missingFixture, { pane: "other:p1" });
 await missing.start();
-assert.equal(missing.messages.length, 0);
+assert.equal(missing.submissions.length, 0);
 assert.equal(await exists(join(missingFixture.run, "claims", `${missingFixture.target.token}.json`)), false);
 await missing.shutdown();
 const contradictionFixture = await fixture("contradiction");
 const contradiction = harness(moduleA, contradictionFixture, { session: "/sessions/wrong.jsonl" });
 await contradiction.start();
-assert.equal(contradiction.messages.length, 0);
+assert.equal(contradiction.submissions.length, 0);
 assert.ok(contradiction.warnings.some(({ message }) => /contradictory/.test(message)));
 await contradiction.shutdown();
 
@@ -609,7 +867,7 @@ await contradiction.shutdown();
 const failureFixture = await fixture("failure");
 const failure = harness(moduleA, failureFixture);
 await failure.start();
-await waitFor(() => failure.messages.length === 1, "failure request was not queued");
+await waitFor(() => failure.submissions.length === 1, "failure request was not queued");
 await failure.commands.get("qq-activate").handler(`${failureFixture.runId} ${failureFixture.target.token}`, {
   reload: async () => { throw new Error("fixture refusal"); }, shutdown() {},
 });
@@ -626,7 +884,7 @@ const staleModule = await import(pathToFileURL(stalePath));
 const staleFixture = await fixture("stale");
 const staleOld = harness(moduleA, staleFixture);
 await staleOld.start();
-await waitFor(() => staleOld.messages.length === 1, "stale fixture was not queued");
+await waitFor(() => staleOld.submissions.length === 1, "stale fixture was not queued");
 await staleOld.commands.get("qq-activate").handler(`${staleFixture.runId} ${staleFixture.target.token}`, { reload: async () => {}, shutdown() {} });
 await staleOld.shutdown();
 const staleNew = harness(staleModule, staleFixture);
@@ -666,7 +924,7 @@ const replaceOld = harness(moduleA, replaceFixture, {
   },
 });
 await replaceOld.start();
-await waitFor(() => replaceOld.messages.length === 1, "replacement was not queued");
+await waitFor(() => replaceOld.submissions.length === 1, "replacement was not queued");
 let shutdownCalls = 0;
 const replaceCommand = replaceOld.commands.get("qq-activate").handler(`${replaceFixture.runId} ${replaceFixture.target.token}`, {
   reload: async () => assert.fail("replacement silently downgraded to reload"),
@@ -701,7 +959,7 @@ const rejected = harness(moduleA, rejectedFixture, {
   replaceProcess: async () => { throw new Error("fixture launch rejection"); },
 });
 await rejected.start();
-await waitFor(() => rejected.messages.length === 1, "rejected replacement was not queued");
+await waitFor(() => rejected.submissions.length === 1, "rejected replacement was not queued");
 let rejectedShutdowns = 0;
 await rejected.commands.get("qq-activate").handler(`${rejectedFixture.runId} ${rejectedFixture.target.token}`, {
   reload: async () => assert.fail("replacement launch rejection downgraded to reload"),

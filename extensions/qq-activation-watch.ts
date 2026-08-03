@@ -210,6 +210,28 @@ function defaultAuthority(target) {
   return true;
 }
 
+export function defaultSubmitCommand(target, command) {
+  if (!PANE_TOKEN.test(target?.pane_id ?? "") || !/^\/qq-activate [A-Za-z0-9:_-]{1,128} [0-9a-f]{32}$/.test(command)) {
+    throw new Error("internal activation command submission identity is unsafe");
+  }
+  const output = spawnSync("herdr", ["agent", "prompt", target.pane_id, command], {
+    encoding: "utf8", maxBuffer: 1024 * 1024,
+  });
+  if (output.status !== 0 || output.error) {
+    throw new Error("Herdr internal activation command submission failed");
+  }
+  let result;
+  try {
+    result = JSON.parse(output.stdout)?.result;
+  } catch {
+    throw new Error("Herdr internal activation command response is malformed");
+  }
+  if (result?.type !== "agent_prompted" || result?.agent?.pane_id !== target.pane_id) {
+    throw new Error("Herdr did not confirm internal activation command submission to the exact pane");
+  }
+  return result;
+}
+
 export function defaultReplace(runDir, token, processId, request, target) {
   const helper = resolve(dirname(fileURLToPath(import.meta.url)), "../bin/lib/qq-activation.py");
   const child = spawn(
@@ -304,6 +326,7 @@ export default function register(pi, deps = {}) {
   const loadedFingerprint = deps.fingerprint ?? (() => defaultFingerprint(repoRoot));
   const targetAuthority = deps.authority ?? defaultAuthority;
   const replaceProcess = deps.replaceProcess ?? defaultReplace;
+  const submitCommand = deps.submitCommand ?? defaultSubmitCommand;
   const processId = deps.processId ?? process.pid;
   const runtimeNonce = randomUUID();
   const blockerEventsAvailable = typeof pi.events?.on === "function";
@@ -393,6 +416,38 @@ export default function register(pi, deps = {}) {
     return undefined;
   }
 
+  function editorBoundary() {
+    if (ctx?.hasUI !== true || typeof ctx?.ui?.getEditorText !== "function") {
+      return "Pi UI editor state is unavailable";
+    }
+    let text;
+    try {
+      text = ctx.ui.getEditorText();
+    } catch {
+      return "Pi UI editor state is unreadable";
+    }
+    if (typeof text !== "string") return "Pi UI editor state is unreadable";
+    if (text !== "") return "the Pi editor is not exactly empty";
+    return undefined;
+  }
+
+  function exactClaim(claim, request, target) {
+    const keys = [
+      "schema", "version", "run_id", "target", "pane_id", "session_path",
+      "process_id", "runtime_nonce", "watcher_version", "claimed_at",
+    ].sort();
+    return Boolean(
+      claim && typeof claim === "object" &&
+      JSON.stringify(Object.keys(claim).sort()) === JSON.stringify(keys) &&
+      claim.schema === "qq.activation-claim" && claim.version === 1 &&
+      claim.run_id === request.run_id && claim.target === target.token &&
+      claim.pane_id === target.pane_id && claim.session_path === target.session_path &&
+      Number.isInteger(claim.process_id) && claim.process_id > 0 &&
+      RUN_TOKEN.test(claim.runtime_nonce ?? "") && RUN_TOKEN.test(claim.watcher_version ?? "") &&
+      typeof claim.claimed_at === "string" && claim.claimed_at.length > 0
+    );
+  }
+
   async function recordFailure(runDir, request, target, reason) {
     const receipts = await exactDirectory(join(runDir, "receipts"), "activation receipts", true);
     await atomicJson(join(receipts, `${target.token}.json`), {
@@ -411,11 +466,29 @@ export default function register(pi, deps = {}) {
     const receiptState = await safeLstat(receiptPath);
     if (receiptState) {
       const receipt = await readJson(receiptPath, "activation receipt");
-      return receipt.status === "activated" || receipt.status === "failed";
+      return receipt.status === "activated" || receipt.status === "failed" || receipt.status === "absent";
     }
     const attemptPath = join(runDir, "attempts", `${target.token}.json`);
     const attemptState = await safeLstat(attemptPath);
-    if (!attemptState) return false;
+    if (!attemptState) {
+      const claimPath = join(runDir, "claims", `${target.token}.json`);
+      const claimState = await safeLstat(claimPath);
+      if (!claimState) return false;
+      let claim;
+      try {
+        claim = await readJson(claimPath, "orphaned activation claim");
+      } catch (error) {
+        await recordFailure(runDir, request, target, `orphaned activation claim is malformed: ${error instanceof Error ? error.message : String(error)}`);
+        return true;
+      }
+      if (!exactClaim(claim, request, target)) {
+        await recordFailure(runDir, request, target, "orphaned activation claim authority is contradictory");
+        return true;
+      }
+      if (claim.process_id === processId && claim.runtime_nonce === runtimeNonce) return true;
+      await rm(claimPath, { force: true });
+      return false;
+    }
     const attempt = await readJson(attemptPath, "activation attempt");
     if (attempt.run_id !== request.run_id || attempt.target !== target.token) {
       await recordFailure(runDir, request, target, "activation attempt identity is contradictory");
@@ -439,7 +512,14 @@ export default function register(pi, deps = {}) {
     if (request.action === "replace") {
       const helperPath = join(runDir, "helpers", `${target.token}.json`);
       const helperState = await safeLstat(helperPath);
-      if (!helperState) return true;
+      if (!helperState) {
+        const claimingRuntimeEnded = attempt.runtime_nonce !== runtimeNonce &&
+          (attempt.process_id !== processId || startReason === "reload");
+        if (claimingRuntimeEnded) {
+          await recordFailure(runDir, request, target, "replacement helper record is absent after the claiming runtime ended");
+        }
+        return true;
+      }
       const helper = await readJson(helperPath, "replacement helper record");
       if (
         helper.schema !== "qq.activation-replacement" ||
@@ -519,6 +599,18 @@ export default function register(pi, deps = {}) {
       }
       return;
     }
+    // Pi 0.81.1 exposes no atomic editor-check-and-command-submit operation.
+    // This final read-only check deliberately preserves the operator-accepted
+    // small race in which a human can type before the no-focus Herdr submit.
+    const finalBoundary = safeBoundary() ?? editorBoundary();
+    if (finalBoundary) {
+      const key = `${request.run_id}:${target.token}:final-boundary:${finalBoundary}`;
+      if (!warned.has(key)) {
+        warned.add(key);
+        warning(`qq activation ${request.run_id} is pending: ${finalBoundary}`);
+      }
+      return;
+    }
     const claims = await exactDirectory(join(runDir, "claims"), "activation claims", true);
     const claimPath = join(claims, `${target.token}.json`);
     try {
@@ -543,9 +635,14 @@ export default function register(pi, deps = {}) {
     await atomicJson(join(attempts, `${target.token}.json`), attempt);
     pendingCommands.set(key, { runDir, request, target, attempt });
     queued.add(key);
-    void pi.sendUserMessage(`/qq-activate ${request.run_id} ${target.token}`, { deliverAs: "followUp" }).catch(async (error) => {
-      await recordFailure(runDir, request, target, `command delivery failed: ${error instanceof Error ? error.message : String(error)}`);
-    });
+    const command = `/qq-activate ${request.run_id} ${target.token}`;
+    try {
+      await submitCommand(target, command);
+    } catch (error) {
+      queued.delete(key);
+      pendingCommands.delete(key);
+      await recordFailure(runDir, request, target, `command submission failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   async function inspectRun(runDir) {
