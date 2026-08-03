@@ -599,18 +599,29 @@ def write_absent_receipt(run_dir: Path, request: dict[str, Any], target: dict[st
 
 
 def settle_absent_targets(run_dir: Path, request: dict[str, Any], herdr: str) -> None:
-    if not os.path.isabs(herdr) or not os.path.isfile(herdr) or not os.access(herdr, os.X_OK):
+    if not Path(herdr).is_absolute():
         raise Refusal("passed Herdr discovery authority is not an absolute executable file")
-    for target in request["targets"]:
-        receipt_path = run_dir / "receipts" / f"{target['token']}.json"
-        if os.path.lexists(receipt_path):
-            continue
-        raw = run([herdr, "agent", "list"])
-        try:
-            discovery = json.loads(raw)
-        except (UnicodeError, json.JSONDecodeError) as error:
-            raise Refusal("fresh Herdr agent discovery is malformed") from error
-        live = targets_from_discovery(discovery)
+    try:
+        herdr_state = os.stat(herdr)
+        herdr_executable = os.access(herdr, os.X_OK)
+    except OSError as error:
+        raise Refusal("passed Herdr discovery authority is unavailable") from error
+    if not stat.S_ISREG(herdr_state.st_mode) or not herdr_executable:
+        raise Refusal("passed Herdr discovery authority is not an absolute executable file")
+    missing = [
+        target
+        for target in request["targets"]
+        if not os.path.lexists(run_dir / "receipts" / f"{target['token']}.json")
+    ]
+    if not missing:
+        return
+    raw = run([herdr, "agent", "list"])
+    try:
+        discovery = json.loads(raw)
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise Refusal("fresh Herdr agent discovery is malformed") from error
+    live = targets_from_discovery(discovery)
+    for target in missing:
         pane_matches = [item for item in live if item["pane_id"] == target["pane_id"]]
         session_matches = [item for item in live if item["session_path"] == target["session_path"]]
         if not pane_matches and not session_matches:
