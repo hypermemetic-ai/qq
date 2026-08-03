@@ -30,6 +30,13 @@ SH
 chmod +x "$fake_gh"
 export QQ_GH_BIN="$fake_gh"
 
+# architect-context resolves Backlog even though this fixture has no managed
+# disposition write. Keep the Check hermetic on CI, where Backlog is absent.
+fake_backlog="$tmp/backlog"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 99' >"$fake_backlog"
+chmod +x "$fake_backlog"
+export QQ_BACKLOG_BIN="$fake_backlog"
+
 fake_delegate="$tmp/qq-delegate"
 cat >"$fake_delegate" <<'SH'
 #!/usr/bin/env bash
