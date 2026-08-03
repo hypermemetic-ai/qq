@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Minimal blocking delegate engine for qq trusted roles.
+# Bounded blocking and prompt-returning delegate engine for qq trusted roles.
 set -euo pipefail
 
 umask 077
@@ -12,7 +12,14 @@ fail() {
 }
 
 usage() {
-  printf '%s\n' 'usage: qq-delegate run --role <role> --cwd <worktree> --brief <abs-run-dir>/BRIEF.md' '       qq-delegate batch <abs-batch.json>' >&2
+  printf '%s\n' \
+    'usage: qq-delegate run --role <role> --cwd <worktree> --brief <abs-run-dir>/BRIEF.md' \
+    '       qq-delegate batch <abs-batch.json>' \
+    '       qq-delegate start --role <role> --cwd <worktree> --brief <abs-run-dir>/BRIEF.md' \
+    '       qq-delegate start-batch <abs-batch.json>' \
+    '       qq-delegate status <absolute-run-dir>' \
+    '       qq-delegate wait <absolute-run-dir>' \
+    '       qq-delegate collect <absolute-run-dir>' >&2
   exit 64
 }
 
@@ -36,9 +43,11 @@ done
 run_role=""
 run_cwd=""
 run_brief=""
+run_id_input=""
 batch_path=""
+lifecycle_run_dir=""
 case "$command_name" in
-  run)
+  run | start)
     while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 && "$2" != --* ]] || usage
       case "$1" in
@@ -51,9 +60,29 @@ case "$command_name" in
     done
     [[ -n "$run_role" && -n "$run_cwd" && -n "$run_brief" ]] || usage
     ;;
-  batch)
+  batch | start-batch)
     [[ $# -eq 1 && "$1" != -* ]] || usage
     batch_path="$1"
+    ;;
+  status | wait | collect)
+    [[ $# -eq 1 && "$1" != -* ]] || usage
+    lifecycle_run_dir="$1"
+    ;;
+  _worker)
+    [[ "${QQ_DELEGATE_INTERNAL_WORKER:-}" == 1 ]] || usage
+    while [[ $# -gt 0 ]]; do
+      [[ $# -ge 2 && "$2" != --* ]] || usage
+      case "$1" in
+        --run-id) [[ -z "$run_id_input" ]] || usage; run_id_input="$2" ;;
+        --role) [[ -z "$run_role" ]] || usage; run_role="$2" ;;
+        --cwd) [[ -z "$run_cwd" ]] || usage; run_cwd="$2" ;;
+        --brief) [[ -z "$run_brief" ]] || usage; run_brief="$2" ;;
+        *) usage ;;
+      esac
+      shift 2
+    done
+    [[ -n "$run_id_input" && -n "$run_role" && -n "$run_cwd" && -n "$run_brief" ]] || usage
+    [[ "$run_id_input" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || usage
     ;;
   *) usage ;;
 esac
@@ -116,7 +145,7 @@ PY
 
 write_terminal_and_status() {
   local run_dir="$1" run_id="$2" role="$3" child_status="$4"
-  local started_at="$5" ended_at="$6" started_ms="$7" ended_ms="$8" worktree="$9"
+  local started_at="$5" ended_at="$6" worktree="$7"
   local timed_out=false
   [[ "$child_status" -ne 124 && "$child_status" -ne 137 ]] || timed_out=true
 
@@ -129,16 +158,19 @@ run_dir = Path(run_dir_text)
 exit_code = int(exit_text)
 timed_out = timed_text == "true"
 
-def atomic_json(target, value):
+def publish_json(target, value):
     temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
     data = (json.dumps(value, separators=(",", ":")) + "\n").encode()
     descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         os.write(descriptor, data)
+        os.fsync(descriptor)
     finally:
         os.close(descriptor)
-    os.replace(temporary, target)
-    os.chmod(target, 0o600)
+    try:
+        os.link(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 terminal = {
     "schema": "qq-run-terminal", "version": 2, "run_id": run_id,
@@ -148,17 +180,130 @@ terminal = {
     "sessions_dir": str(run_dir / "sessions"),
     "parent_session": session_id,
 }
-atomic_json(run_dir / "TERMINAL", terminal)
+publish_json(run_dir / "TERMINAL", terminal)
 PY
   then
-    printf '[qq-delegate] fail-closed: cannot write terminal run state\n' >&2
+    printf '[qq-delegate] fail-closed: cannot atomically seal terminal run state\n' >&2
     return 73
   fi
 }
 
+claim_run_directory() {
+  local run_dir="$1" run_id="$2" worker_pid="$3" detached="$4"
+  if ! "$python_binary" - "$run_dir" "$run_id" "$worker_pid" "$detached" <<'PY'
+import json, os, sys
+from pathlib import Path
+run_dir, run_id, worker_pid, detached_text = sys.argv[1:]
+run_path = Path(run_dir)
+target = run_path / ".launch-claim"
+value = {
+    "schema": "qq-run-launch-claim", "version": 1,
+    "run_id": run_id, "run_dir": run_dir, "worker_pid": int(worker_pid),
+}
+data = (json.dumps(value, separators=(",", ":")) + "\n").encode()
+descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+try:
+    os.write(descriptor, data)
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+try:
+    if detached_text == "true":
+        allowed = {"BRIEF.md", "PANE", "cache", ".launch-claim"}
+    elif detached_text == "false":
+        allowed = {
+            "BRIEF.md", "ENVELOPE.md", "PANE", "cache", "pi-config",
+            "sessions", ".system-prompt.md", ".launch-claim",
+        }
+    else:
+        raise OSError("invalid claim mode")
+    if any(entry.name not in allowed for entry in run_path.iterdir()):
+        raise OSError("run directory became spent while claiming")
+except BaseException:
+    target.unlink(missing_ok=True)
+    raise
+PY
+  then
+    fail 68 "dispatch run directory is already claimed or unsafe"
+  fi
+}
+
+write_launch_metadata() {
+  local run_dir="$1" run_id="$2" role="$3" worktree="$4" brief_path="$5"
+  local worker_pid="$6" detached="$7" dispatch_pid="$8"
+  if ! "$python_binary" - "$run_dir" "$run_id" "$role" "$worktree" "$brief_path" \
+      "$worker_pid" "$detached" "$dispatch_pid" "$accountable_session_id" <<'PY'
+import datetime, json, os, stat, sys
+from pathlib import Path
+(run_dir_text, run_id, role, cwd, brief, pid_text,
+ detached_text, dispatch_pid_text, parent_session) = sys.argv[1:]
+run_dir = Path(run_dir_text)
+pid = int(pid_text)
+dispatch_pid = int(dispatch_pid_text)
+
+def process_fields(process_id):
+    text = Path(f"/proc/{process_id}/stat").read_text(encoding="ascii")
+    fields = text[text.rfind(")") + 2:].split()
+    return fields[0], int(fields[2]), int(fields[3]), int(fields[19])
+
+state, process_group, session, start_ticks = process_fields(pid)
+if state == "Z":
+    raise OSError("launch worker is already a zombie")
+dispatch_state, dispatch_group, _dispatch_session, dispatch_ticks = process_fields(dispatch_pid)
+detached = detached_text == "true"
+if detached and (process_group != pid or session != pid):
+    raise OSError("detached worker does not own its session and process group")
+if detached and dispatch_group != process_group:
+    raise OSError("dispatch process is outside the detached worker process group")
+boot_id = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip()
+value = {
+    "schema": "qq-run-launch", "version": 1, "run_id": run_id,
+    "role": role, "cwd": cwd, "run_dir": str(run_dir), "brief": brief,
+    "parent_session": parent_session, "worker_pid": pid,
+    "worker_start_ticks": start_ticks, "dispatch_pid": dispatch_pid,
+    "dispatch_start_ticks": dispatch_ticks, "dispatch_process_group": dispatch_group,
+    "boot_id": boot_id, "detached": detached,
+    "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+}
+claim = run_dir / ".launch-claim"
+try:
+    claim_value = json.loads(claim.read_text(encoding="utf-8"))
+    claim_state = claim.lstat()
+    if (claim.is_symlink() or not stat.S_ISREG(claim_state.st_mode)
+            or claim_state.st_uid != os.getuid()
+            or stat.S_IMODE(claim_state.st_mode) != 0o600
+            or claim_value != {
+                "schema": "qq-run-launch-claim", "version": 1,
+                "run_id": run_id, "run_dir": str(run_dir), "worker_pid": pid,
+            }):
+        raise OSError
+except (OSError, UnicodeError, json.JSONDecodeError):
+    raise OSError("launch claim changed before acceptance")
+target = run_dir / "LAUNCH"
+temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+data = (json.dumps(value, separators=(",", ":")) + "\n").encode()
+descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+try:
+    os.write(descriptor, data)
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+try:
+    os.link(temporary, target)
+finally:
+    temporary.unlink(missing_ok=True)
+claim.unlink()
+PY
+  then
+    printf '[qq-delegate] fail-closed: cannot publish attributable LAUNCH metadata\n' >&2
+    return 68
+  fi
+}
+
 execute_ticket() {
-  local role="$1" cwd_input="$2" brief_path="$3" run_id="$5"
-  local metadata_file="${6:-}"
+  local role="$1" cwd_input="$2" brief_path="$3" run_id="$4"
+  local metadata_file="${5:-}"
+  local detached="${6:-false}"
 
   case "$role" in
     implementer | reviewer | researcher | observer) ;;
@@ -199,17 +344,27 @@ execute_ticket() {
   run_dir_mode="$(stat -c %a "$run_dir")"
   [[ "$run_dir_mode" == 700 ]] || fail 68 "dispatch run directory must be mode 700 (found $run_dir_mode): $run_dir"
   [[ ! -e "$run_dir/TERMINAL" && ! -L "$run_dir/TERMINAL" ]] || fail 68 "dispatch run directory is sealed by TERMINAL: $run_dir"
+  [[ ! -e "$run_dir/LAUNCH" && ! -L "$run_dir/LAUNCH" ]] || fail 68 "dispatch run directory is already reserved by LAUNCH: $run_dir"
 
   local run_entry
   shopt -s nullglob dotglob
   local run_entries=("$run_dir"/*)
   shopt -u nullglob dotglob
   for run_entry in "${run_entries[@]}"; do
-    case "${run_entry##*/}" in
-      BRIEF.md|ENVELOPE.md|PANE|cache|pi-config|sessions|.system-prompt.md) ;;
-      *) fail 68 "dispatch run directory contains unexpected entry: $run_entry" ;;
-    esac
+    if [[ "$detached" == true ]]; then
+      case "${run_entry##*/}" in
+        BRIEF.md|PANE|cache) ;;
+        *) fail 68 "prompt-returning dispatch run directory is spent: $run_entry" ;;
+      esac
+    else
+      case "${run_entry##*/}" in
+        BRIEF.md|ENVELOPE.md|PANE|cache|pi-config|sessions|.system-prompt.md) ;;
+        *) fail 68 "dispatch run directory contains unexpected entry: $run_entry" ;;
+      esac
+    fi
   done
+
+  claim_run_directory "$run_dir" "$run_id" "$BASHPID" "$detached"
 
   local stage_dir
   for stage_dir in cache pi-config sessions; do
@@ -380,10 +535,6 @@ PY
     fi
   fi
 
-  if [[ -n "$metadata_file" ]]; then
-    printf '%s\0' "$run_dir" >"$metadata_file"
-  fi
-
   local -a child_argv=(
     "$pi_binary" --approve --offline --mode json -p
     --provider "$provider" --model "$model"
@@ -412,6 +563,14 @@ PY
   )
   printf '[qq-delegate] role=%s timeout=%s run-dir=%s\n' "$role" "$timeout_spec" "$run_dir" >&2
 
+  local -a timeout_argv=("$timeout_binary")
+  if [[ "$detached" == true ]]; then
+    # GNU timeout otherwise creates a child process group. Detached lifecycle
+    # authority requires the dispatch to remain in the worker's exact group.
+    timeout_argv+=(--foreground)
+  fi
+  timeout_argv+=(-k 10 --signal=TERM "$timeout_spec")
+
   local dispatch_pid=""
   local termination_signal=""
   forward_termination() {
@@ -431,7 +590,7 @@ PY
     while IFS= read -r inherited_name; do
       unset "$inherited_name"
     done < <(compgen -A variable PI_SUBAGENT_ || true)
-    unset QQ_DISPATCH_RUN_DIR QQ_DELEGATE_SERVICE_CLASS
+    unset QQ_DISPATCH_RUN_DIR QQ_DELEGATE_SERVICE_CLASS QQ_DELEGATE_INTERNAL_WORKER
     export QQ_DISPATCH_RUN_DIR="$run_dir"
     if [[ "$service_class" != provider-default ]]; then
       export QQ_DELEGATE_SERVICE_CLASS="$service_class"
@@ -440,9 +599,18 @@ PY
     export PI_CODING_AGENT_DIR="$pi_config_dir"
     export PI_CODING_AGENT_SESSION_DIR="$run_dir/sessions"
     export PI_OFFLINE=1
-    exec "$timeout_binary" -k 10 --signal=TERM "$timeout_spec" "$python_binary" "$tree_supervisor" -- "${child_argv[@]}"
+    exec "${timeout_argv[@]}" "$python_binary" "$tree_supervisor" -- "${child_argv[@]}"
   ) >"$run_dir/output.jsonl" 2>"$run_dir/stderr.log" &
   dispatch_pid=$!
+  if ! write_launch_metadata "$run_dir" "$run_id" "$role" "$worktree" \
+      "$resolved_brief" "$BASHPID" "$detached" "$dispatch_pid"; then
+    kill -TERM "$dispatch_pid" 2>/dev/null || true
+    wait "$dispatch_pid" 2>/dev/null || true
+    fail 68 "cannot accept the dispatch after child launch"
+  fi
+  if [[ -n "$metadata_file" ]]; then
+    printf '%s\0' "$run_dir" >"$metadata_file"
+  fi
   [[ -z "$termination_signal" ]] || forward_termination "$termination_signal"
   local child_status
   while true; do
@@ -469,14 +637,564 @@ import time
 print(datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"), int(time.time() * 1000), sep="\t")
 PY
   )
-  write_terminal_and_status "$run_dir" "$run_id" "$role" "$child_status" "$started_at" "$ended_at" "$started_ms" "$ended_ms" "$worktree" || return $?
+  write_terminal_and_status "$run_dir" "$run_id" "$role" "$child_status" \
+    "$started_at" "$ended_at" "$worktree" || return $?
   return "$child_status"
 }
 
+inspect_run() {
+  local operation="$1" requested_run_dir="$2"
+  "$python_binary" - "$operation" "$requested_run_dir" "$runtime_root" <<'PY'
+import datetime, json, os, re, signal, stat, sys, uuid
+from pathlib import Path
+
+operation, run_dir_text, runtime_root = sys.argv[1:]
+MAX_STATE = 64 * 1024
+MAX_ENVELOPE = 1024 * 1024
+uid = os.getuid()
+
+def refuse(message, status_code=74):
+    print(f"[qq-delegate] fail-closed: {message}", file=sys.stderr)
+    raise SystemExit(status_code)
+
+def strict_json(data, label):
+    def pairs(items):
+        value = {}
+        for key, item in items:
+            if key in value:
+                refuse(f"{label} contains duplicate key {key!r}")
+            value[key] = item
+        return value
+    try:
+        return json.loads(data, object_pairs_hook=pairs)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        refuse(f"{label} is malformed")
+
+def safe_regular_metadata(path, label, maximum=None, required_mode=0o600):
+    try:
+        state = path.lstat()
+    except OSError:
+        refuse(f"{label} is missing or inaccessible")
+    if not stat.S_ISREG(state.st_mode) or path.is_symlink():
+        refuse(f"{label} is not a regular non-symlink file")
+    if state.st_uid != uid:
+        refuse(f"{label} is not owned by the operator")
+    if required_mode is not None and stat.S_IMODE(state.st_mode) != required_mode:
+        refuse(f"{label} must be mode {required_mode:o}")
+    if maximum is not None and state.st_size > maximum:
+        refuse(f"{label} exceeds its size bound")
+    return state
+
+
+def safe_regular(path, label, maximum, required_mode=0o600):
+    safe_regular_metadata(path, label, maximum, required_mode)
+    try:
+        return path.read_bytes()
+    except OSError:
+        refuse(f"{label} cannot be read")
+
+def safe_directory(path, label, required_mode=0o700):
+    try:
+        state = path.lstat()
+    except OSError:
+        refuse(f"{label} is missing or inaccessible")
+    if not stat.S_ISDIR(state.st_mode) or path.is_symlink():
+        refuse(f"{label} is not a regular non-symlink directory")
+    if state.st_uid != uid:
+        refuse(f"{label} is not owned by the operator")
+    if stat.S_IMODE(state.st_mode) != required_mode:
+        refuse(f"{label} must be mode {required_mode:o}")
+
+def within(candidate, parent):
+    return candidate == parent or candidate.startswith(parent + os.sep)
+
+if not run_dir_text.startswith("/") or os.path.normpath(run_dir_text) != run_dir_text:
+    refuse("run directory must be one normalized absolute path", 65)
+run_dir = Path(run_dir_text)
+safe_directory(run_dir, "run directory")
+try:
+    if str(run_dir.resolve(strict=True)) != run_dir_text:
+        refuse("run directory does not resolve exactly")
+except OSError:
+    refuse("run directory cannot be resolved")
+
+def optional_state(path, label):
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        refuse(f"{label} cannot be inspected")
+    return strict_json(safe_regular(path, label, MAX_STATE), label)
+
+
+def canonical_uuid(value, message):
+    if not isinstance(value, str) or len(value) != 36:
+        refuse(message)
+    try:
+        if str(uuid.UUID(value)) != value:
+            refuse(message)
+    except ValueError:
+        refuse(message)
+    return value
+
+
+def validate_authority(label, run_id_value, role_value, cwd_value, parent_value):
+    run_id_value = canonical_uuid(run_id_value, f"{label} run ID is malformed")
+    if role_value not in {"implementer", "reviewer", "researcher", "observer"}:
+        refuse(f"{label} role is malformed")
+    if (not isinstance(cwd_value, str) or not cwd_value.startswith("/")
+            or os.path.normpath(cwd_value) != cwd_value):
+        refuse(f"{label} cwd is malformed")
+    try:
+        if str(Path(cwd_value).resolve(strict=True)) != cwd_value:
+            refuse(f"{label} cwd does not resolve exactly")
+    except OSError:
+        refuse(f"{label} cwd cannot be resolved")
+    parent_value = canonical_uuid(parent_value, f"{label} parent session is malformed")
+    if not within(run_dir_text, runtime_root) and not within(run_dir_text, cwd_value):
+        refuse(f"{label} run path is outside its durable authority")
+    if run_dir_text in {runtime_root, cwd_value}:
+        refuse(f"{label} run path names an authority root")
+    return run_id_value, role_value, cwd_value, parent_value
+
+
+try:
+    (run_dir / ".launch-claim").lstat()
+except FileNotFoundError:
+    pass
+except OSError:
+    refuse("launch claim cannot be inspected")
+else:
+    refuse("run remains incompletely claimed")
+
+launch_path = run_dir / "LAUNCH"
+terminal_path = run_dir / "TERMINAL"
+launch = optional_state(launch_path, "LAUNCH")
+terminal = optional_state(terminal_path, "TERMINAL")
+if launch is None and terminal is None:
+    refuse("LAUNCH is missing and no attributable TERMINAL is present")
+
+terminal_identity = None
+if terminal is not None:
+    terminal_keys = {
+        "schema", "version", "run_id", "agent", "exit_code", "started_at",
+        "ended_at", "timed_out", "cwd", "run_dir", "output_log",
+        "sessions_dir", "parent_session",
+    }
+    if not isinstance(terminal, dict) or set(terminal) != terminal_keys:
+        refuse("TERMINAL has an unexpected schema shape")
+    if terminal.get("schema") != "qq-run-terminal" or terminal.get("version") != 2:
+        refuse("TERMINAL schema or version is unsupported")
+    terminal_identity = validate_authority(
+        "TERMINAL", terminal.get("run_id"), terminal.get("agent"),
+        terminal.get("cwd"), terminal.get("parent_session"),
+    )
+    terminal_run_id, terminal_role, terminal_cwd, terminal_parent = terminal_identity
+    if (terminal.get("run_dir") != run_dir_text
+            or terminal.get("output_log") != str(run_dir / "output.jsonl")
+            or terminal.get("sessions_dir") != str(run_dir / "sessions")):
+        refuse("TERMINAL is mismatched or misattributed")
+    exit_code = terminal.get("exit_code")
+    if isinstance(exit_code, bool) or not isinstance(exit_code, int) or not 0 <= exit_code <= 255:
+        refuse("TERMINAL exit code is malformed")
+    if (not isinstance(terminal.get("timed_out"), bool)
+            or terminal["timed_out"] != (exit_code in {124, 137})
+            or any(not isinstance(terminal.get(key), str) or not terminal[key]
+                   or len(terminal[key]) > 64 for key in ("started_at", "ended_at"))):
+        refuse("TERMINAL outcome fields are malformed")
+    try:
+        timestamps = [
+            datetime.datetime.fromisoformat(terminal[key][:-1] + "+00:00")
+            for key in ("started_at", "ended_at") if terminal[key].endswith("Z")
+        ]
+        if len(timestamps) != 2 or timestamps[1] < timestamps[0]:
+            raise ValueError
+    except ValueError:
+        refuse("TERMINAL timestamps are malformed")
+
+worker_pid = worker_ticks = dispatch_pid = dispatch_ticks = dispatch_group = boot_id = None
+if launch is not None:
+    launch_keys = {
+        "schema", "version", "run_id", "role", "cwd", "run_dir", "brief",
+        "parent_session", "worker_pid", "worker_start_ticks", "dispatch_pid",
+        "dispatch_start_ticks", "dispatch_process_group", "boot_id",
+        "detached", "created_at",
+    }
+    if not isinstance(launch, dict) or set(launch) != launch_keys:
+        refuse("LAUNCH has an unexpected schema shape")
+    if launch.get("schema") != "qq-run-launch" or launch.get("version") != 1:
+        refuse("LAUNCH schema or version is unsupported")
+    run_id, role, cwd, parent_session = validate_authority(
+        "LAUNCH", launch.get("run_id"), launch.get("role"),
+        launch.get("cwd"), launch.get("parent_session"),
+    )
+    brief = launch.get("brief")
+    if (not isinstance(brief, str) or not brief.startswith("/")
+            or os.path.normpath(brief) != brief):
+        refuse("LAUNCH brief path is malformed")
+    if launch.get("run_dir") != run_dir_text or brief != str(run_dir / "BRIEF.md"):
+        refuse("LAUNCH is attributed to a different run path")
+    worker_pid = launch.get("worker_pid")
+    worker_ticks = launch.get("worker_start_ticks")
+    dispatch_pid = launch.get("dispatch_pid")
+    dispatch_ticks = launch.get("dispatch_start_ticks")
+    dispatch_group = launch.get("dispatch_process_group")
+    boot_id = launch.get("boot_id")
+    if (isinstance(worker_pid, bool) or not isinstance(worker_pid, int) or worker_pid <= 1
+            or isinstance(worker_ticks, bool) or not isinstance(worker_ticks, int)
+            or worker_ticks <= 0
+            or isinstance(dispatch_pid, bool) or not isinstance(dispatch_pid, int) or dispatch_pid <= 1
+            or isinstance(dispatch_ticks, bool) or not isinstance(dispatch_ticks, int) or dispatch_ticks <= 0
+            or isinstance(dispatch_group, bool) or not isinstance(dispatch_group, int) or dispatch_group <= 1
+            or not isinstance(boot_id, str) or len(boot_id) != 36
+            or not isinstance(launch.get("detached"), bool)
+            or not isinstance(launch.get("created_at"), str)
+            or len(launch["created_at"]) > 64):
+        refuse("LAUNCH process identity is malformed")
+    if launch["detached"] and dispatch_group != worker_pid:
+        refuse("detached LAUNCH process group is misattributed")
+    try:
+        if str(uuid.UUID(boot_id)) != boot_id or not launch["created_at"].endswith("Z"):
+            raise ValueError
+        datetime.datetime.fromisoformat(launch["created_at"][:-1] + "+00:00")
+    except ValueError:
+        refuse("LAUNCH boot or creation identity is malformed")
+    if terminal_identity is not None and terminal_identity != (run_id, role, cwd, parent_session):
+        refuse("TERMINAL is mismatched or misattributed")
+else:
+    run_id, role, cwd, parent_session = terminal_identity
+
+safe_regular(run_dir / "BRIEF.md", "BRIEF.md", MAX_ENVELOPE, None)
+
+if terminal is None:
+    try:
+        current_boot = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip()
+    except OSError:
+        refuse("cannot verify the launch boot identity")
+
+    def process_identity(process_id, expected_ticks, expected_group=None):
+        if current_boot != boot_id:
+            return "reused"
+        try:
+            process_text = Path(f"/proc/{process_id}/stat").read_text(encoding="ascii")
+            fields = process_text[process_text.rfind(")") + 2:].split()
+            if int(fields[19]) != expected_ticks:
+                return "reused"
+            if expected_group is not None and int(fields[2]) != expected_group:
+                return "group-mismatch"
+            return "zombie" if fields[0] == "Z" else "alive"
+        except FileNotFoundError:
+            return "missing"
+        except (OSError, ValueError, IndexError):
+            return "unknown"
+
+    expected_worker_group = worker_pid if launch["detached"] else None
+    expected_dispatch_group = dispatch_group if launch["detached"] else None
+    worker_identity = process_identity(worker_pid, worker_ticks, expected_worker_group)
+    dispatch_identity = process_identity(dispatch_pid, dispatch_ticks, expected_dispatch_group)
+    invalid_dispatch = dispatch_identity in {"reused", "group-mismatch"}
+    if worker_identity == "alive" and not invalid_dispatch:
+        snapshot = {
+            "schema": "qq-run-status", "version": 1, "run_id": run_id,
+            "run_dir": run_dir_text, "state": "running", "role": role,
+            "cwd": cwd, "worker_pid": worker_pid,
+        }
+    else:
+        if launch["detached"] and worker_identity not in {"reused", "group-mismatch"}:
+            worker_owns_group = worker_identity in {"alive", "zombie"}
+            dispatch_owns_group = dispatch_identity == "alive"
+            if dispatch_owns_group:
+                try:
+                    os.kill(dispatch_pid, signal.SIGTERM)
+                except (ProcessLookupError, PermissionError):
+                    pass
+            if worker_owns_group or dispatch_owns_group:
+                try:
+                    os.killpg(dispatch_group, signal.SIGTERM)
+                except (ProcessLookupError, PermissionError):
+                    pass
+        if worker_identity == "reused":
+            reason = "worker-pid-reused"
+        elif worker_identity == "group-mismatch":
+            reason = "worker-process-group-mismatch"
+        elif dispatch_identity == "reused":
+            reason = "dispatch-pid-reused"
+        elif dispatch_identity == "group-mismatch":
+            reason = "dispatch-process-group-mismatch"
+        else:
+            reason = "worker-not-running"
+        snapshot = {
+            "schema": "qq-run-status", "version": 1, "run_id": run_id,
+            "run_dir": run_dir_text, "state": "failed", "role": role,
+            "cwd": cwd, "reason": reason,
+        }
+else:
+    snapshot = {
+        "schema": "qq-run-status", "version": 1, "run_id": run_id,
+        "run_dir": run_dir_text, "state": "terminal", "role": role,
+        "cwd": cwd, "exit_code": terminal["exit_code"],
+        "timed_out": terminal["timed_out"],
+        "terminal_path": str(terminal_path),
+    }
+
+if operation == "snapshot":
+    print(json.dumps(snapshot, separators=(",", ":")))
+    raise SystemExit(0)
+if operation != "collect":
+    refuse("internal lifecycle operation is unsupported", 70)
+if terminal is None:
+    refuse("run is incomplete and cannot be collected", 75)
+
+# Collection verifies every artifact named by the terminal before returning the
+# exact terminal object and exact envelope bytes as one attributable JSON line.
+safe_regular(run_dir / "BRIEF.md", "BRIEF.md", MAX_ENVELOPE, None)
+# The output can be arbitrarily large; collection validates its metadata but
+# does not need or load the log bytes.
+safe_regular_metadata(run_dir / "output.jsonl", "terminal output log")
+safe_directory(run_dir / "sessions", "terminal sessions directory")
+pane_path = run_dir / "PANE"
+try:
+    pane_path.lstat()
+except FileNotFoundError:
+    pass
+except OSError:
+    refuse("PANE cannot be inspected")
+else:
+    pane_data = safe_regular(pane_path, "PANE", 65)
+    if re.fullmatch(rb"[A-Za-z0-9:_-]{1,64}\n?", pane_data) is None:
+        refuse("PANE is malformed")
+envelope_path = run_dir / "ENVELOPE.md"
+envelope_data = safe_regular(envelope_path, "ENVELOPE.md", MAX_ENVELOPE)
+try:
+    envelope = envelope_data.decode("utf-8")
+except UnicodeDecodeError:
+    refuse("ENVELOPE.md is not valid UTF-8")
+result = {
+    "schema": "qq-run-collection", "version": 1,
+    "run_id": run_id, "run_dir": run_dir_text, "state": "terminal",
+    "terminal_path": str(terminal_path), "terminal": terminal,
+    "envelope_path": str(envelope_path), "envelope": envelope,
+}
+print(json.dumps(result, separators=(",", ":"), ensure_ascii=False))
+PY
+}
+
+json_state_and_exit() {
+  "$python_binary" -c 'import json,sys; v=json.load(sys.stdin); t=v.get("terminal", v); print(v["state"], t.get("exit_code", ""), sep="\t")'
+}
+
+run_lifecycle_command() {
+  local operation="$1" requested_run_dir="$2" snapshot state exit_code
+  if [[ "$operation" == wait ]]; then
+    while true; do
+      if snapshot="$(inspect_run snapshot "$requested_run_dir")"; then
+        :
+      else
+        local inspect_status=$?
+        return "$inspect_status"
+      fi
+      IFS=$'\t' read -r state exit_code < <(printf '%s\n' "$snapshot" | json_state_and_exit)
+      case "$state" in
+        running) sleep 0.05 ;;
+        terminal) printf '%s\n' "$snapshot"; return "$exit_code" ;;
+        failed) printf '%s\n' "$snapshot"; return 75 ;;
+        *) fail 70 "lifecycle inspector returned an invalid state" ;;
+      esac
+    done
+  fi
+
+  if [[ "$operation" == collect ]]; then
+    if snapshot="$(inspect_run collect "$requested_run_dir")"; then
+      :
+    else
+      local inspect_status=$?
+      return "$inspect_status"
+    fi
+  else
+    if snapshot="$(inspect_run snapshot "$requested_run_dir")"; then
+      :
+    else
+      local inspect_status=$?
+      return "$inspect_status"
+    fi
+  fi
+  IFS=$'\t' read -r state exit_code < <(printf '%s\n' "$snapshot" | json_state_and_exit)
+  printf '%s\n' "$snapshot"
+  if [[ "$state" == failed ]]; then
+    return 75
+  fi
+  if [[ "$operation" == collect ]]; then
+    [[ "$state" == terminal && -n "$exit_code" ]] || fail 70 "collector returned an invalid state"
+    return "$exit_code"
+  fi
+  return 0
+}
+
+start_run_dir() {
+  local brief_path="$1"
+  [[ "$brief_path" == /* ]] || fail 68 "work-order brief path must be absolute: $brief_path"
+  [[ "${brief_path##*/}" == BRIEF.md ]] || fail 68 "work-order reference must name BRIEF.md: $brief_path"
+  [[ ! -L "$brief_path" && -f "$brief_path" ]] || fail 68 "work-order brief is missing or linked: $brief_path"
+  local input resolved directory
+  input="$(dirname -- "$brief_path")"
+  [[ ! -L "$input" ]] || fail 68 "dispatch run directory may not be a symlink"
+  directory="$(realpath -e -- "$input" 2>/dev/null)" || fail 68 "cannot resolve the dispatch run directory"
+  resolved="$(realpath -e -- "$brief_path" 2>/dev/null)" || fail 68 "cannot resolve the work-order brief"
+  [[ "$resolved" == "$directory/BRIEF.md" && "$brief_path" == "$resolved" ]] \
+    || fail 68 "work-order brief must be one normalized exact path"
+  printf '%s\n' "$directory"
+}
+
+spawn_detached_worker() {
+  local run_id="$1" role="$2" cwd="$3" brief="$4"
+  "$python_binary" - "$self" "$run_id" "$role" "$cwd" "$brief" <<'PY'
+import os, subprocess, sys, time
+from pathlib import Path
+engine, run_id, role, cwd, brief = sys.argv[1:]
+environment = os.environ.copy()
+environment["QQ_DELEGATE_INTERNAL_WORKER"] = "1"
+process = subprocess.Popen(
+    [engine, "_worker", "--run-id", run_id, "--role", role,
+     "--cwd", cwd, "--brief", brief],
+    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL, close_fds=True, start_new_session=True,
+    env=environment,
+)
+for _ in range(100):
+    try:
+        text = Path(f"/proc/{process.pid}/stat").read_text(encoding="ascii")
+        fields = text[text.rfind(")") + 2:].split()
+        start_ticks = int(fields[19])
+        break
+    except (OSError, ValueError, IndexError):
+        if process.poll() is not None:
+            raise SystemExit(71)
+        time.sleep(0.001)
+else:
+    raise SystemExit(71)
+boot_id = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip()
+print(process.pid, start_ticks, boot_id, sep="\t")
+PY
+}
+
+worker_identity_alive() {
+  local pid="$1" ticks="$2" boot_id="$3"
+  "$python_binary" - "$pid" "$ticks" "$boot_id" <<'PY'
+import sys
+from pathlib import Path
+pid, ticks, boot_id = sys.argv[1:]
+try:
+    if Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip() != boot_id:
+        raise SystemExit(1)
+    text = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+    fields = text[text.rfind(")") + 2:].split()
+    if fields[0] == "Z" or fields[19] != ticks:
+        raise SystemExit(1)
+except (OSError, ValueError, IndexError):
+    raise SystemExit(1)
+PY
+}
+
+start_receipt() {
+  local run_dir="$1" run_id="$2" pid="$3" ticks="$4" boot_id="$5"
+  "$python_binary" - "$run_dir" "$run_id" "$pid" "$ticks" "$boot_id" <<'PY'
+import json, os, stat, sys, uuid
+from pathlib import Path
+run_dir_text, expected_id, pid_text, ticks_text, expected_boot = sys.argv[1:]
+path = Path(run_dir_text) / "LAUNCH"
+try:
+    state = path.lstat()
+    if (not stat.S_ISREG(state.st_mode) or path.is_symlink()
+            or state.st_uid != os.getuid() or stat.S_IMODE(state.st_mode) != 0o600
+            or state.st_size > 64 * 1024):
+        raise OSError
+    def pairs(items):
+        value = {}
+        for key, item in items:
+            if key in value: raise ValueError
+            value[key] = item
+        return value
+    value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=pairs)
+except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+    print("[qq-delegate] fail-closed: detached worker wrote unsafe LAUNCH metadata", file=sys.stderr)
+    raise SystemExit(74)
+expected_keys = {
+    "schema", "version", "run_id", "role", "cwd", "run_dir", "brief",
+    "parent_session", "worker_pid", "worker_start_ticks", "dispatch_pid",
+    "dispatch_start_ticks", "dispatch_process_group", "boot_id",
+    "detached", "created_at",
+}
+if (not isinstance(value, dict) or set(value) != expected_keys
+        or value.get("schema") != "qq-run-launch" or value.get("version") != 1
+        or value.get("run_id") != expected_id or value.get("run_dir") != run_dir_text
+        or value.get("brief") != str(Path(run_dir_text) / "BRIEF.md")
+        or value.get("worker_pid") != int(pid_text)
+        or value.get("worker_start_ticks") != int(ticks_text)
+        or value.get("dispatch_process_group") != int(pid_text)
+        or value.get("boot_id") != expected_boot or value.get("detached") is not True):
+    print("[qq-delegate] fail-closed: detached worker LAUNCH metadata is misattributed", file=sys.stderr)
+    raise SystemExit(74)
+print(json.dumps({
+    "schema": "qq-run-start", "version": 1, "run_id": expected_id,
+    "run_dir": run_dir_text, "state": "accepted",
+}, separators=(",", ":")))
+PY
+}
+
+start_one() {
+  local role="$1" cwd="$2" brief="$3" run_id run_dir spawn_info pid ticks boot_id receipt
+  run_dir="$(start_run_dir "$brief")" || return $?
+  run_id="$(new_run_id)" || fail 71 "cannot mint a delegate run ID"
+  spawn_info="$(spawn_detached_worker "$run_id" "$role" "$cwd" "$brief")" \
+    || fail 71 "cannot launch the detached delegate worker"
+  IFS=$'\t' read -r pid ticks boot_id <<<"$spawn_info"
+  local attempt
+  for attempt in {1..600}; do
+    if { [[ -e "$run_dir/LAUNCH" || -L "$run_dir/LAUNCH" ]]; } \
+        && [[ ! -e "$run_dir/.launch-claim" && ! -L "$run_dir/.launch-claim" ]]; then
+      receipt="$(start_receipt "$run_dir" "$run_id" "$pid" "$ticks" "$boot_id")" \
+        || return $?
+      printf '%s\n' "$receipt"
+      return 0
+    fi
+    if ! worker_identity_alive "$pid" "$ticks" "$boot_id"; then
+      fail 71 "detached delegate worker failed before accepting the ticket"
+    fi
+    sleep 0.05
+  done
+  kill -TERM -- "-$pid" 2>/dev/null || true
+  fail 71 "detached delegate worker did not accept the ticket promptly"
+}
+
+if [[ "$command_name" == _worker ]]; then
+  set +e
+  execute_ticket "$run_role" "$run_cwd" "$run_brief" "$run_id_input" "" true
+  worker_status=$?
+  set -e
+  exit "$worker_status"
+fi
+
 if [[ "$command_name" == run ]]; then
   run_id="$(new_run_id)" || fail 71 "cannot mint a delegate run ID"
-  execute_ticket "$run_role" "$run_cwd" "$run_brief" 0 "$run_id"
+  set +e
+  execute_ticket "$run_role" "$run_cwd" "$run_brief" "$run_id"
+  run_status=$?
+  set -e
+  exit "$run_status"
+fi
+
+if [[ "$command_name" == start ]]; then
+  start_one "$run_role" "$run_cwd" "$run_brief"
   exit $?
+fi
+
+if [[ "$command_name" == status || "$command_name" == wait || "$command_name" == collect ]]; then
+  set +e
+  run_lifecycle_command "$command_name" "$lifecycle_run_dir"
+  lifecycle_status=$?
+  set -e
+  exit "$lifecycle_status"
 fi
 
 [[ "$batch_path" == /* ]] || fail 65 "batch file path must be absolute"
@@ -537,6 +1255,13 @@ while IFS= read -r -d '' item_role && IFS= read -r -d '' item_cwd && IFS= read -
   briefs+=("$item_brief")
 done <"$batch_items"
 
+if [[ "$command_name" == start-batch ]]; then
+  for index in "${!roles[@]}"; do
+    start_one "${roles[index]}" "${cwds[index]}" "${briefs[index]}"
+  done
+  exit 0
+fi
+
 pids=()
 summary_files=()
 for index in "${!roles[@]}"; do
@@ -578,7 +1303,7 @@ PY
       exit "$ticket_status"
     }
     trap finish_batch_ticket EXIT
-    execute_ticket "${roles[index]}" "${cwds[index]}" "${briefs[index]}" "$index" "$run_id" "$metadata_file"
+    execute_ticket "${roles[index]}" "${cwds[index]}" "${briefs[index]}" "$run_id" "$metadata_file"
   ) &
   pids+=("$!")
 done

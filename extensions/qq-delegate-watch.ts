@@ -1,6 +1,5 @@
 // @ts-nocheck
 
-import { randomUUID } from "node:crypto";
 import { watch as watchFs } from "node:fs";
 import {
   lstat,
@@ -11,10 +10,7 @@ import {
 } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { createConnection } from "node:net";
 
-const BROKER_TIMEOUT_MS = 2_000;
-const MAX_FRAME_BYTES = 1024 * 1024;
 const MAX_WIDGET_RUNS = 8;
 const PANE_TOKEN = /^[A-Za-z0-9:_-]{1,64}$/;
 const WIDGET_KEY = "qq-delegates";
@@ -32,177 +28,6 @@ function singleLine(value) {
 
 function safeRunName(path) {
   return singleLine(basename(path)) || "delegate";
-}
-
-function frame(message) {
-  const payload = Buffer.from(JSON.stringify(message), "utf8");
-  const header = Buffer.alloc(4);
-  header.writeUInt32BE(payload.length, 0);
-  return Buffer.concat([header, payload]);
-}
-
-function sendThroughBroker(socketPath, pane, text, deps = {}) {
-  const connect = deps.createConnection ?? createConnection;
-  const startTimeout = deps.setTimeout ?? globalThis.setTimeout;
-  const stopTimeout = deps.clearTimeout ?? globalThis.clearTimeout;
-  const timeoutMs = deps.brokerTimeoutMs ?? BROKER_TIMEOUT_MS;
-
-  return new Promise((resolvePromise, rejectPromise) => {
-    let settled = false;
-    let registered = false;
-    let buffer = Buffer.alloc(0);
-    const requestId = randomUUID();
-    const messageId = randomUUID();
-    const now = Date.now();
-    let socket;
-
-    function write(message) {
-      socket.write(frame(message));
-    }
-
-    function finish(error) {
-      if (settled) return;
-      settled = true;
-      stopTimeout(timeout);
-      if (registered && socket && !socket.destroyed) {
-        try {
-          socket.end(frame({ type: "unregister" }));
-        } catch {
-          socket.destroy();
-        }
-      } else {
-        socket?.destroy?.();
-      }
-      if (error) rejectPromise(error);
-      else resolvePromise(true);
-    }
-
-    function handle(message) {
-      if (message === null || typeof message !== "object") {
-        finish(new Error("intercom returned an invalid message"));
-        return;
-      }
-      if (message.type === "registered") {
-        if (registered || typeof message.sessionId !== "string") {
-          finish(new Error("intercom registration response was invalid"));
-          return;
-        }
-        registered = true;
-        write({ type: "list", requestId });
-        return;
-      }
-      if (message.type === "sessions" && message.requestId === requestId) {
-        if (!Array.isArray(message.sessions)) {
-          finish(new Error("intercom session list was invalid"));
-          return;
-        }
-        const targetName = pane.toLowerCase();
-        const matches = message.sessions.filter(
-          (session) =>
-            session !== null &&
-            typeof session === "object" &&
-            typeof session.id === "string" &&
-            typeof session.name === "string" &&
-            session.name.toLowerCase() === targetName,
-        );
-        if (matches.length !== 1) {
-          finish(new Error("accountable pane has no unique live intercom presence"));
-          return;
-        }
-        write({
-          type: "send",
-          to: matches[0].id,
-          message: {
-            id: messageId,
-            timestamp: Date.now(),
-            content: { text },
-          },
-        });
-        return;
-      }
-      if (message.type === "delivered" && message.messageId === messageId) {
-        finish();
-        return;
-      }
-      if (
-        message.type === "delivery_failed" &&
-        message.messageId === messageId
-      ) {
-        finish(
-          new Error(
-            typeof message.reason === "string"
-              ? message.reason
-              : "intercom delivery failed",
-          ),
-        );
-        return;
-      }
-      if (message.type === "error") {
-        finish(
-          new Error(
-            typeof message.error === "string"
-              ? message.error
-              : "intercom broker error",
-          ),
-        );
-      }
-      // Presence broadcasts can arrive between request/response messages.
-    }
-
-    const timeout = startTimeout(
-      () => finish(new Error("intercom completion delivery timed out")),
-      timeoutMs,
-    );
-
-    try {
-      socket = connect(socketPath);
-    } catch (error) {
-      finish(error instanceof Error ? error : new Error(String(error)));
-      return;
-    }
-    socket.on("connect", () => {
-      try {
-        write({
-          type: "register",
-          session: {
-            name: `qq-delegate-watch-${process.pid}-${randomUUID()}`,
-            cwd: process.cwd(),
-            model: "qq-delegate-watch",
-            pid: process.pid,
-            startedAt: now,
-            lastActivity: now,
-            status: "busy",
-          },
-        });
-      } catch (error) {
-        finish(error instanceof Error ? error : new Error(String(error)));
-      }
-    });
-    socket.on("data", (chunk) => {
-      if (settled) return;
-      buffer = Buffer.concat([buffer, chunk]);
-      while (buffer.length >= 4) {
-        const length = buffer.readUInt32BE(0);
-        if (length > MAX_FRAME_BYTES) {
-          finish(new Error("intercom frame was too large"));
-          return;
-        }
-        if (buffer.length < 4 + length) return;
-        const payload = buffer.subarray(4, 4 + length);
-        buffer = buffer.subarray(4 + length);
-        try {
-          handle(JSON.parse(payload.toString("utf8")));
-        } catch (error) {
-          finish(error instanceof Error ? error : new Error(String(error)));
-          return;
-        }
-      }
-    });
-    socket.on("error", (error) => finish(error));
-    socket.on("close", () => {
-      if (!settled) finish(new Error("intercom broker disconnected"));
-    });
-  });
 }
 
 async function safeLstat(path) {
@@ -277,8 +102,6 @@ export default function register(pi, deps = {}) {
       ),
   );
   const roots = [...new Set([durableRoot, legacyRoot])];
-  const brokerSocketPath =
-    deps.brokerSocketPath ?? join(homedir(), ".pi", "agent", "intercom", "broker.sock");
   const currentPaneSource = Object.hasOwn(deps, "currentPane")
     ? deps.currentPane
     : process.env.HERDR_PANE_ID;
@@ -288,7 +111,6 @@ export default function register(pi, deps = {}) {
       : undefined;
   const watch = deps.watch ?? watchFs;
   const makeDirectory = deps.mkdir ?? mkdir;
-  const brokerSend = deps.sendThroughBroker ?? sendThroughBroker;
   const records = new Map();
   const completedSeen = new Set();
   const rootWatchers = new Map();
@@ -367,23 +189,10 @@ export default function register(pi, deps = {}) {
     return pending;
   }
 
-  async function defaultHerdrNotify({ title, body }) {
-    if (typeof pi.exec !== "function") {
-      throw new Error("herdr execution is unavailable");
-    }
-    const result = await pi.exec(
-      "herdr",
-      ["notification", "show", title, "--body", body, "--sound", "request"],
-      { timeout: deps.herdrTimeoutMs ?? 5_000 },
-    );
-    if (result?.killed || result?.code !== 0) {
-      throw new Error("herdr notification command failed");
-    }
-  }
-
-  const herdrNotify = deps.herdrNotify ?? defaultHerdrNotify;
-
   async function wake(runDir) {
+    const pane = await paneFor(runDir);
+    if (!currentPane || pane !== currentPane) return;
+
     let claim;
     try {
       claim = await open(join(runDir, ".wake-claimed"), "wx", 0o600);
@@ -405,23 +214,24 @@ export default function register(pi, deps = {}) {
     const name = safeRunName(runDir);
     const safePath = singleLine(runDir);
     const body = `Delegate ${name} completed (exit ${state.exitCode}, timed out: ${state.timedOut}). Run: ${safePath}`;
-    const title = `Delegate complete: ${name}`;
-    const pane = await paneFor(runDir);
-
-    if (pane) {
-      try {
-        await brokerSend(brokerSocketPath, pane, body, deps);
-        return;
-      } catch {
-        // Missing or ambiguous pane presence degrades to an operator wake.
-      }
-    }
 
     try {
-      await herdrNotify({ title, body });
+      await pi.sendMessage(
+        {
+          customType: "qq-delegate-complete",
+          content: body,
+          display: true,
+          details: {
+            run_directory: runDir,
+            exit_code: state.exitCode,
+            timed_out: state.timedOut,
+          },
+        },
+        { triggerTurn: true, deliverAs: "followUp" },
+      );
     } catch (error) {
       warning(
-        `${body} Herdr notification failed: ${error instanceof Error ? error.message : String(error)}`,
+        `Delegate completion wake failed for ${name}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }

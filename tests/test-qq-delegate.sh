@@ -40,6 +40,9 @@ cat >"$fake_pi" <<'SH'
 set -euo pipefail
 printf '%s\0' "$@" >"$QQ_DISPATCH_RUN_DIR/argv.nul"
 env | LC_ALL=C sort >"$QQ_DISPATCH_RUN_DIR/child.env"
+if [[ -n "${QQ_DELEGATE_TEST_PID_LOG:-}" ]]; then
+  printf '%s\n' "$$" >>"$QQ_DELEGATE_TEST_PID_LOG"
+fi
 printf '{"event":"fixture-output"}\n'
 printf 'fixture-stderr\n' >&2
 mkdir -p "$PI_CODING_AGENT_SESSION_DIR/nested"
@@ -537,6 +540,476 @@ for run in "${batch_runs[@]}"; do
   [ -f "$run/output.jsonl" ] || fail "batch run lacks output: $run"
 done
 
+# Prompt-returning start accepts only after production preflight, returns the
+# exact durable identity, and does not wait for the fake Pi child lifecycle.
+# The sanctioned cache may already contain the owner's Check baseline.
+start_run="$(new_run start-success 'sleep=1')"
+mkdir -p "$start_run/cache/baseline"
+printf 'owner baseline evidence\n' >"$start_run/cache/baseline/check.log"
+start_stdout="$tmp/start-success.stdout"
+start_stderr="$tmp/start-success.stderr"
+start_started="$(date +%s%3N)"
+env HERDR_PANE_ID=pane:start_T208 "$fixture_engine" start \
+  --role reviewer --cwd "$fixture" --brief "$start_run/BRIEF.md" \
+  >"$start_stdout" 2>"$start_stderr"
+start_elapsed=$(( $(date +%s%3N) - start_started ))
+[[ "$start_elapsed" -lt 700 ]] || fail "start blocked on its child (${start_elapsed}ms)"
+[ ! -e "$start_run/TERMINAL" ] || fail "start waited through the sleeping child"
+start_id="$(jq -r '.run_id' "$start_stdout")"
+jq -e --arg run "$start_run" '
+  .schema == "qq-run-start" and .version == 1 and .state == "accepted"
+  and .run_dir == $run and (.run_id | test("^[0-9a-f-]{36}$"))
+' "$start_stdout" >/dev/null
+jq -e --arg id "$start_id" --arg run "$start_run" --arg cwd "$fixture" '
+  .schema == "qq-run-launch" and .version == 1 and .run_id == $id
+  and .run_dir == $run and .brief == ($run + "/BRIEF.md")
+  and .cwd == $cwd and .role == "reviewer" and .detached == true
+  and (.worker_pid | type == "number") and (.worker_start_ticks | type == "number")
+  and (.dispatch_pid | type == "number") and (.dispatch_start_ticks | type == "number")
+' "$start_run/LAUNCH" >/dev/null
+[ "$(stat -c %a "$start_run/LAUNCH")" = 600 ] || fail "LAUNCH mode is not 600"
+[ ! -e "$start_run/.launch-claim" ] || fail "accepted run retained its launch claim"
+assert_equal 'owner baseline evidence' "$(cat "$start_run/cache/baseline/check.log")" \
+  "start did not preserve sanctioned baseline evidence"
+assert_equal 'pane:start_T208' "$(cat "$start_run/PANE")" \
+  "start did not persist its valid pane identity"
+
+status_started="$(date +%s%3N)"
+"$fixture_engine" status "$start_run" >"$tmp/start-active.status"
+status_elapsed=$(( $(date +%s%3N) - status_started ))
+[[ "$status_elapsed" -lt 300 ]] || fail "status waited or scanned (${status_elapsed}ms)"
+jq -e --arg id "$start_id" --arg run "$start_run" '
+  .schema == "qq-run-status" and .run_id == $id and .run_dir == $run
+  and .state == "running" and (.worker_pid | type == "number")
+' "$tmp/start-active.status" >/dev/null
+set +e
+"$fixture_engine" wait "$start_run" >"$tmp/start-success.wait"
+start_wait_status=$?
+set -e
+assert_equal 0 "$start_wait_status" "wait did not preserve successful child status"
+jq -e --arg id "$start_id" '.state == "terminal" and .run_id == $id and .exit_code == 0' \
+  "$tmp/start-success.wait" >/dev/null
+"$fixture_engine" status "$start_run" >"$tmp/start-terminal.status"
+jq -e --arg id "$start_id" '.state == "terminal" and .run_id == $id and .exit_code == 0' \
+  "$tmp/start-terminal.status" >/dev/null
+"$fixture_engine" collect "$start_run" >"$tmp/start-success.collect"
+jq -e --arg id "$start_id" --arg run "$start_run" '
+  .schema == "qq-run-collection" and .run_id == $id and .run_dir == $run
+  and .state == "terminal" and .terminal.schema == "qq-run-terminal"
+  and .terminal.version == 2 and .terminal.run_id == $id
+  and .terminal.exit_code == 0 and .terminal.run_dir == $run
+  and .terminal_path == ($run + "/TERMINAL")
+  and .envelope_path == ($run + "/ENVELOPE.md")
+  and .envelope == "# completion envelope\n"
+' "$tmp/start-success.collect" >/dev/null
+assert_equal 'owner baseline evidence' "$(cat "$start_run/cache/baseline/check.log")" \
+  "collection did not preserve the sanctioned baseline evidence"
+
+# Completed TERMINAL v2 state from the admitted blocking engine remains exact
+# authority even when its pre-LAUNCH run directory has no LAUNCH artifact.
+legacy_terminal_run="$(new_run legacy-terminal-only)"
+run_case legacy-terminal-only reviewer "$fixture" "$legacy_terminal_run/BRIEF.md"
+assert_equal 0 "$RUN_STATUS" "legacy fixture run did not complete"
+rm "$legacy_terminal_run/LAUNCH"
+[ ! -e "$legacy_terminal_run/LAUNCH" ] || fail "legacy fixture retained LAUNCH"
+"$fixture_engine" status "$legacy_terminal_run" >"$tmp/legacy-terminal.status"
+"$fixture_engine" wait "$legacy_terminal_run" >"$tmp/legacy-terminal.wait"
+"$fixture_engine" collect "$legacy_terminal_run" >"$tmp/legacy-terminal.collect"
+python3 - "$legacy_terminal_run" "$tmp/legacy-terminal.status" \
+  "$tmp/legacy-terminal.wait" "$tmp/legacy-terminal.collect" <<'PY'
+import json
+from pathlib import Path
+import sys
+run = Path(sys.argv[1])
+terminal = json.loads((run / "TERMINAL").read_text())
+status = json.loads(Path(sys.argv[2]).read_text())
+wait = json.loads(Path(sys.argv[3]).read_text())
+collection = json.loads(Path(sys.argv[4]).read_text())
+for snapshot in (status, wait):
+    assert snapshot == {
+        "schema": "qq-run-status", "version": 1,
+        "run_id": terminal["run_id"], "run_dir": str(run),
+        "state": "terminal", "role": terminal["agent"],
+        "cwd": terminal["cwd"], "exit_code": terminal["exit_code"],
+        "timed_out": terminal["timed_out"],
+        "terminal_path": str(run / "TERMINAL"),
+    }, snapshot
+assert collection["terminal"] == terminal, collection
+assert collection["run_id"] == terminal["run_id"], collection
+assert collection["run_dir"] == str(run), collection
+assert collection["terminal_path"] == str(run / "TERMINAL"), collection
+assert collection["envelope"] == (run / "ENVELOPE.md").read_text(), collection
+PY
+
+# Wait and collection both preserve nonzero and timeout outcomes while still
+# emitting exact attributable JSON.
+start_failed_run="$(new_run start-failed 'exit=3')"
+"$fixture_engine" start --role reviewer --cwd "$fixture" \
+  --brief "$start_failed_run/BRIEF.md" >"$tmp/start-failed.start"
+failed_start_id="$(jq -r .run_id "$tmp/start-failed.start")"
+set +e
+"$fixture_engine" wait "$start_failed_run" >"$tmp/start-failed.wait"
+failed_wait_status=$?
+"$fixture_engine" collect "$start_failed_run" >"$tmp/start-failed.collect"
+failed_collect_status=$?
+set -e
+assert_equal 3 "$failed_wait_status" "wait did not preserve child exit 3"
+assert_equal 3 "$failed_collect_status" "collect did not preserve child exit 3"
+jq -e --arg id "$failed_start_id" '.run_id == $id and .exit_code == 3 and .timed_out == false' \
+  "$tmp/start-failed.wait" >/dev/null
+jq -e --arg id "$failed_start_id" '.run_id == $id and .terminal.exit_code == 3' \
+  "$tmp/start-failed.collect" >/dev/null
+
+start_timeout_run="$(new_run start-timeout 'wedge=1')"
+env QQ_DISPATCH_TIMEOUT=0.3s "$fixture_engine" start --role reviewer --cwd "$fixture" \
+  --brief "$start_timeout_run/BRIEF.md" >"$tmp/start-timeout.start"
+timeout_start_id="$(jq -r .run_id "$tmp/start-timeout.start")"
+set +e
+"$fixture_engine" wait "$start_timeout_run" >"$tmp/start-timeout.wait"
+start_timeout_status=$?
+"$fixture_engine" collect "$start_timeout_run" >"$tmp/start-timeout.collect"
+start_timeout_collect_status=$?
+set -e
+assert_equal 124 "$start_timeout_status" "non-blocking wait did not preserve timeout"
+assert_equal 124 "$start_timeout_collect_status" "timeout collection did not preserve timeout"
+jq -e --arg id "$timeout_start_id" '
+  .run_id == $id and .exit_code == 124 and .timed_out == true
+' "$tmp/start-timeout.wait" >/dev/null
+jq -e '.terminal.exit_code == 124 and .terminal.timed_out == true' \
+  "$tmp/start-timeout.collect" >/dev/null
+start_wedged_pid="$(cat "$start_timeout_run/stub-child.pid")"
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  kill -0 "$start_wedged_pid" 2>/dev/null || break
+  sleep 0.05
+done
+kill -0 "$start_wedged_pid" 2>/dev/null \
+  && fail "non-blocking timeout leaked descendant $start_wedged_pid"
+
+# start-batch accepts the existing shape promptly, starts all three tickets,
+# and preserves exact per-run attribution through independent collection.
+start_batch_runs=()
+for name in start-batch-a start-batch-b start-batch-c; do
+  start_batch_runs+=("$(new_run "$name" 'sleep=1.5')")
+done
+start_batch_json="$tmp/start-batch.json"
+python3 - "$start_batch_json" "$fixture" "${start_batch_runs[@]}" <<'PY'
+import json
+from pathlib import Path
+import sys
+target, cwd, *runs = sys.argv[1:]
+Path(target).write_text(json.dumps([
+    {"role": "reviewer", "cwd": cwd, "brief": run + "/BRIEF.md"}
+    for run in runs
+]))
+PY
+start_batch_started="$(date +%s%3N)"
+"$fixture_engine" start-batch "$start_batch_json" >"$tmp/start-batch.stdout"
+start_batch_elapsed=$(( $(date +%s%3N) - start_batch_started ))
+[[ "$start_batch_elapsed" -lt 1000 ]] \
+  || fail "start-batch waited through child lifecycles (${start_batch_elapsed}ms)"
+assert_equal 3 "$(wc -l <"$tmp/start-batch.stdout" | tr -d ' ')" \
+  "start-batch did not emit one line per accepted ticket"
+python3 - "$tmp/start-batch.stdout" "${start_batch_runs[@]}" <<'PY'
+import json
+from pathlib import Path
+import sys
+rows = [json.loads(line) for line in Path(sys.argv[1]).read_text().splitlines()]
+assert [row["run_dir"] for row in rows] == sys.argv[2:], rows
+assert len({row["run_id"] for row in rows}) == 3, rows
+assert all(row["state"] == "accepted" for row in rows), rows
+PY
+for run in "${start_batch_runs[@]}"; do
+  "$fixture_engine" wait "$run" >"$tmp/$(basename "$run").wait"
+  "$fixture_engine" collect "$run" >"$tmp/$(basename "$run").collect"
+  jq -e --arg run "$run" '.run_dir == $run and .terminal.run_dir == $run' \
+    "$tmp/$(basename "$run").collect" >/dev/null
+done
+
+# A delayed same-directory starter must revalidate after acquiring its claim.
+# The accepted winner stays collectable and the loser never launches a child or
+# leaves claim residue after the winner unlinks its own claim.
+race_run="$(new_run same-directory-race 'sleep=0.4')"
+race_site="$tmp/same-directory-race-site"
+race_marker="$tmp/same-directory-race.marker"
+race_pid_log="$tmp/same-directory-race.pids"
+mkdir -p "$race_site"
+cat >"$race_site/sitecustomize.py" <<'PY'
+import os
+import time
+from pathlib import Path
+if os.environ.get("QQ_DELEGATE_INTERNAL_WORKER") == "1" and os.environ.get("QQ_DELEGATE_TEST_SLOW_CLAIM") == "1":
+    marker = Path(os.environ["QQ_DELEGATE_TEST_CLAIM_MARKER"])
+    marker.write_text("sleeping\n")
+    time.sleep(1.2)
+    marker.write_text("released\n")
+PY
+env PYTHONPATH="$race_site" QQ_DELEGATE_TEST_SLOW_CLAIM=1 \
+  QQ_DELEGATE_TEST_CLAIM_MARKER="$race_marker" \
+  QQ_DELEGATE_TEST_PID_LOG="$race_pid_log" \
+  "$fixture_engine" start --role reviewer --cwd "$fixture" \
+  --brief "$race_run/BRIEF.md" >"$tmp/same-directory-race-a.stdout" \
+  2>"$tmp/same-directory-race-a.stderr" &
+race_a_starter=$!
+for _ in {1..200}; do
+  [[ -f "$race_marker" && "$(cat "$race_marker")" == sleeping ]] && break
+  sleep 0.01
+done
+[[ -f "$race_marker" && "$(cat "$race_marker")" == sleeping ]] \
+  || fail "delayed same-directory worker did not reach the claim window"
+env QQ_DELEGATE_TEST_PID_LOG="$race_pid_log" \
+  "$fixture_engine" start --role reviewer --cwd "$fixture" \
+  --brief "$race_run/BRIEF.md" >"$tmp/same-directory-race-b.stdout"
+set +e
+wait "$race_a_starter"
+race_a_status=$?
+set -e
+[[ "$race_a_status" -ne 0 ]] || fail "duplicate same-directory starter was accepted"
+"$fixture_engine" wait "$race_run" >"$tmp/same-directory-race.wait"
+for _ in {1..200}; do
+  [[ -f "$race_marker" && "$(cat "$race_marker")" == released ]] && break
+  sleep 0.01
+done
+[[ -f "$race_marker" && "$(cat "$race_marker")" == released ]] \
+  || fail "delayed same-directory worker did not leave its stall"
+sleep 0.2
+[ ! -e "$race_run/.launch-claim" ] \
+  || fail "losing same-directory worker left claim residue"
+"$fixture_engine" status "$race_run" >"$tmp/same-directory-race.status"
+"$fixture_engine" collect "$race_run" >"$tmp/same-directory-race.collect"
+assert_equal 1 "$(wc -l <"$race_pid_log" | tr -d ' ')" \
+  "losing same-directory worker launched a second child"
+race_id="$(jq -r .run_id "$tmp/same-directory-race-b.stdout")"
+jq -e --arg id "$race_id" '.state == "terminal" and .run_id == $id and .exit_code == 0' \
+  "$tmp/same-directory-race.status" >/dev/null
+jq -e --arg id "$race_id" '.run_id == $id and .terminal.run_id == $id' \
+  "$tmp/same-directory-race.collect" >/dev/null
+
+# A starter shell may disappear immediately after acceptance; the detached
+# worker remains authoritative and seals the exact run.
+detached_survival_run="$(new_run detached-survival 'sleep=0.5')"
+(
+  exec "$fixture_engine" start --role reviewer --cwd "$fixture" \
+    --brief "$detached_survival_run/BRIEF.md"
+) >"$tmp/detached-survival.start" &
+starter_pid=$!
+wait "$starter_pid"
+[ -f "$detached_survival_run/LAUNCH" ] || fail "starter returned before durable acceptance"
+"$fixture_engine" wait "$detached_survival_run" >"$tmp/detached-survival.wait"
+
+# Killing the exact detached worker cannot leave a plausible running state.
+# Status checks the persisted PID/start identity and tears down its owned group.
+worker_failure_run="$(new_run worker-failure 'wedge=1')"
+env QQ_DISPATCH_TIMEOUT=5s "$fixture_engine" start --role reviewer --cwd "$fixture" \
+  --brief "$worker_failure_run/BRIEF.md" >"$tmp/worker-failure.start"
+for _ in {1..100}; do
+  [ -s "$worker_failure_run/stub-child.pid" ] && break
+  sleep 0.02
+done
+[ -s "$worker_failure_run/stub-child.pid" ] || fail "worker-failure descendant did not start"
+worker_failure_child="$(cat "$worker_failure_run/stub-child.pid")"
+worker_failure_pid="$(jq -r .worker_pid "$worker_failure_run/LAUNCH")"
+kill -KILL "$worker_failure_pid"
+for _ in {1..100}; do
+  kill -0 "$worker_failure_pid" 2>/dev/null || break
+  sleep 0.01
+done
+set +e
+"$fixture_engine" status "$worker_failure_run" >"$tmp/worker-failure.status"
+worker_failure_status=$?
+set -e
+assert_equal 75 "$worker_failure_status" "dead detached worker looked plausible"
+jq -e '.state == "failed" and .reason == "worker-not-running"' \
+  "$tmp/worker-failure.status" >/dev/null
+for _ in {1..100}; do
+  kill -0 "$worker_failure_child" 2>/dev/null || break
+  sleep 0.02
+done
+kill -0 "$worker_failure_child" 2>/dev/null \
+  && fail "dead worker status cleanup leaked descendant $worker_failure_child"
+expect_refusal incomplete-worker-collect 'incomplete and cannot be collected' \
+  "$fixture_engine" collect "$worker_failure_run"
+
+# Starting spent output and preflight-invalid tickets fails before emitting an
+# acceptance line. The spent run stays refused on every retry.
+spent_output_run="$(new_run spent-output)"
+printf 'prior output\n' >"$spent_output_run/output.jsonl"
+expect_refusal spent-output-start 'failed before accepting the ticket' \
+  "$fixture_engine" start --role reviewer --cwd "$fixture" \
+    --brief "$spent_output_run/BRIEF.md"
+preflight_failure_run="$(new_run start-preflight-failure)"
+expect_refusal start-preflight-failure 'failed before accepting the ticket' \
+  "$fixture_engine" start --role architect --cwd "$fixture" \
+    --brief "$preflight_failure_run/BRIEF.md"
+expect_refusal spent-terminal-start 'LAUNCH metadata is misattributed' \
+  "$fixture_engine" start --role reviewer --cwd "$fixture" \
+    --brief "$start_run/BRIEF.md"
+
+# Lifecycle validation refuses missing, malformed, linked, loose, mismatched,
+# stale-process, and cross-run artifacts without scanning for another run.
+missing_launch_run="$(new_run missing-launch-status)"
+expect_refusal missing-launch-status 'LAUNCH is missing' \
+  "$fixture_engine" status "$missing_launch_run"
+ln -s "$start_run" "$runtime_root/symlink-run"
+expect_refusal symlink-run-status 'non-symlink directory' \
+  "$fixture_engine" status "$runtime_root/symlink-run"
+chmod 755 "$start_run"
+expect_refusal loose-status 'run directory must be mode 700' \
+  "$fixture_engine" status "$start_run"
+chmod 700 "$start_run"
+
+cp -p "$start_run/LAUNCH" "$tmp/start.LAUNCH"
+chmod 644 "$start_run/LAUNCH"
+expect_refusal launch-mode 'LAUNCH must be mode 600' \
+  "$fixture_engine" status "$start_run"
+cp -p "$tmp/start.LAUNCH" "$start_run/LAUNCH"
+printf '{malformed\n' >"$start_run/LAUNCH"
+chmod 600 "$start_run/LAUNCH"
+expect_refusal launch-malformed 'LAUNCH is malformed' \
+  "$fixture_engine" status "$start_run"
+cp -p "$tmp/start.LAUNCH" "$start_run/LAUNCH"
+mv "$start_run/LAUNCH" "$start_run/LAUNCH.saved"
+ln -s LAUNCH.saved "$start_run/LAUNCH"
+expect_refusal launch-symlink 'LAUNCH is not a regular non-symlink file' \
+  "$fixture_engine" status "$start_run"
+rm "$start_run/LAUNCH"
+mv "$start_run/LAUNCH.saved" "$start_run/LAUNCH"
+python3 - "$start_run/LAUNCH" <<'PY'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1]); value = json.loads(path.read_text())
+value["run_id"] = "00000000-0000-0000-0000-000000000000"
+path.write_text(json.dumps(value) + "\n")
+PY
+chmod 600 "$start_run/LAUNCH"
+expect_refusal launch-run-id 'TERMINAL is mismatched or misattributed' \
+  "$fixture_engine" status "$start_run"
+cp -p "$tmp/start.LAUNCH" "$start_run/LAUNCH"
+
+cp -p "$start_run/TERMINAL" "$tmp/start.TERMINAL"
+printf '{malformed\n' >"$start_run/TERMINAL"
+chmod 600 "$start_run/TERMINAL"
+expect_refusal terminal-malformed 'TERMINAL is malformed' \
+  "$fixture_engine" collect "$start_run"
+cp -p "$tmp/start.TERMINAL" "$start_run/TERMINAL"
+mv "$start_run/TERMINAL" "$start_run/TERMINAL.saved"
+ln -s TERMINAL.saved "$start_run/TERMINAL"
+expect_refusal terminal-symlink 'TERMINAL is not a regular non-symlink file' \
+  "$fixture_engine" collect "$start_run"
+rm "$start_run/TERMINAL"
+mv "$start_run/TERMINAL.saved" "$start_run/TERMINAL"
+python3 - "$start_run/TERMINAL" <<'PY'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1]); value = json.loads(path.read_text())
+value["run_id"] = "00000000-0000-0000-0000-000000000000"
+path.write_text(json.dumps(value) + "\n")
+PY
+chmod 600 "$start_run/TERMINAL"
+expect_refusal terminal-run-id 'TERMINAL is mismatched or misattributed' \
+  "$fixture_engine" collect "$start_run"
+cp -p "$tmp/start.TERMINAL" "$start_run/TERMINAL"
+
+mv "$start_run/ENVELOPE.md" "$start_run/ENVELOPE.saved"
+expect_refusal envelope-missing 'ENVELOPE.md is missing' \
+  "$fixture_engine" collect "$start_run"
+ln -s ENVELOPE.saved "$start_run/ENVELOPE.md"
+expect_refusal envelope-symlink 'ENVELOPE.md is not a regular non-symlink file' \
+  "$fixture_engine" collect "$start_run"
+rm "$start_run/ENVELOPE.md"
+mv "$start_run/ENVELOPE.saved" "$start_run/ENVELOPE.md"
+chmod 644 "$start_run/ENVELOPE.md"
+expect_refusal envelope-mode 'ENVELOPE.md must be mode 600' \
+  "$fixture_engine" collect "$start_run"
+chmod 600 "$start_run/ENVELOPE.md"
+
+cp -p "$start_run/PANE" "$tmp/start.PANE"
+mv "$start_run/PANE" "$start_run/PANE.saved"
+ln -s PANE.saved "$start_run/PANE"
+expect_refusal pane-symlink 'PANE is not a regular non-symlink file' \
+  "$fixture_engine" collect "$start_run"
+rm "$start_run/PANE"
+mv "$start_run/PANE.saved" "$start_run/PANE"
+printf 'unsafe pane\n' >"$start_run/PANE"
+chmod 600 "$start_run/PANE"
+expect_refusal pane-malformed 'PANE is malformed' \
+  "$fixture_engine" collect "$start_run"
+cp -p "$tmp/start.PANE" "$start_run/PANE"
+chmod 644 "$start_run/PANE"
+expect_refusal pane-mode 'PANE must be mode 600' \
+  "$fixture_engine" collect "$start_run"
+cp -p "$tmp/start.PANE" "$start_run/PANE"
+"$fixture_engine" collect "$start_run" >"$tmp/start-valid-pane.collect"
+jq -e '.state == "terminal" and .terminal.exit_code == 0' \
+  "$tmp/start-valid-pane.collect" >/dev/null
+printf %s 'pane:start_T208' >"$start_run/PANE"
+chmod 600 "$start_run/PANE"
+"$fixture_engine" collect "$start_run" >"$tmp/start-valid-pane-no-newline.collect"
+jq -e '.state == "terminal" and .terminal.exit_code == 0' \
+  "$tmp/start-valid-pane-no-newline.collect" >/dev/null
+cp -p "$tmp/start.PANE" "$start_run/PANE"
+
+mv "$start_run/output.jsonl" "$start_run/output.saved"
+expect_refusal output-missing 'terminal output log is missing' \
+  "$fixture_engine" collect "$start_run"
+mv "$start_run/output.saved" "$start_run/output.jsonl"
+cp -p "$start_run/output.jsonl" "$tmp/start.output.jsonl"
+truncate -s 134217728 "$start_run/output.jsonl"
+set +e
+(
+  ulimit -v 65536
+  "$fixture_engine" collect "$start_run"
+) >"$tmp/start-sparse-output.collect" 2>"$tmp/start-sparse-output.stderr"
+sparse_output_status=$?
+set -e
+assert_equal 0 "$sparse_output_status" \
+  "collection loaded the sparse terminal output instead of validating metadata"
+cp -p "$tmp/start.output.jsonl" "$start_run/output.jsonl"
+mv "$start_run/sessions" "$start_run/sessions.saved"
+ln -s sessions.saved "$start_run/sessions"
+expect_refusal sessions-symlink 'terminal sessions directory is not a regular non-symlink directory' \
+  "$fixture_engine" collect "$start_run"
+rm "$start_run/sessions"
+mv "$start_run/sessions.saved" "$start_run/sessions"
+
+cp -p "$start_failed_run/TERMINAL" "$tmp/start-failed.TERMINAL"
+cp -p "$start_run/TERMINAL" "$start_failed_run/TERMINAL"
+expect_refusal cross-run-terminal 'TERMINAL is mismatched or misattributed' \
+  "$fixture_engine" collect "$start_failed_run"
+cp -p "$tmp/start-failed.TERMINAL" "$start_failed_run/TERMINAL"
+
+stale_pid_run="$(new_run stale-pid 'sleep=1')"
+"$fixture_engine" start --role reviewer --cwd "$fixture" \
+  --brief "$stale_pid_run/BRIEF.md" >"$tmp/stale-pid.start"
+cp -p "$stale_pid_run/LAUNCH" "$tmp/stale-pid.LAUNCH"
+python3 - "$stale_pid_run/LAUNCH" <<'PY'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1]); value = json.loads(path.read_text())
+value["dispatch_process_group"] += 1
+path.write_text(json.dumps(value) + "\n")
+PY
+chmod 600 "$stale_pid_run/LAUNCH"
+expect_refusal detached-process-group 'detached LAUNCH process group is misattributed' \
+  "$fixture_engine" status "$stale_pid_run"
+cp -p "$tmp/stale-pid.LAUNCH" "$stale_pid_run/LAUNCH"
+python3 - "$stale_pid_run/LAUNCH" <<'PY'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1]); value = json.loads(path.read_text())
+value["worker_start_ticks"] += 1
+path.write_text(json.dumps(value) + "\n")
+PY
+chmod 600 "$stale_pid_run/LAUNCH"
+set +e
+"$fixture_engine" status "$stale_pid_run" >"$tmp/stale-pid.status"
+stale_pid_status=$?
+set -e
+assert_equal 75 "$stale_pid_status" "stale PID identity looked running"
+jq -e '.state == "failed" and .reason == "worker-pid-reused"' \
+  "$tmp/stale-pid.status" >/dev/null
+cp -p "$tmp/stale-pid.LAUNCH" "$stale_pid_run/LAUNCH"
+"$fixture_engine" wait "$stale_pid_run" >"$tmp/stale-pid.wait"
+
 empty_batch="$tmp/empty.json"
 printf '[]\n' >"$empty_batch"
 expect_refusal empty-batch '1..12 tickets' "$fixture_engine" batch "$empty_batch"
@@ -565,6 +1038,6 @@ printf '[{"role":"reviewer","cwd":"%s"}]\n' "$fixture" >"$missing_key_batch"
 expect_refusal missing-key-batch 'exact keys role,cwd,brief' \
   "$fixture_engine" batch "$missing_key_batch"
 
-assert_equal 18 "$fail_closed_count" "fail-closed test count changed"
+assert_equal 42 "$fail_closed_count" "fail-closed test count changed"
 printf 'test-qq-delegate: fail-closed cases: %s\n' "$fail_closed_count"
 printf 'test-qq-delegate: pass\n'
