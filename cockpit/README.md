@@ -1,9 +1,11 @@
 # Cockpit
 
-`cockpit/` is the source of truth for the human-driven terminal surface.
-Day-0 bootstrap (see the README's Install section) symlinks each config file
-into `~/.config`, so editing here or through the live config path edits the
-same file; the shell surface is sourced straight from this checkout.
+`cockpit/` contains Repository-owned templates and helpers for the human-driven
+terminal surface. The ignored `herdr/config.toml` is operator-local state, not
+Repository-owned content. Day-0 bootstrap (see the README's Install section)
+links tracked fixed-path configurations and, when it exists separately, the
+optional local Herdr config into `~/.config`; the shell surface is sourced
+straight from this checkout.
 
 ## Files
 
@@ -14,8 +16,9 @@ same file; the shell surface is sourced straight from this checkout.
   surface, masks Herdr's session-only right edge; other sizes pass through
   unchanged.
 - `glow/glow.yml` — fixed-width, no-pager Glow defaults for pane rendering.
-- `herdr/config.toml` — tokyo-night, onboarding suppressed, priority-sorted
-  agent sidebar, direct navigation, agent-pull, and project-home snap bindings.
+- `herdr/config.toml` — ignored operator-local state,
+  not Repository-owned content; when it exists separately, the root README
+  shows an optional guarded link for Herdr's fixed config path.
 - `shell/file-navigation.bash` — `QQ_HOME`, `qqroot`, focused-worktree lookup
   through `qq_space_dir`, and shell directory changes through `qqcd`.
 - `systemd/user/qq-openwiki-daily.{service,timer}` — repository-owned user
