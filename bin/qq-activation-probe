@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Prepare or verify an isolated live methodology-activation acceptance runtime.
+set -euo pipefail
+
+self="$(readlink -f -- "${BASH_SOURCE[0]}")"
+helper="$(dirname "$self")/lib/qq-activation.py"
+
+case "${1:-}" in
+  prepare)
+    [ "$#" -eq 2 ] || { printf 'usage: qq-activation-probe prepare <new-absolute-runtime-root>\n' >&2; exit 64; }
+    exec "$helper" probe-prepare --runtime-root "$2"
+    ;;
+  validate)
+    [ "$#" -eq 2 ] || { printf 'usage: qq-activation-probe validate <absolute-runtime-root>\n' >&2; exit 64; }
+    exec "$helper" probe-validate --runtime-root "$2"
+    ;;
+  request)
+    shift
+    [ "$#" -ge 5 ] || { printf 'usage: qq-activation-probe request <absolute-runtime-root> --repo <qq-main> --pane <id> --pane <id> [...]\n' >&2; exit 64; }
+    root="$1"
+    shift
+    exec "$helper" probe-request --runtime-root "$root" "$@"
+    ;;
+  verify)
+    shift
+    [ "$#" -ge 1 ] || { printf 'usage: qq-activation-probe verify <absolute-runtime-root> [--minimum <count>]\n' >&2; exit 64; }
+    root="$1"
+    shift
+    exec "$helper" probe-verify --runtime-root "$root" "$@"
+    ;;
+  *)
+    printf 'usage: qq-activation-probe prepare <new-absolute-runtime-root> | validate <root> | request <root> --repo <qq-main> --pane <id> --pane <id> [...] | verify <root> [--minimum <count>]\n' >&2
+    exit 64
+    ;;
+esac
