@@ -3,19 +3,19 @@
     "provider": "openai-codex",
     "model": "gpt-5.6-sol",
     "effort": "xhigh",
-    "serviceClass": "provider-default"
+    "serviceClass": "priority"
   },
   "implementer": {
     "provider": "openai-codex",
     "model": "gpt-5.6-sol",
     "effort": "xhigh",
-    "serviceClass": "provider-default"
+    "serviceClass": "priority"
   },
   "observer": {
     "provider": "openai-codex",
     "model": "gpt-5.6-sol",
     "effort": "xhigh",
-    "serviceClass": "provider-default"
+    "serviceClass": "priority"
   },
   "orchestrator": {
     "provider": "kimi-coding",
@@ -27,7 +27,7 @@
     "provider": "openai-codex",
     "model": "gpt-5.6-sol",
     "effort": "xhigh",
-    "serviceClass": "provider-default"
+    "serviceClass": "priority"
   },
   "reviewer": {
     "provider": "kimi-coding",
