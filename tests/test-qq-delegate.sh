@@ -407,7 +407,8 @@ expect_refusal bad-effort 'effort for reviewer is unsupported' \
   "$fixture_engine" run --role reviewer --cwd "$fixture" --brief "$bad_effort_run/BRIEF.md"
 cp "$tmp/policy.original" "$policy"
 
-# provider-default omits thinking; researcher mounts Context7 and rejects its API key.
+# Provider-default omits thinking; the canonical researcher mounts Fast mode
+# before Context7 and rejects an inherited Context7 API key.
 python3 - "$policy" <<'PY'
 import json
 from pathlib import Path
@@ -429,41 +430,19 @@ cp "$tmp/policy.original" "$policy"
 research_run="$(new_run researcher)"
 run_case researcher researcher "$fixture" "$research_run/BRIEF.md"
 assert_equal 0 "$RUN_STATUS" "researcher dispatch failed"
-CONTEXT7="$context7" python3 - "$research_run/argv.nul" <<'PY'
-import os
-from pathlib import Path
-import sys
-args = Path(sys.argv[1]).read_bytes().split(b"\0")
-n = args.index(b"--extension")
-assert args[n + 1].decode() == os.environ["CONTEXT7"]
-tools = args[args.index(b"--tools") + 1].decode().split(",")
-assert "resolve-library-id" in tools and "query-docs" in tools, tools
-PY
-
-python3 - "$tmp/policy.original" "$policy" <<'PY'
-import json
-from pathlib import Path
-import sys
-source, target = map(Path, sys.argv[1:])
-value = json.loads(source.read_text())
-value["researcher"]["serviceClass"] = "priority"
-target.write_text(json.dumps(value))
-PY
-research_service_run="$(new_run researcher-service)"
-run_case researcher-service researcher "$fixture" "$research_service_run/BRIEF.md"
-assert_equal 0 "$RUN_STATUS" "researcher service-class dispatch failed"
 CONTEXT7="$context7" SERVICE_EXTENSION="$fixture_service_extension" \
-  python3 - "$research_service_run/argv.nul" <<'PY'
+  python3 - "$research_run/argv.nul" <<'PY'
 import os
 from pathlib import Path
 import sys
 args = Path(sys.argv[1]).read_bytes().split(b"\0")
 extensions = [args[index + 1].decode() for index, value in enumerate(args) if value == b"--extension"]
 assert extensions == [os.environ["SERVICE_EXTENSION"], os.environ["CONTEXT7"]], extensions
+tools = args[args.index(b"--tools") + 1].decode().split(",")
+assert "resolve-library-id" in tools and "query-docs" in tools, tools
 PY
-grep -Fxq 'QQ_DELEGATE_SERVICE_CLASS=priority' "$research_service_run/child.env" \
+grep -Fxq 'QQ_DELEGATE_SERVICE_CLASS=priority' "$research_run/child.env" \
   || fail 'researcher did not receive its validated private service class'
-cp "$tmp/policy.original" "$policy"
 
 context_key_run="$(new_run context-key)"
 expect_refusal context-key 'forbids inherited CONTEXT7_API_KEY' \

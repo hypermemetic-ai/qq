@@ -16,9 +16,9 @@ jq -e '
     . == {provider:"kimi-coding", model:"k3", effort:"max", serviceClass:"provider-default"}
   ))
   and ([.architect, .implementer, .observer, .researcher] | all(
-    . == {provider:"openai-codex", model:"gpt-5.6-sol", effort:"xhigh", serviceClass:"provider-default"}
+    . == {provider:"openai-codex", model:"gpt-5.6-sol", effort:"xhigh", serviceClass:"priority"}
   ))
-' "$POLICY" >/dev/null || fail 'six-role policy does not match the operator-restored map'
+' "$POLICY" >/dev/null || fail 'six-role policy does not match the operator-set map'
 
 for manifest in "$ROOT"/delegation/manifests/agents/{implementer,observer,researcher,reviewer}.md; do
   assert_file_not_matches "$manifest" '^(model|thinking):' 'canonical manifest retained compute authority'

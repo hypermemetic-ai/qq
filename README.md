@@ -176,10 +176,11 @@ chmod 600 ~/.pi/agent/auth.json
 
 `delegation/policies/execution-profiles.json` assigns Orchestrator and Reviewer
 to `kimi-coding/k3:max`; Architect, Implementer, Researcher, and Observer use
-`openai-codex/gpt-5.6-sol:xhigh`. All six currently request the provider-default
-service class. `qq-delegate` reads the selected delegated role from this policy
-and passes its provider, model, and non-default thinking level through Pi's
-native CLI flags.
+`openai-codex/gpt-5.6-sol:xhigh` with the `priority` service class (Fast mode).
+Ordinary Pi sessions use the globally mounted `qq-codex-fast` extension to
+apply the same service class to every GPT-5.6 model. `qq-delegate` reads the
+selected delegated role from this policy and passes its provider, model, and
+non-default thinking level through Pi's native CLI flags.
 
 A delegated route may instead select `auto`, `default`, `flex`, or `priority`
 service class when its requested provider is `openai` or `openai-codex`.
