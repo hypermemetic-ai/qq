@@ -150,7 +150,9 @@ for index in "${!task_files[@]}"; do
   IFS=$'\t' read -r task_id status <<<"$metadata"
   [ "$task_id" = "$expected" ] || data_refuse 'Task filename and frontmatter id disagree.' \
     "$("$QQ_ENGINE_JQ" -cn --arg task_file "$path" --arg expected_id "$expected" --arg stored_id "$task_id" '{task_file:$task_file,expected_id:$expected_id,stored_id:$stored_id}')"
-  case "$status" in 'To Do' | 'In Progress' | Done) ;; *) data_refuse 'Task record has an unsupported stored status.' \
+  case "$status" in
+    Unaligned | Aligned | Active | 'To Do' | 'In Progress' | Done) ;;
+    *) data_refuse 'Task record has an unsupported stored status.' \
     "$("$QQ_ENGINE_JQ" -cn --arg task_id "$task_id" --arg stored_status "$status" '{task_id:$task_id,stored_status:$stored_status}')" ;; esac
   [ -z "${seen_ids[$task_id]+x}" ] || data_refuse 'Duplicate Task record id in the store.'
   seen_ids["$task_id"]=1; task_ids+=("$task_id"); statuses+=("$status")

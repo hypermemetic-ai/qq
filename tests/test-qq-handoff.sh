@@ -66,7 +66,7 @@ task_path = task_dir / "t-155 - Fixture.md"
 plan_path = plan_dir / "doc-90 - Fixture.md"
 dirty_path = change / "dirty bytes.bin"
 
-def task_text(status="In Progress", ledger="- none", documentation=("doc-90",), title="Fixture accountable handoff"):
+def task_text(status="Aligned", ledger="- none", documentation=("doc-90",), title="Fixture accountable handoff"):
     docs = "\n".join(f"  - {item}" for item in documentation)
     return f'''---
 id: T-155
@@ -294,6 +294,30 @@ assert [rail["name"] for rail in receipt["rails"]] == ["repository_topology","ch
 caller_rail = next(rail for rail in receipt["rails"] if rail["name"] == "caller_identity")
 assert "focused" not in caller_rail["evidence"]
 assert_no_mutation()
+
+# Lifecycle authorization is explicit. Aligned is the target authorization;
+# old names remain bounded compatibility inputs behind every existing rail.
+for status in ("To Do", "In Progress"):
+    reset(); task_path.write_text(task_text(status=status), encoding="utf-8")
+    compatibility = invoke(0, "inspect", "T-155", "--repo", main)
+    assert compatibility["task"]["status"] == status
+    assert [rail["name"] for rail in compatibility["rails"]] == [
+        "repository_topology", "change_checkout", "task_and_plan_evidence",
+        "duplicate_owner", "caller_identity",
+    ]
+    assert_no_mutation()
+
+for status, message in (
+    ("Unaligned", "execution is not authorized"),
+    ("Active", "fresh manual handoff cannot create or recover"),
+    ("Done", "complete and cannot be handed off"),
+    ("Blocked", "unsupported status"),
+):
+    reset(); task_path.write_text(task_text(status=status), encoding="utf-8")
+    refused = invoke(2, "start", "T-155", "--repo", main)
+    assert refused["evidence"]["status"] == status
+    assert message in refused["message"]
+    assert_no_mutation()
 
 # A direct child resolves exactly, preserving its complete identity without a surrogate Task.
 reset()

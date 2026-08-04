@@ -69,7 +69,9 @@ global package location and executes the package's stock `dist/cli.js` with the
 caller's arguments unchanged. It refuses clearly when npm, the package, or the
 CLI is absent. After bootstrap, Pi updates use the ordinary `pi update`
 command. Ticket implementation and tests do not install or update the live
-operator runtime; activation is performed separately after the Change lands.
+operator runtime. Methodology and source mounts are live by construction; when
+landed-methodology proof is required, verify it from a fresh Pi session after
+merge rather than adding reload or activation machinery.
 
 ### Researcher-only native Context7
 

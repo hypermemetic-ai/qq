@@ -34,6 +34,10 @@ task_prefix: t
 YAML
 make_task "$repo" 1 'To Do' 'primary wins'
 make_task "$repo" 2 Done 'stored done'
+make_task "$repo" 3 'In Progress' 'old active name'
+make_task "$repo" 4 Unaligned 'target default deny'
+make_task "$repo" 5 Aligned 'target authorized'
+make_task "$repo" 6 Active 'target owned'
 "$real_git" -C "$repo" add backlog
 "$real_git" -C "$repo" -c user.name=test -c user.email=test@example.com commit -qm records
 "$real_git" -C "$repo" worktree add -qb feat/t-1-open "$linked" main >/dev/null
@@ -85,9 +89,11 @@ jq -e --arg repo "$repo" --arg scratch "$scratch" '
   .engine == "qq-board" and .action == "apply:reconcile" and .status == "done"
   and (.state | keys | sort) == ["config_source","dry_run","materialized","notes","repo_root","scratch_root","task_count","tasks"]
   and .state.repo_root == $repo and .state.scratch_root == $scratch
-  and .state.materialized and (.state.dry_run | not) and .state.task_count == 2
+  and .state.materialized and (.state.dry_run | not) and .state.task_count == 6
   and ([.state.tasks[] | {id,status}] | sort_by(.id)) == [
-    {id:"T-1",status:"To Do"},{id:"T-2",status:"Done"}]
+    {id:"T-1",status:"To Do"},{id:"T-2",status:"Done"},
+    {id:"T-3",status:"In Progress"},{id:"T-4",status:"Unaligned"},
+    {id:"T-5",status:"Aligned"},{id:"T-6",status:"Active"}]
   and all(.state.tasks[];
     (. | keys | sort) == ["filename","id","materialized","status"] and .materialized)
 ' "$tmp/result.json" >/dev/null
@@ -95,9 +101,11 @@ jq -e --arg repo "$repo" --arg scratch "$scratch" '
 generation_one="$(readlink "$scratch")"; [ -d "$generation_one/backlog/tasks" ] || fail 'publish target is incomplete'
 cmp "$repo/backlog/config.yml" "$scratch/backlog/config.yml" || fail 'config copy changed'
 cmp "$repo/backlog/tasks/t-1 - fixture-1.md" "$scratch/backlog/tasks/t-1 - fixture-1.md" || fail 'Task copy changed'
-cmp "$repo/backlog/tasks/t-2 - fixture-2.md" "$scratch/backlog/tasks/t-2 - fixture-2.md" || fail 'Task copy changed'
+for number in 2 3 4 5 6; do
+  cmp "$repo/backlog/tasks/t-$number - fixture-$number.md" "$scratch/backlog/tasks/t-$number - fixture-$number.md" || fail "Task $number copy changed"
+done
 assert_file_contains "$scratch/backlog/tasks/t-1 - fixture-1.md" 'marker: primary wins'
-assert_equal 2 "$(find "$scratch/backlog/tasks" -maxdepth 1 -type f -name '*.md' | wc -l)" 'linked Task data was aggregated'
+assert_equal 6 "$(find "$scratch/backlog/tasks" -maxdepth 1 -type f -name '*.md' | wc -l)" 'linked Task data was aggregated'
 [ -f "$generation_one/.signature" ] || fail 'generation has no signature'
 [ ! -e "$GH_WAS_CALLED" ] || fail 'qq-board invoked gh'
 [ ! -e "$FORBIDDEN_GIT_READ" ] || fail 'qq-board read status refs'
