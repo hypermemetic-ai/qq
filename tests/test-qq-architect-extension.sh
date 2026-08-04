@@ -74,6 +74,7 @@ const h = harness([result(openedContext)]);
 await h.commands.get("architect").handler("", h.ctx);
 assert.equal(h.calls.length, 1); assert.deepEqual(h.calls[0].args, ["architect-context"]);
 assert.match(h.messages[0], /compact JSON/);
+assert.match(h.messages[0], /recurring preemptive complexity across findings[\s\S]*do not recommend or route a remedy that reproduces the pattern/);
 assert.match(h.messages[0], /exact key hit in a Backlog decision record/);
 assert.match(h.messages[0], /architect_disposition action=settle/);
 assert.equal(h.messages[0].includes("awaiting affirmative"), false);

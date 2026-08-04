@@ -1,22 +1,19 @@
 ---
 name: uat-signoff
-description: Walks the owner through brief hands-on acceptance checks after a verified user-facing change. Use when user-facing behavior or UI changes, acceptance is subjective or externally observable, or the owner asks for review or sign-off.
+description: Guides operator-owned or requested acceptance after autonomous proof.
 ---
 
 # Human acceptance
 
-Autonomous verification establishes that the implementation behaves as claimed.
-Human acceptance establishes that the result matches what the owner wants in
-actual use.
+Agents first perform available live compatibility and observable-behavior proof.
+UAT is never mandatory; reserve it for genuinely operator-owned judgment,
+access, experience, or explicit request. Count setup, navigation, waiting, and
+staging machinery honestly as operator effort. Prepare without changing focus;
+say where to navigate.
 
-After verification, offer the owner a hands-on check for user-facing changes.
-Keep it proportional: a small change may need one check; a larger flow may need
-several. Internal-only work ends with autonomous verification. Prepare
-acceptance without changing focus; notify the owner where to navigate.
-
-1. Derive the smallest useful set of user-observable outcomes from the request,
-   diff, and verification evidence.
-2. Present one check at a time. State the expected behavior, then ask the owner
+1. Derive the smallest useful user-observable outcomes from the request, diff,
+   and verification.
+2. Present one check at a time. State expected behavior, then ask the owner
    to try it and report what happens.
 3. Wait for an explicit observation. Record a mismatch in the owner's words;
    record an unperformed check as skipped.

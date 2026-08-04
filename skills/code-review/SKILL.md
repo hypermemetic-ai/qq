@@ -37,21 +37,23 @@ the Change and code without inheriting the author's conclusions.
    exact-path `status`, `wait`, and `collect` contract. A nonzero terminal or
    refused/missing envelope fails dispatch; `run` is blocking compatibility.
    The brief completes orientation—no broad intent search or full-suite rerun.
-5. The reviewer tests responsibilities against the brief, exact diff, callers,
-   tests, and suspected failure paths. Review moves and deletions by invariant.
-   A hole reports the missing or contradictory fact, why it controls the
-   verdict, and evidence inspected. Amend only that fact and dispatch fresh; a
-   context gap is neither finding nor pass.
+5. Test responsibilities against the brief, exact diff, callers, tests, and
+   failure paths. Apply `REVIEW.md`'s responsibility-and-consequence standard
+   to additions and omissions; imaginability alone cannot support a finding.
+   Review moves and deletions by invariant. A hole names the missing or
+   contradictory fact, why it controls the verdict, and evidence inspected.
+   Amend only that fact and dispatch fresh; a context gap is neither finding
+   nor pass.
 6. Request only material introduced failures. Smells require evidenced future
-   cost and counterevidence, never label-driven refactoring. A finding whose
-   remedy wants a fence names the declared trust boundary; empty means shrink.
+   cost and counterevidence, never label-driven refactoring. A finding seeking
+   a fence names the declared trust boundary; absent means shrink.
 
 ## Verify and close
 
-1. Verify each finding. Confirm a failure with a constructed input, state, or
-   sequence observed to fail; confirm intent against scope and diff. Deduplicate
-   and rank confirmed findings only. Clusters may require a model decision, not
-   a patch queue. Stop at review unless fixes were requested.
+1. Verify each finding. Reproduce failure with a constructed input, state, or
+   sequence; confirm intent against scope and diff. Deduplicate and rank only
+   confirmed findings. Clusters may need a model decision, not a patch queue.
+   Stop at review unless fixes were requested.
 2. Fix only introduced, reproduced, supported, in-scope failures, choosing the
    smallest resulting system; diff size only breaks ties. Rerun affected Checks
    and review the fix delta.

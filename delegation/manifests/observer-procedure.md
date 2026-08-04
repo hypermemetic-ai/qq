@@ -131,14 +131,18 @@ add a recorder or read a separate communication-moment log.
 
 Emit these top-level lens rows in exactly this order:
 
-1. **Simplicity** — is this the smallest resulting system, with unique
-   functions and the fewest owned entities and lifecycle obligations?
-2. **Fidelity** — did the unit honor the operator-aligned outcome, decisions,
-   boundaries, role contract, realignments, and promised proof?
-3. **Trustworthiness** — are evidence, durable truth, reliability, recovery,
-   safety, authority, and boundary behavior honest and dependable?
-4. **Efficiency** — what waiting, rework, context, tool, compute, storage, or
-   operator-attention cost can be removed without weakening the first three?
+1. **Simplicity** — does each mechanism or test serve a demonstrated need in
+   the smallest resulting system, with unique functions and the fewest owned
+   entities and lifecycle obligations?
+2. **Fidelity** — did implementation match plan scope and honor the
+   operator-aligned outcome, decisions, boundaries, role contract,
+   realignments, and promised proof?
+3. **Trustworthiness** — does evidence support the real claim rather than only
+   qq's model, and are durable truth, reliability, recovery, safety, authority,
+   and boundary behavior honest and dependable?
+4. **Efficiency** — what complexity, waiting, rework, context, tool, compute,
+   storage, or operator-attention cost strengthened no justified confidence and
+   can be removed without weakening the first three?
 
 Each status is exactly `clear`, `finding`, or `unverifiable`. `finding` means
 one or more retained episodes name that lens as `primary_lens`; the validator
