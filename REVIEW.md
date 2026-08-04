@@ -1,45 +1,48 @@
 # Review guidelines
 
-A brief supplies intent, ownership/trust boundaries, non-goals, and
-threat model; its scope wins.
+Brief supplies intent, ownership/trust boundaries, non-goals, and threat model;
+its scope wins.
 
 ## Scope
 
-- Review only material failures the Change introduced in correctness,
-  security, reliability, intent, or unenforced standards.
-- Honor the declared threat model: owner-declined classes do not affect the
-  verdict; review drift-nets against it, never as security boundaries.
+- Review only materially consequential correctness, security, reliability,
+  intent, or unenforced standards failures the Change owns through current use,
+  aligned outcome, demonstrated contract, observed failure, or credible
+  consequential threat. Review additions and omissions: unsupported behavior,
+  abstractions, guards, and tests qualify when materially complex;
+  imaginability alone does not.
+- Honor the declared threat model: declined classes do not affect the verdict;
+  review drift-nets against it, never as security boundaries.
 - Correct but unapproved responsibility is an intent finding.
 - Review moves/deletions through invariants, not unchanged bodies.
 
 ## Finding shape
 
-- Findings state failure, file, line, concrete path, and evidence. A fence cites
-  a declared trust boundary; none means shrink.
+- Findings name failure, file/line, concrete path, and evidence. Fences cite
+  declared trust boundaries; otherwise shrink.
 - Classify by declared-boundary lookup, never origin archaeology. Price guard
-  and state-space-removal forms; prescriptions are not addition-shaped. An
-  interior guard stands labeled only after surviving mechanical
-  same-fix-smaller.
-- A smell is a heuristic, not a violation. Report only diff/history-supported
-  future cost after weighing generated, boundary, compatibility, or deliberate
+  and state-space-removal forms; no addition-shaped prescriptions. An interior
+  guard stays labeled only after surviving mechanical same-fix-smaller.
+- Smells are not violations. Report only diff/history-supported future cost
+  after weighing generated, boundary, compatibility, or deliberate
   bounded-context counterevidence; never prescribe from a label.
 
 ## Remedy and gates
 
-- Smallest remedy means smallest resulting system; diff breaks ties. In-boundary
-  state-space shrinkage or preservation is pre-authorized and reported in the
-  completion envelope; boundary changes align.
-- Block only at shape: merge-boundary gates are only-down count budgets, such
-  as complex functions or long files. Trend gauges, including fix-net and
-  health composites, gate nothing.
-- Place obligations only where retry is cheap or firing rare; provide
-  information elsewhere. Blended gates are gameable and undiagnosable;
-  frequent per-Change obligations become rote.
+- Smallest remedy means smallest resulting system; diff only breaks ties.
+  In-boundary state-space shrinkage or preservation is pre-authorized and
+  envelope-reported; boundary changes align.
+- Only-down count budgets, such as complex functions or long files, are
+  merge-boundary shape gates. Trends, including fix-net and health composites,
+  gate nothing.
+- Place obligations where retry is cheap or firing rare; inform elsewhere.
+  Blended gates are gameable and undiagnosable; frequent per-Change obligations
+  become rote.
 
 ## Context gaps
 
-Context-gap reports name missing/contradictory facts, why the verdict depends,
-and evidence inspected; never improvise. They are neither finding nor pass.
+Context gaps name missing/contradictory facts, why verdict depends, and inspected
+evidence; never improvise or call them findings/passes.
 
 ## Recurrence rules
 

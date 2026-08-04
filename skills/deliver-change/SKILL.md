@@ -5,23 +5,27 @@ description: Owns judgment and one-PR GitHub Flow delivery for authorized Reposi
 
 # Deliver a Change
 
-Retain scope, decisions, evidence, and delivery state; delegate only bounded
-work. Diff review is presented inline; GitHub's UI owns Checks and merge. Call
-qq engines unconditionally: they own containment, degradation, and rails.
-Answer status questions from the record, never with a steer; give the first
-authoritative status before any recovery tooling, and treat a stop steer as
-terminal with no new investigation. Before any merge-ready word, map every
-acceptance criterion to fresh evidence. At land, resolve foreign drift through
-exactly one preserve-or-restore question, never an operator-input deadlock.
+Retain scope, judgment, decisions, evidence, and delivery state. Give
+implementers bounded plans; leave cheap equivalent in-boundary details to them.
+Realign only when gaps add consequential scope, capability, contract, lifecycle,
+or commitment. Present diff inline; GitHub UI owns Checks and merge. Call qq
+engines unconditionally; they own containment, degradation, and rails. Answer
+status from the record, never a steer; give first authoritative status before
+recovery tooling; stop steers are terminal, with no new investigation. Before
+merge-ready/done claims, perform available live compatibility and
+observable-behavior proof and map every acceptance criterion to fresh evidence.
+At land, resolve foreign drift through exactly one preserve-or-restore question,
+never an operator-input deadlock.
 
 1. **Align.** Require the owning Task's decision ledger to cite what settled
-   every consequential decision—or say `none`. Dispositions do not transfer;
-   an uncited decision returns to alignment, and broader reach needs a
-   decision record. For a settled decision reaching beyond one Change, mint
-   its Backlog decision record in the Change checkout first encoding it,
-   riding that pull request—never primary `main`; cite the asked-and-answered
-   exchange until then, and switch the ledger to the record id before Task
-   finalization. Confirm branch and worktree isolation.
+   each consequential decision, or `none`. Dispositions do not transfer;
+   uncited decisions realign, and broader reach needs a decision record. For a
+   settled decision beyond one Change, mint its Backlog decision record in the
+   first encoding Change checkout and pull request—never primary `main`.
+   Cite the asked-and-answered exchange until then; switch ledger to record id
+   before Task finalization. Ground the plan in the real outcome and important
+   uncertainty; choose proportionate, decision-useful evidence before designing
+   around consequential assumptions. Confirm branch and worktree isolation.
 2. **Born.** Call `qq-herdr-home inspect --repo <root>`. Create the Change as a
    plain linked worktree from the agreed base, with no Herdr workspace.
    Backlog's CLI creates the Change's Task record in decision-28's
@@ -45,9 +49,9 @@ exactly one preserve-or-restore question, never an operator-input deadlock.
 4. **Review.** After local verification, run fresh-context `code-review` for
    every non-trivial Change; skip only a purely mechanical Change—a deletion
    or docs/prose edit, grep/CI-verifiable, with no trust boundary, no operator
-   state, and no external side effect. Verify findings, fix only confirmed
-   in-scope failures, rerun affected Checks, review every fix delta, and
-   present the diff inline.
+   state, and no external side effect. Verify reviewer findings before
+   delegating fixes; reject speculative correctness. Fix only confirmed in-scope
+   failures, rerun affected Checks, and review every fix delta.
 5. **Finalize, then PR.** First verify every acceptance criterion in the
    checkout, summarize the Change, mark its Task Done through Backlog's CLI,
    store-commit—not branch-commit—the status edit, and push the green finalization.
