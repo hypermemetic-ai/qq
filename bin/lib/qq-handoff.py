@@ -332,9 +332,23 @@ class Engine:
             raise Refusal("The selected Task record identity changed during inspection.")
         title = normalize_title(fields.get("title"))
         status_value = scalar_field(fields, "status", "Task status")
-        if status_value not in ("To Do", "In Progress"):
+        if status_value == "Unaligned":
             raise Refusal(
-                "The Task is terminal or has an unsupported status.", {"status": status_value}
+                "The Task is Unaligned; execution is not authorized.",
+                {"status": status_value},
+            )
+        if status_value == "Active":
+            raise Refusal(
+                "The Task is Active; fresh manual handoff cannot create or recover its accountable owner.",
+                {"status": status_value},
+            )
+        if status_value == "Done":
+            raise Refusal(
+                "The Task is complete and cannot be handed off.", {"status": status_value}
+            )
+        if status_value not in ("Aligned", "To Do", "In Progress"):
+            raise Refusal(
+                "The Task has an unsupported status.", {"status": status_value}
             )
         documentation = fields.get("documentation")
         if not isinstance(documentation, list) or not documentation:

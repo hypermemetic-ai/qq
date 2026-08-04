@@ -5,17 +5,15 @@ description: Owns judgment and one-PR GitHub Flow delivery for authorized Reposi
 
 # Deliver a Change
 
-Retain scope, judgment, decisions, evidence, and delivery state. Give
-implementers bounded plans; leave cheap equivalent in-boundary details to them.
-Realign only when gaps add consequential scope, capability, contract, lifecycle,
-or commitment. Present diff inline; GitHub UI owns Checks and merge. Call qq
-engines unconditionally; they own containment, degradation, and rails. Answer
-status from the record, never a steer; give first authoritative status before
-recovery tooling; stop steers are terminal, with no new investigation. Before
-merge-ready/done claims, perform available live compatibility and
-observable-behavior proof and map every acceptance criterion to fresh evidence.
-At land, resolve foreign drift through exactly one preserve-or-restore question,
-never an operator-input deadlock.
+Retain scope, judgment, decisions, evidence, and delivery state. Give bounded
+plans; leave cheap equivalent in-boundary details to implementers. Realign only
+for consequential scope/capability/contract/lifecycle/commitment. Present diff
+inline; GitHub UI owns Checks and merge. Call qq engines unconditionally for
+rails, containment, and degradation. Answer status from record—not a steer—before
+recovery; stop steers end investigation. Before merge-ready/done claims, map each
+criterion to fresh evidence and perform every available outcome, live
+compatibility, and behavior observation before merge. At land, resolve foreign
+drift with one preserve-or-restore question, never an operator-input deadlock.
 
 1. **Align.** Require the owning Task's decision ledger to cite what settled
    each consequential decision, or `none`. Dispositions do not transfer;
@@ -52,33 +50,34 @@ never an operator-input deadlock.
    state, and no external side effect. Verify reviewer findings before
    delegating fixes; reject speculative correctness. Fix only confirmed in-scope
    failures, rerun affected Checks, and review every fix delta.
-5. **Finalize, then PR.** First verify every acceptance criterion in the
-   checkout, summarize the Change, mark its Task Done through Backlog's CLI,
-   store-commit—not branch-commit—the status edit, and push the green finalization.
-   Then open the one pull request carrying
-   Task intent and Check evidence, pass final GitHub Checks, and use `gh pr
-   checks` plus `gh pr view --json mergeStateStatus,reviewDecision` as the
-   authoritative terminal surface. Open the resolved URL in the operator's
-   browser, send a Herdr notification containing it, and report it; browser and
-   cockpit behavior never block handoff. Arm `qq_pr_watch`; while Checks are
-   pending, yield to the watch instead of polling. Never merge—the operator
-   merges. A Change is **created locally** until finalized and is **mergeable
-   now** only when finalized and green; never use bare "mergeable". There is no
-   pre-finalization mergeable window. An unmet criterion reactivates the same
-   Task and Change; if the Change is unavailable, align its branch disposition
-   without replacing the Task. A closed or rejected Change follows the same
-   rule, while later intent is new work requiring approval.
-6. **Land and retire.** On the operator's merge, and after any watch wake,
-   resume, or operator message, call idempotent `qq-change land <pr> --repo
-   <checkout>`; it verifies merge and ancestry and fast-forwards the sole
-   primary `main`. Assemble and finalize this Change's guided observer package
-   while the worktree lives—dispatch the observer through the `delegate-batch`
-   contract with the procedure/package paths and the `qq-observe
-   recurrence-keys` inventory—then call `qq-change retire`. The engines own
-   the refusal semantics: land ancestry, package presence and finalized state,
-   lifecycle ownership, checkout, branch, workspace-absence, topology,
-   cleanliness, focus, and bound delegate run dirs. On refusal or error,
-   report and preserve every session, checkout, pane, and branch; never
-   force-delete, stash, clean, reset, switch, or repair delivery state. Keep
-   the five accountable-owner gates: intent alignment, plan approval, review
-   verdict, acceptance, and merge.
+5. **Finalize, then PR.** Verify every criterion, summarize, store-commit—not
+   branch-commit—Task edits, and push green. Keep Task Active/old-compatible
+   until PR merge; normal delivery never completes it first. Open
+   one PR with Task intent and Check evidence. Pass final Checks; `gh pr checks`
+   and `gh pr view --json mergeStateStatus,reviewDecision` are authoritative.
+   Open/report URL and Herdr-notify; UI never blocks. Arm
+   `qq_pr_watch`; yield, never poll. Never merge—the operator merges. A Change is
+   **created locally** until finalized, then **mergeable now** only when green;
+   never say bare "mergeable" or claim an earlier window. An unmet criterion
+   keeps the same Task and Change Active; if unavailable, align branch
+   disposition. Closed/rejected Changes follow that rule; later intent
+   needs approval.
+6. **Land, complete, and retire.** After operator merge or any
+   wake/resume/message, call idempotent `qq-change land <pr> --repo <checkout>`;
+   it verifies merge/ancestry and fast-forwards sole primary `main`. Merge
+   normally completes the Task after verification through Backlog's CLI;
+   store-commit and push that store edit: target `backlog task complete
+   <Task-ID>` moves Active outside the active collection; old stores use their
+   compatible terminal/complete sequence. Only an explicitly required
+   observation technically impossible before merge keeps the Task Active under
+   the same Change Owner until resolution. Routine post-merge Observer learning
+   and local cleanup remain owner duties, not completion gates. While the
+   worktree lives, assemble/finalize its guided observer package through
+   `delegate-batch` with procedure/package paths and `qq-observe recurrence-keys`;
+   then call `qq-change retire`. Engines own ancestry, package-finalization,
+   lifecycle-ownership, checkout, branch, workspace-absence, topology,
+   cleanliness, focus, and bound-run-dir rails.
+   On refusal/error, report and preserve every session, checkout, pane, and
+   branch; never force-delete, stash, clean, reset, switch, or repair state.
+   Keep the five accountable-owner gates: intent alignment, plan approval,
+   review verdict, acceptance, and merge.

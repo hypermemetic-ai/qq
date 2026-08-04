@@ -17,6 +17,16 @@ and delivery state.
 **Task** — Backlog.md's durable record of operator intent, acceptance criteria,
 dependencies, and work status.
 
+**Unaligned** — Default-deny; execution unauthorized.
+
+**Aligned** — Sole execution authorization.
+
+**Active** — Requires one exact accountable Change Owner.
+
+Completion/archive remove a Task from the active collection, never add a status.
+`To Do`/`In Progress`/`Done` are migration compatibility behind existing rails,
+not independent pickup authority. Unknowns fail closed.
+
 **Task umbrella** — A parent Task grouping one outcome, used only when that
 outcome needs multiple independently deliverable Changes. Its direct children
 are membership, not sequence or prerequisite claims, and their decimal
