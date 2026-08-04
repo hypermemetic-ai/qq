@@ -17,18 +17,18 @@ rebuildable derived store names the one materialization function that
 rebuilds it.
 
 At ticket creation, the owner creates one private mode-700 durable run directory
-beneath the delegate runtime root and writes its complete work order as
-`BRIEF.md`.
-Include the ticket and acceptance criteria, context, exact orientation paths
-and verified facts, constraints, per-ticket commit protocol, exact Checks, and
-the required completion envelope. The brief exists at dispatch by construction.
-Before dispatch, the owner executes every literal Check in the work order
-exactly as written from the target worktree and records the baseline outcome in
-the run directory. A Check that cannot run as written is a work-order defect—fix
-the order, never dispatch around it. Keep delegate scratch, temporary files,
-redirected logs, generated helpers, and caches beneath this run directory.
-Writers never push, open pull requests, or edit `backlog/`. Durable intent stays
-in the checkout's Task.
+beneath the delegate runtime root and writes its complete work order as `BRIEF.md`.
+Include the ticket, acceptance criteria, context, exact orientation paths and
+verified facts, constraints, commit protocol, exact Checks, and required completion
+envelope. `BRIEF.md` exists by construction at dispatch and maps supporting
+files or directories beside it.
+Before dispatch, the owner runs every literal Check exactly as written from the
+target worktree and records the baseline outcome in brief-mapped material. A
+Check that cannot run as written is a work-order defect—fix the order; never
+dispatch around it. `cache/` is disposable child/runtime storage, not for
+parent handoff. Keep scratch and generated helpers beneath it. Writers
+never push, open pull requests, or edit `backlog/`. Durable intent stays in the
+checkout's Task.
 
 - Couple shared files or invariants; work sequentially.
 - Fan out independent reads; give writers disjoint branches, worktrees, and

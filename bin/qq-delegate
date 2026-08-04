@@ -189,11 +189,11 @@ PY
 }
 
 claim_run_directory() {
-  local run_dir="$1" run_id="$2" worker_pid="$3" detached="$4"
-  if ! "$python_binary" - "$run_dir" "$run_id" "$worker_pid" "$detached" <<'PY'
+  local run_dir="$1" run_id="$2" worker_pid="$3"
+  if ! "$python_binary" - "$run_dir" "$run_id" "$worker_pid" <<'PY'
 import json, os, sys
 from pathlib import Path
-run_dir, run_id, worker_pid, detached_text = sys.argv[1:]
+run_dir, run_id, worker_pid = sys.argv[1:]
 run_path = Path(run_dir)
 target = run_path / ".launch-claim"
 value = {
@@ -208,17 +208,9 @@ try:
 finally:
     os.close(descriptor)
 try:
-    if detached_text == "true":
-        allowed = {"BRIEF.md", "PANE", "cache", ".launch-claim"}
-    elif detached_text == "false":
-        allowed = {
-            "BRIEF.md", "ENVELOPE.md", "PANE", "cache", "pi-config",
-            "sessions", ".system-prompt.md", ".launch-claim",
-        }
-    else:
-        raise OSError("invalid claim mode")
-    if any(entry.name not in allowed for entry in run_path.iterdir()):
-        raise OSError("run directory became spent while claiming")
+    reserved = {"LAUNCH", "TERMINAL", "output.jsonl", "stderr.log"}
+    if any(entry.name in reserved for entry in run_path.iterdir()):
+        raise OSError("engine-owned run state appeared while claiming")
 except BaseException:
     target.unlink(missing_ok=True)
     raise
@@ -346,25 +338,13 @@ execute_ticket() {
   [[ ! -e "$run_dir/TERMINAL" && ! -L "$run_dir/TERMINAL" ]] || fail 68 "dispatch run directory is sealed by TERMINAL: $run_dir"
   [[ ! -e "$run_dir/LAUNCH" && ! -L "$run_dir/LAUNCH" ]] || fail 68 "dispatch run directory is already reserved by LAUNCH: $run_dir"
 
-  local run_entry
-  shopt -s nullglob dotglob
-  local run_entries=("$run_dir"/*)
-  shopt -u nullglob dotglob
-  for run_entry in "${run_entries[@]}"; do
-    if [[ "$detached" == true ]]; then
-      case "${run_entry##*/}" in
-        BRIEF.md|PANE|cache) ;;
-        *) fail 68 "prompt-returning dispatch run directory is spent: $run_entry" ;;
-      esac
-    else
-      case "${run_entry##*/}" in
-        BRIEF.md|ENVELOPE.md|PANE|cache|pi-config|sessions|.system-prompt.md) ;;
-        *) fail 68 "dispatch run directory contains unexpected entry: $run_entry" ;;
-      esac
-    fi
+  local engine_output
+  for engine_output in output.jsonl stderr.log; do
+    [[ ! -e "$run_dir/$engine_output" && ! -L "$run_dir/$engine_output" ]] \
+      || fail 68 "dispatch run directory contains engine-owned output: $run_dir/$engine_output"
   done
 
-  claim_run_directory "$run_dir" "$run_id" "$BASHPID" "$detached"
+  claim_run_directory "$run_dir" "$run_id" "$BASHPID"
 
   local stage_dir
   for stage_dir in cache pi-config sessions; do

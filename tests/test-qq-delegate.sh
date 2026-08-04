@@ -521,10 +521,12 @@ done
 
 # Prompt-returning start accepts only after production preflight, returns the
 # exact durable identity, and does not wait for the fake Pi child lifecycle.
-# The sanctioned cache may already contain the owner's Check baseline.
-start_run="$(new_run start-success 'sleep=1')"
-mkdir -p "$start_run/cache/baseline"
-printf 'owner baseline evidence\n' >"$start_run/cache/baseline/check.log"
+# BRIEF.md maps ordinary parent supporting material beside it.
+start_run="$(new_run start-success $'sleep=1\nRead support-note.txt and support-material/sample.txt.')"
+printf 'parent support note\n' >"$start_run/support-note.txt"
+mkdir "$start_run/support-material"
+printf 'parent support sample\n' >"$start_run/support-material/sample.txt"
+[ ! -e "$start_run/cache" ] || fail "parent handoff created child cache storage"
 start_stdout="$tmp/start-success.stdout"
 start_stderr="$tmp/start-success.stderr"
 start_started="$(date +%s%3N)"
@@ -548,8 +550,11 @@ jq -e --arg id "$start_id" --arg run "$start_run" --arg cwd "$fixture" '
 ' "$start_run/LAUNCH" >/dev/null
 [ "$(stat -c %a "$start_run/LAUNCH")" = 600 ] || fail "LAUNCH mode is not 600"
 [ ! -e "$start_run/.launch-claim" ] || fail "accepted run retained its launch claim"
-assert_equal 'owner baseline evidence' "$(cat "$start_run/cache/baseline/check.log")" \
-  "start did not preserve sanctioned baseline evidence"
+assert_equal 'parent support note' "$(cat "$start_run/support-note.txt")" \
+  "start did not preserve the parent supporting file"
+assert_equal 'parent support sample' "$(cat "$start_run/support-material/sample.txt")" \
+  "start did not preserve the parent supporting directory"
+[ -d "$start_run/cache" ] || fail "start did not create child cache storage"
 assert_equal 'pane:start_T208' "$(cat "$start_run/PANE")" \
   "start did not persist its valid pane identity"
 
@@ -581,8 +586,10 @@ jq -e --arg id "$start_id" --arg run "$start_run" '
   and .envelope_path == ($run + "/ENVELOPE.md")
   and .envelope == "# completion envelope\n"
 ' "$tmp/start-success.collect" >/dev/null
-assert_equal 'owner baseline evidence' "$(cat "$start_run/cache/baseline/check.log")" \
-  "collection did not preserve the sanctioned baseline evidence"
+assert_equal 'parent support note' "$(cat "$start_run/support-note.txt")" \
+  "collection did not preserve the parent supporting file"
+assert_equal 'parent support sample' "$(cat "$start_run/support-material/sample.txt")" \
+  "collection did not preserve the parent supporting directory"
 
 # Completed TERMINAL v2 state from the admitted blocking engine remains exact
 # authority even when its pre-LAUNCH run directory has no LAUNCH artifact.
@@ -703,6 +710,62 @@ for run in "${start_batch_runs[@]}"; do
   jq -e --arg run "$run" '.run_dir == $run and .terminal.run_dir == $run' \
     "$tmp/$(basename "$run").collect" >/dev/null
 done
+
+# Engine-owned output introduced after preflight is still refused when the
+# detached worker acquires its atomic claim.
+claim_collision_run="$(new_run claim-output-collision)"
+claim_collision_site="$tmp/claim-output-collision-site"
+claim_collision_marker="$tmp/claim-output-collision.marker"
+claim_collision_release="$tmp/claim-output-collision.release"
+mkdir -p "$claim_collision_site"
+cat >"$claim_collision_site/sitecustomize.py" <<'PY'
+import os
+import time
+from pathlib import Path
+if os.environ.get("QQ_DELEGATE_INTERNAL_WORKER") == "1" and os.environ.get("QQ_DELEGATE_TEST_STALL_CLAIM") == "1":
+    original_fsync = os.fsync
+    def fsync(descriptor):
+        original_fsync(descriptor)
+        marker = Path(os.environ["QQ_DELEGATE_TEST_CLAIM_MARKER"])
+        release = Path(os.environ["QQ_DELEGATE_TEST_CLAIM_RELEASE"])
+        marker.write_text("waiting\n")
+        while not release.exists():
+            time.sleep(0.01)
+    os.fsync = fsync
+PY
+env PYTHONPATH="$claim_collision_site" QQ_DELEGATE_TEST_STALL_CLAIM=1 \
+  QQ_DELEGATE_TEST_CLAIM_MARKER="$claim_collision_marker" \
+  QQ_DELEGATE_TEST_CLAIM_RELEASE="$claim_collision_release" \
+  "$fixture_engine" start --role reviewer --cwd "$fixture" \
+  --brief "$claim_collision_run/BRIEF.md" \
+  >"$tmp/claim-output-collision.stdout" \
+  2>"$tmp/claim-output-collision.stderr" &
+claim_collision_starter=$!
+for _ in {1..200}; do
+  [ -f "$claim_collision_marker" ] && break
+  sleep 0.01
+done
+[ -f "$claim_collision_marker" ] \
+  || fail "claim-collision worker did not reach the claim window"
+[ -f "$claim_collision_run/.launch-claim" ] \
+  || fail "claim-collision worker stalled before acquiring its claim"
+printf 'prior engine output\n' >"$claim_collision_run/output.jsonl"
+printf 'release\n' >"$claim_collision_release"
+set +e
+wait "$claim_collision_starter"
+claim_collision_status=$?
+set -e
+[[ "$claim_collision_status" -ne 0 ]] \
+  || fail "engine-owned output introduced during claim was accepted"
+assert_file_contains "$tmp/claim-output-collision.stderr" \
+  'detached delegate worker failed before accepting the ticket'
+assert_equal 'prior engine output' "$(cat "$claim_collision_run/output.jsonl")" \
+  "claim collision overwrote engine-owned output"
+[ ! -e "$claim_collision_run/.launch-claim" ] \
+  || fail "claim collision left claim residue"
+[ ! -e "$claim_collision_run/LAUNCH" ] \
+  || fail "claim collision published LAUNCH"
+fail_closed_count=$((fail_closed_count + 1))
 
 # A delayed same-directory starter must revalidate after acquiring its claim.
 # The accepted winner stays collectable and the loser never launches a child or
@@ -1017,6 +1080,6 @@ printf '[{"role":"reviewer","cwd":"%s"}]\n' "$fixture" >"$missing_key_batch"
 expect_refusal missing-key-batch 'exact keys role,cwd,brief' \
   "$fixture_engine" batch "$missing_key_batch"
 
-assert_equal 42 "$fail_closed_count" "fail-closed test count changed"
+assert_equal 43 "$fail_closed_count" "fail-closed test count changed"
 printf 'test-qq-delegate: fail-closed cases: %s\n' "$fail_closed_count"
 printf 'test-qq-delegate: pass\n'
