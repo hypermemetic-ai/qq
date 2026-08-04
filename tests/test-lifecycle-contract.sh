@@ -7,7 +7,7 @@ TEST_NAME="test-lifecycle-contract"
 # shellcheck source=tests/helpers.sh
 source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd -- "$TESTS_DIR/.." && pwd -P)"
-BACKLOG="$(command -v backlog)"
+BACKLOG="$(command -v backlog || true)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -45,6 +45,7 @@ assert_task_status() {
   assert_file_contains "$file" "status: $expected"
 }
 
+if [ -n "$BACKLOG" ]; then
 old="$TMP/old"
 make_store "$old" old 'To Do' '"To Do", "In Progress", "Done"'
 run_backlog "$old" task create 'Old lifecycle completion' --no-dod-defaults --plain
@@ -84,6 +85,9 @@ run_backlog "$target" task edit T-2 --status Aligned --plain
 run_backlog "$target" task archive T-2
 [ ! -e "$target/backlog/tasks/t-2 - Target-lifecycle-archive.md" ] || fail 'target archive remained active'
 assert_task_status "$target" archive/tasks T-2 Aligned
+else
+  printf 'test-lifecycle-contract: Backlog CLI unavailable; live compatibility probe skipped\n'
+fi
 
 python3 - "$ROOT/CONCEPTS.md" "$ROOT/skills/deliver-change/SKILL.md" "$ROOT/README.md" <<'PY'
 from pathlib import Path
