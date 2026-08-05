@@ -30,8 +30,8 @@ assert_file_contains "$PROMPT" \
   'prompt does not carry all optional operator context through the supported expansion'
 
 assert_file_contains "$README" \
-  'ln -sT "$HOME/projects/qq/.pi/prompts/check-in.md" "$HOME/.pi/agent/prompts/check-in.md"' \
-  'README does not mount the versioned prompt globally by the /bro convention'
+  'contributes the complete `skills/` and `.pi/prompts/` roots' \
+  'README does not expose the versioned prompt root through the linked bootstrap'
 assert_file_contains "$README" '/check-in [date | commit | PR number | PR URL]'
 assert_file_contains "$README" 'A first use without either one'
 assert_file_contains "$README" 'refuses to guess.'

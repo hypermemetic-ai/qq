@@ -1,11 +1,11 @@
 # Concepts
 
-Read this glossary before every work item. These definitions are the
-canonical shared language for every Repository on this operator-owned Pi
-installation; use them consistently in reasoning, conversation, code, Tasks,
-and documentation. A root `CONCEPTS.local.md` may append its own Repository vocabulary
-but never redefine a canonical term. Keep this glossary aligned as vocabulary
-changes.
+This glossary is included in every qq-linked session snapshot. These definitions
+are the canonical shared language for qq-linked Repositories; use them
+consistently in reasoning, conversation, code, Tasks, and documentation. A
+trusted root `CONCEPTS.local.md` may append its own Repository vocabulary but
+never activate qq or redefine a canonical term. Keep this glossary aligned as
+vocabulary changes.
 
 **Actor** — The operator or a replaceable agent participating in the work. The
 operator owns intent and judgment; agents investigate, recommend, execute, and

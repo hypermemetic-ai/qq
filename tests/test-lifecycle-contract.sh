@@ -122,7 +122,7 @@ for phrase in (
     assert phrase in skill_flat, phrase
 assert "mark its Task Done" not in skill
 assert "activation is performed separately after the Change lands" not in readme
-assert "verify it from a fresh Pi session after\nmerge rather than adding reload or activation machinery" in readme
+assert "verify it in fresh\nlinked and unlinked Pi sessions after merge" in readme
 PY
 
 printf 'test-lifecycle-contract: pass\n'

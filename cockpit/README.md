@@ -53,9 +53,10 @@ bindings use `qq-herdr-pull <N|next>`. `alt+o` snaps to Pi in the Repository
 project home, or to focused-workspace Pi when no home runtime exists. Pressing
 it again at the target bounces back.
 
-`extensions/qq-backlog-guard.ts` loads as part of the mounted qq extension set
-through the one global symlink described in the root README's Install section.
-On each built-in `write` or `edit`, it discovers the current Git checkout from
+`extensions/qq-backlog-guard.ts` loads through the conditional bootstrap only
+when the current Repository is explicitly linked to qq. The one global inert
+symlink and Repository link rail are described in the root README's Install
+section. On each built-in `write` or `edit`, it discovers the current Git checkout from
 Pi's working directory and blocks normalized targets inside that checkout's
 `backlog/`, returning the Backlog-CLI guidance. It deliberately allows reads
 and Bash, including Backlog CLI commands; it is a path-only drift-net, not a

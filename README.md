@@ -23,13 +23,14 @@ wiring needed to expose it.
 
 ## Repository surfaces
 
-- [`AGENTS.md`](./AGENTS.md) is the shared operating guidance mounted through
-  Pi's global context path. Repository-local guidance is optional additive context.
-- `skills/` contains stateless capabilities discovered through each agent
-  runtime's native skill surface.
+- [`AGENTS.md`](./AGENTS.md) is the shared operating guidance delivered by the
+  conditional Pi bootstrap in qq-linked Repositories. Repository-local guidance
+  remains Pi-native additive context.
+- `skills/` contains stateless capabilities exposed through each linked agent
+  runtime's native Skill surface.
 - `backlog/` holds Tasks, authored documents, and decisions managed through the
   Backlog CLI and its shared search index.
-- `CONCEPTS.md` is the shared language agents read before every work item.
+- `CONCEPTS.md` is the shared language included in every linked session snapshot.
 - The single `Ideas` Backlog document is the idea capture surface.
 - Backlog document categories `plans`, `research`, and `solutions` retain
   historical designs, cited investigations, and reusable lessons.
@@ -41,8 +42,8 @@ wiring needed to expose it.
 - `delegation/` contains the delegate role manifests, completion envelope
   template, and execution-profile policy.
 - `bin/` holds the qq commands — mounted on `PATH` by the cockpit shell
-  surface — for guarded local OpenWiki updates and Herdr project-home focus
-  and pane movement.
+  surface — for Repository methodology activation, guarded local OpenWiki
+  updates, and Herdr project-home focus and pane movement.
 
 ## Delivery
 
@@ -52,10 +53,12 @@ operator merges.
 
 ## Install qq
 
-Installation is by construction: every runtime surface mounts this checkout
-directly, so day-to-day changes — adding, editing, or removing a Skill, command,
-or extension source file — are live everywhere with no install step. A machine
-is bootstrapped once.
+Installation mounts the live checkout rather than copying it. Machine-level
+shell and cockpit surfaces stay global. The qq agent bundle is different: one
+inert bootstrap is mounted globally, and each intended Git Repository opts in
+once. Changes to canonical bundle source become current for that Repository at
+the next fresh Pi session or explicit reload; no reinstall or Repository edit is
+needed.
 
 qq runs stock Pi from the standard global npm installation. Bootstrap the
 selected 0.81.1 release without lifecycle scripts:
@@ -69,9 +72,8 @@ global package location and executes the package's stock `dist/cli.js` with the
 caller's arguments unchanged. It refuses clearly when npm, the package, or the
 CLI is absent. After bootstrap, Pi updates use the ordinary `pi update`
 command. Ticket implementation and tests do not install or update the live
-operator runtime. Methodology and source mounts are live by construction; when
-landed-methodology proof is required, verify it from a fresh Pi session after
-merge rather than adding reload or activation machinery.
+operator runtime. When landed-methodology proof is required, verify it in fresh
+linked and unlinked Pi sessions after merge.
 
 ### Researcher-only native Context7
 
@@ -123,19 +125,40 @@ A failed or rolled-back adoption leaves Context7 absent. Restore `.mcp.json`
 only after a new explicit operator decision; never silently fall back to the
 retired `npx @latest` route.
 
-Mount qq's global context and Skill roots directly into Pi. These root mounts
-keep methodology and Skill membership live by construction without per-Repository
-activation. The `/bro` and `/check-in` templates mount the same way: the
-Repository stays the versioned source, and both global prompt names resolve
-everywhere.
+Install qq's one conditional Pi bootstrap from the intended live checkout:
 
 ```bash
-mkdir -p ~/.pi/agent ~/.pi/agent/prompts
-ln -sT "$HOME/projects/qq/AGENTS.md" "$HOME/.pi/agent/AGENTS.md"
-ln -sT "$HOME/projects/qq/skills" "$HOME/.pi/agent/skills"
-ln -sT "$HOME/projects/qq/.pi/prompts/bro.md" "$HOME/.pi/agent/prompts/bro.md"
-ln -sT "$HOME/projects/qq/.pi/prompts/check-in.md" "$HOME/.pi/agent/prompts/check-in.md"
+"$HOME/projects/qq/bin/qq-methodology" install
 ```
+
+The idempotent installer globally mounts only `extensions/qq`, whose `index.ts`
+is the inert bootstrap. During cutover it removes the former unconditional qq
+`AGENTS.md`, Skill, `/bro`, and `/check-in` mounts only when each exact path is a
+symlink resolving to this checkout's corresponding source. It refuses foreign
+symlinks and regular paths rather than replacing them. Do not run the installer
+from an unlanded Change checkout.
+
+Then explicitly link each intended Repository:
+
+```bash
+cd "$HOME/projects/example"
+qq-methodology inspect
+qq-methodology link
+```
+
+`qq.methodology=true` in the Repository's common local Git config is the sole
+activation authority. The setting is operator-local, shared by linked worktrees,
+and absent from fresh clones. `link` and `unlink` modify only that config and
+state that a fresh Pi session or `/reload` is required. Unlinked, invalid,
+ambiguous, and non-Git contexts fail closed: they receive no qq guidance,
+Skills, prompts, tools, commands, or guards. Product membership and tracked
+files are not activation authority.
+
+At linked startup/reload the bootstrap snapshots canonical `AGENTS.md` and
+`CONCEPTS.md`, contributes the complete `skills/` and `.pi/prompts/` roots, and
+registers the existing extension/tool set. Pi's Repository-local `AGENTS.md`
+remains additive context. A trusted root `CONCEPTS.local.md` may append
+Repository vocabulary but cannot activate qq or redefine canonical terms.
 
 `/check-in [date | commit | PR number | PR URL]` reports every first-parent
 `origin/main` advance after the explicit baseline, or after the exact
@@ -179,10 +202,11 @@ chmod 600 ~/.pi/agent/auth.json
 `delegation/policies/execution-profiles.json` assigns Orchestrator and Reviewer
 to `kimi-coding/k3:max`; Architect, Implementer, Researcher, and Observer use
 `openai-codex/gpt-5.6-sol:xhigh` with the `priority` service class (Fast mode).
-Ordinary Pi sessions use the globally mounted `qq-codex-fast` extension to
-apply the same service class to every GPT-5.6 model. `qq-delegate` reads the
-selected delegated role from this policy and passes its provider, model, and
-non-default thinking level through Pi's native CLI flags.
+Ordinary Pi sessions in qq-linked Repositories use the conditional
+`qq-codex-fast` extension to apply the same service class to every GPT-5.6
+model. `qq-delegate` reads the selected delegated role from this policy and
+passes its provider, model, and non-default thinking level through Pi's native
+CLI flags.
 
 A delegated route may instead select `auto`, `default`, `flex`, or `priority`
 service class when its requested provider is `openai` or `openai-codex`.
@@ -193,16 +217,19 @@ unchanged. Requested provider/model selection may silently fall back. The
 JSONL are authoritative for who served; footer state and `model_change` entries
 only describe selection and are not serving-provider evidence.
 
-The accountable agent creates the global `qq` extension link once per machine:
+The `qq-methodology install` rail creates the one global `qq` extension link.
+`settings.json` carries no qq extension paths. In an unlinked context its
+bootstrap registers nothing. In a linked context it activates the complete
+bundle from this checkout. Source-only changes need no install step.
 
-```bash
-mkdir -p "$HOME/.pi/agent/extensions"
-ln -sfn "$HOME/projects/qq/extensions" "$HOME/.pi/agent/extensions/qq"
-```
-
-That one link mounts the Repository extension set, which is live in every Pi
-session from then on. `settings.json` no longer carries extension paths. Source-
-only changes need no install step.
+A linked running session keeps its startup/reload snapshot. A later canonical
+`AGENTS.md`, `CONCEPTS.md`, Skill, prompt, or extension change sets one
+persistent footer status: `qq update available`. Repeated events coalesce and
+never add model-visible text, steer, or reload the session. A successful
+explicit `/reload` builds the new current snapshot and clears the status;
+shutdown closes its watchers. Ordinary canonical updates require no consumer
+Repository Change. A Change that breaks a durable external contract must own
+its explicit consumer migration and any required session reset.
 
 The Repository extension gives local feedback when Pi's built-in `write` or
 `edit` targets the normalized `backlog/` path of the checkout containing
@@ -332,9 +359,9 @@ Ghostty defaults to the portable laptop geometry. Use
 Repository. Reload Ghostty with `ctrl+shift+,` after selecting; padding applies
 to newly opened terminal surfaces.
 
-Bootstrap mounts canonical qq guidance globally through
-`~/.pi/agent/AGENTS.md`. A Repository may add its own local `AGENTS.md` as
-additional project context; that file is not a qq activation marker.
+The conditional bootstrap delivers canonical qq guidance only in linked
+Repositories. A Repository may add its own local `AGENTS.md` as additional
+Pi-native project context; that file is not a qq activation marker.
 
 ## Knowledge runtime
 
