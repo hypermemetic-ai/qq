@@ -28,7 +28,7 @@ export const QQ_EXTENSION_MODULES = Object.freeze([
   "./qq-codex-fast.ts",
 ]);
 
-async function defaultRun(file, args, options = {}) {
+function defaultRun(file, args, options = {}) {
   return execFile(file, args, {
     ...options,
     encoding: "utf8",
@@ -364,6 +364,6 @@ export default async function register(pi, deps = {}) {
     watch: deps.watch ?? watchFs,
   });
   for (const registerSibling of siblingRegisters) {
-    await registerSibling(pi);
+    registerSibling(pi);
   }
 }

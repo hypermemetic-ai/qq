@@ -8,7 +8,6 @@ TEST_NAME="test-qq-delegate-watch-extension"
 source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd -- "$TESTS_DIR/.." && pwd -P)"
 WATCH_EXTENSION="$ROOT/extensions/qq-delegate-watch.ts"
-INDEX="$ROOT/extensions/index.ts"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

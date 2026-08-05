@@ -9,7 +9,6 @@ TEST_NAME="test-qq-session-lineage-extension"
 source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd -- "$TESTS_DIR/.." && pwd -P)"
 EXTENSION="$ROOT/extensions/qq-session-lineage.ts"
-INDEX="$ROOT/extensions/index.ts"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
