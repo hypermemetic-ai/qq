@@ -19,6 +19,7 @@ sys.dont_write_bytecode = True
 PROTOCOL = "qq-event-plane/v1"
 MAX_FRAME_BYTES = 128 * 1024
 MAX_SAFE_INTEGER = 2**53 - 1
+MAX_JAVASCRIPT_ARRAY_INDEX = "4294967294"
 OPERATIONS = (
     "send", "publish", "ensure_subscription", "next", "acknowledge", "retry", "block",
     "disposition", "status", "inspect", "backup", "restore", "shutdown",
@@ -32,9 +33,20 @@ class EventPlaneClientError(Exception):
         self.code = code
 
 
+def is_javascript_array_index(value: str) -> bool:
+    if value == "0":
+        return True
+    if not value or value[0] == "0" or any(character < "0" or character > "9" for character in value):
+        return False
+    return len(value) < len(MAX_JAVASCRIPT_ARRAY_INDEX) or (
+        len(value) == len(MAX_JAVASCRIPT_ARRAY_INDEX)
+        and value <= MAX_JAVASCRIPT_ARRAY_INDEX
+    )
+
+
 def validate_json_object_key(value: str) -> None:
     validate_json_value(value)
-    if value.isascii() and value.isdigit() and str(int(value)) == value and int(value) <= 2**32 - 2:
+    if is_javascript_array_index(value):
         raise EventPlaneClientError("operation body object keys cannot be JavaScript array indexes")
 
 

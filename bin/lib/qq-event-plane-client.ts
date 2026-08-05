@@ -33,9 +33,16 @@ function validatedString(value: string): string {
   return value;
 }
 
+function isJavaScriptArrayIndex(value: string): boolean {
+  if (value === "0") return true;
+  if (!/^[1-9][0-9]*$/.test(value)) return false;
+  const maximum = "4294967294";
+  return value.length < maximum.length || (value.length === maximum.length && value <= maximum);
+}
+
 function validatedObjectKey(value: string): string {
   validatedString(value);
-  if (/^(0|[1-9][0-9]*)$/.test(value) && Number(value) <= 2 ** 32 - 2) {
+  if (isJavaScriptArrayIndex(value)) {
     throw new EventPlaneError("operation body object keys cannot be JavaScript array indexes");
   }
   return value;

@@ -487,6 +487,253 @@ def post_copy_restore_atomicity() -> None:
     proofs.add("post-copy-restore-rollback")
 
 
+def restore_crash_convergence() -> None:
+    service_source = ROOT / "bin/lib/qq_event_plane_service.py"
+    service_spec = importlib.util.spec_from_file_location("qq_event_plane_service_crash_test", service_source)
+    assert service_spec is not None and service_spec.loader is not None
+    service_module = importlib.util.module_from_spec(service_spec)
+    service_spec.loader.exec_module(service_module)
+    root = SCRATCH / "restore-crash-convergence"
+    root.mkdir(mode=0o700)
+
+    original_state = root / "original-state"; original_state.mkdir(mode=0o700)
+    original = service_module.Store(service_module.Config(original_state, None))
+    original_first = original.append("send", send_body("restore-crash-original-first"))
+    original_second = original.append("send", send_body("restore-crash-original-second"))
+    original_instance = original.instance_id
+    original.close()
+
+    candidate_state = root / "candidate-state"; candidate_state.mkdir(mode=0o700)
+    candidate = service_module.Store(service_module.Config(candidate_state, None))
+    candidate_only = candidate.append("send", send_body("restore-crash-candidate-only"))
+    candidate_instance = candidate.instance_id
+    candidate.close()
+    assert candidate_instance != original_instance
+    candidate_database = candidate_state / "event-plane.sqlite3"
+
+    child_script = r'''
+import importlib.util
+import os
+from pathlib import Path
+import sys
+
+service_source, phase, state_text, candidate_text = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("qq_event_plane_service_restore_child", service_source)
+assert spec is not None and spec.loader is not None
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+state = Path(state_text)
+candidate = Path(candidate_text)
+store = module.Store(module.Config(state, None))
+if phase == "before-safety-durability":
+    store._write_restore_safety = lambda _rollback: os._exit(91)
+elif phase == "after-safety-durability":
+    store._copy_restore_candidate = lambda _source: os._exit(92)
+elif phase == "during-candidate-copy":
+    def during_copy(_source):
+        database = state / "event-plane.sqlite3"
+        raw = candidate.read_bytes()
+        descriptor = os.open(database, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW)
+        try:
+            os.write(descriptor, raw[:len(raw) // 2])
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        journal = Path(f"{database}-journal")
+        journal.write_bytes(b"candidate journal must never reach recovered safety")
+        journal.chmod(0o600)
+        directory = os.open(state, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+        os._exit(93)
+    store._copy_restore_candidate = during_copy
+elif phase == "after-candidate-copy":
+    original_copy = store._copy_restore_candidate
+    def after_copy(source):
+        original_copy(source)
+        os._exit(94)
+    store._copy_restore_candidate = after_copy
+elif phase == "after-candidate-validation":
+    store._finalize_restore = lambda _rollback: os._exit(95)
+elif phase == "after-durable-safety-removal":
+    original_finalize = store._finalize_restore
+    def after_finalize(rollback):
+        original_finalize(rollback)
+        os._exit(96)
+    store._finalize_restore = after_finalize
+else:
+    raise AssertionError(phase)
+store.restore({"path": str(candidate), "expected_instance_id": store.instance_id})
+raise AssertionError("restore fault did not terminate the process")
+'''
+    phases = {
+        "before-safety-durability": False,
+        "after-safety-durability": False,
+        "during-candidate-copy": False,
+        "after-candidate-copy": False,
+        "after-candidate-validation": False,
+        "after-durable-safety-removal": True,
+    }
+    recovered_for_rollback: Path | None = None
+    for index, (phase, candidate_wins) in enumerate(phases.items(), start=1):
+        phase_root = root / phase; phase_root.mkdir(mode=0o700)
+        state = phase_root / "state"; state.mkdir(mode=0o700)
+        shutil.copy2(original_state / "event-plane.sqlite3", state / "event-plane.sqlite3")
+        (state / "event-plane.sqlite3").chmod(0o600)
+        child = subprocess.run(
+            [
+                sys.executable, "-c", child_script, str(service_source), phase,
+                str(state), str(candidate_database),
+            ],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+        )
+        assert child.returncode == 90 + index, (phase, child.returncode, child.stdout, child.stderr)
+
+        restarted = service_module.Store(service_module.Config(state, None))
+        expected_instance = candidate_instance if candidate_wins else original_instance
+        assert restarted.instance_id == expected_instance
+        if candidate_wins:
+            assert restarted.status({"event_id": candidate_only["record"]["event_id"]})["record"]["event_id"] == candidate_only["record"]["event_id"]
+            try:
+                restarted.status({"event_id": original_first["record"]["event_id"]})
+            except service_module.Refusal as error:
+                assert error.code == "not_found"
+            else:
+                raise AssertionError("original-only state leaked after durable restore finalization")
+        else:
+            for accepted in (original_first, original_second):
+                assert restarted.status({"event_id": accepted["record"]["event_id"]})["record"]["event_id"] == accepted["record"]["event_id"]
+            try:
+                restarted.status({"event_id": candidate_only["record"]["event_id"]})
+            except service_module.Refusal as error:
+                assert error.code == "not_found"
+            else:
+                raise AssertionError("candidate-only state leaked through crash recovery")
+        assert not (state / ".restore-rollback.sqlite3").exists()
+        assert not any(path.exists() for path in service_module._sqlite_side_paths(state / "event-plane.sqlite3"))
+
+        if phase == "after-candidate-copy":
+            backup = phase_root / "after-recovery.sqlite3"
+            restarted.backup({"path": str(backup)})
+            later = restarted.append("send", send_body("restore-crash-after-recovery"))
+            restarted.restore({"path": str(backup), "expected_instance_id": restarted.instance_id})
+            try:
+                restarted.status({"event_id": later["record"]["event_id"]})
+            except service_module.Refusal as error:
+                assert error.code == "not_found"
+            else:
+                raise AssertionError("ordinary restore after crash recovery did not replace later state")
+            assert not (state / ".restore-rollback.sqlite3").exists()
+            recovered_for_rollback = state
+        restarted.close()
+
+    assert recovered_for_rollback is not None
+    rollback_root = recovered_for_rollback.parent
+    process = subprocess.Popen(
+        [SERVICE, "serve", "--state-dir", str(recovered_for_rollback)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    rollback_socket = recovered_for_rollback / "event-plane.sock"
+    for _ in range(250):
+        if rollback_socket.is_socket():
+            break
+        if process.poll() is not None:
+            out, err = process.communicate()
+            raise AssertionError((process.returncode, out, err))
+        time.sleep(0.01)
+    else:
+        raise AssertionError("recovered service did not start for exact rollback")
+    rollback_client = Client(str(rollback_socket))
+    rollback_backup = rollback_root / "exact-rollback-after-recovery.sqlite3"
+    rolled_back = subprocess.run(
+        [ADMIN, "--state-dir", str(recovered_for_rollback), "rollback", json.dumps({
+            "backup_path": str(rollback_backup),
+            "expected_instance_id": rollback_client.inspect({"view": "health"})["instance_id"],
+            "authorization": "operator",
+        })],
+        text=True, capture_output=True, check=False,
+    )
+    assert rolled_back.returncode == 0, (rolled_back.stdout, rolled_back.stderr)
+    process.wait(timeout=10)
+    assert rollback_backup.exists() and not recovered_for_rollback.exists()
+    proofs.add("restore-crash-convergence")
+
+
+def restore_marker_invalid_refusal() -> None:
+    service_source = ROOT / "bin/lib/qq_event_plane_service.py"
+    service_spec = importlib.util.spec_from_file_location("qq_event_plane_service_marker_test", service_source)
+    assert service_spec is not None and service_spec.loader is not None
+    service_module = importlib.util.module_from_spec(service_spec)
+    service_spec.loader.exec_module(service_module)
+    root = SCRATCH / "restore-marker-refusal"
+    root.mkdir(mode=0o700)
+    template_state = root / "template"; template_state.mkdir(mode=0o700)
+    template = service_module.Store(service_module.Config(template_state, None))
+    template.append("send", send_body("restore-marker-original"))
+    template.close()
+    template_database = template_state / "event-plane.sqlite3"
+
+    def fingerprint(state: Path) -> list[tuple[str, int, str]]:
+        result: list[tuple[str, int, str]] = []
+        for path in sorted(state.iterdir(), key=lambda item: item.name):
+            info = path.lstat()
+            if stat.S_ISLNK(info.st_mode):
+                content = os.readlink(path)
+            elif stat.S_ISREG(info.st_mode):
+                content = hashlib.sha256(path.read_bytes()).hexdigest()
+            else:
+                content = f"type:{stat.S_IFMT(info.st_mode)}"
+            result.append((path.name, stat.S_IMODE(info.st_mode), content))
+        return result
+
+    cases = (
+        "malformed-file", "loose-file", "symlink-path", "hardlink-identity",
+        "altered-schema", "malformed-instance", "foreign-reference", "safety-journal",
+    )
+    for case in cases:
+        case_root = root / case; case_root.mkdir(mode=0o700)
+        state = case_root / "state"; state.mkdir(mode=0o700)
+        database = state / "event-plane.sqlite3"
+        marker = state / ".restore-rollback.sqlite3"
+        shutil.copy2(template_database, database); database.chmod(0o600)
+        if case == "malformed-file":
+            marker.write_bytes(b"not sqlite"); marker.chmod(0o600)
+        elif case == "loose-file":
+            shutil.copy2(template_database, marker); marker.chmod(0o644)
+        elif case == "symlink-path":
+            marker.symlink_to(template_database)
+        elif case == "hardlink-identity":
+            os.link(database, marker)
+        else:
+            shutil.copy2(template_database, marker); marker.chmod(0o600)
+            if case == "altered-schema":
+                with sqlite3.connect(marker) as connection:
+                    connection.execute("CREATE TABLE unexpected(value TEXT)")
+            elif case == "malformed-instance":
+                with sqlite3.connect(marker) as connection:
+                    connection.execute("UPDATE metadata SET value='not-an-instance' WHERE key='instance_id'")
+            elif case == "foreign-reference":
+                with sqlite3.connect(marker) as connection:
+                    connection.execute(
+                        "INSERT INTO consumer_gaps(subscription_id,generation,record_position,obligation_id,status) "
+                        "VALUES('qq/missing',1,999,'obl_missing','pending')"
+                    )
+            elif case == "safety-journal":
+                journal = Path(f"{marker}-journal")
+                journal.write_bytes(b"ambiguous safety journal"); journal.chmod(0o600)
+        before = fingerprint(state)
+        try:
+            service_module.Store(service_module.Config(state, None))
+        except service_module.ConfigurationError:
+            pass
+        else:
+            raise AssertionError(f"invalid restore marker started mutable state: {case}")
+        assert fingerprint(state) == before, f"invalid restore marker changed state: {case}"
+    proofs.add("restore-marker-invalid-refusal")
+
+
 def predicate_wait_atomicity() -> None:
     service_source = ROOT / "bin/lib/qq_event_plane_service.py"
     service_spec = importlib.util.spec_from_file_location("qq_event_plane_service_wait_test", service_source)
@@ -975,6 +1222,82 @@ console.log(JSON.stringify(refused));
     plane.close()
 
 
+def bounded_decimal_key_classification() -> None:
+    plane = Plane("bounded-decimal-keys")
+    c = plane.client
+    long_decimal = "9" * 5000
+    payload = {
+        "00": "leading-zero-zero",
+        "01": {"4294967295": "above-index-boundary"},
+        "4294967295": {"nested": {long_decimal: [True, {"ordinary-key": "value"}]}},
+        "ordinary-key": {"0000000001": "noncanonical-decimal"},
+    }
+    python_body = send_body("decimal-key-python", payload=payload)
+    python_first = c.send(python_body)
+    script = r'''
+const { EventPlaneClient, canonicalEventPlaneJson } = await import(process.argv[2]);
+const client = new EventPlaneClient(process.argv[3]);
+const payload = JSON.parse(process.argv[4]);
+const body = (request_id, value) => ({
+  producer_id:"qq/producer",request_id,origin_id:"qq/change/T-209.16",recipient_id:"qq/actor",
+  product_id:"qq",kind:"actor.message",schema_version:1,payload:value,
+});
+const retried = await client.send(body("decimal-key-python", payload));
+const accepted = await client.send(body("decimal-key-typescript", payload));
+const invalidPayloads = [{"0":"zero"},{"4294967294":"maximum"},{nested:{"4294967294":"nested"}}];
+const refusals = [];
+for (let index = 0; index < invalidPayloads.length; index += 1) {
+  try {
+    await client.send(body(`decimal-key-invalid-ts-${index}`, invalidPayloads[index]));
+    refusals.push(false);
+  } catch (error) {
+    refusals.push(error.code === "client_error");
+  }
+}
+console.log(JSON.stringify({retried,accepted,refusals,canonical:canonicalEventPlaneJson(payload)}));
+'''
+    process = subprocess.run(
+        [
+            "node", "--experimental-strip-types", "--input-type=module", "-",
+            Path(TS_CLIENT).resolve().as_uri(), str(plane.socket),
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+        ],
+        input=script, text=True, capture_output=True, check=False,
+    )
+    assert process.returncode == 0, (process.stdout, process.stderr)
+    observed = json.loads(process.stdout)
+    assert observed["retried"]["idempotent"]
+    assert observed["retried"]["record"]["event_id"] == python_first["record"]["event_id"]
+    assert all(observed["refusals"])
+    typescript_retry = c.send(send_body("decimal-key-typescript", payload=payload))
+    assert typescript_retry["idempotent"]
+    assert typescript_retry["record"]["event_id"] == observed["accepted"]["record"]["event_id"]
+    assert observed["canonical"] == json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+
+    accepted_count = c.inspect({"view": "health"})["counts"]["records"]
+    invalid_payloads = [
+        {"0": "zero"},
+        {"4294967294": "maximum"},
+        {"nested": {"4294967294": "nested"}},
+    ]
+    for index, invalid in enumerate(invalid_payloads):
+        refused("client_error", c.send, send_body(f"decimal-key-invalid-python-{index}", payload=invalid))
+        raw = (
+            '{"protocol":"qq-event-plane/v1","operation":"send","body":'
+            '{"producer_id":"qq/raw","request_id":"decimal-key-invalid-raw-' + str(index) + '",'
+            '"origin_id":"qq/source/raw","recipient_id":"qq/actor","product_id":"qq",'
+            '"kind":"actor.message","schema_version":1,"payload":' +
+            json.dumps(invalid, ensure_ascii=False, separators=(",", ":")) + '}}'
+        ).encode("utf-8")
+        service_refusal = raw_request(plane.socket, raw=raw)
+        assert not service_refusal["ok"]
+    assert c.inspect({"view": "health"})["counts"]["records"] == accepted_count
+    proofs.add("bounded-decimal-key-classification")
+    plane.close()
+
+
 def administration_and_rollback() -> None:
     plane = Plane("administration")
     c = plane.client
@@ -1170,14 +1493,35 @@ def test_clock_preflight() -> None:
     real_parent = root / "real-parent"; real_parent.mkdir(mode=0o700)
     nested = real_parent / "clock"; nested.write_text("1000000\n", encoding="ascii"); nested.chmod(0o600)
     linked_parent = root / "linked-parent"; linked_parent.symlink_to(real_parent, target_is_directory=True)
+    loose_parent = root / "loose-parent"; loose_parent.mkdir(mode=0o777); loose_parent.chmod(0o777)
+    loose_parent_clock = loose_parent / "clock"
+    loose_parent_clock.write_text("1000000\n", encoding="ascii"); loose_parent_clock.chmod(0o600)
+    nested_outer = root / "nested-outer"; nested_outer.mkdir(mode=0o700)
+    nested_loose = nested_outer / "nested-loose"; nested_loose.mkdir(mode=0o770); nested_loose.chmod(0o770)
+    nested_loose_clock = nested_loose / "clock"
+    nested_loose_clock.write_text("1000000\n", encoding="ascii"); nested_loose_clock.chmod(0o600)
+    fifo_parent = root / "fifo-parent"; os.mkfifo(fifo_parent, mode=0o600)
+    sticky_parent = root / "sticky-parent"; sticky_parent.mkdir(mode=0o1777); sticky_parent.chmod(0o1777)
+    sticky_private = sticky_parent / "private-child"; sticky_private.mkdir(mode=0o700)
+    sticky_clock = sticky_private / "clock"
+    sticky_clock.write_text("1000000\n", encoding="ascii"); sticky_clock.chmod(0o600)
+    nonwritable_parent = root / "nonwritable-parent"
+    nonwritable_parent.mkdir(mode=0o755); nonwritable_parent.chmod(0o755)
+    nonwritable_clock = nonwritable_parent / "clock"
+    nonwritable_clock.write_text("1000000\n", encoding="ascii"); nonwritable_clock.chmod(0o600)
     rejected = [
         loose, symlink, directory, fifo, malformed, root / "missing-clock",
-        Path("/dev/null"), linked_parent / "clock",
+        Path("/dev/null"), linked_parent / "clock", loose_parent_clock,
+        nested_loose_clock, fifo_parent / "clock",
     ]
     if os.geteuid() == 0:
         foreign = root / "foreign-clock"
         foreign.write_text("1000000\n", encoding="ascii"); foreign.chmod(0o600); os.chown(foreign, 65534, 65534)
-        rejected.append(foreign)
+        foreign_parent = root / "foreign-parent"; foreign_parent.mkdir(mode=0o700)
+        foreign_parent_clock = foreign_parent / "clock"
+        foreign_parent_clock.write_text("1000000\n", encoding="ascii"); foreign_parent_clock.chmod(0o600)
+        os.chown(foreign_parent, 65534, 65534)
+        rejected.extend((foreign, foreign_parent_clock))
     env = os.environ.copy(); env["QQ_EVENT_PLANE_TESTING"] = "1"
     for index, clock in enumerate(rejected):
         state = root / f"rejected-state-{index}"
@@ -1196,24 +1540,25 @@ def test_clock_preflight() -> None:
     )
     assert production.returncode == 73 and not production_state.exists()
 
-    valid_state = root / "valid-state"
-    process = subprocess.Popen(
-        [SERVICE, "serve", "--state-dir", str(valid_state), "--test-clock", str(good)],
-        env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    )
-    valid_socket = valid_state / "event-plane.sock"
-    for _ in range(250):
-        if valid_socket.is_socket():
-            break
-        if process.poll() is not None:
-            out, err = process.communicate()
-            raise AssertionError((process.returncode, out, err))
-        time.sleep(0.01)
-    else:
-        raise AssertionError("valid isolated clock service did not start")
-    assert Client(str(valid_socket)).inspect({"view": "health"})["service"] == "qq-event-plane"
-    process.terminate(); process.wait(timeout=10)
-    proofs.add("test-clock-preflight-no-state")
+    for index, valid_clock in enumerate((good, sticky_clock, nonwritable_clock)):
+        valid_state = root / f"valid-state-{index}"
+        process = subprocess.Popen(
+            [SERVICE, "serve", "--state-dir", str(valid_state), "--test-clock", str(valid_clock)],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        valid_socket = valid_state / "event-plane.sock"
+        for _ in range(250):
+            if valid_socket.is_socket():
+                break
+            if process.poll() is not None:
+                out, err = process.communicate()
+                raise AssertionError((process.returncode, out, err))
+            time.sleep(0.01)
+        else:
+            raise AssertionError("valid isolated clock service did not start")
+        assert Client(str(valid_socket)).inspect({"view": "health"})["service"] == "qq-event-plane"
+        process.terminate(); process.wait(timeout=10)
+    proofs.update({"test-clock-preflight-no-state", "test-clock-namespace-trust"})
 
 
 def source_boundaries() -> None:
@@ -1257,12 +1602,15 @@ try:
     concurrent_acceptance()
     delivery_gaps_and_guards()
     post_copy_restore_atomicity()
+    restore_crash_convergence()
+    restore_marker_invalid_refusal()
     predicate_wait_atomicity()
     backoff_blocking()
     expiry_lease_and_retention()
     framing_exactness()
     ts_equivalence()
     shared_integer_json_state_space()
+    bounded_decimal_key_classification()
     administration_and_rollback()
     test_clock_preflight()
     source_boundaries()
@@ -1281,9 +1629,11 @@ expected = {
     "backoff-blocked-no-hot-loop", "addressed-expiry-waiter", "lease-reconstruction",
     "retention-tombstone-deletion", "retention-replay-boundary", "blocked-abandoned-cleanup",
     "single-frame-stream-exactness", "python-typescript-equivalence", "cross-client-json-classes",
-    "strict-integer-json-refusal", "migration-integrity", "schema-v1-v2-migration",
-    "structural-restore-atomic", "post-copy-restore-rollback", "backup-restore", "singleton", "permissions", "signal-cleanup",
-    "exact-rollback", "test-clock-preflight-no-state", "inactive-nongoal-absence",
+    "strict-integer-json-refusal", "bounded-decimal-key-classification", "migration-integrity", "schema-v1-v2-migration",
+    "structural-restore-atomic", "post-copy-restore-rollback", "restore-crash-convergence",
+    "restore-marker-invalid-refusal", "backup-restore", "singleton", "permissions", "signal-cleanup",
+    "exact-rollback", "test-clock-preflight-no-state", "test-clock-namespace-trust",
+    "inactive-nongoal-absence",
 }
 assert proofs == expected, (expected - proofs, proofs - expected)
 print(f"event-plane proof matrix: {len(proofs)} named proofs")
