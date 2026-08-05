@@ -18,14 +18,19 @@ command -v node >/dev/null 2>&1 || fail 'node is required to test the Pi extensi
 # design (T-204); this suite asserts direct-registration shape in a clean env.
 unset QQ_DISPATCH_RUN_DIR
 
-if ! node --input-type=module - "$INDEX" <<'JS'
+git init -q -b main "$TMP/unlinked"
+git init -q -b main "$TMP/linked"
+git -C "$TMP/linked" config --local qq.methodology true
+
+if ! node --input-type=module - "$INDEX" "$TMP/unlinked" "$TMP/linked" <<'JS'
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [indexPath] = process.argv.slice(2);
-const { default: register } = await import(pathToFileURL(indexPath));
+const [indexPath, unlinkedRepository, linkedRepository] = process.argv.slice(2);
+const indexModule = await import(pathToFileURL(indexPath));
+const { default: register, QQ_EXTENSION_MODULES } = indexModule;
 
 function recordingPi() {
   const registrations = [];
@@ -48,56 +53,61 @@ function recordingPi() {
   };
 }
 
-const indexRecording = recordingPi();
-register(indexRecording.pi);
-
 const indexSource = await readFile(indexPath, "utf8");
-const extensionFiles = (await readdir(dirname(indexPath)))
-  .filter((filename) => filename.endsWith(".ts"))
+assert.match(indexSource, /from\s+["']\.\/qq-methodology\.ts["']/);
+assert.doesNotMatch(
+  indexSource,
+  /from\s+["']\.\/qq-(?!methodology)[^"']+\.ts["']/,
+  "the global mount statically imports a conditional qq extension",
+);
+
+const extensionDirectory = dirname(indexPath);
+const siblingFiles = (await readdir(extensionDirectory))
+  .filter((filename) => filename.startsWith("qq-") && filename.endsWith(".ts"))
+  .filter((filename) => filename !== "qq-methodology.ts")
   .sort();
-const excluded = new Set(["index.ts"]);
-const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-for (const filename of extensionFiles) {
-  if (excluded.has(filename)) continue;
-  const escapedFilename = escapeRegExp(filename);
-  const importSpecifier = new RegExp(`from\\s+["']\\./${escapedFilename}["']`);
-  assert.match(indexSource, importSpecifier, `${filename} is missing from extensions/index.ts`);
-  const defaultImport = new RegExp(
-    `import\\s+([A-Za-z_$][\\w$]*)\\s+from\\s+["']\\./${escapedFilename}["']`,
-  );
-  const importMatch = indexSource.match(defaultImport);
-  assert.ok(
-    importMatch,
-    `${filename} is imported in extensions/index.ts but its default-import binding cannot be identified`,
-  );
-  const binding = importMatch[1];
-  assert.match(
-    indexSource,
-    new RegExp(`\\b${binding}\\s*\\(`),
-    `${filename} is imported in extensions/index.ts but its register is never invoked`,
-  );
-}
-const siblingRegistrations = [];
-for (const filename of extensionFiles) {
-  if (excluded.has(filename)) continue;
-  const { default: registerSibling } = await import(
-    pathToFileURL(`${dirname(indexPath)}/${filename}`)
-  );
-  const siblingRecording = recordingPi();
-  registerSibling(siblingRecording.pi);
-  assert.notEqual(
-    siblingRecording.registrations.length,
-    0,
-    `${filename} registered nothing when invoked directly`,
-  );
-  siblingRegistrations.push(...siblingRecording.registrations);
-}
-
+const listedFiles = QQ_EXTENSION_MODULES.map((specifier) => specifier.slice(2)).sort();
 assert.deepEqual(
-  indexRecording.registrations.sort(),
-  siblingRegistrations.sort(),
-  "extensions/index.ts registrations differ from its mounted extension siblings",
+  listedFiles,
+  siblingFiles,
+  "conditional bootstrap membership differs from the qq extension siblings",
+);
+
+const unlinked = recordingPi();
+await register(unlinked.pi, { cwd: unlinkedRepository });
+assert.deepEqual(
+  unlinked.registrations,
+  [],
+  "unlinked Repository received qq tools, commands, guards, or listeners",
+);
+
+const linked = recordingPi();
+await register(linked.pi, { cwd: linkedRepository });
+const siblingRegistrations = [];
+for (const specifier of QQ_EXTENSION_MODULES) {
+  const { default: registerSibling } = await import(
+    pathToFileURL(`${extensionDirectory}/${specifier.slice(2)}`)
+  );
+  const sibling = recordingPi();
+  await registerSibling(sibling.pi);
+  assert.notEqual(
+    sibling.registrations.length,
+    0,
+    `${specifier} registered nothing when invoked directly`,
+  );
+  siblingRegistrations.push(...sibling.registrations);
+}
+
+const bootstrapRegistrations = [
+  "listener:session_start",
+  "listener:resources_discover",
+  "listener:before_agent_start",
+  "listener:session_shutdown",
+];
+assert.deepEqual(
+  linked.registrations.sort(),
+  [...bootstrapRegistrations, ...siblingRegistrations].sort(),
+  "linked bootstrap registrations differ from the whole qq extension bundle",
 );
 
 console.log("test-qq-extension-mount: pass");

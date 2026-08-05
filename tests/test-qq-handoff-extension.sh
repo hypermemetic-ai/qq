@@ -9,7 +9,7 @@ TEST_NAME="test-qq-handoff-extension"
 source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd -- "$TESTS_DIR/.." && pwd -P)"
 EXTENSION="$ROOT/extensions/qq-handoff.ts"
-INDEX="$ROOT/extensions/index.ts"
+INDEX="$ROOT/extensions/qq-methodology.ts"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -73,8 +73,11 @@ async function invoke(h, args) {
 }
 
 const indexSource = await readFile(indexPath, "utf8");
-assert.equal((indexSource.match(/from\s+["']\.\/qq-handoff\.ts["']/g) ?? []).length, 1);
-assert.equal((indexSource.match(/registerHandoff\s*\(/g) ?? []).length, 1);
+assert.equal(
+  (indexSource.match(/["']\.\/qq-handoff\.ts["']/g) ?? []).length,
+  1,
+  "conditional bootstrap does not include qq-handoff exactly once",
+);
 
 for (const args of ["", " ", "T-0", "T-01", "T-1.0", "T-1.2.3", "--help", "-T-155", "T-155/child", "T-155 extra", "T-155 ", " T-155", "T-155\nT-156"]) {
   const h = harness({ code: 0, killed: false, stdout: receipt("done"), stderr: "" });

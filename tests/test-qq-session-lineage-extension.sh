@@ -9,7 +9,6 @@ TEST_NAME="test-qq-session-lineage-extension"
 source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd -- "$TESTS_DIR/.." && pwd -P)"
 EXTENSION="$ROOT/extensions/qq-session-lineage.ts"
-INDEX="$ROOT/extensions/index.ts"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -70,10 +69,8 @@ then
   fail 'session-lineage extension assertions failed'
 fi
 
-# The mount point imports and registers the extension (mount, don't mirror).
-grep -Fq 'import registerSessionLineage from "./qq-session-lineage.ts";' "$INDEX" \
-  || fail 'extensions/index.ts does not import qq-session-lineage'
-grep -Fq 'registerSessionLineage(pi);' "$INDEX" \
-  || fail 'extensions/index.ts does not register qq-session-lineage'
+# The conditional bootstrap owns extension membership (mount, don't mirror).
+grep -Fq '"./qq-session-lineage.ts"' "$ROOT/extensions/qq-methodology.ts" \
+  || fail 'conditional bootstrap does not include qq-session-lineage'
 
 printf 'test-qq-session-lineage-extension: pass\n'

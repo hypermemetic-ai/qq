@@ -1,33 +1,8 @@
 // @ts-nocheck
-// This file is the mount point for qq's pi extension set: one global symlink
-// (~/.pi/agent/extensions/qq -> <repo>/extensions) makes the whole set live by
-// construction (mount, don't mirror). Adding or removing an extension is a
-// repo-only change: change the file and one import line here.
+// Sole global qq mount point. The bootstrap stays inert unless the current Git
+// Repository explicitly carries qq.methodology=true in its common local config.
 
-import registerPrWatch from "./qq-pr-watch.ts";
-import registerContinue from "./qq-continue.ts";
-import registerSplitFork from "./qq-split-fork.ts";
-import registerOperatorStage from "./qq-operator-stage.ts";
-import registerBacklogGuard from "./qq-backlog-guard.ts";
-import registerDelegateWatch from "./qq-delegate-watch.ts";
-import registerQqFooter from "./qq-footer.ts";
-import registerArchitect from "./qq-architect.ts";
-import registerHandoff from "./qq-handoff.ts";
-import registerSessionLineage from "./qq-session-lineage.ts";
-import registerCommunicationMoments from "./qq-communication-moments.ts";
-import registerCodexFast from "./qq-codex-fast.ts";
+import registerQqMethodology from "./qq-methodology.ts";
 
-export default function register(pi) {
-  registerPrWatch(pi);
-  registerContinue(pi);
-  registerSplitFork(pi);
-  registerOperatorStage(pi);
-  registerBacklogGuard(pi);
-  registerDelegateWatch(pi);
-  registerQqFooter(pi);
-  registerArchitect(pi);
-  registerHandoff(pi);
-  registerSessionLineage(pi);
-  registerCommunicationMoments(pi);
-  registerCodexFast(pi);
-}
+export { QQ_EXTENSION_MODULES, inspectMethodologyLink } from "./qq-methodology.ts";
+export default registerQqMethodology;

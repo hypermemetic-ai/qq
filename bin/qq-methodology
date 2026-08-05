@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+KEY='qq.methodology'
+GIT_BIN="${QQ_GIT_BIN:-git}"
+
+fail() {
+  printf 'qq-methodology: %s\n' "$*" >&2
+  exit 69
+}
+
+usage() {
+  cat >&2 <<'EOF'
+usage: qq-methodology <link|unlink|inspect|install>
+
+  link     link the current Git Repository to qq methodology
+  unlink   unlink the current Git Repository from qq methodology
+  inspect  report the current Repository's fail-closed link state
+  install  mount only the conditional qq Pi bootstrap for this machine
+EOF
+  exit 64
+}
+
+require_git() {
+  if [[ "$GIT_BIN" == */* ]]; then
+    [[ -x "$GIT_BIN" ]] || fail "Git executable is unavailable: $GIT_BIN"
+  else
+    command -v "$GIT_BIN" >/dev/null 2>&1 || fail "Git executable is unavailable: $GIT_BIN"
+  fi
+}
+
+common_git_dir() {
+  local value
+  require_git
+  if ! value="$($GIT_BIN -C "$PWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+    || [[ -z "$value" || "$value" != /* || "$value" == *$'\n'* || ! -d "$value" ]]; then
+    return 1
+  fi
+  printf '%s\n' "$value"
+}
+
+link_repository() {
+  local common
+  common="$(common_git_dir)" || fail 'the current directory is not inside a Git Repository'
+  "$GIT_BIN" --git-dir="$common" config --local --no-includes \
+    --replace-all "$KEY" true \
+    || fail "could not write $KEY to the current Repository's common local Git config"
+  printf 'qq methodology linked for this Repository (%s=true). Start a fresh Pi session or run /reload.\n' "$KEY"
+}
+
+unlink_repository() {
+  local common status
+  common="$(common_git_dir)" || fail 'the current directory is not inside a Git Repository'
+  set +e
+  "$GIT_BIN" --git-dir="$common" config --local --no-includes --unset-all "$KEY"
+  status=$?
+  set -e
+  if (( status != 0 && status != 5 )); then
+    fail "could not remove $KEY from the current Repository's common local Git config"
+  fi
+  printf 'qq methodology unlinked for this Repository. Start a fresh Pi session or run /reload.\n'
+}
+
+inspect_repository() {
+  local common output status
+  local -a values=()
+  if ! common="$(common_git_dir)"; then
+    printf 'unlinked: current directory is not inside a Git Repository\n'
+    return
+  fi
+
+  set +e
+  output="$($GIT_BIN --git-dir="$common" config --local --no-includes \
+    --type=bool --get-all "$KEY" 2>/dev/null)"
+  status=$?
+  set -e
+  if (( status == 1 )); then
+    printf 'unlinked: %s is absent from the Repository common local Git config\n' "$KEY"
+    return
+  fi
+  if (( status != 0 )); then
+    printf 'unlinked (invalid): %s is not a readable Git boolean\n' "$KEY"
+    return
+  fi
+
+  mapfile -t values <<<"$output"
+  if (( ${#values[@]} != 1 )); then
+    printf 'unlinked (invalid): %s has multiple local values\n' "$KEY"
+  elif [[ "${values[0]}" == true ]]; then
+    printf 'linked: %s=true in the Repository common local Git config\n' "$KEY"
+  elif [[ "${values[0]}" == false ]]; then
+    printf 'unlinked: %s=false in the Repository common local Git config\n' "$KEY"
+  else
+    printf 'unlinked (invalid): %s is not a readable Git boolean\n' "$KEY"
+  fi
+}
+
+resolved_path() {
+  readlink -f -- "$1" 2>/dev/null
+}
+
+require_safe_mount() {
+  local path="$1" expected="$2" label="$3"
+  local actual expected_resolved
+  if [[ -L "$path" ]]; then
+    actual="$(resolved_path "$path")" || fail "$label is a dangling or unreadable symlink: $path"
+    expected_resolved="$(resolved_path "$expected")" || fail "qq source path is unreadable: $expected"
+    [[ "$actual" == "$expected_resolved" ]] \
+      || fail "$label is a foreign symlink; refusing to replace it: $path"
+  elif [[ -e "$path" ]]; then
+    fail "$label is not a symlink; refusing to replace it: $path"
+  fi
+}
+
+install_bootstrap() {
+  [[ -n "${HOME:-}" && "$HOME" == /* ]] || fail 'HOME must be an absolute path'
+
+  local agent="$HOME/.pi/agent"
+  local extension="$agent/extensions/qq"
+  local -a legacy_paths=(
+    "$agent/AGENTS.md"
+    "$agent/skills"
+    "$agent/prompts/bro.md"
+    "$agent/prompts/check-in.md"
+  )
+  local -a legacy_targets=(
+    "$ROOT/AGENTS.md"
+    "$ROOT/skills"
+    "$ROOT/.pi/prompts/bro.md"
+    "$ROOT/.pi/prompts/check-in.md"
+  )
+
+  # Refuse every foreign or regular collision before changing any mount.
+  require_safe_mount "$extension" "$ROOT/extensions" 'qq bootstrap mount'
+  local index
+  for index in "${!legacy_paths[@]}"; do
+    require_safe_mount "${legacy_paths[$index]}" "${legacy_targets[$index]}" \
+      'legacy unconditional qq mount'
+  done
+
+  mkdir -p -- "$agent/extensions"
+  if [[ ! -L "$extension" ]]; then
+    ln -sT -- "$ROOT/extensions" "$extension"
+  fi
+  for index in "${!legacy_paths[@]}"; do
+    if [[ -L "${legacy_paths[$index]}" ]]; then
+      rm -- "${legacy_paths[$index]}"
+    fi
+  done
+
+  printf 'qq Pi bootstrap installed at %s; no unconditional qq context, Skill, or prompt mounts remain.\n' "$extension"
+  printf 'Link each intended Repository with: %s link\n' "$ROOT/bin/qq-methodology"
+}
+
+(( $# == 1 )) || usage
+case "$1" in
+  link) link_repository ;;
+  unlink) unlink_repository ;;
+  inspect) inspect_repository ;;
+  install) install_bootstrap ;;
+  *) usage ;;
+esac

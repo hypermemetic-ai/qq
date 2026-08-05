@@ -5,7 +5,7 @@ principles, skills, and project knowledge.
 
 ## Invariants
 
-These rules apply to every work item.
+These rules apply in qq-linked Repositories.
 
 **Stay within the agreement.** The operator owns intent, scope, and
 consequential decisions. Act within what was agreed; stop and realign when the
@@ -28,9 +28,8 @@ words, the real question named. Not always; just then.
 
 ## Context
 
-Read `CONCEPTS.md` before working and use its vocabulary. Where present,
-`CONCEPTS.local.md` appends the Repository's own vocabulary to that
-glossary.
+`CONCEPTS.md` is the linked session's canonical shared vocabulary. A trusted root
+`CONCEPTS.local.md` may add Repository vocabulary without activating qq.
 
 Pi is qq scope: qq runs on Pi, so a Pi change is a methodology change and qq
 owns the Pi surface—configuration, extensions, and agent integration. Herdr is

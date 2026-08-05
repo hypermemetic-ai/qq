@@ -8,7 +8,6 @@ TEST_NAME="test-qq-delegate-watch-extension"
 source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd -- "$TESTS_DIR/.." && pwd -P)"
 WATCH_EXTENSION="$ROOT/extensions/qq-delegate-watch.ts"
-INDEX="$ROOT/extensions/index.ts"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -579,9 +578,7 @@ then
   fail 'delegate watcher extension node suite failed'
 fi
 
-grep -Fq 'import registerDelegateWatch from "./qq-delegate-watch.ts";' "$INDEX" \
-  || fail 'extensions/index.ts does not import qq-delegate-watch'
-grep -Fq 'registerDelegateWatch(pi);' "$INDEX" \
-  || fail 'extensions/index.ts does not register qq-delegate-watch'
+grep -Fq '"./qq-delegate-watch.ts"' "$ROOT/extensions/qq-methodology.ts" \
+  || fail 'conditional bootstrap does not include qq-delegate-watch'
 
 printf 'test-qq-delegate-watch-extension: pass\n'
