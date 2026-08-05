@@ -23,7 +23,7 @@ import threading
 import time
 from typing import Any
 
-SERVICE, ADMIN, CLIENT_SOURCE, STATE_SOURCE, TS_CLIENT, ROOT_TEXT, SCRATCH_TEXT = sys.argv[1:]
+SERVICE, ADMIN, CLIENT_SOURCE, TS_CLIENT, ROOT_TEXT, SCRATCH_TEXT = sys.argv[1:]
 ROOT = Path(ROOT_TEXT)
 SCRATCH = Path(SCRATCH_TEXT)
 sys.dont_write_bytecode = True
@@ -230,29 +230,6 @@ def state_fingerprint(state: Path) -> list[tuple[str, int, int, str]]:
     return result
 
 
-def admin_restore(state: Path, backup: Path, instance_id: str, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [ADMIN, "--state-dir", str(state), "restore", json.dumps({
-            "backup_path": str(backup),
-            "expected_instance_id": instance_id,
-            "authorization": "operator",
-        })],
-        text=True, capture_output=True, check=False, env=env,
-    )
-
-
-def offline_restore_plane(plane: Plane, backup: Path, instance_id: str) -> dict[str, Any]:
-    plane.client.shutdown({"expected_instance_id": instance_id, "authorization": "operator"})
-    assert plane.process is not None
-    plane.process.wait(timeout=10)
-    plane.process = None
-    result = admin_restore(plane.state, backup, instance_id)
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    receipt = json.loads(result.stdout)["result"]
-    plane.start()
-    return receipt
-
-
 def streamed_raw_request(
     path: Path, declared_raw: bytes, *, trailing: bytes = b"", fragmented: bool = False
 ) -> dict[str, Any]:
@@ -286,6 +263,8 @@ def crash_and_validation() -> None:
     survived = plane.client.status({"event_id": event})
     assert survived["record"]["journal_position"] == position and not survived["terminal"]
     refused("not_found", plane.client.status, {"producer_id": "qq/producer", "request_id": "never-accepted"})
+    retried = plane.client.send(send_body("never-accepted"))
+    assert retried["accepted"] and not retried["idempotent"]
     other_product = send_body("deciq-record")
     other_product.update({
         "producer_id": "deciq/producer", "origin_id": "deciq/source", "recipient_id": "deciq/actor",
@@ -331,24 +310,105 @@ def crash_and_validation() -> None:
     refused("refused", plane.client.ensure_subscription, selector)
     after = plane.client.inspect({"view": "health"})["counts"]
     assert after["records"] == before["records"] + 1 and after["obligations"] == before["obligations"] + 1
-    proofs.update({"committed-crash", "absence-not-accepted", "idempotency-validation", "bounded-framing"})
+    proofs.update({"01 committed crash durability", "03 idempotency and refusal"})
     plane.close()
 
 
-def socket_restore_absence() -> None:
-    plane = Plane("socket-restore-absence")
+def native_hot_journal_recovery() -> None:
+    plane = Plane("native-hot-journal")
+    accepted = plane.client.send(send_body("hot-journal-custody", recipient="qq/hot-target"))
+    event_id = accepted["record"]["event_id"]
+    obligation_id = plane.client.status({"event_id": event_id})["obligations"][0]["obligation_id"]
+    plane.stop()
+    journal = plane.state / "event-plane.sqlite3-journal"
+    evidence = plane.root / "hot-journal-magic"
+    child_source = r'''
+import importlib.util, os, pathlib, sys
+source, state_text, clock_text, evidence_text, obligation_id = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("qq_event_plane_hot_child", source)
+module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+config = module.Config(pathlib.Path(state_text), pathlib.Path(clock_text))
+singleton = module.Singleton(config.lock_path)
+store = module.Store(config)
+store.conn.execute("PRAGMA cache_size=5")
+store.conn.execute("PRAGMA cache_spill=ON")
+store.conn.execute("BEGIN IMMEDIATE")
+store.conn.execute(
+    "UPDATE obligations SET status='acknowledged',last_reason='partial hot write' WHERE obligation_id=?",
+    (obligation_id,),
+)
+magic = bytes.fromhex("d9d505f920a163d7")
+observed = b""
+for index in range(4000):
+    store.conn.execute(
+        "INSERT INTO metadata(key,value) VALUES(?,?)",
+        (f"partial-{index:04d}", "x" * 3500),
+    )
+    if index % 10 == 0:
+        path = config.database_path.with_name(config.database_path.name + "-journal")
+        try:
+            observed = path.read_bytes()[:8]
+        except OSError:
+            observed = b""
+        if observed == magic:
+            break
+pathlib.Path(evidence_text).write_text(observed.hex(), encoding="ascii")
+if observed != magic:
+    os._exit(96)
+os._exit(97)
+'''
+    child = subprocess.run(
+        [
+            sys.executable, "-c", child_source,
+            str(ROOT / "bin/lib/qq_event_plane_service.py"), str(plane.state),
+            str(plane.clock), str(evidence), obligation_id,
+        ],
+        env=plane.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20,
+    )
+    assert child.returncode == 97, (child.returncode, child.stdout, child.stderr)
+    assert evidence.read_text() == "d9d505f920a163d7"
+    assert journal.is_file() and journal.read_bytes()[:8].hex() == "d9d505f920a163d7"
+
+    plane.start()
+    status = plane.client.status({"event_id": event_id})
+    assert status["obligations"][0]["obligation_id"] == obligation_id
+    assert status["obligations"][0]["status"] == "pending"
+    delivery = plane.client.next({
+        "consumer_type": "recipient", "consumer_id": "qq/hot-target", "generation": 0,
+        "endpoint_token": "hot-recovered-endpoint",
+    })["delivery"]
+    assert delivery["record"]["event_id"] == event_id
+    assert plane.client.inspect({"view": "integrity"})["integrity"] == "ok"
+    with sqlite3.connect(plane.state / "event-plane.sqlite3") as connection:
+        keys = {row[0] for row in connection.execute("SELECT key FROM metadata")}
+        assert keys == {"instance_id", "schema_version"}
+        assert connection.execute(
+            "SELECT status FROM obligations WHERE obligation_id=?", (obligation_id,)
+        ).fetchone()[0] == "in_flight"
+    assert not journal.exists() or journal.stat().st_size == 0
+    proofs.add("02 native hot-journal recovery")
+    plane.close()
+
+
+def removed_operations_absence() -> None:
+    plane = Plane("removed-operations-absence")
     before = state_fingerprint(plane.state)
-    result = raw_request(plane.socket, {
-        "protocol": PROTOCOL,
-        "operation": "restore",
-        "body": {"path": "/not-used", "expected_instance_id": "not-used"},
-    })
-    assert not result["ok"] and result["error"]["message"] == "operation is not supported"
+    for operation in ("restore", "rollback"):
+        result = raw_request(plane.socket, {
+            "protocol": PROTOCOL, "operation": operation, "body": {},
+        })
+        assert not result["ok"] and result["error"]["message"] == "operation is not supported"
+        cli = subprocess.run(
+            [ADMIN, "--state-dir", str(plane.state), operation, "{}"],
+            text=True, capture_output=True, check=False,
+        )
+        assert cli.returncode == 2 and "invalid choice" in cli.stderr
     assert state_fingerprint(plane.state) == before
-    assert not hasattr(Client(str(plane.socket)), "restore")
+    python_client = Client(str(plane.socket))
+    assert not hasattr(python_client, "restore") and not hasattr(python_client, "rollback")
     ts_source = Path(TS_CLIENT).read_text(encoding="utf-8")
-    assert '"restore"' not in ts_source and "restore(body" not in ts_source
-    proofs.add("socket-restore-absent-unchanged")
+    assert "restore" not in ts_source.lower() and "rollback" not in ts_source.lower()
+    proofs.add("23 backup client parity and removed APIs")
     plane.close()
 
 
@@ -371,7 +431,7 @@ def concurrent_acceptance() -> None:
         after = page[-1]["journal_position"]
     assert len(journal) == 32
     assert [row["journal_position"] for row in journal] == sorted(positions)
-    proofs.add("concurrent-monotonic")
+    proofs.add("04 concurrent monotonic acceptance")
     plane.close()
 
 
@@ -502,289 +562,12 @@ def delivery_gaps_and_guards() -> None:
     first = c.publish(old_world)["record"]; second = c.publish(new_world)["record"]
     assert first["journal_position"] < second["journal_position"]
     assert first["envelope"]["source_revision"] == "revision-99" and second["envelope"]["source_revision"] == "revision-1"
-    proofs.update({"send-publish-engine", "identity-fencing", "independent-gaps", "crash-redelivery", "guarded-ack", "poison-nonfreezing", "blocked-rebind-resolution", "audited-disposition", "acceptance-order-only"})
-    plane.close()
-
-
-def offline_restore_and_refusals() -> None:
-    plane = Plane("offline-restore")
-    c = plane.client
-    baseline = c.send(send_body("offline-baseline"))
-    candidate = plane.root / "candidate.sqlite3"
-    evidence = c.backup({"path": str(candidate)})
-    instance = evidence["instance_id"]
-    later = c.send(send_body("offline-later"))
-
-    # Restore never asks the service to stop. A live singleton refusal leaves
-    # every byte/name/mode/link fingerprint unchanged.
-    before_live = state_fingerprint(plane.state)
-    live_refusal = admin_restore(plane.state, candidate, instance)
-    assert live_refusal.returncode == 2
-    assert json.loads(live_refusal.stdout)["error"]["code"] == "service_running"
-    assert state_fingerprint(plane.state) == before_live
-
-    c.shutdown({"expected_instance_id": instance, "authorization": "operator"})
-    assert plane.process is not None
-    plane.process.wait(timeout=10); plane.process = None
-
-    def invoke(body: dict[str, Any]) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [ADMIN, "--state-dir", str(plane.state), "restore", json.dumps(body)],
-            text=True, capture_output=True, check=False,
-        )
-
-    def unchanged_refusal(body: dict[str, Any]) -> None:
-        before = state_fingerprint(plane.state)
-        result = invoke(body)
-        assert result.returncode == 2, (result.stdout, result.stderr)
-        assert not json.loads(result.stdout)["ok"]
-        assert state_fingerprint(plane.state) == before
-
-    valid_body = {
-        "backup_path": str(candidate),
-        "expected_instance_id": instance,
-        "authorization": "operator",
-    }
-    unchanged_refusal({**valid_body, "authorization": "delegate"})
-    unchanged_refusal({**valid_body, "expected_instance_id": "plane_" + "0" * 32})
-    unchanged_refusal({**valid_body, "backup_path": "relative.sqlite3"})
-    unchanged_refusal({**valid_body, "unknown": True})
-    before_duplicate = state_fingerprint(plane.state)
-    duplicate_body = (
-        '{"backup_path":' + json.dumps(str(candidate))
-        + ',"expected_instance_id":' + json.dumps(instance)
-        + ',"authorization":"delegate","authorization":"operator"}'
-    )
-    duplicate = subprocess.run(
-        [ADMIN, "--state-dir", str(plane.state), "restore", duplicate_body],
-        text=True, capture_output=True, check=False,
-    )
-    assert duplicate.returncode == 2 and state_fingerprint(plane.state) == before_duplicate
-
-    valid_v1 = plane.root / "schema-v1.sqlite3"
-    shutil.copy2(candidate, valid_v1); valid_v1.chmod(0o600)
-    with sqlite3.connect(valid_v1) as db:
-        db.execute("DROP TABLE retention_boundaries")
-        db.execute("UPDATE metadata SET value='1' WHERE key='schema_version'")
-        db.execute("PRAGMA user_version=1")
-        db.commit()
-    altered = plane.root / "altered.sqlite3"
-    shutil.copy2(candidate, altered); altered.chmod(0o600)
-    with sqlite3.connect(altered) as db:
-        db.execute("CREATE TABLE unexpected(value TEXT)"); db.commit()
-    corrupt = plane.root / "corrupt.sqlite3"
-    corrupt.write_bytes(b"not sqlite"); corrupt.chmod(0o600)
-    loose = plane.root / "loose.sqlite3"
-    shutil.copy2(candidate, loose); loose.chmod(0o644)
-    linked = plane.root / "linked.sqlite3"
-    os.link(candidate, linked)
-    symlink = plane.root / "symlink.sqlite3"
-    symlink.symlink_to(candidate)
-    directory = plane.root / "directory.sqlite3"; directory.mkdir(mode=0o700)
-    fifo = plane.root / "fifo.sqlite3"; os.mkfifo(fifo, mode=0o600)
-    sided = plane.root / "sided.sqlite3"
-    shutil.copy2(candidate, sided); sided.chmod(0o600)
-    side = Path(f"{sided}-journal"); side.write_bytes(b"ambiguous"); side.chmod(0o600)
-    for invalid in (valid_v1, altered, corrupt, loose, linked, symlink, directory, fifo, sided, Path("/etc/passwd")):
-        unchanged_refusal({**valid_body, "backup_path": str(invalid)})
-    linked.unlink()
-
-    other = Plane("offline-foreign-instance")
-    foreign = other.root / "foreign.sqlite3"
-    other.client.backup({"path": str(foreign)})
-    other.close()
-    unchanged_refusal({**valid_body, "backup_path": str(foreign)})
-
-    restored = admin_restore(plane.state, candidate, instance)
-    assert restored.returncode == 0, (restored.stdout, restored.stderr)
-    receipt = json.loads(restored.stdout)["result"]
-    assert receipt["restored"] and receipt["instance_id"] == instance
-    assert receipt["integrity"] == "ok" and len(receipt["sha256"]) == 64
-    assert {path.name for path in plane.state.iterdir()} == {"event-plane.sqlite3", "event-plane.lock"}
-
-    plane.start(); c = plane.client
-    assert c.status({"event_id": baseline["record"]["event_id"]})["record"]["event_id"] == baseline["record"]["event_id"]
-    refused("not_found", c.status, {"event_id": later["record"]["event_id"]})
-    assert c.inspect({"view": "integrity"})["ok"]
-
-    # A later online backup and a second stopped-service restore remain exact.
-    post_restore_backup = plane.root / "post-restore-backup.sqlite3"
-    c.backup({"path": str(post_restore_backup)})
-    repeated_later = c.send(send_body("offline-repeat-later"))
-    repeated = offline_restore_plane(plane, post_restore_backup, instance)
-    assert repeated["restored"]
-    refused("not_found", plane.client.status, {"event_id": repeated_later["record"]["event_id"]})
     proofs.update({
-        "socket-live-restore-refusal-unchanged", "offline-v2-restore-readback",
-        "offline-restore-input-refusals-unchanged", "offline-restore-file-refusals-unchanged",
-        "offline-restore-repeat-backup",
+        "05 send and publish engine", "06 identity and endpoint fencing",
+        "07 independent consumers and gaps", "08 restart redelivery",
+        "09 blocked rebind resolution", "14 guarded disposition",
+        "15 acceptance ordering boundary",
     })
-    plane.close()
-
-
-def offline_restore_crash_convergence() -> None:
-    plane = Plane("offline-crash-template")
-    baseline = plane.client.send(send_body("offline-crash-baseline"))
-    candidate = plane.root / "crash-candidate.sqlite3"
-    evidence = plane.client.backup({"path": str(candidate)})
-    instance = evidence["instance_id"]
-    later = plane.client.send(send_body("offline-crash-pre-state"))
-    plane.client.shutdown({"expected_instance_id": instance, "authorization": "operator"})
-    assert plane.process is not None
-    plane.process.wait(timeout=10); plane.process = None
-
-    checkpoints = {
-        "candidate-temp-created": False,
-        "candidate-temp-durable": False,
-        "candidate-published": False,
-        "candidate-publication-durable": False,
-        "safety-temp-created": False,
-        "safety-temp-durable": False,
-        "before-safety-publication": False,
-        "after-safety-publication": False,
-        "safety-publication-durable": False,
-        "commit-temp-durable": False,
-        "before-live-publication": False,
-        "after-live-publication": False,
-        "candidate-live-durable": False,
-        "before-commit-publication": False,
-        "after-commit-publication": True,
-        "commit-publication-durable": True,
-        "after-safety-cleanup": True,
-        "after-final-cleanup": True,
-    }
-    state_module_path = Path(STATE_SOURCE)
-    spec = importlib.util.spec_from_file_location("qq_event_plane_state_crash_test", state_module_path)
-    assert spec is not None and spec.loader is not None
-    state_module = importlib.util.module_from_spec(spec); spec.loader.exec_module(state_module)
-
-    repeated_state: Path | None = None
-    for checkpoint, candidate_wins in checkpoints.items():
-        root = plane.root / checkpoint; root.mkdir(mode=0o700)
-        state = root / "state"; state.mkdir(mode=0o700)
-        for name in ("event-plane.sqlite3", "event-plane.lock"):
-            shutil.copy2(plane.state / name, state / name); (state / name).chmod(0o600)
-        env = os.environ.copy()
-        env["QQ_EVENT_PLANE_TESTING"] = "1"
-        env["QQ_EVENT_PLANE_RESTORE_CRASH_AT"] = checkpoint
-        died = admin_restore(state, candidate, instance, env=env)
-        assert died.returncode == 97, (checkpoint, died.returncode, died.stdout, died.stderr)
-
-        process = subprocess.Popen(
-            [SERVICE, "serve", "--state-dir", str(state)],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
-        socket_path = state / "event-plane.sock"
-        for _ in range(250):
-            if socket_path.is_socket():
-                break
-            if process.poll() is not None:
-                out, err = process.communicate()
-                raise AssertionError((checkpoint, process.returncode, out, err, state_fingerprint(state)))
-            time.sleep(0.01)
-        else:
-            raise AssertionError(f"service did not reconcile crash checkpoint {checkpoint}")
-        client = Client(str(socket_path))
-        assert client.status({"event_id": baseline["record"]["event_id"]})["record"]["event_id"] == baseline["record"]["event_id"]
-        if candidate_wins:
-            refused("not_found", client.status, {"event_id": later["record"]["event_id"]})
-        else:
-            assert client.status({"event_id": later["record"]["event_id"]})["record"]["event_id"] == later["record"]["event_id"]
-        names = {path.name for path in state.iterdir()}
-        assert not names.intersection(state_module.RESTORE_NAMES)
-        assert not any(side.exists() for side in state_module.sqlite_side_paths(state / "event-plane.sqlite3"))
-        health = client.inspect({"view": "health"})
-        assert health["instance_id"] == instance
-        client.shutdown({"expected_instance_id": instance, "authorization": "operator"})
-        process.wait(timeout=10)
-        if checkpoint == "after-live-publication":
-            repeated_state = state
-
-    assert repeated_state is not None
-    again = admin_restore(repeated_state, candidate, instance)
-    assert again.returncode == 0, (again.stdout, again.stderr)
-    proofs.add("offline-restore-crash-boundaries")
-    plane.close()
-
-
-def offline_restore_leftover_refusal() -> None:
-    plane = Plane("offline-leftovers-template")
-    plane.client.send(send_body("leftover-baseline"))
-    candidate = plane.root / "valid.sqlite3"
-    instance = plane.client.backup({"path": str(candidate)})["instance_id"]
-    plane.client.shutdown({"expected_instance_id": instance, "authorization": "operator"})
-    assert plane.process is not None
-    plane.process.wait(timeout=10); plane.process = None
-
-    state_module_path = Path(STATE_SOURCE)
-    spec = importlib.util.spec_from_file_location("qq_event_plane_state_leftover_test", state_module_path)
-    assert spec is not None and spec.loader is not None
-    state_module = importlib.util.module_from_spec(spec); spec.loader.exec_module(state_module)
-
-    def copied_state(name: str) -> Path:
-        state = plane.root / name / "state"; state.mkdir(parents=True, mode=0o700)
-        for fixed in ("event-plane.sqlite3", "event-plane.lock"):
-            shutil.copy2(plane.state / fixed, state / fixed); (state / fixed).chmod(0o600)
-        return state
-
-    cases: list[tuple[str, Any]] = []
-    def unknown(state: Path) -> None:
-        path = state / ".event-plane-restore-unknown"; path.write_bytes(b"x"); path.chmod(0o600)
-    cases.append(("unknown-name", unknown))
-    def malformed_candidate(state: Path) -> None:
-        path = state / state_module.CANDIDATE_NAME; path.write_bytes(b"bad"); path.chmod(0o600)
-    cases.append(("malformed-candidate", malformed_candidate))
-    def malformed_safety(state: Path) -> None:
-        path = state / state_module.SAFETY_NAME; path.write_bytes(b"bad"); path.chmod(0o600)
-    cases.append(("malformed-safety", malformed_safety))
-    def malformed_commit(state: Path) -> None:
-        path = state / state_module.COMMIT_NAME; path.write_bytes(b"bad"); path.chmod(0o600)
-    cases.append(("malformed-commit", malformed_commit))
-    def loose_temp(state: Path) -> None:
-        path = state / state_module.CANDIDATE_TEMP_NAME; path.write_bytes(b"partial"); path.chmod(0o644)
-    cases.append(("loose-temp", loose_temp))
-    def symlink_temp(state: Path) -> None:
-        (state / state_module.SAFETY_TEMP_NAME).symlink_to(state / "event-plane.sqlite3")
-    cases.append(("symlink-temp", symlink_temp))
-    def hardlink_safety(state: Path) -> None:
-        published = state / state_module.SAFETY_NAME
-        shutil.copy2(candidate, published); published.chmod(0o600)
-        os.link(published, state.parent / "outside-link")
-    cases.append(("hardlink-safety", hardlink_safety))
-    def side_file(state: Path) -> None:
-        path = Path(f"{state / 'event-plane.sqlite3'}-journal")
-        path.write_bytes(b"ambiguous"); path.chmod(0o600)
-    cases.append(("side-file", side_file))
-
-    for name, build in cases:
-        state = copied_state(name); build(state)
-        before = state_fingerprint(state)
-        result = subprocess.run(
-            [SERVICE, "serve", "--state-dir", str(state)],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
-        )
-        assert result.returncode == 73, (name, result.returncode, result.stderr)
-        assert state_fingerprint(state) == before, f"ambiguous leftover changed: {name}"
-
-    disposable = copied_state("disposable-temp")
-    partial = disposable / state_module.CANDIDATE_TEMP_NAME
-    partial.write_bytes(b"partial candidate construction"); partial.chmod(0o600)
-    process = subprocess.Popen(
-        [SERVICE, "serve", "--state-dir", str(disposable)],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    )
-    socket_path = disposable / "event-plane.sock"
-    for _ in range(250):
-        if socket_path.is_socket(): break
-        if process.poll() is not None:
-            out, err = process.communicate(); raise AssertionError((process.returncode, out, err))
-        time.sleep(0.01)
-    else: raise AssertionError("disposable restore temp permanently wedged startup")
-    assert not partial.exists()
-    client = Client(str(socket_path))
-    client.shutdown({"expected_instance_id": instance, "authorization": "operator"})
-    process.wait(timeout=10)
-    proofs.update({"offline-restore-leftover-refusal-unchanged", "offline-restore-disposable-temp-cleanup"})
     plane.close()
 
 
@@ -857,7 +640,7 @@ def predicate_wait_atomicity() -> None:
             assert not worker.is_alive()
     finally:
         store.close()
-    proofs.update({"next-lost-wake-atomic", "status-lost-wake-atomic"})
+    proofs.add("10 atomic next and status wakes")
 
 
 def backoff_blocking() -> None:
@@ -881,7 +664,7 @@ def backoff_blocking() -> None:
     assert observed_delays == [1000, 2000, 5000, 10000, 30000, 60000, 120000, 300000]
     assert c.next({"consumer_type": "subscription", "consumer_id": "qq/retry", "generation": 1, "endpoint_token": "retry-endpoint"})["delivery"] is None
     assert c.status({"event_id": record["record"]["event_id"]})["obligations"][0]["status"] == "blocked"
-    proofs.add("backoff-blocked-no-hot-loop")
+    proofs.add("11 exact backoff and blocking")
     plane.close()
 
 
@@ -974,21 +757,16 @@ def expiry_lease_and_retention() -> None:
         "generation": 1, "reconstruct_from": deleted_position,
     })
     assert isolated_kind["reconstructed"] and isolated_product["reconstructed"]
-    boundary_backup = plane.root / "retention-boundary.sqlite3"
-    health = c.inspect({"view": "health"})
-    c.backup({"path": str(boundary_backup)})
     plane.restart(); c = plane.client
     refused("replay_unavailable", c.ensure_subscription, {
         "subscription_id": "qq/deleted-after-restart", "product_id": "qq", "kind": "lease.fact",
         "generation": 1, "reconstruct_from": deleted_position,
     })
-    offline_restore_plane(plane, boundary_backup, health["instance_id"])
-    c = plane.client
-    refused("replay_unavailable", c.ensure_subscription, {
-        "subscription_id": "qq/deleted-after-restore", "product_id": "qq", "kind": "lease.fact",
-        "generation": 1, "reconstruct_from": deleted_position,
+    proofs.update({
+        "12 addressed expiry and waiter failure",
+        "13 lease reconstruction and replay truth",
+        "16 bounded retention",
     })
-    proofs.update({"addressed-expiry-waiter", "lease-reconstruction", "retention-tombstone-deletion", "retention-replay-boundary", "blocked-abandoned-cleanup"})
     plane.close()
 
 
@@ -1102,7 +880,6 @@ try {
         assert process.returncode == 0, (process.stdout, process.stderr)
         assert json.loads(process.stdout)["rejected"]
         assert not worker.is_alive()
-    proofs.add("single-frame-stream-exactness")
     plane.close()
 
 
@@ -1149,7 +926,8 @@ const status = await client.status({event_id:fact.record.event_id});
 const inspection = await client.inspect({view:"health"});
 const backup = await client.backup({path:backupPath});
 const methods = ["send","publish","ensureSubscription","next","wait","acknowledge","retry","block","disposition","status","inspect","backup","shutdown"];
-console.log(JSON.stringify({result, conflict, fact, disposable, waited, status, inspection, backup, canonical: canonicalEventPlaneJson({body,operation:"send",protocol:"qq-event-plane/v1"}), methods: methods.every((name) => typeof client[name] === "function")}));
+const shutdown = await client.shutdown({expected_instance_id:inspection.instance_id,authorization:"operator"});
+console.log(JSON.stringify({result, conflict, fact, disposable, waited, status, inspection, backup, shutdown, canonical: canonicalEventPlaneJson({body,operation:"send",protocol:"qq-event-plane/v1"}), methods: methods.every((name) => typeof client[name] === "function")}));
 '''
     ts_backup = plane.root / "typescript-backup.sqlite3"
     process = subprocess.run(
@@ -1165,12 +943,12 @@ console.log(JSON.stringify({result, conflict, fact, disposable, waited, status, 
     assert observed["status"]["terminal"] and observed["status"]["obligations"][0]["status"] == "acknowledged"
     assert observed["inspection"]["journal_mode"] == "delete"
     assert observed["backup"]["integrity"] == "ok" and ts_backup.exists()
+    assert observed["shutdown"]["shutdown"] and observed["shutdown"]["instance_id"] == observed["inspection"]["instance_id"]
     expected_request = json.dumps(
         {"body": body, "operation": "send", "protocol": PROTOCOL},
         ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":"),
     )
     assert observed["canonical"] == expected_request
-    proofs.add("python-typescript-equivalence")
     plane.close()
 
 
@@ -1273,7 +1051,6 @@ console.log(JSON.stringify(refused));
     assert invalid_process.returncode == 0, (invalid_process.stdout, invalid_process.stderr)
     assert all(json.loads(invalid_process.stdout))
     assert c.inspect({"view": "health"})["counts"]["records"] == valid_count
-    proofs.update({"cross-client-json-classes", "strict-integer-json-refusal"})
     plane.close()
 
 
@@ -1349,134 +1126,406 @@ console.log(JSON.stringify({retried,accepted,refusals,canonical:canonicalEventPl
         service_refusal = raw_request(plane.socket, raw=raw)
         assert not service_refusal["ok"]
     assert c.inspect({"view": "health"})["counts"]["records"] == accepted_count
-    proofs.add("bounded-decimal-key-classification")
+    proofs.add("17 cross-client bounded protocol")
     plane.close()
 
 
-def administration_and_rollback() -> None:
-    plane = Plane("administration")
+def online_backup_contract() -> None:
+    plane = Plane("online-backup")
     c = plane.client
-    baseline = c.send(send_body("backup-baseline"))
+    baseline = c.send(send_body("backup-baseline", recipient="qq/backup-target"))
     health = c.inspect({"view": "health"})
-    assert health["journal_mode"] == "delete" and health["synchronous"] == "FULL"
-    assert c.inspect({"view": "integrity"}) == {"integrity": "ok", "ok": True, "schema_version": 2}
-    database = plane.state / "event-plane.sqlite3"
-    with sqlite3.connect(database) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
-        assert db.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
-        trigger = db.execute("SELECT sql FROM sqlite_master WHERE name='records_immutable'").fetchone()[0]
-        assert "immutable journal record" in trigger
-    backup = plane.root / "backup.sqlite3"
-    c.backup({"path": str(backup)})
-    assert stat.S_IMODE(backup.stat().st_mode) == 0o600
+    destination = plane.root / "snapshot.sqlite3"
+    receipt = c.backup({"path": str(destination)})
+    info = destination.lstat()
+    assert stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid()
+    assert stat.S_IMODE(info.st_mode) == 0o600 and info.st_nlink == 1
+    assert not any(Path(str(destination) + suffix).exists() for suffix in ("-journal", "-wal", "-shm"))
+    assert receipt["schema_version"] == 2 and receipt["instance_id"] == health["instance_id"]
+    assert receipt["integrity"] == "ok" and receipt["durability"] == "file-and-parent-fsynced"
+    assert receipt["baseline"]["records"] == health["counts"]["records"]
+    with sqlite3.connect(destination) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert connection.execute(
+            "SELECT value FROM metadata WHERE key='instance_id'"
+        ).fetchone()[0] == health["instance_id"]
+        row = connection.execute(
+            "SELECT event_id FROM records WHERE request_id='backup-baseline'"
+        ).fetchone()
+        assert row is not None and row[0] == baseline["record"]["event_id"]
 
-    # v1 -> v2 remains solely a cold service-start migration concern.
-    valid_v1 = plane.root / "valid-v1.sqlite3"
-    shutil.copy2(backup, valid_v1)
-    with sqlite3.connect(valid_v1) as db:
-        db.execute("DROP TABLE retention_boundaries")
-        db.execute("UPDATE metadata SET value='1' WHERE key='schema_version'")
-        db.execute("PRAGMA user_version=1")
-        db.commit()
-        assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-    valid_v1.chmod(0o600)
-    migration_state = plane.root / "migration-state"
-    migration_state.mkdir(mode=0o700)
-    migrated_database = migration_state / "event-plane.sqlite3"
-    shutil.copy2(valid_v1, migrated_database); migrated_database.chmod(0o600)
-    migration_process = subprocess.Popen(
-        [SERVICE, "serve", "--state-dir", str(migration_state), "--test-clock", str(plane.clock)],
+    sticky = plane.root / "sticky-shared"
+    sticky.mkdir(mode=0o1777); sticky.chmod(0o1777)
+    private_child = sticky / "account-private"
+    private_child.mkdir(mode=0o700)
+    sticky_snapshot = private_child / "sticky-snapshot.sqlite3"
+    assert c.backup({"path": str(sticky_snapshot)})["integrity"] == "ok"
+
+    database = plane.state / "event-plane.sqlite3"
+    def journal_digest() -> str:
+        return hashlib.sha256(database.read_bytes()).hexdigest()
+
+    def backup_refusal(raw: str) -> None:
+        before_digest = journal_digest()
+        before_counts = c.inspect({"view": "health"})["counts"]
+        refused("refused", c.backup, {"path": raw})
+        assert journal_digest() == before_digest
+        assert c.inspect({"view": "health"})["counts"] == before_counts
+
+    backup_refusal(str(plane.state))
+    backup_refusal(str(plane.state / "inside.sqlite3"))
+    backup_refusal(str(plane.state / "nested" / "inside.sqlite3"))
+    assert not (plane.state / "inside.sqlite3").exists()
+
+    existing = plane.root / "existing.sqlite3"
+    existing.write_bytes(b"existing"); existing.chmod(0o600)
+    backup_refusal(str(existing))
+    target = plane.root / "symlink-target"
+    target.write_bytes(b"target"); target.chmod(0o600)
+    symlink = plane.root / "symlink.sqlite3"; symlink.symlink_to(target)
+    backup_refusal(str(symlink))
+    directory = plane.root / "directory-target"; directory.mkdir(mode=0o700)
+    backup_refusal(str(directory))
+    fifo = plane.root / "fifo-target"; os.mkfifo(fifo, mode=0o600)
+    backup_refusal(str(fifo))
+
+    unsafe = plane.root / "unsafe-parent"; unsafe.mkdir(mode=0o777); unsafe.chmod(0o777)
+    backup_refusal(str(unsafe / "unsafe.sqlite3"))
+    nested_outer = plane.root / "nested-safe"; nested_outer.mkdir(mode=0o700)
+    nested_unsafe = nested_outer / "nested-unsafe"
+    nested_unsafe.mkdir(mode=0o770); nested_unsafe.chmod(0o770)
+    nested_private = nested_unsafe / "private"; nested_private.mkdir(mode=0o700)
+    backup_refusal(str(nested_private / "unsafe.sqlite3"))
+    backup_refusal("relative.sqlite3")
+    backup_refusal("")
+    backup_refusal(str(plane.root) + "/trailing.sqlite3/")
+    backup_refusal(str(plane.root) + "//double.sqlite3")
+    backup_refusal(str(plane.root) + "/./dot.sqlite3")
+    backup_refusal(str(plane.root / "nested-safe" / ".." / "traversal.sqlite3"))
+
+    foreign_parent: Path | None = None
+    for search_root in (Path("/run"), Path("/var/lib"), Path("/var/cache"), Path("/proc")):
+        try:
+            candidates = list(search_root.iterdir())
+        except OSError:
+            continue
+        for candidate in candidates:
+            try:
+                candidate_info = candidate.lstat()
+            except OSError:
+                continue
+            if stat.S_ISDIR(candidate_info.st_mode) and candidate_info.st_uid not in (0, os.getuid()):
+                foreign_parent = candidate
+                break
+        if foreign_parent is not None:
+            break
+    assert foreign_parent is not None, "substrate has no observable foreign-owned directory"
+    backup_refusal(str(foreign_parent / "qq-event-plane-backup.sqlite3"))
+
+    # Make the copy long enough for another process to replace the just-created
+    # destination name. Retained descriptor/inode checks must refuse success.
+    payload = {"blob": "x" * 60_000}
+    for index in range(96):
+        c.send(send_body(f"backup-race-fill-{index}", recipient="qq/race", payload=payload))
+    race = plane.root / "racy.sqlite3"
+    moved = plane.root / "racy-original.sqlite3"
+    changed = threading.Event()
+
+    def replace_destination() -> None:
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                race.lstat()
+            except FileNotFoundError:
+                continue
+            try:
+                os.replace(race, moved)
+                race.write_bytes(b"replacement")
+                race.chmod(0o600)
+                changed.set()
+                return
+            except FileNotFoundError:
+                continue
+
+    racer = threading.Thread(target=replace_destination)
+    racer.start()
+    before_digest = journal_digest()
+    refused("refused", c.backup, {"path": str(race)})
+    racer.join(timeout=10)
+    assert changed.is_set() and not racer.is_alive()
+    assert journal_digest() == before_digest
+    for item in (race, moved):
+        if item.exists() or item.is_symlink():
+            item.unlink()
+
+    assert c.status({"event_id": baseline["record"]["event_id"]})["record"]["event_id"] == baseline["record"]["event_id"]
+    plane.restart()
+    assert plane.client.status({"event_id": baseline["record"]["event_id"]})["record"]["event_id"] == baseline["record"]["event_id"]
+    source = (ROOT / "bin/lib/qq_event_plane_service.py").read_text(encoding="utf-8")
+    assert "os.fsync(target_fd)" in source and "os.fsync(parent_fd)" in source
+    proofs.update({"21 online backup success", "22 online backup refusal and race safety"})
+    plane.close()
+
+
+def exact_v2_and_fixed_process_contract() -> None:
+    plane = Plane("schema-contract")
+    snapshot = plane.root / "exact-v2.sqlite3"
+    installed_instance = plane.client.inspect({"view": "health"})["instance_id"]
+    plane.client.backup({"path": str(snapshot)})
+    plane.close()
+
+    def make_state(name: str) -> tuple[Path, Path]:
+        state = plane.root / name
+        state.mkdir(mode=0o700)
+        database = state / "event-plane.sqlite3"
+        shutil.copyfile(snapshot, database); database.chmod(0o600)
+        lock = state / "event-plane.lock"; lock.touch(mode=0o600); lock.chmod(0o600)
+        return state, database
+
+    exact_state, exact_database = make_state("exact-open")
+    exact_process = subprocess.Popen(
+        [SERVICE, "serve", "--state-dir", str(exact_state), "--test-clock", str(plane.clock)],
         env=plane.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
-    migration_socket = migration_state / "event-plane.sock"
+    exact_socket = exact_state / "event-plane.sock"
     for _ in range(250):
-        if migration_socket.is_socket(): break
-        if migration_process.poll() is not None:
-            out, err = migration_process.communicate(); raise AssertionError((migration_process.returncode, out, err))
+        if exact_socket.is_socket():
+            break
+        if exact_process.poll() is not None:
+            out, err = exact_process.communicate()
+            raise AssertionError((exact_process.returncode, out, err))
         time.sleep(0.01)
-    else: raise AssertionError("v1 migration service did not start")
-    migration_client = Client(str(migration_socket))
-    assert migration_client.inspect({"view": "health"})["schema_version"] == 2
-    migrated_instance = migration_client.inspect({"view": "health"})["instance_id"]
-    migration_client.shutdown({"expected_instance_id": migrated_instance, "authorization": "operator"})
-    migration_process.wait(timeout=10)
-    with sqlite3.connect(migrated_database) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
-        assert db.execute("SELECT COUNT(*) FROM retention_boundaries").fetchone()[0] == 0
+    else:
+        raise AssertionError("exact-v2 database did not open")
+    exact_client = Client(str(exact_socket))
+    assert exact_client.inspect({"view": "health"})["instance_id"] == installed_instance
+    exact_client.shutdown({"expected_instance_id": installed_instance, "authorization": "operator"})
+    exact_process.wait(timeout=10)
+    assert hashlib.sha256(exact_database.read_bytes()).hexdigest()
 
-    # Singleton overlap refuses without touching the live socket.
-    overlap = subprocess.run(
-        [SERVICE, "serve", "--state-dir", str(plane.state), "--test-clock", str(plane.clock)],
+    cases: list[tuple[str, Any, int]] = []
+    def schema_one(connection: sqlite3.Connection) -> None:
+        connection.execute("UPDATE metadata SET value='1' WHERE key='schema_version'")
+        connection.execute("PRAGMA user_version=1")
+    cases.append(("schema-one", schema_one, 0o600))
+    def unknown_version(connection: sqlite3.Connection) -> None:
+        connection.execute("UPDATE metadata SET value='77' WHERE key='schema_version'")
+        connection.execute("PRAGMA user_version=77")
+    cases.append(("unknown-version", unknown_version, 0o600))
+    def altered(connection: sqlite3.Connection) -> None:
+        connection.execute("CREATE TABLE foreign_extra(value TEXT)")
+    cases.append(("altered", altered, 0o600))
+
+    for name, mutate, mode in cases:
+        state, database = make_state(name)
+        with sqlite3.connect(database) as connection:
+            mutate(connection)
+            connection.commit()
+        database.chmod(mode)
+        before = database.read_bytes()
+        result = subprocess.run(
+            [SERVICE, "serve", "--state-dir", str(state), "--test-clock", str(plane.clock)],
+            env=plane.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
+        )
+        assert result.returncode == 73, (name, result.returncode, result.stderr)
+        assert database.read_bytes() == before
+        assert {item.name for item in state.iterdir()} == {"event-plane.sqlite3", "event-plane.lock"}
+
+    unversioned_state = plane.root / "unversioned-nonempty"
+    unversioned_state.mkdir(mode=0o700)
+    unversioned_database = unversioned_state / "event-plane.sqlite3"
+    with sqlite3.connect(unversioned_database) as connection:
+        connection.execute("CREATE TABLE foreign_state(value TEXT)")
+        connection.execute("INSERT INTO foreign_state VALUES('unchanged')")
+    unversioned_database.chmod(0o600)
+    unversioned_lock = unversioned_state / "event-plane.lock"
+    unversioned_lock.touch(mode=0o600); unversioned_lock.chmod(0o600)
+    before = unversioned_database.read_bytes()
+    result = subprocess.run(
+        [SERVICE, "serve", "--state-dir", str(unversioned_state), "--test-clock", str(plane.clock)],
         env=plane.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
     )
-    assert overlap.returncode == 73 and b"singleton lock" in overlap.stderr
-    assert c.status({"event_id": baseline["record"]["event_id"]})["record"]["event_id"] == baseline["record"]["event_id"]
+    assert result.returncode == 73 and unversioned_database.read_bytes() == before
 
-    assert stat.S_IMODE(plane.state.stat().st_mode) == 0o700
-    for path in (plane.socket, database, plane.state / "event-plane.lock"):
-        assert stat.S_IMODE(path.lstat().st_mode) == 0o600 and path.lstat().st_nlink == 1
-
-    # Guarded shutdown cleans its socket; restart proves recovery after signal.
-    refused("guard_conflict", c.shutdown, {"expected_instance_id": "wrong", "authorization": "operator"})
-    c.shutdown({"expected_instance_id": health["instance_id"], "authorization": "operator"})
-    assert plane.process is not None
-    plane.process.wait(timeout=10); plane.process = None
-    assert not plane.socket.exists()
-    plane.start(); c = plane.client
-
-    # Exact rollback reconciles only a recognized private offline construction
-    # name, then removes the exact installed database/lock pair under singleton.
-    import importlib.util as _importlib_util
-    state_spec = _importlib_util.spec_from_file_location(
-        "qq_event_plane_state_rollback_test", Path(STATE_SOURCE)
-    )
-    assert state_spec is not None and state_spec.loader is not None
-    state_module = _importlib_util.module_from_spec(state_spec); state_spec.loader.exec_module(state_module)
-    disposable = plane.state / state_module.CANDIDATE_TEMP_NAME
-    disposable.write_bytes(b"interrupted pre-publication construction"); disposable.chmod(0o600)
-    rollback_backup = plane.root / "rollback.sqlite3"
-    admin = subprocess.run(
-        [ADMIN, "--state-dir", str(plane.state), "rollback", json.dumps({
-            "backup_path": str(rollback_backup),
-            "expected_instance_id": c.inspect({"view": "health"})["instance_id"],
-            "authorization": "operator",
-        })],
-        text=True, capture_output=True, check=False,
-    )
-    assert admin.returncode == 0, (admin.stdout, admin.stderr)
-    receipt = json.loads(admin.stdout)
-    assert receipt["result"]["rolled_back"] and rollback_backup.exists() and not plane.state.exists()
-    assert plane.process is not None
-    plane.process.wait(timeout=10); plane.process = None
-
-    # Unknown unversioned state fails closed without a partial migration.
-    legacy_state = plane.root / "legacy-state"; legacy_state.mkdir(mode=0o700)
-    legacy_db = legacy_state / "event-plane.sqlite3"
-    with sqlite3.connect(legacy_db) as db:
-        db.execute("CREATE TABLE foreign_state(value TEXT)")
-        db.execute("INSERT INTO foreign_state VALUES('unchanged')")
-    legacy_db.chmod(0o600)
-    migration = subprocess.run(
-        [SERVICE, "serve", "--state-dir", str(legacy_state), "--test-clock", str(plane.clock)],
-        env=plane.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
-    )
-    assert migration.returncode == 73 and b"refuses implicit migration" in migration.stderr
-    with sqlite3.connect(legacy_db) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 0
-        assert db.execute("SELECT value FROM foreign_state").fetchone()[0] == "unchanged"
-    loose_state = plane.root / "loose-state"; loose_state.mkdir(mode=0o700)
-    loose_db = loose_state / "event-plane.sqlite3"; loose_db.touch(mode=0o644); loose_db.chmod(0o644)
+    loose_state, loose_database = make_state("loose-database")
+    loose_database.chmod(0o644)
+    before = loose_database.read_bytes()
     loose = subprocess.run(
         [SERVICE, "serve", "--state-dir", str(loose_state), "--test-clock", str(plane.clock)],
         env=plane.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
     )
-    assert loose.returncode == 73 and b"mode 0600" in loose.stderr
-    assert stat.S_IMODE(loose_db.stat().st_mode) == 0o644
-    active.remove(plane)
-    proofs.update({
-        "migration-integrity", "schema-v1-v2-migration", "online-backup",
-        "singleton", "permissions", "signal-cleanup", "exact-rollback",
-    })
+    assert loose.returncode == 73 and loose_database.read_bytes() == before
+    assert stat.S_IMODE(loose_database.stat().st_mode) == 0o644
+
+    wal_state, wal_database = make_state("wal-database")
+    with sqlite3.connect(wal_database) as connection:
+        assert connection.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+    before = wal_database.read_bytes()
+    wal = subprocess.run(
+        [SERVICE, "serve", "--state-dir", str(wal_state), "--test-clock", str(plane.clock)],
+        env=plane.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
+    )
+    assert wal.returncode == 73 and wal_database.read_bytes() == before
+    assert {item.name for item in wal_state.iterdir()} == {"event-plane.sqlite3", "event-plane.lock"}
+
+    corrupt_state, corrupt_database = make_state("corrupt-database")
+    with sqlite3.connect(corrupt_database) as connection:
+        page_size = int(connection.execute("PRAGMA page_size").fetchone()[0])
+        records_root = int(connection.execute(
+            "SELECT rootpage FROM sqlite_master WHERE name='records'"
+        ).fetchone()[0])
+    damaged = bytearray(corrupt_database.read_bytes())
+    damaged[(records_root - 1) * page_size] = 0xff
+    corrupt_database.write_bytes(damaged); corrupt_database.chmod(0o600)
+    before = corrupt_database.read_bytes()
+    corrupt = subprocess.run(
+        [SERVICE, "serve", "--state-dir", str(corrupt_state), "--test-clock", str(plane.clock)],
+        env=plane.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
+    )
+    assert corrupt.returncode != 0 and corrupt_database.read_bytes() == before
+    proofs.add("18 exact first schema v2")
+
+    singleton_plane = Plane("singleton-fixed-names")
+    c = singleton_plane.client
+    health = c.inspect({"view": "health"})
+    overlap = subprocess.run(
+        [SERVICE, "serve", "--state-dir", str(singleton_plane.state), "--test-clock", str(singleton_plane.clock)],
+        env=singleton_plane.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
+    )
+    assert overlap.returncode == 73 and b"singleton lock" in overlap.stderr
+    for fixed in (
+        singleton_plane.state / "event-plane.sqlite3",
+        singleton_plane.state / "event-plane.lock",
+        singleton_plane.socket,
+    ):
+        fixed_info = fixed.lstat()
+        assert stat.S_IMODE(fixed_info.st_mode) == 0o600 and fixed_info.st_nlink == 1
+    assert stat.S_IMODE(singleton_plane.state.lstat().st_mode) == 0o700
+    refused("guard_conflict", c.shutdown, {"expected_instance_id": "wrong", "authorization": "operator"})
+    singleton_plane.stop(signal.SIGINT)
+    singleton_plane.start()
+    singleton_plane.stop(signal.SIGTERM)
+
+    for name in ("unexpected-name", "event-plane.sqlite3-wal", "event-plane.sqlite3-shm"):
+        marker = singleton_plane.state / name
+        marker.write_bytes(b"ambiguous"); marker.chmod(0o600)
+        result = subprocess.run(
+            [SERVICE, "serve", "--state-dir", str(singleton_plane.state), "--test-clock", str(singleton_plane.clock)],
+            env=singleton_plane.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
+        )
+        assert result.returncode == 73 and marker.read_bytes() == b"ambiguous"
+        marker.unlink()
+    socket_regular = singleton_plane.socket
+    socket_regular.write_bytes(b"not a socket"); socket_regular.chmod(0o600)
+    result = subprocess.run(
+        [SERVICE, "serve", "--state-dir", str(singleton_plane.state), "--test-clock", str(singleton_plane.clock)],
+        env=singleton_plane.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
+    )
+    assert result.returncode == 73 and socket_regular.read_bytes() == b"not a socket"
+    socket_regular.unlink()
+    database = singleton_plane.state / "event-plane.sqlite3"
+    hardlink = singleton_plane.root / "database-hardlink"
+    os.link(database, hardlink)
+    result = subprocess.run(
+        [SERVICE, "serve", "--state-dir", str(singleton_plane.state), "--test-clock", str(singleton_plane.clock)],
+        env=singleton_plane.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
+    )
+    assert result.returncode == 73
+    hardlink.unlink()
+    singleton_plane.start()
+    assert singleton_plane.client.inspect({"view": "health"})["instance_id"] == health["instance_id"]
+    proofs.add("19 singleton signals and private fixed names")
+    singleton_plane.close()
+
+
+def state_ancestor_fence() -> None:
+    root = SCRATCH / "state-ancestors"
+    root.mkdir(mode=0o700)
+    clock = root / "clock"
+    clock.write_text("1000000\n", encoding="ascii"); clock.chmod(0o600)
+    env = os.environ.copy(); env["QQ_EVENT_PLANE_TESTING"] = "1"
+
+    def start_and_stop(state: Path) -> None:
+        process = subprocess.Popen(
+            [SERVICE, "serve", "--state-dir", str(state), "--test-clock", str(clock)],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        socket_path = state / "event-plane.sock"
+        for _ in range(250):
+            if socket_path.is_socket():
+                break
+            if process.poll() is not None:
+                out, err = process.communicate()
+                raise AssertionError((process.returncode, out, err, state))
+            time.sleep(0.01)
+        else:
+            raise AssertionError(("state did not start", state))
+        client = Client(str(socket_path))
+        identity = client.inspect({"view": "health"})["instance_id"]
+        client.shutdown({"expected_instance_id": identity, "authorization": "operator"})
+        process.wait(timeout=10)
+
+    start_and_stop(root / "account-private-state")
+    existing_container = root / "existing-container"; existing_container.mkdir(mode=0o700)
+    existing_state = existing_container / "state"
+    start_and_stop(existing_state)
+    before_existing = state_fingerprint(existing_state)
+    existing_container.chmod(0o777)
+    existing_refusal = subprocess.run(
+        [SERVICE, "serve", "--state-dir", str(existing_state), "--test-clock", str(clock)],
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
+    )
+    assert existing_refusal.returncode == 73
+    assert state_fingerprint(existing_state) == before_existing
+    existing_container.chmod(0o700)
+    sticky = root / "sticky-shared"; sticky.mkdir(mode=0o1777); sticky.chmod(0o1777)
+    sticky_private = sticky / "account-private"; sticky_private.mkdir(mode=0o700)
+    start_and_stop(sticky_private / "state")
+
+    def rejected(state: Path) -> None:
+        result = subprocess.run(
+            [SERVICE, "serve", "--state-dir", str(state), "--test-clock", str(clock)],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
+        )
+        assert result.returncode == 73, (state, result.returncode, result.stderr)
+        assert not state.exists()
+
+    real_parent = root / "real-parent"; real_parent.mkdir(mode=0o700)
+    linked_parent = root / "linked-parent"; linked_parent.symlink_to(real_parent, target_is_directory=True)
+    rejected(linked_parent / "state")
+    writable = root / "writable"; writable.mkdir(mode=0o777); writable.chmod(0o777)
+    rejected(writable / "state")
+    nested = root / "nested"; nested.mkdir(mode=0o700)
+    nested_writable = nested / "writable"; nested_writable.mkdir(mode=0o770); nested_writable.chmod(0o770)
+    rejected(nested_writable / "state")
+    sticky_loose = sticky / "loose-child"; sticky_loose.mkdir(mode=0o755); sticky_loose.chmod(0o755)
+    rejected(sticky_loose / "state")
+
+    foreign_parent: Path | None = None
+    for search_root in (Path("/run"), Path("/var/lib"), Path("/var/cache"), Path("/proc")):
+        try:
+            candidates = list(search_root.iterdir())
+        except OSError:
+            continue
+        for candidate in candidates:
+            try:
+                candidate_info = candidate.lstat()
+            except OSError:
+                continue
+            if stat.S_ISDIR(candidate_info.st_mode) and candidate_info.st_uid not in (0, os.getuid()):
+                foreign_parent = candidate
+                break
+        if foreign_parent is not None:
+            break
+    assert foreign_parent is not None, "substrate has no observable foreign-owned directory"
+    foreign_state = foreign_parent / "qq-event-plane-test-state"
+    result = subprocess.run(
+        [SERVICE, "serve", "--state-dir", str(foreign_state), "--test-clock", str(clock)],
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
+    )
+    assert result.returncode == 73 and not foreign_state.exists()
+    proofs.add("20 state ancestor fence")
 
 
 def test_clock_preflight() -> None:
@@ -1561,32 +1610,32 @@ def test_clock_preflight() -> None:
             raise AssertionError("valid isolated clock service did not start")
         assert Client(str(valid_socket)).inspect({"view": "health"})["service"] == "qq-event-plane"
         process.terminate(); process.wait(timeout=10)
-    proofs.update({"test-clock-preflight-no-state", "test-clock-namespace-trust"})
+    # This seam remains an additional preflight check beneath proof item 19.
 
 
 def source_boundaries() -> None:
     sources = [
         ROOT / "bin/lib/qq_event_plane_service.py",
         ROOT / "bin/lib/qq_event_plane_client.py",
-        ROOT / "bin/lib/qq_event_plane_state.py",
         ROOT / "bin/lib/qq-event-plane-client.ts",
         ROOT / "bin/qq-event-plane",
         ROOT / "bin/qq-event-plane-admin",
     ]
+    assert not (ROOT / "bin/lib/qq_event_plane_state.py").exists()
     combined = "\n".join(path.read_text(encoding="utf-8") for path in sources)
     service_source = sources[0].read_text(encoding="utf-8")
-    # Standard-library implementation: every imported Python root is in the stdlib.
+    client_source = sources[1].read_text(encoding="utf-8")
+    typescript_source = sources[2].read_text(encoding="utf-8")
     imports: set[str] = set()
-    for source in sources[:3]:
+    for source in sources[:2]:
         tree = ast.parse(source.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 imports.update(alias.name.split(".")[0] for alias in node.names)
             elif isinstance(node, ast.ImportFrom) and node.module:
                 imports.add(node.module.split(".")[0])
-    allowed_imports = set(sys.stdlib_module_names) | {"__future__", "qq_event_plane_state", "qq_event_plane_service"}
-    assert imports <= allowed_imports, imports - allowed_imports
-    assert 'from "node:net"' in sources[3].read_text(encoding="utf-8")
+    assert imports <= set(sys.stdlib_module_names) | {"__future__"}, imports - set(sys.stdlib_module_names)
+    assert 'from "node:net"' in typescript_source
     forbidden = (
         "node:sqlite", "better-sqlite", "nats", "redis", "dead_letter", "dead-letter",
         "routing_dsl", "free_form_tags", "mailbox_registry", "session_registry",
@@ -1595,30 +1644,25 @@ def source_boundaries() -> None:
     lowered = combined.lower()
     for token in forbidden:
         assert token not in lowered, f"out-of-scope surface appeared in Event Plane source: {token}"
+    assert "restore" not in service_source.lower()
+    assert "restore" not in client_source.lower() and "restore" not in typescript_source.lower()
+    assert "def rollback" not in service_source.lower() and "rollback" not in client_source.lower()
+    assert "rollback" not in typescript_source.lower()
+    assert "schema_v1" not in lowered and "_migrate" not in service_source
+    assert "candidate_temp" not in lowered and "safety_name" not in lowered
     index = (ROOT / "extensions/index.ts").read_text(encoding="utf-8")
     assert "event-plane" not in index.lower() and "event_plane" not in index.lower()
     assert not (ROOT / "extensions/qq-event-plane.ts").exists()
-    assert "sqlite3.connect" in service_source and "AF_UNIX" not in service_source  # socketserver owns the private Unix listener.
-    service_tree = ast.parse(service_source)
-    dispatch_literals = {
-        node.value for node in ast.walk(service_tree)
-        if isinstance(node, ast.Constant) and isinstance(node.value, str)
-    }
-    assert '"restore": self.store' not in service_source
-    assert '"restore"' not in sources[3].read_text(encoding="utf-8")
-    assert '"restore"' not in sources[1].read_text(encoding="utf-8").split("def restore(", 1)[0]
-    assert "restore" not in dispatch_literals
-    proofs.add("inactive-nongoal-absence")
+    assert "sqlite3.connect" in service_source and "AF_UNIX" not in service_source
+    proofs.add("24 scope and absence")
 
 
 try:
     crash_and_validation()
-    socket_restore_absence()
+    native_hot_journal_recovery()
+    removed_operations_absence()
     concurrent_acceptance()
     delivery_gaps_and_guards()
-    offline_restore_and_refusals()
-    offline_restore_crash_convergence()
-    offline_restore_leftover_refusal()
     predicate_wait_atomicity()
     backoff_blocking()
     expiry_lease_and_retention()
@@ -1626,7 +1670,9 @@ try:
     ts_equivalence()
     shared_integer_json_state_space()
     bounded_decimal_key_classification()
-    administration_and_rollback()
+    online_backup_contract()
+    exact_v2_and_fixed_process_contract()
+    state_ancestor_fence()
     test_clock_preflight()
     source_boundaries()
 finally:
@@ -1636,22 +1682,33 @@ finally:
         except BaseException as error:
             print(f"fixture cleanup warning: {error}", file=sys.stderr)
 
-expected = {
-    "committed-crash", "absence-not-accepted", "idempotency-validation", "bounded-framing",
-    "concurrent-monotonic", "send-publish-engine", "identity-fencing", "independent-gaps",
-    "crash-redelivery", "guarded-ack", "poison-nonfreezing", "blocked-rebind-resolution",
-    "audited-disposition", "acceptance-order-only", "next-lost-wake-atomic", "status-lost-wake-atomic",
-    "backoff-blocked-no-hot-loop", "addressed-expiry-waiter", "lease-reconstruction",
-    "retention-tombstone-deletion", "retention-replay-boundary", "blocked-abandoned-cleanup",
-    "single-frame-stream-exactness", "python-typescript-equivalence", "cross-client-json-classes",
-    "strict-integer-json-refusal", "bounded-decimal-key-classification", "migration-integrity", "schema-v1-v2-migration",
-    "socket-restore-absent-unchanged", "socket-live-restore-refusal-unchanged",
-    "offline-v2-restore-readback", "offline-restore-input-refusals-unchanged",
-    "offline-restore-file-refusals-unchanged", "offline-restore-repeat-backup",
-    "offline-restore-crash-boundaries", "offline-restore-leftover-refusal-unchanged",
-    "offline-restore-disposable-temp-cleanup", "online-backup", "singleton", "permissions", "signal-cleanup",
-    "exact-rollback", "test-clock-preflight-no-state", "test-clock-namespace-trust",
-    "inactive-nongoal-absence",
-}
+expected = {f"{index:02d} {name}" for index, name in enumerate((
+    "committed crash durability",
+    "native hot-journal recovery",
+    "idempotency and refusal",
+    "concurrent monotonic acceptance",
+    "send and publish engine",
+    "identity and endpoint fencing",
+    "independent consumers and gaps",
+    "restart redelivery",
+    "blocked rebind resolution",
+    "atomic next and status wakes",
+    "exact backoff and blocking",
+    "addressed expiry and waiter failure",
+    "lease reconstruction and replay truth",
+    "guarded disposition",
+    "acceptance ordering boundary",
+    "bounded retention",
+    "cross-client bounded protocol",
+    "exact first schema v2",
+    "singleton signals and private fixed names",
+    "state ancestor fence",
+    "online backup success",
+    "online backup refusal and race safety",
+    "backup client parity and removed APIs",
+    "scope and absence",
+), start=1)}
 assert proofs == expected, (expected - proofs, proofs - expected)
-print(f"event-plane proof matrix: {len(proofs)} named proofs")
+for proof in sorted(proofs):
+    print(f"event-plane proof {proof}: pass")
+print("event-plane proof 25 repository delivery: deferred to outer Check run")

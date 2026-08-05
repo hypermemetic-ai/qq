@@ -28,14 +28,6 @@ import time
 from typing import Any, Callable, Iterator
 import uuid
 
-from qq_event_plane_state import (
-    LOCK_NAME,
-    RESTORE_NAMES,
-    RestoreStateError,
-    inspect_state_namespace,
-    reconcile_restore_state,
-)
-
 sys.dont_write_bytecode = True
 
 PROTOCOL = "qq-event-plane/v1"
@@ -60,10 +52,16 @@ OPEN = ("pending", "in_flight", "blocked")
 MAX_SAFE_INTEGER = 2**53 - 1
 MAX_JAVASCRIPT_ARRAY_INDEX = "4294967294"
 
-# These definitions are both the migration input and the exact structural
-# contract accepted at startup and by offline administration. SQLite-created autoindexes are omitted;
-# every Event Plane-owned table, explicit index, and trigger is included.
-SCHEMA_V1_OBJECTS = {
+DATABASE_NAME = "event-plane.sqlite3"
+LOCK_NAME = "event-plane.lock"
+SOCKET_NAME = "event-plane.sock"
+JOURNAL_NAME = DATABASE_NAME + "-journal"
+WAL_NAME = DATABASE_NAME + "-wal"
+SHM_NAME = DATABASE_NAME + "-shm"
+
+# Exact first-schema-v2 structural contract. SQLite-created autoindexes are
+# omitted; every Event Plane-owned table, explicit index, and trigger is listed.
+SCHEMA_OBJECTS = {
     ("table", "metadata"): """CREATE TABLE metadata(
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
@@ -163,10 +161,7 @@ SCHEMA_V1_OBJECTS = {
       OR OLD.accepted_at != NEW.accepted_at
       OR COALESCE(OLD.deadline_at, -1) != COALESCE(NEW.deadline_at, -1)
     BEGIN SELECT RAISE(ABORT, 'immutable journal record'); END""",
-}
-SCHEMA_V2_OBJECTS = {
-    **SCHEMA_V1_OBJECTS,
-    ("table", "retention_boundaries"): """CREATE TABLE retention_boundaries(
+    ("table", "retention_boundaries"):  """CREATE TABLE retention_boundaries(
         product_id TEXT NOT NULL,
         kind TEXT NOT NULL,
         unavailable_through_position INTEGER NOT NULL,
@@ -360,23 +355,91 @@ def response(ok: bool, value: dict[str, Any]) -> bytes:
     return raw
 
 
-def private_directory(path: Path, *, create: bool) -> Path:
-    if not path.is_absolute():
-        raise ConfigurationError("state directory must be absolute")
-    if create and not path.exists() and not path.is_symlink():
-        try:
-            path.mkdir(parents=True, mode=0o700)
-        except OSError as error:
-            raise ConfigurationError(f"cannot create state directory: {error}") from error
+def _absolute_lexical_path(path: Path, label: str) -> Path:
+    if not path.is_absolute() or path.anchor != "/":
+        raise ConfigurationError(f"{label} must be one POSIX absolute path")
+    if ".." in path.parts:
+        raise ConfigurationError(f"{label} cannot contain a parent traversal")
+    return path
+
+
+def _directory_info(path: Path, label: str) -> os.stat_result:
     try:
         info = path.lstat()
     except OSError as error:
-        raise ConfigurationError(f"cannot inspect state directory: {error}") from error
+        raise ConfigurationError(f"cannot inspect {label}: {error}") from error
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
-        raise ConfigurationError("state directory must be a real directory, not a symlink")
-    if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
-        raise ConfigurationError("state directory must be owned by this account with mode 0700")
-    return path.resolve(strict=True)
+        raise ConfigurationError(f"{label} must contain only real directories, not symlinks")
+    if info.st_uid not in (0, os.getuid()):
+        raise ConfigurationError(f"{label} contains a foreign-owned directory")
+    return info
+
+
+def _parent_fences_child(
+    parent: os.stat_result, child: os.stat_result, label: str
+) -> None:
+    if not stat.S_IMODE(parent.st_mode) & 0o022:
+        return
+    private_account_child = (
+        bool(parent.st_mode & stat.S_ISVTX)
+        and child.st_uid == os.getuid()
+        and stat.S_ISDIR(child.st_mode)
+        and stat.S_IMODE(child.st_mode) & 0o077 == 0
+    )
+    if not private_account_child:
+        raise ConfigurationError(
+            f"{label} contains a group/other-writable directory without a sticky private-child fence"
+        )
+
+
+def validate_directory_chain(path: Path, label: str, *, create: bool = False) -> Path:
+    """Walk one absolute directory chain without resolving through symlinks.
+
+    This is a different-account placement fence, not protection from root or
+    another process running as this account.
+    """
+    path = _absolute_lexical_path(path, label)
+    current = Path(path.anchor)
+    parent_info = _directory_info(current, label)
+    parts = path.parts[1:]
+    for part in parts:
+        child = current / part
+        try:
+            child_info = child.lstat()
+        except FileNotFoundError:
+            if not create:
+                raise ConfigurationError(f"cannot inspect {label}: directory does not exist")
+            if stat.S_IMODE(parent_info.st_mode) & 0o022 and not (
+                parent_info.st_mode & stat.S_ISVTX
+            ):
+                raise ConfigurationError(
+                    f"{label} has a group/other-writable unfenced creation parent"
+                )
+            try:
+                os.mkdir(child, 0o700)
+            except FileExistsError:
+                pass
+            except OSError as error:
+                raise ConfigurationError(f"cannot create {label}: {error}") from error
+            child_info = _directory_info(child, label)
+        except OSError as error:
+            raise ConfigurationError(f"cannot inspect {label}: {error}") from error
+        if stat.S_ISLNK(child_info.st_mode) or not stat.S_ISDIR(child_info.st_mode):
+            raise ConfigurationError(f"{label} must contain only real directories, not symlinks")
+        if child_info.st_uid not in (0, os.getuid()):
+            raise ConfigurationError(f"{label} contains a foreign-owned directory")
+        _parent_fences_child(parent_info, child_info, label)
+        current = child
+        parent_info = child_info
+    return path
+
+
+def private_directory(path: Path, *, create: bool) -> Path:
+    path = validate_directory_chain(path, "state directory", create=create)
+    info = path.lstat()
+    if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+        raise ConfigurationError("state directory must be account-owned with mode 0700")
+    return path
 
 
 def validate_private_file(path: Path, label: str) -> bool:
@@ -394,6 +457,66 @@ def validate_private_file(path: Path, label: str) -> bool:
     if info.st_nlink != 1:
         raise ConfigurationError(f"{label} must have exactly one link")
     return True
+
+
+def refuse_wal_database_header(path: Path) -> None:
+    """Refuse an installed WAL-format header before SQLite can create side files."""
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        header = os.pread(descriptor, 20, 0)
+    finally:
+        os.close(descriptor)
+    if header.startswith(b"SQLite format 3\x00") and len(header) >= 20 and (
+        header[18] == 2 or header[19] == 2
+    ):
+        raise ConfigurationError("installed database uses unsupported SQLite WAL format")
+
+
+def _validate_private_socket(path: Path) -> None:
+    try:
+        info = path.lstat()
+    except OSError as error:
+        raise ConfigurationError(f"cannot inspect Event Plane socket: {error}") from error
+    if not stat.S_ISSOCK(info.st_mode) or info.st_uid != os.getuid():
+        raise ConfigurationError("Event Plane socket name is not an account-owned socket")
+    if stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1:
+        raise ConfigurationError("Event Plane socket must have mode 0600 and exactly one link")
+
+
+def inspect_state_namespace(
+    state_dir: Path, *, require_database: bool, require_lock: bool
+) -> dict[str, Path]:
+    """Validate the core fixed names while permitting SQLite's live journal."""
+    state_dir = private_directory(state_dir, create=False)
+    try:
+        paths = {entry.name: entry for entry in state_dir.iterdir()}
+    except OSError as error:
+        raise ConfigurationError(f"cannot inspect state directory names: {error}") from error
+    unsupported = sorted(set(paths) & {WAL_NAME, SHM_NAME})
+    if unsupported:
+        raise ConfigurationError(
+            f"state directory contains unsupported SQLite side file(s): {', '.join(unsupported)}"
+        )
+    allowed = {DATABASE_NAME, LOCK_NAME, SOCKET_NAME, JOURNAL_NAME}
+    unknown = sorted(set(paths) - allowed)
+    if unknown:
+        raise ConfigurationError(f"state directory contains unknown name(s): {', '.join(unknown)}")
+    if require_database and DATABASE_NAME not in paths:
+        raise ConfigurationError("state directory has no installed Event Plane database")
+    if require_lock and LOCK_NAME not in paths:
+        raise ConfigurationError("state directory has no installed Event Plane singleton lock")
+    for name, label in (
+        (DATABASE_NAME, "Event Plane database"),
+        (LOCK_NAME, "Event Plane singleton lock"),
+        (JOURNAL_NAME, "SQLite rollback journal"),
+    ):
+        if name in paths:
+            validate_private_file(paths[name], label)
+    if JOURNAL_NAME in paths and DATABASE_NAME not in paths:
+        raise ConfigurationError("SQLite rollback journal exists without its database")
+    if SOCKET_NAME in paths:
+        _validate_private_socket(paths[SOCKET_NAME])
+    return paths
 
 
 def validate_test_clock(path: Path) -> Path:
@@ -521,23 +644,32 @@ class Store:
         # commit/notification unobservable gaps impossible.
         self.changed = threading.Condition(self.lock)
         database_existed = validate_private_file(config.database_path, "Event Plane database")
+        may_create_schema = (
+            not database_existed or config.database_path.lstat().st_size == 0
+        )
+        if database_existed:
+            refuse_wal_database_header(config.database_path)
         self.conn = sqlite3.connect(
             config.database_path, timeout=10, isolation_level=None, check_same_thread=False
         )
         self.conn.row_factory = sqlite3.Row
         if not database_existed:
             os.chmod(config.database_path, 0o600)
+        # For existing state the first schema read lets SQLite recover its own
+        # DELETE-mode hot journal. Exact-v2 and integrity checks happen before
+        # any Event Plane startup transition is accepted.
+        self._initialize_schema(may_create=may_create_schema)
         self._configure()
-        self._migrate()
+        validate_private_file(config.database_path, "Event Plane database")
         self.instance_id = self._meta("instance_id")
         with self.lock:
             self._recover_startup()
             self.cleanup()
 
     def _configure(self) -> None:
-        journal = self.conn.execute("PRAGMA journal_mode=DELETE").fetchone()[0]
+        journal = self.conn.execute("PRAGMA journal_mode").fetchone()[0]
         if str(journal).lower() != "delete":
-            raise ConfigurationError("SQLite refused rollback journaling")
+            raise ConfigurationError("installed database is not in SQLite DELETE journal mode")
         self.conn.execute("PRAGMA synchronous=FULL")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.execute("PRAGMA busy_timeout=10000")
@@ -560,29 +692,28 @@ class Store:
         return re.sub(r"\s+", " ", value.strip().rstrip(";")).strip()
 
     @classmethod
-    def _validate_schema(
-        cls, connection: sqlite3.Connection, *, allowed_versions: tuple[int, ...]
-    ) -> int:
+    def _validate_schema(cls, connection: sqlite3.Connection) -> int:
         def fail(message: str) -> None:
             raise ConfigurationError(message)
 
         try:
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-            if version not in allowed_versions:
-                fail(f"database schema {version} is not a supported Event Plane schema")
-            expected = SCHEMA_V1_OBJECTS if version == 1 else SCHEMA_V2_OBJECTS
+            if version != SCHEMA_VERSION:
+                fail(f"database schema {version} is not exact Event Plane schema 2")
             rows = connection.execute(
                 "SELECT type,name,sql FROM sqlite_master "
                 "WHERE name NOT LIKE 'sqlite_%' AND type IN ('table','index','trigger')"
             ).fetchall()
             observed = {(str(row[0]), str(row[1])): row[2] for row in rows}
-            if set(observed) != set(expected):
-                missing = sorted(name for name in set(expected) - set(observed))
-                extra = sorted(name for name in set(observed) - set(expected))
+            if set(observed) != set(SCHEMA_OBJECTS):
+                missing = sorted(name for name in set(SCHEMA_OBJECTS) - set(observed))
+                extra = sorted(name for name in set(observed) - set(SCHEMA_OBJECTS))
                 fail(f"Event Plane schema objects differ (missing={missing}, extra={extra})")
-            for identity, definition in expected.items():
+            for identity, definition in SCHEMA_OBJECTS.items():
                 sql = observed.get(identity)
-                if not isinstance(sql, str) or cls._normalized_schema_sql(sql) != cls._normalized_schema_sql(definition):
+                if not isinstance(sql, str) or cls._normalized_schema_sql(
+                    sql
+                ) != cls._normalized_schema_sql(definition):
                     fail(f"Event Plane schema object is altered: {identity[1]}")
             metadata = {
                 str(row[0]): str(row[1])
@@ -590,7 +721,7 @@ class Store:
             }
             if set(metadata) != {"instance_id", "schema_version"}:
                 fail("Event Plane metadata keys differ from the supported contract")
-            if metadata["schema_version"] != str(version):
+            if metadata["schema_version"] != str(SCHEMA_VERSION):
                 fail("Event Plane schema metadata does not match user_version")
             if re.fullmatch(r"plane_[0-9a-f]{32}", metadata["instance_id"]) is None:
                 fail("Event Plane instance identity is malformed")
@@ -600,10 +731,8 @@ class Store:
         raise AssertionError("schema validation did not return or refuse")
 
     @classmethod
-    def _validate_database(
-        cls, connection: sqlite3.Connection, *, allowed_versions: tuple[int, ...]
-    ) -> int:
-        version = cls._validate_schema(connection, allowed_versions=allowed_versions)
+    def _validate_database(cls, connection: sqlite3.Connection) -> int:
+        version = cls._validate_schema(connection)
         try:
             integrity = str(connection.execute("PRAGMA integrity_check").fetchone()[0])
             foreign_keys = connection.execute("PRAGMA foreign_key_check").fetchall()
@@ -615,92 +744,31 @@ class Store:
             )
         return version
 
-    @classmethod
-    def validate_offline_database(cls, path: Path) -> dict[str, Any]:
-        """Validate one immutable exact-v2 database for stopped-service administration."""
-        try:
-            connection = sqlite3.connect(
-                f"{path.as_uri()}?mode=ro&immutable=1", uri=True
-            )
-            try:
-                version = cls._validate_database(
-                    connection, allowed_versions=(SCHEMA_VERSION,)
-                )
-                row = connection.execute(
-                    "SELECT value FROM metadata WHERE key='instance_id'"
-                ).fetchone()
-                if row is None:
-                    raise ConfigurationError("Event Plane database has no instance identity")
-                instance_id = str(row[0])
-            finally:
-                connection.close()
-        except ConfigurationError:
-            raise
-        except (OSError, sqlite3.Error) as error:
-            raise ConfigurationError(f"cannot validate offline Event Plane database: {error}") from error
-        return {"schema_version": version, "instance_id": instance_id, "integrity": "ok"}
-
-    @classmethod
-    def reconcile_offline_restore(cls, config: Config, *, require_database: bool) -> str:
-        try:
-            return reconcile_restore_state(
-                config.state_dir,
-                cls.validate_offline_database,
-                require_database=require_database,
-            )
-        except RestoreStateError as error:
-            raise ConfigurationError(str(error)) from error
-
-    @staticmethod
-    def _v1_journal_is_complete(connection: sqlite3.Connection) -> bool:
-        count, minimum, maximum = connection.execute(
-            "SELECT COUNT(*),MIN(journal_position),MAX(journal_position) FROM records"
-        ).fetchone()
-        sequence_row = connection.execute(
-            "SELECT seq FROM sqlite_sequence WHERE name='records'"
-        ).fetchone()
-        sequence = int(sequence_row[0]) if sequence_row is not None else 0
-        if int(count) == 0:
-            return sequence == 0
-        return int(minimum) == 1 and int(count) == int(maximum) == sequence
-
-    def _migrate(self) -> None:
+    def _initialize_schema(self, *, may_create: bool) -> None:
+        # Reading user_version is the first database access for existing state;
+        # SQLite performs native hot-journal recovery before returning it.
         version = int(self.conn.execute("PRAGMA user_version").fetchone()[0])
-        if version > SCHEMA_VERSION:
-            raise ConfigurationError(
-                f"database schema {version} is newer than supported schema {SCHEMA_VERSION}"
-            )
         if version == SCHEMA_VERSION:
-            self._validate_database(self.conn, allowed_versions=(SCHEMA_VERSION,))
-            return
-        if version == 1:
-            self._validate_database(self.conn, allowed_versions=(1,))
-            if not self._v1_journal_is_complete(self.conn):
-                raise ConfigurationError(
-                    "schema 1 has deleted journal positions and cannot acquire truthful selector retention boundaries"
-                )
-            try:
-                with self.transaction():
-                    self.conn.execute(SCHEMA_V2_OBJECTS[("table", "retention_boundaries")])
-                    self.conn.execute(
-                        "UPDATE metadata SET value='2' WHERE key='schema_version'"
-                    )
-                    self.conn.execute("PRAGMA user_version=2")
-            except sqlite3.Error as error:
-                raise ConfigurationError(f"schema 1 to 2 migration failed: {error}") from error
-            self._validate_database(self.conn, allowed_versions=(SCHEMA_VERSION,))
+            self._validate_database(self.conn)
             return
         if version != 0:
-            raise ConfigurationError(f"no safe migration exists from database schema {version}")
+            raise ConfigurationError(
+                f"database schema {version} is not exact Event Plane schema 2"
+            )
+        if not may_create:
+            raise ConfigurationError("existing unversioned database refuses schema creation")
         existing = self.conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            "SELECT type,name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
         ).fetchall()
         if existing:
-            raise ConfigurationError("unversioned non-empty database refuses implicit migration")
+            raise ConfigurationError("unversioned non-empty database refuses schema creation")
+        # The default mode for a new SQLite database is DELETE. Establish FULL
+        # synchronous commits before publishing the first schema transaction.
+        self._configure()
         instance_id = "plane_" + uuid.uuid4().hex
         try:
             with self.transaction():
-                for definition in SCHEMA_V2_OBJECTS.values():
+                for definition in SCHEMA_OBJECTS.values():
                     self.conn.execute(definition)
                 self.conn.execute(
                     "INSERT INTO metadata(key,value) VALUES('instance_id',?)", (instance_id,)
@@ -711,7 +779,7 @@ class Store:
                 self.conn.execute("PRAGMA user_version=2")
         except sqlite3.Error as error:
             raise ConfigurationError(f"cannot create Event Plane schema: {error}") from error
-        self._validate_database(self.conn, allowed_versions=(SCHEMA_VERSION,))
+        self._validate_database(self.conn)
 
     def _meta(self, key: str) -> str:
         row = self.conn.execute("SELECT value FROM metadata WHERE key=?", (key,)).fetchone()
@@ -1611,55 +1679,191 @@ class Store:
             },
         }
 
+    @staticmethod
+    def _backup_baseline(connection: sqlite3.Connection) -> dict[str, Any]:
+        record_count, maximum = connection.execute(
+            "SELECT COUNT(*),COALESCE(MAX(journal_position),0) FROM records"
+        ).fetchone()
+        digest = hashlib.sha256()
+        tables = (
+            "metadata", "records", "subscriptions", "obligations", "consumer_gaps",
+            "endpoints", "dispositions", "retention_boundaries", "sqlite_sequence",
+        )
+        for table in tables:
+            digest.update(table.encode("ascii") + b"\0")
+            for row in connection.execute(f'SELECT rowid,* FROM "{table}" ORDER BY rowid'):
+                encoded: list[dict[str, Any]] = []
+                for value in tuple(row):
+                    if isinstance(value, bytes):
+                        encoded.append({"type": "bytes", "value": value.hex()})
+                    elif value is None:
+                        encoded.append({"type": "null", "value": None})
+                    elif isinstance(value, int):
+                        encoded.append({"type": "integer", "value": value})
+                    else:
+                        encoded.append({"type": "text", "value": str(value)})
+                digest.update(canonical_json(encoded) + b"\n")
+        return {
+            "records": int(record_count),
+            "max_journal_position": int(maximum),
+            "obligations": int(connection.execute("SELECT COUNT(*) FROM obligations").fetchone()[0]),
+            "subscriptions": int(connection.execute("SELECT COUNT(*) FROM subscriptions").fetchone()[0]),
+            "dispositions": int(connection.execute("SELECT COUNT(*) FROM dispositions").fetchone()[0]),
+            "retention_boundaries": int(
+                connection.execute("SELECT COUNT(*) FROM retention_boundaries").fetchone()[0]
+            ),
+            "content_sha256": digest.hexdigest(),
+        }
+
+    @staticmethod
+    def _same_inode(left: os.stat_result, right: os.stat_result) -> bool:
+        return (left.st_dev, left.st_ino) == (right.st_dev, right.st_ino)
+
+    @staticmethod
+    def _validate_backup_file_info(info: os.stat_result) -> None:
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+            raise Refusal("backup result is not an account-owned regular file")
+        if stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1:
+            raise Refusal("backup result must have mode 0600 and exactly one link")
+
+    def _backup_path(self, raw: Any) -> Path:
+        if not isinstance(raw, str) or not raw or "\x00" in raw:
+            raise Refusal("backup path must be a non-empty absolute path")
+        path = Path(raw)
+        if raw != str(path):
+            raise Refusal("backup path must use one lexical absolute form without redundant components")
+        try:
+            _absolute_lexical_path(path, "backup path")
+        except ConfigurationError as error:
+            raise Refusal(str(error)) from error
+        if path == self.config.state_dir or self.config.state_dir in path.parents:
+            raise Refusal("backup destination must be outside and not below Event Plane state")
+        try:
+            validate_directory_chain(path.parent, "backup destination ancestors")
+        except ConfigurationError as error:
+            raise Refusal(str(error)) from error
+        parent_info = path.parent.lstat()
+        if parent_info.st_uid != os.getuid() or stat.S_IMODE(parent_info.st_mode) != 0o700:
+            raise Refusal("backup destination parent must be account-owned with mode 0700")
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            raise Refusal(f"cannot inspect backup destination: {error}") from error
+        else:
+            raise Refusal("backup destination must be a new name")
+        return path
+
     def backup(self, body: Any) -> dict[str, Any]:
         body = exact_object(body, {"path"}, set(), "backup body")
-        path = self._admin_path(body.get("path"), must_exist=False)
-        if path.exists() or path.is_symlink():
-            raise Refusal("backup destination must not already exist")
-        with self.lock:
-            self.cleanup()
-            destination = sqlite3.connect(path)
-            try:
-                self.conn.backup(destination)
-                destination.execute("PRAGMA synchronous=FULL")
-                result = str(destination.execute("PRAGMA integrity_check").fetchone()[0])
-                if result != "ok":
-                    raise Refusal("created backup failed integrity inspection")
-            finally:
-                destination.close()
-            os.chmod(path, 0o600)
-            with path.open("rb") as stream:
-                os.fsync(stream.fileno())
-            directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
-        return {"backup": str(path), "integrity": "ok", "instance_id": self.instance_id}
-
-    def _admin_path(self, raw: Any, *, must_exist: bool) -> Path:
-        if not isinstance(raw, str) or not raw or not os.path.isabs(raw):
-            raise Refusal("administrative path must be absolute")
-        path = Path(raw)
-        if path.is_symlink():
-            raise Refusal("administrative path cannot be a symlink")
-        parent = path.parent
+        path = self._backup_path(body.get("path"))
+        parent_fd = -1
+        target_fd = -1
+        destination: sqlite3.Connection | None = None
+        created_info: os.stat_result | None = None
+        successful = False
         try:
-            info = parent.lstat()
-        except OSError as error:
-            raise Refusal(f"cannot inspect administrative path parent: {error}") from error
-        if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
-            raise Refusal("administrative path parent must be a real directory")
-        if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
-            raise Refusal("administrative path parent must be account-private")
-        if must_exist:
+            parent_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            parent_info = os.fstat(parent_fd)
+            current_parent = path.parent.lstat()
+            if (
+                not self._same_inode(parent_info, current_parent)
+                or parent_info.st_uid != os.getuid()
+                or stat.S_IMODE(parent_info.st_mode) != 0o700
+            ):
+                raise Refusal("backup destination parent changed during validation")
             try:
-                item = path.lstat()
-            except OSError as error:
-                raise Refusal(f"cannot inspect administrative file: {error}") from error
-            if not stat.S_ISREG(item.st_mode) or item.st_uid != os.getuid() or stat.S_IMODE(item.st_mode) & 0o077:
-                raise Refusal("administrative file must be a private account-owned regular file")
-        return path
+                target_fd = os.open(
+                    path.name,
+                    os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                    0o600,
+                    dir_fd=parent_fd,
+                )
+            except FileExistsError as error:
+                raise Refusal("backup destination must remain a new name") from error
+            os.fchmod(target_fd, 0o600)
+            created_info = os.fstat(target_fd)
+            self._validate_backup_file_info(created_info)
+
+            with self.lock:
+                # Backup is read-only with respect to the Journal. The same lock
+                # serializes the committed baseline and SQLite snapshot.
+                baseline = self._backup_baseline(self.conn)
+                destination = sqlite3.connect(path, timeout=10, isolation_level=None)
+                destination.execute("PRAGMA synchronous=FULL")
+                self.conn.backup(destination)
+                destination.close()
+                destination = None
+
+                named_info = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+                if not self._same_inode(created_info, named_info):
+                    raise Refusal("backup destination changed while SQLite wrote it")
+                readback = sqlite3.connect(f"{path.as_uri()}?mode=ro&immutable=1", uri=True)
+                try:
+                    self._validate_database(readback)
+                    instance_row = readback.execute(
+                        "SELECT value FROM metadata WHERE key='instance_id'"
+                    ).fetchone()
+                    if instance_row is None or str(instance_row[0]) != self.instance_id:
+                        raise Refusal("backup instance identity differs from installed state")
+                    if self._backup_baseline(readback) != baseline:
+                        raise Refusal("backup committed baseline differs from installed snapshot")
+                finally:
+                    readback.close()
+
+                final_info = os.fstat(target_fd)
+                final_named = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+                current_parent = path.parent.lstat()
+                if not self._same_inode(created_info, final_info) or not self._same_inode(
+                    created_info, final_named
+                ):
+                    raise Refusal("backup destination changed before durability sync")
+                if not self._same_inode(parent_info, current_parent):
+                    raise Refusal("backup destination parent changed before durability sync")
+                self._validate_backup_file_info(final_info)
+                try:
+                    validate_directory_chain(path.parent, "backup destination ancestors")
+                except ConfigurationError as error:
+                    raise Refusal(str(error)) from error
+                os.fsync(target_fd)
+                os.fsync(parent_fd)
+
+            successful = True
+            return {
+                "backup": str(path),
+                "schema_version": SCHEMA_VERSION,
+                "instance_id": self.instance_id,
+                "integrity": "ok",
+                "baseline": baseline,
+                "durability": "file-and-parent-fsynced",
+            }
+        except Refusal:
+            raise
+        except (OSError, sqlite3.Error, ConfigurationError) as error:
+            raise Refusal(f"backup refused: {error}") from error
+        finally:
+            if destination is not None:
+                destination.close()
+            if target_fd >= 0:
+                if parent_fd >= 0 and created_info is not None:
+                    try:
+                        named = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+                        if not self._same_inode(created_info, named):
+                            named = None
+                    except OSError:
+                        named = None
+                    # Keep a successful result; remove only this operation's
+                    # exact inode on every failure path.
+                    if not successful and named is not None:
+                        try:
+                            os.unlink(path.name, dir_fd=parent_fd)
+                            os.fsync(parent_fd)
+                        except OSError:
+                            pass
+                os.close(target_fd)
+            if parent_fd >= 0:
+                os.close(parent_fd)
 
     def _record_document(self, row: sqlite3.Row) -> dict[str, Any]:
         envelope = decode_json(bytes(row["envelope_json"]), "stored envelope") if row["envelope_json"] is not None else None
@@ -1807,14 +2011,33 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
 class Singleton:
     def __init__(self, path: Path):
         existed = validate_private_file(path, "Event Plane singleton lock")
-        self.fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+        flags = os.O_RDWR | os.O_NOFOLLOW
+        try:
+            self.fd = os.open(path, flags if existed else flags | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            validate_private_file(path, "Event Plane singleton lock")
+            self.fd = os.open(path, flags)
         if not existed:
             os.fchmod(self.fd, 0o600)
         try:
+            descriptor_info = os.fstat(self.fd)
+            named_info = path.lstat()
+            if (
+                not stat.S_ISREG(descriptor_info.st_mode)
+                or descriptor_info.st_uid != os.getuid()
+                or stat.S_IMODE(descriptor_info.st_mode) != 0o600
+                or descriptor_info.st_nlink != 1
+                or (descriptor_info.st_dev, descriptor_info.st_ino)
+                != (named_info.st_dev, named_info.st_ino)
+            ):
+                raise ConfigurationError("Event Plane singleton lock changed during acquisition")
             fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             os.close(self.fd)
             raise ConfigurationError("another qq Event Plane service owns the singleton lock") from error
+        except BaseException:
+            os.close(self.fd)
+            raise
 
     def record_owner(self) -> None:
         os.ftruncate(self.fd, 0)
@@ -1827,24 +2050,22 @@ class Singleton:
 
 
 def serve(config: Config) -> int:
-    try:
-        initial_names = inspect_state_namespace(
-            config.state_dir, require_database=False, require_lock=False
-        )
-    except RestoreStateError as error:
-        raise ConfigurationError(str(error)) from error
-    if any(name in initial_names for name in RESTORE_NAMES) and LOCK_NAME not in initial_names:
-        raise ConfigurationError("offline restore state exists without the installed singleton lock")
+    initial_names = inspect_state_namespace(
+        config.state_dir, require_database=False, require_lock=False
+    )
+    if DATABASE_NAME in initial_names and LOCK_NAME not in initial_names:
+        raise ConfigurationError("installed Event Plane database has no singleton lock")
     singleton = Singleton(config.lock_path)
     store: Store | None = None
     server: Server | None = None
     owns_socket = False
     try:
-        # Offline-restore recovery and every fixed-name validation happen while
-        # fenced but before mutable database open, lock-content update, or
-        # stale-socket removal. Invalid/ambiguous state refuses unchanged.
-        Store.reconcile_offline_restore(config, require_database=False)
+        # Recheck after singleton acquisition. SQLite then owns any valid live
+        # DELETE rollback journal; exact schema/integrity validation completes
+        # before the socket can accept a request.
+        inspect_state_namespace(config.state_dir, require_database=False, require_lock=True)
         store = Store(config)
+        inspect_state_namespace(config.state_dir, require_database=True, require_lock=True)
         singleton.record_owner()
         if config.socket_path.is_symlink():
             raise ConfigurationError("socket path cannot be a symlink")
@@ -1909,6 +2130,10 @@ def main(argv: list[str]) -> int:
             # directory, singleton lock, database, or socket.
             test_clock = validate_test_clock(Path(args.test_clock))
             read_test_clock(test_clock)
+        if args.state_dir is not None and args.state_dir != str(Path(args.state_dir)):
+            raise ConfigurationError(
+                "state directory must use one lexical absolute form without redundant components"
+            )
         state = private_directory(Path(args.state_dir) if args.state_dir else default_state_dir(), create=True)
         config = Config(state, test_clock)
         return serve(config)

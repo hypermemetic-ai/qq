@@ -18,8 +18,7 @@ python3 "$TESTS_DIR/qq_event_plane_test.py" \
   "$ROOT/bin/qq-event-plane" \
   "$ROOT/bin/qq-event-plane-admin" \
   "$ROOT/bin/lib/qq_event_plane_client.py" \
-  "$ROOT/bin/lib/qq_event_plane_state.py" \
   "$ROOT/bin/lib/qq-event-plane-client.ts" \
   "$ROOT" "$TMP"
 
-printf 'test-qq-event-plane: pass (46 named proofs; AC #1-#10 + F2-F7 + offline restore crash matrix)\n'
+printf 'test-qq-event-plane: pass (proof matrix 01-24; repository delivery is outer item 25)\n'
