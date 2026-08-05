@@ -1,3 +1,4 @@
+// @ts-nocheck -- qq intentionally ships no TypeScript or Node type dependency.
 // Dependency-free TypeScript client for the bounded qq Event Plane protocol.
 import net from "node:net";
 

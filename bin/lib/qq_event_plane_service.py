@@ -639,6 +639,8 @@ class Store:
                         body["schema_version"], now, deadline, envelope, payload,
                     ),
                 )
+                if cursor.lastrowid is None:
+                    raise RuntimeError("record insert returned no journal position")
                 position = int(cursor.lastrowid)
                 obligation_count = 0
                 if operation == "send":
@@ -833,6 +835,7 @@ class Store:
             with self.lock:
                 self.cleanup()
                 now = self.clock.now_ms()
+                subscription: sqlite3.Row | None = None
                 if consumer_type == "subscription":
                     subscription = self.conn.execute(
                         "SELECT * FROM subscriptions WHERE subscription_id=?", (consumer_id,)
@@ -910,6 +913,7 @@ class Store:
                 if due is not None:
                     wake_times.append(int(due))
                 if consumer_type == "subscription":
+                    assert subscription is not None
                     wake_times.append(int(subscription["lease_expires_at"]))
                     oldest = self.conn.execute(
                         "SELECT MIN(created_at) FROM obligations WHERE consumer_type='subscription' "
@@ -1568,21 +1572,22 @@ def serve(config: Config) -> int:
             config.socket_path.unlink()
         store = Store(config)
         plane = EventPlane(store)
-        server = Server(str(config.socket_path), RequestHandler, plane)
+        active_server = Server(str(config.socket_path), RequestHandler, plane)
+        server = active_server
         os.chmod(config.socket_path, 0o600)
-        plane.shutdown_requested = server.shutdown
+        plane.shutdown_requested = active_server.shutdown
 
         stopping = threading.Event()
 
         def stop(_signum: int, _frame: Any) -> None:
             if not stopping.is_set():
                 stopping.set()
-                threading.Thread(target=server.shutdown, daemon=True).start()
+                threading.Thread(target=active_server.shutdown, daemon=True).start()
 
         signal.signal(signal.SIGTERM, stop)
         signal.signal(signal.SIGINT, stop)
-        server.serve_forever(poll_interval=0.1)
-        server.server_close()
+        active_server.serve_forever(poll_interval=0.1)
+        active_server.server_close()
         server = None
         return 0
     finally:
