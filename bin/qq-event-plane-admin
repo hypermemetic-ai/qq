@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Invoke the bounded qq Event Plane Python inspection/administration client.
+set -euo pipefail
+
+self="$(readlink -f -- "${BASH_SOURCE[0]}")"
+# shellcheck source=bin/lib/qq-bin.sh
+source "$(dirname "$self")/lib/qq-bin.sh"
+
+if ! qq_resolve_bin python3; then
+  printf '{"ok":false,"error":{"code":"unavailable","message":"python3 is unavailable"}}\n'
+  exit 69
+fi
+exec "$QQ_BIN_RESULT" "$(dirname "$self")/lib/qq_event_plane_client.py" "$@"
