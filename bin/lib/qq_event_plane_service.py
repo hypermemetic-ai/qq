@@ -990,6 +990,7 @@ class Store:
                         )
                         reconstructed = True
                 if reconstructed:
+                    assert reconstruct is not None
                     boundary = self.conn.execute(
                         "SELECT unavailable_through_position FROM retention_boundaries "
                         "WHERE product_id=? AND kind=?",

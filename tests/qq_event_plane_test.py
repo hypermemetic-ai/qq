@@ -1176,7 +1176,7 @@ def test_clock_preflight() -> None:
     ]
     if os.geteuid() == 0:
         foreign = root / "foreign-clock"
-        foreign.write_text("1000000\n", encoding="ascii"); foreign.chmod(0o600); foreign.chown(65534, 65534)
+        foreign.write_text("1000000\n", encoding="ascii"); foreign.chmod(0o600); os.chown(foreign, 65534, 65534)
         rejected.append(foreign)
     env = os.environ.copy(); env["QQ_EVENT_PLANE_TESTING"] = "1"
     for index, clock in enumerate(rejected):
