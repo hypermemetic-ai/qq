@@ -6,7 +6,7 @@ export const QQ_EVENT_PLANE_PROTOCOL = "qq-event-plane/v1";
 const MAX_FRAME_BYTES = 128 * 1024;
 const OPERATIONS = new Set([
   "send", "publish", "ensure_subscription", "next", "acknowledge", "retry", "block",
-  "disposition", "status", "inspect", "backup", "restore", "shutdown",
+  "disposition", "status", "inspect", "backup", "shutdown",
 ]);
 
 type JsonPrimitive = null | boolean | number | string;
@@ -232,6 +232,5 @@ export class EventPlaneClient {
   status(body: JsonObject) { return this.operation("status", body); }
   inspect(body: JsonObject) { return this.operation("inspect", body); }
   backup(body: JsonObject) { return this.operation("backup", body); }
-  restore(body: JsonObject) { return this.operation("restore", body); }
   shutdown(body: JsonObject) { return this.operation("shutdown", body); }
 }

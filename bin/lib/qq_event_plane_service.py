@@ -16,7 +16,6 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import signal
 import socket
 import socketserver
@@ -28,6 +27,14 @@ import threading
 import time
 from typing import Any, Callable, Iterator
 import uuid
+
+from qq_event_plane_state import (
+    LOCK_NAME,
+    RESTORE_NAMES,
+    RestoreStateError,
+    inspect_state_namespace,
+    reconcile_restore_state,
+)
 
 sys.dont_write_bytecode = True
 
@@ -54,7 +61,7 @@ MAX_SAFE_INTEGER = 2**53 - 1
 MAX_JAVASCRIPT_ARRAY_INDEX = "4294967294"
 
 # These definitions are both the migration input and the exact structural
-# contract accepted at startup/restore. SQLite-created autoindexes are omitted;
+# contract accepted at startup and by offline administration. SQLite-created autoindexes are omitted;
 # every Event Plane-owned table, explicit index, and trigger is included.
 SCHEMA_V1_OBJECTS = {
     ("table", "metadata"): """CREATE TABLE metadata(
@@ -382,8 +389,10 @@ def validate_private_file(path: Path, label: str) -> bool:
         raise ConfigurationError(f"cannot inspect {label}: {error}") from error
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
         raise ConfigurationError(f"{label} must be a real regular file, not a symlink")
-    if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
-        raise ConfigurationError(f"{label} must be account-owned and account-private")
+    if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:
+        raise ConfigurationError(f"{label} must be account-owned with mode 0600")
+    if info.st_nlink != 1:
+        raise ConfigurationError(f"{label} must have exactly one link")
     return True
 
 
@@ -503,46 +512,6 @@ class Config:
         return value
 
 
-def _sqlite_side_paths(path: Path) -> tuple[Path, ...]:
-    return tuple(Path(f"{path}{suffix}") for suffix in ("-journal", "-wal", "-shm"))
-
-
-def _fsync_file(path: Path) -> None:
-    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
-def _fsync_directory(path: Path) -> None:
-    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
-def _open_immutable_database(path: Path) -> sqlite3.Connection:
-    return sqlite3.connect(f"{path.as_uri()}?mode=ro&immutable=1", uri=True)
-
-
-def _copy_file_contents_durably(source: Path, destination: Path) -> None:
-    source_fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
-    try:
-        destination_fd = os.open(destination, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW)
-        try:
-            with os.fdopen(source_fd, "rb", closefd=False) as source_stream:
-                with os.fdopen(destination_fd, "wb", closefd=False) as destination_stream:
-                    shutil.copyfileobj(source_stream, destination_stream, length=1024 * 1024)
-                    destination_stream.flush()
-                    os.fsync(destination_fd)
-        finally:
-            os.close(destination_fd)
-    finally:
-        os.close(source_fd)
-
-
 class Store:
     def __init__(self, config: Config):
         self.config = config
@@ -551,7 +520,6 @@ class Store:
         # State predicates and waiter installation use the same lock, making
         # commit/notification unobservable gaps impossible.
         self.changed = threading.Condition(self.lock)
-        self._recover_interrupted_restore(config)
         database_existed = validate_private_file(config.database_path, "Event Plane database")
         self.conn = sqlite3.connect(
             config.database_path, timeout=10, isolation_level=None, check_same_thread=False
@@ -565,73 +533,6 @@ class Store:
         with self.lock:
             self._recover_startup()
             self.cleanup()
-
-    @classmethod
-    def _recover_interrupted_restore(cls, config: Config) -> None:
-        """Conservatively restore a durable pre-restore marker before opening live state."""
-        rollback = config.state_dir / ".restore-rollback.sqlite3"
-        if not rollback.exists() and not rollback.is_symlink():
-            return
-        if not validate_private_file(rollback, "Event Plane restore safety database"):
-            raise ConfigurationError("Event Plane restore safety database disappeared")
-        if not validate_private_file(config.database_path, "Event Plane database"):
-            raise ConfigurationError("restore safety exists without a live Event Plane database")
-        rollback_info = rollback.lstat()
-        database_info = config.database_path.lstat()
-        if (rollback_info.st_dev, rollback_info.st_ino) == (database_info.st_dev, database_info.st_ino):
-            raise ConfigurationError("restore safety and live database are not independent files")
-
-        for side in _sqlite_side_paths(rollback):
-            if side.exists() or side.is_symlink():
-                raise ConfigurationError(
-                    f"restore safety database has an ambiguous SQLite side file: {side.name}"
-                )
-        candidate_sides: list[Path] = []
-        for side in _sqlite_side_paths(config.database_path):
-            if side.exists() or side.is_symlink():
-                if not validate_private_file(side, f"Event Plane SQLite side file {side.name}"):
-                    raise ConfigurationError(f"Event Plane SQLite side file disappeared: {side.name}")
-                candidate_sides.append(side)
-
-        try:
-            saved = _open_immutable_database(rollback)
-            try:
-                cls._validate_database(saved, allowed_versions=(SCHEMA_VERSION,))
-                saved_instance = str(
-                    saved.execute("SELECT value FROM metadata WHERE key='instance_id'").fetchone()[0]
-                )
-            finally:
-                saved.close()
-        except (OSError, sqlite3.Error) as error:
-            raise ConfigurationError(f"cannot validate restore safety database: {error}") from error
-
-        try:
-            # A candidate rollback journal belongs only to the interrupted
-            # candidate. Discard it before copying so it can never be applied
-            # to the recovered pre-restore database.
-            for side in candidate_sides:
-                side.unlink()
-            _copy_file_contents_durably(rollback, config.database_path)
-            recovered = _open_immutable_database(config.database_path)
-            try:
-                cls._validate_database(recovered, allowed_versions=(SCHEMA_VERSION,))
-                recovered_instance = str(
-                    recovered.execute("SELECT value FROM metadata WHERE key='instance_id'").fetchone()[0]
-                )
-            finally:
-                recovered.close()
-            if recovered_instance != saved_instance:
-                raise ConfigurationError("recovered database changed the restore safety identity")
-            # The recovered bytes and candidate-side removal are durable before
-            # the marker is removed. A crash before marker removal repeats this
-            # conservative transition; after durable removal, live is truthful.
-            _fsync_directory(config.state_dir)
-            rollback.unlink()
-            _fsync_directory(config.state_dir)
-        except ConfigurationError:
-            raise
-        except (OSError, sqlite3.Error) as error:
-            raise ConfigurationError(f"cannot recover interrupted restore: {error}") from error
 
     def _configure(self) -> None:
         journal = self.conn.execute("PRAGMA journal_mode=DELETE").fetchone()[0]
@@ -660,11 +561,9 @@ class Store:
 
     @classmethod
     def _validate_schema(
-        cls, connection: sqlite3.Connection, *, allowed_versions: tuple[int, ...], refusal: bool = False
+        cls, connection: sqlite3.Connection, *, allowed_versions: tuple[int, ...]
     ) -> int:
         def fail(message: str) -> None:
-            if refusal:
-                raise Refusal(message, "invalid_restore")
             raise ConfigurationError(message)
 
         try:
@@ -702,24 +601,55 @@ class Store:
 
     @classmethod
     def _validate_database(
-        cls, connection: sqlite3.Connection, *, allowed_versions: tuple[int, ...], refusal: bool = False
+        cls, connection: sqlite3.Connection, *, allowed_versions: tuple[int, ...]
     ) -> int:
-        version = cls._validate_schema(
-            connection, allowed_versions=allowed_versions, refusal=refusal
-        )
+        version = cls._validate_schema(connection, allowed_versions=allowed_versions)
         try:
             integrity = str(connection.execute("PRAGMA integrity_check").fetchone()[0])
             foreign_keys = connection.execute("PRAGMA foreign_key_check").fetchall()
         except sqlite3.Error as error:
-            if refusal:
-                raise Refusal(f"cannot inspect restore source integrity: {error}", "invalid_restore") from error
             raise ConfigurationError(f"cannot inspect Event Plane integrity: {error}") from error
         if integrity != "ok" or foreign_keys:
-            message = "Event Plane database failed integrity or foreign-key inspection"
-            if refusal:
-                raise Refusal(message, "invalid_restore")
-            raise ConfigurationError(message)
+            raise ConfigurationError(
+                "Event Plane database failed integrity or foreign-key inspection"
+            )
         return version
+
+    @classmethod
+    def validate_offline_database(cls, path: Path) -> dict[str, Any]:
+        """Validate one immutable exact-v2 database for stopped-service administration."""
+        try:
+            connection = sqlite3.connect(
+                f"{path.as_uri()}?mode=ro&immutable=1", uri=True
+            )
+            try:
+                version = cls._validate_database(
+                    connection, allowed_versions=(SCHEMA_VERSION,)
+                )
+                row = connection.execute(
+                    "SELECT value FROM metadata WHERE key='instance_id'"
+                ).fetchone()
+                if row is None:
+                    raise ConfigurationError("Event Plane database has no instance identity")
+                instance_id = str(row[0])
+            finally:
+                connection.close()
+        except ConfigurationError:
+            raise
+        except (OSError, sqlite3.Error) as error:
+            raise ConfigurationError(f"cannot validate offline Event Plane database: {error}") from error
+        return {"schema_version": version, "instance_id": instance_id, "integrity": "ok"}
+
+    @classmethod
+    def reconcile_offline_restore(cls, config: Config, *, require_database: bool) -> str:
+        try:
+            return reconcile_restore_state(
+                config.state_dir,
+                cls.validate_offline_database,
+                require_database=require_database,
+            )
+        except RestoreStateError as error:
+            raise ConfigurationError(str(error)) from error
 
     @staticmethod
     def _v1_journal_is_complete(connection: sqlite3.Connection) -> bool:
@@ -1707,133 +1637,6 @@ class Store:
                 os.close(directory_fd)
         return {"backup": str(path), "integrity": "ok", "instance_id": self.instance_id}
 
-    def _write_restore_safety(self, rollback: Path) -> None:
-        descriptor = os.open(
-            rollback, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
-        )
-        os.close(descriptor)
-        try:
-            safety = sqlite3.connect(rollback)
-            try:
-                safety.execute("PRAGMA journal_mode=DELETE")
-                safety.execute("PRAGMA synchronous=FULL")
-                self.conn.backup(safety)
-            finally:
-                safety.close()
-            os.chmod(rollback, 0o600)
-            _fsync_file(rollback)
-            _fsync_directory(rollback.parent)
-            saved = _open_immutable_database(rollback)
-            try:
-                self._validate_database(saved, allowed_versions=(SCHEMA_VERSION,))
-                saved_instance = str(
-                    saved.execute("SELECT value FROM metadata WHERE key='instance_id'").fetchone()[0]
-                )
-            finally:
-                saved.close()
-            if saved_instance != self.instance_id:
-                raise ConfigurationError("restore safety copy changed the live instance identity")
-        except BaseException:
-            # Ordinary safety-copy failure has not touched live state. Remove
-            # only artifacts created by this call; process death bypasses this
-            # cleanup and startup validates any leftover before changing state.
-            for side in _sqlite_side_paths(rollback):
-                side.unlink(missing_ok=True)
-            rollback.unlink(missing_ok=True)
-            _fsync_directory(rollback.parent)
-            raise
-
-    def _copy_restore_candidate(self, source: sqlite3.Connection) -> None:
-        source.backup(self.conn)
-
-    def _finalize_restore(self, rollback: Path) -> None:
-        self._validate_database(self.conn, allowed_versions=(SCHEMA_VERSION,))
-        if self._meta("instance_id") != self.instance_id:
-            raise ConfigurationError("live Event Plane identity changed before restore finalization")
-        for side in _sqlite_side_paths(self.config.database_path):
-            if side.exists() or side.is_symlink():
-                raise ConfigurationError(
-                    f"live database has an unexpected SQLite side file before restore finalization: {side.name}"
-                )
-        _fsync_file(self.config.database_path)
-        _fsync_directory(self.config.state_dir)
-        rollback.unlink()
-        _fsync_directory(self.config.state_dir)
-
-    def restore(self, body: Any) -> dict[str, Any]:
-        body = exact_object(body, {"path", "expected_instance_id"}, set(), "restore body")
-        if body.get("expected_instance_id") != self.instance_id:
-            raise Refusal("service instance guard does not match", "guard_conflict")
-        path = self._admin_path(body.get("path"), must_exist=True)
-        try:
-            source = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
-        except sqlite3.Error as error:
-            raise Refusal(f"cannot open restore source: {error}", "invalid_restore") from error
-        source.row_factory = sqlite3.Row
-        try:
-            # A candidate cannot touch live state until its complete supported
-            # version-specific schema, identity, integrity, and references pass.
-            source_version = self._validate_database(
-                source, allowed_versions=(1, SCHEMA_VERSION), refusal=True
-            )
-            if source_version == 1 and not self._v1_journal_is_complete(source):
-                raise Refusal(
-                    "schema 1 restore has deleted journal positions without truthful selector boundaries",
-                    "replay_unavailable",
-                )
-            rollback = self.config.state_dir / ".restore-rollback.sqlite3"
-            if rollback.exists() or rollback.is_symlink():
-                raise Refusal("restore safety path already exists; live state retained", "restore_incomplete")
-            with self.lock:
-                if body.get("expected_instance_id") != self.instance_id:
-                    raise Refusal("service instance guard no longer matches", "guard_conflict")
-                old_instance = self.instance_id
-                self._write_restore_safety(rollback)
-                try:
-                    self._copy_restore_candidate(source)
-                    self._configure()
-                    self._migrate()
-                    self._validate_database(
-                        self.conn, allowed_versions=(SCHEMA_VERSION,), refusal=True
-                    )
-                    candidate_instance = self._meta("instance_id")
-                    self.instance_id = candidate_instance
-                    self._recover_startup()
-                    self._validate_database(
-                        self.conn, allowed_versions=(SCHEMA_VERSION,), refusal=True
-                    )
-                    if self._meta("instance_id") != candidate_instance:
-                        raise Refusal("restored Event Plane identity changed during recovery", "invalid_restore")
-                    self._finalize_restore(rollback)
-                except BaseException as candidate_error:
-                    # Do not return any candidate failure until the exact live
-                    # safety copy has itself been restored, made durable, and
-                    # fully validated under its original instance identity.
-                    try:
-                        saved = _open_immutable_database(rollback)
-                        try:
-                            saved.backup(self.conn)
-                        finally:
-                            saved.close()
-                        self._configure()
-                        self._validate_database(
-                            self.conn, allowed_versions=(SCHEMA_VERSION,)
-                        )
-                        restored_instance = self._meta("instance_id")
-                        if restored_instance != old_instance:
-                            raise ConfigurationError("restore safety copy changed the live instance identity")
-                        self.instance_id = restored_instance
-                        self._finalize_restore(rollback)
-                    except BaseException as safety_error:
-                        raise ConfigurationError(
-                            f"candidate restore failed and safety restoration could not be validated: {safety_error}"
-                        ) from candidate_error
-                    raise
-        finally:
-            source.close()
-        self.notify()
-        return {"restored": True, "instance_id": self.instance_id, "integrity": "ok"}
-
     def _admin_path(self, raw: Any, *, must_exist: bool) -> Path:
         if not isinstance(raw, str) or not raw or not os.path.isabs(raw):
             raise Refusal("administrative path must be absolute")
@@ -1929,7 +1732,6 @@ class EventPlane:
             "status": self.store.status,
             "inspect": self.store.inspect,
             "backup": self.store.backup,
-            "restore": self.store.restore,
             "shutdown": self.shutdown,
         }
         handler = operations.get(operation)
@@ -2025,18 +1827,23 @@ class Singleton:
 
 
 def serve(config: Config) -> int:
-    restore_marker = config.state_dir / ".restore-rollback.sqlite3"
-    if (restore_marker.exists() or restore_marker.is_symlink()) and not validate_private_file(
-        config.lock_path, "Event Plane singleton lock"
-    ):
-        raise ConfigurationError("restore safety exists without the service-owned singleton lock")
+    try:
+        initial_names = inspect_state_namespace(
+            config.state_dir, require_database=False, require_lock=False
+        )
+    except RestoreStateError as error:
+        raise ConfigurationError(str(error)) from error
+    if any(name in initial_names for name in RESTORE_NAMES) and LOCK_NAME not in initial_names:
+        raise ConfigurationError("offline restore state exists without the installed singleton lock")
     singleton = Singleton(config.lock_path)
     store: Store | None = None
     server: Server | None = None
+    owns_socket = False
     try:
-        # Restore recovery and all marker validation happen while fenced but
-        # before mutable database open, lock-content update, or stale-socket
-        # removal. Invalid safety therefore refuses without changing state.
+        # Offline-restore recovery and every fixed-name validation happen while
+        # fenced but before mutable database open, lock-content update, or
+        # stale-socket removal. Invalid/ambiguous state refuses unchanged.
+        Store.reconcile_offline_restore(config, require_database=False)
         store = Store(config)
         singleton.record_owner()
         if config.socket_path.is_symlink():
@@ -2049,6 +1856,7 @@ def serve(config: Config) -> int:
         plane = EventPlane(store)
         active_server = Server(str(config.socket_path), RequestHandler, plane)
         server = active_server
+        owns_socket = True
         os.chmod(config.socket_path, 0o600)
         plane.shutdown_requested = active_server.shutdown
 
@@ -2071,7 +1879,11 @@ def serve(config: Config) -> int:
         if store is not None:
             store.close()
         try:
-            if config.socket_path.exists() and stat.S_ISSOCK(config.socket_path.lstat().st_mode):
+            if (
+                owns_socket
+                and config.socket_path.exists()
+                and stat.S_ISSOCK(config.socket_path.lstat().st_mode)
+            ):
                 config.socket_path.unlink()
         finally:
             singleton.close()

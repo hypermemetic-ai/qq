@@ -12,7 +12,32 @@ import stat
 import struct
 import sys
 import time
-from typing import Any
+from typing import Any, Callable
+
+from qq_event_plane_state import (
+    CANDIDATE_NAME,
+    CANDIDATE_TEMP_NAME,
+    COMMIT_FORMAT,
+    COMMIT_NAME,
+    COMMIT_TEMP_NAME,
+    DATABASE_NAME,
+    LOCK_NAME,
+    RESTORE_NAMES,
+    SAFETY_NAME,
+    SAFETY_TEMP_NAME,
+    OfflineSingleton,
+    RestoreStateError,
+    SingletonBusy,
+    copy_into_existing,
+    fsync_directory,
+    fsync_file,
+    inspect_state_namespace,
+    private_state_directory,
+    reconcile_restore_state,
+    validate_backup_path,
+    validated_database_evidence,
+    write_commit_temp,
+)
 
 sys.dont_write_bytecode = True
 
@@ -22,7 +47,7 @@ MAX_SAFE_INTEGER = 2**53 - 1
 MAX_JAVASCRIPT_ARRAY_INDEX = "4294967294"
 OPERATIONS = (
     "send", "publish", "ensure_subscription", "next", "acknowledge", "retry", "block",
-    "disposition", "status", "inspect", "backup", "restore", "shutdown",
+    "disposition", "status", "inspect", "backup", "shutdown",
 )
 
 
@@ -208,9 +233,6 @@ class EventPlaneClient:
     def backup(self, body: dict[str, Any]) -> dict[str, Any]:
         return self._request("backup", body)
 
-    def restore(self, body: dict[str, Any]) -> dict[str, Any]:
-        return self._request("restore", body)
-
     def shutdown(self, body: dict[str, Any]) -> dict[str, Any]:
         return self._request("shutdown", body)
 
@@ -235,24 +257,225 @@ def private_state_dir(raw: str | None) -> Path:
         raise EventPlaneClientError(f"cannot inspect state directory: {error}") from error
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
         raise EventPlaneClientError("state directory must be a real directory")
-    if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
-        raise EventPlaneClientError("state directory must be account-private")
+    if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+        raise EventPlaneClientError("state directory must be account-owned with mode 0700")
     return path.resolve(strict=True)
 
 
 def load_body(raw: str | None) -> dict[str, Any]:
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON field: {key}")
+            result[key] = value
+        return result
+
+    def safe_integer(value: str) -> int:
+        parsed = int(value)
+        if not -MAX_SAFE_INTEGER <= parsed <= MAX_SAFE_INTEGER:
+            raise ValueError("integer outside shared range")
+        return parsed
+
     try:
         if raw is None or raw == "-":
-            value = json.load(sys.stdin)
+            text = sys.stdin.read()
         elif raw.startswith("@"):
-            value = json.loads(Path(raw[1:]).read_text(encoding="utf-8"))
+            text = Path(raw[1:]).read_text(encoding="utf-8")
         else:
-            value = json.loads(raw)
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        raise EventPlaneClientError(f"cannot read JSON body: {error}") from error
+            text = raw
+        value = json.loads(
+            text,
+            parse_int=safe_integer,
+            parse_float=lambda item: (_ for _ in ()).throw(ValueError(item)),
+            parse_constant=lambda item: (_ for _ in ()).throw(ValueError(item)),
+            object_pairs_hook=unique_object,
+        )
+        validate_json_value(value)
+    except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as error:
+        raise EventPlaneClientError(f"cannot read strict JSON body: {error}") from error
     if not isinstance(value, dict):
         raise EventPlaneClientError("JSON body must be an object")
     return value
+
+
+def restore_checkpoint(name: str) -> None:
+    """Isolated process-death seam at real internal publication boundaries."""
+    if os.environ.get("QQ_EVENT_PLANE_TESTING") != "1":
+        return
+    if os.environ.get("QQ_EVENT_PLANE_RESTORE_CRASH_AT") == name:
+        os._exit(97)
+
+
+def perform_offline_restore(
+    state_dir: Path,
+    body: dict[str, Any],
+    validate_database: Callable[[Path], dict[str, Any]],
+) -> dict[str, Any]:
+    required = {"backup_path", "expected_instance_id", "authorization"}
+    if not isinstance(body, dict) or set(body) != required:
+        raise RestoreStateError(
+            "restore requires exactly backup_path, expected_instance_id, and authorization"
+        )
+    if body.get("authorization") != "operator":
+        raise RestoreStateError("restore requires exact local operator authorization")
+    backup_raw = body.get("backup_path")
+    expected = body.get("expected_instance_id")
+    if not isinstance(backup_raw, str) or not isinstance(expected, str) or not expected:
+        raise RestoreStateError("restore backup and instance guards are malformed")
+
+    state_dir = private_state_directory(state_dir)
+    # Unknown/type/mode/link ambiguity is rejected before lock acquisition and
+    # before any mutation. The lock itself must already be installed.
+    inspect_state_namespace(state_dir, require_database=True, require_lock=True)
+    backup = Path(backup_raw)
+    try:
+        backup_parent = backup.parent.resolve(strict=True) if backup.is_absolute() else None
+    except OSError as error:
+        raise RestoreStateError(f"cannot resolve backup_path parent: {error}") from error
+    if backup_parent == state_dir:
+        raise RestoreStateError("backup_path must be outside the installed state directory")
+    with OfflineSingleton(state_dir / LOCK_NAME):
+        reconcile_restore_state(state_dir, validate_database)
+        paths = inspect_state_namespace(state_dir, require_database=True, require_lock=True)
+        if any(name in paths for name in RESTORE_NAMES):
+            raise RestoreStateError("offline restore reconciliation left fixed restore state")
+        live = state_dir / DATABASE_NAME
+        live_info = live.lstat()
+        live_evidence = validated_database_evidence(live, validate_database)
+        if live_evidence["instance_id"] != expected:
+            raise RestoreStateError("expected_instance_id does not match the installed database")
+
+        backup_info = validate_backup_path(backup)
+        if (backup_info.st_dev, backup_info.st_ino) == (live_info.st_dev, live_info.st_ino):
+            raise RestoreStateError("restore backup must be independent from the live database")
+        source_evidence = validated_database_evidence(backup, validate_database)
+        if source_evidence["instance_id"] != expected:
+            raise RestoreStateError("restore backup instance does not match expected_instance_id")
+
+        candidate_temp = state_dir / CANDIDATE_TEMP_NAME
+        candidate = state_dir / CANDIDATE_NAME
+        safety_temp = state_dir / SAFETY_TEMP_NAME
+        safety = state_dir / SAFETY_NAME
+        commit_temp = state_dir / COMMIT_TEMP_NAME
+        commit = state_dir / COMMIT_NAME
+        committed = False
+        try:
+            # Candidate and safety final names never exist partially: each is
+            # copied, fsynced, fully validated, then atomically published.
+            descriptor = os.open(
+                candidate_temp,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+            )
+            os.close(descriptor)
+            restore_checkpoint("candidate-temp-created")
+            copy_into_existing(backup, candidate_temp)
+            restore_checkpoint("candidate-temp-durable")
+            candidate_evidence = validated_database_evidence(candidate_temp, validate_database)
+            if candidate_evidence != source_evidence:
+                raise RestoreStateError("durable restore candidate differs from validated backup")
+            os.replace(candidate_temp, candidate)
+            restore_checkpoint("candidate-published")
+            fsync_directory(state_dir)
+            restore_checkpoint("candidate-publication-durable")
+
+            descriptor = os.open(
+                safety_temp,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+            )
+            os.close(descriptor)
+            restore_checkpoint("safety-temp-created")
+            copy_into_existing(live, safety_temp)
+            restore_checkpoint("safety-temp-durable")
+            safety_evidence = validated_database_evidence(safety_temp, validate_database)
+            if safety_evidence != live_evidence:
+                raise RestoreStateError("durable restore safety differs from installed database")
+            restore_checkpoint("before-safety-publication")
+            os.replace(safety_temp, safety)
+            restore_checkpoint("after-safety-publication")
+            fsync_directory(state_dir)
+            restore_checkpoint("safety-publication-durable")
+
+            marker = {
+                "format": COMMIT_FORMAT,
+                "instance_id": expected,
+                "pre_restore_sha256": live_evidence["sha256"],
+                "candidate_sha256": candidate_evidence["sha256"],
+            }
+            write_commit_temp(commit_temp, marker)
+            restore_checkpoint("commit-temp-durable")
+
+            restore_checkpoint("before-live-publication")
+            os.replace(candidate, live)
+            restore_checkpoint("after-live-publication")
+            fsync_file(live)
+            fsync_directory(state_dir)
+            restore_checkpoint("candidate-live-durable")
+
+            # This atomic marker publication is the process-crash commit
+            # boundary. Before it, safety wins; from it onward, candidate wins.
+            restore_checkpoint("before-commit-publication")
+            os.replace(commit_temp, commit)
+            committed = True
+            restore_checkpoint("after-commit-publication")
+            fsync_directory(state_dir)
+            restore_checkpoint("commit-publication-durable")
+
+            safety.unlink()
+            fsync_directory(state_dir)
+            restore_checkpoint("after-safety-cleanup")
+            commit.unlink()
+            fsync_directory(state_dir)
+            restore_checkpoint("after-final-cleanup")
+        except Exception as error:
+            try:
+                outcome = reconcile_restore_state(state_dir, validate_database)
+            except BaseException as recovery_error:
+                raise RestoreStateError(
+                    f"offline restore failed and recovery refused ambiguous state: {recovery_error}"
+                ) from error
+            if committed and outcome == "candidate":
+                final = validated_database_evidence(live, validate_database)
+                return {
+                    "restored": True,
+                    "instance_id": final["instance_id"],
+                    "integrity": final.get("integrity", "ok"),
+                    "sha256": final["sha256"],
+                }
+            raise
+
+        final = validated_database_evidence(live, validate_database)
+        if final["sha256"] != candidate_evidence["sha256"]:
+            raise RestoreStateError("restored live database differs from validated candidate")
+        return {
+            "restored": True,
+            "instance_id": final["instance_id"],
+            "integrity": final.get("integrity", "ok"),
+            "sha256": final["sha256"],
+        }
+
+
+def validate_offline_database(path: Path) -> dict[str, Any]:
+    # The schema contract remains owned by the service implementation while
+    # fixed-name validation/reconciliation is shared with service startup.
+    from qq_event_plane_service import Store
+
+    return Store.validate_offline_database(path)
+
+
+def restore(state_dir: Path, body: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return perform_offline_restore(state_dir, body, validate_offline_database)
+    except SingletonBusy as error:
+        raise EventPlaneClientError(str(error), "service_running") from error
+    except RestoreStateError as error:
+        raise EventPlaneClientError(str(error), "invalid_restore") from error
+    except Exception as error:
+        # Configuration/schema errors from the service validator are rendered as
+        # bounded administration refusals rather than Python tracebacks.
+        raise EventPlaneClientError(str(error), "invalid_restore") from error
 
 
 def rollback(client: EventPlaneClient, state_dir: Path, body: dict[str, Any]) -> dict[str, Any]:
@@ -270,40 +493,40 @@ def rollback(client: EventPlaneClient, state_dir: Path, body: dict[str, Any]) ->
     backup_result = client.backup({"path": backup_path})
     shutdown_result = client.shutdown({"expected_instance_id": instance, "authorization": "operator"})
     socket_path = state_dir / "event-plane.sock"
-    lock_path = state_dir / "event-plane.lock"
+    lock_path = state_dir / LOCK_NAME
     deadline = time.monotonic() + 10
     while socket_path.exists() and time.monotonic() < deadline:
         time.sleep(0.02)
     if socket_path.exists():
         raise EventPlaneClientError("service did not stop; rollback retained all state", "rollback_incomplete")
-    lock_fd = os.open(lock_path, os.O_RDWR)
     try:
-        import fcntl
-        try:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as error:
-            raise EventPlaneClientError("singleton lock remains owned; rollback retained all state") from error
-        allowed = {"event-plane.sqlite3", "event-plane.lock"}
-        observed = {path.name for path in state_dir.iterdir()}
-        if observed - allowed:
-            raise EventPlaneClientError("state directory contains unknown files; rollback retained all state")
-        database = state_dir / "event-plane.sqlite3"
-        if database.exists():
-            database.unlink()
-        os.close(lock_fd)
-        lock_fd = -1
-        lock_path.unlink(missing_ok=True)
+        inspect_state_namespace(state_dir, require_database=True, require_lock=True)
+        with OfflineSingleton(lock_path):
+            reconcile_restore_state(state_dir, validate_offline_database)
+            observed = inspect_state_namespace(
+                state_dir, require_database=True, require_lock=True
+            )
+            if any(name in observed for name in RESTORE_NAMES):
+                raise RestoreStateError("rollback reconciliation left offline restore state")
+            if set(observed) != {DATABASE_NAME, LOCK_NAME}:
+                raise RestoreStateError("rollback state contains names outside the exact installed pair")
+            validate_offline_database(state_dir / DATABASE_NAME)
+            (state_dir / DATABASE_NAME).unlink()
+            fsync_directory(state_dir)
+        lock_path.unlink()
+        fsync_directory(state_dir)
         state_dir.rmdir()
-    finally:
-        if lock_fd >= 0:
-            os.close(lock_fd)
+    except SingletonBusy as error:
+        raise EventPlaneClientError(str(error), "rollback_incomplete") from error
+    except Exception as error:
+        raise EventPlaneClientError(str(error), "rollback_incomplete") from error
     return {"rolled_back": True, "backup": backup_result, "shutdown": shutdown_result}
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="qq-event-plane-admin")
     parser.add_argument("--state-dir")
-    parser.add_argument("operation", choices=(*OPERATIONS, "wait", "rollback"))
+    parser.add_argument("operation", choices=(*OPERATIONS, "wait", "restore", "rollback"))
     parser.add_argument("body", nargs="?", help="JSON object, @file, or - for stdin (default)")
     return parser.parse_args(argv)
 
@@ -313,12 +536,15 @@ def main(argv: list[str]) -> int:
         args = parse_args(argv)
         state = private_state_dir(args.state_dir)
         body = load_body(args.body)
-        client = EventPlaneClient(str(state / "event-plane.sock"))
-        if args.operation == "rollback":
-            result = rollback(client, state, body)
+        if args.operation == "restore":
+            result = restore(state, body)
         else:
-            method = getattr(client, args.operation)
-            result = method(body)
+            client = EventPlaneClient(str(state / "event-plane.sock"))
+            if args.operation == "rollback":
+                result = rollback(client, state, body)
+            else:
+                method = getattr(client, args.operation)
+                result = method(body)
         print(json.dumps({"ok": True, "result": result}, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         return 0
     except EventPlaneClientError as error:
