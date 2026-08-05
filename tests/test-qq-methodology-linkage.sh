@@ -361,41 +361,86 @@ assert.match(snapshotTurn.systemPrompt, /LOCAL VOCABULARY ONE/);
 assert.doesNotMatch(snapshotTurn.systemPrompt, /SNAPSHOT TWO/);
 assert.doesNotMatch(snapshotTurn.systemPrompt, /qq update available/);
 
-await emit(linked, "session_shutdown", { reason: "reload" }, linkedContext);
-assert.ok(watches.records.every((record) => record.closed), "shutdown left a canonical watcher open");
+const firstSessionWatchers = watches.records.slice();
+await emit(linked, "session_shutdown", { reason: "new" }, linkedContext);
+assert.ok(
+  firstSessionWatchers.every((record) => record.closed),
+  "session replacement left an old canonical watcher open",
+);
 assert.deepEqual(linkedContext.statuses.at(-1), ["qq-methodology-update", undefined]);
 const statusCountAfterShutdown = linkedContext.statuses.length;
-watches.records[0].callback("change", "after-shutdown");
+firstSessionWatchers[0].callback("change", "after-shutdown");
 assert.equal(linkedContext.statuses.length, statusCountAfterShutdown);
 
-// A successful explicit reload builds a fresh runtime/current snapshot and
-// starts with the update status clear.
-const reloadWatches = watcherHarness();
-const reloaded = runtime();
-await register(reloaded.pi, {
-  cwd: runtimeRepository,
-  bundleRoot,
-  inspectLink: async () => ({
-    linked: true,
-    state: "linked",
-    repositoryRoot: runtimeRepository,
-  }),
-  siblingRegisters: [],
-  watch: reloadWatches.watch,
-});
-const reloadedContext = context(true);
-await emit(reloaded, "session_start", { reason: "reload" }, reloadedContext);
-assert.deepEqual(reloadedContext.statuses, [["qq-methodology-update", undefined]]);
+// Pi reuses this registration for new/resume/fork. The next session boundary
+// must replace both the file snapshot and its watchers before clearing status.
+const replacementContext = context(true);
+await emit(linked, "session_start", { reason: "new" }, replacementContext);
+assert.deepEqual(replacementContext.statuses, [["qq-methodology-update", undefined]]);
+assert.equal(watches.records.length, 10, "replacement session did not replace all watchers");
+const replacementWatchers = watches.records.slice(firstSessionWatchers.length);
+assert.equal(replacementWatchers.length, 5);
+assert.ok(
+  replacementWatchers.every((record) => !record.closed),
+  "replacement session armed a closed canonical watcher",
+);
 const [currentTurn] = await emit(
-  reloaded,
+  linked,
   "before_agent_start",
   { systemPrompt: "PI BASE", systemPromptOptions: { contextFiles: [] } },
-  reloadedContext,
+  replacementContext,
 );
 assert.match(currentTurn.systemPrompt, /AGENTS SNAPSHOT TWO/);
 assert.match(currentTurn.systemPrompt, /CONCEPTS SNAPSHOT TWO/);
 assert.match(currentTurn.systemPrompt, /LOCAL VOCABULARY TWO/);
-assert.doesNotMatch(currentTurn.systemPrompt, /SNAPSHOT ONE/);
+assert.doesNotMatch(currentTurn.systemPrompt, /AGENTS SNAPSHOT ONE/);
+assert.doesNotMatch(currentTurn.systemPrompt, /CONCEPTS SNAPSHOT ONE/);
+assert.doesNotMatch(currentTurn.systemPrompt, /LOCAL VOCABULARY ONE/);
+
+// A broken canonical snapshot fails the next boundary before status, watchers,
+// resources, or model context become active.
+await writeFile(join(bundleRoot, "AGENTS.md"), "");
+replacementWatchers[0].callback("change", "before-failed-boundary");
+await emit(linked, "session_shutdown", { reason: "fork" }, replacementContext);
+const failedBoundaryContext = context(true);
+await assert.rejects(
+  () => emit(linked, "session_start", { reason: "fork" }, failedBoundaryContext),
+  /qq canonical methodology files must be non-empty text/,
+);
+assert.deepEqual(failedBoundaryContext.statuses, []);
+assert.equal(watches.records.length, 10, "failed boundary armed canonical watchers");
+const [failedResources] = await emit(
+  linked,
+  "resources_discover",
+  { reason: "startup", cwd: runtimeRepository },
+  failedBoundaryContext,
+);
+assert.equal(failedResources, undefined);
+const [failedTurn] = await emit(
+  linked,
+  "before_agent_start",
+  { systemPrompt: "PI BASE", systemPromptOptions: { contextFiles: [] } },
+  failedBoundaryContext,
+);
+assert.equal(failedTurn, undefined);
+
+// The factory keeps its earlier fail-closed contract as well: no linked or
+// sibling handlers are registered when canonical methodology is invalid.
+let failedFactorySiblingCalls = 0;
+const failedFactory = runtime();
+await assert.rejects(
+  () => register(failedFactory.pi, {
+    cwd: runtimeRepository,
+    bundleRoot,
+    inspectLink: async () => ({ linked: true, state: "linked" }),
+    siblingRegisters: [() => failedFactorySiblingCalls++],
+    watch: watcherHarness().watch,
+  }),
+  /qq canonical methodology files must be non-empty text/,
+);
+assert.deepEqual(failedFactory.registrations, []);
+assert.equal(failedFactorySiblingCalls, 0);
+await writeFile(join(bundleRoot, "AGENTS.md"), "AGENTS SNAPSHOT TWO\n");
 
 const untrusted = runtime();
 await register(untrusted.pi, {

@@ -186,16 +186,17 @@ function watcherSpecs(bundleRoot) {
 }
 
 function registerLinkedBootstrap(pi, options) {
-  const { bundleRoot, link, loadFile, snapshot, watch } = options;
+  const { bundleRoot, link, loadFile, watch } = options;
   const watchers = new Set();
   let active = false;
   let context;
+  let snapshot;
   let localVocabulary;
   let updateAvailable = false;
 
-  function localWarning(message) {
+  function localWarning(message, warningContext = context) {
     try {
-      if (context?.hasUI) context.ui.notify(message, "warning");
+      if (warningContext?.hasUI) warningContext.ui.notify(message, "warning");
     } catch {
       // A UI warning must not disrupt the session runtime.
     }
@@ -250,20 +251,23 @@ function registerLinkedBootstrap(pi, options) {
     }
   }
 
-  async function readLocalVocabulary(nextContext) {
+  async function readLocalVocabulary(nextContext, nextSnapshot) {
     if (!link.repositoryRoot || nextContext.isProjectTrusted?.() !== true) {
       return undefined;
     }
     try {
       const value = await loadFile(join(link.repositoryRoot, "CONCEPTS.local.md"), "utf8");
-      if (typeof value !== "string" || value === "" || value === snapshot.concepts) {
+      if (typeof value !== "string" || value === "" || value === nextSnapshot.concepts) {
         return undefined;
       }
       return value;
     } catch (error) {
       if (error?.code !== "ENOENT" && error?.code !== "ENOTDIR") {
         const detail = error instanceof Error ? `: ${error.message}` : "";
-        localWarning(`qq could not snapshot additive Repository vocabulary${detail}`);
+        localWarning(
+          `qq could not snapshot additive Repository vocabulary${detail}`,
+          nextContext,
+        );
       }
       return undefined;
     }
@@ -271,23 +275,36 @@ function registerLinkedBootstrap(pi, options) {
 
   pi.on("session_start", async (_event, nextContext) => {
     closeWatchers();
-    context = nextContext;
-    active = true;
-    updateAvailable = false;
+    active = false;
+    context = undefined;
+    snapshot = undefined;
     localVocabulary = undefined;
+
+    // Pi can reuse this registered runtime for new/resume/fork. Complete the
+    // whole replacement snapshot before exposing any linked session surface.
+    const nextSnapshot = await canonicalSnapshot(bundleRoot, loadFile);
+    const nextLocalVocabulary = await readLocalVocabulary(nextContext, nextSnapshot);
+
+    snapshot = nextSnapshot;
+    localVocabulary = nextLocalVocabulary;
+    context = nextContext;
+    updateAvailable = false;
+    active = true;
     try {
       if (context?.hasUI) context.ui.setStatus(UPDATE_STATUS_KEY, undefined);
     } catch {
       // A fresh runtime is current even if its UI cannot render the clear.
     }
-    localVocabulary = await readLocalVocabulary(nextContext);
     armWatchers();
   });
 
-  pi.on("resources_discover", () => ({
-    skillPaths: [join(bundleRoot, "skills")],
-    promptPaths: [join(bundleRoot, ".pi", "prompts")],
-  }));
+  pi.on("resources_discover", () => {
+    if (!active) return undefined;
+    return {
+      skillPaths: [join(bundleRoot, "skills")],
+      promptPaths: [join(bundleRoot, ".pi", "prompts")],
+    };
+  });
 
   pi.on("before_agent_start", (event) => {
     if (!active) return undefined;
@@ -306,6 +323,7 @@ function registerLinkedBootstrap(pi, options) {
       // Shutdown cleanup is best-effort after watcher closure.
     }
     context = undefined;
+    snapshot = undefined;
     localVocabulary = undefined;
     updateAvailable = false;
   });
@@ -334,14 +352,15 @@ export default async function register(pi, deps = {}) {
 
   const bundleRoot = resolve(deps.bundleRoot ?? DEFAULT_BUNDLE_ROOT);
   const loadFile = deps.readFile ?? readFile;
-  const snapshot = await canonicalSnapshot(bundleRoot, loadFile);
+  // Validate before registering any linked handlers or sibling extensions.
+  // session_start reads again because one process can cross session boundaries.
+  await canonicalSnapshot(bundleRoot, loadFile);
   const siblingRegisters = await loadSiblingRegisters(deps);
 
   registerLinkedBootstrap(pi, {
     bundleRoot,
     link,
     loadFile,
-    snapshot,
     watch: deps.watch ?? watchFs,
   });
   for (const registerSibling of siblingRegisters) {
