@@ -1519,12 +1519,21 @@ def state_ancestor_fence() -> None:
         if foreign_parent is not None:
             break
     assert foreign_parent is not None, "substrate has no observable foreign-owned directory"
-    foreign_state = foreign_parent / "qq-event-plane-test-state"
+    foreign_before = foreign_parent.lstat()
+    foreign_identity = (
+        foreign_before.st_dev, foreign_before.st_ino, foreign_before.st_mode,
+        foreign_before.st_uid, foreign_before.st_gid,
+    )
     result = subprocess.run(
-        [SERVICE, "serve", "--state-dir", str(foreign_state), "--test-clock", str(clock)],
+        [SERVICE, "serve", "--state-dir", str(foreign_parent), "--test-clock", str(clock)],
         env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
     )
-    assert result.returncode == 73 and not foreign_state.exists()
+    foreign_after = foreign_parent.lstat()
+    assert result.returncode == 73
+    assert (
+        foreign_after.st_dev, foreign_after.st_ino, foreign_after.st_mode,
+        foreign_after.st_uid, foreign_after.st_gid,
+    ) == foreign_identity
     proofs.add("20 state ancestor fence")
 
 
