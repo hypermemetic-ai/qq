@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import socket
 import sqlite3
 import stat
@@ -94,6 +95,7 @@ class Plane:
         self.state = self.root / "state"
         self.clock = self.root / "clock"
         self.clock.write_text("1000000\n", encoding="ascii")
+        self.clock.chmod(0o600)
         self.stderr = self.root / "stderr.log"
         self.stdout = self.root / "stdout.log"
         self.process: subprocess.Popen[bytes] | None = None
@@ -125,6 +127,7 @@ class Plane:
         assert value >= self.now
         temporary = self.root / ".clock-new"
         temporary.write_text(f"{value}\n", encoding="ascii")
+        temporary.chmod(0o600)
         temporary.replace(self.clock)
 
     def advance(self, amount: int) -> None:
@@ -181,6 +184,21 @@ class Plane:
             active.remove(self)
 
 
+def read_framed_response(connection: socket.socket) -> dict[str, Any]:
+    header = bytearray()
+    while len(header) < 4:
+        chunk = connection.recv(4 - len(header))
+        assert chunk
+        header.extend(chunk)
+    length = struct.unpack(">I", header)[0]
+    data = bytearray()
+    while len(data) < length:
+        chunk = connection.recv(length - len(data))
+        assert chunk
+        data.extend(chunk)
+    return json.loads(data)
+
+
 def raw_request(path: Path, document: Any = None, raw: bytes | None = None, declared: int | None = None) -> dict[str, Any]:
     if raw is None:
         raw = json.dumps(document, separators=(",", ":")).encode()
@@ -190,16 +208,31 @@ def raw_request(path: Path, document: Any = None, raw: bytes | None = None, decl
     connection.settimeout(3)
     connection.connect(str(path))
     connection.sendall(struct.pack(">I", declared) + raw)
-    header = connection.recv(4)
-    assert len(header) == 4
-    length = struct.unpack(">I", header)[0]
-    data = bytearray()
-    while len(data) < length:
-        chunk = connection.recv(length - len(data))
-        assert chunk
-        data.extend(chunk)
+    connection.shutdown(socket.SHUT_WR)
+    result = read_framed_response(connection)
     connection.close()
-    return json.loads(data)
+    return result
+
+
+def streamed_raw_request(
+    path: Path, declared_raw: bytes, *, trailing: bytes = b"", fragmented: bool = False
+) -> dict[str, Any]:
+    connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    connection.settimeout(3)
+    connection.connect(str(path))
+    frame = struct.pack(">I", len(declared_raw)) + declared_raw
+    if fragmented:
+        for byte in frame:
+            connection.sendall(bytes((byte,)))
+    else:
+        connection.sendall(frame)
+    if trailing:
+        time.sleep(0.05)
+        connection.sendall(trailing)
+    connection.shutdown(socket.SHUT_WR)
+    result = read_framed_response(connection)
+    connection.close()
+    return result
 
 
 def crash_and_validation() -> None:
@@ -249,7 +282,7 @@ def crash_and_validation() -> None:
         plane.socket,
         raw=b'{"protocol":"qq-event-plane/v1","operation":"send","operation":"publish","body":{}}',
     )
-    assert not duplicate["ok"] and "valid finite" in duplicate["error"]["message"]
+    assert not duplicate["ok"] and "bounded integer" in duplicate["error"]["message"]
     oversized = raw_request(plane.socket, raw=b"{}", declared=128 * 1024 + 1)
     assert oversized["error"]["code"] == "frame_too_large"
     selector = {
@@ -361,8 +394,21 @@ def delivery_gaps_and_guards() -> None:
         if row["subscription_id"] == "qq/consumer-a"
     )
     assert len(persisted_gap["gaps"]) == 1 and persisted_gap["gaps"][0]["status"] == "blocked"
+    recovered_blocked = c.next({
+        "consumer_type": "subscription", "consumer_id": "qq/consumer-a", "generation": 1,
+        "endpoint_token": "endpoint-blocked-b",
+    })["delivery"]
+    assert recovered_blocked["record"]["event_id"] == poison["record"]["event_id"]
+    assert recovered_blocked["obligation"]["status"] == "blocked"
+    assert recovered_blocked["obligation"]["last_reason"] == "authority payload is temporarily poison"
+    assert recovered_blocked["attempt_token"] != poison_delivery["attempt_token"]
+    refused("stale_attempt", c.retry, {**guard(poison_delivery), "reason": "stale endpoint cannot retry"})
+    refused("stale_attempt", c.disposition, {
+        **guard(poison_delivery), "authorized_by": "qq/operator", "authorization": "operator",
+        "reason": "stale endpoint cannot dispose", "expected_status": "blocked",
+    })
     later = c.publish(publish_body("later-wakeup"))
-    later_delivery = c.next({"consumer_type": "subscription", "consumer_id": "qq/consumer-a", "generation": 1, "endpoint_token": "endpoint-a2"})["delivery"]
+    later_delivery = c.next({"consumer_type": "subscription", "consumer_id": "qq/consumer-a", "generation": 1, "endpoint_token": "endpoint-blocked-b"})["delivery"]
     assert later_delivery["record"]["event_id"] == later["record"]["event_id"]
     stale_gap = guard(later_delivery); stale_gap["expected_gap_token"] = poison_delivery["guard"]["expected_gap_token"]
     refused("gap_conflict", c.acknowledge, stale_gap)
@@ -378,7 +424,7 @@ def delivery_gaps_and_guards() -> None:
 
     # Disposition uses current gap state, is audited, and changes no B obligation.
     disposition = {
-        **guard(poison_delivery),
+        **guard(recovered_blocked),
         "expected_high_water": subscription["high_water"],
         "expected_gap_token": subscription["gap_token"],
         "authorized_by": "qq/operator",
@@ -400,8 +446,117 @@ def delivery_gaps_and_guards() -> None:
     first = c.publish(old_world)["record"]; second = c.publish(new_world)["record"]
     assert first["journal_position"] < second["journal_position"]
     assert first["envelope"]["source_revision"] == "revision-99" and second["envelope"]["source_revision"] == "revision-1"
-    proofs.update({"send-publish-engine", "identity-fencing", "independent-gaps", "crash-redelivery", "guarded-ack", "poison-nonfreezing", "audited-disposition", "acceptance-order-only"})
+    proofs.update({"send-publish-engine", "identity-fencing", "independent-gaps", "crash-redelivery", "guarded-ack", "poison-nonfreezing", "blocked-rebind-resolution", "audited-disposition", "acceptance-order-only"})
     plane.close()
+
+
+def post_copy_restore_atomicity() -> None:
+    service_source = ROOT / "bin/lib/qq_event_plane_service.py"
+    service_spec = importlib.util.spec_from_file_location("qq_event_plane_service_restore_test", service_source)
+    assert service_spec is not None and service_spec.loader is not None
+    service_module = importlib.util.module_from_spec(service_spec)
+    service_spec.loader.exec_module(service_module)
+    root = SCRATCH / "post-copy-restore"
+    root.mkdir(mode=0o700)
+    state = root / "state"; state.mkdir(mode=0o700)
+    store = service_module.Store(service_module.Config(state, None))
+    try:
+        baseline = store.append("send", send_body("post-copy-baseline"))
+        backup = root / "before-later.sqlite3"
+        store.backup({"path": str(backup)})
+        later = store.append("send", send_body("post-copy-live"))
+        original_recovery = store._recover_startup
+
+        def injected_recovery_failure() -> None:
+            raise RuntimeError("injected failure after candidate copy")
+
+        store._recover_startup = injected_recovery_failure
+        try:
+            store.restore({"path": str(backup), "expected_instance_id": store.instance_id})
+        except RuntimeError as error:
+            assert "after candidate copy" in str(error)
+        else:
+            raise AssertionError("post-copy recovery failure unexpectedly accepted restore")
+        finally:
+            store._recover_startup = original_recovery
+        assert store.status({"event_id": baseline["record"]["event_id"]})["record"]["event_id"] == baseline["record"]["event_id"]
+        assert store.status({"event_id": later["record"]["event_id"]})["record"]["event_id"] == later["record"]["event_id"]
+        assert not (state / ".restore-rollback.sqlite3").exists()
+    finally:
+        store.close()
+    proofs.add("post-copy-restore-rollback")
+
+
+def predicate_wait_atomicity() -> None:
+    service_source = ROOT / "bin/lib/qq_event_plane_service.py"
+    service_spec = importlib.util.spec_from_file_location("qq_event_plane_service_wait_test", service_source)
+    assert service_spec is not None and service_spec.loader is not None
+    service_module = importlib.util.module_from_spec(service_spec)
+    service_spec.loader.exec_module(service_module)
+    state = SCRATCH / "predicate-waits" / "state"
+    state.mkdir(parents=True, mode=0o700)
+    store = service_module.Store(service_module.Config(state, None))
+    workers: list[threading.Thread] = []
+
+    def inject_at_wait(callback) -> None:
+        original_wait = store.changed.wait
+        armed = True
+
+        def hooked_wait(timeout: float | None = None):
+            nonlocal armed
+            if armed:
+                armed = False
+                store.changed.wait = original_wait
+                worker = threading.Thread(target=callback)
+                workers.append(worker)
+                worker.start()
+            return original_wait(timeout)
+
+        store.changed.wait = hooked_wait
+
+    try:
+        store.ensure_subscription({
+            "subscription_id": "qq/atomic-wait", "product_id": "qq", "kind": "atomic.fact",
+            "generation": 1, "reconstruct_from": 1,
+        })
+        empty = store.next_delivery({
+            "consumer_type": "subscription", "consumer_id": "qq/atomic-wait", "generation": 1,
+            "endpoint_token": "atomic-endpoint", "wait_ms": 0,
+        })
+        assert empty["delivery"] is None
+        inject_at_wait(lambda: store.append("publish", publish_body("atomic-next", kind="atomic.fact")))
+        started = time.monotonic()
+        delivered = store.next_delivery({
+            "consumer_type": "subscription", "consumer_id": "qq/atomic-wait", "generation": 1,
+            "endpoint_token": "atomic-endpoint", "wait_ms": 2000,
+        })["delivery"]
+        next_elapsed = time.monotonic() - started
+        assert delivered is not None and delivered["record"]["request_id"] == "atomic-next"
+        assert next_elapsed < 1.0, next_elapsed
+        for worker in workers:
+            worker.join(timeout=2)
+            assert not worker.is_alive()
+        workers.clear()
+        store.acknowledge(guard(delivered))
+
+        accepted = store.append("send", send_body("atomic-status", recipient="qq/atomic-target"))
+        direct = store.next_delivery({
+            "consumer_type": "recipient", "consumer_id": "qq/atomic-target", "generation": 0,
+            "endpoint_token": "atomic-status-endpoint", "wait_ms": 0,
+        })["delivery"]
+        assert direct is not None
+        inject_at_wait(lambda: store.acknowledge(guard(direct)))
+        started = time.monotonic()
+        status = store.status({"event_id": accepted["record"]["event_id"], "wait_ms": 2000})
+        status_elapsed = time.monotonic() - started
+        assert status["terminal"] and status["obligations"][0]["status"] == "acknowledged"
+        assert status_elapsed < 1.0, status_elapsed
+        for worker in workers:
+            worker.join(timeout=2)
+            assert not worker.is_alive()
+    finally:
+        store.close()
+    proofs.update({"next-lost-wake-atomic", "status-lost-wake-atomic"})
 
 
 def backoff_blocking() -> None:
@@ -498,7 +653,154 @@ def expiry_lease_and_retention() -> None:
     refused("not_found", c.status, {"event_id": fact["record"]["event_id"]})
     refused("not_found", c.status, {"event_id": acknowledged["record"]["event_id"]})
     refused("not_found", c.status, {"event_id": disposed["record"]["event_id"]})
-    proofs.update({"addressed-expiry-waiter", "lease-reconstruction", "retention-tombstone-deletion", "blocked-abandoned-cleanup"})
+
+    deleted_position = fact["record"]["journal_position"]
+    refused("replay_unavailable", c.ensure_subscription, {
+        "subscription_id": "qq/deleted-boundary", "product_id": "qq", "kind": "lease.fact",
+        "generation": 1, "reconstruct_from": deleted_position,
+    })
+    later_start = c.ensure_subscription({
+        "subscription_id": "qq/after-deleted-boundary", "product_id": "qq", "kind": "lease.fact",
+        "generation": 1, "reconstruct_from": deleted_position + 1,
+    })
+    assert later_start["reconstructed"] and later_start["replayed"] == 0
+    isolated_kind = c.ensure_subscription({
+        "subscription_id": "qq/isolated-kind", "product_id": "qq", "kind": "other.fact",
+        "generation": 1, "reconstruct_from": deleted_position,
+    })
+    isolated_product = c.ensure_subscription({
+        "subscription_id": "deciq/isolated-product", "product_id": "deciq", "kind": "lease.fact",
+        "generation": 1, "reconstruct_from": deleted_position,
+    })
+    assert isolated_kind["reconstructed"] and isolated_product["reconstructed"]
+    boundary_backup = plane.root / "retention-boundary.sqlite3"
+    health = c.inspect({"view": "health"})
+    c.backup({"path": str(boundary_backup)})
+    plane.restart(); c = plane.client
+    refused("replay_unavailable", c.ensure_subscription, {
+        "subscription_id": "qq/deleted-after-restart", "product_id": "qq", "kind": "lease.fact",
+        "generation": 1, "reconstruct_from": deleted_position,
+    })
+    c.restore({"path": str(boundary_backup), "expected_instance_id": health["instance_id"]})
+    refused("replay_unavailable", c.ensure_subscription, {
+        "subscription_id": "qq/deleted-after-restore", "product_id": "qq", "kind": "lease.fact",
+        "generation": 1, "reconstruct_from": deleted_position,
+    })
+    proofs.update({"addressed-expiry-waiter", "lease-reconstruction", "retention-tombstone-deletion", "retention-replay-boundary", "blocked-abandoned-cleanup"})
+    plane.close()
+
+
+def framing_exactness() -> None:
+    plane = Plane("framing-exact")
+    c = plane.client
+    before = c.inspect({"view": "health"})["counts"]["records"]
+    valid_document = {"protocol": PROTOCOL, "operation": "send", "body": send_body("fragmented-valid")}
+    valid_raw = json.dumps(valid_document, separators=(",", ":")).encode()
+    fragmented = streamed_raw_request(plane.socket, valid_raw, fragmented=True)
+    assert fragmented["ok"] and fragmented["result"]["accepted"]
+
+    malformed_streams = [
+        ("same-write", send_body("trailing-same"), b"TRAILING", False),
+        ("split-write", send_body("trailing-split"), b"TRAILING", True),
+    ]
+    for _label, body, trailing, split in malformed_streams:
+        document = {"protocol": PROTOCOL, "operation": "send", "body": body}
+        raw = json.dumps(document, separators=(",", ":")).encode()
+        connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        connection.settimeout(3)
+        connection.connect(str(plane.socket))
+        frame = struct.pack(">I", len(raw)) + raw
+        if split:
+            connection.sendall(frame)
+            time.sleep(0.05)
+            connection.sendall(trailing)
+        else:
+            connection.sendall(frame + trailing)
+        connection.shutdown(socket.SHUT_WR)
+        result = read_framed_response(connection)
+        connection.close()
+        assert not result["ok"] and result["error"]["code"] == "invalid_frame"
+    duplicate_body = send_body("duplicate-frame")
+    duplicate_raw = json.dumps(
+        {"protocol": PROTOCOL, "operation": "send", "body": duplicate_body},
+        separators=(",", ":"),
+    ).encode()
+    duplicate_frame = struct.pack(">I", len(duplicate_raw)) + duplicate_raw
+    duplicate = streamed_raw_request(plane.socket, duplicate_raw, trailing=duplicate_frame)
+    assert not duplicate["ok"] and duplicate["error"]["code"] == "invalid_frame"
+    after = c.inspect({"view": "health"})["counts"]["records"]
+    assert after == before + 1
+    for request_id in ("trailing-same", "trailing-split", "duplicate-frame"):
+        refused("not_found", c.status, {"producer_id": "qq/producer", "request_id": request_id})
+
+    counter = 0
+
+    def fake_response(*, split: bool, duplicate_response: bool = False) -> tuple[Path, threading.Thread]:
+        nonlocal counter
+        counter += 1
+        path = plane.root / f"fake-response-{counter}.sock"
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(str(path))
+        listener.listen(1)
+
+        def serve_one() -> None:
+            connection, _ = listener.accept()
+            try:
+                header = bytearray()
+                while len(header) < 4:
+                    header.extend(connection.recv(4 - len(header)))
+                length = struct.unpack(">I", header)[0]
+                request = bytearray()
+                while len(request) < length:
+                    request.extend(connection.recv(length - len(request)))
+                assert connection.recv(1) == b""
+                response_raw = json.dumps(
+                    {"protocol": PROTOCOL, "ok": True, "result": {"accepted": True}},
+                    separators=(",", ":"),
+                ).encode()
+                response_frame = struct.pack(">I", len(response_raw)) + response_raw
+                trailing = response_frame if duplicate_response else b"TRAILING"
+                if split:
+                    connection.sendall(response_frame)
+                    time.sleep(0.05)
+                    connection.sendall(trailing)
+                else:
+                    connection.sendall(response_frame + trailing)
+            finally:
+                connection.close()
+                listener.close()
+
+        worker = threading.Thread(target=serve_one)
+        worker.start()
+        return path, worker
+
+    for split, duplicate_response in ((False, False), (True, False), (True, True)):
+        fake, worker = fake_response(split=split, duplicate_response=duplicate_response)
+        refused("client_error", Client(str(fake), timeout_seconds=2).send, {})
+        worker.join(timeout=3)
+        assert not worker.is_alive()
+
+    ts_refusal_script = r'''
+const { EventPlaneClient } = await import(process.argv[2]);
+try {
+  await new EventPlaneClient(process.argv[3], 2000).send({});
+  console.error("unexpected response acceptance");
+  process.exit(1);
+} catch (error) {
+  console.log(JSON.stringify({rejected:true,code:error.code}));
+}
+'''
+    for split, duplicate_response in ((False, False), (True, False), (True, True)):
+        fake, worker = fake_response(split=split, duplicate_response=duplicate_response)
+        process = subprocess.run(
+            ["node", "--experimental-strip-types", "--input-type=module", "-", Path(TS_CLIENT).resolve().as_uri(), str(fake)],
+            input=ts_refusal_script, text=True, capture_output=True, check=False,
+        )
+        worker.join(timeout=3)
+        assert process.returncode == 0, (process.stdout, process.stderr)
+        assert json.loads(process.stdout)["rejected"]
+        assert not worker.is_alive()
+    proofs.add("single-frame-stream-exactness")
     plane.close()
 
 
@@ -570,22 +872,205 @@ console.log(JSON.stringify({result, conflict, fact, disposable, waited, status, 
     plane.close()
 
 
+def shared_integer_json_state_space() -> None:
+    plane = Plane("shared-json")
+    c = plane.client
+    payloads: list[Any] = [
+        None,
+        False,
+        -9007199254740991,
+        "é shared text",
+        [None, True, 7, "array"],
+        {"😀": [1, {"nested": False}], "\ue000": "scalar-key-order"},
+    ]
+    def json_body(request_id: str, payload: Any) -> dict[str, Any]:
+        body = send_body(request_id)
+        body["payload"] = payload
+        return body
+
+    python_first: list[dict[str, Any]] = []
+    for index, payload in enumerate(payloads):
+        python_first.append(c.send(json_body(f"json-python-{index}", payload)))
+
+    script = r'''
+const { EventPlaneClient, canonicalEventPlaneJson } = await import(process.argv[2]);
+const client = new EventPlaneClient(process.argv[3]);
+const payloads = JSON.parse(process.argv[4]);
+const body = (request_id, payload) => ({
+  producer_id:"qq/producer",request_id,origin_id:"qq/change/T-209.16",recipient_id:"qq/actor",
+  product_id:"qq",kind:"actor.message",schema_version:1,payload,
+});
+const retried = [];
+const accepted = [];
+for (let index = 0; index < payloads.length; index += 1) {
+  retried.push(await client.send(body(`json-python-${index}`, payloads[index])));
+  accepted.push(await client.send(body(`json-typescript-${index}`, payloads[index])));
+}
+console.log(JSON.stringify({retried,accepted,canonical:payloads.map(canonicalEventPlaneJson)}));
+'''
+    process = subprocess.run(
+        [
+            "node", "--experimental-strip-types", "--input-type=module", "-",
+            Path(TS_CLIENT).resolve().as_uri(), str(plane.socket),
+            json.dumps(payloads, ensure_ascii=False, separators=(",", ":")),
+        ],
+        input=script, text=True, capture_output=True, check=False,
+    )
+    assert process.returncode == 0, (process.stdout, process.stderr)
+    observed = json.loads(process.stdout)
+    for index, payload in enumerate(payloads):
+        assert observed["retried"][index]["idempotent"]
+        assert observed["retried"][index]["record"]["event_id"] == python_first[index]["record"]["event_id"]
+        python_retry = c.send(json_body(f"json-typescript-{index}", payload))
+        assert python_retry["idempotent"]
+        assert python_retry["record"]["event_id"] == observed["accepted"][index]["record"]["event_id"]
+        expected = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        assert observed["canonical"][index] == expected
+
+    valid_count = c.inspect({"view": "health"})["counts"]["records"]
+    invalid_values: list[Any] = [
+        1.0, 1.5, float("nan"), float("inf"), float("-inf"),
+        9007199254740992, -9007199254740992,
+        {"nested": [0, {"unsafe": 9007199254740992}]}, "\ud800", {"2": "index-key"},
+    ]
+    for index, value in enumerate(invalid_values):
+        refused("client_error", c.send, json_body(f"invalid-python-{index}", value))
+
+    raw_numeric_values = [
+        "1.0", "1.5", "NaN", "Infinity", "-Infinity",
+        "9007199254740992", "-9007199254740992", "{\"nested\":[1.0]}", '"\\ud800"',
+        '{"2":"index-key"}',
+    ]
+    for index, literal in enumerate(raw_numeric_values):
+        raw = (
+            '{"protocol":"qq-event-plane/v1","operation":"send","body":'
+            '{"producer_id":"qq/raw","request_id":"raw-number-' + str(index) + '",'
+            '"origin_id":"qq/source/raw","recipient_id":"qq/actor","product_id":"qq",'
+            '"kind":"actor.message","schema_version":1,"payload":' + literal + '}}'
+        ).encode()
+        refusal = raw_request(plane.socket, raw=raw)
+        assert not refusal["ok"]
+
+    ts_invalid_script = r'''
+const { EventPlaneClient } = await import(process.argv[2]);
+const client = new EventPlaneClient(process.argv[3]);
+const values = [1.5,NaN,Infinity,-Infinity,Number.MAX_SAFE_INTEGER+1,Number.MIN_SAFE_INTEGER-1,{nested:[1.5]},"\ud800",{"2":"index-key"}];
+const refused = [];
+for (let index = 0; index < values.length; index += 1) {
+  try {
+    await client.send({producer_id:"qq/ts",request_id:`invalid-ts-${index}`,origin_id:"qq/source/ts",recipient_id:"qq/actor",product_id:"qq",kind:"actor.message",schema_version:1,payload:values[index]});
+    refused.push(false);
+  } catch (error) { refused.push(error.code === "client_error"); }
+}
+console.log(JSON.stringify(refused));
+'''
+    invalid_process = subprocess.run(
+        ["node", "--experimental-strip-types", "--input-type=module", "-", Path(TS_CLIENT).resolve().as_uri(), str(plane.socket)],
+        input=ts_invalid_script, text=True, capture_output=True, check=False,
+    )
+    assert invalid_process.returncode == 0, (invalid_process.stdout, invalid_process.stderr)
+    assert all(json.loads(invalid_process.stdout))
+    assert c.inspect({"view": "health"})["counts"]["records"] == valid_count
+    proofs.update({"cross-client-json-classes", "strict-integer-json-refusal"})
+    plane.close()
+
+
 def administration_and_rollback() -> None:
     plane = Plane("administration")
     c = plane.client
     baseline = c.send(send_body("backup-baseline"))
     health = c.inspect({"view": "health"})
     assert health["journal_mode"] == "delete" and health["synchronous"] == "FULL"
-    assert c.inspect({"view": "integrity"}) == {"integrity": "ok", "ok": True, "schema_version": 1}
+    assert c.inspect({"view": "integrity"}) == {"integrity": "ok", "ok": True, "schema_version": 2}
     database = plane.state / "event-plane.sqlite3"
     with sqlite3.connect(database) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
         assert db.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
         trigger = db.execute("SELECT sql FROM sqlite_master WHERE name='records_immutable'").fetchone()[0]
         assert "immutable journal record" in trigger
     backup = plane.root / "backup.sqlite3"
     c.backup({"path": str(backup)})
     assert stat.S_IMODE(backup.stat().st_mode) == 0o600
+
+    # Build an exact prior v1 backup, then independently alter each supported
+    # structural class. Every integrity-clean candidate refuses before live
+    # replacement and the accepted baseline remains usable.
+    valid_v1 = plane.root / "valid-v1.sqlite3"
+    shutil.copy2(backup, valid_v1)
+    with sqlite3.connect(valid_v1) as db:
+        db.execute("DROP TABLE retention_boundaries")
+        db.execute("UPDATE metadata SET value='1' WHERE key='schema_version'")
+        db.execute("PRAGMA user_version=1")
+        db.commit()
+        assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    valid_v1.chmod(0o600)
+    mutations = {
+        "missing-table": ["DROP TABLE endpoints"],
+        "altered-columns": ["ALTER TABLE endpoints ADD COLUMN unexpected TEXT"],
+        "altered-index": [
+            "DROP INDEX obligations_delivery",
+            "CREATE INDEX obligations_delivery ON obligations(consumer_id,record_position)",
+        ],
+        "missing-trigger": ["DROP TRIGGER records_immutable"],
+    }
+    for label, statements in mutations.items():
+        candidate = plane.root / f"invalid-{label}.sqlite3"
+        shutil.copy2(valid_v1, candidate)
+        with sqlite3.connect(candidate) as db:
+            for statement in statements:
+                db.execute(statement)
+            db.commit()
+            assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        candidate.chmod(0o600)
+        refused("invalid_restore", c.restore, {
+            "path": str(candidate), "expected_instance_id": health["instance_id"],
+        })
+        assert c.status({"event_id": baseline["record"]["event_id"]})["record"]["event_id"] == baseline["record"]["event_id"]
+
+    deleted_v1 = plane.root / "deleted-history-v1.sqlite3"
+    shutil.copy2(valid_v1, deleted_v1)
+    with sqlite3.connect(deleted_v1) as db:
+        db.execute("PRAGMA foreign_keys=ON")
+        db.execute("DELETE FROM records")
+        db.commit()
+        assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+    deleted_v1.chmod(0o600)
+    refused("replay_unavailable", c.restore, {
+        "path": str(deleted_v1), "expected_instance_id": health["instance_id"],
+    })
+    assert c.status({"event_id": baseline["record"]["event_id"]})["record"]["event_id"] == baseline["record"]["event_id"]
+
+    # Prior exact schema backups migrate both on restore and cold startup.
+    migrated_restore = c.restore({"path": str(valid_v1), "expected_instance_id": health["instance_id"]})
+    assert migrated_restore["integrity"] == "ok"
+    assert c.inspect({"view": "health"})["schema_version"] == 2
+    migration_state = plane.root / "migration-state"
+    migration_state.mkdir(mode=0o700)
+    migrated_database = migration_state / "event-plane.sqlite3"
+    shutil.copy2(valid_v1, migrated_database)
+    migrated_database.chmod(0o600)
+    migration_process = subprocess.Popen(
+        [SERVICE, "serve", "--state-dir", str(migration_state), "--test-clock", str(plane.clock)],
+        env=plane.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    migration_socket = migration_state / "event-plane.sock"
+    for _ in range(250):
+        if migration_socket.is_socket():
+            break
+        if migration_process.poll() is not None:
+            out, err = migration_process.communicate()
+            raise AssertionError((migration_process.returncode, out, err))
+        time.sleep(0.01)
+    else:
+        raise AssertionError("v1 migration service did not start")
+    migration_client = Client(str(migration_socket))
+    assert migration_client.inspect({"view": "health"})["schema_version"] == 2
+    migration_process.terminate(); migration_process.wait(timeout=10)
+    with sqlite3.connect(migrated_database) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert db.execute("SELECT COUNT(*) FROM retention_boundaries").fetchone()[0] == 0
+
     later = c.send(send_body("after-backup"))
     refused("guard_conflict", c.restore, {"path": str(backup), "expected_instance_id": "wrong"})
     restored = c.restore({"path": str(backup), "expected_instance_id": health["instance_id"]})
@@ -665,7 +1150,70 @@ def administration_and_rollback() -> None:
     assert loose.returncode == 73 and b"account-private" in loose.stderr
     assert stat.S_IMODE(loose_db.stat().st_mode) == 0o644  # refuse, do not silently chmod.
     active.remove(plane)
-    proofs.update({"migration-integrity", "backup-restore", "singleton", "permissions", "signal-cleanup", "exact-rollback"})
+    proofs.update({"migration-integrity", "schema-v1-v2-migration", "structural-restore-atomic", "backup-restore", "singleton", "permissions", "signal-cleanup", "exact-rollback"})
+
+
+def test_clock_preflight() -> None:
+    root = SCRATCH / "clock-preflight"
+    root.mkdir(mode=0o700)
+    good = root / "good-clock"
+    good.write_text("1000000\n", encoding="ascii"); good.chmod(0o600)
+    loose = root / "loose-clock"
+    loose.write_text("1000000\n", encoding="ascii"); loose.chmod(0o666)
+    target = root / "target-clock"
+    target.write_text("1000000\n", encoding="ascii"); target.chmod(0o600)
+    symlink = root / "clock-link"; symlink.symlink_to(target)
+    directory = root / "clock-directory"; directory.mkdir(mode=0o700)
+    fifo = root / "clock-fifo"; os.mkfifo(fifo, mode=0o600)
+    malformed = root / "malformed-clock"
+    malformed.write_text("not-a-clock\n", encoding="ascii"); malformed.chmod(0o600)
+    real_parent = root / "real-parent"; real_parent.mkdir(mode=0o700)
+    nested = real_parent / "clock"; nested.write_text("1000000\n", encoding="ascii"); nested.chmod(0o600)
+    linked_parent = root / "linked-parent"; linked_parent.symlink_to(real_parent, target_is_directory=True)
+    rejected = [
+        loose, symlink, directory, fifo, malformed, root / "missing-clock",
+        Path("/dev/null"), linked_parent / "clock",
+    ]
+    if os.geteuid() == 0:
+        foreign = root / "foreign-clock"
+        foreign.write_text("1000000\n", encoding="ascii"); foreign.chmod(0o600); foreign.chown(65534, 65534)
+        rejected.append(foreign)
+    env = os.environ.copy(); env["QQ_EVENT_PLANE_TESTING"] = "1"
+    for index, clock in enumerate(rejected):
+        state = root / f"rejected-state-{index}"
+        result = subprocess.run(
+            [SERVICE, "serve", "--state-dir", str(state), "--test-clock", str(clock)],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
+        )
+        assert result.returncode == 73, (clock, result.returncode, result.stderr)
+        assert not state.exists(), f"rejected clock created Event Plane state: {clock}"
+
+    production_state = root / "production-seam-state"
+    production_env = os.environ.copy(); production_env.pop("QQ_EVENT_PLANE_TESTING", None)
+    production = subprocess.run(
+        [SERVICE, "serve", "--state-dir", str(production_state), "--test-clock", str(good)],
+        env=production_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
+    )
+    assert production.returncode == 73 and not production_state.exists()
+
+    valid_state = root / "valid-state"
+    process = subprocess.Popen(
+        [SERVICE, "serve", "--state-dir", str(valid_state), "--test-clock", str(good)],
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    valid_socket = valid_state / "event-plane.sock"
+    for _ in range(250):
+        if valid_socket.is_socket():
+            break
+        if process.poll() is not None:
+            out, err = process.communicate()
+            raise AssertionError((process.returncode, out, err))
+        time.sleep(0.01)
+    else:
+        raise AssertionError("valid isolated clock service did not start")
+    assert Client(str(valid_socket)).inspect({"view": "health"})["service"] == "qq-event-plane"
+    process.terminate(); process.wait(timeout=10)
+    proofs.add("test-clock-preflight-no-state")
 
 
 def source_boundaries() -> None:
@@ -708,10 +1256,15 @@ try:
     crash_and_validation()
     concurrent_acceptance()
     delivery_gaps_and_guards()
+    post_copy_restore_atomicity()
+    predicate_wait_atomicity()
     backoff_blocking()
     expiry_lease_and_retention()
+    framing_exactness()
     ts_equivalence()
+    shared_integer_json_state_space()
     administration_and_rollback()
+    test_clock_preflight()
     source_boundaries()
 finally:
     for plane in active[:]:
@@ -723,11 +1276,14 @@ finally:
 expected = {
     "committed-crash", "absence-not-accepted", "idempotency-validation", "bounded-framing",
     "concurrent-monotonic", "send-publish-engine", "identity-fencing", "independent-gaps",
-    "crash-redelivery", "guarded-ack", "poison-nonfreezing", "audited-disposition",
-    "acceptance-order-only", "backoff-blocked-no-hot-loop", "addressed-expiry-waiter",
-    "lease-reconstruction", "retention-tombstone-deletion", "blocked-abandoned-cleanup",
-    "python-typescript-equivalence", "migration-integrity", "backup-restore", "singleton",
-    "permissions", "signal-cleanup", "exact-rollback", "inactive-nongoal-absence",
+    "crash-redelivery", "guarded-ack", "poison-nonfreezing", "blocked-rebind-resolution",
+    "audited-disposition", "acceptance-order-only", "next-lost-wake-atomic", "status-lost-wake-atomic",
+    "backoff-blocked-no-hot-loop", "addressed-expiry-waiter", "lease-reconstruction",
+    "retention-tombstone-deletion", "retention-replay-boundary", "blocked-abandoned-cleanup",
+    "single-frame-stream-exactness", "python-typescript-equivalence", "cross-client-json-classes",
+    "strict-integer-json-refusal", "migration-integrity", "schema-v1-v2-migration",
+    "structural-restore-atomic", "post-copy-restore-rollback", "backup-restore", "singleton", "permissions", "signal-cleanup",
+    "exact-rollback", "test-clock-preflight-no-state", "inactive-nongoal-absence",
 }
 assert proofs == expected, (expected - proofs, proofs - expected)
 print(f"event-plane proof matrix: {len(proofs)} named proofs")

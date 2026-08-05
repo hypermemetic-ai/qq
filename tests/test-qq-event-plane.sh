@@ -21,4 +21,4 @@ python3 "$TESTS_DIR/qq_event_plane_test.py" \
   "$ROOT/bin/lib/qq-event-plane-client.ts" \
   "$ROOT" "$TMP"
 
-printf 'test-qq-event-plane: pass (26 named proofs; AC #1-#10 failure matrix)\n'
+printf 'test-qq-event-plane: pass (37 named proofs; AC #1-#10 + F1-F7 regression matrix)\n'

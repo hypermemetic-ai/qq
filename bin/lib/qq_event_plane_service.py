@@ -32,7 +32,7 @@ import uuid
 sys.dont_write_bytecode = True
 
 PROTOCOL = "qq-event-plane/v1"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MAX_FRAME_BYTES = 128 * 1024
 MAX_PAYLOAD_BYTES = 64 * 1024
 MAX_WAIT_MS = 30_000
@@ -50,6 +50,122 @@ TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,190}\Z")
 KIND_RE = re.compile(r"[a-z][a-z0-9.-]{0,126}\Z")
 TERMINAL = ("acknowledged", "expired", "disposed", "abandoned")
 OPEN = ("pending", "in_flight", "blocked")
+MAX_SAFE_INTEGER = 2**53 - 1
+
+# These definitions are both the migration input and the exact structural
+# contract accepted at startup/restore. SQLite-created autoindexes are omitted;
+# every Event Plane-owned table, explicit index, and trigger is included.
+SCHEMA_V1_OBJECTS = {
+    ("table", "metadata"): """CREATE TABLE metadata(
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    )""",
+    ("table", "records"): """CREATE TABLE records(
+        journal_position INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id TEXT NOT NULL UNIQUE,
+        producer_id TEXT NOT NULL,
+        request_id TEXT NOT NULL,
+        input_hash TEXT NOT NULL,
+        normalized_input BLOB,
+        record_type TEXT NOT NULL CHECK(record_type IN ('send','publish')),
+        product_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        origin_id TEXT NOT NULL,
+        recipient_id TEXT,
+        schema_version INTEGER NOT NULL,
+        accepted_at INTEGER NOT NULL,
+        deadline_at INTEGER,
+        envelope_json BLOB,
+        payload_json BLOB,
+        terminal_at INTEGER,
+        payload_purged_at INTEGER,
+        UNIQUE(producer_id, request_id)
+    )""",
+    ("table", "subscriptions"): """CREATE TABLE subscriptions(
+        subscription_id TEXT PRIMARY KEY,
+        product_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        generation INTEGER NOT NULL,
+        reconstruction_position INTEGER NOT NULL,
+        high_water INTEGER NOT NULL,
+        lease_expires_at INTEGER NOT NULL,
+        active INTEGER NOT NULL CHECK(active IN (0,1)),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        expired_at INTEGER
+    )""",
+    ("table", "obligations"): """CREATE TABLE obligations(
+        obligation_id TEXT PRIMARY KEY,
+        record_position INTEGER NOT NULL REFERENCES records(journal_position) ON DELETE CASCADE,
+        consumer_type TEXT NOT NULL CHECK(consumer_type IN ('recipient','subscription')),
+        consumer_id TEXT NOT NULL,
+        subscription_generation INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('pending','in_flight','blocked','acknowledged','expired','disposed','abandoned')),
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        failure_count INTEGER NOT NULL DEFAULT 0,
+        attempt_token TEXT,
+        endpoint_token TEXT,
+        next_attempt_at INTEGER NOT NULL,
+        last_reason TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        terminal_at INTEGER,
+        UNIQUE(record_position, consumer_type, consumer_id, subscription_generation)
+    )""",
+    ("index", "obligations_delivery"): """CREATE INDEX obligations_delivery ON obligations(
+        consumer_type, consumer_id, subscription_generation, status, next_attempt_at, record_position
+    )""",
+    ("table", "consumer_gaps"): """CREATE TABLE consumer_gaps(
+        subscription_id TEXT NOT NULL,
+        generation INTEGER NOT NULL,
+        record_position INTEGER NOT NULL,
+        obligation_id TEXT NOT NULL UNIQUE REFERENCES obligations(obligation_id) ON DELETE CASCADE,
+        status TEXT NOT NULL,
+        reason TEXT,
+        PRIMARY KEY(subscription_id, generation, record_position)
+    )""",
+    ("table", "endpoints"): """CREATE TABLE endpoints(
+        consumer_type TEXT NOT NULL,
+        consumer_id TEXT NOT NULL,
+        generation INTEGER NOT NULL,
+        endpoint_token TEXT NOT NULL,
+        bound_at INTEGER NOT NULL,
+        PRIMARY KEY(consumer_type, consumer_id, generation)
+    )""",
+    ("table", "dispositions"): """CREATE TABLE dispositions(
+        disposition_id TEXT PRIMARY KEY,
+        obligation_id TEXT NOT NULL REFERENCES obligations(obligation_id) ON DELETE CASCADE,
+        event_id TEXT NOT NULL,
+        authorized_by TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        disposed_at INTEGER NOT NULL
+    )""",
+    ("trigger", "records_immutable"): """CREATE TRIGGER records_immutable
+    BEFORE UPDATE ON records
+    WHEN OLD.event_id != NEW.event_id
+      OR OLD.producer_id != NEW.producer_id
+      OR OLD.request_id != NEW.request_id
+      OR OLD.input_hash != NEW.input_hash
+      OR OLD.record_type != NEW.record_type
+      OR OLD.product_id != NEW.product_id
+      OR OLD.kind != NEW.kind
+      OR OLD.origin_id != NEW.origin_id
+      OR COALESCE(OLD.recipient_id, '') != COALESCE(NEW.recipient_id, '')
+      OR OLD.schema_version != NEW.schema_version
+      OR OLD.accepted_at != NEW.accepted_at
+      OR COALESCE(OLD.deadline_at, -1) != COALESCE(NEW.deadline_at, -1)
+    BEGIN SELECT RAISE(ABORT, 'immutable journal record'); END""",
+}
+SCHEMA_V2_OBJECTS = {
+    **SCHEMA_V1_OBJECTS,
+    ("table", "retention_boundaries"): """CREATE TABLE retention_boundaries(
+        product_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        unavailable_through_position INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY(product_id, kind)
+    )""",
+}
 
 
 class Refusal(Exception):
@@ -63,13 +179,56 @@ class ConfigurationError(Exception):
     pass
 
 
+def _validate_json_object_key(value: str) -> None:
+    _validate_json_value(value, set())
+    if value.isascii() and value.isdigit() and str(int(value)) == value and int(value) <= 2**32 - 2:
+        raise ValueError("JSON object keys cannot be JavaScript array-index keys")
+
+
+def _validate_json_value(value: Any, seen: set[int]) -> None:
+    if value is None or isinstance(value, bool):
+        return
+    if isinstance(value, str):
+        if any(0xD800 <= ord(character) <= 0xDFFF for character in value):
+            raise ValueError("JSON strings must contain only Unicode scalar values")
+        return
+    if isinstance(value, int):
+        if not -MAX_SAFE_INTEGER <= value <= MAX_SAFE_INTEGER:
+            raise ValueError("JSON integer is outside the JavaScript safe-integer range")
+        return
+    if isinstance(value, float):
+        raise ValueError("JSON numbers must be integers")
+    if isinstance(value, (list, dict)):
+        identity = id(value)
+        if identity in seen:
+            raise ValueError("JSON value is cyclic")
+        seen.add(identity)
+        try:
+            values: Any
+            if isinstance(value, dict):
+                if not all(isinstance(key, str) for key in value):
+                    raise ValueError("JSON object keys must be strings")
+                for key in value:
+                    _validate_json_object_key(key)
+                values = value.values()
+            else:
+                values = value
+            for item in values:
+                _validate_json_value(item, seen)
+        finally:
+            seen.remove(identity)
+        return
+    raise ValueError(f"unsupported JSON value type: {type(value).__name__}")
+
+
 def canonical_json(value: Any) -> bytes:
     try:
+        _validate_json_value(value, set())
         return json.dumps(
             value, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
     except (TypeError, ValueError) as error:
-        raise Refusal(f"value is not bounded JSON: {error}") from error
+        raise Refusal(f"value is not bounded integer JSON: {error}") from error
 
 
 def decode_json(raw: bytes, label: str) -> Any:
@@ -81,14 +240,24 @@ def decode_json(raw: bytes, label: str) -> Any:
             result[key] = value
         return result
 
+    def safe_integer(value: str) -> int:
+        parsed = int(value)
+        if not -MAX_SAFE_INTEGER <= parsed <= MAX_SAFE_INTEGER:
+            raise ValueError("integer outside shared range")
+        return parsed
+
     try:
-        return json.loads(
+        value = json.loads(
             raw.decode("utf-8"),
+            parse_int=safe_integer,
+            parse_float=lambda value: (_ for _ in ()).throw(ValueError(value)),
             parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
             object_pairs_hook=unique_object,
         )
+        _validate_json_value(value, set())
+        return value
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
-        raise Refusal(f"{label} is not valid finite UTF-8 JSON") from error
+        raise Refusal(f"{label} is not valid bounded integer UTF-8 JSON") from error
 
 
 def exact_object(value: Any, required: set[str], optional: set[str], label: str) -> dict[str, Any]:
@@ -119,7 +288,7 @@ def text_field(body: dict[str, Any], key: str, pattern: re.Pattern[str] = TOKEN_
 
 
 def integer_field(
-    body: dict[str, Any], key: str, *, minimum: int = 0, maximum: int = 2**63 - 1
+    body: dict[str, Any], key: str, *, minimum: int = 0, maximum: int = MAX_SAFE_INTEGER
 ) -> int:
     value = body.get(key)
     if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
@@ -206,6 +375,48 @@ def validate_private_file(path: Path, label: str) -> bool:
     return True
 
 
+def validate_test_clock(path: Path) -> Path:
+    if not path.is_absolute():
+        raise ConfigurationError("isolated test clock path must be absolute")
+    current = Path(path.anchor)
+    try:
+        for part in path.parts[1:]:
+            current /= part
+            info = current.lstat()
+            if stat.S_ISLNK(info.st_mode):
+                raise ConfigurationError("isolated test clock path cannot contain symlinks")
+    except FileNotFoundError as error:
+        raise ConfigurationError(f"cannot inspect isolated test clock: {error}") from error
+    except OSError as error:
+        raise ConfigurationError(f"cannot inspect isolated test clock: {error}") from error
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode):
+        raise ConfigurationError("isolated test clock must be a regular file")
+    if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
+        raise ConfigurationError("isolated test clock must be account-owned and account-private")
+    return path
+
+
+def read_test_clock(path: Path) -> int:
+    path = validate_test_clock(path)
+    descriptor = -1
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
+            raise ConfigurationError("isolated test clock changed to an unsafe file")
+        raw = os.read(descriptor, 128).decode("ascii").strip()
+        value = int(raw)
+    except (OSError, UnicodeError, ValueError) as error:
+        raise ConfigurationError(f"cannot read isolated test clock: {error}") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if not 0 <= value <= MAX_SAFE_INTEGER:
+        raise ConfigurationError("isolated test clock must be a non-negative safe integer")
+    return value
+
+
 def default_state_dir() -> Path:
     state_home = os.environ.get("XDG_STATE_HOME")
     if state_home:
@@ -223,14 +434,7 @@ class Clock:
     def now_ms(self) -> int:
         if self.test_file is None:
             return time.time_ns() // 1_000_000
-        try:
-            raw = self.test_file.read_text(encoding="ascii").strip()
-            value = int(raw)
-        except (OSError, UnicodeError, ValueError) as error:
-            raise ConfigurationError(f"cannot read isolated test clock: {error}") from error
-        if value < 0:
-            raise ConfigurationError("isolated test clock cannot be negative")
-        return value
+        return read_test_clock(self.test_file)
 
 
 class Config:
@@ -275,7 +479,9 @@ class Store:
         self.config = config
         self.clock = config.clock
         self.lock = threading.RLock()
-        self.changed = threading.Condition()
+        # State predicates and waiter installation use the same lock, making
+        # commit/notification unobservable gaps impossible.
+        self.changed = threading.Condition(self.lock)
         database_existed = validate_private_file(config.database_path, "Event Plane database")
         self.conn = sqlite3.connect(
             config.database_path, timeout=10, isolation_level=None, check_same_thread=False
@@ -311,11 +517,109 @@ class Store:
         else:
             self.conn.execute("COMMIT")
 
+    @staticmethod
+    def _normalized_schema_sql(value: str) -> str:
+        return re.sub(r"\s+", " ", value.strip().rstrip(";")).strip()
+
+    def _validate_schema(
+        self, connection: sqlite3.Connection, *, allowed_versions: tuple[int, ...], refusal: bool = False
+    ) -> int:
+        def fail(message: str) -> None:
+            if refusal:
+                raise Refusal(message, "invalid_restore")
+            raise ConfigurationError(message)
+
+        try:
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version not in allowed_versions:
+                fail(f"database schema {version} is not a supported Event Plane schema")
+            expected = SCHEMA_V1_OBJECTS if version == 1 else SCHEMA_V2_OBJECTS
+            rows = connection.execute(
+                "SELECT type,name,sql FROM sqlite_master "
+                "WHERE name NOT LIKE 'sqlite_%' AND type IN ('table','index','trigger')"
+            ).fetchall()
+            observed = {(str(row[0]), str(row[1])): row[2] for row in rows}
+            if set(observed) != set(expected):
+                missing = sorted(name for name in set(expected) - set(observed))
+                extra = sorted(name for name in set(observed) - set(expected))
+                fail(f"Event Plane schema objects differ (missing={missing}, extra={extra})")
+            for identity, definition in expected.items():
+                sql = observed.get(identity)
+                if not isinstance(sql, str) or self._normalized_schema_sql(sql) != self._normalized_schema_sql(definition):
+                    fail(f"Event Plane schema object is altered: {identity[1]}")
+            metadata = {
+                str(row[0]): str(row[1])
+                for row in connection.execute("SELECT key,value FROM metadata").fetchall()
+            }
+            if set(metadata) != {"instance_id", "schema_version"}:
+                fail("Event Plane metadata keys differ from the supported contract")
+            if metadata["schema_version"] != str(version):
+                fail("Event Plane schema metadata does not match user_version")
+            if re.fullmatch(r"plane_[0-9a-f]{32}", metadata["instance_id"]) is None:
+                fail("Event Plane instance identity is malformed")
+            return version
+        except (sqlite3.Error, TypeError, ValueError) as error:
+            fail(f"cannot validate Event Plane schema: {error}")
+        raise AssertionError("schema validation did not return or refuse")
+
+    def _validate_database(
+        self, connection: sqlite3.Connection, *, allowed_versions: tuple[int, ...], refusal: bool = False
+    ) -> int:
+        version = self._validate_schema(
+            connection, allowed_versions=allowed_versions, refusal=refusal
+        )
+        try:
+            integrity = str(connection.execute("PRAGMA integrity_check").fetchone()[0])
+            foreign_keys = connection.execute("PRAGMA foreign_key_check").fetchall()
+        except sqlite3.Error as error:
+            if refusal:
+                raise Refusal(f"cannot inspect restore source integrity: {error}", "invalid_restore") from error
+            raise ConfigurationError(f"cannot inspect Event Plane integrity: {error}") from error
+        if integrity != "ok" or foreign_keys:
+            message = "Event Plane database failed integrity or foreign-key inspection"
+            if refusal:
+                raise Refusal(message, "invalid_restore")
+            raise ConfigurationError(message)
+        return version
+
+    @staticmethod
+    def _v1_journal_is_complete(connection: sqlite3.Connection) -> bool:
+        count, minimum, maximum = connection.execute(
+            "SELECT COUNT(*),MIN(journal_position),MAX(journal_position) FROM records"
+        ).fetchone()
+        sequence_row = connection.execute(
+            "SELECT seq FROM sqlite_sequence WHERE name='records'"
+        ).fetchone()
+        sequence = int(sequence_row[0]) if sequence_row is not None else 0
+        if int(count) == 0:
+            return sequence == 0
+        return int(minimum) == 1 and int(count) == int(maximum) == sequence
+
     def _migrate(self) -> None:
         version = int(self.conn.execute("PRAGMA user_version").fetchone()[0])
         if version > SCHEMA_VERSION:
-            raise ConfigurationError(f"database schema {version} is newer than supported schema 1")
+            raise ConfigurationError(
+                f"database schema {version} is newer than supported schema {SCHEMA_VERSION}"
+            )
         if version == SCHEMA_VERSION:
+            self._validate_database(self.conn, allowed_versions=(SCHEMA_VERSION,))
+            return
+        if version == 1:
+            self._validate_database(self.conn, allowed_versions=(1,))
+            if not self._v1_journal_is_complete(self.conn):
+                raise ConfigurationError(
+                    "schema 1 has deleted journal positions and cannot acquire truthful selector retention boundaries"
+                )
+            try:
+                with self.transaction():
+                    self.conn.execute(SCHEMA_V2_OBJECTS[("table", "retention_boundaries")])
+                    self.conn.execute(
+                        "UPDATE metadata SET value='2' WHERE key='schema_version'"
+                    )
+                    self.conn.execute("PRAGMA user_version=2")
+            except sqlite3.Error as error:
+                raise ConfigurationError(f"schema 1 to 2 migration failed: {error}") from error
+            self._validate_database(self.conn, allowed_versions=(SCHEMA_VERSION,))
             return
         if version != 0:
             raise ConfigurationError(f"no safe migration exists from database schema {version}")
@@ -326,118 +630,19 @@ class Store:
             raise ConfigurationError("unversioned non-empty database refuses implicit migration")
         instance_id = "plane_" + uuid.uuid4().hex
         try:
-            self.conn.executescript(
-                """
-                BEGIN IMMEDIATE;
-                CREATE TABLE metadata(
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL
-                );
-                CREATE TABLE records(
-                    journal_position INTEGER PRIMARY KEY AUTOINCREMENT,
-                    event_id TEXT NOT NULL UNIQUE,
-                    producer_id TEXT NOT NULL,
-                    request_id TEXT NOT NULL,
-                    input_hash TEXT NOT NULL,
-                    normalized_input BLOB,
-                    record_type TEXT NOT NULL CHECK(record_type IN ('send','publish')),
-                    product_id TEXT NOT NULL,
-                    kind TEXT NOT NULL,
-                    origin_id TEXT NOT NULL,
-                    recipient_id TEXT,
-                    schema_version INTEGER NOT NULL,
-                    accepted_at INTEGER NOT NULL,
-                    deadline_at INTEGER,
-                    envelope_json BLOB,
-                    payload_json BLOB,
-                    terminal_at INTEGER,
-                    payload_purged_at INTEGER,
-                    UNIQUE(producer_id, request_id)
-                );
-                CREATE TABLE subscriptions(
-                    subscription_id TEXT PRIMARY KEY,
-                    product_id TEXT NOT NULL,
-                    kind TEXT NOT NULL,
-                    generation INTEGER NOT NULL,
-                    reconstruction_position INTEGER NOT NULL,
-                    high_water INTEGER NOT NULL,
-                    lease_expires_at INTEGER NOT NULL,
-                    active INTEGER NOT NULL CHECK(active IN (0,1)),
-                    created_at INTEGER NOT NULL,
-                    updated_at INTEGER NOT NULL,
-                    expired_at INTEGER
-                );
-                CREATE TABLE obligations(
-                    obligation_id TEXT PRIMARY KEY,
-                    record_position INTEGER NOT NULL REFERENCES records(journal_position) ON DELETE CASCADE,
-                    consumer_type TEXT NOT NULL CHECK(consumer_type IN ('recipient','subscription')),
-                    consumer_id TEXT NOT NULL,
-                    subscription_generation INTEGER NOT NULL,
-                    status TEXT NOT NULL CHECK(status IN ('pending','in_flight','blocked','acknowledged','expired','disposed','abandoned')),
-                    attempt_count INTEGER NOT NULL DEFAULT 0,
-                    failure_count INTEGER NOT NULL DEFAULT 0,
-                    attempt_token TEXT,
-                    endpoint_token TEXT,
-                    next_attempt_at INTEGER NOT NULL,
-                    last_reason TEXT,
-                    created_at INTEGER NOT NULL,
-                    updated_at INTEGER NOT NULL,
-                    terminal_at INTEGER,
-                    UNIQUE(record_position, consumer_type, consumer_id, subscription_generation)
-                );
-                CREATE INDEX obligations_delivery ON obligations(
-                    consumer_type, consumer_id, subscription_generation, status, next_attempt_at, record_position
-                );
-                CREATE TABLE consumer_gaps(
-                    subscription_id TEXT NOT NULL,
-                    generation INTEGER NOT NULL,
-                    record_position INTEGER NOT NULL,
-                    obligation_id TEXT NOT NULL UNIQUE REFERENCES obligations(obligation_id) ON DELETE CASCADE,
-                    status TEXT NOT NULL,
-                    reason TEXT,
-                    PRIMARY KEY(subscription_id, generation, record_position)
-                );
-                CREATE TABLE endpoints(
-                    consumer_type TEXT NOT NULL,
-                    consumer_id TEXT NOT NULL,
-                    generation INTEGER NOT NULL,
-                    endpoint_token TEXT NOT NULL,
-                    bound_at INTEGER NOT NULL,
-                    PRIMARY KEY(consumer_type, consumer_id, generation)
-                );
-                CREATE TABLE dispositions(
-                    disposition_id TEXT PRIMARY KEY,
-                    obligation_id TEXT NOT NULL REFERENCES obligations(obligation_id) ON DELETE CASCADE,
-                    event_id TEXT NOT NULL,
-                    authorized_by TEXT NOT NULL,
-                    reason TEXT NOT NULL,
-                    disposed_at INTEGER NOT NULL
-                );
-                CREATE TRIGGER records_immutable
-                BEFORE UPDATE ON records
-                WHEN OLD.event_id != NEW.event_id
-                  OR OLD.producer_id != NEW.producer_id
-                  OR OLD.request_id != NEW.request_id
-                  OR OLD.input_hash != NEW.input_hash
-                  OR OLD.record_type != NEW.record_type
-                  OR OLD.product_id != NEW.product_id
-                  OR OLD.kind != NEW.kind
-                  OR OLD.origin_id != NEW.origin_id
-                  OR COALESCE(OLD.recipient_id, '') != COALESCE(NEW.recipient_id, '')
-                  OR OLD.schema_version != NEW.schema_version
-                  OR OLD.accepted_at != NEW.accepted_at
-                  OR COALESCE(OLD.deadline_at, -1) != COALESCE(NEW.deadline_at, -1)
-                BEGIN SELECT RAISE(ABORT, 'immutable journal record'); END;
-                """
-            )
-            self.conn.execute("INSERT INTO metadata(key,value) VALUES('instance_id',?)", (instance_id,))
-            self.conn.execute("INSERT INTO metadata(key,value) VALUES('schema_version','1')")
-            self.conn.execute("PRAGMA user_version=1")
-            self.conn.execute("COMMIT")
-        except BaseException:
-            if self.conn.in_transaction:
-                self.conn.execute("ROLLBACK")
-            raise
+            with self.transaction():
+                for definition in SCHEMA_V2_OBJECTS.values():
+                    self.conn.execute(definition)
+                self.conn.execute(
+                    "INSERT INTO metadata(key,value) VALUES('instance_id',?)", (instance_id,)
+                )
+                self.conn.execute(
+                    "INSERT INTO metadata(key,value) VALUES('schema_version','2')"
+                )
+                self.conn.execute("PRAGMA user_version=2")
+        except sqlite3.Error as error:
+            raise ConfigurationError(f"cannot create Event Plane schema: {error}") from error
+        self._validate_database(self.conn, allowed_versions=(SCHEMA_VERSION,))
 
     def _meta(self, key: str) -> str:
         row = self.conn.execute("SELECT value FROM metadata WHERE key=?", (key,)).fetchone()
@@ -531,10 +736,19 @@ class Store:
                 )
                 counts["purged_payloads"] += 1
             doomed = self.conn.execute(
-                "SELECT journal_position FROM records WHERE terminal_at IS NOT NULL AND terminal_at<=? LIMIT ?",
+                "SELECT journal_position,record_type,product_id,kind FROM records "
+                "WHERE terminal_at IS NOT NULL AND terminal_at<=? LIMIT ?",
                 (now - self.config.tombstone_retention_ms, CLEANUP_BATCH),
             ).fetchall()
             for row in doomed:
+                if row["record_type"] == "publish":
+                    self.conn.execute(
+                        "INSERT INTO retention_boundaries(product_id,kind,unavailable_through_position,updated_at) "
+                        "VALUES(?,?,?,?) ON CONFLICT(product_id,kind) DO UPDATE SET "
+                        "unavailable_through_position=MAX(unavailable_through_position,excluded.unavailable_through_position),"
+                        "updated_at=excluded.updated_at",
+                        (row["product_id"], row["kind"], row["journal_position"], now),
+                    )
                 self.conn.execute("DELETE FROM records WHERE journal_position=?", (row["journal_position"],))
                 counts["deleted_records"] += 1
             old_subscriptions = self.conn.execute(
@@ -776,6 +990,16 @@ class Store:
                         )
                         reconstructed = True
                 if reconstructed:
+                    boundary = self.conn.execute(
+                        "SELECT unavailable_through_position FROM retention_boundaries "
+                        "WHERE product_id=? AND kind=?",
+                        (product_id, kind),
+                    ).fetchone()
+                    if boundary is not None and reconstruct <= int(boundary["unavailable_through_position"]):
+                        raise Refusal(
+                            "requested replay crosses deleted compact retention; reconstruct current authority at a newer position",
+                            "replay_unavailable",
+                        )
                     unavailable = self.conn.execute(
                         "SELECT journal_position FROM records WHERE record_type='publish' AND product_id=? AND kind=? "
                         "AND journal_position>=? AND envelope_json IS NULL ORDER BY journal_position LIMIT 1",
@@ -863,6 +1087,14 @@ class Store:
                             "AND status IN ('pending','in_flight')",
                             (now, now, consumer_type, consumer_id, generation),
                         )
+                        # Preserve blocked custody/reason, but clear stale
+                        # delivery fencing so exactly the current endpoint can
+                        # receive a new guard for retry or disposition.
+                        self.conn.execute(
+                            "UPDATE obligations SET attempt_token=NULL,endpoint_token=NULL,next_attempt_at=?,updated_at=? "
+                            "WHERE consumer_type=? AND consumer_id=? AND subscription_generation=? AND status='blocked'",
+                            (now, now, consumer_type, consumer_id, generation),
+                        )
                         if consumer_type == "subscription":
                             self.conn.execute(
                                 "UPDATE consumer_gaps SET status='pending' WHERE subscription_id=? AND generation=? AND status='in_flight'",
@@ -872,7 +1104,9 @@ class Store:
                 candidate = self.conn.execute(
                     "SELECT obligations.*,records.* FROM obligations JOIN records ON records.journal_position=obligations.record_position "
                     "WHERE obligations.consumer_type=? AND obligations.consumer_id=? "
-                    "AND obligations.subscription_generation=? AND obligations.status IN ('pending','in_flight') "
+                    "AND obligations.subscription_generation=? "
+                    "AND (obligations.status IN ('pending','in_flight') "
+                    "OR (obligations.status='blocked' AND obligations.endpoint_token IS NULL)) "
                     "AND obligations.next_attempt_at<=? AND records.envelope_json IS NOT NULL "
                     "ORDER BY obligations.record_position LIMIT 1",
                     (consumer_type, consumer_id, generation, now),
@@ -881,16 +1115,18 @@ class Store:
                     attempt = "try_" + uuid.uuid4().hex
                     attempt_count = int(candidate["attempt_count"]) + 1
                     next_at = now + BACKOFF_MS[min(attempt_count - 1, len(BACKOFF_MS) - 1)]
+                    blocked_redelivery = candidate["status"] == "blocked"
                     with self.transaction():
                         self.conn.execute(
-                            "UPDATE obligations SET status='in_flight',attempt_token=?,endpoint_token=?,attempt_count=?,"
+                            "UPDATE obligations SET status=?,attempt_token=?,endpoint_token=?,attempt_count=?,"
                             "next_attempt_at=?,updated_at=? WHERE obligation_id=?",
                             (
+                                "blocked" if blocked_redelivery else "in_flight",
                                 attempt, endpoint, attempt_count, next_at, now,
                                 candidate["obligation_id"],
                             ),
                         )
-                        if consumer_type == "subscription":
+                        if consumer_type == "subscription" and not blocked_redelivery:
                             self.conn.execute(
                                 "UPDATE consumer_gaps SET status='in_flight' WHERE obligation_id=?",
                                 (candidate["obligation_id"],),
@@ -933,15 +1169,17 @@ class Store:
                     if deadline is not None:
                         wake_times.append(int(deadline))
                 wake_after = max(0.0, (min(wake_times) - now) / 1000) if wake_times else None
-            remaining = end - time.monotonic()
-            if remaining <= 0:
-                return {"delivery": None, "rebound": rebound, "consumer_state": state}
-            wait_for = remaining if wake_after is None else min(remaining, wake_after)
-            if self.config.clock.test_file:
-                wait_for = min(wait_for, 0.25)
-            if wait_for <= 0:
-                continue
-            with self.changed:
+                remaining = end - time.monotonic()
+                if remaining <= 0:
+                    return {"delivery": None, "rebound": rebound, "consumer_state": state}
+                wait_for = remaining if wake_after is None else min(remaining, wake_after)
+                if self.config.clock.test_file:
+                    wait_for = min(wait_for, 0.25)
+                if wait_for <= 0:
+                    continue
+                # Condition.wait atomically releases self.lock only after this
+                # waiter is registered; every state-changing notifier uses the
+                # same lock/condition.
                 self.changed.wait(wait_for)
 
     def _gap_state(self, consumer_type: str, consumer_id: str, generation: int) -> tuple[int | None, list[dict[str, Any]], str]:
@@ -1194,13 +1432,12 @@ class Store:
                     ).fetchone()[0]
                     wake_at = int(oldest) + self.config.subscription_lease_ms if oldest is not None else None
                 wake_after = max(0.0, (wake_at - self.clock.now_ms()) / 1000) if wake_at is not None else None
-            remaining = end - time.monotonic()
-            wait_for = remaining if wake_after is None else min(remaining, wake_after)
-            if self.config.clock.test_file:
-                wait_for = min(wait_for, 0.25)
-            if wait_for <= 0:
-                continue
-            with self.changed:
+                remaining = end - time.monotonic()
+                wait_for = remaining if wake_after is None else min(remaining, wake_after)
+                if self.config.clock.test_file:
+                    wait_for = min(wait_for, 0.25)
+                if wait_for <= 0:
+                    continue
                 self.changed.wait(wait_for)
 
     def _status_by_position(self, position: int) -> dict[str, Any]:
@@ -1335,42 +1572,85 @@ class Store:
         if body.get("expected_instance_id") != self.instance_id:
             raise Refusal("service instance guard does not match", "guard_conflict")
         path = self._admin_path(body.get("path"), must_exist=True)
-        source = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            source = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        except sqlite3.Error as error:
+            raise Refusal(f"cannot open restore source: {error}", "invalid_restore") from error
         source.row_factory = sqlite3.Row
         try:
-            if int(source.execute("PRAGMA user_version").fetchone()[0]) != SCHEMA_VERSION:
-                raise Refusal("restore source has an unsupported schema")
-            if str(source.execute("PRAGMA integrity_check").fetchone()[0]) != "ok":
-                raise Refusal("restore source failed integrity inspection")
-            source_instance_row = source.execute("SELECT value FROM metadata WHERE key='instance_id'").fetchone()
-            if source_instance_row is None:
-                raise Refusal("restore source lacks Event Plane identity")
+            # A candidate cannot touch live state until its complete supported
+            # version-specific schema, identity, integrity, and references pass.
+            source_version = self._validate_database(
+                source, allowed_versions=(1, SCHEMA_VERSION), refusal=True
+            )
+            if source_version == 1 and not self._v1_journal_is_complete(source):
+                raise Refusal(
+                    "schema 1 restore has deleted journal positions without truthful selector boundaries",
+                    "replay_unavailable",
+                )
             rollback = self.config.state_dir / ".restore-rollback.sqlite3"
             if rollback.exists() or rollback.is_symlink():
-                rollback.unlink()
+                raise Refusal("restore safety path already exists; live state retained", "restore_incomplete")
             with self.lock:
+                if body.get("expected_instance_id") != self.instance_id:
+                    raise Refusal("service instance guard no longer matches", "guard_conflict")
+                old_instance = self.instance_id
                 safety = sqlite3.connect(rollback)
                 try:
                     self.conn.backup(safety)
                 finally:
                     safety.close()
                 os.chmod(rollback, 0o600)
+                with rollback.open("rb") as stream:
+                    os.fsync(stream.fileno())
+                directory_fd = os.open(rollback.parent, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+                safe_to_remove = False
                 try:
                     source.backup(self.conn)
                     self._configure()
-                    if str(self.conn.execute("PRAGMA integrity_check").fetchone()[0]) != "ok":
-                        raise Refusal("restored database failed integrity inspection")
-                except BaseException:
-                    saved = sqlite3.connect(f"file:{rollback}?mode=ro", uri=True)
+                    self._migrate()
+                    self._validate_database(
+                        self.conn, allowed_versions=(SCHEMA_VERSION,), refusal=True
+                    )
+                    candidate_instance = self._meta("instance_id")
+                    self.instance_id = candidate_instance
+                    self._recover_startup()
+                    self._validate_database(
+                        self.conn, allowed_versions=(SCHEMA_VERSION,), refusal=True
+                    )
+                    if self._meta("instance_id") != candidate_instance:
+                        raise Refusal("restored Event Plane identity changed during recovery", "invalid_restore")
+                    safe_to_remove = True
+                except BaseException as candidate_error:
+                    # Do not return any candidate failure until the exact live
+                    # safety copy has itself been restored and fully validated.
                     try:
-                        saved.backup(self.conn)
-                    finally:
-                        saved.close()
+                        saved = sqlite3.connect(f"file:{rollback}?mode=ro", uri=True)
+                        try:
+                            saved.backup(self.conn)
+                        finally:
+                            saved.close()
+                        self._configure()
+                        self._validate_database(
+                            self.conn, allowed_versions=(SCHEMA_VERSION,)
+                        )
+                        restored_instance = self._meta("instance_id")
+                        if restored_instance != old_instance:
+                            raise ConfigurationError("restore safety copy changed the live instance identity")
+                        self.instance_id = restored_instance
+                        safe_to_remove = True
+                    except BaseException as safety_error:
+                        raise ConfigurationError(
+                            f"candidate restore failed and safety restoration could not be validated: {safety_error}"
+                        ) from candidate_error
                     raise
                 finally:
-                    rollback.unlink(missing_ok=True)
-                self.instance_id = self._meta("instance_id")
-                self._recover_startup()
+                    if safe_to_remove:
+                        rollback.unlink(missing_ok=True)
         finally:
             source.close()
         self.notify()
@@ -1504,6 +1784,11 @@ class RequestHandler(socketserver.BaseRequestHandler):
             raw = self._read_exact(length)
             if raw is None:
                 raise Refusal("request frame ended before its declared length")
+            # Promised clients half-close after one frame. Dispatch is forbidden
+            # until EOF proves there are no trailing bytes or duplicate frames.
+            trailing = self.request.recv(1)
+            if trailing:
+                raise Refusal("request contains trailing bytes outside its single frame", "invalid_frame")
             request = decode_json(raw, "request")
             result = self.server.plane.dispatch(request)  # type: ignore[attr-defined]
             outgoing = response(True, result)
@@ -1532,6 +1817,7 @@ class RequestHandler(socketserver.BaseRequestHandler):
 class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = True
     allow_reuse_address = False
+    request_queue_size = 64
 
     def __init__(self, path: str, handler: type[RequestHandler], plane: EventPlane):
         self.plane = plane
@@ -1614,8 +1900,15 @@ def main(argv: list[str]) -> int:
     os.umask(0o077)
     try:
         args = parse_args(argv)
+        test_clock: Path | None = None
+        if args.test_clock:
+            if os.environ.get("QQ_EVENT_PLANE_TESTING") != "1":
+                raise ConfigurationError("--test-clock is available only in the isolated test seam")
+            # Validate the destructive-time seam before creating even the state
+            # directory, singleton lock, database, or socket.
+            test_clock = validate_test_clock(Path(args.test_clock))
+            read_test_clock(test_clock)
         state = private_directory(Path(args.state_dir) if args.state_dir else default_state_dir(), create=True)
-        test_clock = Path(args.test_clock).resolve(strict=True) if args.test_clock else None
         config = Config(state, test_clock)
         return serve(config)
     except ConfigurationError as error:

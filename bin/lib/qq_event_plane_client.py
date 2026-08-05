@@ -18,6 +18,7 @@ sys.dont_write_bytecode = True
 
 PROTOCOL = "qq-event-plane/v1"
 MAX_FRAME_BYTES = 128 * 1024
+MAX_SAFE_INTEGER = 2**53 - 1
 OPERATIONS = (
     "send", "publish", "ensure_subscription", "next", "acknowledge", "retry", "block",
     "disposition", "status", "inspect", "backup", "restore", "shutdown",
@@ -29,6 +30,49 @@ class EventPlaneClientError(Exception):
         super().__init__(message)
         self.message = message
         self.code = code
+
+
+def validate_json_object_key(value: str) -> None:
+    validate_json_value(value)
+    if value.isascii() and value.isdigit() and str(int(value)) == value and int(value) <= 2**32 - 2:
+        raise EventPlaneClientError("operation body object keys cannot be JavaScript array indexes")
+
+
+def validate_json_value(value: Any, seen: set[int] | None = None) -> None:
+    active = set() if seen is None else seen
+    if value is None or isinstance(value, bool):
+        return
+    if isinstance(value, str):
+        if any(0xD800 <= ord(character) <= 0xDFFF for character in value):
+            raise EventPlaneClientError("operation body strings must contain only Unicode scalar values")
+        return
+    if isinstance(value, int):
+        if not -MAX_SAFE_INTEGER <= value <= MAX_SAFE_INTEGER:
+            raise EventPlaneClientError("operation body contains an integer outside the shared safe range")
+        return
+    if isinstance(value, float):
+        raise EventPlaneClientError("operation body JSON numbers must be integers")
+    if isinstance(value, (list, dict)):
+        identity = id(value)
+        if identity in active:
+            raise EventPlaneClientError("operation body is cyclic")
+        active.add(identity)
+        try:
+            values: Any
+            if isinstance(value, dict):
+                if not all(isinstance(key, str) for key in value):
+                    raise EventPlaneClientError("operation body JSON object keys must be strings")
+                for key in value:
+                    validate_json_object_key(key)
+                values = value.values()
+            else:
+                values = value
+            for item in values:
+                validate_json_value(item, active)
+        finally:
+            active.remove(identity)
+        return
+    raise EventPlaneClientError("operation body contains a non-JSON value")
 
 
 class EventPlaneClient:
@@ -48,6 +92,7 @@ class EventPlaneClient:
         if not isinstance(body, dict):
             raise EventPlaneClientError("operation body must be a JSON object")
         try:
+            validate_json_value(body)
             raw = json.dumps(
                 {"protocol": PROTOCOL, "operation": operation, "body": body},
                 ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":"),
@@ -61,11 +106,17 @@ class EventPlaneClient:
         try:
             connection.connect(self.socket_path)
             connection.sendall(struct.pack(">I", len(raw)) + raw)
+            # EOF on the write half is the exact-one-request handshake. The
+            # service cannot dispatch before observing it.
+            connection.shutdown(socket.SHUT_WR)
             header = self._read_exact(connection, 4)
             length = struct.unpack(">I", header)[0]
             if length < 2 or length > MAX_FRAME_BYTES:
                 raise EventPlaneClientError("service returned an invalid bounded frame")
             response_raw = self._read_exact(connection, length)
+            trailing = connection.recv(1)
+            if trailing:
+                raise EventPlaneClientError("service returned trailing bytes outside its frame")
         except (FileNotFoundError, ConnectionRefusedError) as error:
             raise EventPlaneClientError("Event Plane service is unavailable", "unavailable") from error
         except (OSError, socket.timeout) as error:
@@ -74,6 +125,7 @@ class EventPlaneClient:
             connection.close()
         try:
             document = json.loads(response_raw.decode("utf-8"))
+            validate_json_value(document)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise EventPlaneClientError("service returned malformed JSON") from error
         if (

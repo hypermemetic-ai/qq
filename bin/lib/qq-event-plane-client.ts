@@ -23,10 +23,41 @@ export class EventPlaneError extends Error {
   }
 }
 
+function validatedString(value: string): string {
+  for (const character of value) {
+    const point = character.codePointAt(0)!;
+    if (point >= 0xd800 && point <= 0xdfff) {
+      throw new EventPlaneError("operation body strings must contain only Unicode scalar values");
+    }
+  }
+  return value;
+}
+
+function validatedObjectKey(value: string): string {
+  validatedString(value);
+  if (/^(0|[1-9][0-9]*)$/.test(value) && Number(value) <= 2 ** 32 - 2) {
+    throw new EventPlaneError("operation body object keys cannot be JavaScript array indexes");
+  }
+  return value;
+}
+
+function compareUnicodeScalars(left: string, right: string): number {
+  const leftPoints = Array.from(left, (value) => value.codePointAt(0)!);
+  const rightPoints = Array.from(right, (value) => value.codePointAt(0)!);
+  const shared = Math.min(leftPoints.length, rightPoints.length);
+  for (let index = 0; index < shared; index += 1) {
+    if (leftPoints[index] !== rightPoints[index]) return leftPoints[index] - rightPoints[index];
+  }
+  return leftPoints.length - rightPoints.length;
+}
+
 function stableValue(value: unknown, stack: Set<object>): JsonValue {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "string") return validatedString(value);
   if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new EventPlaneError("operation body is not finite JSON");
+    if (!Number.isSafeInteger(value)) {
+      throw new EventPlaneError("operation body JSON numbers must be safe integers");
+    }
     return value;
   }
   if (typeof value !== "object") throw new EventPlaneError("operation body is not finite JSON");
@@ -38,8 +69,9 @@ function stableValue(value: unknown, stack: Set<object>): JsonValue {
     if (prototype !== Object.prototype && prototype !== null) {
       throw new EventPlaneError("operation body contains a non-JSON object");
     }
-    const result: JsonObject = {};
-    for (const key of Object.keys(value).sort()) {
+    const result: JsonObject = Object.create(null);
+    for (const key of Object.keys(value).sort(compareUnicodeScalars)) {
+      validatedObjectKey(key);
       result[key] = stableValue((value as Record<string, unknown>)[key], stack);
     }
     return result;
@@ -106,7 +138,7 @@ export class EventPlaneClient {
       connection.setTimeout(this.timeoutMs, () => fail(new EventPlaneError(
         "Event Plane transport timed out", "transport_error",
       )));
-      connection.once("connect", () => connection.write(Buffer.concat([header, bytes])));
+      connection.once("connect", () => connection.end(Buffer.concat([header, bytes])));
       connection.once("error", (error: NodeJS.ErrnoException) => {
         const unavailable = error.code === "ENOENT" || error.code === "ECONNREFUSED";
         fail(new EventPlaneError(
@@ -126,52 +158,54 @@ export class EventPlaneClient {
             return;
           }
         }
-        if (expected !== null && all.length >= expected + 4) {
-          if (all.length !== expected + 4) {
-            fail(new EventPlaneError("service returned trailing bytes outside its frame"));
-            return;
-          }
-          let document: unknown;
-          try {
-            document = JSON.parse(all.subarray(4).toString("utf8"));
-          } catch {
-            fail(new EventPlaneError("service returned malformed JSON"));
-            return;
-          }
-          if (
-            document === null || typeof document !== "object" || Array.isArray(document)
-            || (document as Record<string, unknown>).protocol !== QQ_EVENT_PLANE_PROTOCOL
-            || typeof (document as Record<string, unknown>).ok !== "boolean"
-          ) {
-            fail(new EventPlaneError("service returned a malformed protocol response"));
-            return;
-          }
-          const response = document as Record<string, unknown>;
-          if (!response.ok) {
-            const refusal = response.error;
-            if (
-              refusal === null || typeof refusal !== "object" || Array.isArray(refusal)
-              || typeof (refusal as Record<string, unknown>).code !== "string"
-              || typeof (refusal as Record<string, unknown>).message !== "string"
-            ) {
-              fail(new EventPlaneError("service returned a malformed refusal"));
-              return;
-            }
-            const detail = refusal as Record<string, string>;
-            fail(new EventPlaneError(detail.message, detail.code));
-            return;
-          }
-          if (response.result === null || typeof response.result !== "object" || Array.isArray(response.result)) {
-            fail(new EventPlaneError("service returned a non-object result"));
-            return;
-          }
-          settled = true;
-          connection.end();
-          resolve(response.result as JsonObject);
+        if (expected !== null && all.length > expected + 4) {
+          fail(new EventPlaneError("service returned trailing bytes outside its frame"));
         }
       });
       connection.once("end", () => {
-        if (!settled) fail(new EventPlaneError("service closed an incomplete response"));
+        if (settled) return;
+        const all = Buffer.concat(chunks, received);
+        if (expected === null || all.length !== expected + 4) {
+          fail(new EventPlaneError("service closed an incomplete response"));
+          return;
+        }
+        let document: unknown;
+        try {
+          document = JSON.parse(all.subarray(4).toString("utf8"));
+          stableValue(document, new Set());
+        } catch {
+          fail(new EventPlaneError("service returned malformed or unsupported JSON"));
+          return;
+        }
+        if (
+          document === null || typeof document !== "object" || Array.isArray(document)
+          || (document as Record<string, unknown>).protocol !== QQ_EVENT_PLANE_PROTOCOL
+          || typeof (document as Record<string, unknown>).ok !== "boolean"
+        ) {
+          fail(new EventPlaneError("service returned a malformed protocol response"));
+          return;
+        }
+        const response = document as Record<string, unknown>;
+        if (!response.ok) {
+          const refusal = response.error;
+          if (
+            refusal === null || typeof refusal !== "object" || Array.isArray(refusal)
+            || typeof (refusal as Record<string, unknown>).code !== "string"
+            || typeof (refusal as Record<string, unknown>).message !== "string"
+          ) {
+            fail(new EventPlaneError("service returned a malformed refusal"));
+            return;
+          }
+          const detail = refusal as Record<string, string>;
+          fail(new EventPlaneError(detail.message, detail.code));
+          return;
+        }
+        if (response.result === null || typeof response.result !== "object" || Array.isArray(response.result)) {
+          fail(new EventPlaneError("service returned a non-object result"));
+          return;
+        }
+        settled = true;
+        resolve(response.result as JsonObject);
       });
     });
   }
