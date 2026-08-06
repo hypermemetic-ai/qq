@@ -12,11 +12,11 @@ POLICY="$ROOT/delegation/policies/execution-profiles.json"
 [ -f "$POLICY" ] || fail "missing policy: $POLICY"
 jq -e '
   (keys == ["architect", "compactor", "implementer", "observer", "orchestrator", "researcher", "reviewer"])
-  and ([.orchestrator, .reviewer] | all(
+  and ([.architect, .compactor, .observer, .researcher, .reviewer] | all(
     . == {provider:"kimi-coding", model:"k3", effort:"max", serviceClass:"provider-default"}
   ))
-  and ([.architect, .compactor, .implementer, .observer, .researcher] | all(
-    . == {provider:"openai-codex", model:"gpt-5.6-sol", effort:"xhigh", serviceClass:"priority"}
+  and ([.implementer, .orchestrator] | all(
+    . == {provider:"qwen-token-plan", model:"qwen3.8-max-preview", effort:"max", serviceClass:"provider-default"}
   ))
 ' "$POLICY" >/dev/null || fail 'role policy plus the canonical compactor does not match the operator-set map'
 
