@@ -14,9 +14,23 @@ trap 'rm -rf "$TMP"' EXIT
 
 [[ -x "$RAIL" ]] || fail "missing methodology activation rail: $RAIL"
 command -v node >/dev/null 2>&1 || fail 'node is required to test methodology bootstrap behavior'
-command -v npm >/dev/null 2>&1 || fail 'npm is required to locate the stock Pi resource loader'
-PI_RESOURCE_LOADER="$(npm root -g)/@earendil-works/pi-coding-agent/dist/core/resource-loader.js"
-[[ -f "$PI_RESOURCE_LOADER" ]] || fail "stock Pi resource loader is missing: $PI_RESOURCE_LOADER"
+PI_RESOURCE_LOADER=''
+if pi_bin="$(command -v pi 2>/dev/null)" &&
+   pi_cli="$(readlink -f -- "$pi_bin" 2>/dev/null)" &&
+   [[ "$pi_cli" == */@earendil-works/pi-coding-agent/dist/cli.js ]]; then
+  candidate="${pi_cli%/dist/cli.js}/dist/core/resource-loader.js"
+  [[ -f "$candidate" ]] && PI_RESOURCE_LOADER="$candidate"
+fi
+if [[ -z "$PI_RESOURCE_LOADER" ]]; then
+  command -v npm >/dev/null 2>&1 || fail \
+    'stock Pi resource loader was not found through package pi on PATH, and npm is unavailable'
+  if ! npm_root="$(npm root -g 2>/dev/null)" || [[ "$npm_root" != /* ]]; then
+    fail 'stock Pi resource loader was not found through package pi on PATH or a global npm root'
+  fi
+  PI_RESOURCE_LOADER="$npm_root/@earendil-works/pi-coding-agent/dist/core/resource-loader.js"
+fi
+[[ -f "$PI_RESOURCE_LOADER" ]] || fail \
+  "stock Pi resource loader is missing from package pi on PATH and global npm: $PI_RESOURCE_LOADER"
 
 repository="$TMP/repository"
 unlinked="$TMP/unlinked"
