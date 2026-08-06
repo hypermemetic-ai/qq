@@ -16,7 +16,7 @@ jq -e '
     . == {provider:"kimi-coding", model:"k3", effort:"max", serviceClass:"provider-default"}
   ))
   and ([.implementer, .orchestrator] | all(
-    . == {provider:"qwen-token-plan", model:"qwen3.8-max-preview", effort:"max", serviceClass:"provider-default"}
+    . == {provider:"qwen-token-plan", model:"qwen3.8-max", effort:"xhigh", serviceClass:"provider-default"}
   ))
 ' "$POLICY" >/dev/null || fail 'role policy plus the canonical compactor does not match the operator-set map'
 

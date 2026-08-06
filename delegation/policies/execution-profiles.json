@@ -13,8 +13,8 @@
   },
   "implementer": {
     "provider": "qwen-token-plan",
-    "model": "qwen3.8-max-preview",
-    "effort": "max",
+    "model": "qwen3.8-max",
+    "effort": "xhigh",
     "serviceClass": "provider-default"
   },
   "observer": {
@@ -25,8 +25,8 @@
   },
   "orchestrator": {
     "provider": "qwen-token-plan",
-    "model": "qwen3.8-max-preview",
-    "effort": "max",
+    "model": "qwen3.8-max",
+    "effort": "xhigh",
     "serviceClass": "provider-default"
   },
   "researcher": {
