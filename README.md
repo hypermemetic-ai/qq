@@ -191,20 +191,21 @@ what may leave the worktree.
 
 Start Pi and use `/login` to configure both providers: select Kimi For Coding
 for the accountable session's dedicated `pi-qq` credential, then select
-`openai-codex` and complete its OAuth login for delegates. Pi writes the
-credentials to `~/.pi/agent/auth.json`; never commit or report their values,
-and keep the file private:
+`qwen-token-plan` and enter its API key for the Qwen delegate seats. Pi writes
+the credentials to `~/.pi/agent/auth.json`; never commit or report their
+values, and keep the file private:
 
 ```bash
 chmod 600 ~/.pi/agent/auth.json
 ```
 
-`delegation/policies/execution-profiles.json` assigns Orchestrator and Reviewer
-to `kimi-coding/k3:max`; Architect, Implementer, Researcher, and Observer use
-`openai-codex/gpt-5.6-sol:xhigh` with the `priority` service class (Fast mode).
-Ordinary Pi sessions in qq-linked Repositories use the conditional
-`qq-codex-fast` extension to apply the same service class to every GPT-5.6
-model. `qq-delegate` reads the selected delegated role from this policy and
+`delegation/policies/execution-profiles.json` assigns Architect, Observer,
+Researcher, and Reviewer to `kimi-coding/k3:max`; Implementer and Orchestrator
+use `qwen-token-plan/qwen3.8-max-preview:max`. All seats use the
+`provider-default` service class. The conditional `qq-codex-fast` extension
+remains installed but is inert: it applies the `priority` service class only
+when a GPT-5.6 model is in use, so it reactivates by itself if that provider
+returns. `qq-delegate` reads the selected delegated role from this policy and
 passes its provider, model, and non-default thinking level through Pi's native
 CLI flags.
 

@@ -407,8 +407,7 @@ expect_refusal bad-effort 'effort for reviewer is unsupported' \
   "$fixture_engine" run --role reviewer --cwd "$fixture" --brief "$bad_effort_run/BRIEF.md"
 cp "$tmp/policy.original" "$policy"
 
-# Provider-default omits thinking; the canonical researcher mounts Fast mode
-# before Context7 and rejects an inherited Context7 API key.
+# Provider-default omits thinking.
 python3 - "$policy" <<'PY'
 import json
 from pathlib import Path
@@ -427,6 +426,17 @@ args = Path(sys.argv[1]).read_bytes().split(b"\0")
 assert b"--thinking" not in args, args
 PY
 cp "$tmp/policy.original" "$policy"
+# An OpenAI-pinned researcher mounts its validated private service class
+# before Context7 and rejects an inherited Context7 API key.
+python3 - "$policy" <<'PY'
+import json
+from pathlib import Path
+import sys
+path = Path(sys.argv[1]); value = json.loads(path.read_text())
+value["researcher"]["provider"] = "openai-codex"
+value["researcher"]["serviceClass"] = "priority"
+path.write_text(json.dumps(value))
+PY
 research_run="$(new_run researcher)"
 run_case researcher researcher "$fixture" "$research_run/BRIEF.md"
 assert_equal 0 "$RUN_STATUS" "researcher dispatch failed"
