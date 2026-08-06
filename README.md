@@ -202,10 +202,7 @@ chmod 600 ~/.pi/agent/auth.json
 `delegation/policies/execution-profiles.json` assigns Architect, Observer,
 Researcher, and Reviewer to `kimi-coding/k3:max`; Implementer and Orchestrator
 use `qwen-token-plan/qwen3.8-max:xhigh`. All seats use the
-`provider-default` service class. The conditional `qq-codex-fast` extension
-remains installed but is inert: it applies the `priority` service class only
-when a GPT-5.6 model is in use, so it reactivates by itself if that provider
-returns. `qq-delegate` reads the selected delegated role from this policy and
+`provider-default` service class. `qq-delegate` reads the selected delegated role from this policy and
 passes its provider, model, and non-default thinking level through Pi's native
 CLI flags.
 

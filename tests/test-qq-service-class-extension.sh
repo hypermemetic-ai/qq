@@ -8,10 +8,8 @@ TEST_NAME="test-qq-service-class-extension"
 source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd -- "$TESTS_DIR/.." && pwd -P)"
 EXTENSION="$ROOT/delegation/extensions/qq-service-class.ts"
-FAST_EXTENSION="$ROOT/extensions/qq-codex-fast.ts"
 
 [ -f "$EXTENSION" ] || fail "missing delegate service-class extension: $EXTENSION"
-[ -f "$FAST_EXTENSION" ] || fail "missing ordinary Pi Fast-mode extension: $FAST_EXTENSION"
 command -v node >/dev/null 2>&1 || fail 'node is required to test the service-class extension'
 
 node --experimental-strip-types --input-type=module - "$EXTENSION" <<'JS'
@@ -84,43 +82,4 @@ for (const env of [
 }
 
 console.log("test-qq-service-class-extension: pass");
-JS
-
-node --experimental-strip-types --input-type=module - "$FAST_EXTENSION" <<'JS'
-import assert from "node:assert/strict";
-import { pathToFileURL } from "node:url";
-
-const [extensionPath] = process.argv.slice(2);
-const { default: register } = await import(pathToFileURL(extensionPath));
-let handler;
-register({
-  on(name, candidate) {
-    assert.equal(name, "before_provider_request");
-    handler = candidate;
-  },
-});
-
-const payload = {
-  model: "gpt-5.6-sol",
-  input: [{ role: "user", content: "test" }],
-  stream: true,
-};
-assert.deepEqual(
-  handler({ type: "before_provider_request", payload }, {}),
-  { ...payload, service_tier: "priority" },
-);
-assert.equal(
-  handler({ type: "before_provider_request", payload: { ...payload, model: "gpt-5.5" } }, {}),
-  undefined,
-);
-assert.equal(
-  handler({ type: "before_provider_request", payload: { ...payload, service_tier: "default" } }, {}),
-  undefined,
-);
-assert.equal(
-  handler({ type: "before_provider_request", payload: { model: "gpt-5.6-sol", messages: [], stream: true } }, {}),
-  undefined,
-);
-
-console.log("test-qq-codex-fast-extension: pass");
 JS
