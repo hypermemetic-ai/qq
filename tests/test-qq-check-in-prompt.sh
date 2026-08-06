@@ -9,7 +9,7 @@ TEST_NAME="test-qq-check-in-prompt"
 # shellcheck disable=SC1091
 source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd -- "$TESTS_DIR/.." && pwd -P)"
-PROMPT="$ROOT/.pi/prompts/check-in.md"
+PROMPT="$ROOT/prompts/check-in.md"
 README="$ROOT/README.md"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -30,7 +30,7 @@ assert_file_contains "$PROMPT" \
   'prompt does not carry all optional operator context through the supported expansion'
 
 assert_file_contains "$README" \
-  'contributes the complete `skills/` and `.pi/prompts/` roots' \
+  'contributes the complete `skills/` and `prompts/` roots' \
   'README does not expose the versioned prompt root through the linked bootstrap'
 assert_file_contains "$README" '/check-in [date | commit | PR number | PR URL]'
 assert_file_contains "$README" 'A first use without either one'

@@ -14,6 +14,9 @@ trap 'rm -rf "$TMP"' EXIT
 
 [[ -x "$RAIL" ]] || fail "missing methodology activation rail: $RAIL"
 command -v node >/dev/null 2>&1 || fail 'node is required to test methodology bootstrap behavior'
+command -v npm >/dev/null 2>&1 || fail 'npm is required to locate the stock Pi resource loader'
+PI_RESOURCE_LOADER="$(npm root -g)/@earendil-works/pi-coding-agent/dist/core/resource-loader.js"
+[[ -f "$PI_RESOURCE_LOADER" ]] || fail "stock Pi resource loader is missing: $PI_RESOURCE_LOADER"
 
 repository="$TMP/repository"
 unlinked="$TMP/unlinked"
@@ -103,6 +106,12 @@ ln -sT "$ROOT/AGENTS.md" "$cutover_home/.pi/agent/AGENTS.md"
 ln -sT "$ROOT/skills" "$cutover_home/.pi/agent/skills"
 ln -sT "$ROOT/.pi/prompts/bro.md" "$cutover_home/.pi/agent/prompts/bro.md"
 ln -sT "$ROOT/.pi/prompts/check-in.md" "$cutover_home/.pi/agent/prompts/check-in.md"
+for legacy_prompt in \
+  "$cutover_home/.pi/agent/prompts/bro.md" \
+  "$cutover_home/.pi/agent/prompts/check-in.md"; do
+  [[ -L "$legacy_prompt" && ! -e "$legacy_prompt" ]] \
+    || fail "retired prompt fixture is not a dangling historical link: $legacy_prompt"
+done
 HOME="$cutover_home" "$RAIL" install >/dev/null
 [[ -L "$cutover_home/.pi/agent/extensions/qq" ]] || fail 'cutover did not install bootstrap'
 for legacy in \
@@ -112,6 +121,45 @@ for legacy in \
   "$cutover_home/.pi/agent/prompts/check-in.md"; do
   [[ ! -e "$legacy" && ! -L "$legacy" ]] || fail "safe legacy mount survived cutover: $legacy"
 done
+
+canonical_prompt_home="$TMP/canonical-prompt-home"
+mkdir -p "$canonical_prompt_home/.pi/agent/prompts"
+ln -sT "$ROOT/prompts/bro.md" "$canonical_prompt_home/.pi/agent/prompts/bro.md"
+ln -sT "$ROOT/prompts/check-in.md" "$canonical_prompt_home/.pi/agent/prompts/check-in.md"
+HOME="$canonical_prompt_home" "$RAIL" install >/dev/null
+for legacy_prompt in \
+  "$canonical_prompt_home/.pi/agent/prompts/bro.md" \
+  "$canonical_prompt_home/.pi/agent/prompts/check-in.md"; do
+  [[ ! -e "$legacy_prompt" && ! -L "$legacy_prompt" ]] \
+    || fail "canonical qq prompt link survived cutover: $legacy_prompt"
+done
+
+foreign_prompt_home="$TMP/foreign-prompt-home"
+mkdir -p "$foreign_prompt_home/.pi/agent/prompts"
+printf 'foreign prompt\n' >"$TMP/foreign-prompt.md"
+ln -sT "$TMP/foreign-prompt.md" "$foreign_prompt_home/.pi/agent/prompts/bro.md"
+if HOME="$foreign_prompt_home" "$RAIL" install \
+  >"$TMP/foreign-prompt.out" 2>"$TMP/foreign-prompt.err"; then
+  fail 'installer replaced a foreign prompt symlink'
+fi
+assert_file_contains "$TMP/foreign-prompt.err" 'foreign symlink'
+[[ -L "$foreign_prompt_home/.pi/agent/prompts/bro.md" ]] \
+  || fail 'installer removed a refused foreign prompt symlink'
+[[ ! -e "$foreign_prompt_home/.pi/agent/extensions/qq" ]] \
+  || fail 'installer partially created bootstrap before refusing a foreign prompt link'
+
+dangling_prompt_home="$TMP/dangling-prompt-home"
+mkdir -p "$dangling_prompt_home/.pi/agent/prompts"
+ln -sT "$TMP/not-a-qq-prompt.md" "$dangling_prompt_home/.pi/agent/prompts/bro.md"
+if HOME="$dangling_prompt_home" "$RAIL" install \
+  >"$TMP/dangling-prompt.out" 2>"$TMP/dangling-prompt.err"; then
+  fail 'installer replaced an arbitrary dangling prompt symlink'
+fi
+assert_file_contains "$TMP/dangling-prompt.err" 'refusing to replace it'
+[[ -L "$dangling_prompt_home/.pi/agent/prompts/bro.md" ]] \
+  || fail 'installer removed a refused dangling prompt symlink'
+[[ ! -e "$dangling_prompt_home/.pi/agent/extensions/qq" ]] \
+  || fail 'installer partially created bootstrap before refusing a dangling prompt link'
 
 foreign_home="$TMP/foreign-home"
 mkdir -p "$foreign_home/.pi/agent"
@@ -137,11 +185,11 @@ assert_equal "$(readlink -f "$TMP/non-git")" \
 
 bundle="$TMP/bundle"
 runtime_repo="$TMP/runtime-repository"
-mkdir -p "$bundle/skills/example" "$bundle/.pi/prompts" "$bundle/extensions" "$runtime_repo"
+mkdir -p "$bundle/skills/example" "$bundle/prompts" "$bundle/extensions" "$runtime_repo"
 printf 'AGENTS SNAPSHOT ONE\n' >"$bundle/AGENTS.md"
 printf 'CONCEPTS SNAPSHOT ONE\n' >"$bundle/CONCEPTS.md"
 printf 'skill one\n' >"$bundle/skills/example/SKILL.md"
-printf 'prompt one\n' >"$bundle/.pi/prompts/example.md"
+printf 'prompt one\n' >"$bundle/prompts/example.md"
 printf 'extension one\n' >"$bundle/extensions/example.ts"
 printf 'LOCAL VOCABULARY ONE\n' >"$runtime_repo/CONCEPTS.local.md"
 
@@ -290,7 +338,7 @@ assert.deepEqual(
     join(bundleRoot, "AGENTS.md"),
     join(bundleRoot, "CONCEPTS.md"),
     join(bundleRoot, "skills"),
-    join(bundleRoot, ".pi", "prompts"),
+    join(bundleRoot, "prompts"),
     join(bundleRoot, "extensions"),
   ].sort(),
 );
@@ -304,7 +352,7 @@ const [resources] = await emit(
 );
 assert.deepEqual(resources, {
   skillPaths: [join(bundleRoot, "skills")],
-  promptPaths: [join(bundleRoot, ".pi", "prompts")],
+  promptPaths: [join(bundleRoot, "prompts")],
 });
 
 const [firstTurn] = await emit(
@@ -465,5 +513,8 @@ const [untrustedTurn] = await emit(
 assert.doesNotMatch(untrustedTurn.systemPrompt, /LOCAL VOCABULARY TWO/);
 
 JS
+
+node "$TESTS_DIR/check-qq-prompt-loader.mjs" \
+  "$EXTENSION" "$ROOT" "$PI_RESOURCE_LOADER" "$TMP/prompt-loader"
 
 printf 'test-qq-methodology-linkage: pass\n'

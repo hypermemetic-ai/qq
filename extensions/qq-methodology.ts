@@ -181,7 +181,7 @@ function watcherSpecs(bundleRoot) {
     { path: join(bundleRoot, "AGENTS.md"), recursive: false },
     { path: join(bundleRoot, "CONCEPTS.md"), recursive: false },
     { path: join(bundleRoot, "skills"), recursive: true },
-    { path: join(bundleRoot, ".pi", "prompts"), recursive: true },
+    { path: join(bundleRoot, "prompts"), recursive: true },
     { path: join(bundleRoot, "extensions"), recursive: true },
   ];
 }
@@ -303,7 +303,7 @@ function registerLinkedBootstrap(pi, options) {
     if (!active) return undefined;
     return {
       skillPaths: [join(bundleRoot, "skills")],
-      promptPaths: [join(bundleRoot, ".pi", "prompts")],
+      promptPaths: [join(bundleRoot, "prompts")],
     };
   });
 
