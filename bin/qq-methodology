@@ -113,6 +113,18 @@ require_safe_mount() {
   fi
 }
 
+require_safe_legacy_prompt_mount() {
+  local path="$1" expected="$2" retired="$3" label="$4"
+  local target
+  if [[ -L "$path" ]]; then
+    target="$(readlink -- "$path")" || fail "$label is an unreadable symlink: $path"
+    if [[ "$target" == "$retired" ]]; then
+      return
+    fi
+  fi
+  require_safe_mount "$path" "$expected" "$label"
+}
+
 install_bootstrap() {
   [[ -n "${HOME:-}" && "$HOME" == /* ]] || fail 'HOME must be an absolute path'
 
@@ -127,6 +139,12 @@ install_bootstrap() {
   local -a legacy_targets=(
     "$ROOT/AGENTS.md"
     "$ROOT/skills"
+    "$ROOT/prompts/bro.md"
+    "$ROOT/prompts/check-in.md"
+  )
+  local -a retired_prompt_targets=(
+    ''
+    ''
     "$ROOT/.pi/prompts/bro.md"
     "$ROOT/.pi/prompts/check-in.md"
   )
@@ -135,8 +153,16 @@ install_bootstrap() {
   require_safe_mount "$extension" "$ROOT/extensions" 'qq bootstrap mount'
   local index
   for index in "${!legacy_paths[@]}"; do
-    require_safe_mount "${legacy_paths[$index]}" "${legacy_targets[$index]}" \
-      'legacy unconditional qq mount'
+    if [[ -n "${retired_prompt_targets[$index]}" ]]; then
+      require_safe_legacy_prompt_mount \
+        "${legacy_paths[$index]}" \
+        "${legacy_targets[$index]}" \
+        "${retired_prompt_targets[$index]}" \
+        'legacy unconditional qq mount'
+    else
+      require_safe_mount "${legacy_paths[$index]}" "${legacy_targets[$index]}" \
+        'legacy unconditional qq mount'
+    fi
   done
 
   mkdir -p -- "$agent/extensions"

@@ -155,7 +155,7 @@ Skills, prompts, tools, commands, or guards. Product membership and tracked
 files are not activation authority.
 
 At linked startup/reload the bootstrap snapshots canonical `AGENTS.md` and
-`CONCEPTS.md`, contributes the complete `skills/` and `.pi/prompts/` roots, and
+`CONCEPTS.md`, contributes the complete `skills/` and `prompts/` roots, and
 registers the existing extension/tool set. Pi's Repository-local `AGENTS.md`
 remains additive context. A trusted root `CONCEPTS.local.md` may append
 Repository vocabulary but cannot activate qq or redefine canonical terms.
