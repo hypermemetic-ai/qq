@@ -1,0 +1,306 @@
+#!/usr/bin/env bash
+# Exact-pane unavailable-accountable-Actor recovery transaction. Owning role
+# policy decides when spawn/commit is authorized; this engine owns only the
+# mechanically fenced candidate, activation, reversal, and leftover cleanup.
+set -euo pipefail
+
+refuse() { printf '{"ok":false,"schema":"qq.context-recovery/v1","error":{"code":"refused","message":%s}}\n' "$(jq -Rn --arg v "$*" '$v')"; exit 2; }
+error() { printf '{"ok":false,"schema":"qq.context-recovery/v1","error":{"code":"operational","message":%s}}\n' "$(jq -Rn --arg v "$*" '$v')"; exit 1; }
+usage() { refuse 'usage: qq-context-recover <spawn|commit|cleanup> with exact identity, source, pane resource, and (for spawn/commit) unavailable-pane testimony'; }
+[[ $# -gt 0 ]] || usage
+ACTION=$1; shift
+case "$ACTION" in spawn|commit|cleanup) ;; *) usage ;; esac
+for tool in jq herdr python3 sha256sum; do command -v "$tool" >/dev/null || error "required tool unavailable: $tool"; done
+SELF="$(readlink -f -- "${BASH_SOURCE[0]}")"; BIN_DIR="$(cd -- "$(dirname -- "$SELF")" && pwd -P)"; BINDING="$BIN_DIR/qq-actor-binding"
+[[ -x "$BINDING" ]] || error 'qq-actor-binding is unavailable'
+
+REPO='' PRODUCT='' ROLE='' CHANGE='' EXPECTED='' CANDIDATE='' WORKSPACE='' CWD='' LABEL='' TASK='' EXTENSION_PATH='' HERDR_EXTENSION_PATH=''
+ROLE_SOURCE='' SOURCE='' CURSOR='' POLICY_PROVED=false CONTINUE_REQUIRED=false REASON=''
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo|--product|--role|--change|--expected-current|--candidate|--workspace|--cwd|--label|--task|--extension-path|--herdr-extension-path|--role-source-fingerprint|--source-fingerprint|--operation-cursor|--recovery-reason)
+      [[ $# -ge 2 && "$2" != --* ]] || usage
+      case "$1" in
+        --repo) REPO=$2;; --product) PRODUCT=$2;; --role) ROLE=$2;; --change) CHANGE=$2;; --expected-current) EXPECTED=$2;; --candidate) CANDIDATE=$2;;
+        --workspace) WORKSPACE=$2;; --cwd) CWD=$2;; --label) LABEL=$2;; --task) TASK=$2;; --extension-path) EXTENSION_PATH=$2;; --herdr-extension-path) HERDR_EXTENSION_PATH=$2;;
+        --role-source-fingerprint) ROLE_SOURCE=$2;; --source-fingerprint) SOURCE=$2;; --operation-cursor) CURSOR=$2;; --recovery-reason) REASON=$2;;
+      esac; shift 2;;
+    --policy-proved-unavailable) POLICY_PROVED=true; shift;;
+    --continuation-required) CONTINUE_REQUIRED=true; shift;;
+    --readiness-acknowledged|--candidate-no-mutation-observed) refuse 'caller-supplied readiness/no-mutation booleans are forbidden; durable candidate facts are required';;
+    *) usage;;
+  esac
+done
+[[ -n "$REPO" && "$REPO" == /* && -d "$REPO" && -n "$PRODUCT" && -n "$ROLE" && -n "$EXPECTED" && -n "$ROLE_SOURCE" && -n "$SOURCE" && -n "$CURSOR" ]] || usage
+REPO="$(cd -- "$REPO" && pwd -P)"
+if [[ -n "$CWD" ]]; then [[ "$CWD" == /* && -d "$CWD" ]] || usage; CWD="$(cd -- "$CWD" && pwd -P)"; fi
+validate_extension_path() {
+  local path=$1 label=$2 canonical
+  [[ "$path" == /* && -f "$path" && ! -L "$path" ]] || refuse "$label must be one canonical absolute non-symlink regular file"
+  canonical="$(readlink -f -- "$path")" || refuse "$label cannot be resolved"
+  [[ "$canonical" == "$path" ]] || refuse "$label must be canonical and contain no symlink traversal"
+}
+if [[ -n "$EXTENSION_PATH" || -n "$HERDR_EXTENSION_PATH" ]]; then
+  [[ -n "$EXTENSION_PATH" && -n "$HERDR_EXTENSION_PATH" ]] || refuse 'explicit pre-merge lifecycle and Herdr extension paths must be supplied together'
+  validate_extension_path "$EXTENSION_PATH" 'explicit pre-merge lifecycle extension path'
+  validate_extension_path "$HERDR_EXTENSION_PATH" 'explicit managed Herdr integration extension path'
+  [[ "$EXTENSION_PATH" != "$HERDR_EXTENSION_PATH" ]] || refuse 'explicit lifecycle and Herdr integration extensions must be distinct files'
+fi
+if [[ "$ACTION" != cleanup ]]; then [[ "$POLICY_PROVED" == true && "$CONTINUE_REQUIRED" == true && "$REASON" == unavailable-pane ]] || refuse 'recovery requires owning-policy proof of unavailable-pane and required continuation'; fi
+case "$ROLE" in architect|coordinator) [[ -z "$CHANGE" ]] || refuse "$ROLE recovery cannot carry a Change identity";; change_owner) [[ -n "$CHANGE" ]] || refuse 'change_owner recovery requires one Change identity';; *) refuse 'unsupported accountable role';; esac
+
+identity=(--repo "$REPO" --product "$PRODUCT" --role "$ROLE"); [[ -z "$CHANGE" ]] || identity+=(--change "$CHANGE")
+fences=(--role-source-fingerprint "$ROLE_SOURCE" --source-fingerprint "$SOURCE" --operation-cursor "$CURSOR")
+authority=(--policy-proved-unavailable --continuation-required --recovery-reason unavailable-pane)
+
+validated_context_authorities() {
+  python3 - <<'PY'
+import hashlib, json, os, pathlib, re, stat, sys
+try:
+    values = json.loads(os.environ["QQ_CONTEXT_AUTHORITIES"])
+    if not isinstance(values, list) or len(values) > 32:
+        raise ValueError("allowlist must contain at most 32 entries")
+    names = set()
+    for item in values:
+        if not isinstance(item, dict) or set(item) != {"name", "path", "sha256"}:
+            raise ValueError("entry shape is malformed")
+        name, raw_path, digest = item["name"], item["path"], item["sha256"]
+        if not isinstance(name, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", name) is None or name in names:
+            raise ValueError("authority name is malformed or duplicated")
+        if not isinstance(raw_path, str) or not raw_path.startswith("/") or os.path.normpath(raw_path) != raw_path:
+            raise ValueError(f"authority {name} path is not canonical absolute")
+        path = pathlib.Path(raw_path); mode = path.lstat().st_mode
+        if not stat.S_ISREG(mode) or stat.S_ISLNK(mode) or str(path.resolve(strict=True)) != raw_path or path.stat().st_size > 512 * 1024:
+            raise ValueError(f"authority {name} path is not one bounded canonical non-symlink regular file")
+        content = path.read_bytes()
+        content.decode("utf-8", "strict")
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None or hashlib.sha256(content).hexdigest() != digest:
+            raise ValueError(f"authority {name} SHA-256 revision does not match")
+        names.add(name)
+    print(json.dumps(values, sort_keys=True, separators=(",", ":"), ensure_ascii=False))
+except (KeyError, OSError, UnicodeError, ValueError, json.JSONDecodeError) as error:
+    print(str(error), file=sys.stderr)
+    raise SystemExit(2)
+PY
+}
+
+binding_json() {
+  local output status
+  set +e; output="$("$BINDING" "$@")"; status=$?; set -e
+  [[ "$status" -eq 0 ]] || { printf '%s\n' "$output" >&2; return "$status"; }
+  jq -e '.ok == true and .schema == "qq.actor-binding/v1"' <<<"$output" >/dev/null || return 70
+  printf '%s\n' "$output"
+}
+pane_get() {
+  local pane=$1 output
+  output="$(herdr pane get "$pane")" || return 1
+  jq -e --arg pane "$pane" '.result.type == "pane_info" and .result.pane.pane_id == $pane and (.result.pane.workspace_id|type)=="string" and (.result.pane.tab_id|type)=="string" and (.result.pane.focused|type)=="boolean"' <<<"$output" >/dev/null || return 70
+  printf '%s\n' "$output"
+}
+pane_absent() {
+  local pane=$1 output status
+  set +e; output="$(herdr pane get "$pane" 2>&1)"; status=$?; set -e
+  [[ "$status" -ne 0 ]] || return 1
+  jq -e '.error.code == "pane_not_found"' <<<"$output" >/dev/null 2>&1
+}
+close_exact_pane() { local pane=$1; herdr pane close "$pane" >/dev/null || return 1; pane_absent "$pane"; }
+agent_session_value() { jq -er '.result.agent.agent_session | select(.agent == "pi" and .kind == "path") | .value' <<<"$1"; }
+valid_pi_agent() {
+  local document=$1 pane=$2 workspace=$3 tab=$4 cwd=$5 name=${6:-}
+  jq -e --arg pane "$pane" --arg workspace "$workspace" --arg tab "$tab" --arg cwd "$cwd" --arg name "$name" '
+    .result.type == "agent_info" and .result.agent.pane_id == $pane and .result.agent.workspace_id == $workspace and .result.agent.tab_id == $tab and
+    .result.agent.agent == "pi" and .result.agent.interactive_ready == true and (.result.agent.launch_pending == false or .result.agent.launch_pending == null) and
+    (.result.agent.cwd == $cwd or .result.agent.foreground_cwd == $cwd) and
+    (.result.agent.agent_status == "idle" or .result.agent.agent_status == "done" or .result.agent.agent_status == "working" or .result.agent.agent_status == "blocked") and
+    .result.agent.agent_session.agent == "pi" and .result.agent.agent_session.kind == "path" and (.result.agent.agent_session.value|type)=="string" and
+    ($name == "" or .result.agent.name == $name)' <<<"$document" >/dev/null
+}
+valid_started_pi_agent() {
+  local document=$1 pane=$2 workspace=$3 tab=$4 cwd=$5 name=$6
+  jq -e --arg pane "$pane" --arg workspace "$workspace" --arg tab "$tab" --arg cwd "$cwd" --arg name "$name" '
+    .result.type == "agent_info" and .result.agent.pane_id == $pane and .result.agent.workspace_id == $workspace and .result.agent.tab_id == $tab and
+    .result.agent.agent == "pi" and .result.agent.name == $name and .result.agent.interactive_ready == true and
+    (.result.agent.launch_pending == false or .result.agent.launch_pending == null) and (.result.agent.cwd == $cwd or .result.agent.foreground_cwd == $cwd) and
+    (.result.agent.agent_status == "idle" or .result.agent.agent_status == "done" or .result.agent.agent_status == "working" or .result.agent.agent_status == "blocked") and
+    (.result.agent.agent_session == null or (.result.agent.agent_session.agent == "pi" and .result.agent.agent_session.kind == "path" and (.result.agent.agent_session.value|type)=="string"))' <<<"$document" >/dev/null
+}
+reported_pi_agent() {
+  local pane=$1 workspace=$2 tab=$3 cwd=$4 name=${5:-} output session
+  output="$(herdr agent get "$pane")" || return 1
+  valid_pi_agent "$output" "$pane" "$workspace" "$tab" "$cwd" "$name" || return 1
+  session="$(agent_session_value "$output")" || return 1
+  [[ "$session" == /* && ! -L "$session" ]] || return 1
+  printf '%s\n' "$output"
+}
+live_pi_agent() {
+  local pane=$1 workspace=$2 tab=$3 cwd=$4 name=${5:-} output session
+  output="$(reported_pi_agent "$pane" "$workspace" "$tab" "$cwd" "$name")" || return 1
+  session="$(agent_session_value "$output")" || return 1
+  [[ -f "$session" ]] || return 1
+  printf '%s\n' "$output"
+}
+validate_location() {
+  local document=$1 workspace=$2 tab=$3 cwd=$4 focus=$5
+  jq -e --arg workspace "$workspace" --arg tab "$tab" --arg cwd "$cwd" --argjson focus "$focus" '
+    .result.pane.workspace_id == $workspace and .result.pane.tab_id == $tab and .result.pane.cwd == $cwd and .result.pane.focused == $focus' <<<"$document" >/dev/null
+}
+recovery_agent_name() {
+  local role=$1 pane=$2 tag digest
+  case "$role" in architect) tag=a;; coordinator) tag=c;; change_owner) tag=o;; *) return 2;; esac
+  digest="$(printf '%s|%s' "$role" "$pane" | sha256sum | cut -c1-16)" || return 1
+  printf 'qq-recovery-%s-%s\n' "$tag" "$digest"
+}
+
+if [[ "$ACTION" == spawn ]]; then
+  [[ -n "$WORKSPACE" && -n "$CWD" && -n "$LABEL" && -z "$CANDIDATE" ]] || usage
+  CONTEXT_AUTHORITIES=''
+  if [[ ${QQ_CONTEXT_AUTHORITIES+x} ]]; then
+    set +e; CONTEXT_AUTHORITIES="$(validated_context_authorities)"; authorities_status=$?; set -e
+    [[ "$authorities_status" -eq 0 ]] || refuse 'QQ_CONTEXT_AUTHORITIES is malformed, changed, unsafe, or not exact'
+  fi
+  current="$(binding_json inspect "${identity[@]}")" || refuse 'current binding is unavailable or ambiguous'
+  jq -e --arg expected "$EXPECTED" --arg role_source "$ROLE_SOURCE" --arg source "$SOURCE" --arg cursor "$CURSOR" '
+    .result.current.pane_id == $expected and .result.current.runtime_active == true and .result.current.read_only == false and .result.candidate == null and
+    .result.current.source == {operation_cursor:$cursor,role_source_fingerprint:$role_source,source_fingerprint:$source}' <<<"$current" >/dev/null || refuse 'expected current/source/empty-candidate fence does not match'
+  predecessor_doc="$(pane_get "$EXPECTED")" || refuse 'expected predecessor pane resource is unavailable or malformed'
+  pred_tab="$(jq -er '.result.pane.tab_id' <<<"$predecessor_doc")"
+  validate_location "$predecessor_doc" "$WORKSPACE" "$pred_tab" "$CWD" false || refuse 'predecessor must be the exact non-focused workspace/tab/cwd pane before recovery spawn'
+  focus_before="$(herdr pane current --current | jq -er '.result | select(.type == "pane_current") | .pane.pane_id')" || refuse 'cannot establish the no-focus fence'
+  panes_before="$(herdr pane list --workspace "$WORKSPACE")" || refuse 'cannot establish preexisting pane identities'
+  jq -e '.result.type == "pane_list" and ([.result.panes[].pane_id] | length == (unique|length))' <<<"$panes_before" >/dev/null || refuse 'preexisting pane evidence is malformed or ambiguous'
+  envs=(--env "QQ_ACCOUNTABLE_ROLE=$ROLE" --env "QQ_PRODUCT_ID=$PRODUCT" --env "QQ_ROLE_SOURCE_FINGERPRINT=$ROLE_SOURCE" --env "QQ_SOURCE_FINGERPRINT=$SOURCE" --env "QQ_OPERATION_CURSOR=$CURSOR" --env "QQ_ACTOR_BINDING_BIN=$BINDING")
+  [[ -z "${XDG_STATE_HOME:-}" ]] || envs+=(--env "XDG_STATE_HOME=$XDG_STATE_HOME")
+  [[ -z "$CONTEXT_AUTHORITIES" ]] || envs+=(--env "QQ_CONTEXT_AUTHORITIES=$CONTEXT_AUTHORITIES")
+  [[ -z "$CHANGE" ]] || envs+=(--env "QQ_CHANGE_ID=$CHANGE"); [[ -z "$TASK" ]] || envs+=(--env "QQ_TASK_ID=$TASK")
+  set +e; created="$(herdr pane split --pane "$EXPECTED" --direction right --cwd "$CWD" --no-focus "${envs[@]}")"; create_status=$?; set -e
+  [[ "$create_status" -eq 0 ]] || error 'no-focus adjacent candidate split failed; an unidentifiable resource, if any, was preserved'
+  jq -e '.result.type == "pane_info"' <<<"$created" >/dev/null || error 'candidate split receipt is ambiguous; possible resource was preserved'
+  pane="$(jq -er '.result.pane.pane_id' <<<"$created")" || error 'candidate split returned no exact pane identity; possible resource was preserved'
+  if [[ "$pane" == "$EXPECTED" ]] || jq -e --arg pane "$pane" '[.result.panes[].pane_id] | index($pane) != null' <<<"$panes_before" >/dev/null; then
+    error 'Herdr returned the predecessor or a preexisting pane identity; no pane was closed because ownership of that identity is not candidate-exclusive'
+  fi
+  if ! validate_location "$created" "$WORKSPACE" "$pred_tab" "$CWD" false || [[ "$(jq -r '.result.pane.agent_session' <<<"$created")" != null ]]; then
+    error "candidate $pane has wrong workspace/tab/cwd/focus/startup evidence and was preserved for inspection"
+  fi
+  [[ "$(herdr pane current --current | jq -er '.result.pane.pane_id')" == "$focus_before" ]] || error "no-focus candidate $pane stole focus; exact pane was preserved for inspection"
+  if ! binding_json candidate-create "${identity[@]}" --expected-current "$EXPECTED" --pane "$pane" "${fences[@]}" "${authority[@]}" >/dev/null; then
+    close_exact_pane "$pane" || error "candidate CAS refused and exact cleanup of pane $pane is uncertain"
+    refuse 'candidate CAS lost or authority changed; exact created pane was cleaned'
+  fi
+  name="$(recovery_agent_name "$ROLE" "$pane")" || error 'cannot derive bounded candidate agent name'
+  pi_args=(--approve); [[ -z "$EXTENSION_PATH" ]] || pi_args+=(--no-extensions --extension "$EXTENSION_PATH" --extension "$HERDR_EXTENSION_PATH")
+  set +e; started="$(herdr agent start "$name" --kind pi --pane "$pane" --timeout 60000 -- "${pi_args[@]}")"; start_status=$?; set -e
+  if [[ "$start_status" -ne 0 ]]; then
+    set +e; no_agent="$(herdr agent get "$pane")"; no_agent_status=$?; set -e
+    if [[ "$no_agent_status" -eq 0 ]] && jq -e --arg pane "$pane" '.result.type == "agent_info" and .result.agent.pane_id == $pane and .result.agent.agent == null and .result.agent.agent_session == null and .result.agent.interactive_ready == false and .result.agent.launch_pending == false' <<<"$no_agent" >/dev/null; then
+      binding_json cleanup-claim "${identity[@]}" --expected-current "$EXPECTED" --pane "$pane" >/dev/null || error 'proven pre-agent failure could not claim exact cleanup; pane and slot preserved'
+      close_exact_pane "$pane" || error 'proven pre-agent failure cleanup could not close exact candidate; cleanup claim preserved'
+      binding_json cleanup-finalize "${identity[@]}" --expected-current "$EXPECTED" --pane "$pane" >/dev/null || error 'candidate pane closed but cleanup finalization is preserved for inspection'
+      error 'candidate Pi startup failed before any agent existed; exact candidate pane and slot were cleaned while current stayed unchanged'
+    fi
+    error "candidate Pi startup is uncertain; read-only candidate pane $pane and binding slot were preserved"
+  fi
+  start_agent="$(jq -c '.result | select(.type == "agent_started") | {result:{type:"agent_info",agent:.agent}}' <<<"$started")" || error "candidate start receipt is malformed; pane $pane was preserved"
+  valid_started_pi_agent "$start_agent" "$pane" "$WORKSPACE" "$pred_tab" "$CWD" "$name" || error "candidate start identity/workspace/tab/cwd/readiness receipt is malformed; pane $pane was preserved"
+  jq -e --arg ext "$EXTENSION_PATH" --arg herdr_ext "$HERDR_EXTENSION_PATH" '
+    (.result.argv|type)=="array" and
+    (if $ext == "" then .result.argv == ["pi","--approve"]
+     else (.result.argv|length) == 7 and .result.argv[0] == "pi" and .result.argv[1] == "--approve" and .result.argv[2] == "--no-extensions" and
+       .result.argv[3] == "--extension" and .result.argv[5] == "--extension" and
+       ([.result.argv[4],.result.argv[6]] | sort) == ([$ext,$herdr_ext] | sort)
+     end)' <<<"$started" >/dev/null || error "candidate launch argv receipt is wrong or ambiguous; pane $pane was preserved"
+  candidate_live=''
+  for _ in $(seq 1 50); do candidate_live="$(reported_pi_agent "$pane" "$WORKSPACE" "$pred_tab" "$CWD" "$name" 2>/dev/null || true)"; [[ -n "$candidate_live" ]] && break; sleep 0.2; done
+  [[ -n "$candidate_live" ]] || error "candidate Pi session reporter did not durably bind the exact started agent; pane $pane was preserved"
+  session="$(agent_session_value "$candidate_live")" || error "candidate reported Pi session is malformed; pane $pane was preserved"
+  readiness="Read-only unavailable-pane recovery for exact role=$ROLE Product=$PRODUCT${TASK:+ Task=$TASK}${CHANGE:+ Change=$CHANGE}. Reconstruct only from the deterministic normal role prompt and durable/runtime sources. Use bounded checkout-local read tools and call inspect_accountable_context for the exact current Git/binding and allowlisted authority content. If and only if that inspection and reconstruction are conflict-free with no contradictions, call acknowledge_context_candidate with both booleans true and an empty contradictions array. Readiness is mechanically refused without a fresh unchanged inspection. Do not mutate, message, browse, use Bash, or authorize the pointer swap."
+  set +e; prompted="$(herdr agent prompt "$pane" "$readiness" --wait --until idle --until done --until blocked --timeout 180000)"; prompt_status=$?; set -e
+  [[ "$prompt_status" -eq 0 ]] || error "candidate readiness observation is uncertain; read-only pane $pane and binding slot were preserved"
+  prompt_agent="$(jq -c '.result | select(.type == "agent_prompted") | {result:{type:"agent_info",agent:.agent}}' <<<"$prompted")" || error "candidate prompt receipt is malformed; pane $pane was preserved"
+  valid_pi_agent "$prompt_agent" "$pane" "$WORKSPACE" "$pred_tab" "$CWD" "$name" || error "candidate prompt identity/resource receipt is malformed; pane $pane was preserved"
+  [[ "$(agent_session_value "$prompt_agent")" == "$session" ]] || error "candidate Pi session changed during readiness; pane $pane was preserved"
+  [[ -f "$session" && ! -L "$session" ]] || error "candidate readiness settled without persisting its exact Pi session file; pane $pane was preserved"
+  ready="$(binding_json inspect "${identity[@]}")" || error 'candidate durable readiness facts became unavailable'
+  jq -e --arg expected "$EXPECTED" --arg pane "$pane" '.result.current.pane_id == $expected and .result.candidate.pane_id == $pane and .result.candidate.phase == "candidate" and .result.candidate.read_only == true and .result.candidate.acknowledged == true and .result.candidate.mutated == false and .result.candidate.runtime_active == false' <<<"$ready" >/dev/null || error "candidate did not durably acknowledge exact read-only/no-mutation readiness; pane $pane was preserved"
+  jq -n --arg pane "$pane" --arg tab "$pred_tab" --arg workspace "$WORKSPACE" --arg cwd "$CWD" --arg expected "$EXPECTED" --arg session "$session" --arg prompt_hash "$(printf %s "$readiness" | sha256sum | cut -d' ' -f1)" '{ok:true,schema:"qq.context-recovery/v1",status:"ready_for_external_commit",candidate_pane_id:$pane,candidate_tab_id:$tab,candidate_workspace_id:$workspace,candidate_cwd:$cwd,candidate_pi_session_file:$session,expected_current_pane_id:$expected,durable_readiness_acknowledged:true,durable_read_only:true,durable_no_mutation:true,no_focus:true,narrative_packet:false,readiness_prompt_sha256:$prompt_hash}'
+  exit 0
+fi
+
+if [[ "$ACTION" == cleanup ]]; then
+  [[ -n "$CANDIDATE" && -n "$WORKSPACE" && -n "$CWD" && -z "$LABEL" && -z "$EXTENSION_PATH" ]] || usage
+  current_doc="$(pane_get "$EXPECTED")" || refuse 'cleanup expected-current pane evidence is unavailable or malformed'
+  current_tab="$(jq -er '.result.pane.tab_id' <<<"$current_doc")"
+  validate_location "$current_doc" "$WORKSPACE" "$current_tab" "$CWD" "$(jq -r '.result.pane.focused' <<<"$current_doc")" || refuse 'cleanup current workspace/tab/cwd evidence changed'
+  candidate_doc="$(pane_get "$CANDIDATE")" || refuse 'cleanup candidate pane evidence is unavailable or malformed'
+  validate_location "$candidate_doc" "$WORKSPACE" "$current_tab" "$CWD" false || refuse 'cleanup candidate is not the exact non-focused adjacent resource'
+  jq -e '.result.pane.agent == null and .result.pane.agent_session == null' <<<"$candidate_doc" >/dev/null || refuse 'cleanup candidate still has live or ambiguous agent evidence'
+  inspect="$(binding_json inspect "${identity[@]}")" || refuse 'cleanup binding is unavailable'
+  jq -e --arg expected "$EXPECTED" --arg pane "$CANDIDATE" --arg role_source "$ROLE_SOURCE" --arg source "$SOURCE" --arg cursor "$CURSOR" '.result.current.pane_id == $expected and .result.current.runtime_active == true and .result.current.source == {operation_cursor:$cursor,role_source_fingerprint:$role_source,source_fingerprint:$source} and .result.candidate.pane_id == $pane and (.result.candidate.phase == "candidate" or .result.candidate.phase == "cleanup") and .result.candidate.expected_current_pane_id == $expected and .result.candidate.source == {operation_cursor:$cursor,role_source_fingerprint:$role_source,source_fingerprint:$source} and .result.candidate.acknowledged == false and .result.candidate.mutated == false and .result.candidate.runtime_active == false' <<<"$inspect" >/dev/null || refuse 'cleanup candidate is active, acknowledged, mutated, source-changed, or authority is ambiguous'
+  binding_json cleanup-claim "${identity[@]}" --expected-current "$EXPECTED" --pane "$CANDIDATE" >/dev/null || refuse 'cleanup claim CAS failed; nothing was closed'
+  close_exact_pane "$CANDIDATE" || error 'cleanup claim is durable but exact candidate pane close/absence proof failed; slot and pane evidence were preserved'
+  binding_json cleanup-finalize "${identity[@]}" --expected-current "$EXPECTED" --pane "$CANDIDATE" >/dev/null || error 'exact candidate pane is absent but cleanup slot finalization failed; current remained unchanged'
+  jq -n --arg pane "$CANDIDATE" --arg current "$EXPECTED" '{ok:true,schema:"qq.context-recovery/v1",status:"inactive_leftover_cleaned",closed_candidate_pane_id:$pane,current_pane_id:$current,pointer_changes:0}'
+  exit 0
+fi
+
+# Commit trusts no caller readiness/no-mutation booleans. It reads the durable
+# acknowledgement made by the mechanically read-only candidate runtime.
+[[ -n "$CANDIDATE" && -n "$WORKSPACE" && -n "$CWD" && -z "$LABEL" ]] || usage
+inspect="$(binding_json inspect "${identity[@]}")" || refuse 'commit binding is unavailable or malformed'
+jq -e --arg expected "$EXPECTED" --arg pane "$CANDIDATE" --arg role_source "$ROLE_SOURCE" --arg source "$SOURCE" --arg cursor "$CURSOR" '
+  .result.current.pane_id == $expected and .result.current.runtime_active == true and .result.current.source == {operation_cursor:$cursor,role_source_fingerprint:$role_source,source_fingerprint:$source} and
+  .result.candidate.pane_id == $pane and .result.candidate.expected_current_pane_id == $expected and .result.candidate.phase == "candidate" and
+  .result.candidate.source == {operation_cursor:$cursor,role_source_fingerprint:$role_source,source_fingerprint:$source} and
+  .result.candidate.acknowledged == true and .result.candidate.read_only == true and .result.candidate.mutated == false and .result.candidate.runtime_active == false' <<<"$inspect" >/dev/null || refuse 'durable candidate readiness/read-only/no-mutation/current/source facts do not authorize commit'
+pred_doc="$(pane_get "$EXPECTED")" || refuse 'predecessor pane resource evidence is unavailable before commit'
+tab="$(jq -er '.result.pane.tab_id' <<<"$pred_doc")"
+validate_location "$pred_doc" "$WORKSPACE" "$tab" "$CWD" false || refuse 'predecessor must be the exact non-focused pane before commit'
+candidate_doc="$(pane_get "$CANDIDATE")" || refuse 'candidate pane resource evidence is unavailable before commit'
+validate_location "$candidate_doc" "$WORKSPACE" "$tab" "$CWD" false || refuse 'candidate is not the exact non-focused same-tab/cwd pane'
+candidate_name="$(recovery_agent_name "$ROLE" "$CANDIDATE")" || refuse 'cannot derive bounded candidate agent name'
+candidate_agent="$(live_pi_agent "$CANDIDATE" "$WORKSPACE" "$tab" "$CWD" "$candidate_name")" || refuse 'candidate is not one exact persisted live Pi agent'
+candidate_session="$(agent_session_value "$candidate_agent")"
+focus_before="$(herdr pane current --current | jq -er '.result.pane.pane_id')" || refuse 'cannot establish commit focus fence'
+nonce="$(python3 - <<'PY'
+import secrets
+print(secrets.token_hex(24))
+PY
+)"
+# Focus can change while the candidate is reconstructed. Re-prove the exact
+# predecessor is still non-focused immediately before the pointer CAS.
+pred_recheck="$(pane_get "$EXPECTED")" || refuse 'predecessor pane resource evidence is unavailable immediately before commit CAS'
+validate_location "$pred_recheck" "$WORKSPACE" "$tab" "$CWD" false || refuse 'predecessor focus/location changed immediately before commit CAS'
+binding_json swap "${identity[@]}" --expected-current "$EXPECTED" --pane "$CANDIDATE" --activation-nonce "$nonce" >/dev/null || refuse 'binding swap CAS failed'
+if binding_json guard "${identity[@]}" --pane "$EXPECTED" "${fences[@]}" --acknowledgement >/dev/null 2>&1; then error 'stale predecessor acknowledgement unexpectedly passed after swap'; fi
+command="/qq-context-activate $nonce"
+set +e; activation_receipt="$(herdr agent prompt "$CANDIDATE" "$command")"; activation_status=$?; set -e
+if [[ "$activation_status" -ne 0 ]]; then error 'activation command injection is uncertain after swap; exact candidate/predecessor evidence was preserved and no reversal was guessed'; fi
+activation_agent="$(jq -c '.result | select(.type == "agent_prompted") | {result:{type:"agent_info",agent:.agent}}' <<<"$activation_receipt")" || error 'activation command receipt is malformed after swap; evidence was preserved'
+valid_pi_agent "$activation_agent" "$CANDIDATE" "$WORKSPACE" "$tab" "$CWD" || error 'activation command agent/resource receipt is malformed after swap; evidence was preserved'
+[[ "$(agent_session_value "$activation_agent")" == "$candidate_session" ]] || error 'activation command targeted a changed candidate Pi session; evidence was preserved'
+activated=false
+for _ in $(seq 1 50); do
+  check="$(binding_json inspect "${identity[@]}" 2>/dev/null || true)"
+  if jq -e --arg pane "$CANDIDATE" '.result.current.pane_id == $pane and .result.current.runtime_active == true and .result.current.read_only == false and .result.current.activation_nonce == null and .result.candidate.phase == "predecessor"' <<<"$check" >/dev/null 2>&1; then activated=true; break; fi
+  sleep 0.2
+done
+if [[ "$activated" != true ]]; then
+  check="$(binding_json inspect "${identity[@]}" 2>/dev/null || true)"
+  reversible=false
+  if jq -e --arg pane "$CANDIDATE" --arg pred "$EXPECTED" '.result.current.pane_id == $pane and .result.current.runtime_active == false and .result.current.mutated == false and .result.current.acknowledged == false and .result.candidate.pane_id == $pred and .result.candidate.phase == "predecessor"' <<<"$check" >/dev/null 2>&1; then reversible=true; fi
+  if [[ "$reversible" == true ]] && live_pi_agent "$EXPECTED" "$WORKSPACE" "$tab" "$CWD" >/dev/null; then
+    if binding_json reverse "${identity[@]}" --expected-current "$CANDIDATE" --predecessor "$EXPECTED" --predecessor-live >/dev/null; then
+      close_exact_pane "$CANDIDATE" || error 'activation failed and exact CAS reversed to live Pi predecessor, but candidate pane close is uncertain'
+      error 'candidate activation acknowledgement did not arrive; exact CAS reversed only after proving a persisted live Pi predecessor, and the candidate pane was closed'
+    fi
+  fi
+  error 'candidate activation failed after swap; predecessor was not a proven persisted live Pi runtime or reversal facts changed, so exact panes and binding were preserved'
+fi
+[[ "$(herdr pane current --current | jq -er '.result.pane.pane_id')" == "$focus_before" ]] || error 'activation changed focus; candidate is authoritative and exact panes were preserved'
+# Runtime acknowledgement is durable. Close only the exact predecessor pane;
+# same-tab siblings are structurally unreachable because no tab-close verb exists.
+close_exact_pane "$EXPECTED" || error 'candidate runtime is active but exact predecessor pane close/absence proof failed; predecessor slot was preserved'
+binding_json finalize "${identity[@]}" --pane "$CANDIDATE" >/dev/null || error 'predecessor pane is absent but predecessor-slot finalization failed; active candidate evidence was preserved'
+final="$(binding_json inspect "${identity[@]}")" || error 'final active binding inspection failed'
+jq -e --arg pane "$CANDIDATE" '.result.current.pane_id == $pane and .result.current.runtime_active == true and .result.current.read_only == false and .result.candidate == null' <<<"$final" >/dev/null || error 'final active binding has the wrong shape'
+jq -n --arg pane "$CANDIDATE" --arg predecessor "$EXPECTED" --arg session "$candidate_session" '{ok:true,schema:"qq.context-recovery/v1",status:"activated",current_pane_id:$pane,current_pi_session_file:$session,closed_predecessor_pane_id:$predecessor,pointer_changes:1,stale_predecessor_refused:true,runtime_activation_acknowledged:true,closed_scope:"exact_pane_only"}'

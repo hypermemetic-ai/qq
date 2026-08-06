@@ -26,6 +26,7 @@ export const QQ_EXTENSION_MODULES = Object.freeze([
   "./qq-session-lineage.ts",
   "./qq-communication-moments.ts",
   "./qq-codex-fast.ts",
+  "./qq-context-lifecycle.ts",
 ]);
 
 function defaultRun(file, args, options = {}) {
