@@ -5,6 +5,12 @@
     "effort": "xhigh",
     "serviceClass": "priority"
   },
+  "compactor": {
+    "provider": "openai-codex",
+    "model": "gpt-5.6-sol",
+    "effort": "xhigh",
+    "serviceClass": "priority"
+  },
   "implementer": {
     "provider": "openai-codex",
     "model": "gpt-5.6-sol",
