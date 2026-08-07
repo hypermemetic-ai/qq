@@ -195,10 +195,17 @@ qwen_meter() {
   matched_lines="$TELEMETRY_TMP/meter-qwen-lines.txt"
   scanned_json="$TELEMETRY_TMP/meter-scanned.json"
   : >"$manifest_tsv"
-  if [ -r "$METER_CACHE" ] && jq -e 'type == "object"' "$METER_CACHE" >/dev/null 2>&1; then
+  if [ -r "$METER_CACHE" ] && jq -e '
+      type == "object" and
+      (.version | type) == "number" and
+      .version == 2
+    ' "$METER_CACHE" >/dev/null 2>&1; then
     cp -- "$METER_CACHE" "$cache_work"
   else
-    printf '{}\n' >"$cache_work"
+    # Version 2 stores only events selected by the exact top-level message
+    # provider. Unversioned/older entries may contain pre-fix false matches, so
+    # starting with an empty cache deliberately forces one full corpus rescan.
+    printf '{"version":2}\n' >"$cache_work"
   fi
 
   nowms=$(( $(now_epoch) * 1000 ))
@@ -279,7 +286,7 @@ qwen_meter() {
         elif ($text | test("insufficient_quota|^insufficient quota$"; "i")) then
           {timestamp: .timestamp, text: "insufficient quota"}
         else empty end;
-      reduce ($manifest[0] | to_entries[]) as $file ({};
+      reduce ($manifest[0] | to_entries[]) as $file ({version: 2};
         ($old[0][$file.key] // {}) as $cached |
         (($cached.mtime != $file.value.mtime) or
           ($cached.size != $file.value.size) or
@@ -304,9 +311,10 @@ qwen_meter() {
   }
 
   totals=$(jq -r '
-    ([to_entries[].value.sum5h // 0] | add // 0),
-    ([to_entries[].value.sum7d // 0] | add // 0),
-    ([to_entries[].value.walls[]?] | sort_by(.timestamp) | (last.text // ""))
+    def entries: to_entries[] | select(.key != "version") | .value;
+    ([entries | .sum5h // 0] | add // 0),
+    ([entries | .sum7d // 0] | add // 0),
+    ([entries | .walls[]?] | sort_by(.timestamp) | (last.text // ""))
   ' "$METER_CACHE" 2>/dev/null) || { QWEN_METER_AVAILABLE=0; return 1; }
   QWEN_MTR_T5=$(sed -n '1p' <<<"$totals")
   QWEN_MTR_T7=$(sed -n '2p' <<<"$totals")

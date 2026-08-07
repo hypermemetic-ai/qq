@@ -114,15 +114,17 @@ import browser_cookie3
 
 action, profile_arg, target_arg = sys.argv[1:]
 profile = Path(profile_arg).resolve(strict=True)
-target = Path(target_arg)
-home = Path.home().resolve(strict=True)
-expected = home / ".local" / "state" / "qq" / "telemetry" / "qwen.cookies"
+home_path = Path.home()
+home_real = home_path.resolve(strict=True)
+requested_target = Path(target_arg)
+requested_expected = home_path / ".local" / "state" / "qq" / "telemetry" / "qwen.cookies"
+target = home_real / ".local" / "state" / "qq" / "telemetry" / "qwen.cookies"
 
 try:
-    profile.relative_to(home)
+    profile.relative_to(home_real)
 except ValueError:
     raise SystemExit("Refusing Firefox profile outside HOME.")
-if target != expected:
+if requested_target != requested_expected:
     raise SystemExit("Refusing cookie output path other than the telemetry snapshot.")
 
 def allowed_domain(domain: str) -> bool:
@@ -161,19 +163,6 @@ if action == "inventory":
 if action != "write":
     raise SystemExit("Unknown browser-cookie helper action.")
 
-expected_parent = expected.parent
-if target.parent.is_symlink():
-    raise SystemExit("Refusing a symlink telemetry state directory.")
-try:
-    parent_real = target.parent.resolve(strict=True)
-    expected_parent_real = expected_parent.resolve(strict=True)
-except OSError:
-    raise SystemExit("Refusing a missing or invalid telemetry state directory.")
-if not target.parent.is_dir() or parent_real != expected_parent_real:
-    raise SystemExit("Refusing cookie output outside the real telemetry state directory.")
-if target.is_symlink():
-    raise SystemExit("Refusing to overwrite a symlink cookie snapshot.")
-
 header = b"# Netscape HTTP Cookie File\n"
 marker = b"# qwencloud.com rows for qq telemetry; values intentionally never displayed\n"
 parent_flags = os.O_RDONLY
@@ -181,9 +170,50 @@ if hasattr(os, "O_DIRECTORY"):
     parent_flags |= os.O_DIRECTORY
 if hasattr(os, "O_NOFOLLOW"):
     parent_flags |= os.O_NOFOLLOW
-parent_fd = os.open(target.parent, parent_flags)
+try:
+    parent_fd = os.open(home_real, parent_flags)
+except OSError:
+    raise SystemExit("Refusing a missing or invalid telemetry state directory.")
 fd = None
 try:
+    # Validate every fixed state-path component immediately before opening the
+    # snapshot. Descriptor-relative, no-follow traversal also keeps a racing
+    # ancestor replacement from redirecting the final file open.
+    for component in (".local", "state", "qq", "telemetry"):
+        try:
+            component_metadata = os.lstat(component, dir_fd=parent_fd)
+        except OSError:
+            raise SystemExit("Refusing a missing or invalid telemetry state directory.")
+        if stat.S_ISLNK(component_metadata.st_mode):
+            raise SystemExit("Refusing a symlink telemetry state directory.")
+        if not stat.S_ISDIR(component_metadata.st_mode):
+            raise SystemExit("Refusing a missing or invalid telemetry state directory.")
+        try:
+            next_parent_fd = os.open(component, parent_flags, dir_fd=parent_fd)
+        except OSError:
+            raise SystemExit("Refusing a missing or invalid telemetry state directory.")
+        opened_metadata = os.fstat(next_parent_fd)
+        if (
+            not stat.S_ISDIR(opened_metadata.st_mode)
+            or opened_metadata.st_dev != component_metadata.st_dev
+            or opened_metadata.st_ino != component_metadata.st_ino
+        ):
+            os.close(next_parent_fd)
+            raise SystemExit("Refusing a changed telemetry state directory.")
+        os.close(parent_fd)
+        parent_fd = next_parent_fd
+
+    try:
+        snapshot_metadata = os.stat(
+            target.name, dir_fd=parent_fd, follow_symlinks=False
+        )
+    except FileNotFoundError:
+        snapshot_metadata = None
+    except OSError:
+        raise SystemExit("Refusing an invalid cookie snapshot.")
+    if snapshot_metadata is not None and stat.S_ISLNK(snapshot_metadata.st_mode):
+        raise SystemExit("Refusing to overwrite a symlink cookie snapshot.")
+
     target_flags = os.O_RDWR
     if hasattr(os, "O_NOFOLLOW"):
         target_flags |= os.O_NOFOLLOW
@@ -196,8 +226,13 @@ try:
         )
         existing = False
     except FileExistsError:
-        fd = os.open(target.name, target_flags, dir_fd=parent_fd)
+        try:
+            fd = os.open(target.name, target_flags, dir_fd=parent_fd)
+        except OSError:
+            raise SystemExit("Refusing an invalid cookie snapshot.")
         existing = True
+    except OSError:
+        raise SystemExit("Refusing an invalid cookie snapshot.")
 
     metadata = os.fstat(fd)
     if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid():
