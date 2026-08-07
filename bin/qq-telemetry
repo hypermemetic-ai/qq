@@ -45,13 +45,6 @@ color_frac() {
   awk -v f="$1" 'BEGIN { if (f>=0.9) print "\033[31m"; else if (f>=0.6) print "\033[33m"; else print "\033[32m" }'
 }
 
-redact_sensitive_text() {
-  sed -E \
-    -e 's/sk-[A-Za-z0-9._-]{8,}/[redacted]/g' \
-    -e 's/login_qwencloud_ticket[^[:space:]]*/[redacted]/g' \
-    -e 's/Bearer[[:space:]]+[A-Za-z0-9._-]{20,}/Bearer [redacted]/g'
-}
-
 usage() {
   cat <<'EOF'
 Usage: qq-telemetry [--once] [--help]
@@ -66,13 +59,6 @@ EOF
 }
 
 ONCE=0
-case "${1:-}" in
-  '') ;;
-  --once) ONCE=1 ;;
-  --help|-h) usage; exit 0 ;;
-  *) usage >&2; exit 2 ;;
-esac
-[ "$#" -le 1 ] || { usage >&2; exit 2; }
 
 # Per-provider display state.
 KIMI_WEEK='weekly   unavailable'
@@ -108,6 +94,10 @@ seat_text_for_provider() {
 
 load_seats() {
   local rows
+  KIMI_SEATS='seats: unavailable'
+  GPT_SEATS='seats: unavailable'
+  DS_SEATS='seats: unavailable'
+  QWEN_SEATS='seats: unavailable'
   if [ ! -r "$PROFILES_FILE" ] || ! jq -e '
       type == "object" and
       all(to_entries[]; (.key | type) == "string" and
@@ -132,6 +122,7 @@ QWEN_MTR_T7=''
 QWEN_METER_AVAILABLE=0
 QWEN_WALL_TEXT=''
 QWEN_GW_TS=0
+QWEN_GW_ATTEMPT_TS=0
 QWEN_GW_USAGE=''
 QWEN_GW_QCONF=''
 QWEN_GW_SPEC=''
@@ -256,16 +247,24 @@ qwen_meter() {
         (try ($raw[$separator + 1:] | fromjson) catch null) as $message |
         if $message == null then . else
           .[$path] = (.[$path] // {events: [], walls: []}) |
-          if ($message.message.stopReason != "error" and
+          if ($message.message.provider == "qwen-token-plan" and
+              $message.message.stopReason != "error" and
               ($message.message.timestamp | type) == "number" and
               ($message.message.usage.totalTokens | type) == "number" and
               $message.message.timestamp >= $cutoff7) then
             .[$path].events += [[$message.message.timestamp, $message.message.usage.totalTokens]]
-          elif ($message.message.stopReason == "error" and
+          elif ($message.message.provider == "qwen-token-plan" and
+              $message.message.stopReason == "error" and
               (($message.message.errorMessage // "") |
-                test("insufficient_quota|quota has been exhausted"; "i")) and
+                test("quota has been exhausted"; "i")) and
               ($message.message.timestamp // 0) >= $cutoff7) then
-            .[$path].walls += [{timestamp: ($message.message.timestamp // 0), text: $message.message.errorMessage}]
+            .[$path].walls += [{timestamp: ($message.message.timestamp // 0), text: "quota exhausted"}]
+          elif ($message.message.provider == "qwen-token-plan" and
+              $message.message.stopReason == "error" and
+              (($message.message.errorMessage // "") |
+                test("insufficient_quota"; "i")) and
+              ($message.message.timestamp // 0) >= $cutoff7) then
+            .[$path].walls += [{timestamp: ($message.message.timestamp // 0), text: "insufficient quota"}]
           else . end
         end
       end)
@@ -273,6 +272,13 @@ qwen_meter() {
 
   jq -n --argjson cutoff7 "$cutoff7" --argjson cutoff5 "$cutoff5" \
     --slurpfile manifest "$manifest_json" --slurpfile old "$cache_work" --slurpfile scanned "$scanned_json" '
+      def canonical_wall:
+        (.text // "") as $text |
+        if ($text | test("quota has been exhausted|^quota exhausted$"; "i")) then
+          {timestamp: .timestamp, text: "quota exhausted"}
+        elif ($text | test("insufficient_quota|^insufficient quota$"; "i")) then
+          {timestamp: .timestamp, text: "insufficient quota"}
+        else empty end;
       reduce ($manifest[0] | to_entries[]) as $file ({};
         ($old[0][$file.key] // {}) as $cached |
         (($cached.mtime != $file.value.mtime) or
@@ -281,7 +287,7 @@ qwen_meter() {
           (($cached.walls | type) != "array")) as $changed |
         (if $changed then ($scanned[0][$file.key] // {events: [], walls: []}) else $cached end) as $source |
         [$source.events[]? | select(.[0] >= $cutoff7)] as $events |
-        [$source.walls[]? | select(.timestamp >= $cutoff7)] as $walls |
+        [$source.walls[]? | select((.timestamp | type) == "number" and .timestamp >= $cutoff7) | canonical_wall] as $walls |
         .[$file.key] = {
           mtime: $file.value.mtime,
           size: $file.value.size,
@@ -304,7 +310,7 @@ qwen_meter() {
   ' "$METER_CACHE" 2>/dev/null) || { QWEN_METER_AVAILABLE=0; return 1; }
   QWEN_MTR_T5=$(sed -n '1p' <<<"$totals")
   QWEN_MTR_T7=$(sed -n '2p' <<<"$totals")
-  QWEN_WALL_TEXT=$(sed -n '3,$p' <<<"$totals" | redact_sensitive_text)
+  QWEN_WALL_TEXT=$(sed -n '3,$p' <<<"$totals")
   QWEN_METER_AVAILABLE=1
 }
 
@@ -325,15 +331,18 @@ qwen_update() {
 
   if qwen_cookie_args _qwen_cookie_probe 2>/dev/null; then
     have_cookies=1
-    if [ "$((now - QWEN_GW_TS))" -ge "$QWEN_GW_CADENCE" ] || [ "$FORCE_QWEN" = 1 ]; then
+    # Both clocks must be due: the success clock controls freshness labels,
+    # while the attempt clock prevents a failed gateway from retrying each tick.
+    if { [ "$((now - QWEN_GW_TS))" -ge "$QWEN_GW_CADENCE" ] &&
+         [ "$((now - QWEN_GW_ATTEMPT_TS))" -ge "$QWEN_GW_CADENCE" ]; } ||
+       [ "$FORCE_QWEN" = 1 ]; then
+      QWEN_GW_ATTEMPT_TS=$now
       if qwen_gateway_fetch; then
         QWEN_GW_USAGE=$(cat "$TELEMETRY_TMP/usage")
         QWEN_GW_QCONF=$(cat "$TELEMETRY_TMP/quota-config")
         QWEN_GW_SPEC=$(jq -r '.data.DataV2.data.data.specCode // empty' "$TELEMETRY_TMP/subscription" 2>/dev/null || true)
         [ -n "$QWEN_GW_SPEC" ] || QWEN_GW_SPEC="${TELEMETRY_QWEN_TIER:-}"
-        QWEN_GW_TS=$(now_epoch)
-      else
-        QWEN_GW_TS=0
+        QWEN_GW_TS=$now
       fi
       FORCE_QWEN=0
     fi
@@ -414,6 +423,7 @@ qwen_update() {
 fetch_all() {
   local auth='' key access account body used limit resetw used5 limit5 reset5 frac col flag
   local pct reset_at credits balance currency now
+  load_seats
   KIMI_WEEK='weekly   unavailable'
   KIMI_5H='5h       unavailable'
   GPT_WEEK='7d       unavailable'
@@ -491,24 +501,37 @@ render() {
   printf '%s\n' "${C_DIM}r refresh · q quit · auto-refresh ${REFRESH_SECS}s (Qwen official ping every ${QWEN_GW_CADENCE}s) · credentials never leave this machine${C_RESET}"
 }
 
-load_seats
-if [ "$ONCE" = 1 ]; then
-  fetch_all
-  render
-  exit 0
-fi
-
-while true; do
-  fetch_all
-  render
-  key=''
-  if [ -r /dev/tty ]; then
-    read -r -t "$REFRESH_SECS" -n1 key </dev/tty 2>/dev/null || key=''
-  else
-    sleep "$REFRESH_SECS"
-  fi
-  case "$key" in
-    q|Q) [ -t 1 ] && printf '\033[2J\033[H'; exit 0 ;;
-    r|R) FORCE_QWEN=1 ;;
+qq_telemetry_main() {
+  case "${1:-}" in
+    '') ONCE=0 ;;
+    --once) ONCE=1 ;;
+    --help|-h) usage; return 0 ;;
+    *) usage >&2; return 2 ;;
   esac
-done
+  [ "$#" -le 1 ] || { usage >&2; return 2; }
+
+  if [ "$ONCE" = 1 ]; then
+    fetch_all
+    render
+    return 0
+  fi
+
+  while true; do
+    fetch_all
+    render
+    key=''
+    if [ -t 0 ]; then
+      read -r -t "$REFRESH_SECS" -n1 key || key=''
+    else
+      sleep "$REFRESH_SECS"
+    fi
+    case "$key" in
+      q|Q) [ -t 1 ] && printf '\033[2J\033[H'; return 0 ;;
+      r|R) FORCE_QWEN=1 ;;
+    esac
+  done
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  qq_telemetry_main "$@"
+fi

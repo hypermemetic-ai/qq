@@ -161,23 +161,58 @@ if action == "inventory":
 if action != "write":
     raise SystemExit("Unknown browser-cookie helper action.")
 
-target.parent.mkdir(parents=True, exist_ok=True)
+expected_parent = expected.parent
+if target.parent.is_symlink():
+    raise SystemExit("Refusing a symlink telemetry state directory.")
+try:
+    parent_real = target.parent.resolve(strict=True)
+    expected_parent_real = expected_parent.resolve(strict=True)
+except OSError:
+    raise SystemExit("Refusing a missing or invalid telemetry state directory.")
+if not target.parent.is_dir() or parent_real != expected_parent_real:
+    raise SystemExit("Refusing cookie output outside the real telemetry state directory.")
 if target.is_symlink():
     raise SystemExit("Refusing to overwrite a symlink cookie snapshot.")
-if target.exists():
-    metadata = target.stat()
+
+header = b"# Netscape HTTP Cookie File\n"
+marker = b"# qwencloud.com rows for qq telemetry; values intentionally never displayed\n"
+parent_flags = os.O_RDONLY
+if hasattr(os, "O_DIRECTORY"):
+    parent_flags |= os.O_DIRECTORY
+if hasattr(os, "O_NOFOLLOW"):
+    parent_flags |= os.O_NOFOLLOW
+parent_fd = os.open(target.parent, parent_flags)
+fd = None
+try:
+    target_flags = os.O_RDWR
+    if hasattr(os, "O_NOFOLLOW"):
+        target_flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(
+            target.name,
+            target_flags | os.O_CREAT | os.O_EXCL,
+            0o600,
+            dir_fd=parent_fd,
+        )
+        existing = False
+    except FileExistsError:
+        fd = os.open(target.name, target_flags, dir_fd=parent_fd)
+        existing = True
+
+    metadata = os.fstat(fd)
     if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid():
         raise SystemExit("Refusing to overwrite a cookie snapshot not owned by this user.")
+    if existing:
+        os.lseek(fd, 0, os.SEEK_SET)
+        if os.read(fd, len(header) + len(marker)) != header + marker:
+            raise SystemExit("Refusing to overwrite a non-telemetry snapshot file.")
 
-flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-if hasattr(os, "O_NOFOLLOW"):
-    flags |= os.O_NOFOLLOW
-fd = os.open(target, flags, 0o600)
-try:
+    os.ftruncate(fd, 0)
+    os.lseek(fd, 0, os.SEEK_SET)
     os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8", newline="\n", closefd=False) as stream:
-        stream.write("# Netscape HTTP Cookie File\n")
-        stream.write("# qwencloud.com rows for qq telemetry; values intentionally never displayed\n")
+        stream.write(header.decode("ascii"))
+        stream.write(marker.decode("ascii"))
         for cookie in sorted(cookies, key=lambda row: (row.domain, row.path, row.name)):
             include_subdomains = "TRUE" if cookie.domain.startswith(".") else "FALSE"
             secure = "TRUE" if cookie.secure else "FALSE"
@@ -194,8 +229,9 @@ try:
         stream.flush()
         os.fsync(stream.fileno())
 finally:
-    os.close(fd)
-os.chmod(target, 0o600, follow_symlinks=False)
+    if fd is not None:
+        os.close(fd)
+    os.close(parent_fd)
 print(f"cookie snapshot written: {len(cookies)} rows (mode 600)")
 PY
 }
