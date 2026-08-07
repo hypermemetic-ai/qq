@@ -1,0 +1,545 @@
+#!/usr/bin/env bash
+# Live provider-usage terminal panel. Credential material is read only for the
+# provider requests that need it and is never included in panel output.
+set -u
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=bin/lib/telemetry-lib.sh
+source "$SCRIPT_DIR/lib/telemetry-lib.sh"
+
+AUTH_FILE="${HOME}/.pi/agent/auth.json"
+PROFILES_FILE="${QQ_TELEMETRY_PROFILES_FILE:-$SCRIPT_DIR/../delegation/policies/execution-profiles.json}"
+METER_CACHE="${HOME}/.local/state/qq/telemetry/meter-cache.json"
+REFRESH_SECS="${TELEMETRY_REFRESH:-30}"
+QWEN_GW_CADENCE="${TELEMETRY_QWEN_GW_CADENCE:-300}"
+QWEN_MTR_CADENCE=60
+QWEN_SESSION_WINDOW_DAYS=7
+BAR_CELLS=16
+FILL='█'
+EMPTY='░'
+C_RESET=$'\033[0m'
+C_DIM=$'\033[2m'
+C_BOLD=$'\033[1m'
+C_GREEN=$'\033[32m'
+C_YELLOW=$'\033[33m'
+C_RED=$'\033[31m'
+
+TELEMETRY_TMP=""
+cleanup() {
+  if [ -n "$TELEMETRY_TMP" ] && [ -d "$TELEMETRY_TMP" ]; then
+    rm -rf -- "$TELEMETRY_TMP"
+  fi
+}
+trap cleanup EXIT HUP INT TERM
+TELEMETRY_TMP=$(mktemp -d "${TMPDIR:-/tmp}/qq-telemetry.XXXXXX" 2>/dev/null || true)
+
+iso_utc() { date -u -d "$1" '+%Y-%m-%d %H:%MZ' 2>/dev/null || printf '?'; }
+epoch_utc() { date -u -d "@$1" '+%Y-%m-%d %H:%MZ' 2>/dev/null || printf '?'; }
+now_epoch() { date -u +%s; }
+
+api_get() {
+  curl -sS -m 10 -H 'Accept: application/json' "$@" 2>/dev/null || true
+}
+
+color_frac() {
+  awk -v f="$1" 'BEGIN { if (f>=0.9) print "\033[31m"; else if (f>=0.6) print "\033[33m"; else print "\033[32m" }'
+}
+
+usage() {
+  cat <<'EOF'
+Usage: qq-telemetry [--once] [--help]
+
+Render live Kimi, GPT/Codex, DeepSeek, and Qwen provider usage.
+  --once  Fetch and render one screen, then exit.
+  --help  Show this help.
+
+Interactive mode refreshes every 30 seconds by default; press r to refresh or
+q to quit. Set TELEMETRY_REFRESH and TELEMETRY_QWEN_GW_CADENCE to tune cadence.
+EOF
+}
+
+ONCE=0
+
+# Per-provider display state.
+KIMI_WEEK='weekly   unavailable'
+KIMI_5H='5h       unavailable'
+GPT_WEEK='7d       unavailable'
+GPT_CREDITS='credits  unavailable'
+DS_BAL='balance  unavailable'
+QWEN_SOURCE='pending'
+QWEN_L1='usage    unavailable'
+QWEN_L2=''
+QWEN_WALL=''
+
+KIMI_SEATS='seats: unavailable'
+GPT_SEATS='seats: unavailable'
+DS_SEATS='seats: unavailable'
+QWEN_SEATS='seats: unavailable'
+
+seat_text_for_provider() {
+  local provider="$1" rows="$2" result="" role model item
+  while IFS=$'\t' read -r role model; do
+    [ -n "$role" ] || continue
+    item="$role"
+    [ -n "$model" ] && item+=" ($model)"
+    if [ -n "$result" ]; then result+=", "; fi
+    result+="$item"
+  done < <(awk -F '\t' -v provider="$provider" '$1 == provider { print $2 "\t" $3 }' <<<"$rows")
+  if [ -n "$result" ]; then
+    printf 'seats: %s' "$result"
+  else
+    printf 'seats: none configured'
+  fi
+}
+
+load_seats() {
+  local rows
+  KIMI_SEATS='seats: unavailable'
+  GPT_SEATS='seats: unavailable'
+  DS_SEATS='seats: unavailable'
+  QWEN_SEATS='seats: unavailable'
+  if [ ! -r "$PROFILES_FILE" ] || ! jq -e '
+      type == "object" and
+      all(to_entries[]; (.key | type) == "string" and
+        (.value | type) == "object" and
+        (.value.provider | type) == "string" and
+        (.value.model | type) == "string")
+    ' "$PROFILES_FILE" >/dev/null 2>&1; then
+    return 0
+  fi
+  rows=$(jq -r 'to_entries[] | [.value.provider, .key, .value.model] | @tsv' "$PROFILES_FILE" 2>/dev/null) || return 0
+  KIMI_SEATS=$(seat_text_for_provider 'kimi-coding' "$rows")
+  GPT_SEATS=$(seat_text_for_provider 'openai-codex' "$rows")
+  DS_SEATS=$(seat_text_for_provider 'deepseek' "$rows")
+  QWEN_SEATS=$(seat_text_for_provider 'qwen-token-plan' "$rows")
+}
+
+# Qwen process-local state. Two consecutive official pings calibrate the local
+# token meter without persisting provider payloads or browser credentials.
+QWEN_MTR_TS=0
+QWEN_MTR_T5=''
+QWEN_MTR_T7=''
+QWEN_METER_AVAILABLE=0
+QWEN_WALL_TEXT=''
+QWEN_GW_TS=0
+QWEN_GW_ATTEMPT_TS=0
+QWEN_GW_USAGE=''
+QWEN_GW_QCONF=''
+QWEN_GW_SPEC=''
+QWEN_GW_CEILW=''
+QWEN_ANCHOR_TS=0
+QWEN_ANCHOR_TOK7=0
+QWEN_ANCHOR_CRED=0
+QWEN_RATE=''
+FORCE_QWEN=0
+
+qwen_cookie_args() {
+  # Populate the named array with either an explicitly supplied Cookie header
+  # or curl's cookie-file option. Never read cookie material into panel output.
+  local -n target=$1
+  local cookie_file
+  target=()
+  if [ -n "${TELEMETRY_QWEN_COOKIE:-}" ]; then
+    target=(-H "Cookie: ${TELEMETRY_QWEN_COOKIE}")
+    return 0
+  fi
+  cookie_file="${TELEMETRY_QWEN_COOKIE_FILE:-$HOME/.local/state/qq/telemetry/qwen.cookies}"
+  if [ -f "$cookie_file" ]; then
+    target=(-b "$cookie_file")
+    return 0
+  fi
+  return 1
+}
+
+qwen_gateway_fetch() {
+  local sec endpoint
+  local -a cookie_args=()
+  [ -n "$TELEMETRY_TMP" ] || return 1
+  qwen_cookie_args cookie_args || return 1
+  sec="${TELEMETRY_QWEN_SEC_TOKEN:-}"
+  if [ -z "$sec" ]; then
+    sec=$(api_get 'https://home.qwencloud.com/tool/user/info.json' "${cookie_args[@]}" |
+      jq -r '.data.secToken // empty' 2>/dev/null || true)
+  fi
+  [ -n "$sec" ] || return 1
+
+  for endpoint in usage quota-config subscription; do
+    curl -sS -L -m 12 -X POST 'https://cs-data.qwencloud.com/data/api.json' \
+      -H 'Content-Type: application/x-www-form-urlencoded' \
+      -H 'Origin: https://home.qwencloud.com' \
+      -H 'Referer: https://home.qwencloud.com/billing/subscription/token-plan-individual' \
+      "${cookie_args[@]}" \
+      --data-urlencode 'product=sfm_bailian' \
+      --data-urlencode 'action=IntlBroadScopeAspnGateway' \
+      --data-urlencode "sec_token=$sec" \
+      --data-urlencode 'region=ap-southeast-1' \
+      --data-urlencode "params={\"Api\":\"zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/$endpoint\",\"Data\":{\"cornerstoneParam\":{\"domain\":\"home.qwencloud.com\",\"consoleSite\":\"QWENCLOUD\",\"console\":\"ONE_CONSOLE\",\"xsp_lang\":\"en-US\",\"protocol\":\"V2\",\"productCode\":\"p_efm\"}},\"V\":\"1.0\"}" \
+      >"$TELEMETRY_TMP/$endpoint" 2>/dev/null || return 1
+    jq -e '.data.DataV2.data.data != null' "$TELEMETRY_TMP/$endpoint" >/dev/null 2>&1 || return 1
+  done
+}
+
+qwen_meter() {
+  local sessions="$HOME/.pi/agent/sessions" state_dir cache_work manifest_tsv manifest_json
+  local changed_list matched_lines scanned_json totals nowms cutoff7 cutoff5 file mtime size encoded
+  local -a changed_files=()
+  [ -d "$sessions" ] || { QWEN_METER_AVAILABLE=0; return 1; }
+  [ -n "$TELEMETRY_TMP" ] || { QWEN_METER_AVAILABLE=0; return 1; }
+
+  state_dir=$(dirname -- "$METER_CACHE")
+  mkdir -p -- "$state_dir" 2>/dev/null || { QWEN_METER_AVAILABLE=0; return 1; }
+  cache_work="$TELEMETRY_TMP/meter-cache-source.json"
+  manifest_tsv="$TELEMETRY_TMP/meter-manifest.tsv"
+  manifest_json="$TELEMETRY_TMP/meter-manifest.json"
+  changed_list="$TELEMETRY_TMP/meter-changed.txt"
+  matched_lines="$TELEMETRY_TMP/meter-qwen-lines.txt"
+  scanned_json="$TELEMETRY_TMP/meter-scanned.json"
+  : >"$manifest_tsv"
+  if [ -r "$METER_CACHE" ] && jq -e '
+      type == "object" and
+      (.version | type) == "number" and
+      .version == 2
+    ' "$METER_CACHE" >/dev/null 2>&1; then
+    cp -- "$METER_CACHE" "$cache_work"
+  else
+    # Version 2 stores only events selected by the exact top-level message
+    # provider. Unversioned/older entries may contain pre-fix false matches, so
+    # starting with an empty cache deliberately forces one full corpus rescan.
+    printf '{"version":2}\n' >"$cache_work"
+  fi
+
+  nowms=$(( $(now_epoch) * 1000 ))
+  cutoff7=$(( nowms - QWEN_SESSION_WINDOW_DAYS * 24 * 3600 * 1000 ))
+  cutoff5=$(( nowms - 5 * 3600 * 1000 ))
+
+  # find(1) obtains stat metadata for every candidate. The generated Pi session
+  # paths contain neither tabs nor newlines, which keeps this one-pass manifest
+  # cheap even when the corpus contains hundreds of files.
+  while IFS= read -r -d '' file && IFS= read -r -d '' mtime && IFS= read -r -d '' size; do
+    mtime=${mtime%%.*}
+    [[ "$mtime" =~ ^[0-9]+$ && "$size" =~ ^[0-9]+$ ]] || continue
+    printf '%s\t%s\t%s\n' "$file" "$mtime" "$size" >>"$manifest_tsv"
+  done < <(find "$sessions" -type f -name '*.jsonl' -printf '%p\0%T@\0%s\0' 2>/dev/null)
+
+  jq -Rn '
+    reduce inputs as $line ({};
+      ($line | capture("^(?<path>.*)\\t(?<mtime>[0-9]+)\\t(?<size>[0-9]+)$")) as $row |
+      .[$row.path] = {mtime: ($row.mtime | tonumber), size: ($row.size | tonumber)})
+  ' <"$manifest_tsv" >"$manifest_json" || { QWEN_METER_AVAILABLE=0; return 1; }
+
+  jq -r --slurpfile cache "$cache_work" '
+    to_entries[] |
+    select(
+      ($cache[0][.key].mtime != .value.mtime) or
+      ($cache[0][.key].size != .value.size) or
+      (($cache[0][.key].events | type) != "array") or
+      (($cache[0][.key].walls | type) != "array")
+    ) |
+    .key | @base64
+  ' "$manifest_json" >"$changed_list" || { QWEN_METER_AVAILABLE=0; return 1; }
+  while IFS= read -r encoded; do
+    [ -n "$encoded" ] && changed_files+=("$(printf '%s' "$encoded" | base64 -d)")
+  done <"$changed_list"
+
+  : >"$matched_lines"
+  if [ "${#changed_files[@]}" -gt 0 ]; then
+    grep -H -E '"provider"[[:space:]]*:[[:space:]]*"qwen-token-plan"' \
+      "${changed_files[@]}" >"$matched_lines" 2>/dev/null || true
+  fi
+  jq -Rn --argjson cutoff7 "$cutoff7" '
+    reduce inputs as $raw ({};
+      ($raw | index(":")) as $separator |
+      if $separator == null then . else
+        ($raw[0:$separator]) as $path |
+        (try ($raw[$separator + 1:] | fromjson) catch null) as $message |
+        if $message == null then . else
+          .[$path] = (.[$path] // {events: [], walls: []}) |
+          if ($message.message.provider == "qwen-token-plan" and
+              $message.message.stopReason != "error" and
+              ($message.message.timestamp | type) == "number" and
+              ($message.message.usage.totalTokens | type) == "number" and
+              $message.message.timestamp >= $cutoff7) then
+            .[$path].events += [[$message.message.timestamp, $message.message.usage.totalTokens]]
+          elif ($message.message.provider == "qwen-token-plan" and
+              $message.message.stopReason == "error" and
+              (($message.message.errorMessage // "") |
+                test("quota has been exhausted"; "i")) and
+              ($message.message.timestamp // 0) >= $cutoff7) then
+            .[$path].walls += [{timestamp: ($message.message.timestamp // 0), text: "quota exhausted"}]
+          elif ($message.message.provider == "qwen-token-plan" and
+              $message.message.stopReason == "error" and
+              (($message.message.errorMessage // "") |
+                test("insufficient_quota"; "i")) and
+              ($message.message.timestamp // 0) >= $cutoff7) then
+            .[$path].walls += [{timestamp: ($message.message.timestamp // 0), text: "insufficient quota"}]
+          else . end
+        end
+      end)
+  ' <"$matched_lines" >"$scanned_json" || { QWEN_METER_AVAILABLE=0; return 1; }
+
+  jq -n --argjson cutoff7 "$cutoff7" --argjson cutoff5 "$cutoff5" \
+    --slurpfile manifest "$manifest_json" --slurpfile old "$cache_work" --slurpfile scanned "$scanned_json" '
+      def canonical_wall:
+        (.text // "") as $text |
+        if ($text | test("quota has been exhausted|^quota exhausted$"; "i")) then
+          {timestamp: .timestamp, text: "quota exhausted"}
+        elif ($text | test("insufficient_quota|^insufficient quota$"; "i")) then
+          {timestamp: .timestamp, text: "insufficient quota"}
+        else empty end;
+      reduce ($manifest[0] | to_entries[]) as $file ({version: 2};
+        ($old[0][$file.key] // {}) as $cached |
+        (($cached.mtime != $file.value.mtime) or
+          ($cached.size != $file.value.size) or
+          (($cached.events | type) != "array") or
+          (($cached.walls | type) != "array")) as $changed |
+        (if $changed then ($scanned[0][$file.key] // {events: [], walls: []}) else $cached end) as $source |
+        [$source.events[]? | select(.[0] >= $cutoff7)] as $events |
+        [$source.walls[]? | select((.timestamp | type) == "number" and .timestamp >= $cutoff7) | canonical_wall] as $walls |
+        .[$file.key] = {
+          mtime: $file.value.mtime,
+          size: $file.value.size,
+          sum7d: ([$events[]? | .[1]] | add // 0),
+          sum5h: ([$events[]? | select(.[0] >= $cutoff5) | .[1]] | add // 0),
+          events: $events,
+          walls: $walls
+        })
+  ' >"$TELEMETRY_TMP/meter-cache-new.json" || { QWEN_METER_AVAILABLE=0; return 1; }
+  chmod 600 "$TELEMETRY_TMP/meter-cache-new.json" 2>/dev/null || true
+  mv -f -- "$TELEMETRY_TMP/meter-cache-new.json" "$METER_CACHE" || {
+    QWEN_METER_AVAILABLE=0
+    return 1
+  }
+
+  totals=$(jq -r '
+    def entries: to_entries[] | select(.key != "version") | .value;
+    ([entries | .sum5h // 0] | add // 0),
+    ([entries | .sum7d // 0] | add // 0),
+    ([entries | .walls[]?] | sort_by(.timestamp) | (last.text // ""))
+  ' "$METER_CACHE" 2>/dev/null) || { QWEN_METER_AVAILABLE=0; return 1; }
+  QWEN_MTR_T5=$(sed -n '1p' <<<"$totals")
+  QWEN_MTR_T7=$(sed -n '2p' <<<"$totals")
+  QWEN_WALL_TEXT=$(sed -n '3,$p' <<<"$totals")
+  QWEN_METER_AVAILABLE=1
+}
+
+qwen_update() {
+  local now="$1" have_cookies=0 age spec
+  local usage qconf p5 p1w p5r p1wr ceil5n ceilwn tokenw used5 frac col
+  QWEN_WALL=''
+  QWEN_L1='usage    unavailable'
+  QWEN_L2=''
+
+  if [ "$((now - QWEN_MTR_TS))" -ge "$QWEN_MTR_CADENCE" ]; then
+    qwen_meter || true
+    QWEN_MTR_TS=$(now_epoch)
+  fi
+  if [ -n "$QWEN_WALL_TEXT" ]; then
+    QWEN_WALL="${C_RED}wall: ${QWEN_WALL_TEXT}${C_RESET}"
+  fi
+
+  if qwen_cookie_args _qwen_cookie_probe 2>/dev/null; then
+    have_cookies=1
+    # Both clocks must be due: the success clock controls freshness labels,
+    # while the attempt clock prevents a failed gateway from retrying each tick.
+    if { [ "$((now - QWEN_GW_TS))" -ge "$QWEN_GW_CADENCE" ] &&
+         [ "$((now - QWEN_GW_ATTEMPT_TS))" -ge "$QWEN_GW_CADENCE" ]; } ||
+       [ "$FORCE_QWEN" = 1 ]; then
+      QWEN_GW_ATTEMPT_TS=$now
+      if qwen_gateway_fetch; then
+        QWEN_GW_USAGE=$(cat "$TELEMETRY_TMP/usage")
+        QWEN_GW_QCONF=$(cat "$TELEMETRY_TMP/quota-config")
+        QWEN_GW_SPEC=$(jq -r '.data.DataV2.data.data.specCode // empty' "$TELEMETRY_TMP/subscription" 2>/dev/null || true)
+        [ -n "$QWEN_GW_SPEC" ] || QWEN_GW_SPEC="${TELEMETRY_QWEN_TIER:-}"
+        QWEN_GW_TS=$now
+      fi
+      FORCE_QWEN=0
+    fi
+  fi
+
+  spec="$QWEN_GW_SPEC"
+
+  # A response fetched this tick is vendor truth. Between official pings the
+  # calibrated, machine-observed projection fills the gap.
+  if [ -n "$QWEN_GW_USAGE" ] && [ -n "$QWEN_GW_QCONF" ] && [ "$QWEN_GW_TS" -gt 0 ] && [ "$((now - QWEN_GW_TS))" -le 5 ]; then
+    usage="$QWEN_GW_USAGE"
+    qconf="$QWEN_GW_QCONF"
+    p5=$(jq -r '.data.DataV2.data.data.per5HourPercentage // empty' <<<"$usage" 2>/dev/null || true)
+    p1w=$(jq -r '.data.DataV2.data.data.per1WeekPercentage // empty' <<<"$usage" 2>/dev/null || true)
+    p5r=$(jq -r '.data.DataV2.data.data.per5HourResetTime // empty' <<<"$usage" 2>/dev/null || true)
+    p1wr=$(jq -r '.data.DataV2.data.data.per1WeekResetTime // empty' <<<"$usage" 2>/dev/null || true)
+    ceil5n=$(tier_ceiling "$qconf" "$spec" five_hour || true)
+    ceilwn=$(tier_ceiling "$qconf" "$spec" weekly || true)
+    if [[ "$p1w" =~ ^[0-9]+([.][0-9]+)?$ && "$p1wr" =~ ^[0-9]+$ && "$ceilwn" =~ ^[0-9]+$ ]]; then
+      tokenw=$(awk -v p="$p1w" -v c="$ceilwn" 'BEGIN { printf "%d", p*c }')
+      frac="$p1w"
+      col=$(color_frac "$frac")
+      if [ "$QWEN_ANCHOR_TS" -gt 0 ] && [ "$QWEN_METER_AVAILABLE" = 1 ]; then
+        local delta_tokens delta_credits
+        delta_tokens=$((QWEN_MTR_T7 - QWEN_ANCHOR_TOK7))
+        delta_credits=$((tokenw - QWEN_ANCHOR_CRED))
+        if [ "$delta_tokens" -gt 0 ] && [ "$delta_credits" -ge 0 ]; then
+          QWEN_RATE=$(awk -v d="$delta_credits" -v t="$delta_tokens" 'BEGIN { printf "%.9f", d/t }')
+        fi
+      fi
+      if [ "$QWEN_METER_AVAILABLE" = 1 ]; then
+        QWEN_ANCHOR_TS=$(now_epoch)
+        QWEN_ANCHOR_TOK7=$QWEN_MTR_T7
+        QWEN_ANCHOR_CRED=$tokenw
+      fi
+      QWEN_GW_CEILW=$ceilwn
+      QWEN_SOURCE="${C_GREEN}official${C_RESET} (console gateway · all sources · pinged now)"
+      QWEN_L2="weekly   ${col}$(bar "$frac")${C_RESET} ${col}$(fmt_num "$tokenw") / $(fmt_num "$ceilwn")${C_RESET}   reset $(epoch_utc "$((p1wr / 1000))")   tier $spec"
+      if [[ "$p5" =~ ^[0-9]+([.][0-9]+)?$ && "$p5r" =~ ^[0-9]+$ && "$ceil5n" =~ ^[0-9]+$ ]]; then
+        used5=$(awk -v p="$p5" -v c="$ceil5n" 'BEGIN { printf "%d", p*c }')
+        col=$(color_frac "$p5")
+        QWEN_L1="5h       ${col}$(bar "$p5")${C_RESET} ${col}$(fmt_num "$used5") / $(fmt_num "$ceil5n")${C_RESET}   reset $(epoch_utc "$((p5r / 1000))")"
+      else
+        QWEN_L1="5h       ${C_DIM}not reported this cycle${C_RESET}"
+      fi
+      return
+    fi
+  fi
+
+  if [ "$have_cookies" = 1 ]; then
+    if [ "$QWEN_GW_TS" -gt 0 ]; then
+      age=$((now - QWEN_GW_TS))
+      [ "$age" -lt 0 ] && age=0
+      QWEN_SOURCE="${C_YELLOW}projection${C_RESET} (machine-observed · official ping every ${QWEN_GW_CADENCE}s · last official ${age}s ago)"
+    else
+      QWEN_SOURCE="${C_YELLOW}projection${C_RESET} (machine-observed · official gateway unreachable)"
+    fi
+  else
+    QWEN_SOURCE="${C_YELLOW}projection${C_RESET} (machine-observed · no cookie session · plan usage elsewhere not visible)"
+  fi
+
+  if [ "$QWEN_METER_AVAILABLE" != 1 ]; then
+    QWEN_L1='last-7d  unavailable (session meter)'
+    return
+  fi
+  if [ -n "$QWEN_RATE" ] && [ -n "$QWEN_GW_CEILW" ] && [ "$QWEN_ANCHOR_TS" -gt 0 ]; then
+    local projected
+    projected=$(calibrated_projection "$QWEN_ANCHOR_CRED" "$QWEN_RATE" "$QWEN_MTR_T7" "$QWEN_ANCHOR_TOK7")
+    frac=$(awk -v p="$projected" -v c="$QWEN_GW_CEILW" 'BEGIN { print (c>0) ? p/c : 0 }')
+    col=$(color_frac "$frac")
+    QWEN_L1="weekly   ${col}$(bar "$frac")${C_RESET} ${col}$(fmt_num "$projected") / $(fmt_num "$QWEN_GW_CEILW")${C_RESET}  ${C_DIM}~projected (calibrated)${C_RESET}"
+    QWEN_L2="5h       ${C_DIM}— official only · $(fmt_num "$QWEN_MTR_T5") machine-observed tokens${C_RESET}"
+  else
+    QWEN_L1="last-7d  ${C_DIM}$(fmt_num "$QWEN_MTR_T7") tokens on this machine · bar calibrates after 2 official pings${C_RESET}"
+  fi
+}
+
+fetch_all() {
+  local auth='' key access account body used limit resetw used5 limit5 reset5 frac col flag
+  local pct reset_at credits balance currency now
+  load_seats
+  KIMI_WEEK='weekly   unavailable'
+  KIMI_5H='5h       unavailable'
+  GPT_WEEK='7d       unavailable'
+  GPT_CREDITS='credits  unavailable'
+  DS_BAL='balance  unavailable'
+  [ -r "$AUTH_FILE" ] && auth=$(cat "$AUTH_FILE" 2>/dev/null || true)
+  now=$(now_epoch)
+
+  key=$(jq -r '."kimi-coding".api_key // ."kimi-coding".key // empty' <<<"$auth" 2>/dev/null || true)
+  if [ -n "$key" ]; then
+    body=$(api_get 'https://api.kimi.com/coding/v1/usages' -H "Authorization: Bearer $key")
+    used=$(jq -r '.usage.used // empty' <<<"$body" 2>/dev/null || true)
+    limit=$(jq -r '.usage.limit // empty' <<<"$body" 2>/dev/null || true)
+    resetw=$(jq -r '.usage.resetTime // empty' <<<"$body" 2>/dev/null || true)
+    used5=$(jq -r '.limits[0].detail.used // empty' <<<"$body" 2>/dev/null || true)
+    limit5=$(jq -r '.limits[0].detail.limit // empty' <<<"$body" 2>/dev/null || true)
+    reset5=$(jq -r '.limits[0].detail.resetTime // empty' <<<"$body" 2>/dev/null || true)
+    if [[ "$used" =~ ^[0-9]+([.][0-9]+)?$ && "$limit" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+      frac=$(awk -v u="$used" -v l="$limit" 'BEGIN { print (l>0) ? u/l : 0 }')
+      col=$(color_frac "$frac")
+      flag=''
+      [ "$(awk -v f="$frac" 'BEGIN { print (f>=1) ? 1 : 0 }')" = 1 ] && flag="${C_RED}EXHAUSTED${C_RESET}"
+      KIMI_WEEK="weekly   ${col}$(bar "$frac")${C_RESET} ${col}${used} / ${limit}${C_RESET}   reset $(iso_utc "$resetw")  $flag"
+    fi
+    if [[ "$used5" =~ ^[0-9]+([.][0-9]+)?$ && "$limit5" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+      frac=$(awk -v u="$used5" -v l="$limit5" 'BEGIN { print (l>0) ? u/l : 0 }')
+      col=$(color_frac "$frac")
+      KIMI_5H="5h       ${col}$(bar "$frac")${C_RESET} ${col}${used5} / ${limit5}${C_RESET}   reset $(iso_utc "$reset5")"
+    fi
+  fi
+
+  access=$(jq -r '."openai-codex".oauth.access // ."openai-codex".access // empty' <<<"$auth" 2>/dev/null || true)
+  account=$(jq -r '."openai-codex".oauth.accountId // ."openai-codex".accountId // empty' <<<"$auth" 2>/dev/null || true)
+  if [ -n "$access" ] && [ -n "$account" ]; then
+    body=$(api_get 'https://chatgpt.com/backend-api/wham/usage' -H "Authorization: Bearer $access" -H "ChatGPT-Account-Id: $account")
+    pct=$(jq -r '.rate_limit.primary_window.used_percent // empty' <<<"$body" 2>/dev/null || true)
+    reset_at=$(jq -r '.rate_limit.primary_window.reset_at // empty' <<<"$body" 2>/dev/null || true)
+    if [[ "$pct" =~ ^[0-9]+([.][0-9]+)?$ && "$reset_at" =~ ^[0-9]+$ ]]; then
+      frac=$(awk -v p="$pct" 'BEGIN { print p/100 }')
+      col=$(color_frac "$frac")
+      GPT_WEEK="7d       ${col}$(bar "$frac")${C_RESET} ${col}${pct}%${C_RESET}   reset $(epoch_utc "$reset_at")"
+    fi
+    credits=$(jq -r '.credits.balance // empty' <<<"$body" 2>/dev/null || true)
+    if [[ "$credits" =~ ^[0-9]+([.][0-9]+)?$ ]]; then GPT_CREDITS="credits  \$$credits"; else GPT_CREDITS='credits  n/a'; fi
+  fi
+
+  key=$(jq -r '.deepseek.api_key // .deepseek.key // empty' <<<"$auth" 2>/dev/null || true)
+  if [ -n "$key" ]; then
+    body=$(api_get 'https://api.deepseek.com/user/balance' -H "Authorization: Bearer $key")
+    balance=$(jq -r '.balance_infos[0].total_balance // empty' <<<"$body" 2>/dev/null || true)
+    currency=$(jq -r '.balance_infos[0].currency // empty' <<<"$body" 2>/dev/null || true)
+    if [[ "$balance" =~ ^[0-9]+([.][0-9]+)?$ ]]; then DS_BAL="balance  \$$balance $currency"; fi
+  fi
+
+  qwen_update "$now"
+}
+
+render() {
+  if [ -t 1 ]; then printf '\033[2J\033[H'; fi
+  printf '%s\n' "${C_BOLD} TELEMETRY — provider usage${C_RESET}  ${C_DIM}fetched $(date -u '+%Y-%m-%d %H:%M:%SZ')${C_RESET}"
+  printf '%s\n' ' ─────────────────────────────────────────────────────────────────────────────────────────────'
+  printf '%s\n' "${C_BOLD} KIMI FOR CODING${C_RESET}  ${C_DIM}${KIMI_SEATS}${C_RESET}"
+  printf '   %s\n' "$KIMI_WEEK"
+  printf '   %s\n' "$KIMI_5H"
+  printf '%s\n' "${C_BOLD} GPT — CODEX PRO${C_RESET}  ${C_DIM}${GPT_SEATS}${C_RESET}"
+  printf '   %s\n' "$GPT_WEEK"
+  printf '   %s\n' "$GPT_CREDITS"
+  printf '%s\n' "${C_BOLD} DEEPSEEK — NATIVE${C_RESET}  ${C_DIM}${DS_SEATS}${C_RESET}"
+  printf '   %s\n' "$DS_BAL"
+  printf '%s\n' "${C_BOLD} QWEN — TOKEN PLAN${C_RESET}  ${C_DIM}${QWEN_SEATS} · source: ${QWEN_SOURCE}${C_RESET}"
+  [ -n "$QWEN_L1" ] && printf '   %s\n' "$QWEN_L1"
+  [ -n "$QWEN_L2" ] && printf '   %s\n' "$QWEN_L2"
+  [ -n "$QWEN_WALL" ] && printf '   %s\n' "$QWEN_WALL"
+  printf '%s\n' ' ─────────────────────────────────────────────────────────────────────────────────────────────'
+  printf '%s\n' "${C_DIM}r refresh · q quit · auto-refresh ${REFRESH_SECS}s (Qwen official ping every ${QWEN_GW_CADENCE}s) · credentials never leave this machine${C_RESET}"
+}
+
+qq_telemetry_main() {
+  case "${1:-}" in
+    '') ONCE=0 ;;
+    --once) ONCE=1 ;;
+    --help|-h) usage; return 0 ;;
+    *) usage >&2; return 2 ;;
+  esac
+  [ "$#" -le 1 ] || { usage >&2; return 2; }
+
+  if [ "$ONCE" = 1 ]; then
+    fetch_all
+    render
+    return 0
+  fi
+
+  while true; do
+    fetch_all
+    render
+    key=''
+    if [ -t 0 ]; then
+      read -r -t "$REFRESH_SECS" -n1 key || key=''
+    else
+      sleep "$REFRESH_SECS"
+    fi
+    case "$key" in
+      q|Q) [ -t 1 ] && printf '\033[2J\033[H'; return 0 ;;
+      r|R) FORCE_QWEN=1 ;;
+    esac
+  done
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  qq_telemetry_main "$@"
+fi
