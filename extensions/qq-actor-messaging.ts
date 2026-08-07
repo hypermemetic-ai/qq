@@ -453,6 +453,7 @@ export default async function register(pi, deps = {}) {
   const inFlightRequests = new Map();
   const sessionState = {
     active: false,
+    authorized: false,
     reason: "never_started",
     started_at: 0,
     session_file: undefined,
@@ -602,6 +603,7 @@ export default async function register(pi, deps = {}) {
   }
 
   async function sendRecord({ kind, recipient, content, correlationId, urgency = "default", critical = false, origin, requestId }) {
+    if (!sessionState.authorized) throw new Error("outbound refused: session is not bound to an exact current T-189 source");
     if (!MESSAGE_TYPES.has(kind)) throw new Error("message kind is unsupported");
     if (!URGENCIES.has(urgency)) throw new Error("urgency is unsupported");
     if (urgency === "critical" && critical !== true) throw new Error("critical urgency requires explicit critical:true");
@@ -654,6 +656,7 @@ export default async function register(pi, deps = {}) {
   }
 
   async function publishFact({ kind, payload = {}, origin, requestId, correlationId }) {
+    if (!sessionState.authorized) throw new Error("outbound refused: session is not bound to an exact current T-189 source");
     if (!KIND_ID.test(kind ?? "")) throw new Error("fact kind is unsupported");
     const request = requestId ?? `req_${requestHash({ kind, payload, origin: origin ?? display, correlationId })}`;
     return sequence(async () => {
@@ -817,6 +820,20 @@ export default async function register(pi, deps = {}) {
     entry.criticalAttempted = true;
     // The exact T-189 fence precedes any delivery side effect.
     await bindingBeforeDelivery();
+    // Reconstruct an already-persisted critical receipt BEFORE any abort, so a
+    // post-append redelivery acknowledges the stable event without interrupting
+    // a second run.
+    const preExisting = await readReceipt(entry, entry.parsed);
+    if (preExisting) {
+      entry.injected = true;
+      entry.receipt = preExisting;
+      entry.done = true;
+      pending.delete(entry.event_id);
+      deliveries.delete(entry.event_id);
+      if (pending.size === 0) pendingGate = false;
+      await acknowledgeDelivery(entry, preExisting, "reconstructed persisted critical receipt");
+      return;
+    }
     const wasIdle = ctxNow?.isIdle?.() === true;
     if (!abortInFlight) {
       abortInFlight = true;
@@ -955,6 +972,7 @@ export default async function register(pi, deps = {}) {
   async function configureSession(event, ctx) {
     ctxNow = ctx;
     sessionState.active = false;
+    sessionState.authorized = false;
     receiverStopped = true;
     pending.clear();
     deliveries.clear();
@@ -973,6 +991,9 @@ export default async function register(pi, deps = {}) {
     if (record.actor.session_id !== undefined && record.actor.session_id !== ctx?.sessionManager?.getSessionId?.()) {
       throw Object.assign(new Error("session start refused: enable-record session ID differs from current Pi session"), { code: "session_mismatch" });
     }
+    // Only an exact current T-189 source binding admits outbound effects. A
+    // startup refusal (caught by Pi) must leave sending/publication inactive.
+    sessionState.authorized = true;
     void publicationLoop(sessionState.reason);
     void receiverLoop(sessionState.reason);
   }
@@ -1102,6 +1123,7 @@ export default async function register(pi, deps = {}) {
 
   pi.on("session_shutdown", () => {
     sessionState.active = false;
+    sessionState.authorized = false;
     receiverStopped = true;
     pending.clear();
     deliveries.clear();

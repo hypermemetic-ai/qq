@@ -333,6 +333,44 @@ assert.equal(oneoffReply.details.status, "accepted", `one-off reply refused: ${J
 assert.ok(calls.send.some((body) => body.recipient_id === "qq/client/live-1"), "one-off reply was not addressed to the received origin");
 receiptLive = false;
 
+// Post-append critical restart: a persisted critical receipt is reconstructed
+// before any abort, so redelivery does not interrupt a second run.
+receiptLive = true;
+const abortsBeforeCriticalRestart = aborted;
+const criticalAcksBeforeRestart = calls.acknowledge.filter((body) => body.event_id === "evt_critical").length;
+deliveries.push(delivery("evt_critical", "critical body", { urgency: "critical", kind: "action" }));
+await tick();
+assert.equal(aborted, abortsBeforeCriticalRestart, "critical restart aborted again before reconstructing the persisted receipt");
+assert.equal(calls.acknowledge.filter((body) => body.event_id === "evt_critical").length, criticalAcksBeforeRestart + 1, "critical restart did not acknowledge the reconstructed receipt");
+receiptLive = false;
+
+// Fail-closed outbound: a session whose startup binding check is refused cannot
+// send or publish under the configured Actor identity.
+{
+  const refusingMessages = [];
+  const refusingHandlers = new Map();
+  const refusingPi = {
+    on(name, handler) { refusingHandlers.set(name, handler); },
+    registerTool(definition) { this.tool = definition; },
+    async sendMessage(message) { refusingMessages.push(message); return "entry_refusing"; },
+  };
+  await register(refusingPi, {
+    enableRecord: record,
+    clientFactory: () => client,
+    bindingCall: async () => ({ value: undefined, reason: "accountable source fingerprints are unavailable" }),
+    listPanes: async () => panes,
+    sessionRead: async () => "",
+    sleep: async () => {},
+    abortableSleep: async () => {},
+  });
+  await refusingHandlers.get("session_start")({ reason: "startup" }, ctx).catch(() => {});
+  const refusedSend = await refusingPi.tool.execute("blocked-send", { action: "send", recipient: "qq/coordinator", content: "unauthorized" }, undefined, undefined, ctx);
+  assert.equal(refusedSend.details.status, "refused", "unauthorized session was allowed to send");
+  const refusedPublish = await refusingPi.tool.execute("blocked-publish", { action: "publish", kind: "task.changed", payload: {} }, undefined, undefined, ctx);
+  assert.equal(refusedPublish.details.status, "refused", "unauthorized session was allowed to publish");
+  assert.equal(refusingMessages.length, 0, "unauthorized session injected a message");
+}
+
 const status = await tool.value.execute("st0", { action: "status", event_id: "evt_out", wait_ms: 0 }, undefined, undefined, ctx);
 assert.equal(status.details.status, "current");
 assert.equal(calls.status[0].event_id, "evt_out");
