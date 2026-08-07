@@ -475,12 +475,20 @@ def _bounded_capture(command: list[str]) -> tuple[int, bytes, bytes]:
 
 def default_call(argv: list[str]) -> dict[str, Any]:
     configured = os.environ.get("QQ_HERDR_BIN")
-    executable = configured or shutil.which("herdr")
+    try:
+        executable = configured or shutil.which("herdr")
+    except (OSError, TypeError, ValueError) as error:
+        raise Refusal("Herdr is unavailable") from error
     if not executable:
         raise Refusal("Herdr is unavailable")
-    if configured and (not os.path.isabs(configured) or not os.path.isfile(configured)
-                       or not os.access(configured, os.X_OK)):
-        raise Refusal("QQ_HERDR_BIN must be one absolute executable file")
+    if configured:
+        try:
+            configured_ok = (os.path.isabs(configured) and os.path.isfile(configured)
+                             and os.access(configured, os.X_OK))
+        except (OSError, TypeError, ValueError):
+            configured_ok = False
+        if not configured_ok:
+            raise Refusal("QQ_HERDR_BIN must be one absolute executable file")
     operation = " ".join(argv[:2])
     try:
         returncode, stdout, stderr = _bounded_capture([executable, *argv])

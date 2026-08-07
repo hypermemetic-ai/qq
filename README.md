@@ -67,18 +67,29 @@ selected 0.81.1 release without lifecycle scripts:
 npm install --global --ignore-scripts @earendil-works/pi-coding-agent@0.81.1
 ```
 
-`bin/pi` is the checkout-owned PATH entrypoint. It asks `npm root -g` for the
-global package location and execs the package's stock `dist/cli.js`. A normal
-interactive Herdr launch first resolves its pane through `bin/qq-tab-role` and
-prepends one complete role prompt, exact role profile, and exact canonical
-Skill paths before stock Pi starts. That role is immutable for the process.
-Headless delegate runs, administrative and explicit noninteractive operations,
-and calls without a pane retain the caller's original argument vector. The
-wrapper refuses missing runtime dependencies and conflicting role/profile/Skill
-flags. After bootstrap, Pi updates use the ordinary `pi update` command. Ticket
+`bin/pi` is the checkout-owned PATH entrypoint. It finds the global stock Pi
+through `npm root -g` and validates its pinned 0.81.1 package identity, manifest,
+CLI, and same-package argument parser. Classification uses the parser's complete
+final result; parser or package drift refuses before a normal session. Exact
+package/config administration bypasses parser loading so ordinary `pi update`
+can repair drift. Before stock Pi starts, an interactive Herdr launch resolves
+its exact pane through `bin/qq-tab-role` and prepends the complete role prompt,
+profile, and canonical Skill paths. Its role stays fixed. Only parser-proven
+noninteractive calls retain their vector. Linked interactive calls require exact
+pane evidence; neither a dispatch marker nor a missing pane bypasses identity
+fences. The existing Pi runtime/reference Check pins this seam. Ticket
 implementation and tests do not install or update the live operator runtime.
-When landed-methodology proof is required, verify it in fresh
-linked and unlinked Pi sessions after merge.
+When landed-methodology proof is required, verify it in fresh linked and
+unlinked Pi sessions after merge.
+
+Complete startup identities exist for Architect, Coordinator, Change Owner,
+Runner, Implementer, Researcher, Reviewer, Observer, and OpenWiki Maintainer.
+Interactive tabs select one of the first four at process start, with Runner as
+the working-tab default; headless entrypoints select delegated roles. The
+versioned OpenWiki Maintainer prompt is ready for T-196's separately owned
+schedule-launcher cutover. Each complete prompt contains the one methodology
+kernel and receives only its exact policy-selected Skills. The display-only
+Backlog board is not a role or Pi session surface.
 
 ### Researcher-only native Context7
 
@@ -159,13 +170,17 @@ ambiguous, and non-Git contexts fail closed: they receive no qq guidance,
 Skills, prompts, tools, commands, or guards. Product membership and tracked
 files are not activation authority.
 
-At linked startup/reload the incumbent bootstrap snapshots canonical
-`AGENTS.md` and `CONCEPTS.md`, continues its prompt-root contribution, and
-registers the existing extension/tool set. Interactive role identity is not an
-extension lifecycle: `bin/pi` supplies the complete role prompt and exact Skill
-scope before stock Pi starts, after which Pi appends Repository-local
-`AGENTS.md` context normally. A trusted root `CONCEPTS.local.md` may append
-Repository vocabulary but cannot activate qq or redefine canonical terms.
+At linked startup/reload the incumbent bootstrap snapshots the non-empty
+`methodology/KERNEL.md` and `CONCEPTS.md`. It adds the exact kernel once to an
+ordinary linked prompt, omits a second copy when a complete role prompt already
+contains it, and includes trusted additive `CONCEPTS.local.md` vocabulary. It
+contributes only the versioned `prompts/` root; it never contributes the root
+`skills/` directory. The bootstrap also registers the existing extension/tool
+set. Interactive role identity is not an extension lifecycle: `bin/pi`
+supplies the complete role prompt and exact Skill paths before stock Pi starts.
+Pi appends the linked Repository's own `AGENTS.md` as native project context;
+qq's Repository-orientation `AGENTS.md` is never injected as universal
+methodology into another Repository.
 
 `/check-in [date | commit | PR number | PR URL]` reports every first-parent
 `origin/main` advance after the explicit baseline, or after the exact
@@ -252,13 +267,15 @@ bootstrap registers nothing. In a linked context it activates the complete
 bundle from this checkout. Source-only changes need no install step.
 
 A linked running session keeps its startup/reload snapshot. A later canonical
-`AGENTS.md`, `CONCEPTS.md`, Skill, prompt, or extension change sets one
-persistent footer status: `qq update available`. Repeated events coalesce and
-never add model-visible text, steer, or reload the session. A successful
-explicit `/reload` builds the new current snapshot and clears the status;
-shutdown closes its watchers. Ordinary canonical updates require no consumer
-Repository Change. A Change that breaks a durable external contract must own
-its explicit consumer migration and any required session reset.
+kernel, concepts, role manifest, role policy, tracked Skill, prompt, or
+extension change sets one persistent footer status: `qq update available`.
+Repeated events coalesce and never add model-visible text, steer, or reload the
+session. A successful explicit `/reload` builds the new methodology and prompt
+snapshot and clears the status; shutdown closes its process-local watchers.
+Startup role identity remains fixed for the Pi process. Ordinary canonical
+updates require no consumer Repository Change. A Change that breaks a durable
+external contract must own its explicit consumer migration and any required
+session reset.
 
 The Repository extension gives local feedback when Pi's built-in `write` or
 `edit` targets the normalized `backlog/` path of the checkout containing

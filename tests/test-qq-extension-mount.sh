@@ -72,6 +72,11 @@ assert.deepEqual(
   siblingFiles,
   "conditional bootstrap membership differs from the qq extension siblings",
 );
+assert.equal(
+  QQ_EXTENSION_MODULES.filter((specifier) => specifier === "./qq-actor-messaging.ts").length,
+  1,
+  "the production-inactive actor-messaging adapter must be mounted exactly once",
+);
 
 const unlinked = recordingPi();
 await register(unlinked.pi, { cwd: unlinkedRepository });

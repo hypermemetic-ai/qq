@@ -29,6 +29,8 @@ START_TIMEOUT_MS = 60_000
 PROMPT_TIMEOUT_MS = 60_000
 PROCESS_GRACE_SECONDS = 10
 PI_STARTUP_ARGS = ("--approve",)
+MAX_ROLE_BINDING_OUTPUT = 256 * 1024
+NAMED_TAB_ROLES = frozenset(("architect", "coordinator", "change_owner"))
 DOC_ID_RE = re.compile(r"doc-[1-9][0-9]*\Z")
 SAFE_STATE_RE = re.compile(r"[a-z][a-z0-9_-]*\Z")
 DESCRIPTION_BEGIN = "<!-- SECTION:DESCRIPTION:BEGIN -->"
@@ -66,6 +68,7 @@ class Engine:
         self.rails: list[dict[str, Any]] = []
         self.git = resolve_tool("git")
         self.herdr = resolve_tool("herdr")
+        self.tab_role: str | None = None
         self.context: dict[str, Any] = {}
 
     def rail(self, name: str, evidence: dict[str, Any]) -> None:
@@ -526,6 +529,17 @@ class Engine:
         transaction = transaction_state()
         label = self.transaction_label(context)
         prompt = self.transaction_prompt(context)
+        try:
+            self.tab_role = resolve_owned_tab_role()
+            transaction["role_binding"]["tool"] = self.tab_role
+        except OperationalError as error:
+            transaction["role_binding"]["status"] = "unavailable"
+            transaction["role_binding"]["error"] = error.message
+            return self.error_receipt(
+                "The checkout-owned qq-tab-role rail is unavailable; no tab was created.",
+                context,
+                transaction,
+            ), 1
 
         create_args = [
             "tab",
@@ -583,6 +597,17 @@ class Engine:
 
         transaction["created_tab_id"] = created_tab
         transaction["created_pane_id"] = created_pane
+        role_bound = self.bind_created_tab_role(
+            home["workspace_id"], created_tab, transaction
+        )
+        if not role_bound:
+            transaction["cleanup"] = self.cleanup_pre_agent_tab(created_tab, home, transaction)
+            return self.error_receipt(
+                f"Change Owner role binding was refused or uncertain; cleanup outcome: {transaction['cleanup']}.",
+                context,
+                transaction,
+            ), 1
+
         agent_name = self.transaction_agent_name(context, created_pane)
         transaction["agent_name"] = agent_name
 
@@ -623,7 +648,9 @@ class Engine:
             transaction["agent_reinspection"] = live_evidence
             present = live_evidence.get("present")
             if explicit_pre_agent_failure and isinstance(present, bool) and not present:
-                transaction["cleanup"] = self.cleanup_created_tab(created_tab, home)
+                transaction["cleanup"] = self.cleanup_pre_agent_tab(
+                    created_tab, home, transaction
+                )
                 return self.error_receipt(
                     f"Pi startup was proven to fail before a live agent existed; cleanup outcome: {transaction['cleanup']}.",
                     context,
@@ -761,6 +788,99 @@ class Engine:
             "kind": agent.get("agent"),
         }
 
+    def bind_created_tab_role(
+        self, workspace_id: str, tab_id: str, transaction: dict[str, Any]
+    ) -> bool:
+        binding = transaction["role_binding"]
+        binding.update(
+            {
+                "workspace_id": workspace_id,
+                "tab_id": tab_id,
+                "requested_role": "change_owner",
+                "status": "attempted",
+            }
+        )
+        result = self.role_call(
+            [
+                "bind", "--workspace", workspace_id, "--tab", tab_id,
+                "--role", "change_owner",
+            ]
+        )
+        binding["observation"] = role_command_observation(result)
+        if result is None:
+            binding["status"] = "uncertain"
+            return False
+        if result.code == 0 and not result.timed_out and result.stderr == "":
+            try:
+                binding["result"] = parse_role_mutation_result(
+                    result.stdout,
+                    action="bind",
+                    workspace_id=workspace_id,
+                    tab_id=tab_id,
+                    role="change_owner",
+                )
+            except OperationalError as error:
+                binding["status"] = "uncertain"
+                binding["error"] = error.message
+                return False
+            binding["status"] = "bound"
+            return True
+        if result.code == 66 and not result.timed_out and result.stderr == "":
+            try:
+                binding["refusal"] = parse_role_refusal(result.stdout)
+                binding["status"] = "refused"
+            except OperationalError as error:
+                binding["status"] = "uncertain"
+                binding["error"] = error.message
+        else:
+            binding["status"] = "uncertain"
+        return False
+
+    def role_call(self, args: list[str]) -> CommandResult | None:
+        if self.tab_role is None:
+            return None
+        try:
+            return run([self.tab_role, *args], READ_TIMEOUT)
+        except OperationalError:
+            return None
+
+    def unbind_created_tab_role(
+        self, workspace_id: str, tab_id: str, transaction: dict[str, Any]
+    ) -> bool:
+        result = self.role_call(
+            ["unbind", "--workspace", workspace_id, "--tab", tab_id]
+        )
+        evidence = role_command_observation(result)
+        transaction["role_binding"]["unbind"] = evidence
+        if (
+            result is None
+            or result.code != 0
+            or result.timed_out
+            or result.stderr != ""
+        ):
+            evidence["status"] = "uncertain"
+            return False
+        try:
+            evidence["result"] = parse_role_mutation_result(
+                result.stdout,
+                action="unbind",
+                workspace_id=workspace_id,
+                tab_id=tab_id,
+            )
+        except OperationalError as error:
+            evidence["status"] = "uncertain"
+            evidence["error"] = error.message
+            return False
+        evidence["status"] = "confirmed"
+        return True
+
+    def cleanup_pre_agent_tab(
+        self, tab_id: str, home: dict[str, Any], transaction: dict[str, Any]
+    ) -> str:
+        if not self.unbind_created_tab_role(home["workspace_id"], tab_id, transaction):
+            return "role unbind not confirmed; exact created tab preserved"
+        return self.cleanup_created_tab(tab_id, home)
+
     def cleanup_created_tab(self, tab_id: str, home: dict[str, Any]) -> str:
         closed = self.herdr_call(["tab", "close", tab_id])
         if closed.code != 0 or closed.timed_out:
@@ -795,6 +915,152 @@ class Engine:
         except (OperationalError, Refusal):
             evidence["resource_reinspection"] = "inconclusive"
         return evidence
+
+
+def exact_keys(value: Any, keys: set[str]) -> bool:
+    return type(value) is dict and set(value) == keys
+
+
+def strict_json_object(text: str, label: str) -> dict[str, Any]:
+    if type(text) is not str:
+        raise OperationalError(f"{label} was not text.")
+    try:
+        size = len(text.encode("utf-8"))
+    except UnicodeError as error:
+        raise OperationalError(f"{label} was malformed JSON.") from error
+    if size > MAX_ROLE_BINDING_OUTPUT:
+        raise OperationalError(f"{label} exceeded its output bound.")
+
+    def pairs(items):
+        value: dict[str, Any] = {}
+        for key, item in items:
+            if key in value:
+                raise OperationalError(f"{label} contained duplicate JSON keys.")
+            value[key] = item
+        return value
+
+    def invalid_constant(_value):
+        raise OperationalError(f"{label} was malformed JSON.")
+
+    try:
+        value = json.loads(
+            text, object_pairs_hook=pairs, parse_constant=invalid_constant
+        )
+    except (json.JSONDecodeError, UnicodeError, RecursionError) as error:
+        raise OperationalError(f"{label} was malformed JSON.") from error
+    if type(value) is not dict:
+        raise OperationalError(f"{label} was not a JSON object.")
+    return value
+
+
+def parse_role_mutation_result(
+    text: str,
+    *,
+    action: str,
+    workspace_id: str,
+    tab_id: str,
+    role: str | None = None,
+) -> dict[str, Any] | None:
+    document = strict_json_object(text, f"qq-tab-role {action} output")
+    if not exact_keys(document, {"ok", "schema", "result"}):
+        raise OperationalError(f"qq-tab-role {action} returned an invalid envelope.")
+    ok = document["ok"]
+    schema = document["schema"]
+    if type(ok) is not bool or type(schema) is not str:
+        raise OperationalError(f"qq-tab-role {action} returned an invalid envelope.")
+    if ok is not True or schema != "qq.tab-role/v1":
+        raise OperationalError(f"qq-tab-role {action} returned an invalid envelope.")
+
+    value = document["result"]
+    if action == "unbind" and value is None:
+        return None
+    if not exact_keys(value, {"schema", "version", "workspace_id", "tab_id", "role"}):
+        raise OperationalError(
+            f"qq-tab-role {action} returned mismatched role-binding evidence."
+        )
+    result_schema = value["schema"]
+    version = value["version"]
+    result_workspace = value["workspace_id"]
+    result_tab = value["tab_id"]
+    result_role = value["role"]
+    if (
+        type(result_schema) is not str
+        or type(version) is not int
+        or type(result_workspace) is not str
+        or type(result_tab) is not str
+        or type(result_role) is not str
+    ):
+        raise OperationalError(
+            f"qq-tab-role {action} returned mismatched role-binding evidence."
+        )
+    if (
+        result_schema != "qq.tab-role/v1"
+        or version != 1
+        or result_workspace != workspace_id
+        or result_tab != tab_id
+        or result_role not in NAMED_TAB_ROLES
+        or (role is not None and result_role != role)
+    ):
+        raise OperationalError(
+            f"qq-tab-role {action} returned mismatched role-binding evidence."
+        )
+    return value
+
+
+def parse_role_refusal(text: str) -> dict[str, Any]:
+    document = strict_json_object(text, "qq-tab-role refusal output")
+    if not exact_keys(document, {"ok", "schema", "error"}):
+        raise OperationalError("qq-tab-role refusal returned an invalid envelope.")
+    ok = document["ok"]
+    schema = document["schema"]
+    error = document["error"]
+    if type(ok) is not bool or type(schema) is not str or not exact_keys(error, {"code", "message"}):
+        raise OperationalError("qq-tab-role refusal returned an invalid envelope.")
+    code = error["code"]
+    message = error["message"]
+    if type(code) is not str or type(message) is not str:
+        raise OperationalError("qq-tab-role refusal returned an invalid envelope.")
+    if ok is not False or schema != "qq.tab-role/v1" or code != "refused" or message == "":
+        raise OperationalError("qq-tab-role refusal returned an invalid envelope.")
+    return error
+
+
+def role_command_observation(result: CommandResult | None) -> dict[str, Any]:
+    if result is None:
+        return {
+            "exit_code": None,
+            "timed_out": None,
+            "stdout_bytes": None,
+            "stderr": None,
+        }
+    return {
+        "exit_code": result.code,
+        "timed_out": result.timed_out,
+        "stdout_bytes": len(result.stdout.encode("utf-8")),
+        "stderr": result.stderr[:500] or None,
+    }
+
+
+def resolve_owned_tab_role() -> str:
+    try:
+        source = Path(__file__).resolve(strict=True)
+        candidate = source.parent.parent / "qq-tab-role"
+        candidate_state = candidate.lstat()
+        canonical = candidate.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise OperationalError(
+            "The checkout-owned qq-tab-role executable is unavailable."
+        ) from error
+    if (
+        not stat.S_ISREG(candidate_state.st_mode)
+        or stat.S_ISLNK(candidate_state.st_mode)
+        or canonical != candidate
+        or candidate_state.st_uid != os.getuid()
+        or (candidate_state.st_mode & stat.S_IWOTH) != 0
+        or (candidate_state.st_mode & stat.S_IXUSR) == 0
+    ):
+        raise OperationalError("The checkout-owned qq-tab-role executable is unsafe.")
+    return str(candidate)
 
 
 def executable_file(path: Path) -> bool:
@@ -1303,6 +1569,15 @@ def transaction_state() -> dict[str, Any]:
         "created_tab_id": None,
         "created_pane_id": None,
         "agent_name": None,
+        "role_binding": {
+            "tool": None,
+            "workspace_id": None,
+            "tab_id": None,
+            "requested_role": "change_owner",
+            "status": "not_started",
+            "result": None,
+            "unbind": None,
+        },
         "pi_session_identity": None,
         "observed_state": None,
         "prompt_submission": {

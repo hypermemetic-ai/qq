@@ -81,6 +81,16 @@ async function methodologyResources(cwd, linked) {
     { reason: "startup", cwd },
     ctx,
   );
+  assert.deepEqual(
+    Object.keys(resources).sort(),
+    ["promptPaths"],
+    "linked methodology must contribute prompts and no Skill root",
+  );
+  assert.equal(
+    JSON.stringify(resources).includes(join(bundleRoot, "skills")),
+    false,
+    "linked methodology leaked the canonical Skill root",
+  );
   return resources;
 }
 

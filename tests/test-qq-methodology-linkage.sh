@@ -199,9 +199,14 @@ assert_equal "$(readlink -f "$TMP/non-git")" \
 
 bundle="$TMP/bundle"
 runtime_repo="$TMP/runtime-repository"
-mkdir -p "$bundle/skills/example" "$bundle/prompts" "$bundle/extensions" "$runtime_repo"
-printf 'AGENTS SNAPSHOT ONE\n' >"$bundle/AGENTS.md"
+mkdir -p "$bundle/methodology" "$bundle/skills/example" "$bundle/prompts" \
+  "$bundle/extensions" "$bundle/delegation/manifests/agents" \
+  "$bundle/delegation/policies" "$runtime_repo"
+printf '# qq methodology kernel\n\nKERNEL SNAPSHOT ONE\n' >"$bundle/methodology/KERNEL.md"
 printf 'CONCEPTS SNAPSHOT ONE\n' >"$bundle/CONCEPTS.md"
+printf 'QQ REPOSITORY AGENTS MUST NOT BE INJECTED\n' >"$bundle/AGENTS.md"
+printf 'role prompt one\n' >"$bundle/delegation/manifests/agents/example.md"
+printf 'role policy one\n' >"$bundle/delegation/policies/example.json"
 printf 'skill one\n' >"$bundle/skills/example/SKILL.md"
 printf 'prompt one\n' >"$bundle/prompts/example.md"
 printf 'extension one\n' >"$bundle/extensions/example.ts"
@@ -345,12 +350,14 @@ assert.ok(linked.registrations.includes("tool:linked_fixture_tool"));
 
 const linkedContext = context(true);
 await emit(linked, "session_start", { reason: "startup" }, linkedContext);
-assert.equal(watches.records.length, 5, "bootstrap did not watch the five canonical resource roots");
+assert.equal(watches.records.length, 7, "bootstrap did not watch the current canonical role resources");
 assert.deepEqual(
   watches.records.map((record) => record.path).sort(),
   [
-    join(bundleRoot, "AGENTS.md"),
+    join(bundleRoot, "methodology", "KERNEL.md"),
     join(bundleRoot, "CONCEPTS.md"),
+    join(bundleRoot, "delegation", "manifests", "agents"),
+    join(bundleRoot, "delegation", "policies"),
     join(bundleRoot, "skills"),
     join(bundleRoot, "prompts"),
     join(bundleRoot, "extensions"),
@@ -364,10 +371,8 @@ const [resources] = await emit(
   { reason: "startup", cwd: runtimeRepository },
   linkedContext,
 );
-assert.deepEqual(resources, {
-  skillPaths: [join(bundleRoot, "skills")],
-  promptPaths: [join(bundleRoot, "prompts")],
-});
+assert.deepEqual(resources, { promptPaths: [join(bundleRoot, "prompts")] });
+assert.equal(Object.hasOwn(resources, "skillPaths"), false, "linked bootstrap exposed a Skill root");
 
 const [firstTurn] = await emit(
   linked,
@@ -378,26 +383,32 @@ const [firstTurn] = await emit(
   },
   linkedContext,
 );
-assert.match(firstTurn.systemPrompt, /AGENTS SNAPSHOT ONE/);
+assert.equal((firstTurn.systemPrompt.match(/KERNEL SNAPSHOT ONE/gu) ?? []).length, 1);
 assert.match(firstTurn.systemPrompt, /CONCEPTS SNAPSHOT ONE/);
 assert.match(firstTurn.systemPrompt, /LOCAL VOCABULARY ONE/);
 assert.match(firstTurn.systemPrompt, /PROJECT AGENT CONTEXT/);
+assert.doesNotMatch(firstTurn.systemPrompt, /QQ REPOSITORY AGENTS MUST NOT BE INJECTED/);
 
+const kernelOne = "# qq methodology kernel\n\nKERNEL SNAPSHOT ONE";
 const [deduplicatedTurn] = await emit(
   linked,
   "before_agent_start",
   {
-    systemPrompt: "PI BASE\nAGENTS SNAPSHOT ONE",
-    systemPromptOptions: {
-      contextFiles: [{ path: "AGENTS.md", content: "AGENTS SNAPSHOT ONE\n" }],
-    },
+    systemPrompt: `COMPLETE ROLE PROMPT\n\n${kernelOne}`,
+    systemPromptOptions: { contextFiles: [] },
   },
   linkedContext,
 );
-assert.doesNotMatch(deduplicatedTurn.systemPrompt, /## Canonical AGENTS\.md/);
+assert.equal((deduplicatedTurn.systemPrompt.match(/KERNEL SNAPSHOT ONE/gu) ?? []).length, 1);
+assert.doesNotMatch(deduplicatedTurn.systemPrompt, /## Canonical methodology\/KERNEL\.md/);
 assert.match(deduplicatedTurn.systemPrompt, /CONCEPTS SNAPSHOT ONE/);
+assert.match(deduplicatedTurn.systemPrompt, /LOCAL VOCABULARY ONE/);
+assert.doesNotMatch(deduplicatedTurn.systemPrompt, /QQ REPOSITORY AGENTS MUST NOT BE INJECTED/);
 
-await writeFile(join(bundleRoot, "AGENTS.md"), "AGENTS SNAPSHOT TWO\n");
+await writeFile(
+  join(bundleRoot, "methodology", "KERNEL.md"),
+  "# qq methodology kernel\n\nKERNEL SNAPSHOT TWO\n",
+);
 await writeFile(join(bundleRoot, "CONCEPTS.md"), "CONCEPTS SNAPSHOT TWO\n");
 await writeFile(join(runtimeRepository, "CONCEPTS.local.md"), "LOCAL VOCABULARY TWO\n");
 for (const record of watches.records) {
@@ -417,7 +428,7 @@ const [snapshotTurn] = await emit(
   { systemPrompt: "PI BASE", systemPromptOptions: { contextFiles: [] } },
   linkedContext,
 );
-assert.match(snapshotTurn.systemPrompt, /AGENTS SNAPSHOT ONE/);
+assert.match(snapshotTurn.systemPrompt, /KERNEL SNAPSHOT ONE/);
 assert.match(snapshotTurn.systemPrompt, /CONCEPTS SNAPSHOT ONE/);
 assert.match(snapshotTurn.systemPrompt, /LOCAL VOCABULARY ONE/);
 assert.doesNotMatch(snapshotTurn.systemPrompt, /SNAPSHOT TWO/);
@@ -439,9 +450,9 @@ assert.equal(linkedContext.statuses.length, statusCountAfterShutdown);
 const replacementContext = context(true);
 await emit(linked, "session_start", { reason: "new" }, replacementContext);
 assert.deepEqual(replacementContext.statuses, [["qq-methodology-update", undefined]]);
-assert.equal(watches.records.length, 10, "replacement session did not replace all watchers");
+assert.equal(watches.records.length, 14, "replacement session did not replace all watchers");
 const replacementWatchers = watches.records.slice(firstSessionWatchers.length);
-assert.equal(replacementWatchers.length, 5);
+assert.equal(replacementWatchers.length, 7);
 assert.ok(
   replacementWatchers.every((record) => !record.closed),
   "replacement session armed a closed canonical watcher",
@@ -452,25 +463,26 @@ const [currentTurn] = await emit(
   { systemPrompt: "PI BASE", systemPromptOptions: { contextFiles: [] } },
   replacementContext,
 );
-assert.match(currentTurn.systemPrompt, /AGENTS SNAPSHOT TWO/);
+assert.match(currentTurn.systemPrompt, /KERNEL SNAPSHOT TWO/);
 assert.match(currentTurn.systemPrompt, /CONCEPTS SNAPSHOT TWO/);
 assert.match(currentTurn.systemPrompt, /LOCAL VOCABULARY TWO/);
-assert.doesNotMatch(currentTurn.systemPrompt, /AGENTS SNAPSHOT ONE/);
+assert.doesNotMatch(currentTurn.systemPrompt, /KERNEL SNAPSHOT ONE/);
 assert.doesNotMatch(currentTurn.systemPrompt, /CONCEPTS SNAPSHOT ONE/);
 assert.doesNotMatch(currentTurn.systemPrompt, /LOCAL VOCABULARY ONE/);
+assert.doesNotMatch(currentTurn.systemPrompt, /QQ REPOSITORY AGENTS MUST NOT BE INJECTED/);
 
-// A broken canonical snapshot fails the next boundary before status, watchers,
+// An empty canonical kernel fails the next boundary before status, watchers,
 // resources, or model context become active.
-await writeFile(join(bundleRoot, "AGENTS.md"), "");
+await writeFile(join(bundleRoot, "methodology", "KERNEL.md"), " \n");
 replacementWatchers[0].callback("change", "before-failed-boundary");
 await emit(linked, "session_shutdown", { reason: "fork" }, replacementContext);
 const failedBoundaryContext = context(true);
 await assert.rejects(
   () => emit(linked, "session_start", { reason: "fork" }, failedBoundaryContext),
-  /qq canonical methodology files must be non-empty text/,
+  /qq canonical kernel and concepts must be non-empty text/,
 );
 assert.deepEqual(failedBoundaryContext.statuses, []);
-assert.equal(watches.records.length, 10, "failed boundary armed canonical watchers");
+assert.equal(watches.records.length, 14, "failed boundary armed canonical watchers");
 const [failedResources] = await emit(
   linked,
   "resources_discover",
@@ -487,7 +499,7 @@ const [failedTurn] = await emit(
 assert.equal(failedTurn, undefined);
 
 // The factory keeps its earlier fail-closed contract as well: no linked or
-// sibling handlers are registered when canonical methodology is invalid.
+// sibling handlers are registered when the canonical kernel is invalid.
 let failedFactorySiblingCalls = 0;
 const failedFactory = runtime();
 await assert.rejects(
@@ -498,11 +510,14 @@ await assert.rejects(
     siblingRegisters: [() => failedFactorySiblingCalls++],
     watch: watcherHarness().watch,
   }),
-  /qq canonical methodology files must be non-empty text/,
+  /qq canonical kernel and concepts must be non-empty text/,
 );
 assert.deepEqual(failedFactory.registrations, []);
 assert.equal(failedFactorySiblingCalls, 0);
-await writeFile(join(bundleRoot, "AGENTS.md"), "AGENTS SNAPSHOT TWO\n");
+await writeFile(
+  join(bundleRoot, "methodology", "KERNEL.md"),
+  "# qq methodology kernel\n\nKERNEL SNAPSHOT TWO\n",
+);
 
 const untrusted = runtime();
 await register(untrusted.pi, {
@@ -524,6 +539,8 @@ const [untrustedTurn] = await emit(
   { systemPrompt: "PI BASE", systemPromptOptions: { contextFiles: [] } },
   untrustedContext,
 );
+assert.match(untrustedTurn.systemPrompt, /KERNEL SNAPSHOT TWO/);
+assert.match(untrustedTurn.systemPrompt, /CONCEPTS SNAPSHOT TWO/);
 assert.doesNotMatch(untrustedTurn.systemPrompt, /LOCAL VOCABULARY TWO/);
 
 JS

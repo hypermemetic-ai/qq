@@ -37,6 +37,9 @@ const MAX_CANONICAL_TEXT = 1024 * 1024;
 const MAX_SUBPROCESS_OUTPUT = 512 * 1024;
 const GIT_TIMEOUT_MS = 15000;
 const METHODOLOGY_KEY = "qq.methodology";
+const PINNED_PI_PACKAGE = "@earendil-works/pi-coding-agent";
+const PINNED_PI_VERSION = "0.81.1";
+const MAX_PINNED_PI_FILE = 2 * 1024 * 1024;
 const ADMIN_COMMANDS = new Set(["install", "remove", "uninstall", "update", "list", "config"]);
 const CONFLICTING_FLAGS = new Set([
   "--system-prompt", "--append-system-prompt", "--provider", "--model",
@@ -213,6 +216,118 @@ export function strictJson(text, label) {
   return new StrictJsonParser(text, label).parse();
 }
 
+async function canonicalPinnedPiFile(packageRoot, target, relativePath, label, executable = false) {
+  const expected = join(packageRoot, relativePath);
+  if (target !== expected) throw new Refusal(`${label} is outside the pinned stock Pi package`);
+  let state;
+  let canonical;
+  try { [state, canonical] = await Promise.all([lstat(target), realpath(target)]); }
+  catch { throw new Refusal(`${label} is unsafe or unavailable`); }
+  if (!state.isFile() || state.isSymbolicLink() || canonical !== target
+    || state.uid !== process.getuid() || (state.mode & fsConstants.S_IWOTH) !== 0
+    || (executable && (state.mode & fsConstants.S_IXUSR) === 0)
+    || state.size < 1 || state.size > MAX_PINNED_PI_FILE) {
+    throw new Refusal(`${label} is unsafe or unavailable`);
+  }
+  return target;
+}
+
+export async function loadPinnedPiParser(pointers) {
+  if (!exactObject(pointers, ["packageRoot", "manifest", "cli", "parser"])
+    || ![pointers.packageRoot, pointers.manifest, pointers.cli, pointers.parser]
+      .every((value) => typeof value === "string" && isAbsolute(value))) {
+    throw new Refusal("pinned stock Pi package pointers are malformed");
+  }
+  const packageRoot = pointers.packageRoot;
+  let packageState;
+  let canonicalPackage;
+  try {
+    [packageState, canonicalPackage] = await Promise.all([
+      lstat(packageRoot), realpath(packageRoot),
+    ]);
+  } catch {
+    throw new Refusal("pinned stock Pi package root is unsafe or unavailable");
+  }
+  if (!packageState.isDirectory() || packageState.isSymbolicLink()
+    || canonicalPackage !== packageRoot || packageState.uid !== process.getuid()
+    || (packageState.mode & fsConstants.S_IWOTH) !== 0) {
+    throw new Refusal("pinned stock Pi package root is unsafe or unavailable");
+  }
+  await Promise.all([
+    canonicalPinnedPiFile(packageRoot, pointers.manifest, "package.json", "pinned stock Pi manifest"),
+    canonicalPinnedPiFile(packageRoot, pointers.cli, join("dist", "cli.js"),
+      "pinned stock Pi CLI", true),
+    canonicalPinnedPiFile(packageRoot, pointers.parser, join("dist", "cli", "args.js"),
+      "pinned stock Pi argument parser"),
+  ]);
+
+  let manifestSource;
+  try { manifestSource = await readFile(pointers.manifest, "utf8"); }
+  catch { throw new Refusal("pinned stock Pi manifest is unsafe or unavailable"); }
+  const manifest = strictJson(manifestSource, "pinned stock Pi manifest");
+  if (manifest === null || typeof manifest !== "object" || Array.isArray(manifest)
+    || manifest.name !== PINNED_PI_PACKAGE || manifest.version !== PINNED_PI_VERSION) {
+    throw new Refusal(`stock Pi package must be ${PINNED_PI_PACKAGE}@${PINNED_PI_VERSION}`);
+  }
+
+  let parserModule;
+  try { parserModule = await import(pathToFileURL(pointers.parser).href); }
+  catch { throw new Refusal("pinned stock Pi argument parser module could not be loaded"); }
+  if (typeof parserModule?.parseArgs !== "function") {
+    throw new Refusal("pinned stock Pi argument parser has no parseArgs export");
+  }
+  return parserModule.parseArgs;
+}
+
+function validateParsedPiArgs(parsed) {
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)
+    || !Array.isArray(parsed.messages) || parsed.messages.some((value) => typeof value !== "string")
+    || !Array.isArray(parsed.fileArgs) || parsed.fileArgs.some((value) => typeof value !== "string")
+    || !(parsed.unknownFlags instanceof Map)
+    || [...parsed.unknownFlags].some(([key, value]) =>
+      typeof key !== "string" || (typeof value !== "string" && value !== true))
+    || !Array.isArray(parsed.diagnostics)
+    || parsed.diagnostics.some((diagnostic) =>
+      !exactObject(diagnostic, ["type", "message"])
+      || !["error", "warning"].includes(diagnostic.type)
+      || typeof diagnostic.message !== "string")) {
+    throw new Refusal("pinned stock Pi argument parser returned a malformed result");
+  }
+  for (const field of ["help", "version", "print"]) {
+    if (parsed[field] !== undefined && parsed[field] !== true) {
+      throw new Refusal("pinned stock Pi argument parser returned a malformed result");
+    }
+  }
+  if (parsed.mode !== undefined && !["text", "json", "rpc"].includes(parsed.mode)) {
+    throw new Refusal("pinned stock Pi argument parser returned a malformed result");
+  }
+  if (parsed.export !== undefined && typeof parsed.export !== "string") {
+    throw new Refusal("pinned stock Pi argument parser returned a malformed result");
+  }
+  if (parsed.listModels !== undefined
+    && parsed.listModels !== true && typeof parsed.listModels !== "string") {
+    throw new Refusal("pinned stock Pi argument parser returned a malformed result");
+  }
+  return parsed;
+}
+
+function parseCompletePiArgs(parsePiArgs, args) {
+  if (typeof parsePiArgs !== "function") {
+    throw new Refusal("pinned stock Pi argument parser dependency is unavailable");
+  }
+  let parsed;
+  try { parsed = parsePiArgs(Object.freeze([...args])); }
+  catch { throw new Refusal("pinned stock Pi argument parse failed"); }
+  return validateParsedPiArgs(parsed);
+}
+
+function parsedInvocationIsPassThrough(parsed) {
+  return parsed.diagnostics.some((diagnostic) => diagnostic.type === "error")
+    || parsed.version === true || parsed.help === true || parsed.listModels !== undefined
+    || Boolean(parsed.export) || parsed.print === true
+    || parsed.mode === "json" || parsed.mode === "rpc";
+}
+
 function manifestBody(source, role) {
   const lines = source.split("\n");
   if (lines[0] !== "---") throw new Refusal(`role manifest for ${role} has malformed frontmatter`);
@@ -271,12 +386,17 @@ export async function loadRoleSkillPolicy(options = {}) {
       throw new Refusal(`qq role-skill policy for ${role} is malformed`);
     }
   }
-  await Promise.all(value.inventory.map(async (skill) => {
-    const skillSource = await canonicalText(root, join("skills", skill, "SKILL.md"),
-      `canonical qq Skill ${skill}`);
-    const names = skillSource.split("\n").filter((line) => line === `name: ${skill}`);
+  const skillSourcePromises = [];
+  for (const skill of value.inventory) {
+    skillSourcePromises.push(canonicalText(root, join("skills", skill, "SKILL.md"),
+      `canonical qq Skill ${skill}`));
+  }
+  const skillSources = await Promise.all(skillSourcePromises);
+  for (let index = 0; index < value.inventory.length; index += 1) {
+    const skill = value.inventory[index];
+    const names = skillSources[index].split("\n").filter((line) => line === `name: ${skill}`);
     if (names.length !== 1) throw new Refusal(`canonical qq Skill ${skill} has mismatched identity`);
-  }));
+  }
   return Object.freeze({
     inventory: Object.freeze([...value.inventory]),
     roles: Object.freeze(Object.fromEntries(ROLE_NAMES.map((role) =>
@@ -319,25 +439,8 @@ export async function loadExecutionProfiles(options = {}) {
     [role, Object.freeze({ ...value[role] })])));
 }
 
-function invocationIsPassThrough(args, env) {
-  if (typeof env.QQ_DISPATCH_RUN_DIR === "string" && env.QQ_DISPATCH_RUN_DIR !== "") return true;
-  if (typeof env.HERDR_PANE_ID !== "string" || env.HERDR_PANE_ID === "") return true;
-  if (ADMIN_COMMANDS.has(args[0])) return true;
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (arg === "--") break;
-    if (["--help", "-h", "--version", "-v", "--print", "-p", "--export", "--list-models"].includes(arg)) {
-      return true;
-    }
-    if (arg === "--mode" && ["json", "rpc"].includes(args[index + 1])) return true;
-    if (/^--mode=(?:json|rpc)$/u.test(arg)) return true;
-  }
-  return false;
-}
-
 function conflictingFlag(args) {
   for (const arg of args) {
-    if (arg === "--") return undefined;
     if (CONFLICTING_FLAGS.has(arg)) return arg;
     const name = arg.startsWith("--") && arg.includes("=") ? arg.slice(0, arg.indexOf("=")) : undefined;
     if (name && CONFLICTING_FLAGS.has(name)) return name;
@@ -388,7 +491,8 @@ export async function methodologyIsLinked(options = {}) {
   const common = exactGitLine(commonResult.stdout);
   if (!common || !isAbsolute(common)) return false;
   try {
-    if (!(await stat(common)).isDirectory()) return false;
+    const commonState = await stat(common);
+    if (!commonState.isDirectory()) return false;
   } catch {
     return false;
   }
@@ -476,8 +580,9 @@ export async function buildLaunchSpec(originalArgs, options = {}) {
   if (!Array.isArray(originalArgs) || originalArgs.some((arg) => typeof arg !== "string" || arg.includes("\0"))) {
     throw new Refusal("Pi arguments contain NUL or non-string ambiguity");
   }
+  const parsed = parseCompletePiArgs(options.parsePiArgs, originalArgs);
   const env = options.env ?? process.env;
-  if (invocationIsPassThrough(originalArgs, env)) {
+  if (parsedInvocationIsPassThrough(parsed)) {
     return Object.freeze({ bound: false, args: Object.freeze([...originalArgs]) });
   }
   if (!(await methodologyIsLinked({ cwd: options.cwd ?? process.cwd(), env }))) {
@@ -530,13 +635,25 @@ export async function buildLaunchSpec(originalArgs, options = {}) {
 
 async function main(argv) {
   try {
-    if (argv.length < 2 || argv[0] !== "--cli" || !isAbsolute(argv[1]) || argv[2] !== "--") {
+    if (argv.length < 9
+      || argv[0] !== "--package" || !isAbsolute(argv[1])
+      || argv[2] !== "--manifest" || !isAbsolute(argv[3])
+      || argv[4] !== "--cli" || !isAbsolute(argv[5])
+      || argv[6] !== "--parser" || !isAbsolute(argv[7])
+      || argv[8] !== "--") {
       throw new Refusal("internal stock Pi launch arguments are malformed");
     }
-    const cli = argv[1];
-    const originalArgs = argv.slice(3);
-    const spec = await buildLaunchSpec(originalArgs);
-    process.execve(cli, [cli, ...spec.args], process.env);
+    const pointers = Object.freeze({
+      packageRoot: argv[1], manifest: argv[3], cli: argv[5], parser: argv[7],
+    });
+    const originalArgs = argv.slice(9);
+    if (ADMIN_COMMANDS.has(originalArgs[0])) {
+      process.execve(pointers.cli, [pointers.cli, ...originalArgs], process.env);
+      throw new Refusal("stock Pi exec unexpectedly returned");
+    }
+    const parsePiArgs = await loadPinnedPiParser(pointers);
+    const spec = await buildLaunchSpec(originalArgs, { parsePiArgs });
+    process.execve(pointers.cli, [pointers.cli, ...spec.args], process.env);
     throw new Refusal("stock Pi exec unexpectedly returned");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

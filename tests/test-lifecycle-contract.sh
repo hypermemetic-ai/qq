@@ -97,6 +97,7 @@ concepts = Path(sys.argv[1]).read_text(encoding="utf-8")
 prompt = Path(sys.argv[2]).read_text(encoding="utf-8")
 prompt_flat = " ".join(prompt.split())
 readme = Path(sys.argv[3]).read_text(encoding="utf-8")
+readme_flat = " ".join(readme.split())
 
 for phrase in (
     "Default-deny; execution unauthorized.",
@@ -129,7 +130,7 @@ for phrase in (
     assert phrase in prompt_flat, phrase
 assert "mark its Task Done" not in prompt
 assert "activation is performed separately after the Change lands" not in readme
-assert "verify it in fresh\nlinked and unlinked Pi sessions after merge" in readme
+assert "verify it in fresh linked and unlinked Pi sessions after merge" in readme_flat
 PY
 
 printf 'test-lifecycle-contract: pass\n'

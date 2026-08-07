@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 TESTS_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck disable=SC2034
 TEST_NAME=test-qq-role-identity
 # shellcheck source=tests/helpers.sh
 source "$TESTS_DIR/helpers.sh"
@@ -376,10 +377,19 @@ role_env=(TEST_HERDR_FIXTURE="$fixture" QQ_HERDR_BIN="$fake_herdr" QQ_TAB_ROLE_R
 
 # Fake only the final stock CLI. It records the exact exec argument vector and
 # asks the installed Pi 0.81.1 buildSystemPrompt to append context, Skills, cwd.
+# Its same-package parser module re-exports the installed pinned parser rather
+# than copying any Pi option grammar.
+STOCK_PACKAGE="$(npm root -g)/@earendil-works/pi-coding-agent"
+SYSTEM_PROMPT="$STOCK_PACKAGE/dist/core/system-prompt.js"
+STOCK_ARGS="$STOCK_PACKAGE/dist/cli/args.js"
+[ -f "$SYSTEM_PROMPT" ] || fail 'installed Pi system-prompt builder is missing'
+[ -f "$STOCK_ARGS" ] || fail 'installed Pi argument parser is missing'
+stock_version="$(node -e 'console.log(require(process.argv[1]).version)' "$STOCK_PACKAGE/package.json")"
+assert_equal 0.81.1 "$stock_version" 'installed stock Pi version drifted'
 fake_bin="$TMP/bin"
 global_root="$TMP/global/lib/node_modules"
 package="$global_root/@earendil-works/pi-coding-agent"
-mkdir -p "$fake_bin" "$package/dist"
+mkdir -p "$fake_bin" "$package/dist/cli"
 cat >"$fake_bin/npm" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -392,6 +402,9 @@ import { readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 const args = process.argv.slice(2);
+if (process.env.TEST_STOCK_REACHED_FILE) {
+  await writeFile(process.env.TEST_STOCK_REACHED_FILE, "reached\n");
+}
 if (process.env.TEST_READY_FILE) {
   await writeFile(process.env.TEST_READY_FILE, "ready\n");
   const deadline = Date.now() + 10000;
@@ -424,9 +437,16 @@ const fullPrompt = buildSystemPrompt({
 });
 await writeFile(process.env.TEST_OUTPUT, JSON.stringify({ args, cwd: process.cwd(), fullPrompt }) + "\n");
 JS
+cat >"$package/package.json" <<'JSON'
+{"name":"@earendil-works/pi-coding-agent","version":"0.81.1","type":"module"}
+JSON
+node --input-type=module - "$STOCK_ARGS" "$package/dist/cli/args.js" <<'JS'
+import { writeFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
+const [stockParser, target] = process.argv.slice(2);
+await writeFile(target, `export { parseArgs } from ${JSON.stringify(pathToFileURL(stockParser).href)};\n`);
+JS
 chmod 755 "$fake_bin/npm" "$package/dist/cli.js"
-SYSTEM_PROMPT="$(npm root -g)/@earendil-works/pi-coding-agent/dist/core/system-prompt.js"
-[ -f "$SYSTEM_PROMPT" ] || fail 'installed Pi system-prompt builder is missing'
 
 # Every activation assertion uses disposable Repositories. No test reads or
 # mutates this checkout's qq.methodology value.
@@ -774,16 +794,51 @@ expect_no_exec override-extension-short "$TMP/o12.json" -e /tmp/forged-extension
 expect_no_exec override-context "$TMP/o13.json" --no-context-files
 expect_no_exec override-context-short "$TMP/o14.json" -nc
 
-# Headless delegates, no-pane calls, administrative operations, and explicit
-# noninteractive modes preserve the original vector and never inspect Herdr.
+# Only mechanically administrative or explicitly noninteractive operations
+# preserve their vector. A dispatch marker and a missing pane grant no linked
+# interactive bypass, while the engine's complete headless delegate vector
+# remains unchanged without pane evidence.
 : >"$fixture/calls"
 pass_common=(TEST_GLOBAL_ROOT="$global_root" TEST_SYSTEM_PROMPT="$SYSTEM_PROMPT" \
   TEST_CONTEXT_FILE="$ROOT/AGENTS.md" PATH="$fake_bin:$PATH")
-env "${pass_common[@]}" TEST_OUTPUT="$TMP/headless.json" \
-  QQ_DISPATCH_RUN_DIR="$TMP/run dir" HERDR_PANE_ID=wRole:p1 \
-  "$WRAPPER" --system-prompt 'headless prompt' --model provider/model:xhigh --no-skills -p 'headless message'
-env -u QQ_DISPATCH_RUN_DIR -u HERDR_PANE_ID "${pass_common[@]}" TEST_OUTPUT="$TMP/no-pane.json" \
-  "$WRAPPER" --provider openai-codex --model 'model with spaces' -- --literal
+headless=(--approve --offline --mode json -p --system-prompt 'headless prompt' \
+  --model provider/model:xhigh --no-skills --no-context-files \
+  'Task: Read-and-perform:/tmp/BRIEF.md')
+env -u HERDR_PANE_ID "${pass_common[@]}" TEST_OUTPUT="$TMP/headless.json" \
+  QQ_DISPATCH_RUN_DIR="$TMP/run dir" "$WRAPPER" "${headless[@]}"
+
+set +e
+(
+  cd -- "$linked_primary"
+  env "${pass_common[@]}" TEST_OUTPUT="$TMP/forged-dispatch.json" \
+    QQ_DISPATCH_RUN_DIR="$TMP/forged" HERDR_PANE_ID=wRole:p1 \
+    "$WRAPPER" --system-prompt forged
+) >"$TMP/forged-dispatch.out" 2>"$TMP/forged-dispatch.err"
+forged_status=$?
+(
+  cd -- "$linked_primary"
+  env "${role_env[@]}" "${pass_common[@]}" TEST_OUTPUT="$TMP/forged-double-dash.json" \
+    QQ_DISPATCH_RUN_DIR="$TMP/forged" HERDR_PANE_ID=wRole:p1 \
+    "$WRAPPER" -- --system-prompt forged
+) >"$TMP/forged-double-dash.out" 2>"$TMP/forged-double-dash.err"
+forged_double_dash_status=$?
+(
+  cd -- "$linked_primary"
+  env -u QQ_DISPATCH_RUN_DIR -u HERDR_PANE_ID "${pass_common[@]}" \
+    TEST_OUTPUT="$TMP/no-pane.json" "$WRAPPER" 'linked interactive call'
+) >"$TMP/no-pane.out" 2>"$TMP/no-pane.err"
+no_pane_status=$?
+set -e
+assert_equal 69 "$forged_status" 'forged dispatch marker bypassed identity flags'
+assert_equal 69 "$forged_double_dash_status" 'double dash bypassed a later identity flag'
+assert_equal 69 "$no_pane_status" 'linked interactive no-pane call reached stock Pi'
+[[ ! -e "$TMP/forged-dispatch.json" ]] || fail 'forged dispatch reached stock Pi'
+[[ ! -e "$TMP/forged-double-dash.json" ]] || fail 'double-dash override reached stock Pi'
+[[ ! -e "$TMP/no-pane.json" ]] || fail 'linked interactive no-pane call reached stock Pi'
+assert_file_contains "$TMP/forged-dispatch.err" 'rejects identity override --system-prompt'
+assert_file_contains "$TMP/forged-double-dash.err" 'rejects identity override --system-prompt'
+assert_file_contains "$TMP/no-pane.err" 'requires one exact HERDR_PANE_ID'
+
 env -u QQ_DISPATCH_RUN_DIR "${pass_common[@]}" TEST_OUTPUT="$TMP/help.json" \
   HERDR_PANE_ID=wRole:p1 "$WRAPPER" --help --provider ignored
 env -u QQ_DISPATCH_RUN_DIR "${pass_common[@]}" TEST_OUTPUT="$TMP/admin.json" \
@@ -792,13 +847,14 @@ env -u QQ_DISPATCH_RUN_DIR "${pass_common[@]}" TEST_OUTPUT="$TMP/print.json" \
   HERDR_PANE_ID=wRole:p1 "$WRAPPER" -p 'print mode'
 env -u QQ_DISPATCH_RUN_DIR "${pass_common[@]}" TEST_OUTPUT="$TMP/rpc.json" \
   HERDR_PANE_ID=wRole:p1 "$WRAPPER" --mode rpc
-[[ ! -s "$fixture/calls" ]] || fail 'pass-through invocation inspected Herdr'
+[[ ! -s "$fixture/calls" ]] || fail 'classified pass-through or early refusal inspected Herdr'
 node - "$TMP" <<'JS'
 const fs = require("node:fs"), path = require("node:path");
 const root = process.argv[2];
 const cases = {
-  headless:["--system-prompt","headless prompt","--model","provider/model:xhigh","--no-skills","-p","headless message"],
-  "no-pane":["--provider","openai-codex","--model","model with spaces","--","--literal"],
+  headless:["--approve","--offline","--mode","json","-p","--system-prompt","headless prompt",
+    "--model","provider/model:xhigh","--no-skills","--no-context-files",
+    "Task: Read-and-perform:/tmp/BRIEF.md"],
   help:["--help","--provider","ignored"], admin:["list","--model","ignored"],
   print:["-p","print mode"], rpc:["--mode","rpc"],
 };
@@ -806,6 +862,90 @@ for (const [name, expected] of Object.entries(cases)) {
   const actual = JSON.parse(fs.readFileSync(path.join(root, `${name}.json`), "utf8")).args;
   if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`${name}: ${JSON.stringify(actual)}`);
 }
+JS
+
+# Production classification consumes the installed pinned parser's complete
+# final result. This compact matrix covers current callers and control
+# composition without maintaining a qq option-consumption grammar.
+node --input-type=module - \
+  "$ROOT" "$linked_primary" "$WRAPPER" "$STOCK_ARGS" "$fake_bin" \
+  "$global_root" "$SYSTEM_PROMPT" "$TMP" <<'JS'
+import assert from "node:assert/strict";
+import { existsSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { spawnSync } from "node:child_process";
+const [root, linked, wrapper, stockArgsPath, fakeBin, globalRoot, systemPrompt, scratch] =
+  process.argv.slice(2);
+const { buildLaunchSpec } = await import(pathToFileURL(join(root, "bin/lib/qq_role_identity.mjs")));
+const { parseArgs } = await import(pathToFileURL(stockArgsPath));
+const noPane = { ...process.env, QQ_DISPATCH_RUN_DIR: "/tmp/forged" };
+delete noPane.HERDR_PANE_ID;
+const options = { cwd: linked, env: noPane, parsePiArgs: parseArgs };
+const reached = join(scratch, "stock-final-state-reached");
+const output = join(scratch, "stock-final-state-output.json");
+const wrapperEnv = {
+  ...noPane,
+  PATH: `${fakeBin}:${process.env.PATH}`,
+  TEST_GLOBAL_ROOT: globalRoot,
+  TEST_SYSTEM_PROMPT: systemPrompt,
+  TEST_CONTEXT_FILE: join(root, "AGENTS.md"),
+  TEST_OUTPUT: output,
+  TEST_STOCK_REACHED_FILE: reached,
+};
+const stockPasses = (argv) => {
+  const parsed = parseArgs(argv);
+  return parsed.diagnostics.some((diagnostic) => diagnostic.type === "error")
+    || parsed.version === true || parsed.help === true || parsed.listModels !== undefined
+    || Boolean(parsed.export) || parsed.print === true
+    || parsed.mode === "json" || parsed.mode === "rpc";
+};
+const passVectors = [
+  ["mode text then json", ["--mode", "text", "--mode", "json", "--system-prompt", "ENGINE ROLE"]],
+  ["empty export overwritten", ["--export", "", "--export", "session.jsonl", "--system-prompt", "EXPORT ONLY"]],
+  ["sticky print", ["--print", "--mode", "json", "--mode", "text", "--system-prompt", "PRINT ROLE"]],
+  ["sticky help", ["--help", "--mode", "text", "--system-prompt", "HELP ROLE"]],
+  ["sticky version", ["--version", "--mode", "text", "--system-prompt", "VERSION ROLE"]],
+  ["sticky list models", ["--list-models", "search", "--mode", "text", "--system-prompt", "LIST ROLE"]],
+  ["parser error", ["-z", "--system-prompt", "ERROR ROLE"]],
+  ["delegate", ["--approve", "--offline", "--mode", "json", "-p",
+    "--system-prompt", "ENGINE ROLE", "--model", "provider/model:xhigh",
+    "--no-skills", "--no-context-files", "Task: Read-and-perform:/tmp/BRIEF.md"]],
+  ["scheduled OpenWiki", ["--print", "--no-session", "--approve", "--skill",
+    join(root, "skills/openwiki-maintainer/SKILL.md"), "scheduled assignment"]],
+];
+const interactiveVectors = [
+  ["mode json then text", ["--mode", "json", "--mode", "text", "--system-prompt", "FORGED"]],
+  ["mode rpc then text", ["--mode", "rpc", "--mode", "text", "--system-prompt", "FORGED"]],
+  ["empty export", ["--export", "", "--system-prompt", "FORGED"]],
+  ["export overwritten empty", ["--export", "session.jsonl", "--export", "", "--system-prompt", "FORGED"]],
+  ["double dash caller override", ["--", "--system-prompt", "FORGED"]],
+  ["interactive no pane", ["ordinary interactive message"]],
+  ["caller model override", ["--model", "caller/model:xhigh", "ordinary interactive message"]],
+];
+for (const [label, argv] of passVectors) {
+  assert.equal(stockPasses(argv), true, `${label}: stock final state`);
+  const result = await buildLaunchSpec(argv, options);
+  assert.equal(result.bound, false, label);
+  assert.deepEqual(result.args, argv, label);
+  for (const path of [reached, output]) if (existsSync(path)) unlinkSync(path);
+  const wrapped = spawnSync(wrapper, argv, { cwd: linked, env: wrapperEnv, encoding: "utf8" });
+  assert.equal(wrapped.status, 0, `${label}: ${wrapped.stdout}\n${wrapped.stderr}`);
+  assert.equal(existsSync(reached), true, `${label}: fake stock Pi was not reached`);
+}
+for (const [label, argv] of interactiveVectors) {
+  assert.equal(stockPasses(argv), false, `${label}: stock final state`);
+  await assert.rejects(
+    () => buildLaunchSpec(argv, options),
+    /requires one exact HERDR_PANE_ID|rejects identity override/u,
+    label,
+  );
+  for (const path of [reached, output]) if (existsSync(path)) unlinkSync(path);
+  const wrapped = spawnSync(wrapper, argv, { cwd: linked, env: wrapperEnv, encoding: "utf8" });
+  assert.equal(wrapped.status, 69, `${label}: ${wrapped.stdout}\n${wrapped.stderr}`);
+  assert.equal(existsSync(reached), false, `${label}: reached fake stock Pi`);
+}
+console.log("pinned stock Pi complete final-state matrix: pass");
 JS
 
 # Normal interactive Herdr launches bind only for one exact common-local true.
