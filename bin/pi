@@ -7,11 +7,16 @@ fail() {
 }
 
 command -v npm >/dev/null 2>&1 || fail 'npm is unavailable; cannot locate stock Pi'
-if ! npm_root="$(npm root -g 2>/dev/null)" || [[ -z "$npm_root" || "$npm_root" != /* ]]; then
+command -v node >/dev/null 2>&1 || fail 'node is unavailable; cannot prepare stock Pi launch'
+if ! npm_root="$(npm root -g 2>/dev/null)" || [[ -z "$npm_root" || "$npm_root" != /* || "$npm_root" == *$'\n'* ]]; then
   fail 'cannot resolve the global npm package root'
 fi
 package="$npm_root/@earendil-works/pi-coding-agent"
 [[ -d "$package" ]] || fail 'the global @earendil-works/pi-coding-agent package is unavailable'
 cli="$package/dist/cli.js"
 [[ -f "$cli" && -x "$cli" ]] || fail 'the global Pi package executable dist/cli.js is unavailable'
-exec "$cli" "$@"
+
+self="$(readlink -f -- "${BASH_SOURCE[0]}")" || fail 'cannot resolve qq Pi wrapper'
+helper="$(dirname -- "$self")/lib/qq_role_identity.mjs"
+[[ -f "$helper" && ! -L "$helper" ]] || fail 'qq session-start role helper is unavailable'
+exec node "$helper" --cli "$cli" -- "$@"

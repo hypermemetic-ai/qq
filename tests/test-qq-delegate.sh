@@ -65,7 +65,9 @@ chmod +x "$fake_pi"
 
 fixture="$tmp/fixture"
 mkdir -p "$fixture/bin/lib" "$fixture/delegation/manifests/agents" \
-  "$fixture/delegation/policies" "$fixture/delegation/extensions"
+  "$fixture/delegation/policies" "$fixture/delegation/extensions" \
+  "$fixture/methodology" "$fixture/skills/diagnosing-bugs" \
+  "$fixture/skills/writing-for-clients"
 git init -q -b main "$fixture"
 git -C "$fixture" -c user.name=test -c user.email=test@example.invalid \
   -c commit.gpgSign=false commit --allow-empty -qm base
@@ -75,12 +77,18 @@ cp "$fake_pi" "$fixture/bin/pi"
 cp "$ROOT"/delegation/manifests/agents/*.md "$fixture/delegation/manifests/agents/"
 cp "$ROOT/delegation/policies/execution-profiles.json" \
   "$fixture/delegation/policies/execution-profiles.json"
+cp "$ROOT/delegation/policies/role-skills.json" \
+  "$fixture/delegation/policies/role-skills.json"
+cp "$ROOT/methodology/KERNEL.md" "$fixture/methodology/KERNEL.md"
+cp "$ROOT/skills/diagnosing-bugs/SKILL.md" "$fixture/skills/diagnosing-bugs/SKILL.md"
+cp "$ROOT/skills/writing-for-clients/SKILL.md" "$fixture/skills/writing-for-clients/SKILL.md"
 cp "$SERVICE_EXTENSION" "$fixture/delegation/extensions/qq-service-class.ts"
 chmod +x "$fixture/bin/qq-delegate" "$fixture/bin/pi" \
   "$fixture/bin/lib/qq-process-tree-supervisor.py"
 fixture_engine="$fixture/bin/qq-delegate"
 policy="$fixture/delegation/policies/execution-profiles.json"
 fixture_service_extension="$fixture/delegation/extensions/qq-service-class.ts"
+skill_policy="$fixture/delegation/policies/role-skills.json"
 
 new_run() {
   local name="$1"
@@ -137,13 +145,15 @@ assert args == [
 ], args
 PY
 python3 - "$fixture/delegation/manifests/agents/reviewer.md" \
-  "$happy_run/.system-prompt.md" <<'PY'
+  "$fixture/methodology/KERNEL.md" "$happy_run/.system-prompt.md" <<'PY'
 from pathlib import Path
 import sys
 source = Path(sys.argv[1]).read_text()
 lines = source.splitlines(keepends=True)
 close = [line.rstrip("\r\n") for line in lines].index("---", 1)
-assert Path(sys.argv[2]).read_text() == "".join(lines[close + 1:])
+body = "".join(lines[close + 1:]).strip()
+kernel = Path(sys.argv[2]).read_text().strip()
+assert Path(sys.argv[3]).read_text() == f"{body}\n\n{kernel}\n"
 PY
 [ "$(stat -c %a "$happy_run/.system-prompt.md")" = 600 ] || fail "system prompt mode is not 600"
 [ "$(stat -c %a "$happy_run/pi-config/auth.json")" = 600 ] || fail "staged auth mode is not 600"
@@ -178,6 +188,27 @@ jq -e --arg run "$happy_run" --arg cwd "$fixture" --arg session "$parent_session
 ' "$happy_run/TERMINAL" >/dev/null
 [ ! -e "$runtime_root/async-subagent-runs" ] \
   || fail "delegate recreated the retired async-subagent-runs bridge"
+
+# The role-skill policy is consumed by the engine. Implementer always receives
+# the canonical diagnosing-bugs path; an explicitly selected client-writing
+# Skill is additive and only canonical paths reach Pi.
+skilled_run="$(new_run skilled-implementer)"
+"$fixture_engine" run --role implementer --cwd "$fixture" \
+  --brief "$skilled_run/BRIEF.md" --skill writing-for-clients
+DIAGNOSING_SKILL="$fixture/skills/diagnosing-bugs/SKILL.md" \
+WRITING_SKILL="$fixture/skills/writing-for-clients/SKILL.md" \
+python3 - "$skilled_run/argv.nul" <<'PY'
+import os
+from pathlib import Path
+import sys
+args = Path(sys.argv[1]).read_bytes().split(b"\0")
+index = args.index(b"--no-skills")
+assert args[index:index + 6] == [
+    b"--no-skills", b"--skill", os.environ["DIAGNOSING_SKILL"].encode(),
+    b"--skill", os.environ["WRITING_SKILL"].encode(), b"--no-context-files",
+], args
+assert all(b"/.system/" not in value for value in args), args
+PY
 
 # PANE is a sanctioned preflight entry and a valid inherited pane replaces it
 # atomically. Malformed and absent pane identity never fail dispatch or create
@@ -308,6 +339,25 @@ expect_refusal foreign 'different Git common directory' \
 unknown_run="$(new_run unknown-role)"
 expect_refusal unknown-role "unsupported delegated role 'architect'" \
   "$fixture_engine" run --role architect --cwd "$fixture" --brief "$unknown_run/BRIEF.md"
+missing_skill_run="$(new_run missing-skill-value)"
+expect_policy_refusal missing-skill-value '--skill requires one explicit non-option name' \
+  "$fixture_engine" run --role reviewer --cwd "$fixture" --brief "$missing_skill_run/BRIEF.md" --skill
+malformed_skill_run="$(new_run malformed-skill)"
+expect_policy_refusal malformed-skill "malformed selected Skill 'Writing_For_Clients'" \
+  "$fixture_engine" run --role reviewer --cwd "$fixture" --brief "$malformed_skill_run/BRIEF.md" --skill Writing_For_Clients
+duplicate_skill_run="$(new_run duplicate-skill)"
+expect_policy_refusal duplicate-skill "duplicate selected Skill 'writing-for-clients'" \
+  "$fixture_engine" run --role reviewer --cwd "$fixture" --brief "$duplicate_skill_run/BRIEF.md" \
+    --skill writing-for-clients --skill writing-for-clients
+unknown_skill_run="$(new_run unknown-skill)"
+expect_policy_refusal unknown-skill "unknown or non-selectable Skill 'review'" \
+  "$fixture_engine" run --role reviewer --cwd "$fixture" --brief "$unknown_skill_run/BRIEF.md" --skill review
+disallowed_skill_run="$(new_run disallowed-skill)"
+expect_policy_refusal disallowed-skill "Skill 'writing-for-clients' is not allowed for role 'researcher'" \
+  "$fixture_engine" run --role researcher --cwd "$fixture" --brief "$disallowed_skill_run/BRIEF.md" --skill writing-for-clients
+for refused_run in "$missing_skill_run" "$malformed_skill_run" "$duplicate_skill_run" "$unknown_skill_run" "$disallowed_skill_run"; do
+  [ ! -e "$refused_run/output.jsonl" ] || fail "Skill refusal launched Pi: $refused_run"
+done
 
 reviewer_manifest="$fixture/delegation/manifests/agents/reviewer.md"
 cp "$reviewer_manifest" "$tmp/reviewer.original"
@@ -333,6 +383,12 @@ malformed_policy_run="$(new_run malformed-policy)"
 expect_refusal malformed-policy 'policy is malformed' \
   "$fixture_engine" run --role reviewer --cwd "$fixture" --brief "$malformed_policy_run/BRIEF.md"
 cp "$tmp/policy.original" "$policy"
+cp "$skill_policy" "$tmp/skill-policy.original"
+printf '{bad json\n' >"$skill_policy"
+malformed_skill_policy_run="$(new_run malformed-skill-policy)"
+expect_refusal malformed-skill-policy 'role-skill policy is unsafe or malformed' \
+  "$fixture_engine" run --role reviewer --cwd "$fixture" --brief "$malformed_skill_policy_run/BRIEF.md"
+cp "$tmp/skill-policy.original" "$skill_policy"
 python3 - "$policy" <<'PY'
 import json
 from pathlib import Path
@@ -497,10 +553,12 @@ import json
 from pathlib import Path
 import sys
 target, cwd, *runs = sys.argv[1:]
-Path(target).write_text(json.dumps([
+tickets = [
     {"role": "reviewer", "cwd": cwd, "brief": run + "/BRIEF.md"}
     for run in runs
-]))
+]
+tickets[0]["skills"] = ["writing-for-clients"]
+Path(target).write_text(json.dumps(tickets))
 PY
 batch_stdout="$tmp/batch.stdout"
 batch_stderr="$tmp/batch.stderr"
@@ -528,6 +586,13 @@ for run in "${batch_runs[@]}"; do
   [ -f "$run/TERMINAL" ] || fail "batch run lacks TERMINAL: $run"
   [ -f "$run/output.jsonl" ] || fail "batch run lacks output: $run"
 done
+WRITING_SKILL="$fixture/skills/writing-for-clients/SKILL.md" python3 - "${batch_runs[0]}/argv.nul" <<'PY'
+import os
+from pathlib import Path
+import sys
+args = Path(sys.argv[1]).read_bytes().split(b"\0")
+assert args[args.index(b"--skill") + 1] == os.environ["WRITING_SKILL"].encode(), args
+PY
 
 # Prompt-returning start accepts only after production preflight, returns the
 # exact durable identity, and does not wait for the fake Pi child lifecycle.
@@ -542,6 +607,7 @@ start_stderr="$tmp/start-success.stderr"
 start_started="$(date +%s%3N)"
 env HERDR_PANE_ID=pane:start_T208 "$fixture_engine" start \
   --role reviewer --cwd "$fixture" --brief "$start_run/BRIEF.md" \
+  --skill writing-for-clients \
   >"$start_stdout" 2>"$start_stderr"
 start_elapsed=$(( $(date +%s%3N) - start_started ))
 [[ "$start_elapsed" -lt 700 ]] || fail "start blocked on its child (${start_elapsed}ms)"
@@ -581,6 +647,14 @@ set +e
 start_wait_status=$?
 set -e
 assert_equal 0 "$start_wait_status" "wait did not preserve successful child status"
+WRITING_SKILL="$fixture/skills/writing-for-clients/SKILL.md" python3 - "$start_run/argv.nul" <<'PY'
+import os
+from pathlib import Path
+import sys
+args = Path(sys.argv[1]).read_bytes().split(b"\0")
+index = args.index(b"--no-skills")
+assert args[index:index + 4] == [b"--no-skills", b"--skill", os.environ["WRITING_SKILL"].encode(), b"--no-context-files"], args
+PY
 jq -e --arg id "$start_id" '.state == "terminal" and .run_id == $id and .exit_code == 0' \
   "$tmp/start-success.wait" >/dev/null
 "$fixture_engine" status "$start_run" >"$tmp/start-terminal.status"
@@ -685,7 +759,7 @@ kill -0 "$start_wedged_pid" 2>/dev/null \
 # and preserves exact per-run attribution through independent collection.
 start_batch_runs=()
 for name in start-batch-a start-batch-b start-batch-c; do
-  start_batch_runs+=("$(new_run "$name" 'sleep=1.5')")
+  start_batch_runs+=("$(new_run "$name" 'sleep=4')")
 done
 start_batch_json="$tmp/start-batch.json"
 python3 - "$start_batch_json" "$fixture" "${start_batch_runs[@]}" <<'PY'
@@ -693,15 +767,17 @@ import json
 from pathlib import Path
 import sys
 target, cwd, *runs = sys.argv[1:]
-Path(target).write_text(json.dumps([
+tickets = [
     {"role": "reviewer", "cwd": cwd, "brief": run + "/BRIEF.md"}
     for run in runs
-]))
+]
+tickets[1]["skills"] = ["writing-for-clients"]
+Path(target).write_text(json.dumps(tickets))
 PY
 start_batch_started="$(date +%s%3N)"
 "$fixture_engine" start-batch "$start_batch_json" >"$tmp/start-batch.stdout"
 start_batch_elapsed=$(( $(date +%s%3N) - start_batch_started ))
-[[ "$start_batch_elapsed" -lt 1000 ]] \
+[[ "$start_batch_elapsed" -lt 2500 ]] \
   || fail "start-batch waited through child lifecycles (${start_batch_elapsed}ms)"
 assert_equal 3 "$(wc -l <"$tmp/start-batch.stdout" | tr -d ' ')" \
   "start-batch did not emit one line per accepted ticket"
@@ -720,6 +796,13 @@ for run in "${start_batch_runs[@]}"; do
   jq -e --arg run "$run" '.run_dir == $run and .terminal.run_dir == $run' \
     "$tmp/$(basename "$run").collect" >/dev/null
 done
+WRITING_SKILL="$fixture/skills/writing-for-clients/SKILL.md" python3 - "${start_batch_runs[1]}/argv.nul" <<'PY'
+import os
+from pathlib import Path
+import sys
+args = Path(sys.argv[1]).read_bytes().split(b"\0")
+assert args[args.index(b"--skill") + 1] == os.environ["WRITING_SKILL"].encode(), args
+PY
 
 # Engine-owned output introduced after preflight is still refused when the
 # detached worker acquires its atomic claim.
@@ -1089,7 +1172,70 @@ missing_key_batch="$tmp/missing-key.json"
 printf '[{"role":"reviewer","cwd":"%s"}]\n' "$fixture" >"$missing_key_batch"
 expect_refusal missing-key-batch 'exact keys role,cwd,brief' \
   "$fixture_engine" batch "$missing_key_batch"
+malformed_skills_batch="$tmp/malformed-skills.json"
+printf '[{"role":"reviewer","cwd":"%s","brief":"/tmp/malformed/BRIEF.md","skills":"writing-for-clients"}]\n' "$fixture" >"$malformed_skills_batch"
+expect_policy_refusal malformed-skills-batch 'malformed Skill selections' \
+  "$fixture_engine" batch "$malformed_skills_batch"
 
-assert_equal 43 "$fail_closed_count" "fail-closed test count changed"
+# Duplicate JSON object members are refused by the shared batch decoder before
+# either blocking or detached ticket execution. Use valid delegated roles and
+# real private BRIEF.md paths so no later role/path check can mask the fence.
+duplicate_member_runs=()
+for specification in \
+    batch-selected-empty:reviewer:selected-empty:batch \
+    batch-empty-selected:implementer:empty-selected:batch \
+    start-selected-empty:implementer:selected-empty:start-batch \
+    start-empty-selected:reviewer:empty-selected:start-batch; do
+  IFS=: read -r label role order operation <<<"$specification"
+  duplicate_member_run="$(new_run "$label")"
+  duplicate_member_runs+=("$duplicate_member_run")
+  duplicate_member_json="$tmp/$label.json"
+  if [[ "$order" == selected-empty ]]; then
+    printf '[{"role":"%s","cwd":"%s","brief":"%s/BRIEF.md","skills":["writing-for-clients"],"skills":[]}]\n' \
+      "$role" "$fixture" "$duplicate_member_run" >"$duplicate_member_json"
+  else
+    printf '[{"role":"%s","cwd":"%s","brief":"%s/BRIEF.md","skills":[],"skills":["writing-for-clients"]}]\n' \
+      "$role" "$fixture" "$duplicate_member_run" >"$duplicate_member_json"
+  fi
+  expect_policy_refusal "$label" 'duplicate JSON object member' \
+    "$fixture_engine" "$operation" "$duplicate_member_json"
+  [ ! -s "$tmp/$label.refusal.stdout" ] \
+    || fail "$label emitted a plausible per-ticket summary"
+done
+for duplicate_member_run in "${duplicate_member_runs[@]}"; do
+  for artifact in .launch-claim LAUNCH TERMINAL output.jsonl stderr.log cache pi-config sessions; do
+    [ ! -e "$duplicate_member_run/$artifact" ] \
+      || fail "duplicate JSON member created child artifact: $duplicate_member_run/$artifact"
+  done
+done
+
+# object_pairs_hook applies recursively, not only to the ticket object.
+nested_duplicate_run="$(new_run nested-duplicate-member)"
+nested_duplicate_json="$tmp/nested-duplicate-member.json"
+printf '[{"role":"reviewer","cwd":"%s","brief":"%s/BRIEF.md","metadata":{"key":1,"key":2}}]\n' \
+  "$fixture" "$nested_duplicate_run" >"$nested_duplicate_json"
+expect_policy_refusal nested-duplicate-member 'duplicate JSON object member' \
+  "$fixture_engine" batch "$nested_duplicate_json"
+[ ! -s "$tmp/nested-duplicate-member.refusal.stdout" ] \
+  || fail 'nested duplicate member emitted a plausible per-ticket summary'
+for artifact in .launch-claim LAUNCH TERMINAL output.jsonl stderr.log cache pi-config sessions; do
+  [ ! -e "$nested_duplicate_run/$artifact" ] \
+    || fail "nested duplicate JSON member created child artifact: $nested_duplicate_run/$artifact"
+done
+
+duplicate_skills_batch="$tmp/duplicate-skills.json"
+printf '[{"role":"reviewer","cwd":"%s","brief":"/tmp/duplicate-skills/BRIEF.md","skills":["writing-for-clients","writing-for-clients"]}]\n' "$fixture" >"$duplicate_skills_batch"
+expect_policy_refusal duplicate-skills-batch 'duplicate Skill selections' \
+  "$fixture_engine" start-batch "$duplicate_skills_batch"
+unknown_skills_batch="$tmp/unknown-skills.json"
+printf '[{"role":"reviewer","cwd":"%s","brief":"/tmp/unknown-skills/BRIEF.md","skills":["review"]}]\n' "$fixture" >"$unknown_skills_batch"
+expect_policy_refusal unknown-skills-batch 'unknown or non-selectable Skill' \
+  "$fixture_engine" batch "$unknown_skills_batch"
+disallowed_skills_batch="$tmp/disallowed-skills.json"
+printf '[{"role":"researcher","cwd":"%s","brief":"/tmp/disallowed-skills/BRIEF.md","skills":["writing-for-clients"]}]\n' "$fixture" >"$disallowed_skills_batch"
+expect_policy_refusal disallowed-skills-batch 'Skill disallowed for role researcher' \
+  "$fixture_engine" start-batch "$disallowed_skills_batch"
+
+assert_equal 58 "$fail_closed_count" "fail-closed test count changed"
 printf 'test-qq-delegate: fail-closed cases: %s\n' "$fail_closed_count"
 printf 'test-qq-delegate: pass\n'

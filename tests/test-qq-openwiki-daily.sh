@@ -58,7 +58,7 @@ for required in \
   "worktree's bin/qq-openwiki --update" \
   'no semantic documentation change' \
   'bin/qq-openwiki-daily-finish no-change' \
-  'fresh independent code-review' \
+  'fresh independent review' \
   'review every correction delta' \
   'exactly one candidate commit' \
   'shell-tests' \

@@ -16,7 +16,7 @@ Begin only from the assignment; observing `main` advance is not a trigger.
    require a docs-only diff. After no-change, scheduled runs
    call `qq-openwiki-daily-finish no-change`.
 3. Run applicable documentation Checks and `git diff --check`, then invoke
-   `code-review` on the complete diff. Verify findings, correct only supported
+   `review` on the complete diff. Verify findings, correct only supported
    in-scope defects, rerun affected Checks, and review each correction delta.
 
 ## Deliver

@@ -456,7 +456,8 @@ assert len(start[2]) <= 48
 prompt_call = next(call for call in actual if call[:2] == ["agent","prompt"])
 prompt = prompt_call[3]
 for phrase in ("Take accountable ownership","already aligned; do not restart alignment","preserve all existing dirt",
-               "skills/deliver-change/SKILL.md","fresh-context code review and fix-delta review","Never merge",
+               "delegation/manifests/agents/change_owner.md","skills/delegate/SKILL.md","skills/review/SKILL.md",
+               "intrinsic Change Owner lifecycle","behavior Checks","fresh-context review and fix-delta review","Never merge",
                "Report progress and results in this tab","No originating conversation"):
     assert phrase in prompt, phrase
 assert "INHERITED_SECRET_SENTINEL" not in prompt

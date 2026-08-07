@@ -14,7 +14,7 @@ const extensionPath = resolve(extensionArg);
 const bundleRoot = resolve(bundleArg);
 const scratch = resolve(scratchArg);
 const agentDir = join(scratch, "agent");
-const expectedNames = ["bro", "check-in", "model-analysis", "model-benchmarks", "update"];
+const expectedNames = ["architect", "bro", "check-in", "model-analysis", "model-benchmarks", "update"];
 const expectedPaths = expectedNames.map((name) => join(bundleRoot, "prompts", `${name}.md`));
 const { DefaultResourceLoader } = await import(pathToFileURL(resolve(loaderArg)));
 const { default: registerMethodology } = await import(
@@ -138,7 +138,8 @@ await rm(scratch, { recursive: true, force: true });
 await mkdir(agentDir, { recursive: true });
 
 // qq itself has no project-local prompt copy; its linked mount supplies each
-// canonical prompt exactly once through stock Pi resource loading.
+// canonical prompt, including the native manual Architect template, exactly
+// once through stock Pi resource loading.
 const qqResources = await methodologyResources(bundleRoot, true);
 const qqLoader = await projectLoader(bundleRoot);
 mountPrompts(qqLoader, qqResources);

@@ -9,7 +9,7 @@ Delegate the reading; retain the judgment. The owner creates one private
 mode-700 run directory beneath the delegate runtime root and writes a complete
 `BRIEF.md` there with the exact question, decision, constraints, method,
 relevant Repository paths, Checks, and completion requirements. Keep researcher
-scratch beneath it. Use `delegate-batch`'s prompt-returning `start --role
+scratch beneath it. Use `delegate`'s prompt-returning `start --role
 researcher`; its exact identity, lifecycle, `TERMINAL`, envelope, retry-once,
 and failure rules apply. `run` is blocking compatibility. The owner spot-checks
 citations, judges findings, and writes the Repository artifact.

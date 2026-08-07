@@ -44,7 +44,8 @@ chmod 755 "$fake_bin/npm" "$package/dist/cli.js" "$decoy/dist/cli.js"
 
 (
   cd -- "$external_project"
-  TEST_TMP="$TMP" TEST_GLOBAL_ROOT="$global_root" \
+  env -u HERDR_PANE_ID -u QQ_DISPATCH_RUN_DIR \
+    TEST_TMP="$TMP" TEST_GLOBAL_ROOT="$global_root" \
     PI_CODING_AGENT_DIR="$decoy" PATH="$fake_bin:$PATH" \
     "$WRAPPER" --provider openai-codex --model 'model with spaces' -- --literal
 )

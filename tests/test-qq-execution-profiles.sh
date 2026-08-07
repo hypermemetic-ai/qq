@@ -8,19 +8,36 @@ TEST_NAME="test-qq-execution-profiles"
 source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd -- "$TESTS_DIR/.." && pwd -P)"
 POLICY="$ROOT/delegation/policies/execution-profiles.json"
+INTENT="$ROOT/delegation/policies/execution-profile-intent.json"
 
 [ -f "$POLICY" ] || fail "missing policy: $POLICY"
+[ -f "$INTENT" ] || fail "missing profile intent: $INTENT"
 jq -e '
-  (keys == ["architect", "compactor", "implementer", "observer", "orchestrator", "researcher", "reviewer"])
+  (keys == ["architect", "change_owner", "compactor", "coordinator", "implementer", "observer", "researcher", "reviewer", "runner"])
+  and (all(.[]; (keys | sort) == ["effort", "model", "provider", "serviceClass"] and .serviceClass == "provider-default"))
   and ([.architect, .compactor, .implementer, .observer, .reviewer] | all(
     . == {provider:"openai-codex", model:"gpt-5.6-sol", effort:"xhigh", serviceClass:"provider-default"}
   ))
-  and ([.orchestrator, .researcher] | all(
+  and (.change_owner == {provider:"kimi-coding", model:"k3", effort:"max", serviceClass:"provider-default"})
+  and ([.coordinator, .researcher] | all(
     . == {provider:"qwen-token-plan", model:"qwen3.8-max", effort:"xhigh", serviceClass:"provider-default"}
   ))
-' "$POLICY" >/dev/null || fail 'role policy does not match the operator-set interim map (K3 seats on GPT-5.6 while Kimi quota is unavailable)'
+  and (.runner == {provider:"deepseek", model:"deepseek-v4-flash", effort:"max", serviceClass:"provider-default"})
+' "$POLICY" >/dev/null || fail 'effective role policy does not match the approved map and temporary no-Kimi exception'
 
-for manifest in "$ROOT"/delegation/manifests/agents/{implementer,observer,researcher,reviewer}.md; do
+jq -e '
+  keys == ["canonical_k3_profile", "canonical_k3_roles", "openwiki_maintainer_profile_owner", "schema", "temporary_exceptions", "version"]
+  and .schema == "qq.execution-profile-intent/v1" and .version == 1
+  and .canonical_k3_roles == ["architect", "change_owner", "reviewer"]
+  and .canonical_k3_profile == {provider:"kimi-coding", model:"k3", effort:"max", serviceClass:"provider-default"}
+  and .openwiki_maintainer_profile_owner == "T-196"
+  and (.temporary_exceptions | keys == ["architect", "reviewer"])
+  and (all(.temporary_exceptions[];
+    . == {effective_provider:"openai-codex", effective_model:"gpt-5.6-sol", effective_effort:"xhigh", effective_service_class:"provider-default", reason:"kimi-quota-unavailable", restore_only_after:"explicit-operator-confirmation"}
+  ))
+' "$INTENT" >/dev/null || fail 'canonical K3 intent and temporary effective exceptions are not deterministic'
+
+for manifest in "$ROOT"/delegation/manifests/agents/*.md; do
   assert_file_not_matches "$manifest" '^(model|thinking):' 'canonical manifest retained compute authority'
 done
 
