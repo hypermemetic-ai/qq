@@ -1662,6 +1662,16 @@ def source_boundaries() -> None:
     index = (ROOT / "extensions/index.ts").read_text(encoding="utf-8")
     assert "event-plane" not in index.lower() and "event_plane" not in index.lower()
     assert not (ROOT / "extensions/qq-event-plane.ts").exists()
+    adapter_path = ROOT / "extensions/qq-actor-messaging.ts"
+    assert adapter_path.exists(), "separately authorized inactive adapter is absent"
+    adapter_source = adapter_path.read_text(encoding="utf-8")
+    assert "production-inert" in adapter_source
+    assert "EventPlaneClient" in adapter_source
+    assert "pi-intercom" not in adapter_source
+    assert "fallback" not in adapter_source.lower()
+    assert "mailbox" not in adapter_source.lower()
+    assert "registry" not in adapter_source.lower()
+    assert "polling" not in adapter_source.lower()
     assert "sqlite3.connect" in service_source and "AF_UNIX" not in service_source
     proofs.add("24 scope and absence")
 

@@ -26,6 +26,7 @@ export const QQ_EXTENSION_MODULES = Object.freeze([
   "./qq-session-lineage.ts",
   "./qq-communication-moments.ts",
   "./qq-context-lifecycle.ts",
+  "./qq-actor-messaging.ts",
 ]);
 
 function defaultRun(file, args, options = {}) {
@@ -342,6 +343,11 @@ async function loadSiblingRegisters(deps) {
   return registers;
 }
 
+async function invokeSiblingRegister(registerSibling, pi) {
+  const result = registerSibling(pi);
+  if (result && typeof result.then === "function") await result;
+}
+
 /** The sole globally mounted qq extension. It is inert unless the cwd's
  * Repository has exactly one valid local qq.methodology=true value. */
 export default async function register(pi, deps = {}) {
@@ -364,6 +370,6 @@ export default async function register(pi, deps = {}) {
     watch: deps.watch ?? watchFs,
   });
   for (const registerSibling of siblingRegisters) {
-    registerSibling(pi);
+    await invokeSiblingRegister(registerSibling, pi);
   }
 }
