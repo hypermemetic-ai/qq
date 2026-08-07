@@ -50,5 +50,11 @@ Keep it dense:
 - **Sources:** only sources that shaped the conclusion.
 - **Gaps:** what remains unverified and why.
 
+## Completion
+
+A round completes only when the operator has received a plain-language
+explanation of the findings without having to ask — publication alone is not
+completion.
+
 Skip this skill for syntax reminders, stable well-known facts, and one-hop
 Repository lookups.

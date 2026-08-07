@@ -90,3 +90,5 @@ After the human result, emit exactly one fenced `json` block headed `benchmark_s
 Use stable IDs within the JSON so `/model-analysis` can cite metrics, gates, vetoes, configurations, and sources without guessing. Do not put Markdown citation syntax inside JSON; use `citation_id` values that resolve through `sources`.
 
 A successful cycle must reconcile this handoff and its cited human explanation into the one dated cited T-216 research report required by current qq research governance. Preserve gaps and review findings there; producing this prompt output alone does not validate or apply it.
+
+The cycle is not complete when the report is written, reviewed, or published. It completes when the accountable session has delivered a plain-language explanation of what was found to the operator without the operator having to ask, per the research skill's completion rule.

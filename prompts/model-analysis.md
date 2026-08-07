@@ -82,6 +82,8 @@ A configuration is open-weight-eligible only when either:
 
 Count both states at face value without probability discount, but keep them visibly separate. Record exact-model applicability, timing or promised timing, first-party source, weight access location when available, license and use restrictions, and gaps. Do not infer eligibility from source availability, marketing labels, community expectations, a related model's weights, or third-party promises.
 
+Eligibility evidence must come from first-party venues actually opened for the exact model — both weight-hosting repositories and the owner's launch/release venues (launch post, changelog, release notes, and official organization listing). Before recording any capability-relevant candidate as open-weight-ineligible, open its first-party launch announcement and release venues; recording ineligibility without opening them is a discovery failure, not a finding. When a commitment exists, record its promised timing and venue; when none exists, record the venues checked and that none carried a commitment.
+
 Apply this additional-pair rule independently to each profile and only after fixing that profile's primary pair:
 
 1. If either primary configuration is open-weight-eligible, emit no additional pair and state that reason.
@@ -96,10 +98,9 @@ Present a cited report section containing:
 1. cycle/as-of date, consumed benchmark-spec identity/version/date, validation result, scope, and evidence limitations;
 2. source register with stable citation identifiers, source owner, title, URL, publication/update date when available, opened/access date, and whether it is primary or secondary;
 3. discovered candidate/configuration inventory, discovery basis, exact scoring configuration, disposition, and comparability status;
-4. one section per fixed profile with its distinct ranked primary pair, confidence, operating characteristics, veto/evidence-gate results, comparability notes, citations, and evidence gaps;
-5. each profile's conditional additional open-weight pair or explicit none/gap reason, with `available_now` and `announced` visibly distinct;
-6. explicit facts, inferences, gaps, confidence, unresolved disagreements, and benchmark blind spots; and
-7. explicit statements that openness did not alter capability rank and that no universal score or winner was produced.
+4. one section per fixed profile that leads with its open-weight result — the conditional additional open-weight pair or the explicit `not_required`/gap reason, with `available_now` and `announced` visibly distinct — followed by the profile's distinct ranked primary pair with confidence, operating characteristics, veto/evidence-gate results, comparability notes, citations, and evidence gaps (closed-model primaries remain fully reported as capability context, never dropped);
+5. explicit facts, inferences, gaps, confidence, unresolved disagreements, and benchmark blind spots; and
+6. explicit statements that openness did not alter capability rank and that no universal score or winner was produced.
 
 Citations must resolve to sources actually opened in this cycle. Do not cite search snippets as evidence.
 
@@ -121,3 +122,5 @@ After the human result, emit exactly one fenced `json` block headed `model_analy
 Use citation and configuration IDs consistently. Do not put Markdown citation syntax inside JSON; resolve `citation_id` values through `sources`.
 
 Reconcile both the consumed benchmark result and this model-analysis result into the same one dated cited T-216 research report under current qq governance. Preserve gaps and review findings there. Do not apply recommendations to installed/runtime configuration.
+
+The cycle is not complete when the report is written, reviewed, or published. It completes when the accountable session has delivered a plain-language explanation of what was found to the operator without the operator having to ask, per the research skill's completion rule.
