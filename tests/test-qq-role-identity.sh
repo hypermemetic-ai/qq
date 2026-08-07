@@ -379,7 +379,7 @@ role_env=(TEST_HERDR_FIXTURE="$fixture" QQ_HERDR_BIN="$fake_herdr" QQ_TAB_ROLE_R
 # asks the installed Pi 0.81.1 buildSystemPrompt to append context, Skills, cwd.
 # Its same-package parser module re-exports the installed pinned parser rather
 # than copying any Pi option grammar.
-STOCK_PACKAGE="$(npm root -g)/@earendil-works/pi-coding-agent"
+STOCK_PACKAGE="$(stock_pi_package_root)" || fail 'installed Pi package is missing'
 SYSTEM_PROMPT="$STOCK_PACKAGE/dist/core/system-prompt.js"
 STOCK_ARGS="$STOCK_PACKAGE/dist/cli/args.js"
 [ -f "$SYSTEM_PROMPT" ] || fail 'installed Pi system-prompt builder is missing'

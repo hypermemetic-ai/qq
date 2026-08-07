@@ -7,6 +7,25 @@ fail() {
   exit 1
 }
 
+stock_pi_package_root() {
+  local pi_bin pi_cli npm_root package
+  if pi_bin="$(command -v pi 2>/dev/null)" &&
+     pi_cli="$(readlink -f -- "$pi_bin" 2>/dev/null)" &&
+     [[ "$pi_cli" == */@earendil-works/pi-coding-agent/dist/cli.js ]]; then
+    package="${pi_cli%/dist/cli.js}"
+    [[ -f "$package/package.json" ]] || return 1
+    printf '%s\n' "$package"
+    return 0
+  fi
+
+  command -v npm >/dev/null 2>&1 || return 1
+  npm_root="$(npm root -g 2>/dev/null)" || return 1
+  [[ "$npm_root" == /* && "$npm_root" != *$'\n'* ]] || return 1
+  package="$npm_root/@earendil-works/pi-coding-agent"
+  [[ -f "$package/package.json" ]] || return 1
+  printf '%s\n' "$package"
+}
+
 assert_equal() {
   local expected="$1"
   local actual="$2"

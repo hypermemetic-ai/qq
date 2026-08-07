@@ -5,9 +5,8 @@ TEST_NAME=test-qq-role-prompts
 # shellcheck source=tests/helpers.sh
 source "$TESTS_DIR/helpers.sh"
 ROOT="$(cd -- "$TESTS_DIR/.." && pwd -P)"
-command -v npm >/dev/null 2>&1 || fail 'npm is required to locate stock Pi'
-NPM_ROOT="$(npm root -g)"
-SYSTEM_PROMPT="$NPM_ROOT/@earendil-works/pi-coding-agent/dist/core/system-prompt.js"
+STOCK_PACKAGE="$(stock_pi_package_root)" || fail 'stock Pi package is unavailable'
+SYSTEM_PROMPT="$STOCK_PACKAGE/dist/core/system-prompt.js"
 [ -f "$SYSTEM_PROMPT" ] || fail "stock Pi system-prompt builder is missing: $SYSTEM_PROMPT"
 
 node --input-type=module - "$ROOT" "$SYSTEM_PROMPT" <<'JS'
