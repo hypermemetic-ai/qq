@@ -200,6 +200,7 @@ const inbound = await peer.send({
   product_id: "qq",
   kind: "actor.message",
   schema_version: 1,
+  correlation_id: "live-corr-1",
   payload: { schema: "qq.actor-message/v1", record: { origin_id: "qq/coordinator", content: "live proof inbound", kind: "message", correlation_id: "live-corr-1", urgency: "default", critical: false } },
 });
 const inboundEventId = inbound.record.event_id;

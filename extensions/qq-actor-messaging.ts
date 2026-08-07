@@ -15,15 +15,22 @@ const MESSAGE_SCHEMA = "qq.actor-message/v1";
 const MESSAGE_KIND = "actor.message";
 const ATTENTION_KIND = "attention-needed";
 const LIFECYCLE_KIND = "pi.lifecycle";
-const RECEIVER_WAIT_MS = 1000;
+const CRITICAL_ATTEMPT_KIND = "pi.critical-abort";
+const RECEIVER_WAIT_MS = 30_000;
 const RECEIVER_RECONNECT_MS = 250;
-const LOGICAL_ID = /^[a-z][a-z0-9-]{0,62}\/[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,254}$/;
+const MAX_STATUS_WAIT_MS = 30_000;
+const ONE_OFF_REPLY_TTL_MS = 30_000;
+// These match T-209.16's exact wire grammar rather than accepting values the
+// Event Plane will later refuse.
+const LOGICAL_ID = /^[a-z][a-z0-9-]{0,62}\/[A-Za-z0-9][A-Za-z0-9._/-]{0,190}$/;
 const PRODUCT_ID = /^[a-z][a-z0-9-]{0,62}$/;
-const KIND_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,126}$/;
+const KIND_ID = /^[a-z][a-z0-9.-]{0,126}$/;
+const TOKEN_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,190}$/;
 const PANE_ID = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,63}$/;
 const ROLE_NAMES = new Set(["architect", "coordinator", "change_owner"]);
 const MESSAGE_TYPES = new Set(["message", "question", "reply", "action"]);
 const URGENCIES = new Set(["default", "urgent", "critical"]);
+const MODEL_URGENCIES = new Set(["default", "urgent"]);
 const TRANSPORT_TO_READABLE = Object.freeze({
   pending: "pending",
   in_flight: "delivering",
@@ -218,12 +225,16 @@ export async function readEnableRecord(env = process.env, path = enableRecordPat
   if (record.schema !== QQ_ACTOR_MESSAGING_SCHEMA || record.version !== 1) throw new Error("enable record schema/version is unsupported");
   if (typeof record.enabled !== "boolean") throw new Error("enable record enabled flag is malformed");
   if (!PRODUCT_ID.test(record.product_id ?? "")) throw new Error("enable record Product ID is malformed");
-  if (typeof record.event_plane_socket !== "string" || !record.event_plane_socket.startsWith("/")) throw new Error("enable record Event Plane socket is not absolute");
+  if (typeof record.event_plane_socket !== "string" || record.event_plane_socket.length > 4096 || record.event_plane_socket.includes("\0") || resolve(record.event_plane_socket) !== record.event_plane_socket) {
+    throw new Error("enable record Event Plane socket is not one canonical absolute path");
+  }
   if (!isObject(record.actor) || !exactKeys(record.actor, VALID_ACTOR_FIELDS)) throw new Error("enable record actor has an invalid shape");
   if (!ROLE_NAMES.has(record.actor.role)) throw new Error("enable record actor role is unsupported");
-  if (record.actor.role === "change_owner" ? !boundedText(record.actor.change, "Change identity", 256) : record.actor.change !== undefined) {
+  if (record.actor.role === "change_owner" ? !boundedText(record.actor.change, "Change identity", 191) : record.actor.change !== undefined) {
     throw new Error("enable record actor Change identity is invalid");
   }
+  const actorIdentity = record.actor.role === "change_owner" ? `${record.product_id}/change/${record.actor.change}` : `${record.product_id}/${record.actor.role}`;
+  if (!LOGICAL_ID.test(actorIdentity)) throw new Error("enable record actor identity is not Event Plane compatible");
   if (!PANE_ID.test(record.actor.pane ?? "")) throw new Error("enable record actor pane is malformed");
   if (resolveSessionFile(record.actor) === undefined && record.actor.session_file !== undefined) throw new Error("enable record session file is not absolute");
   optionalBoundedText(record.actor.session_id, "session ID", 128);
@@ -271,17 +282,27 @@ function requestHash(fields) {
 }
 
 function parseMessagePayload(record) {
-  const payload = record?.envelope?.payload;
+  const envelope = record?.envelope;
+  const payload = envelope?.payload;
   if (!isObject(payload) || payload.schema !== MESSAGE_SCHEMA) return undefined;
   if (!isObject(payload.record) || !exactKeys(payload.record, VALID_RECORD_FIELDS)) return undefined;
   const value = payload.record;
   if (!LOGICAL_ID.test(value.origin_id ?? "") || !KIND_ID.test(value.kind ?? "")) return undefined;
   if (!MESSAGE_TYPES.has(value.kind)) return undefined;
   if (typeof value.content !== "string" || value.content.length === 0 || value.content.length > 65536) return undefined;
-  if (value.correlation_id !== undefined && typeof value.correlation_id !== "string") return undefined;
+  if (value.correlation_id !== undefined && !TOKEN_ID.test(value.correlation_id)) return undefined;
   if (!URGENCIES.has(value.urgency ?? "default")) return undefined;
-  if (value.urgency === "critical" && value.critical !== true) return undefined;
-  if (value.kind === "reply" && !value.correlation_id) return undefined;
+  if (value.urgency === "critical" ? value.critical !== true : value.critical !== undefined && value.critical !== false) return undefined;
+  if ((value.kind === "question" || value.kind === "reply") && !value.correlation_id) return undefined;
+  // The Event Plane wire record and its actor payload are one authority, not
+  // two chances to choose an identity. Refuse any semantic mismatch before it
+  // can enter pending state, be rendered as another Actor, or gain reply custody.
+  if (record.record_type !== "send" || envelope.record_type !== "send") return undefined;
+  if (record.kind !== MESSAGE_KIND || envelope.kind !== MESSAGE_KIND) return undefined;
+  if (record.schema_version !== 1 || envelope.schema_version !== 1) return undefined;
+  if (record.origin_id !== value.origin_id || envelope.origin_id !== value.origin_id) return undefined;
+  if (record.recipient_id !== envelope.recipient_id || record.product_id !== envelope.product_id) return undefined;
+  if (envelope.correlation_id !== value.correlation_id) return undefined;
   return {
     schema: payload.schema,
     record: value,
@@ -385,9 +406,19 @@ function defaultNow() {
 export default async function register(pi, deps = {}) {
   const env = deps.env ?? process.env;
   const recordPath = deps.enablePath ?? enableRecordPath(env);
-  const record = deps.enableRecord !== undefined
-    ? (deps.enableRecord === null ? undefined : deps.enableRecord)
-    : await readEnableRecord(env, recordPath);
+  let record;
+  if (deps.enableRecord !== undefined) {
+    record = deps.enableRecord === null ? undefined : deps.enableRecord;
+  } else {
+    try {
+      record = await readEnableRecord(env, recordPath);
+    } catch {
+      // Invalid, unsupported, or unsafe activation state is production-inert.
+      // The explicit reader still throws for diagnostics, but the mounted
+      // extension must not perturb the rest of qq's methodology surface.
+      return;
+    }
+  }
   if (record === undefined) return;
 
   const now = deps.now ?? defaultNow;
@@ -431,7 +462,8 @@ export default async function register(pi, deps = {}) {
       const text = await readFile(path, "utf8").catch(() => "");
       const id = /^id:\s*(T-[A-Za-z0-9][A-Za-z0-9._-]*)\s*$/m.exec(text)?.[1];
       const active = /^status:\s*Active\s*$/m.test(text);
-      const assignee = /^assignee:\s*\n\s*-\s*([A-Za-z0-9][A-Za-z0-9._:/@+-]{0,254})\s*$/m.exec(text)?.[1];
+      const assigneeMatch = /^assignee:\s*\n\s*-\s*(?:'(@?[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,253})'|"(@?[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,253})"|(@?[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,253}))\s*$/m.exec(text);
+      const assignee = assigneeMatch?.slice(1).find(Boolean);
       if (id && active && assignee) tasks.push({ id, assignee, path });
     }
     return tasks;
@@ -445,49 +477,41 @@ export default async function register(pi, deps = {}) {
   const client = clientFactory(record.event_plane_socket);
   const display = displayIdentity(record);
   const consumerId = display;
-  const endpointToken = `qq-actor-messaging/${randomUUID()}`;
+  const consumerEndpoint = {
+    consumer_type: "recipient",
+    consumer_id: consumerId,
+    generation: 0,
+    endpoint_token: `qq-actor-messaging/${randomUUID()}`,
+  };
   const pending = new Map();
-  const deliveries = new Map();
   const statuses = new Map();
   const correlations = new Map();
-  const inFlightRequests = new Map();
   const sessionState = {
-    active: false,
-    authorized: false,
+    phase: "inactive",
+    epoch: 0,
     reason: "never_started",
     started_at: 0,
     session_file: undefined,
     session_id: undefined,
-    receiver_running: false,
-    last_publication: "none",
   };
   let ctxNow;
-  const currentClient = client;
   let publishActive = false;
   let receiverActive = false;
   let receiverStopped = false;
-  let pendingGate = false;
-  let receiptScanBusy = false;
-  let abortInFlight = false;
-  let lastSequence = Promise.resolve();
-
-  const sequence = (operation) => {
-    const run = lastSequence.then(operation, operation);
-    lastSequence = run.catch(() => {});
-    return run;
-  };
-
-  const notify = (message, level = "info") => {
-    try {
-      if (ctxNow?.hasUI) ctxNow.ui.notify(message, level);
-    } catch {
-      // UI notification must never affect transport truth.
-    }
-  };
 
   const updateStatus = (eventId, patch) => {
     const current = statuses.get(eventId) ?? {};
     statuses.set(eventId, { ...current, ...patch });
+  };
+
+  const releaseEntry = (entry) => {
+    if (entry?.event_id) pending.delete(entry.event_id);
+  };
+
+  const stopAuthorization = (reason) => {
+    sessionState.phase = "inactive";
+    receiverStopped = true;
+    sessionState.reason = reason;
   };
 
   async function exactBindingState() {
@@ -511,15 +535,33 @@ export default async function register(pi, deps = {}) {
     return state;
   }
 
-  async function bindingBeforeDelivery() {
-    if (record.actor.session_file !== undefined) {
-      const configured = record.actor.session_file;
-      const current = ctxNow?.sessionManager?.getSessionFile?.();
-      if (configured !== current) {
-        throw Object.assign(new Error(`delivery refused: configured session file differs from current Pi session`), { code: "session_mismatch" });
-      }
+  function requireSessionIdentity(reason) {
+    const currentFile = ctxNow?.sessionManager?.getSessionFile?.();
+    const currentId = ctxNow?.sessionManager?.getSessionId?.();
+    if (sessionState.session_file !== currentFile || sessionState.session_id !== currentId) {
+      throw Object.assign(new Error(`${reason} refused: current Pi session changed after authorization`), { code: "session_mismatch" });
     }
-    await requireCurrentBinding("delivery");
+    if (record.actor.session_file !== undefined && record.actor.session_file !== currentFile) {
+      throw Object.assign(new Error(`${reason} refused: enable-record session file differs from current Pi session`), { code: "session_mismatch" });
+    }
+    if (record.actor.session_id !== undefined && record.actor.session_id !== currentId) {
+      throw Object.assign(new Error(`${reason} refused: enable-record session ID differs from current Pi session`), { code: "session_mismatch" });
+    }
+  }
+
+  async function requireAuthorizedEffect(reason) {
+    const epoch = sessionState.epoch;
+    if (sessionState.phase !== "active") {
+      throw Object.assign(new Error(`${reason} refused: session has no exact current T-189 authorization`), { code: "authorization_refused" });
+    }
+    requireSessionIdentity(reason);
+    await requireCurrentBinding(reason);
+    // A queued operation must not survive a session reset or a failed
+    // replacement start merely because its earlier cached check passed.
+    if (epoch !== sessionState.epoch || sessionState.phase !== "active") {
+      throw Object.assign(new Error(`${reason} refused: session authorization changed before the effect`), { code: "authorization_refused" });
+    }
+    requireSessionIdentity(reason);
   }
 
   function bindingFacts() {
@@ -533,20 +575,19 @@ export default async function register(pi, deps = {}) {
   }
 
   async function guardAcknowledgement() {
+    await requireAuthorizedEffect("acknowledgement");
+    const epoch = sessionState.epoch;
     const reply = await bindingCall("guard", bindingFacts(), ["--acknowledgement"]).catch((error) => ({ value: undefined, reason: error instanceof Error ? error.message : String(error) }));
     if (!reply?.value) {
       throw Object.assign(new Error(`acknowledgement refused: T-189 acknowledgement guard is ${reply?.reason ?? "unavailable"}`), { code: "binding_refused" });
     }
+    // The guard itself is asynchronous. Close its shutdown/replacement window
+    // synchronously before the adjacent Event Plane acknowledgement call.
+    if (epoch !== sessionState.epoch || sessionState.phase !== "active") {
+      throw Object.assign(new Error("acknowledgement refused: session changed while T-189 guard was running"), { code: "authorization_refused" });
+    }
+    requireSessionIdentity("acknowledgement");
     return reply.value;
-  }
-
-  async function connectionGuard() {
-    return {
-      consumer_type: "recipient",
-      consumer_id: consumerId,
-      generation: 0,
-      endpoint_token: endpointToken,
-    };
   }
 
   async function listActorCandidatesInternal() {
@@ -593,98 +634,117 @@ export default async function register(pi, deps = {}) {
     if (!LOGICAL_ID.test(recipient)) throw new Error("recipient must be a readable logical Actor");
     const product = recipient.split("/", 1)[0];
     if (product !== record.product_id) throw new Error("recipient crosses the enabled Product boundary");
-    const parts = recipient.split("/");
-    if (parts[1] === "change" && parts.length === 3) return recipient;
-    if ((parts[1] === "architect" || parts[1] === "coordinator") && parts.length === 2) return recipient;
-    // A reply on an already-received initiated thread may return to the exact
-    // one-off origin without granting it a durable accountable identity.
+    // A reply on an already-received initiated thread may return only to that
+    // exact one-off origin. It does not add the origin to durable discovery.
     if (initiatedThread) return recipient;
-    throw new Error("recipient must be an accountable logical Actor");
+    const candidates = await listActorCandidatesInternal();
+    if (!candidates.some((candidate) => candidate.actor === recipient)) {
+      throw new Error("recipient is not a current accountable Actor proven by Product, Task/binding, Herdr, and connection evidence");
+    }
+    return recipient;
   }
 
   async function sendRecord({ kind, recipient, content, correlationId, urgency = "default", critical = false, origin, requestId }) {
-    if (!sessionState.authorized) throw new Error("outbound refused: session is not bound to an exact current T-189 source");
+    if (sessionState.phase !== "active") throw new Error("outbound refused: session is not bound to an exact current T-189 source");
     if (!MESSAGE_TYPES.has(kind)) throw new Error("message kind is unsupported");
     if (!URGENCIES.has(urgency)) throw new Error("urgency is unsupported");
     if (urgency === "critical" && critical !== true) throw new Error("critical urgency requires explicit critical:true");
-    if (kind === "reply" && !correlationId) throw new Error("reply requires correlation_id");
-    const inboundThread = kind === "reply" && correlationId ? correlations.get(correlationId) : undefined;
-    const initiatedThread = kind === "reply" && !!inboundThread?.origin_id && recipient === inboundThread.origin_id;
-    const target = await ensureActorIsDurable(recipient, { initiatedThread });
     const bodyContent = boundedText(content, "message content", 65536);
-    const request = requestId ?? `req_${requestHash({ kind, target, content: bodyContent, correlationId, urgency, critical, origin: origin ?? display })}`;
-    if (inFlightRequests.has(request)) return inFlightRequests.get(request);
-    const operation = sequence(async () => {
-      const messageRecord = {
-        origin_id: origin ?? display,
-        content: bodyContent,
-        kind,
-        urgency,
-        critical,
-      };
-      if (correlationId !== undefined) messageRecord.correlation_id = correlationId;
-      const envelope = {
-        producer_id: `${display}/adapter`,
-        request_id: request,
-        origin_id: origin ?? display,
-        recipient_id: target,
-        product_id: record.product_id,
-        kind: MESSAGE_KIND,
-        schema_version: 1,
-        payload: {
-          schema: MESSAGE_SCHEMA,
-          record: messageRecord,
-        },
-      };
-      const result = await currentClient.send(envelope);
-      const eventId = result.record.event_id;
-      const state = { transport: "accepted", event_id: eventId, request_id: request, kind, recipient: target, correlation_id: correlationId };
-      statuses.set(eventId, state);
-      if (correlationId) {
-        const existing = correlations.get(correlationId) ?? {};
-        correlations.set(correlationId, { ...existing, ...(kind === "question" ? { question_event_id: eventId } : kind === "reply" ? { reply_event_id: eventId } : {}) });
-      }
-      updateStatus(eventId, { transport: result.obligation_count === 0 ? "disposed" : "accepted" });
-      return normalizeResponse({ ...result, ...state }, "accepted");
-    });
-    inFlightRequests.set(request, operation);
-    try {
-      return await operation;
-    } finally {
-      inFlightRequests.delete(request);
+    let correlation = correlationId;
+    if (correlation !== undefined && !TOKEN_ID.test(correlation)) throw new Error("correlation_id is malformed");
+    if (kind === "question" && correlation === undefined) {
+      correlation = `corr_${requestHash({ recipient, content: bodyContent, origin: origin ?? display })}`;
     }
+    if (kind === "reply" && !correlation) throw new Error("reply requires correlation_id");
+    const inboundThread = kind === "reply" ? correlations.get(correlation) : undefined;
+    const initiatedThread = kind === "reply" && Boolean(inboundThread?.origin_id) && recipient === inboundThread.origin_id;
+    const target = await ensureActorIsDurable(recipient, { initiatedThread });
+    // A one-off origin gets one connected receive window. Its deadline was
+    // fixed when the inbound event was accepted, so response-loss retries keep
+    // the same request ID and exact normalized Event Plane bytes.
+    const deadlineAt = initiatedThread ? inboundThread.reply_deadline_at : undefined;
+    if (initiatedThread && !Number.isSafeInteger(deadlineAt)) throw new Error("initiated reply has no stable custody deadline");
+    const request = requestId ?? `req_${requestHash({ kind, target, content: bodyContent, correlation, urgency, critical, origin: origin ?? display, deadlineAt })}`;
+    if (!TOKEN_ID.test(request)) throw new Error("request_id is malformed");
+    // T-209.16 owns request idempotence and conflicting-content refusal. The
+    // adapter keeps no parallel request map or shadow custody state.
+    await requireAuthorizedEffect("outbound send");
+    const messageRecord = {
+      origin_id: origin ?? display,
+      content: bodyContent,
+      kind,
+      urgency,
+      critical,
+    };
+    if (correlation !== undefined) messageRecord.correlation_id = correlation;
+    const envelope = {
+      producer_id: `${display}/adapter`,
+      request_id: request,
+      origin_id: origin ?? display,
+      recipient_id: target,
+      product_id: record.product_id,
+      kind: MESSAGE_KIND,
+      schema_version: 1,
+      payload: { schema: MESSAGE_SCHEMA, record: messageRecord },
+    };
+    if (correlation !== undefined) envelope.correlation_id = correlation;
+    if (deadlineAt !== undefined) envelope.deadline_at = deadlineAt;
+    const result = await client.send(envelope);
+    const eventId = result.record.event_id;
+    const state = { transport: "accepted", event_id: eventId, request_id: request, kind, recipient: target, correlation_id: correlation };
+    statuses.set(eventId, state);
+    if (correlation) {
+      const existing = correlations.get(correlation) ?? { answered: false, resolved: false };
+      const patch = kind === "question"
+        ? { question_event_id: eventId, answered: false, resolved: existing.resolved === true }
+        : kind === "reply"
+          ? { reply_event_id: eventId, answered: true, resolved: existing.resolved === true }
+          : {};
+      correlations.set(correlation, { ...existing, ...patch });
+    }
+    updateStatus(eventId, { transport: result.obligation_count === 0 ? "disposed" : "accepted" });
+    return normalizeResponse({ ...result, ...state }, "accepted");
   }
 
   async function publishFact({ kind, payload = {}, origin, requestId, correlationId }) {
-    if (!sessionState.authorized) throw new Error("outbound refused: session is not bound to an exact current T-189 source");
+    if (sessionState.phase !== "active") throw new Error("outbound refused: session is not bound to an exact current T-189 source");
     if (!KIND_ID.test(kind ?? "")) throw new Error("fact kind is unsupported");
+    if (correlationId !== undefined && !TOKEN_ID.test(correlationId)) throw new Error("correlation_id is malformed");
     const request = requestId ?? `req_${requestHash({ kind, payload, origin: origin ?? display, correlationId })}`;
-    return sequence(async () => {
-      const envelope = {
-        producer_id: `${display}/adapter`,
-        request_id: request,
-        origin_id: origin ?? display,
-        product_id: record.product_id,
-        kind,
-        schema_version: 1,
-        payload,
-      };
-      if (correlationId === undefined) delete envelope.correlation_id;
-      const result = await currentClient.publish(envelope);
-      return normalizeResponse(result, "accepted");
-    });
+    if (!TOKEN_ID.test(request)) throw new Error("request_id is malformed");
+    await requireAuthorizedEffect("outbound publish");
+    const envelope = {
+      producer_id: `${display}/adapter`,
+      request_id: request,
+      origin_id: origin ?? display,
+      product_id: record.product_id,
+      kind,
+      schema_version: 1,
+      payload,
+    };
+    if (correlationId !== undefined) envelope.correlation_id = correlationId;
+    const result = await client.publish(envelope);
+    return normalizeResponse(result, "accepted");
   }
 
-  async function readReceipt(entry, parsed) {
-    if (!parsed) return undefined;
+  async function readReceipt(entry) {
+    const parsed = entry.parsed;
     const expectedFile = record.actor.session_file ?? ctxNow?.sessionManager?.getSessionFile?.();
     const expectedSession = record.actor.session_id ?? ctxNow?.sessionManager?.getSessionId?.();
     if (typeof expectedFile !== "string") return undefined;
     let text;
     try {
       text = await sessionRead(expectedFile);
-    } catch {
-      return undefined;
+    } catch (error) {
+      // Pi allocates a path before a brand-new session has any JSONL to write.
+      // Its own metadata-only startup state (or isPersisted=false) makes that
+      // one ENOENT a proven empty transcript, not an unavailable scan. Once Pi
+      // has a content/custom entry (or cannot say), absence still fails closed.
+      const loadedEntries = ctxNow?.sessionManager?.getEntries?.();
+      const onlyUnpersistedStartupMetadata = Array.isArray(loadedEntries) && loadedEntries.every((entry) => entry?.type === "model_change" || entry?.type === "thinking_level_change");
+      const provenEmpty = ctxNow?.sessionManager?.isPersisted?.() === false || onlyUnpersistedStartupMetadata;
+      if (error?.code === "ENOENT" && provenEmpty) return undefined;
+      throw Object.assign(new Error("persisted-session readback is unavailable"), { code: "readback_unavailable" });
     }
     let found;
     for (const line of text.split("\n")) {
@@ -698,302 +758,350 @@ export default async function register(pi, deps = {}) {
       if (item?.type !== "custom_message" || item.customType !== QQ_ACTOR_MESSAGING_CUSTOM_TYPE) continue;
       if (expectedSession !== undefined && item.session_id !== undefined && item.session_id !== expectedSession) continue;
       const content = typeof item.content === "string" ? item.content : "";
-      if (!content.includes(entry.record.event_id) || !content.includes(parsed.content_hash)) continue;
+      if (!content.includes(entry.event_id) || !content.includes(parsed.content_hash)) continue;
       const details = isObject(item.details) ? item.details : {};
-      if (details.event_id !== entry.record.event_id || details.content_hash !== parsed.content_hash || details.schema !== MESSAGE_SCHEMA) continue;
-      found = { entry_id: item.id, parent_id: item.parentId, session_file: expectedFile };
+      if (details.event_id !== entry.event_id || details.content_hash !== parsed.content_hash || details.schema !== MESSAGE_SCHEMA) continue;
+      if (typeof item.id !== "string" || item.id.length === 0) continue;
+      found = {
+        entry_id: item.id,
+        parent_id: item.parentId,
+        session_file: expectedFile,
+        critical_outcome: details.critical_outcome === "interrupted" || details.critical_outcome === "abort-ignored" || details.critical_outcome === "unknown" ? details.critical_outcome : undefined,
+      };
     }
     return found;
   }
 
-  async function acknowledgeDelivery(entry, receipt, reason) {
+  async function completeDelivery(entry, receipt, reason) {
     await guardAcknowledgement();
-    const guard = guardFromDelivery(entry.delivery);
-    const result = await currentClient.acknowledge(guard);
-    const delivered = { transport: "delivered", receipt, ack_result: result };
+    const result = await client.acknowledge(guardFromDelivery(entry.delivery));
+    const delivered = { transport: "delivered", receipt, ack_result: result, receipt_reason: reason };
     if (entry.criticalOutcome) delivered.critical_outcome = entry.criticalOutcome;
     updateStatus(entry.event_id, delivered);
-    if (entry.parsed.correlation_id) {
-      const existing = correlations.get(entry.parsed.correlation_id) ?? {};
-      correlations.set(entry.parsed.correlation_id, { ...existing, delivered: true, receipt, origin_id: entry.parsed.record.origin_id });
+    const correlation = entry.parsed.correlation_id;
+    if (correlation) {
+      const existing = correlations.get(correlation) ?? { answered: false, resolved: false };
+      const acceptedAt = Number.isSafeInteger(entry.record.accepted_at) ? entry.record.accepted_at : now();
+      correlations.set(correlation, {
+        ...existing,
+        delivered: true,
+        reply_deadline_at: existing.reply_deadline_at ?? acceptedAt + ONE_OFF_REPLY_TTL_MS,
+        receipt,
+        origin_id: entry.parsed.record.origin_id,
+        inbound_event_id: entry.event_id,
+        answered: entry.parsed.record.kind === "reply" || existing.answered === true,
+        resolved: existing.resolved === true,
+      });
     }
-    return result;
+    releaseEntry(entry);
   }
 
-  async function markRetry(entry, reason) {
-    try {
-      await currentClient.retry({ ...guardFromDelivery(entry.delivery), reason });
-      updateStatus(entry.event_id, { transport: "pending", last_reason: reason });
-    } catch (error) {
-      updateStatus(entry.event_id, { transport: "blocked", last_reason: error instanceof Error ? error.message : String(error) });
-    }
+  async function returnDelivery(entry, reason, blocked = false) {
+    await requireAuthorizedEffect(blocked ? "delivery block" : "delivery retry");
+    const operation = blocked ? "block" : "retry";
+    const result = await client[operation]({ ...guardFromDelivery(entry.delivery), reason });
+    updateStatus(entry.event_id, {
+      transport: blocked ? "blocked" : "pending",
+      last_reason: reason,
+      [`${operation}_result`]: result,
+    });
+    releaseEntry(entry);
   }
 
-  async function markBlocked(entry, reason) {
-    try {
-      await currentClient.block({ ...guardFromDelivery(entry.delivery), reason });
-      updateStatus(entry.event_id, { transport: "blocked", last_reason: reason });
-    } catch (error) {
-      updateStatus(entry.event_id, { transport: "blocked", last_reason: error instanceof Error ? error.message : String(error) });
-    }
+  function isAuthorizationFailure(error) {
+    return error?.code === "binding_refused" || error?.code === "session_mismatch" || error?.code === "authorization_refused";
   }
 
-  async function injectParsed(entry) {
-    await bindingBeforeDelivery();
-    const parsed = entry.parsed;
-    // Restart reconstruction: if the exact fenced entry is already persisted in
-    // the current session, acknowledge that receipt instead of injecting a
-    // duplicate custom message.
-    const preExisting = await readReceipt(entry, parsed);
-    if (preExisting) {
-      entry.injected = true;
-      entry.receipt = preExisting;
-      entry.done = true;
-      pending.delete(entry.event_id);
-      deliveries.delete(entry.event_id);
-      if (pending.size === 0) pendingGate = false;
-      await acknowledgeDelivery(entry, preExisting, "reconstructed persisted receipt");
+  async function handleDeliveryFailure(entry, error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    if (isAuthorizationFailure(error)) {
+      // The exact successor owns recovery. A stale pane performs no Event Plane
+      // disposition and discards only its provisional process-local state.
+      stopAuthorization(reason);
+      updateStatus(entry.event_id, { transport: "blocked", last_reason: reason, local_only: true });
+      releaseEntry(entry);
       return;
     }
-    const content = renderMessage(parsed, entry.record);
-    const options = ctxNow?.isIdle?.() === false
-      ? { triggerTurn: parsed.urgency !== "critical", deliverAs: "followUp" }
-      : { triggerTurn: parsed.urgency !== "critical" };
+    try {
+      await returnDelivery(entry, reason, error?.code === "unsupported_payload");
+    } catch (dispositionError) {
+      if (isAuthorizationFailure(dispositionError)) stopAuthorization(dispositionError.message);
+      updateStatus(entry.event_id, {
+        transport: "pending",
+        last_reason: reason,
+        disposition_error: dispositionError instanceof Error ? dispositionError.message : String(dispositionError),
+      });
+      // The attempt lease remains the only recovery state when disposition is
+      // unavailable; never retain a second local custody loop.
+      releaseEntry(entry);
+    }
+  }
+
+  async function queueMessage(entry) {
+    await requireAuthorizedEffect("delivery injection");
+    const parsed = entry.parsed;
     const sendMessage = deps.sendMessage ?? pi.sendMessage?.bind(pi);
     if (typeof sendMessage !== "function") throw new Error("current Pi sendMessage seam is unavailable");
+    const options = ctxNow?.isIdle?.() === false
+      ? { triggerTurn: parsed.urgency !== "critical", deliverAs: "steer" }
+      : { triggerTurn: parsed.urgency !== "critical" };
+    entry.phase = "queued";
+    updateStatus(entry.event_id, { phase: entry.phase });
     await sendMessage({
       customType: QQ_ACTOR_MESSAGING_CUSTOM_TYPE,
-      content,
+      content: renderMessage(parsed, entry.record),
       display: true,
       details: {
         schema: MESSAGE_SCHEMA,
-        event_id: entry.record.event_id,
+        event_id: entry.event_id,
         correlation_id: parsed.correlation_id,
         content_hash: parsed.content_hash,
         kind: parsed.record.kind,
         urgency: parsed.urgency,
+        critical_outcome: entry.criticalOutcome,
       },
     }, options);
-    const injectedState = statuses.get(entry.event_id) ?? {};
-    statuses.set(entry.event_id, { ...injectedState, pending_gate: parsed.urgency !== "critical" });
-    entry.injected = true;
-    if (parsed.urgency !== "critical") pendingGate = true;
-    await processReceipt(entry);
   }
 
-  async function processReceipt(entry) {
-    if (entry.receipt || entry.done) return;
-    await bindingBeforeDelivery();
-    const receipt = await readReceipt(entry, entry.parsed);
-    if (!receipt) return;
-    await requireCurrentBinding("acknowledgement");
-    entry.receipt = receipt;
-    entry.done = true;
-    pending.delete(entry.event_id);
-    deliveries.delete(entry.event_id);
-    if (pending.size === 0) pendingGate = false;
-    await acknowledgeDelivery(entry, receipt, "persisted-session receipt");
+
+  const criticalRequestId = (entry) => `critical_${requestHash({ event_id: entry.event_id, content_hash: entry.parsed.content_hash })}`;
+
+  function criticalClaimPayload(entry) {
+    return {
+      schema: MESSAGE_SCHEMA,
+      fact: "critical-abort-claim",
+      event_id: entry.event_id,
+      content_hash: entry.parsed.content_hash,
+    };
   }
 
-  async function processAllReceipts() {
-    if (receiptScanBusy) return;
-    receiptScanBusy = true;
+  function validateCriticalClaim(eventRecord, entry) {
+    const payload = eventRecord?.envelope?.payload;
+    if (eventRecord?.kind !== CRITICAL_ATTEMPT_KIND || payload?.schema !== MESSAGE_SCHEMA || payload?.fact !== "critical-abort-claim" || payload?.event_id !== entry.event_id || payload?.content_hash !== entry.parsed.content_hash) {
+      throw new Error("critical abort claim record is malformed or mismatched");
+    }
+  }
+
+  async function claimCriticalAbort(entry) {
+    const requestId = criticalRequestId(entry);
     try {
-      for (const entry of [...pending.values()]) {
-        if (entry.injected && !entry.done) await processReceipt(entry).catch(async (error) => {
-          if (error?.code === "binding_refused") {
-            await markBlocked(entry, error.message);
-            entry.done = true;
-            pending.delete(entry.event_id);
-            deliveries.delete(entry.event_id);
-          }
-        });
-      }
-      if (pending.size === 0) pendingGate = false;
-    } finally {
-      receiptScanBusy = false;
+      const result = await publishFact({
+        kind: CRITICAL_ATTEMPT_KIND,
+        correlationId: entry.event_id,
+        requestId,
+        payload: criticalClaimPayload(entry),
+      });
+      validateCriticalClaim(result.record, entry);
+      return result.idempotent !== true;
+    } catch (error) {
+      if (error?.code !== "idempotency_conflict") throw error;
+      await requireAuthorizedEffect("critical claim reconstruction");
+      const result = await client.status({ producer_id: `${display}/adapter`, request_id: requestId, wait_ms: 0 });
+      validateCriticalClaim(result.record, entry);
+      return false;
     }
   }
 
-  async function processCritical(entry) {
-    if (entry.criticalAttempted) return;
-    entry.criticalAttempted = true;
-    // The exact T-189 fence precedes any delivery side effect.
-    await bindingBeforeDelivery();
-    // Reconstruct an already-persisted critical receipt BEFORE any abort, so a
-    // post-append redelivery acknowledges the stable event without interrupting
-    // a second run.
-    const preExisting = await readReceipt(entry, entry.parsed);
-    if (preExisting) {
-      entry.injected = true;
-      entry.receipt = preExisting;
-      entry.done = true;
-      pending.delete(entry.event_id);
-      deliveries.delete(entry.event_id);
-      if (pending.size === 0) pendingGate = false;
-      await acknowledgeDelivery(entry, preExisting, "reconstructed persisted critical receipt");
-      return;
+  const currentRunSignal = () => ctxNow?.signal ?? ctxNow?.getSignal?.();
+
+  function attemptCurrentRunAbort(targetSignal) {
+    // Claim acceptance is asynchronous. Only the exact run captured before the
+    // round trip may be interrupted; idle or successor runs are ignored.
+    if (ctxNow?.isIdle?.() !== false || typeof ctxNow?.abort !== "function" || !targetSignal || targetSignal.aborted || currentRunSignal() !== targetSignal) return "abort-ignored";
+    try {
+      ctxNow.abort();
+    } catch {
+      return "abort-ignored";
     }
-    const wasIdle = ctxNow?.isIdle?.() === true;
-    if (!abortInFlight) {
-      abortInFlight = true;
-      try {
-        await ctxNow?.abort?.();
-      } catch {
-        // A fire-and-forget abort that throws still counts as the one attempt.
-      } finally {
-        abortInFlight = false;
+    return targetSignal.aborted ? "interrupted" : "abort-ignored";
+  }
+
+  async function resolveCriticalOutcome(entry) {
+    const targetSignal = currentRunSignal();
+    const claimed = await claimCriticalAbort(entry);
+    if (!claimed) return statuses.get(entry.event_id)?.critical_outcome ?? "unknown";
+    await requireAuthorizedEffect("critical abort");
+    const outcome = attemptCurrentRunAbort(targetSignal);
+    updateStatus(entry.event_id, { critical_outcome: outcome });
+    return outcome;
+  }
+
+  async function driveDelivery(entry) {
+    if (entry.driving || pending.get(entry.event_id) !== entry) return;
+    entry.driving = true;
+    try {
+      await requireAuthorizedEffect("receive delivery");
+      const receipt = await readReceipt(entry);
+      if (receipt) {
+        entry.criticalOutcome = receipt.critical_outcome ?? entry.criticalOutcome;
+        await completeDelivery(entry, receipt, entry.phase === "queued" ? "persisted-session receipt" : "reconstructed persisted receipt");
+        return;
       }
+      if (entry.phase === "queued") return;
+      if (entry.parsed.urgency === "urgent") {
+        // Attention is a hint, not custody. Start it immediately but never hold
+        // transcript delivery on its acceptance, refusal, or timeout.
+        void publishFact({
+          kind: ATTENTION_KIND,
+          correlationId: entry.event_id,
+          payload: {
+            schema: MESSAGE_SCHEMA,
+            fact: "attention-needed",
+            event_id: entry.event_id,
+            recipient_id: consumerId,
+          },
+        }).then(
+          (result) => updateStatus(entry.event_id, { urgent_attention: "accepted", urgent_attention_record: result }),
+          (error) => {
+            if (isAuthorizationFailure(error)) stopAuthorization(error.message);
+            updateStatus(entry.event_id, { urgent_attention: "unavailable", urgent_attention_reason: error instanceof Error ? error.message : String(error) });
+          },
+        );
+      }
+      if (entry.parsed.urgency === "critical") {
+        entry.criticalOutcome = await resolveCriticalOutcome(entry);
+      }
+      await queueMessage(entry);
+      const persisted = await readReceipt(entry);
+      if (persisted) {
+        entry.criticalOutcome = persisted.critical_outcome ?? entry.criticalOutcome;
+        await completeDelivery(entry, persisted, "persisted-session receipt");
+      }
+    } catch (error) {
+      await handleDeliveryFailure(entry, error);
+    } finally {
+      entry.driving = false;
     }
-    // Truthful outcome from the state Pi can establish at the attempt: an idle
-    // session had no run to interrupt; a busy run received the abort.
-    entry.criticalOutcome = wasIdle ? "ignored" : "interrupted";
-    // Critical content still enters the transcript and is acknowledged only
-    // after exact persisted readback, like every other delivery.
-    await injectParsed(entry);
+  }
+
+  async function drivePending() {
+    for (const entry of [...pending.values()]) await driveDelivery(entry);
   }
 
   async function processDelivery(delivery) {
-    const message = parseMessagePayload(delivery.record);
-    const entry = {
-      delivery,
-      record: delivery.record,
-      event_id: delivery.record.event_id,
-      parsed: message,
-      injected: false,
-      done: false,
-      criticalAttempted: false,
-    };
-    if (!message) {
-      await currentClient.block({ ...guardFromDelivery(delivery), reason: "unsupported actor message payload" });
+    const message = delivery.record?.product_id === record.product_id && delivery.record?.recipient_id === consumerId
+      ? parseMessagePayload(delivery.record)
+      : undefined;
+    const rejected = { delivery, record: delivery.record, event_id: delivery.record?.event_id, parsed: message };
+    if (!message) throw Object.assign(new Error("unsupported actor message payload"), { code: "unsupported_payload", entry: rejected });
+    const existing = pending.get(rejected.event_id);
+    if (existing) {
+      if (existing.parsed.content_hash !== message.content_hash) {
+        throw Object.assign(new Error("redelivered Event Plane event changed actor-message content"), { code: "unsupported_payload", entry: existing });
+      }
+      // Redelivery within this adapter instance transfers only the current
+      // guarded attempt; one driver preserves the current phase.
+      existing.delivery = delivery;
+      existing.record = delivery.record;
+      updateStatus(existing.event_id, { transport: "delivering", redelivered: true });
+      await driveDelivery(existing);
       return;
     }
+    const entry = { ...rejected, phase: "admitted", driving: false, criticalOutcome: undefined };
     pending.set(entry.event_id, entry);
-    deliveries.set(entry.event_id, delivery);
-    statuses.set(entry.event_id, {
+    updateStatus(entry.event_id, {
       transport: "delivering",
+      phase: entry.phase,
       event_id: entry.event_id,
       kind: message.record.kind,
       correlation_id: message.correlation_id,
       urgency: message.urgency,
       content_hash: message.content_hash,
     });
-    if (message.urgency === "urgent") {
-      await publishFact({
-        kind: ATTENTION_KIND,
-        correlationId: entry.event_id,
-        payload: {
-          schema: MESSAGE_SCHEMA,
-          fact: "attention-needed",
-          event_id: entry.event_id,
-          recipient_id: consumerId,
-        },
-      }).then((result) => {
-        updateStatus(entry.event_id, { urgent_attention: "accepted", urgent_attention_record: result });
-      }).catch(() => {
-        updateStatus(entry.event_id, { urgent_attention: "publication-failed" });
-      });
-    }
-    if (message.urgency === "critical") {
-      await processCritical(entry);
-      return;
-    }
-    await injectParsed(entry);
-  }
-
-  async function processCorrelations() {
-    for (const [correlationId, state] of correlations) {
-      if (state.answered === true || state.resolved === true) continue;
-      if (state.reply_event_id) {
-        const replyStatus = statuses.get(state.reply_event_id);
-        if (replyStatus?.transport === "delivered") correlations.set(correlationId, { ...state, answered: true });
-      }
-    }
+    await driveDelivery(entry);
   }
 
   async function receiverLoop(reason) {
     if (receiverActive) return;
     receiverActive = true;
     receiverStopped = false;
-    sessionState.receiver_running = true;
     sessionState.reason = reason;
-    while (sessionState.active && !receiverStopped) {
-      try {
-        const result = await currentClient.next({ ...await connectionGuard(), wait_ms: RECEIVER_WAIT_MS });
-        if (result?.delivery) {
-          await processDelivery(result.delivery).catch(async (error) => {
-            const entry = pending.get(result.delivery.record?.event_id) ?? {
+    try {
+      while (sessionState.phase === "active" && !receiverStopped) {
+        try {
+          // `next` binds the Event Plane endpoint and is therefore itself inside
+          // the T-189 receive boundary. A stale pane never claims an attempt.
+          await requireAuthorizedEffect("receive");
+          const result = await client.next({ ...consumerEndpoint, wait_ms: RECEIVER_WAIT_MS });
+          if (result?.delivery) {
+            const deliveryEntry = {
               delivery: result.delivery,
               record: result.delivery.record,
               event_id: result.delivery.record?.event_id,
             };
-            if (error?.code === "binding_refused") await markBlocked(entry, error.message);
-            else await markRetry(entry, error instanceof Error ? error.message : String(error));
-          });
+            await processDelivery(result.delivery).catch((error) => handleDeliveryFailure(error?.entry ?? pending.get(deliveryEntry.event_id) ?? deliveryEntry, error));
+          }
+          await drivePending();
+        } catch (error) {
+          if (isAuthorizationFailure(error)) {
+            stopAuthorization(error.message);
+            break;
+          }
+          if (sessionState.phase !== "active" || receiverStopped) break;
+          await abortableSleep(RECEIVER_RECONNECT_MS, () => sessionState.phase !== "active" || receiverStopped);
         }
-        await processAllReceipts();
-        await processCorrelations();
-      } catch (error) {
-        if (!sessionState.active || receiverStopped) break;
-        await abortableSleep(RECEIVER_RECONNECT_MS, () => !sessionState.active || receiverStopped);
       }
+    } finally {
+      receiverActive = false;
     }
-    sessionState.receiver_running = false;
-    receiverActive = false;
   }
 
   async function publicationLoop(reason) {
     if (publishActive) return;
     publishActive = true;
-    while (sessionState.active) {
-      try {
-        const result = await publishFact({
-          kind: LIFECYCLE_KIND,
-          payload: {
-            schema: MESSAGE_SCHEMA,
-            fact: "session.lifecycle",
-            product_id: record.product_id,
-            actor: display,
-            reason,
-            started_at: sessionState.started_at,
-            pane: record.actor.pane,
-            session_file: record.actor.session_file,
-          },
-        });
-        sessionState.last_publication = "accepted";
-        return result;
-      } catch (error) {
-        sessionState.last_publication = error?.code === "unavailable" ? "unavailable" : "refused";
-        await abortableSleep(RECEIVER_RECONNECT_MS, () => !sessionState.active);
+    try {
+      while (sessionState.phase === "active") {
+        try {
+          const result = await publishFact({
+            kind: LIFECYCLE_KIND,
+            payload: {
+              schema: MESSAGE_SCHEMA,
+              fact: "session.lifecycle",
+              product_id: record.product_id,
+              actor: display,
+              reason,
+              started_at: sessionState.started_at,
+              pane: record.actor.pane,
+              session_file: sessionState.session_file,
+              session_id: sessionState.session_id,
+            },
+          });
+          return result;
+        } catch (error) {
+          if (isAuthorizationFailure(error)) {
+            stopAuthorization(error.message);
+            return;
+          }
+          await abortableSleep(RECEIVER_RECONNECT_MS, () => sessionState.phase !== "active");
+        }
       }
+    } finally {
+      publishActive = false;
     }
   }
 
   async function configureSession(event, ctx) {
     ctxNow = ctx;
-    sessionState.active = false;
-    sessionState.authorized = false;
+    sessionState.epoch += 1;
+    const epoch = sessionState.epoch;
+    sessionState.phase = "authorizing";
     receiverStopped = true;
     pending.clear();
-    deliveries.clear();
-    publishActive = false;
-    receiverActive = false;
-    pendingGate = false;
-    sessionState.active = true;
     sessionState.reason = event?.reason ?? "startup";
     sessionState.started_at = now();
-    sessionState.session_file = record.actor.session_file ?? ctx?.sessionManager?.getSessionFile?.();
-    sessionState.session_id = record.actor.session_id ?? ctx?.sessionManager?.getSessionId?.();
-    await requireCurrentBinding("session start");
-    if (record.actor.session_file !== undefined && record.actor.session_file !== ctx?.sessionManager?.getSessionFile?.()) {
-      throw Object.assign(new Error("session start refused: enable-record session file differs from current Pi session"), { code: "session_mismatch" });
+    sessionState.session_file = ctx?.sessionManager?.getSessionFile?.();
+    sessionState.session_id = ctx?.sessionManager?.getSessionId?.();
+    try {
+      await requireCurrentBinding("session start");
+      requireSessionIdentity("session start");
+      if (epoch !== sessionState.epoch || sessionState.phase !== "authorizing") {
+        throw Object.assign(new Error("session start refused: session changed during authorization"), { code: "authorization_refused" });
+      }
+      sessionState.phase = "active";
+    } catch (error) {
+      if (epoch === sessionState.epoch) sessionState.phase = "inactive";
+      throw error;
     }
-    if (record.actor.session_id !== undefined && record.actor.session_id !== ctx?.sessionManager?.getSessionId?.()) {
-      throw Object.assign(new Error("session start refused: enable-record session ID differs from current Pi session"), { code: "session_mismatch" });
-    }
-    // Only an exact current T-189 source binding admits outbound effects. A
-    // startup refusal (caught by Pi) must leave sending/publication inactive.
-    sessionState.authorized = true;
     void publicationLoop(sessionState.reason);
     void receiverLoop(sessionState.reason);
   }
@@ -1014,9 +1122,11 @@ export default async function register(pi, deps = {}) {
         correlation_id: { type: "string" },
         request_id: { type: "string" },
         event_id: { type: "string" },
-        urgency: { type: "string", enum: ["default", "urgent", "critical"] },
-        critical: { type: "boolean" },
-        wait_ms: { type: "integer", minimum: 0, maximum: 60000 },
+        // Critical is intentionally absent: a model can send default/urgent,
+        // but only an already-authorized external producer can originate the
+        // explicitly audited critical inbound path.
+        urgency: { type: "string", enum: ["default", "urgent"] },
+        wait_ms: { type: "integer", minimum: 0, maximum: MAX_STATUS_WAIT_MS },
       },
       required: ["action"],
     },
@@ -1033,8 +1143,6 @@ export default async function register(pi, deps = {}) {
         }
         if (params.action === "list_actors") {
           const actors = await listActorCandidatesInternal();
-          const products = params.product_id === undefined ? [] : [boundedText(params.product_id, "Product identity", 63)];
-          if (products.length && products[0] !== record.product_id) throw new Error("list_actors cannot cross the enabled Product boundary");
           return { content: [{ type: "text", text: actors.length ? actors.map((actor) => actor.actor).join("\n") : "No current accountable Actor is connected." }], details: { status: "current", actors } };
         }
         if (params.action === "status") {
@@ -1044,7 +1152,9 @@ export default async function register(pi, deps = {}) {
             const state = correlations.get(selector.correlation_id);
             return { content: [{ type: "text", text: state ? `Correlation ${selector.correlation_id}: ${stableJson(state)}` : `Correlation ${selector.correlation_id} has no tracked state.` }], details: { status: state ? "tracked" : "unknown", correlation_id: selector.correlation_id, state } };
           }
-          const result = await currentClient.status({ ...selector, wait_ms: params.wait_ms ?? 0 });
+          const waitMs = params.wait_ms ?? 0;
+          if (!Number.isInteger(waitMs) || waitMs < 0 || waitMs > MAX_STATUS_WAIT_MS) throw new Error(`status wait_ms must be between 0 and ${MAX_STATUS_WAIT_MS}`);
+          const result = await client.status({ ...selector, wait_ms: waitMs });
           const recordResult = result.record?.event_id ? statuses.get(result.record.event_id) : undefined;
           const readable = result.obligations?.map((item) => ({ ...item, readable_status: TRANSPORT_TO_READABLE[item.status] ?? item.status })) ?? [];
           const local = recordResult ? { local: recordResult } : {};
@@ -1061,14 +1171,16 @@ export default async function register(pi, deps = {}) {
             origin = display;
           }
           const messageKind = params.action === "send" ? "message" : params.action;
+          const urgency = params.urgency ?? "default";
+          if (!MODEL_URGENCIES.has(urgency)) throw new Error("agent-originated urgency must be default or urgent");
           const details = await sendRecord({
             kind: messageKind,
             recipient,
             content: params.content,
             correlationId: params.correlation_id,
             requestId: params.request_id,
-            urgency: params.urgency ?? "default",
-            critical: params.critical === true,
+            urgency,
+            critical: false,
             origin,
           });
           return { content: [{ type: "text", text: `${params.action} accepted as ${details.event_id}.` }], details };
@@ -1086,49 +1198,24 @@ export default async function register(pi, deps = {}) {
   pi.registerTool(messagingTool);
   pi.on("session_start", configureSession);
 
-  pi.on("tool_call", async (_event, _ctx) => {
-    if (pendingGate && pending.size > 0) {
-      const first = [...pending.values()].find((entry) => entry.parsed?.urgency !== "critical");
-      if (first) {
-        return { block: true, reason: `qq Actor message ${first.event_id} is pending at Pi's next safe boundary; reconsider the whole not-yet-started tool batch after it enters context.` };
-      }
-    }
-    return undefined;
-  });
-
   pi.on("turn_start", async (_event, _ctx) => {
-    await sequence(async () => processAllReceipts());
+    await drivePending();
   });
 
-  pi.on("message_end", async (event, ctx) => {
+  pi.on("message_end", async (_event, ctx) => {
     ctxNow = ctx;
-    const message = event?.message;
-    if (message?.role === "assistant") {
-      for (const [correlationId, state] of correlations) {
-        if (!state.reply_event_id || state.answered) continue;
-        correlations.set(correlationId, { ...state, answered: true });
-      }
-    }
-    await processAllReceipts();
+    await drivePending();
   });
 
-  pi.on("agent_settled", async (_event, _ctx) => {
-    await sequence(async () => {
-      await processAllReceipts();
-      for (const entry of [...pending.values()]) {
-        if (!entry.injected && !entry.done) await injectParsed(entry);
-      }
-    });
+  pi.on("agent_settled", async (_event, ctx) => {
+    ctxNow = ctx;
+    await drivePending();
   });
 
   pi.on("session_shutdown", () => {
-    sessionState.active = false;
-    sessionState.authorized = false;
+    sessionState.epoch += 1;
+    sessionState.phase = "inactive";
     receiverStopped = true;
     pending.clear();
-    deliveries.clear();
-    publishActive = false;
-    receiverActive = false;
-    pendingGate = false;
   });
 }
