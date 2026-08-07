@@ -199,10 +199,13 @@ values, and keep the file private:
 chmod 600 ~/.pi/agent/auth.json
 ```
 
-`delegation/policies/execution-profiles.json` assigns Architect, Observer,
-Researcher, and Reviewer to `kimi-coding/k3:max`; Implementer and Orchestrator
-use `qwen-token-plan/qwen3.8-max:xhigh`. All seats use the
-`provider-default` service class. `qq-delegate` reads the selected delegated role from this policy and
+`delegation/policies/execution-profiles.json` assigns Architect, Compactor,
+Implementer, Observer, and Reviewer to `openai-codex/gpt-5.6-sol:xhigh`;
+Researcher and Orchestrator use `qwen-token-plan/qwen3.8-max:xhigh`. All seats
+use the `provider-default` service class. The five GPT-5.6 seats are an interim
+swap while Kimi quota is unavailable; the canonical map (architect,
+change_owner, and reviewer on `kimi-coding/k3:max`) lands with T-214.1.
+`qq-delegate` reads the selected delegated role from this policy and
 passes its provider, model, and non-default thinking level through Pi's native
 CLI flags.
 

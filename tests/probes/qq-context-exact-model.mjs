@@ -62,7 +62,7 @@ try {
   const { COMPACTOR_TOOL_NAMES, CONTEXT_LIFECYCLE_LIMITS: limits, contextCut, contextSnapshot, buildCompactorInput, resolveCompactorProfile, runCompactorAttempt } = lifecycle;
   const profilePath = resolve(root, "delegation/policies/execution-profiles.json");
   const profile = await resolveCompactorProfile(undefined, profilePath);
-  if (JSON.stringify(profile.profile) !== JSON.stringify({ provider: "kimi-coding", model: "k3", effort: "max", serviceClass: "provider-default" })) refuse("canonical compactor profile no longer names the approved exact model/options");
+  if (JSON.stringify(profile.profile) !== JSON.stringify({ provider: "openai-codex", model: "gpt-5.6-sol", effort: "xhigh", serviceClass: "provider-default" })) refuse("canonical compactor profile no longer names the approved exact model/options");
   if (JSON.stringify(COMPACTOR_TOOL_NAMES) !== JSON.stringify(["history_search", "history_read", "authority_read", "submit_checkpoint"])) refuse("production compactor no longer exposes exactly the approved four tools");
 
   const prepared = [];

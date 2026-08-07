@@ -12,13 +12,13 @@ POLICY="$ROOT/delegation/policies/execution-profiles.json"
 [ -f "$POLICY" ] || fail "missing policy: $POLICY"
 jq -e '
   (keys == ["architect", "compactor", "implementer", "observer", "orchestrator", "researcher", "reviewer"])
-  and ([.architect, .compactor, .observer, .researcher, .reviewer] | all(
-    . == {provider:"kimi-coding", model:"k3", effort:"max", serviceClass:"provider-default"}
+  and ([.architect, .compactor, .implementer, .observer, .reviewer] | all(
+    . == {provider:"openai-codex", model:"gpt-5.6-sol", effort:"xhigh", serviceClass:"provider-default"}
   ))
-  and ([.implementer, .orchestrator] | all(
+  and ([.orchestrator, .researcher] | all(
     . == {provider:"qwen-token-plan", model:"qwen3.8-max", effort:"xhigh", serviceClass:"provider-default"}
   ))
-' "$POLICY" >/dev/null || fail 'role policy plus the canonical compactor does not match the operator-set map'
+' "$POLICY" >/dev/null || fail 'role policy does not match the operator-set interim map (K3 seats on GPT-5.6 while Kimi quota is unavailable)'
 
 for manifest in "$ROOT"/delegation/manifests/agents/{implementer,observer,researcher,reviewer}.md; do
   assert_file_not_matches "$manifest" '^(model|thinking):' 'canonical manifest retained compute authority'

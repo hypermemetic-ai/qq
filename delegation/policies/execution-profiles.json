@@ -1,26 +1,26 @@
 {
   "architect": {
-    "provider": "kimi-coding",
-    "model": "k3",
-    "effort": "max",
+    "provider": "openai-codex",
+    "model": "gpt-5.6-sol",
+    "effort": "xhigh",
     "serviceClass": "provider-default"
   },
   "compactor": {
-    "provider": "kimi-coding",
-    "model": "k3",
-    "effort": "max",
+    "provider": "openai-codex",
+    "model": "gpt-5.6-sol",
+    "effort": "xhigh",
     "serviceClass": "provider-default"
   },
   "implementer": {
-    "provider": "qwen-token-plan",
-    "model": "qwen3.8-max",
+    "provider": "openai-codex",
+    "model": "gpt-5.6-sol",
     "effort": "xhigh",
     "serviceClass": "provider-default"
   },
   "observer": {
-    "provider": "kimi-coding",
-    "model": "k3",
-    "effort": "max",
+    "provider": "openai-codex",
+    "model": "gpt-5.6-sol",
+    "effort": "xhigh",
     "serviceClass": "provider-default"
   },
   "orchestrator": {
@@ -30,15 +30,15 @@
     "serviceClass": "provider-default"
   },
   "researcher": {
-    "provider": "kimi-coding",
-    "model": "k3",
-    "effort": "max",
+    "provider": "qwen-token-plan",
+    "model": "qwen3.8-max",
+    "effort": "xhigh",
     "serviceClass": "provider-default"
   },
   "reviewer": {
-    "provider": "kimi-coding",
-    "model": "k3",
-    "effort": "max",
+    "provider": "openai-codex",
+    "model": "gpt-5.6-sol",
+    "effort": "xhigh",
     "serviceClass": "provider-default"
   }
 }

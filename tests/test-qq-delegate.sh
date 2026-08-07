@@ -128,8 +128,8 @@ args = Path(sys.argv[1]).read_bytes().split(b"\0")
 run = os.environ["HAPPY_RUN"]
 assert args == [
     b"--approve", b"--offline", b"--mode", b"json", b"-p",
-    b"--provider", b"kimi-coding", b"--model", b"k3",
-    b"--thinking", b"max",
+    b"--provider", b"openai-codex", b"--model", b"gpt-5.6-sol",
+    b"--thinking", b"xhigh",
     b"--tools", b"read,grep,find,ls,bash", b"--no-extensions",
     b"--no-skills", b"--no-context-files", b"--system-prompt",
     f"{run}/.system-prompt.md".encode(),
@@ -351,12 +351,12 @@ import json
 from pathlib import Path
 import sys
 path = Path(sys.argv[1]); value = json.loads(path.read_text())
-value["reviewer"]["serviceClass"] = "flex"
+value["researcher"]["serviceClass"] = "flex"
 path.write_text(json.dumps(value))
 PY
 unsupported_provider_run="$(new_run unsupported-service-provider)"
-expect_policy_refusal unsupported-service-provider 'unsupported for requested provider kimi-coding' \
-  "$fixture_engine" run --role reviewer --cwd "$fixture" --brief "$unsupported_provider_run/BRIEF.md"
+expect_policy_refusal unsupported-service-provider 'unsupported for requested provider qwen-token-plan' \
+  "$fixture_engine" run --role researcher --cwd "$fixture" --brief "$unsupported_provider_run/BRIEF.md"
 
 # Every allowed non-default class reaches only the explicit delegate extension
 # and the validated private child environment for OpenAI requested providers.
