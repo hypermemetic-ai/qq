@@ -76,7 +76,7 @@ export default function register(pi, deps = {}) {
     return {
       block: true,
       reason:
-        "Blocked by qq's no-focus rule: orchestrator and architect roots do not initiate " +
+        "Blocked by qq's no-focus rule: operator-facing accountable and architect sessions do not initiate " +
         "Herdr focus. Use --no-focus and send a Herdr request notification instead.",
     };
   });

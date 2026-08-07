@@ -50,6 +50,8 @@ shutil.copy2(engine_source, engine)
 shutil.copy2(engine_source.parent / "lib" / "qq-bin.sh", repo / "bin" / "lib" / "qq-bin.sh")
 shutil.copy2(engine_source.parent / "lib" / "qq-handoff.py", repo / "bin" / "lib" / "qq-handoff.py")
 shutil.copy2(engine_source.parent / "lib" / "qq_task_identity.py", repo / "bin" / "lib" / "qq_task_identity.py")
+shutil.copy2(engine_source.parent / "qq-tab-role", repo / "bin" / "qq-tab-role")
+shutil.copy2(engine_source.parent / "lib" / "qq_tab_role.py", repo / "bin" / "lib" / "qq_tab_role.py")
 command("git", "-C", str(repo), "remote", "add", "origin", "git@github.com:fixture/repo.git")
 command("git", "-C", str(repo), "config", "branch.main.remote", "origin")
 command("git", "-C", str(repo), "add", "bin", "backlog")
@@ -213,8 +215,17 @@ if key == ["agent", "prompt"]:
 if key == ["agent", "focus"]:
     emit({"result":{"type":"agent_focused","agent":argv[2]}})
 if key == ["tab", "get"]:
+    if mode == "role_bind_refused_unbind_uncertain" and current.get("binding_refused"):
+        emit({"error":{"code":"tab_evidence_failed"}}, 1)
     label = "general" if mode == "wrong_architect_tab" else "architect"
     emit({"result":{"tab":{"tab_id":argv[2],"workspace_id":"w","label":label}}})
+if key == ["pane", "process-info"]:
+    role_refusal = mode in ("role_bind_refused", "role_bind_refused_unbind_uncertain")
+    if role_refusal:
+        current["binding_refused"] = True; save()
+    processes = ([{"argv":["node","/opt/bin/backlog","board"]}]
+                 if role_refusal else [{"argv":["bash"]}])
+    emit({"result":{"process_info":{"foreground_processes":processes}}})
 if key == ["tab", "close"]:
     if argv[2] != "w:tNew": emit({"result":{"type":"wrong_tab"}}, 3)
     if mode == "startup_failed_close_failed": emit({"error":{"code":"close_failed"}}, 1)
@@ -224,8 +235,9 @@ if key == ["tab", "list"]:
     if current.get("tab"): rows.append({"tab_id":"w:tNew"})
     emit({"result":{"tabs":rows}})
 if key == ["pane", "list"]:
-    rows = [{"pane_id":"w:pCaller"}]
-    if current.get("tab"): rows.append({"pane_id":"w:pNew"})
+    rows = [{"pane_id":"w:pCaller","tab_id":"w:tCaller","workspace_id":"w"}]
+    if current.get("tab"):
+        rows.append({"pane_id":"w:pNew","tab_id":"w:tNew","workspace_id":"w"})
     emit({"result":{"panes":rows}})
 print("unexpected fake herdr argv", argv, file=sys.stderr)
 raise SystemExit(64)
@@ -244,6 +256,7 @@ def reset(mode="success"):
     restore_records()
     log.write_text("")
     state.write_text('{"tab":false,"live":false}')
+    shutil.rmtree(scratch / "xdg-state", ignore_errors=True)
     env["FAKE_MODE"] = mode
 
 
@@ -270,6 +283,20 @@ def assert_no_mutation():
 def assert_no_focus_commands():
     forbidden = {("agent","focus"),("api","snapshot"),("pane","current")}
     assert not any(tuple(call[:2]) in forbidden for call in calls()), calls()
+
+role_spec = importlib.util.spec_from_file_location(
+    "qq_tab_role_handoff_test", repo / "bin" / "lib" / "qq_tab_role.py"
+)
+assert role_spec is not None and role_spec.loader is not None
+role_module = importlib.util.module_from_spec(role_spec)
+role_spec.loader.exec_module(role_module)
+
+
+def stored_role():
+    root = Path(env["XDG_STATE_HOME"]) / "qq" / "tab-roles"
+    if not root.exists():
+        return None
+    return role_module.read_record(root, "w", "w:tNew")
 
 # Exact argument grammar and strict IDs stop before lifecycle inspection.
 for args, code in [
@@ -439,12 +466,23 @@ assert "focus_restoration" not in transaction
 assert transaction["agent_reinspection"]["present"] is True
 assert transaction["agent_reinspection"]["verified"] is True
 assert transaction["cleanup"] == "not_needed"
+role_binding = transaction["role_binding"]
+assert role_binding["status"] == "bound" and role_binding["requested_role"] == "change_owner"
+assert role_binding["workspace_id"] == "w" and role_binding["tab_id"] == "w:tNew"
+assert role_binding["result"] == {
+    "schema":"qq.tab-role/v1", "version":1, "workspace_id":"w",
+    "tab_id":"w:tNew", "role":"change_owner",
+}
+assert role_binding["unbind"] is None
+assert stored_role()["role"] == "change_owner"
 actual = calls()
 sequence = [tuple(call[:2]) for call in actual]
 expected = [("workspace","list"),("agent","list"),("pane","get"),
-            ("tab","list"),("pane","list"),("tab","create"),("agent","start"),
-            ("agent","prompt"),("agent","list")]
+            ("tab","list"),("pane","list"),("tab","create"),
+            ("tab","get"),("pane","list"),("pane","process-info"),
+            ("agent","start"),("agent","prompt"),("agent","list")]
 assert sequence == expected, sequence
+assert sequence.index(("pane","process-info")) < sequence.index(("agent","start"))
 assert_no_focus_commands()
 create = next(call for call in actual if call[:2] == ["tab","create"])
 assert create == ["tab","create","--workspace","w","--cwd",checkout,"--label",create[7],"--no-focus"]
@@ -456,7 +494,8 @@ assert len(start[2]) <= 48
 prompt_call = next(call for call in actual if call[:2] == ["agent","prompt"])
 prompt = prompt_call[3]
 for phrase in ("Take accountable ownership","already aligned; do not restart alignment","preserve all existing dirt",
-               "skills/deliver-change/SKILL.md","fresh-context code review and fix-delta review","Never merge",
+               "delegation/manifests/agents/change_owner.md","skills/delegate/SKILL.md","skills/review/SKILL.md",
+               "intrinsic Change Owner lifecycle","behavior Checks","fresh-context review and fix-delta review","Never merge",
                "Report progress and results in this tab","No originating conversation"):
     assert phrase in prompt, phrase
 assert "INHERITED_SECRET_SENTINEL" not in prompt
@@ -471,14 +510,74 @@ assert receipt["transaction"]["observed_state"] == "working"
 assert receipt["transaction"]["agent_reinspection"]["present"] is True
 assert receipt["transaction"]["agent_reinspection"]["verified"] is False
 assert receipt["transaction"]["cleanup"] == "not_needed"
+assert stored_role()["role"] == "change_owner"
 assert_no_focus_commands()
 assert not any(call[:2] == ["tab","close"] for call in calls())
 
-# Proven pre-agent startup failure closes only the exact created tab and verifies absence.
+# A status-zero bind that mutates through the real rail but emits a malformed
+# receipt becomes uncertainty. Pi never starts, and the existing idempotent
+# unbind/close path removes the tag before cleaning up the exact fresh tab.
+role_wrapper = repo / "bin" / "qq-tab-role"
+role_wrapper_bytes = role_wrapper.read_bytes()
+role_wrapper_mode = role_wrapper.stat().st_mode
+real_role_wrapper = repo / "bin" / "qq-tab-role.real"
+shutil.copy2(role_wrapper, real_role_wrapper)
+role_wrapper.write_text(r'''#!/usr/bin/env bash
+set -euo pipefail
+real="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/qq-tab-role.real"
+if [[ "${1-}" == bind ]]; then
+  "$real" "$@" >/dev/null
+  printf '%s\n' '{"ok":true,"schema":"qq.tab-role/v1","result":{"schema":"qq.tab-role/v1","version":true,"workspace_id":"w","tab_id":"w:tNew","role":"change_owner"}}'
+  exit 0
+fi
+exec "$real" "$@"
+''', encoding="utf-8")
+role_wrapper.chmod(0o755)
+try:
+    reset()
+    receipt = invoke(1,"start","T-155","--repo",main)
+    role_binding = receipt["transaction"]["role_binding"]
+    assert role_binding["status"] == "uncertain"
+    assert role_binding["observation"]["exit_code"] == 0
+    assert role_binding["unbind"]["status"] == "confirmed"
+    assert receipt["transaction"]["cleanup"] == "closed_created_tab_verified_absent"
+    assert stored_role() is None
+    assert not any(call[:2] in (["agent","start"],["agent","prompt"]) for call in calls())
+finally:
+    role_wrapper.write_bytes(role_wrapper_bytes)
+    role_wrapper.chmod(role_wrapper_mode)
+    real_role_wrapper.unlink()
+
+# A real role-rail refusal never starts Pi. Its idempotent confirmed unbind
+# permits only the exact created-tab cleanup.
+reset("role_bind_refused")
+receipt = invoke(1,"start","T-155","--repo",main)
+assert receipt["transaction"]["role_binding"]["status"] == "refused"
+assert receipt["transaction"]["role_binding"]["unbind"]["status"] == "confirmed"
+assert receipt["transaction"]["cleanup"] == "closed_created_tab_verified_absent"
+assert stored_role() is None
+assert not any(call[:2] in (["agent","start"],["agent","prompt"]) for call in calls())
+assert [call for call in calls() if call[:2] == ["tab","close"]] == [["tab","close","w:tNew"]]
+assert_no_focus_commands()
+
+reset("role_bind_refused_unbind_uncertain")
+receipt = invoke(1,"start","T-155","--repo",main)
+assert receipt["transaction"]["role_binding"]["status"] == "refused"
+assert receipt["transaction"]["role_binding"]["unbind"]["status"] == "uncertain"
+assert receipt["transaction"]["cleanup"] == "role unbind not confirmed; exact created tab preserved"
+assert json.loads(state.read_text())["tab"] is True
+assert not any(call[:2] in (["agent","start"],["agent","prompt"],["tab","close"])
+               for call in calls())
+assert_no_focus_commands()
+
+# Proven pre-agent startup failure unbinds Change Owner first, then closes only
+# the exact created tab and verifies absence.
 reset("startup_failed")
 receipt = invoke(1,"start","T-155","--repo",main)
 assert receipt["transaction"]["cleanup"] == "closed_created_tab_verified_absent"
+assert receipt["transaction"]["role_binding"]["unbind"]["status"] == "confirmed"
 assert receipt["message"].endswith("cleanup outcome: closed_created_tab_verified_absent.")
+assert stored_role() is None
 assert "focus_restoration" not in receipt["transaction"]
 assert_no_focus_commands()
 close_calls = [call for call in calls() if call[:2] == ["tab","close"]]
@@ -489,6 +588,8 @@ receipt = invoke(1,"start","T-155","--repo",main)
 assert receipt["transaction"]["cleanup"] == "close attempted but not confirmed; exact created tab preserved if present"
 assert receipt["message"].endswith(f"cleanup outcome: {receipt['transaction']['cleanup']}.")
 assert "closed_created_tab_verified_absent" not in receipt["message"]
+assert receipt["transaction"]["role_binding"]["unbind"]["status"] == "confirmed"
+assert stored_role() is None
 assert json.loads(state.read_text())["tab"] is True
 assert_no_focus_commands()
 
@@ -497,6 +598,7 @@ receipt = invoke(1,"start","T-155","--repo",main)
 assert receipt["transaction"]["cleanup"] == "created tab preserved; Pi may be live"
 assert receipt["transaction"]["agent_reinspection"]["kind"] == "codex"
 assert receipt["transaction"]["agent_reinspection"]["verified"] is False
+assert stored_role()["role"] == "change_owner"
 assert json.loads(state.read_text())["tab"] is True
 assert_no_focus_commands()
 assert not any(call[:2] == ["tab","close"] for call in calls())
@@ -507,6 +609,7 @@ receipt = invoke(1,"start","T-155","--repo",main)
 assert receipt["transaction"]["prompt_submission"]["submitted"] is False
 assert receipt["transaction"]["prompt_submission"]["working_transition_observed"] is False
 assert receipt["transaction"]["cleanup"] == "created tab preserved; prompt may have been accepted"
+assert stored_role()["role"] == "change_owner"
 assert_no_focus_commands()
 assert not any(call[:2] == ["tab","close"] for call in calls())
 
@@ -515,6 +618,7 @@ for mode in ("startup_uncertain","start_malformed","start_invalid_utf8","start_r
     reset(mode); receipt = invoke(1,"start","T-155","--repo",main)
     assert receipt["transaction"]["created_tab_id"] == "w:tNew"
     assert "preserved" in receipt["transaction"]["cleanup"]
+    assert stored_role()["role"] == "change_owner"
     assert_no_focus_commands()
     assert not any(call[:2] == ["tab","close"] for call in calls())
 
@@ -522,6 +626,7 @@ for mode in ("create_malformed", "create_relative_cwd"):
     reset(mode); receipt = invoke(1,"start","T-155","--repo",main)
     assert receipt["transaction"]["created_tab_id"] is None
     assert receipt["transaction"]["possible_new_tab_ids"] == ["w:tNew"]
+    assert stored_role() is None
     assert_no_focus_commands()
     assert not any(call[:2] == ["tab","close"] for call in calls())
 
@@ -538,6 +643,134 @@ spec = importlib.util.spec_from_file_location("qq_handoff_test", implementation)
 assert spec is not None and spec.loader is not None
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
+
+
+def expect_operational(label, operation):
+    try:
+        operation()
+    except module.OperationalError:
+        return
+    except Exception as error:
+        raise AssertionError(f"{label} raised uncontrolled {type(error).__name__}: {error}") from error
+    raise AssertionError(f"{label} was accepted")
+
+
+binding = {
+    "schema":"qq.tab-role/v1", "version":1, "workspace_id":"w",
+    "tab_id":"w:t", "role":"change_owner",
+}
+def mutation_text(result=binding, **envelope):
+    value = {"ok":True, "schema":"qq.tab-role/v1", "result":result}
+    value.update(envelope)
+    return json.dumps(value, separators=(",", ":"))
+
+def parse_mutation(text, action="bind", expected_role="change_owner"):
+    return module.parse_role_mutation_result(
+        text, action=action, workspace_id="w", tab_id="w:t", role=expected_role,
+    )
+
+assert parse_mutation(mutation_text()) == binding
+assert parse_mutation(mutation_text(), action="unbind", expected_role=None) == binding
+assert parse_mutation(mutation_text(None), action="unbind", expected_role=None) is None
+
+json_types = [None, [], {}, 0, True, 1.5, "wrong"]
+for index, value in enumerate([None, [], {}, 0, True, 1.5, "text"]):
+    expect_operational(f"mutation top-level type {index}", lambda value=value: parse_mutation(json.dumps(value)))
+expect_operational("mutation non-text input", lambda: parse_mutation(7))
+for key in ("ok", "schema", "result"):
+    envelope = {"ok":True, "schema":"qq.tab-role/v1", "result":binding}
+    del envelope[key]
+    expect_operational(f"mutation missing envelope {key}", lambda envelope=envelope: parse_mutation(json.dumps(envelope)))
+expect_operational("mutation extra envelope field", lambda: parse_mutation(mutation_text(extra=True)))
+for index, value in enumerate([False, None, [], {}, 0, 1, 1.5, "true"]):
+    expect_operational(f"mutation ok type/value {index}", lambda value=value: parse_mutation(mutation_text(ok=value)))
+for index, value in enumerate(json_types):
+    expect_operational(f"mutation schema type/value {index}", lambda value=value: parse_mutation(mutation_text(schema=value)))
+for index, value in enumerate([None, [], {}, 0, True, 1.5, "result"]):
+    expect_operational(f"mutation result type {index}", lambda value=value: parse_mutation(mutation_text(value)))
+for key in binding:
+    result = dict(binding); del result[key]
+    expect_operational(f"mutation missing result {key}", lambda result=result: parse_mutation(mutation_text(result)))
+result = dict(binding); result["extra"] = True
+expect_operational("mutation extra result field", lambda: parse_mutation(mutation_text(result)))
+for key in ("schema", "workspace_id", "tab_id", "role"):
+    for index, value in enumerate(json_types):
+        result = dict(binding); result[key] = value
+        expect_operational(
+            f"mutation {key} type/value {index}",
+            lambda result=result: parse_mutation(mutation_text(result)),
+        )
+for index, value in enumerate([None, [], {}, True, 1.0, 1.5, "1", 0, 2]):
+    result = dict(binding); result["version"] = value
+    expect_operational(
+        f"mutation version type/value {index}",
+        lambda result=result: parse_mutation(mutation_text(result)),
+    )
+for key, value in (("workspace_id", "other"), ("tab_id", "w:other"),
+                   ("role", "architect"), ("role", "runner"), ("role", "unknown")):
+    result = dict(binding); result[key] = value
+    expect_operational(
+        f"mutation mismatched {key} {value}",
+        lambda result=result: parse_mutation(mutation_text(result)),
+    )
+for label, text in (
+    ("duplicate envelope", '{"ok":true,"ok":true,"schema":"qq.tab-role/v1","result":null}'),
+    ("duplicate result", '{"ok":true,"schema":"qq.tab-role/v1","result":{"schema":"qq.tab-role/v1","version":1,"version":1,"workspace_id":"w","tab_id":"w:t","role":"change_owner"}}'),
+    ("nonstandard number", '{"ok":true,"schema":"qq.tab-role/v1","result":{"schema":"qq.tab-role/v1","version":NaN,"workspace_id":"w","tab_id":"w:t","role":"change_owner"}}'),
+    ("output bound", " " * (module.MAX_ROLE_BINDING_OUTPUT + 1)),
+):
+    expect_operational(f"mutation {label}", lambda text=text: parse_mutation(text))
+
+refusal = {
+    "ok":False, "schema":"qq.tab-role/v1",
+    "error":{"code":"refused", "message":"fixture refusal"},
+}
+def parse_refusal(value):
+    text = value if isinstance(value, str) else json.dumps(value, separators=(",", ":"))
+    return module.parse_role_refusal(text)
+
+assert parse_refusal(refusal) == refusal["error"]
+for index, value in enumerate([None, [], {}, 0, True, 1.5, "text"]):
+    expect_operational(
+        f"refusal top-level type {index}",
+        lambda value=value: module.parse_role_refusal(json.dumps(value)),
+    )
+expect_operational("refusal non-text input", lambda: module.parse_role_refusal(7))
+for key in ("ok", "schema", "error"):
+    envelope = dict(refusal); del envelope[key]
+    expect_operational(f"refusal missing envelope {key}", lambda envelope=envelope: parse_refusal(envelope))
+envelope = dict(refusal); envelope["extra"] = True
+expect_operational("refusal extra envelope field", lambda: parse_refusal(envelope))
+for index, value in enumerate([True, None, [], {}, 0, 1, 1.5, "false"]):
+    envelope = dict(refusal); envelope["ok"] = value
+    expect_operational(f"refusal ok type/value {index}", lambda envelope=envelope: parse_refusal(envelope))
+for index, value in enumerate(json_types):
+    envelope = dict(refusal); envelope["schema"] = value
+    expect_operational(f"refusal schema type/value {index}", lambda envelope=envelope: parse_refusal(envelope))
+for index, value in enumerate([None, [], 0, True, 1.5, "error"]):
+    envelope = dict(refusal); envelope["error"] = value
+    expect_operational(f"refusal error type {index}", lambda envelope=envelope: parse_refusal(envelope))
+for key in ("code", "message"):
+    error = dict(refusal["error"]); del error[key]
+    envelope = dict(refusal); envelope["error"] = error
+    expect_operational(f"refusal missing error {key}", lambda envelope=envelope: parse_refusal(envelope))
+error = dict(refusal["error"]); error["extra"] = True
+envelope = dict(refusal); envelope["error"] = error
+expect_operational("refusal extra error field", lambda: parse_refusal(envelope))
+for index, value in enumerate(json_types):
+    error = dict(refusal["error"]); error["code"] = value
+    envelope = dict(refusal); envelope["error"] = error
+    expect_operational(f"refusal code type/value {index}", lambda envelope=envelope: parse_refusal(envelope))
+for index, value in enumerate([None, [], {}, 0, True, 1.5, ""]):
+    error = dict(refusal["error"]); error["message"] = value
+    envelope = dict(refusal); envelope["error"] = error
+    expect_operational(f"refusal message type/value {index}", lambda envelope=envelope: parse_refusal(envelope))
+for label, text in (
+    ("duplicate envelope", '{"ok":false,"ok":false,"schema":"qq.tab-role/v1","error":{"code":"refused","message":"x"}}'),
+    ("duplicate error", '{"ok":false,"schema":"qq.tab-role/v1","error":{"code":"refused","code":"refused","message":"x"}}'),
+):
+    expect_operational(f"refusal {label}", lambda text=text: parse_refusal(text))
+
 long_task = "T-" + ("9" * 60)
 first_name = module.bounded_agent_name(long_task, "w:p-one")
 second_name = module.bounded_agent_name(long_task, "w:p-two")

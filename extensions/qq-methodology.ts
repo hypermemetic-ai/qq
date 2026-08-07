@@ -144,29 +144,30 @@ export async function inspectMethodologyLink(cwd, deps = {}) {
 }
 
 async function canonicalSnapshot(bundleRoot, loadFile) {
-  const agentsPath = join(bundleRoot, "AGENTS.md");
+  const kernelPath = join(bundleRoot, "methodology", "KERNEL.md");
   const conceptsPath = join(bundleRoot, "CONCEPTS.md");
-  const [agents, concepts] = await Promise.all([
-    loadFile(agentsPath, "utf8"),
+  const [kernel, concepts] = await Promise.all([
+    loadFile(kernelPath, "utf8"),
     loadFile(conceptsPath, "utf8"),
   ]);
-  if (typeof agents !== "string" || agents === "" || typeof concepts !== "string" || concepts === "") {
-    throw new Error("qq canonical methodology files must be non-empty text");
+  if (typeof kernel !== "string" || !kernel.trim()
+    || typeof concepts !== "string" || !concepts.trim()) {
+    throw new Error("qq canonical kernel and concepts must be non-empty text");
   }
-  return Object.freeze({ agents, concepts });
+  return Object.freeze({ kernel, concepts });
 }
 
-function containsCanonicalAgents(contextFiles, agents) {
-  if (!Array.isArray(contextFiles)) return false;
-  return contextFiles.some((file) => {
-    const content = file?.content;
-    return typeof content === "string" && (content === agents || content.includes(agents));
-  });
+function containsCanonicalKernel(systemPrompt, kernel) {
+  return typeof systemPrompt === "string" && systemPrompt.includes(kernel.trimEnd());
 }
 
-function methodologyBlock(snapshot, localVocabulary, includeAgents) {
+function methodologyBlock(snapshot, localVocabulary, includeKernel) {
   const sections = ["# qq methodology (session snapshot)"];
-  if (includeAgents) sections.push(`## Canonical AGENTS.md\n\n${snapshot.agents.trimEnd()}`);
+  if (includeKernel) {
+    sections.push(
+      `## Canonical methodology/KERNEL.md\n\n${snapshot.kernel.trimEnd()}`,
+    );
+  }
   sections.push(`## Canonical CONCEPTS.md\n\n${snapshot.concepts.trimEnd()}`);
   if (localVocabulary) {
     sections.push(
@@ -178,8 +179,10 @@ function methodologyBlock(snapshot, localVocabulary, includeAgents) {
 
 function watcherSpecs(bundleRoot) {
   return [
-    { path: join(bundleRoot, "AGENTS.md"), recursive: false },
+    { path: join(bundleRoot, "methodology", "KERNEL.md"), recursive: false },
     { path: join(bundleRoot, "CONCEPTS.md"), recursive: false },
+    { path: join(bundleRoot, "delegation", "manifests", "agents"), recursive: true },
+    { path: join(bundleRoot, "delegation", "policies"), recursive: true },
     { path: join(bundleRoot, "skills"), recursive: true },
     { path: join(bundleRoot, "prompts"), recursive: true },
     { path: join(bundleRoot, "extensions"), recursive: true },
@@ -301,17 +304,13 @@ function registerLinkedBootstrap(pi, options) {
 
   pi.on("resources_discover", () => {
     if (!active) return undefined;
-    return {
-      skillPaths: [join(bundleRoot, "skills")],
-      promptPaths: [join(bundleRoot, "prompts")],
-    };
+    return { promptPaths: [join(bundleRoot, "prompts")] };
   });
 
   pi.on("before_agent_start", (event) => {
     if (!active) return undefined;
-    const contextFiles = event.systemPromptOptions?.contextFiles;
-    const includeAgents = !containsCanonicalAgents(contextFiles, snapshot.agents);
-    const block = methodologyBlock(snapshot, localVocabulary, includeAgents);
+    const includeKernel = !containsCanonicalKernel(event.systemPrompt, snapshot.kernel);
+    const block = methodologyBlock(snapshot, localVocabulary, includeKernel);
     return { systemPrompt: `${event.systemPrompt}\n\n${block}` };
   });
 

@@ -1,0 +1,55 @@
+{
+  "schema": "qq.role-skills/v1",
+  "version": 1,
+  "inventory": [
+    "agent-messaging",
+    "delegate",
+    "diagnosing-bugs",
+    "operator-input",
+    "research",
+    "review",
+    "uat-signoff",
+    "writing-for-clients"
+  ],
+  "roles": {
+    "architect": [
+      "delegate",
+      "diagnosing-bugs",
+      "operator-input",
+      "research",
+      "agent-messaging"
+    ],
+    "change_owner": [
+      "delegate",
+      "review",
+      "diagnosing-bugs",
+      "operator-input",
+      "research",
+      "uat-signoff",
+      "agent-messaging"
+    ],
+    "coordinator": [
+      "agent-messaging"
+    ],
+    "implementer": [
+      "diagnosing-bugs"
+    ],
+    "observer": [],
+    "openwiki_maintainer": [
+      "delegate",
+      "review"
+    ],
+    "researcher": [],
+    "reviewer": [],
+    "runner": [
+      "writing-for-clients",
+      "diagnosing-bugs"
+    ]
+  },
+  "assignment_selectable": {
+    "writing-for-clients": [
+      "implementer",
+      "reviewer"
+    ]
+  }
+}

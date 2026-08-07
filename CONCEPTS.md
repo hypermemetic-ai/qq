@@ -11,6 +11,49 @@ vocabulary changes.
 operator owns intent and judgment; agents investigate, recommend, execute, and
 verify.
 
+**Role** — One fixed qq-owned identity selected when a live Pi session starts.
+The complete role set is `architect`, `coordinator`, `change_owner`, `runner`,
+`implementer`, `researcher`, `reviewer`, `observer`, and
+`openwiki_maintainer`. A live session never moves, reloads, or replays input
+across roles; an exceptional transfer starts a fresh destination-role session
+from durable facts.
+
+**Architect** — The product-intake role that investigates and shapes Unaligned
+Tasks, aligns them with the operator, and hands off accepted intent without
+executing the Change.
+
+**Coordinator** — The transport and supervision role that derives the ready
+frontier, admits one Change Owner per Change, watches liveness, and brokers
+bounded cross-Change exchange without conducting operator dialogue.
+
+**Change Owner** — The accountable role that carries exactly one admitted
+Change from work orders through evidence, review, one pull request, operator
+merge handoff, and retirement. It talks directly with the operator and never
+merges source.
+
+**Runner** — The direct operator-facing role for reduced-ceremony,
+non-consequential labor in its own scratch worktree and branch. Work carrying
+consequential stakes is outside Runner authority.
+
+**Implementer** — A bounded delegated role that edits only within one complete
+work order and returns Check evidence without taking Change ownership.
+
+**Researcher** — A bounded read-only role that investigates one research brief
+and distinguishes evidence from inference.
+
+**Reviewer** — A bounded read-only role that independently evaluates one
+artifact against its brief in fresh context.
+
+**Observer** — A bounded read-only role that analyzes system health and returns
+evidence-backed findings without settling their disposition.
+
+**OpenWiki Maintainer** — The schedule-instantiated role for one guarded,
+derived-only OpenWiki maintenance run; it is not a manual or source-Change
+trigger.
+
+**Backlog board** — The project-home `backlog board` viewer. It is display-only,
+not a role or Pi session surface, and accepts no role binding.
+
 **Repository** — The Git history and GitHub project that own the system's files
 and delivery state.
 
@@ -54,7 +97,7 @@ locally or through GitHub Actions.
 **Skill** — A stateless capability invoked when its trigger matches the work.
 
 **Knowledge item** — A durable artifact that preserves system description,
-research, an idea, a reusable lesson, or shared vocabulary.
+research, a reusable lesson, or shared vocabulary.
 
 **managed Backlog markdown** — Markdown owned by Backlog and edited only
 through the Backlog CLI surface; the two `bin/qq-backlog` wrapper verbs
@@ -69,9 +112,10 @@ consequential decision its Change embeds, each citing the disposition that
 settled it — a Backlog decision record, an approved Task, an
 asked-and-answered alignment exchange, or an explicit operator opt-out
 recorded verbatim — or the explicit entry `none`. An
-uncited decision is open; deliver-change refuses to bind a Change without a
-ledger. Dispositions do not transfer: each covers exactly the decision it
-settled, on the surface it settled it for.
+uncited decision is open; the admission rail refuses to bind the Change and the
+Change Owner refuses to proceed without a complete ledger. Dispositions do not
+transfer: each covers exactly the decision it settled, on the surface it
+settled it for.
 
 **alignment brief** — The default engagement-first operator-alignment step for
 genuinely new work: current-state questions come first, and the plan is built
@@ -84,10 +128,11 @@ consequential options.
 Checks to operator merge and automatic branch deletion.
 
 **project home** — A Repository's persistent Herdr workspace bound to its sole
-primary `main` checkout. Its dedicated Backlog-board tab, operator-created
-general tabs, and the accountable session dispatching every Change remain at
-this level. Change checkouts are plain linked worktrees with no Herdr workspace,
-and delegated agents run as headless child processes in the Change worktree.
+primary `main` checkout. Its dedicated display-only Backlog-board tab,
+operator-created general tabs, and the accountable session dispatching every
+Change remain at this level. Change checkouts are plain linked worktrees with no
+Herdr workspace, and delegated agents run as headless child processes in the
+Change worktree.
 
 **green** — A unit of work whose applicable Checks pass with evidence that they
 observed the intended subject.

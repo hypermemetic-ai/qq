@@ -128,7 +128,7 @@ reset_fake
 export FAKE_AGENTS_JSON='{"result":{"agents":[{"terminal_id":"term:1","agent_status":"working","workspace_id":"ws","tab_id":"ws:t1","pane_id":"ws:p1","focused":true,"revision":1,"agent":"other-agent","screen_detection_skipped":true}]}}'
 HERDR_PANE_ID=ws:p1 "$SNAP"
 assert_file_contains "$log" 'notification show qq-snap --body no agent session in this space'
-assert_file_not_matches "$log" 'already on the orchestrator'
+assert_file_not_matches "$log" 'already on the project-home agent'
 assert_file_not_matches "$log" '^agent focus '
 
 # No agent in the focused workspace: best-effort notification, no focus.
@@ -153,7 +153,7 @@ XDG_RUNTIME_DIR="$tmp/missing/nested" HERDR_PANE_ID=ws:p1 "$SNAP"
 grep -q '^notification show qq-snap --body cannot record origin pane' "$log"
 assert_file_not_matches "$log" '^agent focus '
 
-# Bounce: already on the orchestrator, previous pane hosts an agent.
+# Bounce: already on the project-home agent, previous pane hosts an agent.
 reset_fake
 printf 'ws:p1\n' >"$state_file"
 export FAKE_PREV_PANE=ws:p1 FAKE_PREV_AGENT_JSON='"other-agent"'
@@ -177,10 +177,10 @@ grep -q '^notification show qq-snap --body previous pane is gone$' "$log"
 assert_file_not_matches "$log" '^agent focus '
 assert_file_not_matches "$log" '^tab focus '
 
-# Already on the orchestrator with no stored origin: notification only.
+# Already on the project-home agent with no stored origin: notification only.
 reset_fake
 HERDR_PANE_ID=ws:p3 "$SNAP"
-grep -q '^notification show qq-snap --body already on the orchestrator$' "$log"
+grep -q '^notification show qq-snap --body already on the project-home agent$' "$log"
 assert_file_not_matches "$log" '^agent focus '
 
 # Without HERDR_PANE_ID the focused pane comes from `pane current`.

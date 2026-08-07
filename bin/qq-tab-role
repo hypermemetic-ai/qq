@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Explicit qq-owned stable tab-role tag mechanics for Herdr 0.7.5.
+set -euo pipefail
+self="$(readlink -f -- "${BASH_SOURCE[0]}")"
+exec python3 "$(dirname -- "$self")/lib/qq_tab_role.py" "$@"

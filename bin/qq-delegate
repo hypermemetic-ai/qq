@@ -13,9 +13,9 @@ fail() {
 
 usage() {
   printf '%s\n' \
-    'usage: qq-delegate run --role <role> --cwd <worktree> --brief <abs-run-dir>/BRIEF.md' \
+    'usage: qq-delegate run --role <role> --cwd <worktree> --brief <abs-run-dir>/BRIEF.md [--skill <name>]...' \
     '       qq-delegate batch <abs-batch.json>' \
-    '       qq-delegate start --role <role> --cwd <worktree> --brief <abs-run-dir>/BRIEF.md' \
+    '       qq-delegate start --role <role> --cwd <worktree> --brief <abs-run-dir>/BRIEF.md [--skill <name>]...' \
     '       qq-delegate start-batch <abs-batch.json>' \
     '       qq-delegate status <absolute-run-dir>' \
     '       qq-delegate wait <absolute-run-dir>' \
@@ -44,11 +44,19 @@ run_role=""
 run_cwd=""
 run_brief=""
 run_id_input=""
+run_skills=()
 batch_path=""
 lifecycle_run_dir=""
 case "$command_name" in
   run | start)
     while [[ $# -gt 0 ]]; do
+      if [[ "$1" == --skill ]]; then
+        [[ $# -ge 2 && "$2" != --* && -n "$2" ]] \
+          || fail 66 "--skill requires one explicit non-option name"
+        run_skills+=("$2")
+        shift 2
+        continue
+      fi
       [[ $# -ge 2 && "$2" != --* ]] || usage
       case "$1" in
         --role) [[ -z "$run_role" ]] || usage; run_role="$2" ;;
@@ -71,6 +79,13 @@ case "$command_name" in
   _worker)
     [[ "${QQ_DELEGATE_INTERNAL_WORKER:-}" == 1 ]] || usage
     while [[ $# -gt 0 ]]; do
+      if [[ "$1" == --skill ]]; then
+        [[ $# -ge 2 && "$2" != --* && -n "$2" ]] \
+          || fail 66 "--skill requires one explicit non-option name"
+        run_skills+=("$2")
+        shift 2
+        continue
+      fi
       [[ $# -ge 2 && "$2" != --* ]] || usage
       case "$1" in
         --run-id) [[ -z "$run_id_input" ]] || usage; run_id_input="$2" ;;
@@ -86,6 +101,21 @@ case "$command_name" in
     ;;
   *) usage ;;
 esac
+
+if [[ "$command_name" == run || "$command_name" == start || "$command_name" == _worker ]]; then
+  declare -A cli_seen_skills=()
+  for cli_skill in "${run_skills[@]}"; do
+    [[ "$cli_skill" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] \
+      || fail 66 "malformed selected Skill '$cli_skill'"
+    [[ -z "${cli_seen_skills[$cli_skill]:-}" ]] \
+      || fail 66 "duplicate selected Skill '$cli_skill'"
+    cli_seen_skills[$cli_skill]=1
+    [[ "$cli_skill" == writing-for-clients ]] \
+      || fail 66 "unknown or non-selectable Skill '$cli_skill'"
+    [[ "$run_role" == implementer || "$run_role" == reviewer ]] \
+      || fail 66 "Skill '$cli_skill' is not allowed for role '$run_role'"
+  done
+fi
 
 for required_command in git python3 timeout realpath; do
   command -v "$required_command" >/dev/null 2>&1 || fail 71 "required command is unavailable: $required_command"
@@ -296,11 +326,29 @@ execute_ticket() {
   local role="$1" cwd_input="$2" brief_path="$3" run_id="$4"
   local metadata_file="${5:-}"
   local detached="${6:-false}"
+  local skill_spec="${7:-}"
 
   case "$role" in
     implementer | reviewer | researcher | observer) ;;
     *) fail 66 "unsupported delegated role '$role'" ;;
   esac
+  local -a selected_skills=()
+  if [[ -n "$skill_spec" ]]; then
+    IFS=',' read -r -a selected_skills <<<"$skill_spec"
+  fi
+  local selected_skill
+  declare -A seen_selected_skills=()
+  for selected_skill in "${selected_skills[@]}"; do
+    [[ "$selected_skill" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] \
+      || fail 66 "malformed selected Skill '$selected_skill'"
+    [[ -z "${seen_selected_skills[$selected_skill]:-}" ]] \
+      || fail 66 "duplicate selected Skill '$selected_skill'"
+    seen_selected_skills[$selected_skill]=1
+    [[ "$selected_skill" == writing-for-clients ]] \
+      || fail 66 "unknown or non-selectable Skill '$selected_skill'"
+    [[ "$role" == implementer || "$role" == reviewer ]] \
+      || fail 66 "Skill '$selected_skill' is not allowed for role '$role'"
+  done
   if [[ "$role" == researcher && -n "${CONTEXT7_API_KEY:-}" ]]; then
     fail 66 "researcher dispatch forbids inherited CONTEXT7_API_KEY"
   fi
@@ -361,19 +409,26 @@ execute_ticket() {
   fi
 
   local manifest="$engine_worktree/delegation/manifests/agents/$role.md"
+  local kernel="$engine_worktree/methodology/KERNEL.md"
   local policy="$engine_worktree/delegation/policies/execution-profiles.json"
+  local skill_policy="$engine_worktree/delegation/policies/role-skills.json"
   local service_class_extension="$engine_worktree/delegation/extensions/qq-service-class.ts"
   local config_file="$runtime_root/.qq-delegate-config-$run_id"
   local system_prompt="$run_dir/.system-prompt.md"
   local parse_error parse_status
-  if parse_error="$("$python_binary" - "$manifest" "$policy" "$role" "$invoking_home" "$config_file" "$system_prompt" <<'PY' 2>&1
+  if parse_error="$("$python_binary" - "$manifest" "$kernel" "$policy" "$skill_policy" \
+      "$role" "$invoking_home" "$config_file" "$system_prompt" "$skill_spec" "$engine_worktree" <<'PY' 2>&1
 import json, os, re, stat, sys
 from pathlib import Path
-manifest_text, policy_text, role, home, config_text, prompt_text = sys.argv[1:]
+(manifest_text, kernel_text, policy_text, skill_policy_text, role, home,
+ config_text, prompt_text, skill_spec, engine_root_text) = sys.argv[1:]
 manifest = Path(manifest_text)
+kernel_path = Path(kernel_text)
 policy_path = Path(policy_text)
+skill_policy_path = Path(skill_policy_text)
 config_path = Path(config_text)
 prompt_path = Path(prompt_text)
+engine_root = Path(engine_root_text)
 
 def refuse(message, status=71):
     print(message, file=sys.stderr)
@@ -447,16 +502,99 @@ if effort != "provider-default" and effort not in {
     "off", "minimal", "low", "medium", "high", "xhigh", "max"
 }:
     refuse(f"execution-profile effort for {role} is unsupported: {effort}", 66)
+def strict_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            refuse(f"role-skill policy contains duplicate key {key!r}")
+        result[key] = value
+    return result
+
+try:
+    skill_policy_state = skill_policy_path.lstat()
+    if (not stat.S_ISREG(skill_policy_state.st_mode) or skill_policy_path.is_symlink()
+            or skill_policy_path.resolve() != skill_policy_path):
+        raise OSError
+    skill_policy = json.loads(skill_policy_path.read_text(encoding="utf-8"),
+                              object_pairs_hook=strict_object)
+except (OSError, UnicodeError, json.JSONDecodeError):
+    refuse("role-skill policy is unsafe or malformed")
+role_names = {
+    "architect", "coordinator", "change_owner", "runner", "implementer",
+    "researcher", "reviewer", "observer", "openwiki_maintainer",
+}
+if (not isinstance(skill_policy, dict)
+        or set(skill_policy) != {"schema", "version", "inventory", "roles", "assignment_selectable"}
+        or skill_policy.get("schema") != "qq.role-skills/v1"
+        or skill_policy.get("version") != 1
+        or not isinstance(skill_policy.get("inventory"), list)
+        or not isinstance(skill_policy.get("roles"), dict)
+        or set(skill_policy["roles"]) != role_names
+        or not isinstance(skill_policy.get("assignment_selectable"), dict)):
+    refuse("role-skill policy has an invalid shape")
+inventory = skill_policy["inventory"]
+name_pattern = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
+if (not inventory or len(inventory) != len(set(inventory))
+        or any(not isinstance(name, str) or name_pattern.fullmatch(name) is None
+               or name == ".system" for name in inventory)):
+    refuse("role-skill policy inventory is malformed")
+inventory_set = set(inventory)
+for mapped_role, names in skill_policy["roles"].items():
+    if (not isinstance(names, list) or len(names) != len(set(names))
+            or any(not isinstance(name, str) or name not in inventory_set for name in names)):
+        refuse(f"role-skill policy for {mapped_role} is malformed")
+for name, allowed_roles in skill_policy["assignment_selectable"].items():
+    if (name not in inventory_set or not isinstance(allowed_roles, list)
+            or len(allowed_roles) != len(set(allowed_roles))
+            or any(allowed not in role_names for allowed in allowed_roles)):
+        refuse(f"assignment-selected Skill policy for {name} is malformed")
+selected = skill_spec.split(",") if skill_spec else []
+if (len(selected) != len(set(selected))
+        or any(name_pattern.fullmatch(name) is None for name in selected)):
+    refuse("selected Skills are malformed or duplicated", 66)
+for name in selected:
+    allowed_roles = skill_policy["assignment_selectable"].get(name)
+    if allowed_roles is None:
+        refuse(f"unknown or non-selectable Skill '{name}'", 66)
+    if role not in allowed_roles:
+        refuse(f"Skill '{name}' is not allowed for role '{role}'", 66)
+role_skills = [*skill_policy["roles"][role], *selected]
+if len(role_skills) != len(set(role_skills)):
+    refuse(f"role-skill policy and selected Skills collide for {role}", 66)
+for name in role_skills:
+    path = engine_root / "skills" / name / "SKILL.md"
+    try:
+        state = path.lstat()
+        if (not stat.S_ISREG(state.st_mode) or path.is_symlink()
+                or path.resolve() != path):
+            raise OSError
+        skill_source = path.read_bytes().decode("utf-8")
+    except (OSError, UnicodeError):
+        refuse(f"canonical Skill is unsafe or unavailable: {name}")
+    if re.search(rf"^name: {re.escape(name)}$", skill_source, re.MULTILINE) is None:
+        refuse(f"canonical Skill has mismatched identity: {name}")
 values = [timeout_spec, ",".join(tools), profile["provider"], profile["model"],
-          effort, service_class, extension_path]
-if any("\0" in value for value in values): refuse(f"execution-profile or extension value for {role} contains NUL")
+          effort, service_class, extension_path, *role_skills]
+if any("\0" in value for value in values): refuse(f"execution-profile, extension, or Skill value for {role} contains NUL")
 config_path.write_bytes(b"\0".join(value.encode() for value in values) + b"\0")
 os.chmod(config_path, 0o600)
-body = "".join(lines[close + 1:]).encode()
+body = "".join(lines[close + 1:]).strip()
+if not body: refuse(f"manifest for {role} has an empty system-prompt body")
+try:
+    kernel_state = kernel_path.lstat()
+    if (not stat.S_ISREG(kernel_state.st_mode) or kernel_path.is_symlink()
+            or kernel_path.resolve() != kernel_path):
+        raise OSError
+    kernel = kernel_path.read_bytes().decode("utf-8").strip()
+    if not kernel:
+        raise OSError
+except (OSError, UnicodeError):
+    refuse("qq methodology kernel is unsafe or unavailable")
+complete_prompt = f"{body}\n\n{kernel}\n".encode()
 try:
     descriptor = os.open(prompt_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
     with os.fdopen(descriptor, "wb") as output:
-        output.write(body)
+        output.write(complete_prompt)
     os.chmod(prompt_path, 0o600)
 except OSError:
     refuse(f"cannot write system prompt for {role}")
@@ -474,7 +612,7 @@ PY
   local -a dispatch_config
   mapfile -d '' -t dispatch_config <"$config_file"
   rm -f -- "$config_file"
-  [[ "${#dispatch_config[@]}" -eq 7 ]] || fail 71 "manifest and execution-profile parser returned malformed data"
+  [[ "${#dispatch_config[@]}" -ge 7 ]] || fail 71 "manifest, execution-profile, and Skill parser returned malformed data"
   local timeout_spec="${dispatch_config[0]}"
   local tools_csv="${dispatch_config[1]}"
   local provider="${dispatch_config[2]}"
@@ -490,6 +628,18 @@ PY
     timeout_spec="$QQ_DISPATCH_TIMEOUT"
     [[ "$timeout_spec" =~ ^(0\.[0-9]+|[1-9][0-9]*(\.[0-9]+)?)([smhd])?$ ]] || fail 71 "invalid QQ_DISPATCH_TIMEOUT '$timeout_spec'"
   fi
+
+  local -a role_skill_names=("${dispatch_config[@]:7}")
+  local -a role_skill_paths=()
+  local skill_name skill_path
+  for skill_name in "${role_skill_names[@]}"; do
+    skill_path="$engine_worktree/skills/$skill_name/SKILL.md"
+    [[ -f "$skill_path" && ! -L "$skill_path" ]] \
+      || fail 71 "canonical Skill is unsafe or unavailable: $skill_name"
+    [[ "$(realpath -e -- "$skill_path" 2>/dev/null)" == "$skill_path" ]] \
+      || fail 71 "canonical Skill does not resolve exactly: $skill_name"
+    role_skill_paths+=("$skill_path")
+  done
 
   if [[ "$inherited_herdr_pane" =~ ^[A-Za-z0-9:_-]{1,64}$ ]]; then
     if ! "$python_binary" - "$run_dir/PANE" "$inherited_herdr_pane" <<'PY'
@@ -529,8 +679,12 @@ PY
   if [[ -n "$extension_path" ]]; then
     child_argv+=(--extension "$extension_path")
   fi
+  child_argv+=(--no-skills)
+  for skill_path in "${role_skill_paths[@]}"; do
+    child_argv+=(--skill "$skill_path")
+  done
   child_argv+=(
-    --no-skills --no-context-files --system-prompt "$system_prompt"
+    --no-context-files --system-prompt "$system_prompt"
     "Task: Read-and-perform:$run_dir/BRIEF.md"
   )
 
@@ -1027,16 +1181,19 @@ start_run_dir() {
 }
 
 spawn_detached_worker() {
-  local run_id="$1" role="$2" cwd="$3" brief="$4"
-  "$python_binary" - "$self" "$run_id" "$role" "$cwd" "$brief" <<'PY'
+  local run_id="$1" role="$2" cwd="$3" brief="$4" skill_spec="${5:-}"
+  "$python_binary" - "$self" "$run_id" "$role" "$cwd" "$brief" "$skill_spec" <<'PY'
 import os, subprocess, sys, time
 from pathlib import Path
-engine, run_id, role, cwd, brief = sys.argv[1:]
+engine, run_id, role, cwd, brief, skill_spec = sys.argv[1:]
 environment = os.environ.copy()
 environment["QQ_DELEGATE_INTERNAL_WORKER"] = "1"
+argv = [engine, "_worker", "--run-id", run_id, "--role", role,
+        "--cwd", cwd, "--brief", brief]
+for skill in (skill_spec.split(",") if skill_spec else []):
+    argv.extend(["--skill", skill])
 process = subprocess.Popen(
-    [engine, "_worker", "--run-id", run_id, "--role", role,
-     "--cwd", cwd, "--brief", brief],
+    argv,
     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
     stderr=subprocess.DEVNULL, close_fds=True, start_new_session=True,
     env=environment,
@@ -1123,10 +1280,10 @@ PY
 }
 
 start_one() {
-  local role="$1" cwd="$2" brief="$3" run_id run_dir spawn_info pid ticks boot_id receipt
+  local role="$1" cwd="$2" brief="$3" skill_spec="${4:-}" run_id run_dir spawn_info pid ticks boot_id receipt
   run_dir="$(start_run_dir "$brief")" || return $?
   run_id="$(new_run_id)" || fail 71 "cannot mint a delegate run ID"
-  spawn_info="$(spawn_detached_worker "$run_id" "$role" "$cwd" "$brief")" \
+  spawn_info="$(spawn_detached_worker "$run_id" "$role" "$cwd" "$brief" "$skill_spec")" \
     || fail 71 "cannot launch the detached delegate worker"
   IFS=$'\t' read -r pid ticks boot_id <<<"$spawn_info"
   local attempt
@@ -1147,9 +1304,14 @@ start_one() {
   fail 71 "detached delegate worker did not accept the ticket promptly"
 }
 
+run_skill_spec=""
+if [[ "${#run_skills[@]}" -gt 0 ]]; then
+  run_skill_spec="$(IFS=,; printf '%s' "${run_skills[*]}")"
+fi
+
 if [[ "$command_name" == _worker ]]; then
   set +e
-  execute_ticket "$run_role" "$run_cwd" "$run_brief" "$run_id_input" "" true
+  execute_ticket "$run_role" "$run_cwd" "$run_brief" "$run_id_input" "" true "$run_skill_spec"
   worker_status=$?
   set -e
   exit "$worker_status"
@@ -1158,14 +1320,14 @@ fi
 if [[ "$command_name" == run ]]; then
   run_id="$(new_run_id)" || fail 71 "cannot mint a delegate run ID"
   set +e
-  execute_ticket "$run_role" "$run_cwd" "$run_brief" "$run_id"
+  execute_ticket "$run_role" "$run_cwd" "$run_brief" "$run_id" "" false "$run_skill_spec"
   run_status=$?
   set -e
   exit "$run_status"
 fi
 
 if [[ "$command_name" == start ]]; then
-  start_one "$run_role" "$run_cwd" "$run_brief"
+  start_one "$run_role" "$run_cwd" "$run_brief" "$run_skill_spec"
   exit $?
 fi
 
@@ -1184,11 +1346,26 @@ batch_tmp="$(mktemp -d "${TMPDIR:-/tmp}/qq-delegate-batch.XXXXXX")" || fail 71 "
 trap 'rm -rf -- "$batch_tmp"' EXIT
 batch_items="$batch_tmp/items"
 if batch_error="$("$python_binary" - "$batch_path" "$batch_items" <<'PY' 2>&1
-import json, os, sys
+import json, os, re, sys
 from pathlib import Path
 source, output = map(Path, sys.argv[1:])
+
+class DuplicateMember(ValueError):
+    pass
+
+def strict_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise DuplicateMember
+        value[key] = item
+    return value
+
 try:
-    value = json.loads(source.read_text(encoding="utf-8"))
+    value = json.loads(source.read_text(encoding="utf-8"), object_pairs_hook=strict_object)
+except DuplicateMember:
+    print("batch file contains a duplicate JSON object member", file=sys.stderr)
+    raise SystemExit(66)
 except (OSError, UnicodeError, json.JSONDecodeError):
     print("batch file is malformed", file=sys.stderr)
     raise SystemExit(65)
@@ -1201,8 +1378,9 @@ if not 1 <= len(value) <= 12:
 briefs = set()
 parts = []
 for index, ticket in enumerate(value):
-    if not isinstance(ticket, dict) or set(ticket) != {"role", "cwd", "brief"}:
-        print(f"batch ticket {index} must have exact keys role,cwd,brief", file=sys.stderr)
+    required = {"role", "cwd", "brief"}
+    if not isinstance(ticket, dict) or not required.issubset(ticket) or not set(ticket).issubset(required | {"skills"}):
+        print(f"batch ticket {index} must have exact keys role,cwd,brief and optional skills", file=sys.stderr)
         raise SystemExit(65)
     if any(not isinstance(ticket[key], str) or not ticket[key] or "\0" in ticket[key]
            for key in ("role", "cwd", "brief")):
@@ -1211,12 +1389,27 @@ for index, ticket in enumerate(value):
     if not ticket["cwd"].startswith("/") or not ticket["brief"].startswith("/"):
         print(f"batch ticket {index} cwd and brief must be absolute", file=sys.stderr)
         raise SystemExit(65)
+    skills = ticket.get("skills", [])
+    if (not isinstance(skills, list) or any(not isinstance(skill, str) or not skill
+            or re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", skill) is None for skill in skills)):
+        print(f"batch ticket {index} has malformed Skill selections", file=sys.stderr)
+        raise SystemExit(66)
+    if len(skills) != len(set(skills)):
+        print(f"batch ticket {index} has duplicate Skill selections", file=sys.stderr)
+        raise SystemExit(66)
+    if any(skill != "writing-for-clients" for skill in skills):
+        print(f"batch ticket {index} has an unknown or non-selectable Skill", file=sys.stderr)
+        raise SystemExit(66)
+    if skills and ticket["role"] not in {"implementer", "reviewer"}:
+        print(f"batch ticket {index} selects a Skill disallowed for role {ticket['role']}", file=sys.stderr)
+        raise SystemExit(66)
     brief_key = os.path.normpath(ticket["brief"])
     if brief_key in briefs:
         print(f"batch ticket {index} duplicates brief path {ticket['brief']}", file=sys.stderr)
         raise SystemExit(65)
     briefs.add(brief_key)
     parts.extend(ticket[key].encode() for key in ("role", "cwd", "brief"))
+    parts.append(",".join(skills).encode())
 output.write_bytes(b"\0".join(parts) + b"\0")
 PY
 )"; then
@@ -1229,15 +1422,18 @@ fi
 roles=()
 cwds=()
 briefs=()
-while IFS= read -r -d '' item_role && IFS= read -r -d '' item_cwd && IFS= read -r -d '' item_brief; do
+skill_specs=()
+while IFS= read -r -d '' item_role && IFS= read -r -d '' item_cwd \
+    && IFS= read -r -d '' item_brief && IFS= read -r -d '' item_skills; do
   roles+=("$item_role")
   cwds+=("$item_cwd")
   briefs+=("$item_brief")
+  skill_specs+=("$item_skills")
 done <"$batch_items"
 
 if [[ "$command_name" == start-batch ]]; then
   for index in "${!roles[@]}"; do
-    start_one "${roles[index]}" "${cwds[index]}" "${briefs[index]}"
+    start_one "${roles[index]}" "${cwds[index]}" "${briefs[index]}" "${skill_specs[index]}"
   done
   exit 0
 fi
@@ -1283,7 +1479,7 @@ PY
       exit "$ticket_status"
     }
     trap finish_batch_ticket EXIT
-    execute_ticket "${roles[index]}" "${cwds[index]}" "${briefs[index]}" "$run_id" "$metadata_file"
+    execute_ticket "${roles[index]}" "${cwds[index]}" "${briefs[index]}" "$run_id" "$metadata_file" false "${skill_specs[index]}"
   ) &
   pids+=("$!")
 done

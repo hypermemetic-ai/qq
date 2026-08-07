@@ -30,8 +30,14 @@ assert_file_contains "$PROMPT" \
   'prompt does not carry all optional operator context through the supported expansion'
 
 assert_file_contains "$README" \
-  'contributes the complete `skills/` and `prompts/` roots' \
+  'contributes only the versioned `prompts/` root' \
   'README does not expose the versioned prompt root through the linked bootstrap'
+assert_file_contains "$README" \
+  'never contributes the root' \
+  'README still describes blanket linked Skill discovery'
+assert_file_contains "$README" \
+  'exact scope in `delegation/policies/role-skills.json`' \
+  'README does not bind role startup to exact Skill policy'
 assert_file_contains "$README" '/check-in [date | commit | PR number | PR URL]'
 assert_file_contains "$README" 'A first use without either one'
 assert_file_contains "$README" 'refuses to guess.'

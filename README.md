@@ -23,15 +23,15 @@ wiring needed to expose it.
 
 ## Repository surfaces
 
-- [`AGENTS.md`](./AGENTS.md) is the shared operating guidance delivered by the
-  conditional Pi bootstrap in qq-linked Repositories. Repository-local guidance
-  remains Pi-native additive context.
-- `skills/` contains stateless capabilities exposed through each linked agent
-  runtime's native Skill surface.
+- [`AGENTS.md`](./AGENTS.md) is qq Repository orientation and points to the
+  single universal methodology kernel at [`methodology/KERNEL.md`](./methodology/KERNEL.md).
+  Repository-local guidance remains Pi-native additive context.
+- `skills/` contains tracked stateless capabilities. Role mounts expose only
+  the exact scope in `delegation/policies/role-skills.json`; ignored
+  machine-local `skills/.system/` content is never part of that scope.
 - `backlog/` holds Tasks, authored documents, and decisions managed through the
   Backlog CLI and its shared search index.
 - `CONCEPTS.md` is the shared language included in every linked session snapshot.
-- The single `Ideas` Backlog document is the idea capture surface.
 - Backlog document categories `plans`, `research`, and `solutions` retain
   historical designs, cited investigations, and reusable lessons.
 - herdr provides persistent `main` project homes, named agents, and direct
@@ -47,9 +47,9 @@ wiring needed to expose it.
 
 ## Delivery
 
-GitHub Flow is the delivery path. The `deliver-change` Skill owns the agent
-procedure for carrying an authorized Change to a green pull request; the
-operator merges.
+GitHub Flow is the delivery path. The complete Change Owner role prompt owns
+one authorized Change's intrinsic lifecycle through a green pull request;
+the operator merges.
 
 ## Install qq
 
@@ -67,13 +67,29 @@ selected 0.81.1 release without lifecycle scripts:
 npm install --global --ignore-scripts @earendil-works/pi-coding-agent@0.81.1
 ```
 
-`bin/pi` is the checkout-owned PATH entrypoint. It asks `npm root -g` for the
-global package location and executes the package's stock `dist/cli.js` with the
-caller's arguments unchanged. It refuses clearly when npm, the package, or the
-CLI is absent. After bootstrap, Pi updates use the ordinary `pi update`
-command. Ticket implementation and tests do not install or update the live
-operator runtime. When landed-methodology proof is required, verify it in fresh
-linked and unlinked Pi sessions after merge.
+`bin/pi` is the checkout-owned PATH entrypoint. It finds the global stock Pi
+through `npm root -g` and validates its pinned 0.81.1 package identity, manifest,
+CLI, and same-package argument parser. Classification uses the parser's complete
+final result; parser or package drift refuses before a normal session. Exact
+package/config administration bypasses parser loading so ordinary `pi update`
+can repair drift. Before stock Pi starts, an interactive Herdr launch resolves
+its exact pane through `bin/qq-tab-role` and prepends the complete role prompt,
+profile, and canonical Skill paths. Its role stays fixed. Only parser-proven
+noninteractive calls retain their vector. Linked interactive calls require exact
+pane evidence; neither a dispatch marker nor a missing pane bypasses identity
+fences. The existing Pi runtime/reference Check pins this seam. Ticket
+implementation and tests do not install or update the live operator runtime.
+When landed-methodology proof is required, verify it in fresh linked and
+unlinked Pi sessions after merge.
+
+Complete startup identities exist for Architect, Coordinator, Change Owner,
+Runner, Implementer, Researcher, Reviewer, Observer, and OpenWiki Maintainer.
+Interactive tabs select one of the first four at process start, with Runner as
+the working-tab default; headless entrypoints select delegated roles. The
+versioned OpenWiki Maintainer prompt is ready for T-196's separately owned
+schedule-launcher cutover. Each complete prompt contains the one methodology
+kernel and receives only its exact policy-selected Skills. The display-only
+Backlog board is not a role or Pi session surface.
 
 ### Researcher-only native Context7
 
@@ -154,11 +170,17 @@ ambiguous, and non-Git contexts fail closed: they receive no qq guidance,
 Skills, prompts, tools, commands, or guards. Product membership and tracked
 files are not activation authority.
 
-At linked startup/reload the bootstrap snapshots canonical `AGENTS.md` and
-`CONCEPTS.md`, contributes the complete `skills/` and `prompts/` roots, and
-registers the existing extension/tool set. Pi's Repository-local `AGENTS.md`
-remains additive context. A trusted root `CONCEPTS.local.md` may append
-Repository vocabulary but cannot activate qq or redefine canonical terms.
+At linked startup/reload the incumbent bootstrap snapshots the non-empty
+`methodology/KERNEL.md` and `CONCEPTS.md`. It adds the exact kernel once to an
+ordinary linked prompt, omits a second copy when a complete role prompt already
+contains it, and includes trusted additive `CONCEPTS.local.md` vocabulary. It
+contributes only the versioned `prompts/` root; it never contributes the root
+`skills/` directory. The bootstrap also registers the existing extension/tool
+set. Interactive role identity is not an extension lifecycle: `bin/pi`
+supplies the complete role prompt and exact Skill paths before stock Pi starts.
+Pi appends the linked Repository's own `AGENTS.md` as native project context;
+qq's Repository-orientation `AGENTS.md` is never injected as universal
+methodology into another Repository.
 
 `/check-in [date | commit | PR number | PR URL]` reports every first-parent
 `origin/main` advance after the explicit baseline, or after the exact
@@ -173,9 +195,15 @@ for child completion. `status` takes one absolute run directory and returns one
 bounded snapshot without a scan or wait; `wait` is the explicit lifecycle wait,
 and `collect` validates and returns the exact terminal outcome and completion
 envelope. The older `run` and `batch` verbs remain blocking compatibility paths.
-The engine resolves each canonical role manifest into explicit Pi arguments
-before launch; there is no separate vendor runtime or activation configuration.
-The assigned Git worktree is the delegate's only boundary.
+The engine composes each canonical delegated role body with the one methodology
+kernel, then passes that complete body through Pi's explicit `--system-prompt`
+with `--no-context-files`. It also uses `--no-skills` plus only canonical Skill
+paths from `role-skills.json`: Implementer always gets `diagnosing-bugs`, and a
+work order may select `writing-for-clients` only for Implementer or Reviewer.
+Malformed, unknown, duplicate, or role-disallowed selections refuse with policy
+status 66 before Pi launches. There is no generic Pi identity dependency or
+separate vendor runtime. The assigned Git worktree is the delegate's only
+boundary.
 
 At delegated-ticket creation, the owner creates one operator-owned mode-700 run
 directory beneath `QQ_DISPATCH_RUNTIME_ROOT` or the assigned worktree and writes
@@ -199,15 +227,30 @@ values, and keep the file private:
 chmod 600 ~/.pi/agent/auth.json
 ```
 
-`delegation/policies/execution-profiles.json` assigns Architect, Compactor,
-Implementer, Observer, and Reviewer to `openai-codex/gpt-5.6-sol:xhigh`;
-Researcher and Orchestrator use `qwen-token-plan/qwen3.8-max:xhigh`. All seats
-use the `provider-default` service class. The five GPT-5.6 seats are an interim
-swap while Kimi quota is unavailable; the canonical map (architect,
-change_owner, and reviewer on `kimi-coding/k3:max`) lands with T-214.1.
-`qq-delegate` reads the selected delegated role from this policy and
-passes its provider, model, and non-default thinking level through Pi's native
-CLI flags.
+`delegation/policies/execution-profiles.json` is the effective engine policy.
+Architect and Reviewer remain on the authorized temporary
+`openai-codex/gpt-5.6-sol:xhigh` seats until explicit operator confirmation that
+Kimi quota is available; Change Owner uses `kimi-coding/k3:max`. Coordinator
+and Researcher use `qwen-token-plan/qwen3.8-max:xhigh`; Compactor, Implementer,
+and Observer use `openai-codex/gpt-5.6-sol:xhigh`; Runner uses
+`deepseek/deepseek-v4-flash:max`. All use `provider-default` service class and
+there is no Orchestrator profile. `execution-profile-intent.json` records the
+canonical K3 intent and two temporary exceptions deterministically. T-196 owns
+the separately scheduled OpenWiki Maintainer profile. `qq-delegate` reads the
+effective selected role and passes provider, model, and non-default thinking
+level through Pi's native CLI flags.
+
+Herdr 0.7.5 has no tab metadata field, so `bin/qq-tab-role` provides qq's
+fail-closed stable mapping keyed by exact workspace+tab identity. Only
+`architect`, `coordinator`, and `change_owner` are stored tags; every untagged
+interactive tab resolves to Runner. `bind`, pane-based `inspect`, and `unbind`
+are explicit. The process-identified `backlog board` tab is display-only and
+cannot be tagged or start Pi. `bin/pi` snapshots the resolved role once before
+stock Pi starts; the live process never watches tab membership, reloads role
+resources, or saves/replays input to move between roles. A deliberate exception
+ends the old process and starts a fresh destination-role session. Unbind removes
+only the ephemeral tag record; session/tab retirement never mutates Tasks,
+worktrees, branches, commits, pull requests, or run directories.
 
 A delegated route may instead select `auto`, `default`, `flex`, or `priority`
 service class when its requested provider is `openai` or `openai-codex`.
@@ -224,13 +267,15 @@ bootstrap registers nothing. In a linked context it activates the complete
 bundle from this checkout. Source-only changes need no install step.
 
 A linked running session keeps its startup/reload snapshot. A later canonical
-`AGENTS.md`, `CONCEPTS.md`, Skill, prompt, or extension change sets one
-persistent footer status: `qq update available`. Repeated events coalesce and
-never add model-visible text, steer, or reload the session. A successful
-explicit `/reload` builds the new current snapshot and clears the status;
-shutdown closes its watchers. Ordinary canonical updates require no consumer
-Repository Change. A Change that breaks a durable external contract must own
-its explicit consumer migration and any required session reset.
+kernel, concepts, role manifest, role policy, tracked Skill, prompt, or
+extension change sets one persistent footer status: `qq update available`.
+Repeated events coalesce and never add model-visible text, steer, or reload the
+session. A successful explicit `/reload` builds the new methodology and prompt
+snapshot and clears the status; shutdown closes its process-local watchers.
+Startup role identity remains fixed for the Pi process. Ordinary canonical
+updates require no consumer Repository Change. A Change that breaks a durable
+external contract must own its explicit consumer migration and any required
+session reset.
 
 The Repository extension gives local feedback when Pi's built-in `write` or
 `edit` targets the normalized `backlog/` path of the checkout containing
@@ -263,14 +308,15 @@ delegation through `qq-delegate`.
 
 Architect findings use a separate typed accountable-intake route. Observer v2
 runs are Repository-qualified beneath
-`observer/runs/by-repository/<owner>/<repo>/pr-<N>`. `/architect`
-directly opens one bounded global digest of new and still-unsettled finding
-occurrences across source rounds and Repositories. It carries slim provenance
-for at most 50 ranked findings; detailed evidence stays in cited analyses and
-an omitted count reveals the remaining working set. There is no round picker or
-fixed verdict form. The Architect records only choices settled in conversation:
-route with non-empty agreed scope or set aside current evidence. Untouched
-occurrences stay open, and a later same-key occurrence reopens automatically.
+`observer/runs/by-repository/<owner>/<repo>/pr-<N>`. The operator manually
+invokes native prompt template `/architect`; it obtains one bounded digest via
+`bin/qq-observe architect-context`. No extension command or model-triggered
+context injection exists. The digest carries slim provenance for at most 50
+ranked findings; detailed evidence stays in cited analyses and an omitted count
+reveals the remaining working set. There is no round picker or fixed verdict
+form. The Architect records only choices settled in conversation: route with
+non-empty agreed scope or set aside current evidence. Untouched occurrences
+stay open, and a later same-key occurrence reopens automatically.
 
 `architect_disposition` settles explicitly operator-settled findings in one
 call: `action=settle` with one decision per recurrence key — `route` with the
@@ -377,7 +423,9 @@ qq-openwiki --init
 qq-openwiki --update
 ```
 
-In a restricted fresh-agent or service environment, set `QQ_OPENWIKI_BIN` to the
+These are the guarded generator operations consumed by the scheduled procedure,
+not a manual role invocation or a source-Change trigger. In a restricted
+fresh-agent or service environment, set `QQ_OPENWIKI_BIN` to the
 OpenWiki executable's absolute path. The wrapper validates and invokes that
 path directly; when it is unset, the shared resolver checks `PATH` and known
 Homebrew locations. It does not use a login shell for executable discovery.
@@ -393,11 +441,13 @@ support.
 
 Its credentials stay under `~/.openwiki/`, uncommitted.
 
-OpenWiki is a local single-writer derived surface owned by a separate maintainer
-Actor, not by source-change agents. Refresh is explicitly assigned on demand or
-by an optional schedule; source Changes do not trigger or perform it. The
-`openwiki-maintainer` Skill owns generation, independent verification, and
-delivery from its dedicated worktree; OpenWiki's internal generator owns
+OpenWiki is a local single-writer derived surface owned by the separately
+scheduled OpenWiki Maintainer Actor, not by source-change agents or an
+operator/manual/Skill trigger. Its complete identity is
+`delegation/manifests/agents/openwiki_maintainer.md`; T-196 owns the detailed
+scheduled procedure and launcher cutover. Until that cutover, the legacy
+`skills/openwiki-maintainer/SKILL.md` remains only for the existing scheduled
+caller and is excluded from every final role mount. OpenWiki's generator owns
 wiki authorship. `qq-openwiki` supplies deterministic branch, freshness,
 process-lock, and root-instruction restoration guards.
 
@@ -414,16 +464,16 @@ nominations to apply; every nomination left out is vetoed. Every scan and
 apply writes a dated report, even when empty; a missing report is the failure
 signal.
 
-### On-demand or scheduled maintenance
+### Scheduled maintenance
 
-Keep one long-lived `openwiki/update` worktree per linked Repository. For an
-assigned refresh, fetch `origin`, reset that worktree to the fresh `origin/main`,
-and run `qq-openwiki --update` (`--init` only for first setup). Review the
-complete generated diff through `code-review`, and open an ordinary
-documentation-only pull request. The operator reviews and merges on-demand
-refreshes.
+Keep one long-lived `openwiki/update` worktree per linked Repository. The
+schedule-instantiated role starts from fresh `origin/main`, runs the guarded
+generator (`--init` only for first setup), and reviews the complete generated
+diff through `review`. T-196 owns the exact procedure and launcher cutover; the
+current scheduled caller retains its safeguard-rich legacy Skill only until
+that cutover.
 
-qq also owns an optional systemd user timer for this Repository. It starts a
+qq owns an optional systemd user timer for this Repository. It starts a
 fresh, ephemeral, explicitly approved headless Pi maintainer assignment every
 day at 03:00 machine-local time. `Persistent=false` means a powered-off run is
 skipped with no boot catch-up or retry. A six-hour service timeout turns a
@@ -460,8 +510,9 @@ Disable and unlink the units without deleting journals or credentials:
 bin/qq-openwiki-schedule disable
 ```
 
-Source Changes still neither trigger nor perform OpenWiki maintenance. They and
-ordinary/on-demand refreshes retain operator merge authority.
+Source Changes and ordinary operator-facing sessions neither trigger nor
+perform OpenWiki maintenance; only the guarded schedule uses the maintenance
+role and scheduled merge path.
 
 Temporary debt (2026-07-10): upstream code mode unconditionally writes a
 scheduled GitHub Actions workflow and scheduled-workflow agent guidance.

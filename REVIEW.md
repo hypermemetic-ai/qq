@@ -51,8 +51,8 @@ evidence; never improvise or call them findings/passes.
   retires at least as much protocol as it adds.
 - Provider command construction exists in exactly one adapter.
 - Core workflow tests pass absent Herdr and OpenWiki.
-- `deliver-change` reaches green handoff without requiring Herdr, a browser, or
-  a polling loop.
+- The intrinsic Change Owner lifecycle reaches green handoff without requiring
+  Herdr, a browser, or a polling loop.
 - After the hybrid Task-truth convention retires, no Task-record relocation is
   a lifecycle transition.
 - Fresh-context review is the default for every non-trivial Change; the only

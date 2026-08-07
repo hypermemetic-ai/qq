@@ -89,14 +89,15 @@ else
   printf 'test-lifecycle-contract: Backlog CLI unavailable; live compatibility probe skipped\n'
 fi
 
-python3 - "$ROOT/CONCEPTS.md" "$ROOT/skills/deliver-change/SKILL.md" "$ROOT/README.md" <<'PY'
+python3 - "$ROOT/CONCEPTS.md" "$ROOT/delegation/manifests/agents/change_owner.md" "$ROOT/README.md" <<'PY'
 from pathlib import Path
 import sys
 
 concepts = Path(sys.argv[1]).read_text(encoding="utf-8")
-skill = Path(sys.argv[2]).read_text(encoding="utf-8")
-skill_flat = " ".join(skill.split())
+prompt = Path(sys.argv[2]).read_text(encoding="utf-8")
+prompt_flat = " ".join(prompt.split())
 readme = Path(sys.argv[3]).read_text(encoding="utf-8")
+readme_flat = " ".join(readme.split())
 
 for phrase in (
     "Default-deny; execution unauthorized.",
@@ -109,20 +110,27 @@ for phrase in (
     assert phrase in concepts, phrase
 
 for phrase in (
-    "perform every available outcome, live compatibility, and behavior observation before merge",
-    "normal delivery never completes it first",
-    "Merge normally completes the Task",
-    "explicitly required observation technically impossible before merge",
-    "Task Active under the same Change Owner until resolution",
-    "Routine post-merge Observer learning and local cleanup",
-    "owner duties, not completion gates",
-    "five accountable-owner gates: intent alignment, plan approval, review verdict, acceptance, and merge",
-    "Never merge—the operator merges",
+    "exactly one admitted Change",
+    "decision ledger to cite the disposition for every consequential decision",
+    "independently verify every envelope claim",
+    "Run behavior and outcome Checks that observe the intended subject",
+    "fresh-context review for every non-trivial Change",
+    "review each fix delta",
+    "Map every acceptance criterion to fresh evidence",
+    "Conduct operator-only input and proportionate UAT directly with the operator",
+    "stop mutation and explicitly return realignment to the Architect",
+    "open one pull request",
+    "Never merge; the operator's merge is the gate",
+    "After verified merge, run the landing rail",
+    "complete the Task through the Backlog CLI",
+    "finalize the guided Observer package",
+    "retire through the engine",
+    "five accountable gates: intent alignment, plan approval, review verdict, acceptance, and operator merge",
 ):
-    assert phrase in skill_flat, phrase
-assert "mark its Task Done" not in skill
+    assert phrase in prompt_flat, phrase
+assert "mark its Task Done" not in prompt
 assert "activation is performed separately after the Change lands" not in readme
-assert "verify it in fresh\nlinked and unlinked Pi sessions after merge" in readme
+assert "verify it in fresh linked and unlinked Pi sessions after merge" in readme_flat
 PY
 
 printf 'test-lifecycle-contract: pass\n'
