@@ -31,7 +31,11 @@ assert_file_contains "$CONCEPTS" 'request/return/forward' 'shared vocabulary lac
 assert_file_contains "$CONCEPTS" 'No intercom `ask`/`reply`' 'shared vocabulary permits ask/reply'
 assert_file_contains "$CONCEPTS" 'Herdr' 'shared vocabulary lost operator notification'
 
-assert_file_not_matches "$ADAPTER" 'spawn|execFile|watch\(|setInterval|polling|mailbox|registry|fallback' 'adapter contains forbidden process/watch/registry/fallback surface'
+# Bounded synchronous CLI invocation (execFile) of the landed T-189 binding and
+# Herdr authorities is integration, not messaging infrastructure; the adapter
+# must still add no daemon spawn, watcher, timer, polling loop, mailbox,
+# registry, or automatic transport fallback of its own.
+assert_file_not_matches "$ADAPTER" 'spawn|watch\(|setInterval|polling|mailbox|registry|fallback' 'adapter contains forbidden daemon/watch/polling/registry/fallback surface'
 assert_file_not_matches "$ADAPTER" 'pi-intercom|subagents|Router|settings\.json|packages' 'adapter touches incumbent/settings/package/Router surface'
 assert_file_contains "$ADAPTER" 'qq.actor-messaging-enable/v1' 'adapter enable schema is missing'
 assert_file_contains "$ADAPTER" 'EventPlaneClient' 'adapter does not use the landed TypeScript client'
@@ -176,6 +180,7 @@ const client = {
 
 let sessionText = "";
 let receiptText = "";
+let receiptLive = false;
 const messageWrites = [];
 const tool = { value: undefined };
 const handlers = new Map();
@@ -213,7 +218,7 @@ await register(pi, {
   bindingCall,
   listPanes: async () => panes,
   actorAuthorities: async () => [{ id: "T-209.17", assignee: "subagent-chat-019fd7bb" }],
-  sessionRead: async () => receiptText,
+  sessionRead: async () => (receiptLive ? sessionText : receiptText),
   sleep: async () => {},
   abortableSleep: async () => {},
 });
@@ -244,7 +249,7 @@ const refused = await tool.value.execute("bad", { action: "send", recipient: "qq
 assert.equal(refused.details.status, "refused");
 assert.match(refused.details.reason, /accountable logical Actor/);
 
-function delivery(eventId, content, { urgency = "default", kind = "message", correlation = "corr-in" } = {}) {
+function delivery(eventId, content, { urgency = "default", kind = "message", correlation = "corr-in", origin = "qq/coordinator" } = {}) {
   return {
     record: {
       event_id: eventId,
@@ -252,7 +257,7 @@ function delivery(eventId, content, { urgency = "default", kind = "message", cor
       envelope: {
         payload: {
           schema: "qq.actor-message/v1",
-          record: { origin_id: "qq/coordinator", content, kind, correlation_id: correlation, urgency, critical: urgency === "critical" },
+          record: { origin_id: origin, content, kind, correlation_id: correlation, urgency, critical: urgency === "critical" },
         },
       },
     },
@@ -262,23 +267,32 @@ function delivery(eventId, content, { urgency = "default", kind = "message", cor
     guard: { expected_high_water: 0, expected_gap_token: "0".repeat(64), gaps: [] },
   };
 }
+const tick = () => new Promise((resolveTick) => setTimeout(resolveTick, 25));
 
-// Idle default append: custom message is persisted; exact readback acknowledges.
+// Idle default append: persisted custom message; exact readback acknowledges.
 deliveries.push(delivery("evt_default", "default body"));
-await new Promise((resolve) => setTimeout(resolve, 25));
-// Injected but the readback is still empty, so it is pending and not yet acknowledged.
-assert.equal(calls.acknowledge.length, 0);
+await tick();
+assert.equal(calls.acknowledge.length, 0, "acknowledged before any readback existed");
 assert.match(messageWrites[0].message.content, /evt_default/);
 receiptText = sessionText;
 await handlers.get("turn_start")({}, ctx);
-await new Promise((resolve) => setTimeout(resolve, 25));
+await tick();
 assert.equal(calls.acknowledge.length, 1);
 assert.match(sessionText, /entry_1/);
 
+// Restart reconstruction: redelivering an already-persisted obligation does not
+// inject a duplicate; it acknowledges the existing receipt.
+const writesBeforeRestart = messageWrites.length;
+deliveries.push(delivery("evt_default", "default body"));
+await tick();
+assert.equal(messageWrites.length, writesBeforeRestart, "restart redelivery injected a duplicate custom message");
+assert.equal(calls.acknowledge.length, 2, "restart redelivery did not acknowledge the reconstructed receipt");
+
 // A still-pending injection gates the whole tool batch for every sibling call.
 receiptText = "";
+receiptLive = false;
 deliveries.push(delivery("evt_gate", "gate body"));
-await new Promise((resolve) => setTimeout(resolve, 25));
+await tick();
 const gateOne = await handlers.get("tool_call")({ toolName: "write", input: {} }, ctx);
 const gateTwo = await handlers.get("tool_call")({ toolName: "bash", input: {} }, ctx);
 assert.equal(gateOne.block, true);
@@ -287,23 +301,37 @@ assert.equal(gateTwo.block, true);
 // Urgent publishes attention-needed but does not abort a busy run.
 aborted = 0; idle = false;
 deliveries.push(delivery("evt_urgent", "urgent body", { urgency: "urgent" }));
-await new Promise((resolve) => setTimeout(resolve, 25));
+await tick();
 assert.equal(aborted, 0);
 assert.ok(calls.publish.some((body) => body.kind === "attention-needed"));
 
-// Critical makes exactly one audited abort and reports interrupted truthfully.
+// Critical: fenced single abort attempt, transcript readback, truthful outcome.
 idle = false;
+receiptLive = true;
 deliveries.push(delivery("evt_critical", "critical body", { urgency: "critical", kind: "action" }));
-await new Promise((resolve) => setTimeout(resolve, 25));
-assert.equal(aborted, 1);
-assert.ok(calls.acknowledge.some((body) => body.event_id === "evt_critical"));
+await tick();
+assert.equal(aborted, 1, "critical did not make exactly one abort attempt");
+assert.ok(calls.acknowledge.some((body) => body.event_id === "evt_critical"), "critical was not acknowledged after readback");
+assert.ok(messageWrites.some((write) => write.message.content.includes("evt_critical")), "critical content never entered the transcript");
+receiptLive = false;
 
-// Stale/source-mismatched binding cannot acknowledge the next delivery.
+// Stale/source-mismatched binding cannot deliver or acknowledge.
 binding.state = "source_mismatch";
 deliveries.push(delivery("evt_stale", "stale body"));
-await new Promise((resolve) => setTimeout(resolve, 25));
+await tick();
 assert.ok(calls.block.some((body) => body.reason.includes("source_mismatch")));
 binding.state = "current";
+
+// One-off initiated thread: a correlated reply returns to the exact live origin
+// without granting it a durable accountable identity.
+receiptLive = true;
+deliveries.push(delivery("evt_oneoff", "one-off question", { correlation: "corr-oneoff", origin: "qq/client/live-1" }));
+await tick();
+assert.ok(calls.acknowledge.some((body) => body.event_id === "evt_oneoff"), "one-off inbound was not acknowledged");
+const oneoffReply = await tool.value.execute("reply-oneoff", { action: "reply", correlation_id: "corr-oneoff", content: "one-off answer" }, undefined, undefined, ctx);
+assert.equal(oneoffReply.details.status, "accepted", `one-off reply refused: ${JSON.stringify(oneoffReply.details)}`);
+assert.ok(calls.send.some((body) => body.recipient_id === "qq/client/live-1"), "one-off reply was not addressed to the received origin");
+receiptLive = false;
 
 const status = await tool.value.execute("st0", { action: "status", event_id: "evt_out", wait_ms: 0 }, undefined, undefined, ctx);
 assert.equal(status.details.status, "current");

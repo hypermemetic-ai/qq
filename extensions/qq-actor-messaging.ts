@@ -1,9 +1,10 @@
 // @ts-nocheck -- qq intentionally ships no TypeScript or Node type dependency.
 // Strictly gated, production-inert deterministic Actor messaging adapter.
+import { execFile as execFileCallback } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { lstat, open, readFile, realpath } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import { EventPlaneClient } from "../bin/lib/qq-event-plane-client.ts";
 
@@ -305,12 +306,72 @@ function renderMessage(parsed, record) {
   return lines.join("\n");
 }
 
-function sourceFingerprintBinding(config) {
-  return {
-    operation_cursor: `qq-actor-messaging/${config.version}`,
-    role_source_fingerprint: config.path ? sha256Text(config.path) : "no-record",
-    source_fingerprint: config.actor.session_file ? sha256Text(config.actor.session_file) : "no-session",
+const SOURCE_FINGERPRINT_VALUE = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/;
+
+/** The accountable session's real source fence, read from the environment the
+ * accountable-session machinery stamps. Undefined (fail-closed) when absent. */
+function sourceFingerprintBinding(env) {
+  const value = {
+    operation_cursor: env.QQ_OPERATION_CURSOR,
+    role_source_fingerprint: env.QQ_ROLE_SOURCE_FINGERPRINT,
+    source_fingerprint: env.QQ_SOURCE_FINGERPRINT,
   };
+  for (const key of Object.keys(value)) {
+    if (!SOURCE_FINGERPRINT_VALUE.test(value[key] ?? "")) return undefined;
+  }
+  return value;
+}
+
+function resolveBindingExecutable(env) {
+  const configured = env.QQ_ACTOR_BINDING_BIN;
+  if (configured === undefined || configured === "") return "qq-actor-binding";
+  return typeof configured === "string" && configured.length <= 4096 && isAbsolute(configured) ? configured : undefined;
+}
+
+function resolveHerdrExecutable(env) {
+  const configured = env.QQ_HERDR_BIN;
+  if (configured === undefined || configured === "") return "herdr";
+  return typeof configured === "string" && configured.length <= 4096 && isAbsolute(configured) ? configured : undefined;
+}
+
+function bindingCliArgs(action, facts, repository, extra) {
+  const args = [action, "--repo", repository, "--product", facts.product, "--role", facts.role];
+  if (facts.change !== undefined) args.push("--change", facts.change);
+  if (action === "classify" || action === "guard") {
+    args.push(
+      "--pane", facts.pane,
+      "--role-source-fingerprint", facts.source.role_source_fingerprint,
+      "--source-fingerprint", facts.source.source_fingerprint,
+      "--operation-cursor", facts.source.operation_cursor,
+    );
+  }
+  return [...args, ...(extra ?? [])];
+}
+
+function parseBindingStdout(result) {
+  try {
+    const value = JSON.parse(result?.stdout);
+    return result?.code === 0 && value?.ok === true ? value.result : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function bindingStdoutFailure(result, defaultMessage) {
+  try {
+    const value = JSON.parse(result?.stdout);
+    return value?.error?.message ?? result?.stderr?.trim() ?? defaultMessage;
+  } catch {
+    return result?.stderr?.trim() ?? defaultMessage;
+  }
+}
+
+function defaultRunCommand(command, args, options) {
+  return new Promise((resolveRun) => {
+    execFileCallback(command, args, { ...options, encoding: "utf8", maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+      resolveRun({ code: error ? (typeof error.code === "number" ? error.code : 1) : 0, stdout, stderr });
+    });
+  });
 }
 
 function normalizeResponse(result, status) {
@@ -331,8 +392,32 @@ export default async function register(pi, deps = {}) {
 
   const now = deps.now ?? defaultNow;
   const clientFactory = deps.clientFactory ?? ((socketPath) => new EventPlaneClient(socketPath));
-  const bindingCall = deps.bindingCall ?? (async () => ({ value: undefined, reason: "binding executable unavailable" }));
-  const listPanes = deps.listPanes ?? (async () => []);
+  const bindingSource = sourceFingerprintBinding(env);
+  const runCommand = deps.run ?? defaultRunCommand;
+  const repositoryRoot = resolve(deps.cwd ?? process.cwd());
+  const bindingExecutable = resolveBindingExecutable(env);
+  const herdrExecutable = resolveHerdrExecutable(env);
+  const bindingCall = deps.bindingCall ?? (async (action, facts, extra = []) => {
+    if (!bindingExecutable) return { value: undefined, reason: "QQ_ACTOR_BINDING_BIN is not one bounded absolute executable path" };
+    if (!bindingSource && action !== "inspect") return { value: undefined, reason: "accountable source fingerprints are unavailable" };
+    const result = await runCommand(bindingExecutable, bindingCliArgs(action, facts, repositoryRoot, extra), { cwd: repositoryRoot });
+    return { value: parseBindingStdout(result), reason: bindingStdoutFailure(result, `${action} binding operation failed`) };
+  });
+  const listPanes = deps.listPanes ?? (async () => {
+    if (!herdrExecutable) return [];
+    const result = await runCommand(herdrExecutable, ["agent", "list"], { cwd: repositoryRoot });
+    if (result.code !== 0) return [];
+    let agents;
+    try {
+      const value = JSON.parse(result.stdout);
+      agents = value?.result?.agents ?? value?.agents ?? [];
+    } catch {
+      return [];
+    }
+    return (Array.isArray(agents) ? agents : [])
+      .filter((agent) => agent && PANE_ID.test(agent.pane_id ?? ""))
+      .map((agent) => ({ pane_id: agent.pane_id, agent: agent.agent, agent_session: agent.agent_session }));
+  });
   const sessionRead = deps.sessionRead ?? (async (path) => readFile(path, "utf8"));
   const actorAuthorities = deps.actorAuthorities ?? (async () => {
     const cwd = deps.cwd ?? process.cwd();
@@ -361,7 +446,6 @@ export default async function register(pi, deps = {}) {
   const display = displayIdentity(record);
   const consumerId = display;
   const endpointToken = `qq-actor-messaging/${randomUUID()}`;
-  const bindingSource = sourceFingerprintBinding(record);
   const pending = new Map();
   const deliveries = new Map();
   const statuses = new Map();
@@ -437,6 +521,24 @@ export default async function register(pi, deps = {}) {
     await requireCurrentBinding("delivery");
   }
 
+  function bindingFacts() {
+    return {
+      product: record.product_id,
+      role: record.actor.role,
+      change: record.actor.change,
+      pane: record.actor.pane,
+      source: bindingSource,
+    };
+  }
+
+  async function guardAcknowledgement() {
+    const reply = await bindingCall("guard", bindingFacts(), ["--acknowledgement"]).catch((error) => ({ value: undefined, reason: error instanceof Error ? error.message : String(error) }));
+    if (!reply?.value) {
+      throw Object.assign(new Error(`acknowledgement refused: T-189 acknowledgement guard is ${reply?.reason ?? "unavailable"}`), { code: "binding_refused" });
+    }
+    return reply.value;
+  }
+
   async function connectionGuard() {
     return {
       consumer_type: "recipient",
@@ -486,13 +588,16 @@ export default async function register(pi, deps = {}) {
     return candidates;
   }
 
-  async function ensureActorIsDurable(recipient) {
+  async function ensureActorIsDurable(recipient, { initiatedThread = false } = {}) {
     if (!LOGICAL_ID.test(recipient)) throw new Error("recipient must be a readable logical Actor");
     const product = recipient.split("/", 1)[0];
     if (product !== record.product_id) throw new Error("recipient crosses the enabled Product boundary");
     const parts = recipient.split("/");
     if (parts[1] === "change" && parts.length === 3) return recipient;
     if ((parts[1] === "architect" || parts[1] === "coordinator") && parts.length === 2) return recipient;
+    // A reply on an already-received initiated thread may return to the exact
+    // one-off origin without granting it a durable accountable identity.
+    if (initiatedThread) return recipient;
     throw new Error("recipient must be an accountable logical Actor");
   }
 
@@ -501,7 +606,9 @@ export default async function register(pi, deps = {}) {
     if (!URGENCIES.has(urgency)) throw new Error("urgency is unsupported");
     if (urgency === "critical" && critical !== true) throw new Error("critical urgency requires explicit critical:true");
     if (kind === "reply" && !correlationId) throw new Error("reply requires correlation_id");
-    const target = await ensureActorIsDurable(recipient);
+    const inboundThread = kind === "reply" && correlationId ? correlations.get(correlationId) : undefined;
+    const initiatedThread = kind === "reply" && !!inboundThread?.origin_id && recipient === inboundThread.origin_id;
+    const target = await ensureActorIsDurable(recipient, { initiatedThread });
     const bodyContent = boundedText(content, "message content", 65536);
     const request = requestId ?? `req_${requestHash({ kind, target, content: bodyContent, correlationId, urgency, critical, origin: origin ?? display })}`;
     if (inFlightRequests.has(request)) return inFlightRequests.get(request);
@@ -597,12 +704,15 @@ export default async function register(pi, deps = {}) {
   }
 
   async function acknowledgeDelivery(entry, receipt, reason) {
+    await guardAcknowledgement();
     const guard = guardFromDelivery(entry.delivery);
     const result = await currentClient.acknowledge(guard);
-    updateStatus(entry.event_id, { transport: "delivered", receipt, ack_result: result });
+    const delivered = { transport: "delivered", receipt, ack_result: result };
+    if (entry.criticalOutcome) delivered.critical_outcome = entry.criticalOutcome;
+    updateStatus(entry.event_id, delivered);
     if (entry.parsed.correlation_id) {
       const existing = correlations.get(entry.parsed.correlation_id) ?? {};
-      correlations.set(entry.parsed.correlation_id, { ...existing, delivered: true, receipt });
+      correlations.set(entry.parsed.correlation_id, { ...existing, delivered: true, receipt, origin_id: entry.parsed.record.origin_id });
     }
     return result;
   }
@@ -628,6 +738,20 @@ export default async function register(pi, deps = {}) {
   async function injectParsed(entry) {
     await bindingBeforeDelivery();
     const parsed = entry.parsed;
+    // Restart reconstruction: if the exact fenced entry is already persisted in
+    // the current session, acknowledge that receipt instead of injecting a
+    // duplicate custom message.
+    const preExisting = await readReceipt(entry, parsed);
+    if (preExisting) {
+      entry.injected = true;
+      entry.receipt = preExisting;
+      entry.done = true;
+      pending.delete(entry.event_id);
+      deliveries.delete(entry.event_id);
+      if (pending.size === 0) pendingGate = false;
+      await acknowledgeDelivery(entry, preExisting, "reconstructed persisted receipt");
+      return;
+    }
     const content = renderMessage(parsed, entry.record);
     const options = ctxNow?.isIdle?.() === false
       ? { triggerTurn: parsed.urgency !== "critical", deliverAs: "followUp" }
@@ -691,25 +815,25 @@ export default async function register(pi, deps = {}) {
   async function processCritical(entry) {
     if (entry.criticalAttempted) return;
     entry.criticalAttempted = true;
-    let outcome = "abort-ignored";
+    // The exact T-189 fence precedes any delivery side effect.
+    await bindingBeforeDelivery();
+    const wasIdle = ctxNow?.isIdle?.() === true;
     if (!abortInFlight) {
       abortInFlight = true;
       try {
         await ctxNow?.abort?.();
-        if (ctxNow?.isIdle?.() === true) outcome = "interrupted";
       } catch {
-        outcome = "abort-ignored";
+        // A fire-and-forget abort that throws still counts as the one attempt.
       } finally {
         abortInFlight = false;
       }
     }
-    await bindingBeforeDelivery();
-    entry.done = true;
-    pending.delete(entry.event_id);
-    deliveries.delete(entry.event_id);
-    if (pending.size === 0) pendingGate = false;
-    await acknowledgeDelivery(entry, { critical_outcome: outcome }, "critical attempt");
-    updateStatus(entry.event_id, { transport: "delivered", critical_outcome: outcome });
+    // Truthful outcome from the state Pi can establish at the attempt: an idle
+    // session had no run to interrupt; a busy run received the abort.
+    entry.criticalOutcome = wasIdle ? "ignored" : "interrupted";
+    // Critical content still enters the transcript and is acknowledged only
+    // after exact persisted readback, like every other delivery.
+    await injectParsed(entry);
   }
 
   async function processDelivery(delivery) {
