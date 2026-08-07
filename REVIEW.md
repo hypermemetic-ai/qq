@@ -46,7 +46,8 @@ evidence; never improvise or call them findings/passes.
 
 ## Recurrence rules
 
-- A new permanent protocol names the user-visible failure it prevents and
+- A new permanent protocol names the materially consequential user-visible
+  failure it prevents, assessed as the simplest sufficient response to it, or
   retires at least as much protocol as it adds.
 - Provider command construction exists in exactly one adapter.
 - Core workflow tests pass absent Herdr and OpenWiki.
