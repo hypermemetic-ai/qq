@@ -162,9 +162,9 @@ EOF
     "$ROOT/bin/qq-telemetry" --once >"$case_dir/output" 2>"$case_dir/stderr"
   rc=$?
   output=$(cat "$case_dir/output")
-  sum=$(jq -r '[to_entries[].value.sum7d // 0] | add // 0' \
+  sum=$(jq -r '[to_entries[] | select(.key != "version") | .value.sum7d // 0] | add // 0' \
     "$home/.local/state/qq/telemetry/meter-cache.json")
-  wall_text=$(jq -r '[to_entries[].value.walls[]?.text] | join("|")' \
+  wall_text=$(jq -r '[to_entries[] | select(.key != "version") | .value.walls[]?.text] | join("|")' \
     "$home/.local/state/qq/telemetry/meter-cache.json")
   combined="$output$(cat "$home/.local/state/qq/telemetry/meter-cache.json")"
   assert_eq 'meter fixture panel exits zero' '0' "$rc"
@@ -173,6 +173,42 @@ EOF
   assert_eq 'wall events map to fixed phrases' 'insufficient quota|quota exhausted' "$wall_text"
   assert_contains 'wall line renders only fixed text' 'wall: quota exhausted' "$output"
   assert_not_contains 'wall output and cache omit vendor sentinel' 'SYNTHETIC_COOKIE_SENTINEL_TEST_ONLY' "$combined"
+}
+
+test_stale_meter_cache_version_rebuild() {
+  local case_dir="$TEST_TMP/stale-meter" home session cache nowms mtime size output rc
+  home="$case_dir/home"
+  session="$home/.pi/agent/sessions/case/session.jsonl"
+  cache="$home/.local/state/qq/telemetry/meter-cache.json"
+  mkdir -p "$(dirname -- "$session")" "$(dirname -- "$cache")"
+  nowms=$(( $(date +%s) * 1000 ))
+  cat >"$session" <<EOF
+{"message":{"provider":"openai","stopReason":"stop","timestamp":$nowms,"usage":{"totalTokens":123},"metadata":{"provider":"qwen-token-plan"}}}
+EOF
+  mtime=$(stat -c '%Y' -- "$session")
+  size=$(stat -c '%s' -- "$session")
+  jq -n --arg path "$session" --argjson mtime "$mtime" --argjson size "$size" --argjson timestamp "$nowms" '
+    {($path): {
+      mtime: $mtime,
+      size: $size,
+      sum7d: 123,
+      sum5h: 123,
+      events: [[$timestamp, 123]],
+      walls: []
+    }}
+  ' >"$cache"
+  HOME="$home" QQ_TELEMETRY_PROFILES_FILE="$case_dir/missing-profiles.json" \
+    "$ROOT/bin/qq-telemetry" --once >"$case_dir/output" 2>"$case_dir/stderr"
+  rc=$?
+  output=$(cat "$case_dir/output")
+  assert_eq 'stale unversioned meter fixture exits zero' '0' "$rc"
+  assert_eq 'stale unversioned meter cache is upgraded' '2' "$(jq -r '.version' "$cache")"
+  assert_eq 'stale non-Qwen cached total is removed' '0' \
+    "$(jq -r '[to_entries[] | select(.key != "version") | .value.sum7d // 0] | add // 0' "$cache")"
+  assert_eq 'stale non-Qwen cached events are removed' '0' \
+    "$(jq -r '[to_entries[] | select(.key != "version") | .value.events[]?] | length' "$cache")"
+  assert_contains 'rebuilt meter renders clean total' '0 tokens on this machine' "$output"
+  assert_not_contains 'rebuilt meter omits contaminated total' '123 tokens on this machine' "$output"
 }
 
 test_cached_wall_canonicalization() {
@@ -186,7 +222,7 @@ test_cached_wall_canonicalization() {
   mtime=$(stat -c '%Y' -- "$session")
   size=$(stat -c '%s' -- "$session")
   jq -n --arg path "$session" --argjson mtime "$mtime" --argjson size "$size" --argjson timestamp "$nowms" '
-    {($path): {
+    {version: 2, ($path): {
       mtime: $mtime,
       size: $size,
       sum7d: 0,
@@ -201,7 +237,7 @@ test_cached_wall_canonicalization() {
   combined="$output$(cat "$cache")"
   assert_contains 'cached wall maps to fixed phrase' 'wall: insufficient quota' "$output"
   assert_eq 'cached wall is rewritten canonically' 'insufficient quota' \
-    "$(jq -r '[to_entries[].value.walls[]?.text] | last' "$cache")"
+    "$(jq -r '[to_entries[] | select(.key != "version") | .value.walls[]?.text] | last' "$cache")"
   assert_not_contains 'cached vendor sentinel cannot resurface' 'SYNTHETIC_COOKIE_SENTINEL_CACHED' "$combined"
 }
 
@@ -283,6 +319,22 @@ test_cookie_destination_guard() {
   assert_not_contains 'cookie parent refusal prints no synthetic value' 'SYNTHETIC_COOKIE_SENTINEL_TEST_ONLY' "$output"
 }
 
+test_cookie_ancestor_destination_guard() {
+  local case_dir="$TEST_TMP/cookie-ancestor-redirect" rc output
+  make_fake_cookie_case "$case_dir"
+  mkdir -p "$case_dir/home/.local/state" "$case_dir/victim/qq/telemetry"
+  ln -s "$case_dir/victim/qq" "$case_dir/home/.local/state/qq"
+  set +e
+  run_fake_cookie_write "$case_dir" >"$case_dir/output" 2>&1
+  rc=$?
+  set -u
+  output=$(cat "$case_dir/output")
+  if [ "$rc" -ne 0 ]; then pass 'cookie helper refuses symlinked state ancestor'; else fail 'cookie helper refuses symlinked state ancestor' 'write unexpectedly succeeded'; fi
+  if [ ! -e "$case_dir/victim/qq/telemetry/qwen.cookies" ]; then pass 'cookie ancestor guard prevents redirected write'; else fail 'cookie ancestor guard prevents redirected write' 'victim file was created'; fi
+  assert_contains 'cookie ancestor guard reports refusal' 'Refusing a symlink telemetry state directory.' "$output"
+  assert_not_contains 'cookie ancestor refusal prints no synthetic value' 'SYNTHETIC_COOKIE_SENTINEL_TEST_ONLY' "$output"
+}
+
 test_cookie_clobber_refusal() {
   local case_dir="$TEST_TMP/cookie-clobber" snapshot before after rc output
   make_fake_cookie_case "$case_dir"
@@ -333,9 +385,11 @@ test_wall_matcher
 test_qwen_attempt_cadence
 test_seats_reload_each_tick
 test_meter_provider_and_wall_canonicalization
+test_stale_meter_cache_version_rebuild
 test_cached_wall_canonicalization
 test_no_tty_sleep_and_interactive_pty
 test_cookie_destination_guard
+test_cookie_ancestor_destination_guard
 test_cookie_clobber_refusal
 test_cookie_existing_snapshot_write
 
