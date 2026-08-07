@@ -84,12 +84,23 @@ assert.deepEqual(
 const linked = recordingPi();
 await register(linked.pi, { cwd: linkedRepository });
 const siblingRegistrations = [];
+// qq-actor-messaging is enable-record-gated and must stay production-inert:
+// invoked directly without an enable record it registers nothing by design.
+const inertWithoutEnable = new Set(["./qq-actor-messaging.ts"]);
 for (const specifier of QQ_EXTENSION_MODULES) {
   const { default: registerSibling } = await import(
     pathToFileURL(`${extensionDirectory}/${specifier.slice(2)}`)
   );
   const sibling = recordingPi();
   await registerSibling(sibling.pi);
+  if (inertWithoutEnable.has(specifier)) {
+    assert.equal(
+      sibling.registrations.length,
+      0,
+      `${specifier} must remain inert without its enable record`,
+    );
+    continue;
+  }
   assert.notEqual(
     sibling.registrations.length,
     0,

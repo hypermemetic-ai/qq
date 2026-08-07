@@ -1,46 +1,64 @@
 ---
 name: agent-messaging
-description: Coordinates live agents through pi-intercom and raises operator-visible herdr notifications. Use for another live agent's state, output, or attention, or an event the operator must notice outside any transcript.
+description: Coordinates live agents through pi-intercom's plain one-way send flow and raises operator-visible herdr notifications. Use only after durable facts and relevant Pi transcripts fail to supply a necessary fact, or when a fact must reach another live agent, or when the operator must notice an event outside any transcript.
 ---
 
 # Message agents through pi-intercom
 
-pi-intercom is qq's default transport; its bundled skill documents raw
-mechanics. This qq overlay does not start, own, or retire agents.
+pi-intercom is qq's incumbent transport; its bundled skill documents raw
+mechanics. This overlay narrows agent behavior while the deterministic
+replacement remains production-inactive. It does not start, own, or retire
+agents, and it does not make a messaging role real.
 
-## Coordinate Pi agents
+## Self-service first
 
-Never self-prompt through intercom: preload only, and describe preloaded state
-as preloaded.
+Before messaging anyone, inspect durable Task/source/Check records directly.
+When useful, read the relevant Pi session transcript as evidence. Do not use
+Intercom for questions, curiosity, status checks, investigations, or
+request/reply cycles when durable facts can answer the question.
 
-Name sessions uniquely. Call `intercom({ action: "list" })`, use its current
-session name as `<id>`, and begin every `send`, `ask`, and `reply` message with
-`AGENT from=<id>: <message>`.
+## Escalate only through the named Coordinator
+
+If self-service still leaves you blocked, or you hold a fact another agent
+must receive, send one plain nonblocking message to the live Product
+Coordinator explicitly named by the operator:
 
 ```text
-intercom({ action: "send", to: "<peer>", message: "AGENT from=<id>: <update>" })
-intercom({ action: "ask", to: "<peer>", message: "AGENT from=<id>: <question>" })
-intercom({ action: "reply", message: "AGENT from=<id>: <answer>" })
+intercom({ action: "send", to: "<named-coordinator>", message: "AGENT from=<id>: <fact or needed fact>" })
 ```
 
-Use `send` for an update and `ask` when work needs an answer. `ask` waits for a
-correlated `reply` and returns it in the asking turn.
+Name sessions uniquely and use your current session name from
+`intercom({ action: "list" })` as `<id>`. Do not contact another agent
+directly.
 
-Pass intended text directly as `message`; JSON transport preserves line breaks
-and backslashes without caller escaping.
+## Coordinator's one bounded broker exchange
 
-Verify the envelope's `<id>` against the transport-reported `From` sender and
-`list`. Reply from the triggered turn so `reply` uses that sender and message
-ID. On mismatch, ambiguity, absence, or failed delivery, report the message or
-reply as unrouteable; never guess.
+The Coordinator self-services first. If another live agent must be consulted,
+it may broker exactly one exchange using only plain one-way sends:
 
-Busy interactive sessions queue messages until idle. Keep `inboundTrigger` at
-its default `always`; receipt must wake the delegate. Alt+M opens the operator
-overlay.
+1. one request to the relevant agent;
+2. one factual return from that agent to the Coordinator; and
+3. one forwarded result from the Coordinator to the original agent.
+
+If no named Coordinator is live, the Coordinator is absent or ambiguous, or
+that bounded exchange does not resolve the issue, report the blocker through
+your owning workflow.
+
+## Never do these
+
+- Do not use intercom `ask` or `reply`.
+- Do not send direct lateral requests between non-Coordinator agents.
+- Do not send status checks, curiosity probes, acknowledgement demands, or
+  repeated follow-ups.
+- Do not broadcast, nominate a substitute Coordinator, or start another
+  request after the one bounded exchange.
+- Do not claim the Event Plane adapter is active in production, remove
+  pi-intercom, or change its package/patch.
 
 ## Notify the operator
 
-For an event the operator must notice outside a transcript:
+Herdr remains the operator-notification surface. For an event the operator
+must notice outside a transcript:
 
 ```sh
 herdr notification show "<title>" --body "<body>" --sound <sound>

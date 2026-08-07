@@ -97,8 +97,15 @@ derives findings from the Change and its intent without inheriting the author's
 working context or conclusions.
 
 **agent messaging** — Direct live-agent coordination through pi-intercom plus
-operator-visible herdr notifications outside transcripts. It does not start,
-own, or retire agents.
+operator-visible herdr notifications outside transcripts. Agents first exhaust
+durable Task/source/Check facts and, when useful, the relevant Pi session
+transcript. A non-Coordinator then sends at most one plain nonblocking message
+to the operator-named Product Coordinator; the Coordinator self-services first
+and may broker one request/return/forward exchange using only plain one-way
+sends. No intercom `ask`/`reply`, lateral requests, status/curiosity checks,
+acknowledgement demands, broadcasts, substitutes, or repeated follow-ups. Herdr
+remains the operator-notification surface. Messaging does not start, own, or
+retire agents.
 
 **work order** — One complete `BRIEF.md` per delegated ticket, written in the
 ticket's durable run directory at creation. It carries the delegate's complete
