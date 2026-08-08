@@ -209,9 +209,22 @@ elif scenario.startswith("foreground-"):
         "file": os.environ["FILE_LOCATION"],
     }[kind]
 result = {"type": "pane_info", "pane": pane}
-document = {"result": result}
+document = {"id": "cli:pane:get", "result": result}
 if scenario == "wrong-type":
     result["type"] = "pane_list"
+if scenario == "receipt-missing":
+    document.pop("id")
+elif scenario == "receipt-wrong":
+    document["id"] = "cli:pane:list"
+elif scenario == "receipt-extra":
+    document["extra"] = True
+elif scenario == "receipt-duplicate":
+    sys.stdout.write('{"id":"cli:pane:get","id":"cli:pane:get","result":' + json.dumps(result, separators=(",", ":"), ensure_ascii=True) + '}\n')
+    raise SystemExit
+elif scenario == "receipt-malformed":
+    document["id"] = "cli:pane:get\x00"
+elif scenario == "receipt-wrong-type":
+    document["id"] = 7
 if scenario == "nonfinite":
     sys.stdout.write(json.dumps(document, separators=(",", ":")).replace('"revision":99', '"revision":NaN') + "\n")
     raise SystemExit
@@ -326,7 +339,7 @@ for scenario in failure malformed duplicate oversized utf8 nonfinite identity en
   ! grep -q '^herdr ' "$TRACE" || fail "$scenario read a pane after invalid binding evidence"
 done
 
-for scenario in failure malformed duplicate oversized utf8 nonfinite wrong-pane wrong-type missing-terminal nonstring-workspace stderr-success mixed-absence absence-extra; do
+for scenario in failure malformed duplicate oversized utf8 nonfinite receipt-missing receipt-wrong receipt-extra receipt-duplicate receipt-malformed receipt-wrong-type wrong-pane wrong-type missing-terminal nonstring-workspace stderr-success mixed-absence absence-extra; do
   reset_case; PANE_CURRENT_SCENARIO="$scenario"; export PANE_CURRENT_SCENARIO
   invoke "${base[@]}"; assert_refusal
   assert_equal 1 "$(grep -c '^binding ' "$TRACE")" "$scenario binding call count"

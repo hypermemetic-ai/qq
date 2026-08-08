@@ -378,7 +378,11 @@ def validate_location(value: Any, label: str) -> str:
 
 
 def present_pane(document: dict[str, Any], pane_id: str) -> dict[str, str]:
-    if set(document) != {"result"}:
+    if (
+        set(document) != {"id", "result"}
+        or type(document["id"]) is not str
+        or document["id"] != "cli:pane:get"
+    ):
         raise Refusal("Herdr pane response has an invalid shape")
     result = document["result"]
     if not isinstance(result, dict) or set(result) != {"type", "pane"} or result["type"] != "pane_info":
