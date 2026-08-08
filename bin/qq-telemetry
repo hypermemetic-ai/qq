@@ -14,6 +14,7 @@ REFRESH_SECS="${TELEMETRY_REFRESH:-30}"
 QWEN_GW_CADENCE="${TELEMETRY_QWEN_GW_CADENCE:-300}"
 QWEN_MTR_CADENCE=60
 QWEN_SESSION_WINDOW_DAYS=7
+META_MTR_CADENCE=60
 BAR_CELLS=16
 FILL='█'
 EMPTY='░'
@@ -45,11 +46,15 @@ color_frac() {
   awk -v f="$1" 'BEGIN { if (f>=0.9) print "\033[31m"; else if (f>=0.6) print "\033[33m"; else print "\033[32m" }'
 }
 
+fmt_usd() {
+  awk -v v="${1:-0}" 'BEGIN { if (v+0<=0) printf "$0.00"; else if (v<1) printf "$%.4f", v; else printf "$%.2f", v }'
+}
+
 usage() {
   cat <<'EOF'
 Usage: qq-telemetry [--once] [--help]
 
-Render live Kimi, GPT/Codex, DeepSeek, and Qwen provider usage.
+Render live Kimi, GPT/Codex, DeepSeek, Qwen, and Meta provider usage.
   --once  Fetch and render one screen, then exit.
   --help  Show this help.
 
@@ -66,6 +71,8 @@ KIMI_5H='5h       unavailable'
 GPT_WEEK='7d       unavailable'
 GPT_CREDITS='credits  unavailable'
 DS_BAL='balance  unavailable'
+META_L1='today    unavailable'
+META_L2='7d       unavailable'
 QWEN_SOURCE='pending'
 QWEN_L1='usage    unavailable'
 QWEN_L2=''
@@ -75,6 +82,7 @@ KIMI_SEATS='seats: unavailable'
 GPT_SEATS='seats: unavailable'
 DS_SEATS='seats: unavailable'
 QWEN_SEATS='seats: unavailable'
+META_SEATS='seats: unavailable'
 
 seat_text_for_provider() {
   local provider="$1" rows="$2" result="" role model item
@@ -98,6 +106,7 @@ load_seats() {
   GPT_SEATS='seats: unavailable'
   DS_SEATS='seats: unavailable'
   QWEN_SEATS='seats: unavailable'
+  META_SEATS='seats: unavailable'
   if [ ! -r "$PROFILES_FILE" ] || ! jq -e '
       type == "object" and
       all(to_entries[]; (.key | type) == "string" and
@@ -112,6 +121,7 @@ load_seats() {
   GPT_SEATS=$(seat_text_for_provider 'openai-codex' "$rows")
   DS_SEATS=$(seat_text_for_provider 'deepseek' "$rows")
   QWEN_SEATS=$(seat_text_for_provider 'qwen-token-plan' "$rows")
+  META_SEATS=$(seat_text_for_provider 'meta' "$rows")
 }
 
 # Qwen process-local state. Two consecutive official pings calibrate the local
@@ -132,6 +142,17 @@ QWEN_ANCHOR_TOK7=0
 QWEN_ANCHOR_CRED=0
 QWEN_RATE=''
 FORCE_QWEN=0
+
+# Meta process-local state. Token and cost totals are machine-observed from Pi
+# session records; Meta Model API is pay-as-you-go and exposes no balance meter.
+META_MTR_TS=0
+META_MTR_TT=0
+META_MTR_CT=0
+META_MTR_T7=0
+META_MTR_C7=0
+META_ACTIVE_H=0
+META_METER_AVAILABLE=0
+META_CACHE="${HOME}/.local/state/qq/telemetry/meta-cache.json"
 
 qwen_cookie_args() {
   # Populate the named array with either an explicitly supplied Cookie header
@@ -428,6 +449,155 @@ qwen_update() {
   fi
 }
 
+meta_meter() {
+  # Mirror of qwen_meter for provider "meta": per-file cache of
+  # [timestamp, totalTokens, costUsd] events inside the trailing 7d window.
+  # Meta is postpaid, so no wall events are tracked.
+  local sessions="$HOME/.pi/agent/sessions" state_dir cache_work manifest_tsv manifest_json
+  local changed_list matched_lines scanned_json totals nowms cutoff7 today0 file mtime size encoded
+  local -a changed_files=()
+  [ -d "$sessions" ] || { META_METER_AVAILABLE=0; return 1; }
+  [ -n "$TELEMETRY_TMP" ] || { META_METER_AVAILABLE=0; return 1; }
+
+  state_dir=$(dirname -- "$META_CACHE")
+  mkdir -p -- "$state_dir" 2>/dev/null || { META_METER_AVAILABLE=0; return 1; }
+  cache_work="$TELEMETRY_TMP/meta-cache-source.json"
+  manifest_tsv="$TELEMETRY_TMP/meta-manifest.tsv"
+  manifest_json="$TELEMETRY_TMP/meta-manifest.json"
+  changed_list="$TELEMETRY_TMP/meta-changed.txt"
+  matched_lines="$TELEMETRY_TMP/meta-matched.txt"
+  scanned_json="$TELEMETRY_TMP/meta-scanned.json"
+  : >"$manifest_tsv"
+  if [ -r "$META_CACHE" ] && jq -e '
+      type == "object" and
+      (.version | type) == "number" and
+      .version == 2
+    ' "$META_CACHE" >/dev/null 2>&1; then
+    cp -- "$META_CACHE" "$cache_work"
+  else
+    printf '{"version":2}\n' >"$cache_work"
+  fi
+
+  nowms=$(( $(now_epoch) * 1000 ))
+  cutoff7=$(( nowms - 7 * 24 * 3600 * 1000 ))
+  today0=$(( $(now_epoch) / 86400 * 86400 * 1000 ))
+
+  # find(1) obtains stat metadata for every candidate. The generated Pi session
+  # paths contain neither tabs nor newlines, which keeps this one-pass manifest
+  # cheap even when the corpus contains hundreds of files.
+  while IFS= read -r -d '' file && IFS= read -r -d '' mtime && IFS= read -r -d '' size; do
+    mtime=${mtime%%.*}
+    [[ "$mtime" =~ ^[0-9]+$ && "$size" =~ ^[0-9]+$ ]] || continue
+    printf '%s\t%s\t%s\n' "$file" "$mtime" "$size" >>"$manifest_tsv"
+  done < <(find "$sessions" -type f -name '*.jsonl' -printf '%p\0%T@\0%s\0' 2>/dev/null)
+
+  jq -Rn '
+    reduce inputs as $line ({};
+      ($line | capture("^(?<path>.*)\\t(?<mtime>[0-9]+)\\t(?<size>[0-9]+)$")) as $row |
+      .[$row.path] = {mtime: ($row.mtime | tonumber), size: ($row.size | tonumber)})
+  ' <"$manifest_tsv" >"$manifest_json" || { META_METER_AVAILABLE=0; return 1; }
+
+  jq -r --slurpfile cache "$cache_work" '
+    to_entries[] |
+    select(
+      ($cache[0][.key].mtime != .value.mtime) or
+      ($cache[0][.key].size != .value.size) or
+      (($cache[0][.key].events | type) != "array")
+    ) |
+    .key | @base64
+  ' "$manifest_json" >"$changed_list" || { META_METER_AVAILABLE=0; return 1; }
+  while IFS= read -r encoded; do
+    [ -n "$encoded" ] && changed_files+=("$(printf '%s' "$encoded" | base64 -d)")
+  done <"$changed_list"
+
+  : >"$matched_lines"
+  if [ "${#changed_files[@]}" -gt 0 ]; then
+    grep -H -E '"provider"[[:space:]]*:[[:space:]]*"meta"' \
+      "${changed_files[@]}" >"$matched_lines" 2>/dev/null || true
+  fi
+  jq -Rn --argjson cutoff7 "$cutoff7" '
+    reduce inputs as $raw ({};
+      ($raw | index(":")) as $separator |
+      if $separator == null then . else
+        ($raw[0:$separator]) as $path |
+        (try ($raw[$separator + 1:] | fromjson) catch null) as $message |
+        if $message == null then . else
+          .[$path] = (.[$path] // {events: []}) |
+          if ($message.message.provider == "meta" and
+              $message.message.stopReason != "error" and
+              ($message.message.timestamp | type) == "number" and
+              ($message.message.usage.totalTokens | type) == "number" and
+              $message.message.timestamp >= $cutoff7) then
+            .[$path].events += [[
+              $message.message.timestamp,
+              $message.message.usage.totalTokens,
+              (($message.message.usage.cost // {}) | .total // 0)
+            ]]
+          else . end
+        end
+      end)
+  ' <"$matched_lines" >"$scanned_json" || { META_METER_AVAILABLE=0; return 1; }
+
+  jq -n --argjson cutoff7 "$cutoff7" \
+    --slurpfile manifest "$manifest_json" --slurpfile old "$cache_work" --slurpfile scanned "$scanned_json" '
+      reduce ($manifest[0] | to_entries[]) as $file ({version: 2};
+        ($old[0][$file.key] // {}) as $cached |
+        (($cached.mtime != $file.value.mtime) or
+          ($cached.size != $file.value.size) or
+          (($cached.events | type) != "array")) as $changed |
+        (if $changed then ($scanned[0][$file.key] // {events: []}) else $cached end) as $source |
+        [$source.events[]? | select(.[0] >= $cutoff7)] as $events |
+        .[$file.key] = {
+          mtime: $file.value.mtime,
+          size: $file.value.size,
+          events: $events
+        })
+  ' >"$TELEMETRY_TMP/meta-cache-new.json" || { META_METER_AVAILABLE=0; return 1; }
+  chmod 600 "$TELEMETRY_TMP/meta-cache-new.json" 2>/dev/null || true
+  mv -f -- "$TELEMETRY_TMP/meta-cache-new.json" "$META_CACHE" || {
+    META_METER_AVAILABLE=0
+    return 1
+  }
+
+  totals=$(jq -r --argjson today0 "$today0" '
+    def entries: to_entries[] | select(.key != "version") | .value;
+    ([entries | .events[]? | select(.[0] >= $today0) | .[1]] | add // 0),
+    ([entries | .events[]? | select(.[0] >= $today0) | .[2]] | add // 0),
+    ([entries | .events[]? | .[1]] | add // 0),
+    ([entries | .events[]? | .[2]] | add // 0),
+    (([entries | .events[]? | .[0]] | min? // 0) as $first |
+     ([entries | .events[]? | .[0]] | max? // 0) as $last |
+     (if ($last > $first and $first > 0) then (($last - $first) / 3600000.0) else 0 end))
+  ' "$META_CACHE" 2>/dev/null) || { META_METER_AVAILABLE=0; return 1; }
+  META_MTR_TT=$(sed -n '1p' <<<"$totals")
+  META_MTR_CT=$(sed -n '2p' <<<"$totals")
+  META_MTR_T7=$(sed -n '3p' <<<"$totals")
+  META_MTR_C7=$(sed -n '4p' <<<"$totals")
+  META_ACTIVE_H=$(sed -n '5p' <<<"$totals")
+  META_METER_AVAILABLE=1
+}
+
+meta_update() {
+  local now="$1" rate rate_txt
+  if [ "$((now - META_MTR_TS))" -ge "$META_MTR_CADENCE" ]; then
+    meta_meter || true
+    META_MTR_TS=$(now_epoch)
+  fi
+  if [ "$META_METER_AVAILABLE" != 1 ]; then
+    META_L1='today    unavailable (session meter)'
+    META_L2='7d       unavailable (session meter)'
+    return
+  fi
+  META_L1="today    $(fmt_usd "$META_MTR_CT")   $(fmt_num "$META_MTR_TT") tok"
+  rate=$(awk -v c="$META_MTR_C7" -v h="$META_ACTIVE_H" 'BEGIN { if (h>=1) printf "%.4f", c/h; else printf "NA" }')
+  if [ "$rate" = "NA" ]; then
+    rate_txt="${C_DIM}—${C_RESET}"
+  else
+    rate_txt="${C_DIM}~$(fmt_usd "$rate")/h active${C_RESET}"
+  fi
+  META_L2="7d       $(fmt_usd "$META_MTR_C7")   $(fmt_num "$META_MTR_T7") tok   $rate_txt"
+}
+
 fetch_all() {
   local auth='' key access account body used limit resetw used5 limit5 reset5 frac col flag
   local pct reset_at credits balance currency now
@@ -437,6 +607,8 @@ fetch_all() {
   GPT_WEEK='7d       unavailable'
   GPT_CREDITS='credits  unavailable'
   DS_BAL='balance  unavailable'
+  META_L1='today    unavailable'
+  META_L2='7d       unavailable'
   [ -r "$AUTH_FILE" ] && auth=$(cat "$AUTH_FILE" 2>/dev/null || true)
   now=$(now_epoch)
 
@@ -486,6 +658,7 @@ fetch_all() {
     if [[ "$balance" =~ ^[0-9]+([.][0-9]+)?$ ]]; then DS_BAL="balance  \$$balance $currency"; fi
   fi
 
+  meta_update "$now"
   qwen_update "$now"
 }
 
@@ -501,6 +674,9 @@ render() {
   printf '   %s\n' "$GPT_CREDITS"
   printf '%s\n' "${C_BOLD} DEEPSEEK — NATIVE${C_RESET}  ${C_DIM}${DS_SEATS}${C_RESET}"
   printf '   %s\n' "$DS_BAL"
+  printf '%s\n' "${C_BOLD} META — MUSE SPARK${C_RESET}  ${C_DIM}${META_SEATS} · pay-as-you-go, spend observed${C_RESET}"
+  printf '   %s\n' "$META_L1"
+  printf '   %s\n' "$META_L2"
   printf '%s\n' "${C_BOLD} QWEN — TOKEN PLAN${C_RESET}  ${C_DIM}${QWEN_SEATS} · source: ${QWEN_SOURCE}${C_RESET}"
   [ -n "$QWEN_L1" ] && printf '   %s\n' "$QWEN_L1"
   [ -n "$QWEN_L2" ] && printf '   %s\n' "$QWEN_L2"
