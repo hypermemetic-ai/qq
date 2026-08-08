@@ -75,7 +75,6 @@ inspection, and operator focus is left untouched. `qq-herdr-home focus-board
 disposition flow: it validates the persistent home and its unique dedicated
 Backlog-board tab, then focuses that tab.
 
-
 ## OpenWiki timer
 
 `bin/qq-openwiki-schedule install` links the two repository files into the
