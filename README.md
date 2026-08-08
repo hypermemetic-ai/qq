@@ -91,6 +91,25 @@ schedule-launcher cutover. Each complete prompt contains the one methodology
 kernel and receives only its exact policy-selected Skills. The display-only
 Backlog board is not a role or Pi session surface.
 
+### Runner ceremony
+
+Runner is the default for a fresh interactive Pi session in a working tab with
+no named role tag; its role is fixed at session start. It is only for
+non-consequential, reversible labor and refuses consequential work. Its
+effective profile is `deepseek/deepseek-v4-flash:max` with the provider-default
+service class, and its only labor-improving Skills are `writing-for-clients` and
+`diagnosing-bugs`.
+
+The Runner takes a brief, asks needed current-state questions, and confirms its
+understanding. It then proposes the work and approach; the operator either
+approves or leaves an open comment for the next round, with no separate deny
+state. After approval it works only in its own scratch worktree on a
+`runner/<label>` branch, making useful checkpoint commits. It reports the
+complete result, naming every changed file and anything not done or verified.
+Acceptance uses the same approve-or-open-comment shape; once approved, the
+Runner opens a pull request to `main`. Until T-226 lands, the operator's merge
+click closes the loop. It cleans up only after durable delivery is verified.
+
 ### Researcher-only native Context7
 
 Canonical researcher children receive only the native `resolve-library-id` and
