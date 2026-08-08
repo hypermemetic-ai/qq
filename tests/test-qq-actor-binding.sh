@@ -24,6 +24,8 @@ base=(--repo "$TMP/repo" --product qq --role change_owner --change T-189); fence
 run() { "$ENGINE" "$@"; }
 refuse() { local output status; set +e; output="$("$ENGINE" "$@")"; status=$?; set -e; [ "$status" -eq 2 ] || fail "expected refusal, got $status: $output"; jq -e '.ok == false and .error.code == "refused"' <<<"$output" >/dev/null || fail "malformed refusal: $output"; printf '%s' "$output"; }
 
+refuse inspect "${base[@]}" >/dev/null
+[ ! -e "$BINDING_ROOT" ] || fail 'absent binding inspection created the binding namespace'
 created="$(run create "${base[@]}" --pane w:p1 "${fences[@]}")"
 jq -e '.result.current.pane_id == "w:p1" and .result.current.read_only == false and .result.current.runtime_active == true and .result.current.activation_nonce == null and .result.candidate == null' <<<"$created" >/dev/null
 path="$(run path "${base[@]}" | jq -r .result.path)"; [ "$(stat -c %a "$BINDING_ROOT")" = 700 ] || fail 'binding namespace mode'; [ "$(stat -c %a "$path")" = 600 ] || fail 'record mode'

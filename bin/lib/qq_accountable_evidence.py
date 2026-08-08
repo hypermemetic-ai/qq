@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -134,8 +135,16 @@ def strict_json(raw: bytes, label: str) -> dict[str, Any]:
     def constant(_value: str) -> Any:
         raise Refusal(f"{label} contains a non-finite JSON constant")
 
+    def finite_float(number: str) -> float:
+        value = float(number)
+        if not math.isfinite(value):
+            raise Refusal(f"{label} contains a non-finite JSON number")
+        return value
+
     try:
-        value = json.loads(text, object_pairs_hook=pairs, parse_constant=constant)
+        value = json.loads(
+            text, object_pairs_hook=pairs, parse_constant=constant, parse_float=finite_float
+        )
     except Refusal:
         raise
     except (json.JSONDecodeError, UnicodeError, RecursionError) as error:

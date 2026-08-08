@@ -228,6 +228,9 @@ elif scenario == "receipt-wrong-type":
 if scenario == "nonfinite":
     sys.stdout.write(json.dumps(document, separators=(",", ":")).replace('"revision":99', '"revision":NaN') + "\n")
     raise SystemExit
+if scenario == "overflow":
+    sys.stdout.write(json.dumps(document, separators=(",", ":")).replace('"revision":99', '"revision":1e999') + "\n")
+    raise SystemExit
 if scenario == "stderr-success":
     print("Herdr warning", file=sys.stderr)
 print(json.dumps(document, separators=(",", ":"), ensure_ascii=True))
@@ -339,7 +342,7 @@ for scenario in failure malformed duplicate oversized utf8 nonfinite identity en
   ! grep -q '^herdr ' "$TRACE" || fail "$scenario read a pane after invalid binding evidence"
 done
 
-for scenario in failure malformed duplicate oversized utf8 nonfinite receipt-missing receipt-wrong receipt-extra receipt-duplicate receipt-malformed receipt-wrong-type wrong-pane wrong-type missing-terminal nonstring-workspace stderr-success mixed-absence absence-extra; do
+for scenario in failure malformed duplicate oversized utf8 nonfinite overflow receipt-missing receipt-wrong receipt-extra receipt-duplicate receipt-malformed receipt-wrong-type wrong-pane wrong-type missing-terminal nonstring-workspace stderr-success mixed-absence absence-extra; do
   reset_case; PANE_CURRENT_SCENARIO="$scenario"; export PANE_CURRENT_SCENARIO
   invoke "${base[@]}"; assert_refusal
   assert_equal 1 "$(grep -c '^binding ' "$TRACE")" "$scenario binding call count"
