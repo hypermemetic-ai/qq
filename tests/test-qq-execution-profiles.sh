@@ -18,7 +18,7 @@ jq -e '
   and ([.architect, .change_owner, .compactor, .implementer, .observer, .researcher, .reviewer] | all(
     . == {provider:"openai-codex", model:"gpt-5.6-sol", effort:"xhigh", serviceClass:"provider-default"}
   ))
-  and (.coordinator == {provider:"meta", model:"muse-spark-1.2", effort:"xhigh", serviceClass:"provider-default"})
+  and (.coordinator == {provider:"deepseek", model:"deepseek-v4-flash", effort:"max", serviceClass:"provider-default"})
   and (.runner == {provider:"deepseek", model:"deepseek-v4-flash", effort:"max", serviceClass:"provider-default"})
 ' "$POLICY" >/dev/null || fail 'sole execution-profile policy does not match the approved effective map'
 
