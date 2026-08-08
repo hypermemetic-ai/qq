@@ -13,7 +13,7 @@ import stat
 import subprocess
 import sys
 import time
-from typing import Any, IO
+from typing import Any, IO, NoReturn
 
 SCHEMA = "qq.accountable-evidence/v1"
 BINDING_SCHEMA = "qq.actor-binding/v1"
@@ -35,7 +35,7 @@ class CaptureFailure(Exception):
 
 
 class ContractParser(argparse.ArgumentParser):
-    def error(self, _message: str) -> None:
+    def error(self, message: str) -> NoReturn:
         raise Refusal("command arguments are malformed")
 
 
