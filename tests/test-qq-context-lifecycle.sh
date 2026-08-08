@@ -15,7 +15,12 @@ assert_file_not_matches "$ROOT/extensions/qq-context-lifecycle.ts" 'pi\.sendUser
 assert_file_not_matches "$ROOT/extensions/qq-context-lifecycle.ts" 'pi\.on\("turn_end"' 'threshold compaction is still registered on turn_end'
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 cp "$ROOT/extensions/qq-context-lifecycle.ts" "$TMP/lifecycle.mjs"
-node --input-type=module - "$TMP/lifecycle.mjs" "$ROOT/delegation/policies/execution-profiles.json" "$TMP" <<'JS'
+# The production resolver and hook call path receive a private mutated policy,
+# so a hardcoded canonical compactor profile cannot satisfy this test.
+policy_fixture="$TMP/execution-profiles.json"
+jq '.compactor = {provider:"fixture-compactor", model:"fixture-context-model", effort:"medium", serviceClass:"provider-default"}' \
+  "$ROOT/delegation/policies/execution-profiles.json" >"$policy_fixture"
+node --input-type=module - "$TMP/lifecycle.mjs" "$policy_fixture" "$TMP" <<'JS'
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
@@ -25,7 +30,7 @@ const lifecycle = await import(pathToFileURL(modulePath));
 const { CONTEXT_LIFECYCLE_LIMITS: limits, COMPACTOR_TOOL_NAMES, ROLE_APPENDICES, resolveCompactorProfile, shouldTriggerCompaction, contextCut, buildCompactorInput, createCompactorTools, validateCheckpoint, runCompactorAttempt, default: register } = lifecycle;
 
 const resolved = await resolveCompactorProfile(undefined, policyPath);
-assert.deepEqual(resolved.profile, { provider: "openai-codex", model: "gpt-5.6-sol", effort: "xhigh", serviceClass: "provider-default" });
+assert.deepEqual(resolved.profile, { provider: "fixture-compactor", model: "fixture-context-model", effort: "medium", serviceClass: "provider-default" });
 assert.match(resolved.hash, /^[0-9a-f]{64}$/);
 assert.equal(shouldTriggerCompaction(84_999, 100_000, 200_000), false);
 assert.equal(shouldTriggerCompaction(85_000, 100_000, 200_000), true);
@@ -86,7 +91,7 @@ let validation = validateCheckpoint(checkpoint(), { role: "change_owner", source
 assert.equal(validation.ok, true); assert.match(validation.rendered, /operation=cursor; role_source=role; source=source/);
 assert.equal(validateCheckpoint(checkpoint("coordinator"), { role: "change_owner", sourceHandles: new Set(["h:e1"]), metadata }).ok, false);
 
-const model = { provider: "openai-codex", id: "gpt-5.6-sol", contextWindow: 200_000 };
+const model = { provider: "fixture-compactor", id: "fixture-context-model", contextWindow: 200_000 };
 const modelCtx = { modelRegistry: { async getApiKeyAndHeaders() { return { ok: true, apiKey: "secret" }; } } };
 let call = 0;
 const completeSuccess = async (_model, request) => {
@@ -150,7 +155,7 @@ function makeHarness(initial = "current", options = {}) {
     sendMessage(message) { messages.push(message); }, appendEntry(customType, data) { customEntries.push({ type: "custom", customType, data }); },
     getActiveTools() { return [...activeTools]; }, setActiveTools(names) { activeTools = [...names]; }, getAllTools() { return [...registeredTools].map(([name]) => ({name})); },
   };
-  const sol = { provider: "openai-codex", id: "gpt-5.6-sol", contextWindow: 200_000 }; const actor = { provider: "other", id: "actor", contextWindow: 180_000 };
+  const sol = { provider: "fixture-compactor", id: "fixture-context-model", contextWindow: 200_000 }; const actor = { provider: "other", id: "actor", contextWindow: 180_000 };
   const sessionManager = { getSessionId: () => sessionId, getLeafId: () => leaf, getSessionFile: () => sessionFile, getEntries: () => customEntries, getBranch: () => customEntries };
   const ctx = { mode: "tui", hasUI: true, cwd: scratch, model: actor, sessionManager, modelRegistry: { find(provider, id) { return provider === sol.provider && id === sol.id ? sol : undefined; }, async getApiKeyAndHeaders() { return { ok: true, apiKey: "secret" }; } }, ui: { notify(message, level) { notifications.push({ message, level }); } }, isIdle: () => idle, getContextUsage: () => ({ tokens: 170_000, contextWindow: 180_000 }), compact(options) { compactCalls += 1; assert.equal(idle, true); assert.equal(pending, false); options.onComplete?.(); }, hasPendingMessages: () => pending, async waitForIdle() { assert.equal(idle, true); }, async newSession(options) { const newFile = `${scratch}/session-new.jsonl`; let resetEntry; const next = { sessionManager: { getSessionId: () => "session-new", getSessionFile: () => newFile, appendCustomEntry(customType, data) { assert.equal(customType, "qq-context-reset-root/v1"); resetEntry = { type: "custom", customType, data }; return "reset-root"; }, appendMessage(message) { assert.equal(message.role, "assistant"); assert.deepEqual(message.content, []); writeFileSync(newFile, `${JSON.stringify({ type: "session", id: "session-new" })}\n${JSON.stringify(resetEntry)}\n${JSON.stringify({ type: "message", message })}\n`, "utf8"); return "persistence-sentinel"; } }, ui: ctx.ui }; await options.withSession(next); sessionId = "session-new"; sessionFile = newFile; return { cancelled: false }; }, async reload() { await listeners.get("session_start")({ reason: "reload" }, ctx); } };
   const exec = async (command, args) => {
@@ -183,7 +188,7 @@ const callerBudgetEntries = Array.from({ length: 25 }, (_, index) => ({ type: "m
 const callerModels = []; let callerRound = 0;
 h = makeHarness("current", { complete: async (usedModel) => { callerModels.push(usedModel.id); callerRound += 1; return { role: "assistant", content: [{ type: "toolCall", id: `caller-read-${callerRound}`, name: "history_read", arguments: { handle: `h:caller-budget-${callerRound}` } }], stopReason: "toolUse", timestamp: callerRound }; } }); await h.start();
 const callerUnsafe = await h.listeners.get("session_before_compact")({ branchEntries: callerBudgetEntries, preparation: { tokensBefore: 100 }, signal: undefined }, h.ctx);
-assert.equal(callerUnsafe, undefined); assert.equal(callerRound, 25); assert.deepEqual(new Set(callerModels), new Set(["gpt-5.6-sol"]), "unsafe compactor evidence retried the Actor instead of falling directly to native Pi"); assert.ok(h.notifications.some((note) => /unsafe\/invalid.*native compaction/.test(note.message)));
+assert.equal(callerUnsafe, undefined); assert.equal(callerRound, 25); assert.deepEqual(new Set(callerModels), new Set(["fixture-context-model"]), "compactor hook ignored the private fixture or retried the Actor instead of falling directly to native Pi"); assert.ok(h.notifications.some((note) => /unsafe\/invalid.*native compaction/.test(note.message)));
 
 // Real Pi 0.81.1 compatibility: the tool returns a terminating result, the full
 // run settles, then a one-shot deferred external command rechecks and replaces the session.

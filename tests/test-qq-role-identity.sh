@@ -1082,6 +1082,31 @@ write_runner_binding() {
   printf '%s\n' '{"ok":true,"schema":"qq.tab-role/v1","result":{"schema":"qq.tab-role/v1","version":1,"pane_id":"wRole:p1","workspace_id":"wRole","tab_id":"wRole:t1","display_only":false,"role":"runner","stored_tag":null}}' >"$binding_file"
 }
 write_runner_binding
+skill_policy="$negative_root/delegation/policies/role-skills.json"
+profile_policy="$negative_root/delegation/policies/execution-profiles.json"
+cp "$skill_policy" "$TMP/skill-policy.good"
+cp "$profile_policy" "$TMP/profile-policy.good"
+
+# A private policy mutation must reach the real interactive launch vector. The
+# synthetic expectation is fixture-only and cannot become a production map.
+jq '.runner = {provider:"fixture-interactive", model:"fixture-runner-model", effort:"low", serviceClass:"provider-default"}' \
+  "$TMP/profile-policy.good" >"$profile_policy"
+(
+  cd -- "$linked_primary"
+  env -u QQ_DISPATCH_RUN_DIR HERDR_PANE_ID=wRole:p1 TEST_BINDING_FILE="$binding_file" \
+    TEST_GLOBAL_ROOT="$global_root" TEST_SYSTEM_PROMPT="$SYSTEM_PROMPT" \
+    TEST_CONTEXT_FILE="$ROOT/AGENTS.md" TEST_OUTPUT="$TMP/private-profile.json" PATH="$fake_bin:$PATH" \
+    "$negative_root/bin/pi" 'private profile fixture'
+)
+node - "$TMP/private-profile.json" <<'JS'
+const observed = JSON.parse(require("node:fs").readFileSync(process.argv[2], "utf8"));
+const model = observed.args.indexOf("--model");
+if (model < 0 || observed.args[model + 1] !== "fixture-interactive/fixture-runner-model:low") {
+  throw new Error(`interactive launch ignored its private execution-profile policy: ${JSON.stringify(observed.args)}`);
+}
+JS
+cp "$TMP/profile-policy.good" "$profile_policy"
+
 run_negative() {
   local label=$1
   local output="$TMP/negative-$label.json"
@@ -1099,19 +1124,6 @@ run_negative() {
   assert_equal 69 "$status" "$label did not refuse"
   [[ ! -e "$output" ]] || fail "$label reached stock Pi"
 }
-# Sanity: the isolated exact launcher reaches fake Pi before corruption.
-(
-  cd -- "$linked_primary"
-  env -u QQ_DISPATCH_RUN_DIR HERDR_PANE_ID=wRole:p1 TEST_BINDING_FILE="$binding_file" \
-    TEST_GLOBAL_ROOT="$global_root" TEST_SYSTEM_PROMPT="$SYSTEM_PROMPT" \
-    TEST_CONTEXT_FILE="$ROOT/AGENTS.md" TEST_OUTPUT="$TMP/negative-valid.json" PATH="$fake_bin:$PATH" \
-    "$negative_root/bin/pi" 'fixture sanity'
-)
-
-skill_policy="$negative_root/delegation/policies/role-skills.json"
-profile_policy="$negative_root/delegation/policies/execution-profiles.json"
-cp "$skill_policy" "$TMP/skill-policy.good"
-cp "$profile_policy" "$TMP/profile-policy.good"
 printf '{not-json\n' >"$skill_policy"; run_negative malformed-policy
 cp "$TMP/skill-policy.good" "$skill_policy"
 python3 - "$skill_policy" <<'PY'

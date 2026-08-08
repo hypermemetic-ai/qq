@@ -11,31 +11,15 @@ POLICY="$ROOT/delegation/policies/execution-profiles.json"
 INTENT="$ROOT/delegation/policies/execution-profile-intent.json"
 
 [ -f "$POLICY" ] || fail "missing policy: $POLICY"
-[ -f "$INTENT" ] || fail "missing profile intent: $INTENT"
+[ ! -e "$INTENT" ] || fail "retired execution-profile intent remains: $INTENT"
 jq -e '
   (keys == ["architect", "change_owner", "compactor", "coordinator", "implementer", "observer", "researcher", "reviewer", "runner"])
   and (all(.[]; (keys | sort) == ["effort", "model", "provider", "serviceClass"] and .serviceClass == "provider-default"))
-  and ([.architect, .compactor, .implementer, .observer, .reviewer] | all(
+  and ([.architect, .change_owner, .compactor, .coordinator, .implementer, .observer, .researcher, .reviewer] | all(
     . == {provider:"openai-codex", model:"gpt-5.6-sol", effort:"xhigh", serviceClass:"provider-default"}
   ))
-  and (.change_owner == {provider:"kimi-coding", model:"k3", effort:"max", serviceClass:"provider-default"})
-  and ([.coordinator, .researcher] | all(
-    . == {provider:"qwen-token-plan", model:"qwen3.8-max", effort:"xhigh", serviceClass:"provider-default"}
-  ))
   and (.runner == {provider:"deepseek", model:"deepseek-v4-flash", effort:"max", serviceClass:"provider-default"})
-' "$POLICY" >/dev/null || fail 'effective role policy does not match the approved map and temporary no-Kimi exception'
-
-jq -e '
-  keys == ["canonical_k3_profile", "canonical_k3_roles", "openwiki_maintainer_profile_owner", "schema", "temporary_exceptions", "version"]
-  and .schema == "qq.execution-profile-intent/v1" and .version == 1
-  and .canonical_k3_roles == ["architect", "change_owner", "reviewer"]
-  and .canonical_k3_profile == {provider:"kimi-coding", model:"k3", effort:"max", serviceClass:"provider-default"}
-  and .openwiki_maintainer_profile_owner == "T-196"
-  and (.temporary_exceptions | keys == ["architect", "reviewer"])
-  and (all(.temporary_exceptions[];
-    . == {effective_provider:"openai-codex", effective_model:"gpt-5.6-sol", effective_effort:"xhigh", effective_service_class:"provider-default", reason:"kimi-quota-unavailable", restore_only_after:"explicit-operator-confirmation"}
-  ))
-' "$INTENT" >/dev/null || fail 'canonical K3 intent and temporary effective exceptions are not deterministic'
+' "$POLICY" >/dev/null || fail 'sole execution-profile policy does not match the approved effective map'
 
 for manifest in "$ROOT"/delegation/manifests/agents/*.md; do
   assert_file_not_matches "$manifest" '^(model|thinking):' 'canonical manifest retained compute authority'
