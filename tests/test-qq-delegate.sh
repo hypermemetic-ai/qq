@@ -90,6 +90,12 @@ policy="$fixture/delegation/policies/execution-profiles.json"
 fixture_service_extension="$fixture/delegation/extensions/qq-service-class.ts"
 skill_policy="$fixture/delegation/policies/role-skills.json"
 
+# Give the production engine a private synthetic reviewer profile. The happy
+# path below must reproduce this fixture in Pi's native launch arguments.
+jq '.reviewer = {provider:"fixture-delegate", model:"fixture-reviewer-model", effort:"high", serviceClass:"provider-default"}' \
+  "$policy" >"$tmp/private-delegate-policy.json"
+cp "$tmp/private-delegate-policy.json" "$policy"
+
 new_run() {
   local name="$1"
   local content="${2:-# bounded work order}"
@@ -136,8 +142,8 @@ args = Path(sys.argv[1]).read_bytes().split(b"\0")
 run = os.environ["HAPPY_RUN"]
 assert args == [
     b"--approve", b"--offline", b"--mode", b"json", b"-p",
-    b"--provider", b"openai-codex", b"--model", b"gpt-5.6-sol",
-    b"--thinking", b"xhigh",
+    b"--provider", b"fixture-delegate", b"--model", b"fixture-reviewer-model",
+    b"--thinking", b"high",
     b"--tools", b"read,grep,find,ls,bash", b"--no-extensions",
     b"--no-skills", b"--no-context-files", b"--system-prompt",
     f"{run}/.system-prompt.md".encode(),
@@ -407,11 +413,12 @@ import json
 from pathlib import Path
 import sys
 path = Path(sys.argv[1]); value = json.loads(path.read_text())
+value["researcher"]["provider"] = "fixture-non-openai"
 value["researcher"]["serviceClass"] = "flex"
 path.write_text(json.dumps(value))
 PY
 unsupported_provider_run="$(new_run unsupported-service-provider)"
-expect_policy_refusal unsupported-service-provider 'unsupported for requested provider qwen-token-plan' \
+expect_policy_refusal unsupported-service-provider 'unsupported for requested provider fixture-non-openai' \
   "$fixture_engine" run --role researcher --cwd "$fixture" --brief "$unsupported_provider_run/BRIEF.md"
 
 # Every allowed non-default class reaches only the explicit delegate extension

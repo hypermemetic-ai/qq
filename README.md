@@ -217,28 +217,21 @@ and a child ending on a user message fails. Open
 egress remains the decision-8 posture, so role and Skill privacy rules govern
 what may leave the worktree.
 
-Start Pi and use `/login` to configure both providers: select Kimi For Coding
-for the accountable session's dedicated `pi-qq` credential, then select
-`qwen-token-plan` and enter its API key for the Qwen delegate seats. Pi writes
-the credentials to `~/.pi/agent/auth.json`; never commit or report their
-values, and keep the file private:
+Use Pi's `/login` flow to configure any providers required by the effective
+execution-profile policy. Pi writes credentials to `~/.pi/agent/auth.json`;
+never commit or report their values, and keep the file private:
 
 ```bash
 chmod 600 ~/.pi/agent/auth.json
 ```
 
-`delegation/policies/execution-profiles.json` is the effective engine policy.
-Architect and Reviewer remain on the authorized temporary
-`openai-codex/gpt-5.6-sol:xhigh` seats until explicit operator confirmation that
-Kimi quota is available; Change Owner uses `kimi-coding/k3:max`. Coordinator
-and Researcher use `qwen-token-plan/qwen3.8-max:xhigh`; Compactor, Implementer,
-and Observer use `openai-codex/gpt-5.6-sol:xhigh`; Runner uses
-`deepseek/deepseek-v4-flash:max`. All use `provider-default` service class and
-there is no Orchestrator profile. `execution-profile-intent.json` records the
-canonical K3 intent and two temporary exceptions deterministically. T-196 owns
-the separately scheduled OpenWiki Maintainer profile. `qq-delegate` reads the
-effective selected role and passes provider, model, and non-default thinking
-level through Pi's native CLI flags.
+`delegation/policies/execution-profiles.json` is the sole current machine
+authority for qq execution profiles. Interactive and delegated startup,
+compactor resolution, and telemetry consume that policy. A live session keeps
+the profile selected at session start; policy changes govern only new launches
+from source containing them. T-196 separately owns the scheduled OpenWiki
+Maintainer profile. `qq-delegate` passes its selected provider, model, and
+non-default thinking level through Pi's native CLI flags.
 
 Herdr 0.7.5 has no tab metadata field, so `bin/qq-tab-role` provides qq's
 fail-closed stable mapping keyed by exact workspace+tab identity. Only

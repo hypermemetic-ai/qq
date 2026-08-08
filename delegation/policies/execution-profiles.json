@@ -6,9 +6,9 @@
     "serviceClass": "provider-default"
   },
   "change_owner": {
-    "provider": "kimi-coding",
-    "model": "k3",
-    "effort": "max",
+    "provider": "openai-codex",
+    "model": "gpt-5.6-sol",
+    "effort": "xhigh",
     "serviceClass": "provider-default"
   },
   "compactor": {
@@ -18,8 +18,8 @@
     "serviceClass": "provider-default"
   },
   "coordinator": {
-    "provider": "qwen-token-plan",
-    "model": "qwen3.8-max",
+    "provider": "openai-codex",
+    "model": "gpt-5.6-sol",
     "effort": "xhigh",
     "serviceClass": "provider-default"
   },
@@ -36,8 +36,8 @@
     "serviceClass": "provider-default"
   },
   "researcher": {
-    "provider": "qwen-token-plan",
-    "model": "qwen3.8-max",
+    "provider": "openai-codex",
+    "model": "gpt-5.6-sol",
     "effort": "xhigh",
     "serviceClass": "provider-default"
   },
