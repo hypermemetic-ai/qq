@@ -18,8 +18,8 @@
     "serviceClass": "provider-default"
   },
   "coordinator": {
-    "provider": "openai-codex",
-    "model": "gpt-5.6-sol",
+    "provider": "meta",
+    "model": "muse-spark-1.2",
     "effort": "xhigh",
     "serviceClass": "provider-default"
   },
