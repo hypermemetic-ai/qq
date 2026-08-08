@@ -18,9 +18,9 @@
     "serviceClass": "provider-default"
   },
   "coordinator": {
-    "provider": "meta",
-    "model": "muse-spark-1.2",
-    "effort": "xhigh",
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "effort": "max",
     "serviceClass": "provider-default"
   },
   "implementer": {
