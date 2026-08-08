@@ -52,7 +52,7 @@ def identity(product: str, role: str, change: str | None) -> dict[str, Any]:
     return {"product": product, "role": role, "change": change}
 
 
-def binding_root(explicit: str | None = None) -> Path:
+def binding_root(explicit: str | None = None, *, create: bool = True) -> Path:
     if explicit:
         root = Path(explicit)
     else:
@@ -65,11 +65,18 @@ def binding_root(explicit: str | None = None) -> Path:
         root = Path(state) / "qq" / "actor-bindings"
     if not root.is_absolute() or os.path.normpath(os.fspath(root)) != os.fspath(root):
         raise Refusal("binding root must be one canonical absolute path")
-    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if create:
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
     current = Path(root.anchor)
     for part in root.parts[1:]:
         current /= part
-        if stat.S_ISLNK(current.lstat().st_mode):
+        try:
+            mode = current.lstat().st_mode
+        except FileNotFoundError:
+            if not create:
+                return root
+            raise
+        if stat.S_ISLNK(mode):
             raise Refusal(f"binding namespace has symlink ambiguity at {current}")
     mode = root.lstat().st_mode
     if stat.S_ISDIR(mode) is False or root.resolve(strict=True) != root or stat.S_IMODE(mode) != 0o700:
@@ -469,7 +476,7 @@ def main(argv=None) -> int:
     try:
         actor = identity(args.product, args.role, args.change)
         verify_product(args.repo, args.product)
-        root = binding_root()
+        root = binding_root(create=args.action != "inspect")
         if args.action == "path":
             value: Any = {"path": os.fspath(record_path(root, actor))}
         elif args.action == "inspect":
