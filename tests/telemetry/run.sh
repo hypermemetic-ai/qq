@@ -51,6 +51,50 @@ repeat() {
   printf '%s' "$result"
 }
 
+test_fmt_usd() {
+  local out
+  out=$(ROOT="$ROOT" bash -c '
+    source "$ROOT/bin/qq-telemetry"
+    printf "%s|" "$(fmt_usd 0)"
+    printf "%s|" "$(fmt_usd 0.005)"
+    printf "%s|" "$(fmt_usd 1.27)"
+    printf "%s" "$(fmt_usd 12.345)"
+  ')
+  assert_eq 'fmt_usd zero and precision bands' '$0.00|$0.0050|$1.27|$12.35' "$out"
+}
+
+test_meta_meter() {
+  local case_dir="$TEST_TMP/meta" home session cache output rc nowms yesterday
+  home="$case_dir/home"
+  session="$home/.pi/agent/sessions/case/session.jsonl"
+  mkdir -p "$(dirname -- "$session")"
+  nowms=$(( $(date +%s) * 1000 ))
+  yesterday=$(( nowms - 26 * 3600 * 1000 ))
+  cat >"$session" <<EOF
+{"message":{"provider":"meta","stopReason":"stop","timestamp":$nowms,"usage":{"totalTokens":2000,"cost":{"total":0.003}}}}
+{"message":{"provider":"meta","stopReason":"stop","timestamp":$yesterday,"usage":{"totalTokens":1000,"cost":{"total":0.002}}}}
+{"message":{"provider":"openai","stopReason":"stop","timestamp":$nowms,"usage":{"totalTokens":99999,"cost":{"total":9.99}},"metadata":{"provider":"meta"}}}
+{"message":{"provider":"meta","stopReason":"error","timestamp":$nowms,"errorMessage":"network timeout","usage":{"totalTokens":5000,"cost":{"total":0.05}}}}
+EOF
+  printf '%s\n' '{"runner":{"provider":"meta","model":"muse-spark-1.2"}}' >"$case_dir/profiles.json"
+  HOME="$home" QQ_TELEMETRY_PROFILES_FILE="$case_dir/profiles.json" \
+    "$ROOT/bin/qq-telemetry" --once >"$case_dir/output" 2>"$case_dir/stderr"
+  rc=$?
+  output=$(cat "$case_dir/output")
+  cache="$home/.local/state/qq/telemetry/meta-cache.json"
+  assert_eq 'meta meter fixture panel exits zero' '0' "$rc"
+  assert_eq 'meta cache is version 2' '2' "$(jq -r '.version' "$cache" 2>/dev/null)"
+  assert_contains 'meta panel renders section header' 'META — MUSE SPARK' "$output"
+  assert_contains 'meta panel renders seats from profiles' 'seats: runner (muse-spark-1.2)' "$output"
+  assert_contains 'meta today line shows cost and tokens' '$0.0030' "$output"
+  assert_contains 'meta today line token count' '2,000 tok' "$output"
+  assert_contains 'meta 7d line shows total cost' '$0.0050' "$output"
+  assert_contains 'meta 7d line token count' '3,000 tok' "$output"
+  assert_contains 'meta 7d line shows active rate' '~$0.0002/h active' "$output"
+  assert_not_contains 'meta meter ignores other-provider records' '99,999 tok' "$output"
+  assert_not_contains 'meta meter ignores error records' '5,000 tok' "$output"
+}
+
 test_bar_rendering() {
   local rendered expected
   BAR_CELLS=16
@@ -377,6 +421,8 @@ EOF
   assert_not_contains 'cookie snapshot success prints no synthetic value' 'SYNTHETIC_COOKIE_SENTINEL_TEST_ONLY' "$output"
 }
 
+test_fmt_usd
+test_meta_meter
 test_bar_rendering
 test_fmt_num
 test_tier_ceiling
