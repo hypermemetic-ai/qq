@@ -80,7 +80,7 @@ async function readProjectConfig(cwd) {
     throw error;
   }
   const value = JSON.parse(source);
-  const allowed = new Set(["project", "role", "tasks"]);
+  const allowed = new Set(["project", "role"]);
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !allowed.has(key))) {
     throw new Error(".pi/agent-messages.json has an invalid shape");
   }
@@ -316,7 +316,6 @@ export default function register(pi, deps = {}) {
     const sessionId = ctx.sessionManager?.getSessionId?.();
     if (typeof sessionId !== "string" || sessionId === "") return;
     const project = projectFromCwd(ctx.cwd, env, config);
-    if (tasks.length === 0 && config.tasks !== undefined) tasks = normalizeTasks(config.tasks);
     if (!SESSION_ID.test(sessionId)) throw new Error("Pi supplied a non-canonical session ID");
     current = { session_id: sessionId, project, role, pane: env.HERDR_PANE_ID || null };
     active = true;
