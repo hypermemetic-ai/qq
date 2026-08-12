@@ -9,7 +9,9 @@ tool actions over the machine-local Event Plane:
 
 An immediate message interrupts the recipient's current run and is injected as
 steering input. A default message waits as a follow-up when the recipient is
-busy.
+busy. A live recipient remembers injected event IDs in process so an Event Plane
+retry cannot display the same message twice while Pi is still persisting it;
+restart delivery still relies on the durable session receipt.
 
 ## Session registration
 

@@ -188,6 +188,7 @@ export default function register(pi, deps = {}) {
   let current;
   let currentContext;
   let ticket = env.QQ_AGENT_TICKET?.trim() || null;
+  const injectedMessages = new Set();
   let renewTimer;
 
   async function writePresence() {
@@ -240,23 +241,30 @@ export default function register(pi, deps = {}) {
       await client.block({ ...deliveryGuard(delivery), reason: "unsupported agent message payload" });
       return;
     }
-    if (await receiptExists(message.event_id, message.content_hash)) {
+    const injectionKey = `${message.event_id}:${message.content_hash}`;
+    if (injectedMessages.has(injectionKey) || await receiptExists(message.event_id, message.content_hash)) {
       await client.acknowledge(deliveryGuard(delivery));
       return;
     }
     if (!active || localEpoch !== epoch || !currentContext) return;
+    injectedMessages.add(injectionKey);
     if (message.delivery === "immediate" && currentContext.isIdle?.() === false && await claimImmediate(message)) {
       try { currentContext.abort?.(); } catch {}
     }
     const options = currentContext.isIdle?.() === false
       ? { triggerTurn: true, deliverAs: message.delivery === "immediate" ? "steer" : "followUp" }
       : { triggerTurn: true };
-    await (deps.sendMessage ?? pi.sendMessage.bind(pi))({
-      customType: CUSTOM_TYPE,
-      content: `[Agent message from ${message.from} | ${message.project} / ${message.role}${message.ticket ? ` / ${message.ticket}` : ""}]\n${message.content}\n[message_id: ${message.event_id}]`,
-      display: true,
-      details: { schema: MESSAGE_SCHEMA, event_id: message.event_id, content_hash: message.content_hash, from: message.from, delivery: message.delivery },
-    }, options);
+    try {
+      await (deps.sendMessage ?? pi.sendMessage.bind(pi))({
+        customType: CUSTOM_TYPE,
+        content: `[Agent message from ${message.from} | ${message.project} / ${message.role}${message.ticket ? ` / ${message.ticket}` : ""}]\n${message.content}\n[message_id: ${message.event_id}]`,
+        display: true,
+        details: { schema: MESSAGE_SCHEMA, event_id: message.event_id, content_hash: message.content_hash, from: message.from, delivery: message.delivery },
+      }, options);
+    } catch (error) {
+      injectedMessages.delete(injectionKey);
+      throw error;
+    }
     if (deps.assumePersisted === true || await receiptExists(message.event_id, message.content_hash)) {
       await client.acknowledge(deliveryGuard(delivery));
     } else {

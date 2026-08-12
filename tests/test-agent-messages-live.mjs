@@ -6,7 +6,7 @@ const [root, socket, stateRoot] = process.argv.slice(2);
 const extension = await import(pathToFileURL(`${root}/extensions/agent-messages.ts`));
 const { EventPlaneClient } = await import(pathToFileURL(`${root}/bin/lib/event-plane-client.ts`));
 
-function harness(role, sessionId, pane) {
+function harness(role, sessionId, pane, options = {}) {
   const handlers = new Map();
   const received = [];
   let aborted = 0;
@@ -25,7 +25,7 @@ function harness(role, sessionId, pane) {
   };
   extension.default(pi, {
     env: { ...process.env, XDG_STATE_HOME: stateRoot, QQ_AGENT_PROJECT: "qq", QQ_AGENT_ROLE: role, HERDR_PANE_ID: pane },
-    client: new EventPlaneClient(socket), assumePersisted: true,
+    client: new EventPlaneClient(socket), assumePersisted: options.assumePersisted ?? true,
   });
   return { pi, ctx, handlers, received, get aborted() { return aborted; } };
 }
@@ -40,7 +40,7 @@ async function waitFor(label, predicate) {
 }
 
 const architect = harness("architect", "session-architect", "w1:p1");
-const runner = harness("runner", "session-runner", "w1:p2");
+const runner = harness("runner", "session-runner", "w1:p2", { assumePersisted: false });
 await architect.handlers.get("session_start")({ reason: "startup" }, architect.ctx);
 await runner.handlers.get("session_start")({ reason: "startup" }, runner.ctx);
 
@@ -52,6 +52,8 @@ assert.match(listing.content[0].text, /pane w1:p2/);
 const sent = await architect.pi.tool.execute("send", { action: "send", to: runnerId, message: "review this now", delivery: "immediate" });
 assert.match(sent.details.message_id, /^evt_/);
 await waitFor("runner delivery", () => runner.received.length === 1);
+await sleep(1_500);
+assert.equal(runner.received.length, 1, "an unacknowledged retry must not inject the same message twice in one process");
 assert.equal(runner.aborted, 1);
 assert.equal(runner.received[0].options.deliverAs, "steer");
 assert.match(runner.received[0].message.content, /review this now/);
