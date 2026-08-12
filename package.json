@@ -1,0 +1,7 @@
+{
+  "name": "qq",
+  "private": true,
+  "dependencies": {
+    "backlog.md": "1.49.1"
+  }
+}
