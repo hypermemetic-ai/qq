@@ -3,7 +3,7 @@
 `extensions/agent-messages.ts` gives messaging-enabled Pi sessions three agent
 tool actions over the machine-local Event Plane:
 
-- `list` returns live agents across projects;
+- `list` returns live agents across projects and marks the calling session as `self`;
 - `send` durably sends to an `agent_id` using `default` or `immediate` delivery;
 - `status` reports queued, delivering, delivered, blocked, expired, or failed.
 

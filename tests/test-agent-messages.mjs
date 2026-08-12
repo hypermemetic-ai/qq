@@ -21,6 +21,7 @@ const valid = {
 };
 assert.equal(module.validPresence(valid, now)?.ticket, "A-90");
 assert.equal(module.validPresence({ ...valid, expires_at: now }, now), undefined);
+assert.deepEqual(module.markSelf([valid, { ...valid, agent_id: second }], first).map((agent) => agent.self), [true, false]);
 
 const directory = await mkdtemp(join(homedir(), "agent-presence-test."));
 try {

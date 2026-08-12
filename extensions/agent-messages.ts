@@ -135,6 +135,10 @@ async function listPresence(directory, filters = {}, now = Date.now()) {
   return result.sort((left, right) => left.project.localeCompare(right.project) || left.role.localeCompare(right.role) || (left.ticket ?? "").localeCompare(right.ticket ?? "") || left.agent_id.localeCompare(right.agent_id));
 }
 
+function markSelf(agents, agentId) {
+  return agents.map((agent) => ({ ...agent, self: agent.agent_id === agentId }));
+}
+
 function parseMessage(record) {
   const payload = record?.envelope?.payload;
   const message = payload?.message;
@@ -170,7 +174,7 @@ function statusName(result) {
   return result?.terminal_failure ? "failed" : "queued";
 }
 
-export { listPresence, parseMessage, sessionAgentId, statusName, validPresence };
+export { listPresence, markSelf, parseMessage, sessionAgentId, statusName, validPresence };
 
 export default function register(pi, deps = {}) {
   const env = deps.env ?? process.env;
@@ -319,8 +323,8 @@ export default function register(pi, deps = {}) {
     async execute(_id, params) {
       try {
         if (params.action === "list") {
-          const agents = await list(paths.presence, { project: params.project, role: params.role, ticket: params.ticket }, now());
-          const text = agents.length ? agents.map((agent) => `${agent.agent_id} — ${agent.project} / ${agent.role}${agent.ticket ? ` / ${agent.ticket}` : ""}${agent.pane ? ` — pane ${agent.pane}` : ""}`).join("\n") : "No messaging-enabled live agents found.";
+          const agents = markSelf(await list(paths.presence, { project: params.project, role: params.role, ticket: params.ticket }, now()), current?.agent_id);
+          const text = agents.length ? agents.map((agent) => `${agent.agent_id} — ${agent.project} / ${agent.role}${agent.ticket ? ` / ${agent.ticket}` : ""}${agent.pane ? ` — pane ${agent.pane}` : ""}${agent.self ? " — self" : ""}`).join("\n") : "No messaging-enabled live agents found.";
           return { content: [{ type: "text", text }], details: { status: "current", agents } };
         }
         if (params.action === "send") {
