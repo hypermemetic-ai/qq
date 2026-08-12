@@ -13,15 +13,21 @@ busy.
 
 ## Session registration
 
-Start a Pi session with a role:
+Trusted projects configure their default registration in
+`.pi/agent-messages.json`:
 
-```sh
-QQ_AGENT_ROLE=architect pi -e /home/qqp/projects/qq/extensions/agent-messages.ts
+```json
+{
+  "project": "qq",
+  "role": "architect"
+}
 ```
 
-Optional environment:
+The globally mounted QQ extension auto-loads this configuration. Environment
+variables may override it for a particular launch:
 
-- `QQ_AGENT_PROJECT` overrides the current repository folder name.
+- `QQ_AGENT_PROJECT` overrides the project.
+- `QQ_AGENT_ROLE` overrides the role.
 - `QQ_AGENT_TICKET` supplies the initial work-item label.
 - `HERDR_PANE_ID` is published as optional location metadata.
 

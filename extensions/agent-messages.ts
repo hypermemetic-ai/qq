@@ -49,13 +49,29 @@ function sha256(value) {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-function projectFromCwd(cwd, env = process.env) {
-  return slug(env.QQ_AGENT_PROJECT || basename(resolve(cwd)), "project");
+function projectFromCwd(cwd, env = process.env, config = {}) {
+  return slug(env.QQ_AGENT_PROJECT || config.project || basename(resolve(cwd)), "project");
 }
 
-function configuredRole(env = process.env) {
-  const value = env.QQ_AGENT_ROLE;
+function configuredRole(env = process.env, config = {}) {
+  const value = env.QQ_AGENT_ROLE || config.role;
   return value ? slug(value, "role") : undefined;
+}
+
+async function readProjectConfig(cwd) {
+  const path = join(resolve(cwd), ".pi", "agent-messages.json");
+  let source;
+  try { source = await readFile(path, "utf8"); }
+  catch (error) {
+    if (error?.code === "ENOENT") return {};
+    throw error;
+  }
+  const value = JSON.parse(source);
+  const allowed = new Set(["project", "role", "ticket"]);
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !allowed.has(key))) {
+    throw new Error(".pi/agent-messages.json has an invalid shape");
+  }
+  return value;
 }
 
 function sessionAgentId(project, role, sessionId) {
@@ -258,11 +274,13 @@ export default function register(pi, deps = {}) {
 
   async function start(_event, ctx) {
     currentContext = ctx;
-    const role = configuredRole(env);
+    const config = await readProjectConfig(ctx.cwd);
+    const role = configuredRole(env, config);
     if (!role) return;
     const sessionId = ctx.sessionManager?.getSessionId?.();
     if (typeof sessionId !== "string" || sessionId === "") return;
-    const project = projectFromCwd(ctx.cwd, env);
+    const project = projectFromCwd(ctx.cwd, env, config);
+    if (!ticket && typeof config.ticket === "string" && config.ticket.trim()) ticket = bounded(config.ticket.trim(), "ticket", 191);
     current = { agent_id: sessionAgentId(project, role, sessionId), project, role, pane: env.HERDR_PANE_ID || null };
     active = true;
     epoch += 1;
