@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Start the machine-local Event Plane service.
+set -euo pipefail
+
+self="$(readlink -f -- "${BASH_SOURCE[0]}")"
+command -v python3 >/dev/null 2>&1 || {
+  printf 'event-plane: python3 is unavailable\n' >&2
+  exit 69
+}
+exec python3 "$(dirname "$self")/lib/event_plane_service.py" "$@"
