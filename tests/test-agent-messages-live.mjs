@@ -25,7 +25,7 @@ function harness(role, sessionId, pane, options = {}) {
     ui: { notify() {} },
   };
   extension.default(pi, {
-    env: { ...process.env, XDG_STATE_HOME: stateRoot, QQ_AGENT_PROJECT: "qq", QQ_AGENT_ROLE: role, HERDR_PANE_ID: pane },
+    env: { ...process.env, XDG_STATE_HOME: stateRoot, QQ_AGENT_PROJECT: "qq", QQ_AGENT_ROLE: role, QQ_AGENT_TASKS: role === "runner" ? "T-12,T-18" : "", HERDR_PANE_ID: pane },
     client: new EventPlaneClient(socket), assumePersisted: options.assumePersisted ?? true, injectedMessages,
   });
   return { pi, ctx, handlers, received, injectedMessages, get aborted() { return aborted; } };
@@ -48,10 +48,11 @@ await architect.handlers.get("session_start")({ reason: "startup" }, architect.c
 await runner.handlers.get("session_start")({ reason: "startup" }, runner.ctx);
 
 const listing = await architect.pi.tool.execute("list", { action: "list" });
-assert.equal(listing.details.agents.length, 2);
+assert.equal(listing.details.agents.length, 1);
 const runnerId = listing.details.agents.find((agent) => agent.role === "runner").session_id;
 assert.equal(runnerId, runnerSession);
-assert.match(listing.content[0].text, /recipient: session_id=019ff7ad-2cba-75a9-adc2-c15a0a92d6a9/);
+assert.match(listing.content[0].text, /session_id=019ff7ad-2cba-75a9-adc2-c15a0a92d6a9/);
+assert.match(listing.content[0].text, /tasks=\[T-12, T-18\]/);
 assert.match(listing.content[0].text, /pane=w1:p2/);
 
 const sent = await architect.pi.tool.execute("send", { action: "send", to: runnerId, message: "review this now", delivery: "immediate" });

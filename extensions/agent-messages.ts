@@ -9,7 +9,7 @@ import { basename, dirname, join, resolve } from "node:path";
 
 import { EventPlaneClient } from "../bin/lib/event-plane-client.ts";
 
-const MESSAGE_SCHEMA = "qq.agent-message/v1";
+const MESSAGE_SCHEMA = "qq.agent-message/v2";
 const CUSTOM_TYPE = "qq-agent-message";
 const PLANE_PRODUCT = "agents";
 const MESSAGE_KIND = "agent.message";
@@ -49,6 +49,19 @@ function sha256(value) {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
+function normalizeTasks(value, label = "tasks") {
+  if (value === undefined || value === null || value === "") return [];
+  const values = typeof value === "string" ? value.split(",") : value;
+  if (!Array.isArray(values) || values.length > 32) throw new Error(`${label} must contain at most 32 entries`);
+  const result = [];
+  for (const entry of values) {
+    if (typeof entry !== "string") throw new Error(`${label} entries must be strings`);
+    const task = bounded(entry.trim(), `${label} entry`, 191);
+    if (!result.includes(task)) result.push(task);
+  }
+  return result;
+}
+
 function projectFromCwd(cwd, env = process.env, config = {}) {
   return slug(env.QQ_AGENT_PROJECT || config.project || basename(resolve(cwd)), "project");
 }
@@ -67,7 +80,7 @@ async function readProjectConfig(cwd) {
     throw error;
   }
   const value = JSON.parse(source);
-  const allowed = new Set(["project", "role", "ticket"]);
+  const allowed = new Set(["project", "role", "tasks"]);
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !allowed.has(key))) {
     throw new Error(".pi/agent-messages.json has an invalid shape");
   }
@@ -115,7 +128,9 @@ function validPresence(value, now = Date.now()) {
   if (!value || value.schema !== "qq.agent-presence/v2" || value.version !== 2) return undefined;
   if (!SESSION_ID.test(value.session_id ?? "")) return undefined;
   if (!SIMPLE.test(value.project ?? "") || !SIMPLE.test(value.role ?? "")) return undefined;
-  if (value.ticket !== null && (typeof value.ticket !== "string" || value.ticket.length > 191 || value.ticket.includes("\0"))) return undefined;
+  let tasks;
+  try { tasks = normalizeTasks(value.tasks); } catch { return undefined; }
+  if (JSON.stringify(tasks) !== JSON.stringify(value.tasks)) return undefined;
   if (value.pane !== null && (typeof value.pane !== "string" || value.pane.length > 128 || value.pane.includes("\0"))) return undefined;
   if (!Number.isSafeInteger(value.updated_at) || !Number.isSafeInteger(value.expires_at) || value.expires_at <= now) return undefined;
   return value;
@@ -137,14 +152,10 @@ async function listPresence(directory, filters = {}, now = Date.now()) {
     if (!presence) continue;
     if (filters.project && presence.project !== slug(filters.project, "project filter")) continue;
     if (filters.role && presence.role !== slug(filters.role, "role filter")) continue;
-    if (filters.ticket && presence.ticket !== filters.ticket) continue;
+    if (filters.task && !presence.tasks.includes(filters.task)) continue;
     result.push(presence);
   }
-  return result.sort((left, right) => left.project.localeCompare(right.project) || left.role.localeCompare(right.role) || (left.ticket ?? "").localeCompare(right.ticket ?? "") || left.session_id.localeCompare(right.session_id));
-}
-
-function markSelf(agents, sessionId) {
-  return agents.map((agent) => ({ ...agent, self: agent.session_id === sessionId }));
+  return result.sort((left, right) => left.project.localeCompare(right.project) || left.role.localeCompare(right.role) || left.tasks.join("\0").localeCompare(right.tasks.join("\0")) || left.session_id.localeCompare(right.session_id));
 }
 
 function parseMessage(record) {
@@ -154,7 +165,10 @@ function parseMessage(record) {
   if (!SESSION_ID.test(message.from ?? "") || !sessionIdFromPlaneAgent(record.recipient_id)) return undefined;
   if (typeof message.content !== "string" || message.content.length === 0 || message.content.length > 65_536) return undefined;
   if (!DELIVERY.has(message.delivery)) return undefined;
-  return { ...message, event_id: record.event_id, accepted_at: record.accepted_at, content_hash: sha256(message.content) };
+  let tasks;
+  try { tasks = normalizeTasks(message.tasks); } catch { return undefined; }
+  if (JSON.stringify(tasks) !== JSON.stringify(message.tasks)) return undefined;
+  return { ...message, tasks, event_id: record.event_id, accepted_at: record.accepted_at, content_hash: sha256(message.content) };
 }
 
 function deliveryGuard(delivery) {
@@ -182,7 +196,7 @@ function statusName(result) {
   return result?.terminal_failure ? "failed" : "queued";
 }
 
-export { listPresence, markSelf, parseMessage, planeAgentId, statusName, validPresence };
+export { listPresence, normalizeTasks, parseMessage, planeAgentId, statusName, validPresence };
 
 export default function register(pi, deps = {}) {
   const env = deps.env ?? process.env;
@@ -195,7 +209,7 @@ export default function register(pi, deps = {}) {
   let epoch = 0;
   let current;
   let currentContext;
-  let ticket = env.QQ_AGENT_TICKET?.trim() || null;
+  let tasks = normalizeTasks(env.QQ_AGENT_TASKS);
   const injectedMessages = deps.injectedMessages ?? new Set();
   let renewTimer;
 
@@ -206,7 +220,7 @@ export default function register(pi, deps = {}) {
     await atomicPrivateJson(presencePath(paths.presence, current.session_id), {
       schema: "qq.agent-presence/v2", version: 2,
       session_id: current.session_id, project: current.project, role: current.role,
-      ticket, pane: current.pane, updated_at: timestamp, expires_at: timestamp + LEASE_MS,
+      tasks, pane: current.pane, updated_at: timestamp, expires_at: timestamp + LEASE_MS,
     });
   }
 
@@ -266,7 +280,7 @@ export default function register(pi, deps = {}) {
     try {
       await (deps.sendMessage ?? pi.sendMessage.bind(pi))({
         customType: CUSTOM_TYPE,
-        content: `[Agent message from ${message.from} | ${message.project} / ${message.role}${message.ticket ? ` / ${message.ticket}` : ""}]\n${message.content}\n[message_id: ${message.event_id}]`,
+        content: `[Agent message from ${message.from} | ${message.project} / ${message.role}${message.tasks.length ? ` / tasks: ${message.tasks.join(", ")}` : ""}]\n${message.content}\n[message_id: ${message.event_id}]`,
         display: true,
         details: { schema: MESSAGE_SCHEMA, event_id: message.event_id, content_hash: message.content_hash, from: message.from, delivery: message.delivery },
       }, options);
@@ -302,7 +316,7 @@ export default function register(pi, deps = {}) {
     const sessionId = ctx.sessionManager?.getSessionId?.();
     if (typeof sessionId !== "string" || sessionId === "") return;
     const project = projectFromCwd(ctx.cwd, env, config);
-    if (!ticket && typeof config.ticket === "string" && config.ticket.trim()) ticket = bounded(config.ticket.trim(), "ticket", 191);
+    if (tasks.length === 0 && config.tasks !== undefined) tasks = normalizeTasks(config.tasks);
     if (!SESSION_ID.test(sessionId)) throw new Error("Pi supplied a non-canonical session ID");
     current = { session_id: sessionId, project, role, pane: env.HERDR_PANE_ID || null };
     active = true;
@@ -328,12 +342,12 @@ export default function register(pi, deps = {}) {
   pi.registerTool({
     name: "agent_messages",
     label: "Agent messages",
-    description: "List live messaging sessions across projects, send one durable message, or inspect delivery status. A recipient is identified only by its canonical Pi session_id. Project and role are discovery metadata: for example, 'the QQ architect' means project qq and role architect. List first, exclude self, and if multiple candidates remain ask rather than guess. Copy the complete session_id unchanged. Use immediate delivery only when the recipient must see the message now; it interrupts their current run.",
+    description: "List other live messaging sessions across projects, send one durable message, or inspect delivery status. The calling session is excluded from list. A recipient is identified only by its canonical Pi session_id. Project, role, optional tasks, and pane are discovery metadata: for example, 'the QQ architect on T-12' means project qq, role architect, and task T-12. If multiple candidates remain, ask rather than guess. Copy the complete session_id unchanged. Use immediate delivery only when the recipient must see the message now; it interrupts their current run.",
     parameters: {
       type: "object", additionalProperties: false,
       properties: {
         action: { type: "string", enum: ["list", "send", "status"] },
-        project: { type: "string" }, role: { type: "string" }, ticket: { type: "string" },
+        project: { type: "string" }, role: { type: "string" }, task: { type: "string", description: "Optional exact task label used to filter list; a session may advertise multiple tasks." },
         to: { type: "string", description: "Recipient's complete canonical Pi session_id returned by list, for example 019ff7b9-2fcd-78cd-bc16-c770a9ccff11. Copy it unchanged; project and role are not part of this ID." }, message: { type: "string" },
         delivery: { type: "string", enum: ["default", "immediate"] },
         message_id: { type: "string" },
@@ -343,8 +357,9 @@ export default function register(pi, deps = {}) {
     async execute(_id, params) {
       try {
         if (params.action === "list") {
-          const agents = markSelf(await list(paths.presence, { project: params.project, role: params.role, ticket: params.ticket }, now()), current?.session_id);
-          const text = agents.length ? agents.map((agent) => `${agent.self ? "self" : "recipient"}: session_id=${agent.session_id} — project=${agent.project} — role=${agent.role}${agent.ticket ? ` — ticket=${agent.ticket}` : ""}${agent.pane ? ` — pane=${agent.pane}` : ""}`).join("\n") : "No messaging-enabled live agents found.";
+          const agents = (await list(paths.presence, { project: params.project, role: params.role, task: params.task }, now()))
+            .filter((agent) => agent.session_id !== current?.session_id);
+          const text = agents.length ? agents.map((agent) => `session_id=${agent.session_id} — project=${agent.project} — role=${agent.role}${agent.tasks.length ? ` — tasks=[${agent.tasks.join(", ")}]` : ""}${agent.pane ? ` — pane=${agent.pane}` : ""}`).join("\n") : "No other messaging-enabled live sessions found.";
           return { content: [{ type: "text", text }], details: { status: "current", agents } };
         }
         if (params.action === "send") {
@@ -357,7 +372,7 @@ export default function register(pi, deps = {}) {
           const result = await client.send({
             producer_id: planeAgentId(current.session_id), request_id: requestId, origin_id: planeAgentId(current.session_id),
             recipient_id: planeAgentId(params.to), product_id: PLANE_PRODUCT, kind: MESSAGE_KIND, schema_version: 1,
-            payload: { schema: MESSAGE_SCHEMA, message: { from: current.session_id, project: current.project, role: current.role, ticket, pane: current.pane, content, delivery } },
+            payload: { schema: MESSAGE_SCHEMA, message: { from: current.session_id, project: current.project, role: current.role, tasks, pane: current.pane, content, delivery } },
           });
           const messageId = result.record.event_id;
           const state = statusName(await client.status({ event_id: messageId, wait_ms: 0 }));
@@ -378,15 +393,14 @@ export default function register(pi, deps = {}) {
     },
   });
 
-  pi.registerCommand("agent-ticket", {
-    description: "Set or clear this live session's work-item label. Usage: /agent-ticket [label]",
+  pi.registerCommand("agent-tasks", {
+    description: "Set or clear this live session's task labels. Usage: /agent-tasks [task, task, ...]",
     handler: async (args, ctx) => {
       if (!current) { ctx.ui.notify("This session is not registered; set QQ_AGENT_ROLE before starting Pi.", "warning"); return; }
-      const value = args.trim();
-      if (value.length > 191 || value.includes("\0")) { ctx.ui.notify("Ticket label is too long or malformed.", "warning"); return; }
-      ticket = value || null;
+      try { tasks = normalizeTasks(args); }
+      catch (error) { ctx.ui.notify(error instanceof Error ? error.message : String(error), "warning"); return; }
       await writePresence();
-      ctx.ui.notify(ticket ? `Agent ticket set to ${ticket}.` : "Agent ticket cleared.", "info");
+      ctx.ui.notify(tasks.length ? `Agent tasks set to ${tasks.join(", ")}.` : "Agent tasks cleared.", "info");
     },
   });
 
