@@ -8,6 +8,7 @@ const { EventPlaneClient } = await import(pathToFileURL(`${root}/bin/lib/event-p
 
 function harness(role, sessionId, pane, options = {}) {
   const handlers = new Map();
+  const injectedMessages = new Set();
   const received = [];
   let aborted = 0;
   const pi = {
@@ -25,9 +26,9 @@ function harness(role, sessionId, pane, options = {}) {
   };
   extension.default(pi, {
     env: { ...process.env, XDG_STATE_HOME: stateRoot, QQ_AGENT_PROJECT: "qq", QQ_AGENT_ROLE: role, HERDR_PANE_ID: pane },
-    client: new EventPlaneClient(socket), assumePersisted: options.assumePersisted ?? true,
+    client: new EventPlaneClient(socket), assumePersisted: options.assumePersisted ?? true, injectedMessages,
   });
-  return { pi, ctx, handlers, received, get aborted() { return aborted; } };
+  return { pi, ctx, handlers, received, injectedMessages, get aborted() { return aborted; } };
 }
 
 async function waitFor(label, predicate) {
@@ -52,8 +53,10 @@ assert.match(listing.content[0].text, /pane w1:p2/);
 const sent = await architect.pi.tool.execute("send", { action: "send", to: runnerId, message: "review this now", delivery: "immediate" });
 assert.match(sent.details.message_id, /^evt_/);
 await waitFor("runner delivery", () => runner.received.length === 1);
+assert.equal(runner.injectedMessages.size, 1, "uncertain persistence must retain one dedup marker");
 await sleep(1_500);
 assert.equal(runner.received.length, 1, "an unacknowledged retry must not inject the same message twice in one process");
+await waitFor("dedup marker cleanup", () => runner.injectedMessages.size === 0);
 assert.equal(runner.aborted, 1);
 assert.equal(runner.received[0].options.deliverAs, "steer");
 assert.match(runner.received[0].message.content, /review this now/);

@@ -188,7 +188,7 @@ export default function register(pi, deps = {}) {
   let current;
   let currentContext;
   let ticket = env.QQ_AGENT_TICKET?.trim() || null;
-  const injectedMessages = new Set();
+  const injectedMessages = deps.injectedMessages ?? new Set();
   let renewTimer;
 
   async function writePresence() {
@@ -244,6 +244,7 @@ export default function register(pi, deps = {}) {
     const injectionKey = `${message.event_id}:${message.content_hash}`;
     if (injectedMessages.has(injectionKey) || await receiptExists(message.event_id, message.content_hash)) {
       await client.acknowledge(deliveryGuard(delivery));
+      injectedMessages.delete(injectionKey);
       return;
     }
     if (!active || localEpoch !== epoch || !currentContext) return;
@@ -267,6 +268,7 @@ export default function register(pi, deps = {}) {
     }
     if (deps.assumePersisted === true || await receiptExists(message.event_id, message.content_hash)) {
       await client.acknowledge(deliveryGuard(delivery));
+      injectedMessages.delete(injectionKey);
     } else {
       await client.retry({ ...deliveryGuard(delivery), reason: "Pi session persistence not yet observable" });
     }
@@ -308,6 +310,7 @@ export default function register(pi, deps = {}) {
     epoch += 1;
     if (renewTimer) clearInterval(renewTimer);
     renewTimer = undefined;
+    injectedMessages.clear();
     await removePresence();
     current = undefined;
     currentContext = undefined;
