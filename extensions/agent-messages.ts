@@ -17,7 +17,7 @@ const LEASE_MS = 45_000;
 const RENEW_MS = 15_000;
 const RECEIVE_WAIT_MS = 30_000;
 const RECONNECT_MS = 500;
-const AGENT_ID = /^agents\/[a-z0-9][a-z0-9-]{0,62}\/[a-z0-9][a-z0-9-]{0,62}-[a-f0-9]{10}$/;
+const SESSION_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const SIMPLE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const DELIVERY = new Set(["default", "immediate"]);
 
@@ -74,12 +74,20 @@ async function readProjectConfig(cwd) {
   return value;
 }
 
-function sessionAgentId(project, role, sessionId) {
-  return `${PLANE_PRODUCT}/${project}/${role}-${sha256(sessionId).slice(0, 10)}`;
+function planeAgentId(sessionId) {
+  if (!SESSION_ID.test(sessionId ?? "")) throw new Error("session_id must be a canonical Pi session ID");
+  return `${PLANE_PRODUCT}/${sessionId}`;
 }
 
-function presencePath(directory, agentId) {
-  return join(directory, `${sha256(agentId)}.json`);
+function sessionIdFromPlaneAgent(value) {
+  const prefix = `${PLANE_PRODUCT}/`;
+  if (typeof value !== "string" || !value.startsWith(prefix)) return undefined;
+  const sessionId = value.slice(prefix.length);
+  return SESSION_ID.test(sessionId) ? sessionId : undefined;
+}
+
+function presencePath(directory, sessionId) {
+  return join(directory, `${sha256(sessionId)}.json`);
 }
 
 async function privateDirectory(path) {
@@ -104,8 +112,8 @@ async function atomicPrivateJson(path, value) {
 }
 
 function validPresence(value, now = Date.now()) {
-  if (!value || value.schema !== "qq.agent-presence/v1" || value.version !== 1) return undefined;
-  if (!AGENT_ID.test(value.agent_id ?? "") || value.agent_id.split("/")[1] !== value.project) return undefined;
+  if (!value || value.schema !== "qq.agent-presence/v2" || value.version !== 2) return undefined;
+  if (!SESSION_ID.test(value.session_id ?? "")) return undefined;
   if (!SIMPLE.test(value.project ?? "") || !SIMPLE.test(value.role ?? "")) return undefined;
   if (value.ticket !== null && (typeof value.ticket !== "string" || value.ticket.length > 191 || value.ticket.includes("\0"))) return undefined;
   if (value.pane !== null && (typeof value.pane !== "string" || value.pane.length > 128 || value.pane.includes("\0"))) return undefined;
@@ -132,18 +140,18 @@ async function listPresence(directory, filters = {}, now = Date.now()) {
     if (filters.ticket && presence.ticket !== filters.ticket) continue;
     result.push(presence);
   }
-  return result.sort((left, right) => left.project.localeCompare(right.project) || left.role.localeCompare(right.role) || (left.ticket ?? "").localeCompare(right.ticket ?? "") || left.agent_id.localeCompare(right.agent_id));
+  return result.sort((left, right) => left.project.localeCompare(right.project) || left.role.localeCompare(right.role) || (left.ticket ?? "").localeCompare(right.ticket ?? "") || left.session_id.localeCompare(right.session_id));
 }
 
-function markSelf(agents, agentId) {
-  return agents.map((agent) => ({ ...agent, self: agent.agent_id === agentId }));
+function markSelf(agents, sessionId) {
+  return agents.map((agent) => ({ ...agent, self: agent.session_id === sessionId }));
 }
 
 function parseMessage(record) {
   const payload = record?.envelope?.payload;
   const message = payload?.message;
   if (payload?.schema !== MESSAGE_SCHEMA || typeof message !== "object" || message === null) return undefined;
-  if (!AGENT_ID.test(message.from ?? "") || !AGENT_ID.test(record.recipient_id ?? "")) return undefined;
+  if (!SESSION_ID.test(message.from ?? "") || !sessionIdFromPlaneAgent(record.recipient_id)) return undefined;
   if (typeof message.content !== "string" || message.content.length === 0 || message.content.length > 65_536) return undefined;
   if (!DELIVERY.has(message.delivery)) return undefined;
   return { ...message, event_id: record.event_id, accepted_at: record.accepted_at, content_hash: sha256(message.content) };
@@ -174,7 +182,7 @@ function statusName(result) {
   return result?.terminal_failure ? "failed" : "queued";
 }
 
-export { listPresence, markSelf, parseMessage, sessionAgentId, statusName, validPresence };
+export { listPresence, markSelf, parseMessage, planeAgentId, statusName, validPresence };
 
 export default function register(pi, deps = {}) {
   const env = deps.env ?? process.env;
@@ -195,16 +203,16 @@ export default function register(pi, deps = {}) {
     if (!current) return;
     await privateDirectory(paths.presence);
     const timestamp = now();
-    await atomicPrivateJson(presencePath(paths.presence, current.agent_id), {
-      schema: "qq.agent-presence/v1", version: 1,
-      agent_id: current.agent_id, project: current.project, role: current.role,
+    await atomicPrivateJson(presencePath(paths.presence, current.session_id), {
+      schema: "qq.agent-presence/v2", version: 2,
+      session_id: current.session_id, project: current.project, role: current.role,
       ticket, pane: current.pane, updated_at: timestamp, expires_at: timestamp + LEASE_MS,
     });
   }
 
   async function removePresence() {
     if (!current) return;
-    await unlink(presencePath(paths.presence, current.agent_id)).catch(() => {});
+    await unlink(presencePath(paths.presence, current.session_id)).catch(() => {});
   }
 
   async function receiptExists(eventId, contentHash) {
@@ -223,9 +231,9 @@ export default function register(pi, deps = {}) {
 
   async function claimImmediate(message) {
     const result = await client.publish({
-      producer_id: message.from,
+      producer_id: planeAgentId(message.from),
       request_id: `immediate_${message.event_id}`,
-      origin_id: message.from,
+      origin_id: planeAgentId(message.from),
       product_id: PLANE_PRODUCT,
       kind: "agent.immediate-claim",
       schema_version: 1,
@@ -278,7 +286,7 @@ export default function register(pi, deps = {}) {
     const endpoint = `agent-messages/${randomUUID()}`;
     while (active && localEpoch === epoch && current) {
       try {
-        const result = await client.next({ consumer_type: "recipient", consumer_id: current.agent_id, generation: 0, endpoint_token: endpoint, wait_ms: RECEIVE_WAIT_MS });
+        const result = await client.next({ consumer_type: "recipient", consumer_id: planeAgentId(current.session_id), generation: 0, endpoint_token: endpoint, wait_ms: RECEIVE_WAIT_MS });
         if (result?.delivery) await receiveOne(result.delivery, localEpoch);
       } catch {
         if (active && localEpoch === epoch) await sleep(RECONNECT_MS);
@@ -295,7 +303,8 @@ export default function register(pi, deps = {}) {
     if (typeof sessionId !== "string" || sessionId === "") return;
     const project = projectFromCwd(ctx.cwd, env, config);
     if (!ticket && typeof config.ticket === "string" && config.ticket.trim()) ticket = bounded(config.ticket.trim(), "ticket", 191);
-    current = { agent_id: sessionAgentId(project, role, sessionId), project, role, pane: env.HERDR_PANE_ID || null };
+    if (!SESSION_ID.test(sessionId)) throw new Error("Pi supplied a non-canonical session ID");
+    current = { session_id: sessionId, project, role, pane: env.HERDR_PANE_ID || null };
     active = true;
     epoch += 1;
     const localEpoch = epoch;
@@ -319,13 +328,13 @@ export default function register(pi, deps = {}) {
   pi.registerTool({
     name: "agent_messages",
     label: "Agent messages",
-    description: "List live agents across projects, send one durable message, or inspect delivery status. Use immediate delivery only when the recipient must see the message now; it interrupts their current run.",
+    description: "List live messaging sessions across projects, send one durable message, or inspect delivery status. A recipient is identified only by its canonical Pi session_id. Project and role are discovery metadata: for example, 'the QQ architect' means project qq and role architect. List first, exclude self, and if multiple candidates remain ask rather than guess. Copy the complete session_id unchanged. Use immediate delivery only when the recipient must see the message now; it interrupts their current run.",
     parameters: {
       type: "object", additionalProperties: false,
       properties: {
         action: { type: "string", enum: ["list", "send", "status"] },
         project: { type: "string" }, role: { type: "string" }, ticket: { type: "string" },
-        to: { type: "string" }, message: { type: "string" },
+        to: { type: "string", description: "Recipient's complete canonical Pi session_id returned by list, for example 019ff7b9-2fcd-78cd-bc16-c770a9ccff11. Copy it unchanged; project and role are not part of this ID." }, message: { type: "string" },
         delivery: { type: "string", enum: ["default", "immediate"] },
         message_id: { type: "string" },
       },
@@ -334,21 +343,21 @@ export default function register(pi, deps = {}) {
     async execute(_id, params) {
       try {
         if (params.action === "list") {
-          const agents = markSelf(await list(paths.presence, { project: params.project, role: params.role, ticket: params.ticket }, now()), current?.agent_id);
-          const text = agents.length ? agents.map((agent) => `${agent.agent_id} — ${agent.project} / ${agent.role}${agent.ticket ? ` / ${agent.ticket}` : ""}${agent.pane ? ` — pane ${agent.pane}` : ""}${agent.self ? " — self" : ""}`).join("\n") : "No messaging-enabled live agents found.";
+          const agents = markSelf(await list(paths.presence, { project: params.project, role: params.role, ticket: params.ticket }, now()), current?.session_id);
+          const text = agents.length ? agents.map((agent) => `${agent.self ? "self" : "recipient"}: session_id=${agent.session_id} — project=${agent.project} — role=${agent.role}${agent.ticket ? ` — ticket=${agent.ticket}` : ""}${agent.pane ? ` — pane=${agent.pane}` : ""}`).join("\n") : "No messaging-enabled live agents found.";
           return { content: [{ type: "text", text }], details: { status: "current", agents } };
         }
         if (params.action === "send") {
           if (!current) throw new Error("this session is not registered; set QQ_AGENT_ROLE before starting Pi");
-          if (!AGENT_ID.test(params.to ?? "")) throw new Error("send requires an agent_id returned by list");
+          if (!SESSION_ID.test(params.to ?? "")) throw new Error("send requires the complete session_id returned by list");
           const content = bounded(params.message, "message", 65_536);
           const delivery = params.delivery ?? "default";
           if (!DELIVERY.has(delivery)) throw new Error("delivery must be default or immediate");
           const requestId = `msg_${randomUUID()}`;
           const result = await client.send({
-            producer_id: current.agent_id, request_id: requestId, origin_id: current.agent_id,
-            recipient_id: params.to, product_id: PLANE_PRODUCT, kind: MESSAGE_KIND, schema_version: 1,
-            payload: { schema: MESSAGE_SCHEMA, message: { from: current.agent_id, project: current.project, role: current.role, ticket, pane: current.pane, content, delivery } },
+            producer_id: planeAgentId(current.session_id), request_id: requestId, origin_id: planeAgentId(current.session_id),
+            recipient_id: planeAgentId(params.to), product_id: PLANE_PRODUCT, kind: MESSAGE_KIND, schema_version: 1,
+            payload: { schema: MESSAGE_SCHEMA, message: { from: current.session_id, project: current.project, role: current.role, ticket, pane: current.pane, content, delivery } },
           });
           const messageId = result.record.event_id;
           const state = statusName(await client.status({ event_id: messageId, wait_ms: 0 }));

@@ -40,15 +40,19 @@ async function waitFor(label, predicate) {
   throw new Error(`timed out waiting for ${label}`);
 }
 
-const architect = harness("architect", "session-architect", "w1:p1");
-const runner = harness("runner", "session-runner", "w1:p2", { assumePersisted: false });
+const architectSession = "019ff7b9-2fcd-78cd-bc16-c770a9ccff11";
+const runnerSession = "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9";
+const architect = harness("architect", architectSession, "w1:p1");
+const runner = harness("runner", runnerSession, "w1:p2", { assumePersisted: false });
 await architect.handlers.get("session_start")({ reason: "startup" }, architect.ctx);
 await runner.handlers.get("session_start")({ reason: "startup" }, runner.ctx);
 
 const listing = await architect.pi.tool.execute("list", { action: "list" });
 assert.equal(listing.details.agents.length, 2);
-const runnerId = listing.details.agents.find((agent) => agent.role === "runner").agent_id;
-assert.match(listing.content[0].text, /pane w1:p2/);
+const runnerId = listing.details.agents.find((agent) => agent.role === "runner").session_id;
+assert.equal(runnerId, runnerSession);
+assert.match(listing.content[0].text, /recipient: session_id=019ff7ad-2cba-75a9-adc2-c15a0a92d6a9/);
+assert.match(listing.content[0].text, /pane=w1:p2/);
 
 const sent = await architect.pi.tool.execute("send", { action: "send", to: runnerId, message: "review this now", delivery: "immediate" });
 assert.match(sent.details.message_id, /^evt_/);
