@@ -25,7 +25,7 @@ function harness(role, sessionId, pane, options = {}) {
     ui: { notify() {} },
   };
   extension.default(pi, {
-    env: { ...process.env, XDG_STATE_HOME: stateRoot, QQ_AGENT_PROJECT: "qq", QQ_AGENT_ROLE: role, QQ_AGENT_TASKS: role === "runner" ? "T-12,T-18" : "", HERDR_PANE_ID: pane },
+    env: { ...process.env, XDG_STATE_HOME: stateRoot, QQ_AGENT_PROJECT: "qq", QQ_AGENT_ROLE: role, HERDR_PANE_ID: pane },
     client: new EventPlaneClient(socket), assumePersisted: options.assumePersisted ?? true, injectedMessages,
   });
   return { pi, ctx, handlers, received, injectedMessages, get aborted() { return aborted; } };
@@ -46,6 +46,7 @@ const architect = harness("architect", architectSession, "w1:p1");
 const runner = harness("runner", runnerSession, "w1:p2", { assumePersisted: false });
 await architect.handlers.get("session_start")({ reason: "startup" }, architect.ctx);
 await runner.handlers.get("session_start")({ reason: "startup" }, runner.ctx);
+await runner.pi.command.handler("T-12, T-18", runner.ctx);
 
 const listing = await architect.pi.tool.execute("list", { action: "list" });
 assert.equal(listing.details.agents.length, 1);

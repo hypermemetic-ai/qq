@@ -209,7 +209,7 @@ export default function register(pi, deps = {}) {
   let epoch = 0;
   let current;
   let currentContext;
-  let tasks = normalizeTasks(env.QQ_AGENT_TASKS);
+  let tasks = [];
   const injectedMessages = deps.injectedMessages ?? new Set();
   let renewTimer;
 
