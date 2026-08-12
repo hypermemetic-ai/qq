@@ -12,3 +12,8 @@ The legacy system is quarantined locally and archived remotely; it is not this r
 
 The tracked `backlog` link mounts QQ's single native Backlog.md collection from
 the shared versioned store. Use the repository-pinned CLI with `npx backlog`.
+
+## Agent messaging
+
+QQ includes a durable, machine-local Event Plane and an initial cross-project
+Pi messaging extension. See [`docs/agent-messages.md`](docs/agent-messages.md).
