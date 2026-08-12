@@ -64,28 +64,79 @@ more than the first agent-communication slice needs.
 ## Recommended fresh boundary
 
 Keep the proven service and clients initially, then replace the adapter with a
-small identity-neutral Pi extension, tentatively named `agent_messages`.
+small Pi extension, tentatively named `agent_messages`.
 
-The first usable slice should provide:
+### Live identity and presence
 
-- a stable agent identity supplied by Pi/session configuration;
-- `list`, `send`, `reply`, and `status` tool actions;
-- a background addressed receiver;
+The registry is machine-wide and cross-project. Every live session has:
+
+- a durable session identity used as the address;
+- a readable role: `architect`, `runner`, `reviewer`, `researcher`, or
+  `observer`;
+- its project;
+- an optional work-item/ticket label;
+- reachability and lease freshness;
+- runtime details such as pane and session as diagnostics, not addresses.
+
+The optional ticket is a data point, not an embedded task system. Another
+component may later maintain the live source of truth for which pane owns which
+work. An unlabeled session is valid. A readable display can therefore be, for
+example, `deciq / architect / A-90`, while its stable address remains independent
+of a ticket that may change.
+
+Registration occurs at session start with the known project, role, and optional
+initial ticket. The session must be able to update its ticket association later.
+Short leases remove dead sessions. Multiple sessions with the same project and
+role are disambiguated by their stable session identity and optional ticket.
+
+### Agent-facing operations
+
+The first usable slice provides:
+
+- `list` — return live agents across all projects, including project, role,
+  optional ticket, stable address, and reachability. Optional filters may narrow
+  by project, role, or ticket.
+- `send` — durably address one agent with a message and one of three urgency
+  tiers: default, urgent, or critical. It returns a message ID and current
+  transport status.
+- `status` — inspect one sent message as queued, delivering, delivered, blocked,
+  expired, or failed, with a concise reason and timestamps. This lets agents
+  troubleshoot delivery without investigating the Event Plane internals.
+
+A response is another ordinary `send`; a special reply/correlation workflow is
+not part of the first interface.
+
+The adapter also provides:
+
+- background addressed receiving;
 - custom-message injection into Pi;
 - acknowledgement after Pi accepts/persists the message;
-- default and urgent priority only;
-- durable idempotent delivery through the Event Plane.
+- durable idempotent delivery through the Event Plane;
+- critical interruption, retained from the legacy adapter: a critical message
+  may interrupt the recipient's current run so the message is seen promptly.
 
-Defer from the first slice:
+### Publication
 
-- personas and fixed roles;
-- A/B task and Product authority discovery;
-- actor-binding/source-fingerprint machinery;
-- critical aborts;
+`publish` means broadcasting a durable fact to every subscription for a
+project/kind rather than addressing one agent. Examples are lifecycle or
+“attention needed” events. The Event Plane may retain this capability for other
+components, but it is not initially exposed to agents: ordinary agent
+communication uses direct `send`.
+
+### Deferred from the first adapter
+
+- A/B Backlog parsing and the legacy Product authority schema;
+- fixed legacy owner roles and persona prompts;
+- `qq-actor-binding` source-fingerprint machinery as currently implemented;
 - general fact publication in the model-facing tool;
 - subscription/replay controls in the model-facing tool;
-- automatic lifecycle facts;
-- application-level `resolved` workflow.
+- automatic lifecycle facts beyond presence leases;
+- application-level `answered`/`resolved` workflow;
+- mandatory Coordinator brokerage.
+
+Here, “legacy task identity” means the old requirement that recipients be
+proven from A/B Backlog records and addressed as Product task owners. It does
+not mean dropping the optional ticket/work association described above.
 
 Service administration can retain inspect, backup, and recovery operations
 without exposing them to agents.
