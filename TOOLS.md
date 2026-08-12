@@ -37,20 +37,16 @@ default. Kept items return only through deliberate, minimal extraction.
 - Role personas and role prompt machinery.
 - Elaborate lifecycle orchestration unless independently retained above.
 
+- Shared-store concurrency machinery — keep the capability because concurrent
+  writers are a known concrete need. The legacy `qq-store-txn`, `qq-backlog`,
+  task identity, task-store, and Product implementation remains subject to
+  review; preserve the idea rather than assuming its A/B design is correct.
+- Session lineage — keep the small root-to-delegate session relationship so
+  Observe can attribute delegated records to their parent session.
+
 ## Deferred clarification
 
 - `qq-check-receipt` — verifies that a textual test receipt names the exact
   pushed commit and Git tree. Decide later whether that proof is still useful.
-- `qq-store-txn`, `qq-backlog`, task identity, task-store, and Product machinery
-  — old optimistic multi-project/A-B Backlog mutation and synchronization
-  system. It is not required by fresh QQ's native single Backlog collection;
-  retain only if a concrete shared-store concurrency need justifies a smaller
-  replacement.
 - Tab-role machinery — durable Herdr workspace/tab role labels used by the old
   role-bound Pi launcher and board classification. Review separately.
-- Session lineage — a 16-line hook that records the root Pi session ID in
-  `PI_SUBAGENT_PARENT_SESSION` so delegate records can be attributed to their
-  parent session by Observe. Keep only if Observe or future delegation still
-  needs that relationship.
-- `qq-check-receipt`, tab roles, and session lineage have no keep/delete decision
-  yet.
