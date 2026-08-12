@@ -68,37 +68,43 @@ small Pi extension, tentatively named `agent_messages`.
 
 ### Live identity and presence
 
-The registry is machine-wide and cross-project. Every live session has:
+The registry is machine-wide and cross-project. Every messaging-enabled live
+session has:
 
-- a durable session identity used as the address;
-- a readable role: `architect`, `runner`, `reviewer`, `researcher`, or
-  `observer`;
+- an `agent_id`, used by `send` to identify that exact live session;
 - its project;
+- a readable role supplied by the session rather than an enumerated role schema;
 - an optional work-item/ticket label;
-- reachability and lease freshness;
-- runtime details such as pane and session as diagnostics, not addresses.
+- optionally, its pane as operator-facing location metadata.
+
+`agent_id` is what “stable address” meant. It is simply the unique handle shown
+by `list` and accepted by `send`, needed to distinguish two agents with the same
+project and role. It stays unchanged for that live session even if the ticket
+label changes; it is not intended as a permanent identity across future
+sessions. Use the plain term `agent_id` rather than “stable address.”
 
 The optional ticket is a data point, not an embedded task system. Another
 component may later maintain the live source of truth for which pane owns which
 work. An unlabeled session is valid. A readable display can therefore be, for
-example, `deciq / architect / A-90`, while its stable address remains independent
-of a ticket that may change.
+example, `deciq / architect / A-90`, accompanied by its `agent_id`.
 
 Registration occurs at session start with the known project, role, and optional
 initial ticket. The session must be able to update its ticket association later.
-Short leases remove dead sessions. Multiple sessions with the same project and
-role are disambiguated by their stable session identity and optional ticket.
+Short leases remove dead sessions, so `list` itself means live; it need not
+return a separate “reachable” field. Only messaging-enabled sessions appear.
+Roles are not hard-coded, and sessions such as observers that do not receive
+messages need not register or appear. Multiple sessions with the same project
+and role are disambiguated by `agent_id` and, for humans, the optional ticket.
 
 ### Agent-facing operations
 
 The first usable slice provides:
 
-- `list` — return live agents across all projects, including project, role,
-  optional ticket, stable address, and reachability. Optional filters may narrow
-  by project, role, or ticket.
-- `send` — durably address one agent with a message and one of three urgency
-  tiers: default, urgent, or critical. It returns a message ID and current
-  transport status.
+- `list` — return messaging-enabled live agents across all projects, including
+  `agent_id`, project, role, optional ticket, and optional pane. Filters may
+  narrow by project, role, or ticket.
+- `send` — durably address one `agent_id` with a message and either `default` or
+  `immediate` delivery. It returns a message ID and current transport status.
 - `status` — inspect one sent message as queued, delivering, delivered, blocked,
   expired, or failed, with a concise reason and timestamps. This lets agents
   troubleshoot delivery without investigating the Event Plane internals.
@@ -112,16 +118,17 @@ The adapter also provides:
 - custom-message injection into Pi;
 - acknowledgement after Pi accepts/persists the message;
 - durable idempotent delivery through the Event Plane;
-- critical interruption, retained from the legacy adapter: a critical message
-  may interrupt the recipient's current run so the message is seen promptly.
+- immediate interruption, retained from the legacy adapter: an `immediate`
+  message may interrupt the recipient's current run so the message is seen now.
+  “Immediate” replaces the emotionally loaded legacy word “critical.”
 
 ### Publication
 
 `publish` means broadcasting a durable fact to every subscription for a
 project/kind rather than addressing one agent. Examples are lifecycle or
-“attention needed” events. The Event Plane may retain this capability for other
-components, but it is not initially exposed to agents: ordinary agent
-communication uses direct `send`.
+“attention needed” events. Preserve the service's publication, subscription,
+and replay machinery. It is not initially exposed in the agent tool: ordinary
+agent communication uses direct `send`.
 
 ### Deferred from the first adapter
 
