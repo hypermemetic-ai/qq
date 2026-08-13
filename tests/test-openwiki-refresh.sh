@@ -9,6 +9,25 @@ trap cleanup EXIT
 REPO="$TMP/repo"
 WORKTREE="$TMP/worktree"
 FAKE="$TMP/fake-openwiki"
+SAFE_BIN="$TMP/safe-bin"
+mkdir -p -- "$REPO/openwiki" "$SAFE_BIN" "$TMP/home"
+ln -s "$(command -v node)" "$SAFE_BIN/node"
+shell_env="$({
+  PATH="$SAFE_BIN:/usr/bin:/bin" HOME="$TMP/home" node \
+    --require "$ROOT/bin/qq-openwiki-shell-env.cjs" --input-type=module - <<'JS'
+import cp from "node:child_process";
+const output = await new Promise((resolve, reject) => {
+  const child = cp.spawn('printf "%s\\n" "$PATH" "$HOME"; command -v node', { shell: true, env: {} });
+  let stdout = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.on("error", reject);
+  child.on("close", (code) => code === 0 ? resolve(stdout) : reject(new Error(`child exited ${code}`)));
+});
+process.stdout.write(output);
+JS
+} )"
+[[ "$shell_env" == "$SAFE_BIN:/usr/bin:/bin"$'\n'"$TMP/home"$'\n'"$SAFE_BIN/node" ]]
+
 mkdir -p -- "$REPO/openwiki"
 git -C "$REPO" init -q -b main
 git -C "$REPO" config user.name qq-test
@@ -24,6 +43,7 @@ cat >"$FAKE" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 command -v node >/dev/null
+[[ "$NODE_OPTIONS" == *"qq-openwiki-shell-env.cjs"* ]]
 printf 'new wiki\n' >openwiki/index.md
 printf 'temporary\n' >CLAUDE.md
 printf 'rewritten instructions\n' >AGENTS.md

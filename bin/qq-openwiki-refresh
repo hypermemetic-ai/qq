@@ -8,6 +8,7 @@ BRANCH="${QQ_OPENWIKI_BRANCH:-qq/openwiki-refresh}"
 STATE_HOME="${XDG_STATE_HOME:-${HOME:?HOME is required}/.local/state}"
 WORKTREE="${QQ_OPENWIKI_WORKTREE:-$STATE_HOME/qq/openwiki/worktree}"
 OPENWIKI_BIN="${QQ_OPENWIKI_BIN:-openwiki}"
+SHELL_ENV_PRELOAD="${QQ_OPENWIKI_SHELL_ENV_PRELOAD:-$ROOT/bin/qq-openwiki-shell-env.cjs}"
 PROMPT="${QQ_OPENWIKI_PROMPT:-Keep this wiki short and practical.}"
 
 MAIN_ROOT="$(git -C "$MAIN_ROOT" rev-parse --show-toplevel)"
@@ -61,9 +62,12 @@ fi
 
 git -C "$MAIN_ROOT" worktree add --quiet -b "$BRANCH" "$WORKTREE" "$MAIN_BRANCH"
 
+node_options="${NODE_OPTIONS:-}"
+if [[ -n "$node_options" ]]; then node_options+=" "; fi
+node_options+="--require=$SHELL_ENV_PRELOAD"
 (
   cd -- "$WORKTREE"
-  "$OPENWIKI_BIN" code --update --print "$PROMPT"
+  NODE_OPTIONS="$node_options" "$OPENWIKI_BIN" code --update --print "$PROMPT"
 )
 
 rm -f -- "$WORKTREE/CLAUDE.md" "$WORKTREE/.github/workflows/openwiki-update.yml"
