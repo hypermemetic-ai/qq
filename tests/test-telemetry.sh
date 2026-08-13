@@ -12,6 +12,7 @@ cat >"$TMP/config/qq/execution-profiles.json" <<'JSON'
   "schema": "qq.execution-profiles/v1",
   "contextWindowCeiling": 200000,
   "compactor": {"provider":"xai","model":"grok-4.6","effort":"high"},
+  "qa": {"provider":"openai-codex","model":"gpt-5.6-sol","effort":"xhigh"},
   "roles": {
     "runner": {
       "default": "grok-high",
@@ -44,6 +45,9 @@ output=$(HOME="$TMP/home" QQ_TELEMETRY_PROFILES_FILE="$TMP/config/qq/execution-p
 [[ "$output" == *'architect'* ]]
 [[ "$output" == *'compactor'* ]]
 [[ "$output" == *'compactor (service)'* ]]
+[[ "$output" == *'qa'* ]]
+[[ "$output" == *'qa (service)'* ]]
+[[ "$output" == *'gpt-5.6-sol'*'xhigh'* ]]
 
 jq '.contextWindowCeiling = 262144' "$TMP/config/qq/execution-profiles.json" >"$TMP/bad.json"
 if HOME="$TMP/home" QQ_TELEMETRY_PROFILES_FILE="$TMP/bad.json" bash -c 'source "$1"; validate_profiles_file' _ "$ROOT/bin/qq-telemetry"; then

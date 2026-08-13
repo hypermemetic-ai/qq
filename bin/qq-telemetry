@@ -119,10 +119,11 @@ validate_profiles_file() {
       and (.profiles | type == "object" and length > 0)
       and ([.profiles | to_entries[] | (.key | name) and (.value | profile)] | all)
       and (.profiles[.default] != null);
-    type == "object" and keys == ["compactor", "contextWindowCeiling", "roles", "schema"]
+    type == "object" and keys == ["compactor", "contextWindowCeiling", "qa", "roles", "schema"]
     and (.schema == "qq.execution-profiles/v1")
     and (.contextWindowCeiling == 200000)
     and (.compactor | profile)
+    and (.qa | profile)
     and (.roles | type == "object" and keys == ["architect", "runner"])
     and ([.roles | to_entries[] | (.key | name) and (.value | role)] | all)
   ' "$PROFILES_FILE" >/dev/null 2>&1
@@ -150,7 +151,8 @@ load_roles() {
         ($role.value.profiles | to_entries
          | sort_by(if .key == $role.value.default then 0 else 1 end)
          | .[] | ["profile", $role.key, .value.model, .value.effort])),
-    ["service", "compactor", .compactor.model, .compactor.effort]
+    ["service", "compactor", .compactor.model, .compactor.effort],
+    ["service", "qa", .qa.model, .qa.effort]
     | @tsv' "$PROFILES_FILE" 2>/dev/null) || return 65
   while IFS=$'\t' read -r kind role model effort; do
     [ -n "$kind" ] || continue

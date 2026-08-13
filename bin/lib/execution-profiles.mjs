@@ -46,7 +46,7 @@ function validateProfile(value, label) {
 }
 
 export function validateExecutionPolicy(value) {
-  if (!exactKeys(value, ["schema", "contextWindowCeiling", "roles", "compactor"])) throw new Error("execution-profile policy has an invalid top-level shape");
+  if (!exactKeys(value, ["schema", "contextWindowCeiling", "roles", "compactor", "qa"])) throw new Error("execution-profile policy has an invalid top-level shape");
   if (value.schema !== POLICY_SCHEMA) throw new Error(`execution-profile policy schema must be ${POLICY_SCHEMA}`);
   if (value.contextWindowCeiling !== CONTEXT_WINDOW_CEILING) throw new Error(`contextWindowCeiling must be ${CONTEXT_WINDOW_CEILING}`);
   if (value.roles === null || typeof value.roles !== "object" || Array.isArray(value.roles)
@@ -74,6 +74,7 @@ export function validateExecutionPolicy(value) {
     contextWindowCeiling: CONTEXT_WINDOW_CEILING,
     roles: Object.freeze(roles),
     compactor: validateProfile(value.compactor, "compactor"),
+    qa: validateProfile(value.qa, "qa"),
   });
 }
 
@@ -148,6 +149,7 @@ export function uniqueBindings(policy) {
     for (const profile of Object.values(role.profiles)) add(profile);
   }
   add(policy.compactor);
+  add(policy.qa);
   return [...found.values()];
 }
 

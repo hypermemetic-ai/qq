@@ -48,9 +48,9 @@ async function main() {
   if (command === "list") {
     if (second) throw new Error("list accepts at most one role");
     if (first) {
-      if (first === "compactor") {
-        const profile = policy.compactor;
-        console.log(`compactor (service)`);
+      if (first === "compactor" || first === "qa") {
+        const profile = policy[first];
+        console.log(`${first} (service)`);
         console.log(`   ${profile.provider}/${profile.model} · ${profile.effort}`);
         return;
       }
@@ -59,9 +59,11 @@ async function main() {
       printRole(first, role);
     } else {
       for (const [name, role] of Object.entries(policy.roles)) printRole(name, role);
-      const profile = policy.compactor;
-      console.log(`compactor (service)`);
-      console.log(`   ${profile.provider}/${profile.model} · ${profile.effort}`);
+      for (const name of ["compactor", "qa"]) {
+        const profile = policy[name];
+        console.log(`${name} (service)`);
+        console.log(`   ${profile.provider}/${profile.model} · ${profile.effort}`);
+      }
     }
     return;
   }

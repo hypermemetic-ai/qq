@@ -90,6 +90,7 @@ export default function registerExecutionProfiles(pi, deps = {}) {
       for (const [name, profile] of Object.entries(role.profiles)) check(`${roleName} profile ${name}`, profile);
     }
     check("compactor", policy.compactor);
+    check("qa", policy.qa);
   }
 
   async function applyRoleProfile(roleName, profileName, ctx, notify = true) {
