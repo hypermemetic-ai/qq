@@ -38,13 +38,19 @@ function turn(text, tools = []) {
   };
 }
 
-function harness(model = { id: "grok-4.6", provider: "xai" }) {
+function harness(model = { id: "grok-4.6", provider: "xai" }, options = {}) {
   const events = new Map();
   const notices = [];
   const navigated = [];
+  const applied = [];
   let aborted = 0;
+  let effort;
   let leaf = "leaf-0";
   const branch = [{ id: "leaf-0", type: "message", message: { role: "assistant" } }];
+  const fallback = {
+    name: "sol-high",
+    profile: { provider: "openai-codex", model: "gpt-5.6-sol", effort: "xhigh" },
+  };
   const ctx = {
     model,
     abort() { aborted += 1; },
@@ -57,15 +63,37 @@ function harness(model = { id: "grok-4.6", provider: "xai" }) {
       getLeafId() { return leaf; },
       getBranch() { return branch; },
     },
-    ui: { notify(message, type) { notices.push({ message, type }); } },
+    modelRegistry: {
+      find(provider, id) {
+        if (provider === fallback.profile.provider && id === fallback.profile.model) {
+          return { provider, id, contextWindow: 200000 };
+        }
+        return undefined;
+      },
+    },
+    ui: {
+      notify(message, type) { notices.push({ message, type }); },
+      setStatus() {},
+    },
   };
-  register({
+  const pi = {
     on(name, fn) { events.set(name, [...(events.get(name) ?? []), fn]); },
+    async setModel(next) { applied.push(next); ctx.model = next; return true; },
+    setThinkingLevel(value) { effort = value; },
+    getThinkingLevel() { return effort; },
+    events: { emit() {} },
+  };
+  register(pi, {
+    readPolicy: async () => options.policy ?? {
+      roles: { runner: { default: "grok-high", profiles: { "sol-high": fallback.profile } } },
+    },
   });
   return {
     notices,
     navigated,
+    applied,
     get aborted() { return aborted; },
+    get effort() { return effort; },
     async emit(name, event = {}) {
       for (const fn of events.get(name) ?? []) await fn(event, ctx);
     },
@@ -118,7 +146,9 @@ for (let i = 1; i < STALL.length; i += 1) {
   await h.emit("agent_settled");
   assert.equal(h.aborted, 2);
   assert.equal(h.navigated.length, 1);
-  assert.match(h.notices.at(-1).message, /after rewind; stopped/);
+  assert.equal(h.applied.at(-1)?.id, "gpt-5.6-sol");
+  assert.equal(h.effort, "xhigh");
+  assert.match(h.notices.at(-1).message, /switched to runner sol-high/);
 }
 
 {
