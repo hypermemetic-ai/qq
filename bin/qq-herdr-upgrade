@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+downstream="$root/herdr/downstream"
+# shellcheck source=/dev/null
+source "$downstream/upstream.env"
+
+candidate=${1:-}
+if [[ -z "$candidate" ]]; then
+  candidate=$(git ls-remote --tags --refs "$HERDR_UPSTREAM_URL" 'v*' \
+    | awk '{sub("refs/tags/v", "", $2); print $2}' \
+    | sort -V \
+    | tail -1)
+  candidate="v$candidate"
+fi
+if [[ ! "$candidate" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  printf 'usage: qq-herdr-upgrade [vMAJOR.MINOR.PATCH]\n' >&2
+  exit 2
+fi
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+git -c advice.detachedHead=false clone --quiet --filter=blob:none --branch "$candidate" --depth 1 "$HERDR_UPSTREAM_URL" "$work/source"
+commit=$(git -C "$work/source" rev-parse HEAD)
+for patch in $HERDR_PATCHES; do
+  if ! git -C "$work/source" apply --check "$downstream/$patch"; then
+    printf 'upgrade blocked: %s does not apply cleanly to %s (%s)\n' "$patch" "$candidate" "$commit" >&2
+    exit 1
+  fi
+done
+cat <<EOF
+candidate: $candidate
+commit:    $commit
+patches:   clean
+
+To pin this candidate, update HERDR_UPSTREAM_TAG and HERDR_UPSTREAM_COMMIT in:
+  $downstream/upstream.env
+Then run:
+  qq-herdr-build build
+EOF

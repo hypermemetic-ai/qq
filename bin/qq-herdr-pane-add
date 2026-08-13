@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+for arg in "$@"; do
+  case "$arg" in
+    --direction|--direction=*|--ratio|--ratio=*)
+      echo 'qq-herdr-pane-add: direction and ratio are owned by the centered-row policy' >&2
+      exit 2
+      ;;
+  esac
+done
+
+herdr_bin=${QQ_HERDR_BIN:-herdr}
+exec "$herdr_bin" pane split --direction right "$@"

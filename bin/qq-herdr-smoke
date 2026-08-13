@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+binary=${1:-${QQ_HERDR_BINARY:-${XDG_CACHE_HOME:-$HOME/.cache}/qq/herdr/bin/herdr}}
+[[ -x "$binary" ]] || { printf 'qq-herdr-smoke: binary not executable: %s\n' "$binary" >&2; exit 1; }
+
+base=$(mktemp -d)
+server=
+client=
+cleanup() {
+  if [[ -n "$client" ]]; then
+    kill "$client" 2>/dev/null || true
+    wait "$client" 2>/dev/null || true
+  fi
+  if [[ -n "$server" ]]; then
+    kill "$server" 2>/dev/null || true
+    wait "$server" 2>/dev/null || true
+  fi
+  rm -rf "$base"
+}
+trap cleanup EXIT
+mkdir -p "$base/config/herdr" "$base/runtime"
+printf 'onboarding = false\n[ui]\npane_preferred_width = 60\n' > "$base/config/herdr/config.toml"
+
+run=(env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_TAB_ID -u HERDR_WORKSPACE_ID \
+  XDG_CONFIG_HOME="$base/config" XDG_RUNTIME_DIR="$base/runtime" \
+  HERDR_SOCKET_PATH="$base/runtime/herdr.sock" SHELL=/bin/bash)
+"${run[@]}" "$binary" server >"$base/server.log" 2>&1 &
+server=$!
+for _ in $(seq 1 200); do
+  [[ -S "$base/runtime/herdr.sock" ]] && break
+  sleep .05
+done
+[[ -S "$base/runtime/herdr.sock" ]] || { cat "$base/server.log" >&2; exit 1; }
+
+pane=$(python3 - "$base/runtime/herdr.sock" <<'PY'
+import json, socket, sys
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+sock.connect(sys.argv[1])
+sock.sendall(b'{"id":"create","method":"workspace.create","params":{"cwd":"/tmp","focus":true}}\n')
+print(json.loads(sock.makefile().readline())["result"]["root_pane"]["pane_id"])
+PY
+)
+timeout 30 script -qfec \
+  "stty rows 50 cols 160; exec env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_TAB_ID -u HERDR_WORKSPACE_ID XDG_CONFIG_HOME='$base/config' XDG_RUNTIME_DIR='$base/runtime' HERDR_SOCKET_PATH='$base/runtime/herdr.sock' SHELL=/bin/bash '$binary'" \
+  "$base/client.typescript" >/dev/null 2>&1 &
+client=$!
+
+python3 - "$base/runtime/herdr.sock" "$pane" <<'PY'
+import json, socket, sys, time
+path, first = sys.argv[1:]
+def request(method, params):
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.connect(path)
+    sock.sendall((json.dumps({"id": method, "method": method, "params": params}) + "\n").encode())
+    response = json.loads(sock.makefile().readline())
+    assert "result" in response, response
+    return response["result"]
+
+area = None
+for _ in range(100):
+    area = request("pane.layout", {"pane_id": first})["layout"]["area"]
+    if area["width"] == 60:
+        break
+    time.sleep(.05)
+assert area == {"x": 63, "y": 1, "width": 60, "height": 49}, area
+
+second = request("pane.split", {"target_pane_id": first, "direction": "right", "focus": False})["pane"]["pane_id"]
+third = request("pane.split", {"target_pane_id": second, "direction": "right", "focus": False})["pane"]["pane_id"]
+layout = request("layout.export", {"pane_id": first})["layout"]
+root = layout["root"]
+assert abs(root["ratio"] - 1 / 3) < 1e-5, root
+assert abs(root["second"]["ratio"] - 1 / 2) < 1e-5, root
+for _ in range(100):
+    area = request("pane.layout", {"pane_id": first})["layout"]["area"]
+    if area["width"] == 134:
+        break
+    time.sleep(.05)
+assert area == {"x": 26, "y": 1, "width": 134, "height": 49}, area
+
+request("pane.close", {"pane_id": second})
+root = request("layout.export", {"pane_id": first})["layout"]["root"]
+assert abs(root["ratio"] - .5) < 1e-5, root
+print("herdr disposable-session geometry passed")
+PY

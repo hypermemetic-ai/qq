@@ -1,0 +1,15 @@
+[Unit]
+Description=QQ-pinned Herdr terminal workspace server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/lib/qq/herdr/bin/herdr server
+Restart=on-failure
+RestartSec=2
+Environment=PATH=%h/.local/bin:%h/.bun/bin:%h/.opencode/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
+StandardOutput=append:%h/.local/state/herdr/herdr.log
+StandardError=append:%h/.local/state/herdr/herdr.log
+
+[Install]
+WantedBy=default.target

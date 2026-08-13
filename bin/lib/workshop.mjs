@@ -260,9 +260,9 @@ export async function spawnWorkshop(options) {
         .filter((pane) => pane?.tab_id === runsTab.tab_id)
         .at(-1)?.pane_id;
       if (!parent) throw new Error("runs tab has no pane to split");
-      const args = ["pane", "split", parent, "--direction", "right", "--cwd", worktree, "--no-focus"];
+      const args = [parent, "--cwd", worktree, "--no-focus"];
       for (const entry of paneEnv) args.push("--env", entry);
-      const split = await checked(run, "herdr", args, {}, "cannot add runs pane");
+      const split = await checked(run, "qq-herdr-pane-add", args, {}, "cannot add runs pane");
       paneId = paneFromSplit(split);
     }
     if (typeof paneId !== "string" || paneId === "") throw new Error("Herdr returned no runs pane id");

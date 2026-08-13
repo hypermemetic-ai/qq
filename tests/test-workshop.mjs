@@ -141,7 +141,7 @@ try {
           stderr: "",
         };
       }
-      if (command === "herdr" && args[0] === "pane" && args[1] === "split") {
+      if (command === "qq-herdr-pane-add") {
         return { code: 0, stdout: JSON.stringify({ result: { pane: { pane_id: "w2T:p-new" } } }), stderr: "" };
       }
       if (command === "herdr" && args[0] === "pane" && args[1] === "process-info") {
@@ -164,9 +164,9 @@ try {
     assert.equal(existingCalls.some(({ command, args }) => command === "herdr" && args[0] === "tab" && args[1] === "create"), false);
     assert.equal(existingCalls.some(({ command, args }) => command === "herdr" &&
       args[0] === "tab" && args[1] === "rename" && args[2] === "w2T:tR" && args[3] === "runs"), label === "workshop");
-    const split = existingCalls.find(({ command, args }) => command === "herdr" && args[0] === "pane" && args[1] === "split");
-    assert.deepEqual(split.args.slice(0, 8), [
-      "pane", "split", "w2T:p-right", "--direction", "right", "--cwd", existingPreparation.worktree, "--no-focus",
+    const split = existingCalls.find(({ command }) => command === "qq-herdr-pane-add");
+    assert.deepEqual(split.args.slice(0, 4), [
+      "w2T:p-right", "--cwd", existingPreparation.worktree, "--no-focus",
     ]);
   }
 

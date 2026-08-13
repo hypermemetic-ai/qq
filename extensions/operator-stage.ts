@@ -78,7 +78,7 @@ export default function registerOperatorStage(pi, deps = {}) {
 
       let split;
       try {
-        split = await run("herdr", ["pane", "split", "--current", "--direction", "right", "--cwd", process.cwd(), "--no-focus"], { signal });
+        split = await run("qq-herdr-pane-add", ["--current", "--cwd", process.cwd(), "--no-focus"], { signal });
       } catch (error) {
         return result(`operator_stage could not create a pane: ${error instanceof Error ? error.message : String(error)}`, details);
       }

@@ -21,7 +21,7 @@ function harness(options = {}) {
     const call = { executable, args, options: execOptions };
     calls.push(call);
     if (options.execReply) return options.execReply(call);
-    if (args[1] === "split") return { code: 0, stdout: JSON.stringify({ result: { pane_id: "wM:p4Q" } }), stderr: "" };
+    if (executable === "qq-herdr-pane-add") return { code: 0, stdout: JSON.stringify({ result: { pane_id: "wM:p4Q" } }), stderr: "" };
     return { code: 0, stdout: "", stderr: "" };
   };
   module.default(pi, { exec, env: options.env ?? { HERDR_PANE_ID: "source-pane" } });
@@ -30,7 +30,7 @@ function harness(options = {}) {
 }
 
 function operations(calls) {
-  return calls.map(({ args }) => args[1]);
+  return calls.map(({ executable, args }) => executable === "qq-herdr-pane-add" ? "split" : args[1]);
 }
 
 const registered = harness();
@@ -41,7 +41,8 @@ assert.deepEqual(registered.tool.parameters.required, ["command", "description",
 const low = harness();
 const lowOutcome = await low.tool.execute("low", { command: "printf ok", description: "verify release", danger: "low" });
 assert.deepEqual(operations(low.calls), ["split", "rename", "wait-output", "send-text", "show"]);
-assert.deepEqual(low.calls[0].args, ["pane", "split", "--current", "--direction", "right", "--cwd", process.cwd(), "--no-focus"]);
+assert.equal(low.calls[0].executable, "qq-herdr-pane-add");
+assert.deepEqual(low.calls[0].args, ["--current", "--cwd", process.cwd(), "--no-focus"]);
 assert.equal(low.calls.some(({ args }) => args.includes("--focus")), false);
 assert.deepEqual(low.calls[3].args, ["pane", "send-text", "wM:p4Q", module.stagedLine("printf ok", "low")]);
 assert.equal(low.calls.some(({ args }) => args[1] === "send-keys"), false);
@@ -68,7 +69,7 @@ for (const testCase of [
 
 const sendFail = harness({
   execReply(call) {
-    if (call.args[1] === "split") return { code: 0, stdout: "created wM:p9Z", stderr: "" };
+    if (call.executable === "qq-herdr-pane-add") return { code: 0, stdout: "created wM:p9Z", stderr: "" };
     if (call.args[1] === "send-text") return { code: 1, stdout: "", stderr: "send denied" };
     return { code: 0, stdout: "", stderr: "" };
   },
@@ -80,7 +81,7 @@ assert.deepEqual(operations(sendFail.calls), ["split", "rename", "wait-output", 
 
 const notifyFail = harness({
   execReply(call) {
-    if (call.args[1] === "split") return { code: 0, stdout: "created wM:p6N", stderr: "" };
+    if (call.executable === "qq-herdr-pane-add") return { code: 0, stdout: "created wM:p6N", stderr: "" };
     if (call.args[0] === "notification") return { code: 1, stdout: "", stderr: "notifications unavailable" };
     return { code: 0, stdout: "", stderr: "" };
   },
@@ -91,7 +92,7 @@ assert.deepEqual(operations(notifyFail.calls), ["split", "rename", "wait-output"
 
 const orphan = harness({
   execReply(call) {
-    if (call.args[1] === "split") return { code: 0, stdout: "created wM:p7T", stderr: "" };
+    if (call.executable === "qq-herdr-pane-add") return { code: 0, stdout: "created wM:p7T", stderr: "" };
     if (call.args[1] === "send-text") return { code: 1, stdout: "", stderr: "send denied" };
     if (call.args[1] === "close") return { code: 1, stdout: "", stderr: "close denied" };
     return { code: 0, stdout: "", stderr: "" };
