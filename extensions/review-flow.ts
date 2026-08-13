@@ -4,7 +4,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { atomicPrivateJson, readHandoff } from "../bin/lib/workshop.mjs";
-import { formatPack, listProposals, prepareDone, projectFromCwd } from "../bin/lib/review.mjs";
+import { formatPack, listProposals, listReviews, prepareDone, projectFromCwd, setBoardStatus } from "../bin/lib/review.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -60,14 +60,15 @@ export default function registerReviewFlow(pi, deps = {}) {
     ctx.ui.notify(`Landed ${state.task.id}.`, "info");
   }
 
-  async function offer(state, ctx) {
+  async function offer(state, ctx, options = {}) {
     const key = `${state.id}:${state.updatedAt}`;
-    if (shown.has(key) || showing || role !== "architect" || !ctx.hasUI || ctx.isIdle?.() === false) return;
+    if (showing || role !== "architect" || !ctx.hasUI) return;
+    if (!options.force && (shown.has(key) || ctx.isIdle?.() === false)) return;
     showing = true;
     shown.add(key);
     try {
       const pack = formatPack(state.pack ?? { summary: state.blockedReason || "qa blocked", files: [] });
-      const choices = state.status === "proposal" ? ["approve", "comment", "later"] : ["comment", "later"];
+      const choices = state.status === "blocked" ? ["comment", "later"] : ["approve", "comment", "later"];
       const choice = await ctx.ui.select(pack, choices);
       if (choice === "approve") {
         await land(state, ctx);
@@ -78,7 +79,13 @@ export default function registerReviewFlow(pi, deps = {}) {
         state.operatorComment = comment;
         state.updatedAt = new Date().toISOString();
         await atomicPrivateJson(state.statePath, state);
-        pi.sendMessage({ customType: "qq-operator-comment", content: `${comment}\n\n${pack}`, display: true, details: { task: state.task.id } }, { triggerTurn: true, deliverAs: "steer" });
+        await setBoardStatus(run, ctx.cwd || state.mainRoot, state.task.id, "To Do");
+        pi.sendMessage({
+          customType: "qq-operator-comment",
+          content: `${state.task.id} comment:\n${comment}\n\n${pack}`,
+          display: true,
+          details: { task: state.task.id },
+        }, { triggerTurn: true, deliverAs: "steer" });
       }
     } catch (error) {
       ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
@@ -93,6 +100,20 @@ export default function registerReviewFlow(pi, deps = {}) {
     const project = projectFromCwd(ctx.cwd, env);
     for (const state of await listProposals(project, env)) await offer(state, ctx);
   }
+
+  pi.registerTool({
+    name: "review", label: "Review", promptSnippet: "Reopen waiting workshop reviews",
+    description: "Offer waiting proposal, blocked, and commented workshop handoffs for approve, comment, or later. Architect sessions only. Reopens a later deferral without reloading and can land an existing QA-passed ref after comment without re-delegating.",
+    parameters: { type: "object", additionalProperties: false, properties: {} },
+    async execute(_id, _params, _signal, _update, ctx) {
+      if (role !== "architect") return result("review is available only in an architect session.", { status: "refused" });
+      if (!ctx.hasUI) return result("review requires an interactive architect session.", { status: "refused" });
+      const waiting = await listReviews(projectFromCwd(ctx.cwd, env), env);
+      if (!waiting.length) return result("No waiting reviews.", { status: "idle" });
+      for (const state of waiting) await offer(state, ctx, { force: true });
+      return result(`Offered ${waiting.length} waiting review${waiting.length === 1 ? "" : "s"}.`, { status: "offered", count: waiting.length });
+    },
+  });
 
   pi.events.on("qq:role-selected", (selection) => {
     if (!selection?.role) return;

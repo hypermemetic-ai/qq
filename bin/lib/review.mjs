@@ -1,7 +1,10 @@
 import { readdir, readFile, realpath } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { atomicPrivateJson, readHandoff, workshopRoot } from "./workshop.mjs";
+
+const BACKLOG = join(resolve(dirname(fileURLToPath(import.meta.url)), "../.."), "node_modules", ".bin", "backlog");
 
 function reason(result, fallback) {
   return result?.stderr?.trim() || result?.stdout?.trim() || fallback;
@@ -54,7 +57,11 @@ export async function packFor(run, state) {
   return parseNumstat(diff.stdout);
 }
 
-export async function listProposals(project, env = process.env) {
+export async function setBoardStatus(run, cwd, taskId, status) {
+  await checked(run, BACKLOG, ["task", "edit", taskId, "--status", status, "--plain"], { cwd }, `cannot set ${taskId} to ${status}`);
+}
+
+async function listHandoffs(project, env, statuses) {
   const root = workshopRoot(project, env);
   const found = [];
   let entries;
@@ -64,15 +71,23 @@ export async function listProposals(project, env = process.env) {
     const path = join(root, entry.name, "handoff.json");
     try {
       const state = await readHandoff(path);
-      if (state.status === "proposal" || state.status === "blocked") found.push(state);
+      if (statuses.includes(state.status)) found.push(state);
     } catch {}
   }
   return found.sort((left, right) => String(left.updatedAt).localeCompare(String(right.updatedAt)));
 }
 
+export async function listProposals(project, env = process.env) {
+  return listHandoffs(project, env, ["proposal", "blocked"]);
+}
+
+export async function listReviews(project, env = process.env) {
+  return listHandoffs(project, env, ["proposal", "blocked", "commented"]);
+}
+
 export async function landHandoff(run, statePath) {
   const state = await readHandoff(statePath);
-  if (state.status !== "proposal") throw new Error(`proposal is ${state.status}, not ready to land`);
+  if (state.status !== "proposal" && state.status !== "commented") throw new Error(`handoff is ${state.status}, not ready to land`);
   try {
     const branch = await checked(run, "git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: state.mainRoot }, "main checkout is detached");
     if (branch.stdout.trim() !== state.baseBranch) throw new Error(`main checkout is on ${branch.stdout.trim()}, not ${state.baseBranch}`);
@@ -86,7 +101,6 @@ export async function landHandoff(run, statePath) {
     state.landedAt = new Date().toISOString();
     state.updatedAt = state.landedAt;
     await atomicPrivateJson(statePath, state);
-    return state;
   } catch (error) {
     state.status = "blocked";
     state.blockedReason = error instanceof Error ? error.message : String(error);
@@ -94,6 +108,8 @@ export async function landHandoff(run, statePath) {
     await atomicPrivateJson(statePath, state);
     throw error;
   }
+  await setBoardStatus(run, state.mainRoot, state.task.id, "Done");
+  return state;
 }
 
 export function projectFromCwd(cwd, env = process.env) {
