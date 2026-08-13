@@ -199,7 +199,7 @@ export function paneHasAvailableShell(value) {
   return PANE_SHELLS.has(processName(processes.find((process) => process?.pid === shellPid)?.name));
 }
 
-async function waitForAvailableShell(run, paneId, options = {}) {
+export async function waitForAvailableShell(run, paneId, options = {}) {
   const timeoutMs = options.timeoutMs ?? 5_000;
   const intervalMs = options.intervalMs ?? 50;
   const sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));

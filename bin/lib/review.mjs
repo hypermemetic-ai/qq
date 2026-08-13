@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { atomicPrivateJson, parseHerdr, readHandoff, stateHome, workshopRoot } from "./workshop.mjs";
+import { atomicPrivateJson, parseHerdr, readHandoff, stateHome, waitForAvailableShell, workshopRoot } from "./workshop.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const BACKLOG = join(QQ_ROOT, "node_modules", ".bin", "backlog");
@@ -167,7 +167,7 @@ async function herdr(run, args, label) {
 }
 
 export async function waitForShell(run, pane, timeoutMs = 15_000) {
-  await herdr(run, ["pane", "wait-output", pane, "--source", "recent-unwrapped", "--timeout", String(timeoutMs), "--regex", String.raw`[$#]\s*$`], "workshop pane did not return to a shell");
+  await waitForAvailableShell(run, pane, { timeoutMs });
 }
 
 export async function takePane(run, pane, name, args, timeoutMs = 30_000) {
@@ -179,7 +179,8 @@ export async function takePane(run, pane, name, args, timeoutMs = 30_000) {
 
 export async function stopAgent(run, pane, timeoutMs = 15_000) {
   const listed = await run("herdr", ["agent", "get", pane], {});
-  const status = parseHerdr(listed?.stdout)?.agent_status;
+  const agent = parseHerdr(listed?.stdout);
+  const status = agent?.agent?.agent_status ?? agent?.agent_status;
   if (listed?.code === 0 && status && status !== "done" && status !== "unknown") {
     await run("herdr", ["agent", "send-keys", pane, "ctrl+d"], {});
   }
@@ -207,6 +208,7 @@ export async function conductReview(run, statePath, options = {}) {
   await writeFile(servicePromptPath, servicePrompt, { mode: 0o600, flag: "wx" });
   const launchArgs = qaLaunchArgs(state, { servicePromptPath, sessionDir, qaSessionId });
   try {
+    await stopAgent(run, state.pane);
     await takePane(run, state.pane, qaAgentName(state), launchArgs);
     await herdr(run, ["agent", "prompt", state.pane, qaLookPrompt(state), "--wait", "--until", "idle", "--until", "done", "--until", "blocked"], "qa did not settle");
     await stopAgent(run, state.pane);
