@@ -24,11 +24,14 @@ grep -q '%h/.local/state/herdr/herdr.log' "$root/systemd/user/herdr.service"
 [[ -x "$root/bin/qq-herdr-upgrade" ]]
 [[ -x "$root/bin/qq-herdr-pane-add" ]]
 [[ -x "$root/bin/qq-herdr-smoke" ]]
+[[ -x "$root/bin/qq-herdr-launch" ]]
+grep -q -- 'ghostty --gtk-single-instance=true --title=herdr -e' "$root/bin/qq-herdr-launch"
 
 ghostty_config="$root/ghostty/config"
 [[ -s "$ghostty_config" ]]
 grep -q '^fullscreen = true$' "$ghostty_config"
 grep -q '^window-padding-x = 12$' "$ghostty_config"
+grep -q '^title = herdr$' "$ghostty_config"
 if grep -q '^window-padding-x = 480$' "$ghostty_config"; then
   echo 'retired Ghostty 4K box padding returned' >&2
   exit 1

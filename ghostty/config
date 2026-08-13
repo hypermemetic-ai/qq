@@ -43,6 +43,10 @@ window-padding-x = 12
 window-padding-y = 0
 fullscreen = true
 
+# Handy routes dictation through the Herdr bridge only for this exact title.
+# Force it so command paths and terminal title escape sequences cannot change it.
+title = herdr
+
 cursor-style = block
 cursor-style-blink = false
 
