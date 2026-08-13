@@ -1,0 +1,104 @@
+#!/usr/bin/env node
+import { spawnSync } from "node:child_process";
+import {
+  CONTEXT_WINDOW_CEILING,
+  executionProfilesPath,
+  installContextCeiling,
+  parseModelList,
+  profileFor,
+  readExecutionPolicy,
+  uniqueBindings,
+  updateRoleDefault,
+} from "./lib/execution-profiles.mjs";
+
+function usage() {
+  console.log(`Usage:
+  qq-profile list [role]
+  qq-profile default <role> [profile]
+  qq-profile context inspect
+  qq-profile context install
+
+Session profile selection is intentionally handled by Pi's /profile command.
+Only 'default <role> <profile>' changes durable profile policy.`);
+}
+
+function availableModels() {
+  const executable = process.env.PI_BIN || "pi";
+  const result = spawnSync(executable, ["--list-models"], { encoding: "utf8", env: process.env, timeout: 60_000, maxBuffer: 2_000_000 });
+  if (result.error) throw new Error(`cannot run ${executable} --list-models: ${result.error.message}`);
+  if (result.status !== 0) throw new Error(`${executable} --list-models failed: ${(result.stderr || result.stdout).trim()}`);
+  return parseModelList(result.stdout);
+}
+
+function printRole(name, role) {
+  console.log(`${name} (default: ${role.default})`);
+  for (const [profileName, profile] of Object.entries(role.profiles)) {
+    const marker = profileName === role.default ? "*" : " ";
+    console.log(` ${marker} ${profileName.padEnd(16)} ${profile.provider}/${profile.model} · ${profile.effort}`);
+  }
+}
+
+async function main() {
+  const [command, first, second, ...rest] = process.argv.slice(2);
+  if (!command || command === "--help" || command === "-h") { usage(); return; }
+  if (rest.length) throw new Error("too many arguments");
+  const path = executionProfilesPath();
+  const policy = await readExecutionPolicy(path);
+
+  if (command === "list") {
+    if (second) throw new Error("list accepts at most one role");
+    if (first) {
+      if (first === "compactor") {
+        const profile = policy.compactor;
+        console.log(`compactor (service)`);
+        console.log(`   ${profile.provider}/${profile.model} · ${profile.effort}`);
+        return;
+      }
+      const role = policy.roles[first];
+      if (!role) throw new Error(`unknown execution-profile role: ${first}`);
+      printRole(first, role);
+    } else {
+      for (const [name, role] of Object.entries(policy.roles)) printRole(name, role);
+      const profile = policy.compactor;
+      console.log(`compactor (service)`);
+      console.log(`   ${profile.provider}/${profile.model} · ${profile.effort}`);
+    }
+    return;
+  }
+
+  if (command === "default") {
+    if (!first) throw new Error("default requires a role");
+    if (!second) {
+      const selected = profileFor(policy, first);
+      console.log(`${first} default: ${selected.name} — ${selected.profile.provider}/${selected.profile.model} · ${selected.profile.effort}`);
+      return;
+    }
+    const result = await updateRoleDefault(first, second, path);
+    console.log(`${first} default: ${result.previous} → ${result.current}`);
+    return;
+  }
+
+  if (command === "context") {
+    if (!first || second || !["inspect", "install"].includes(first)) throw new Error("context requires inspect or install");
+    const models = availableModels();
+    if (first === "install") {
+      const changed = await installContextCeiling(policy, models);
+      console.log(changed.length ? `installed ${CONTEXT_WINDOW_CEILING} context cap: ${changed.join(", ")}` : `context cap already satisfied: ${CONTEXT_WINDOW_CEILING}`);
+      return;
+    }
+    console.log(`context ceiling: ${CONTEXT_WINDOW_CEILING}`);
+    for (const binding of uniqueBindings(policy)) {
+      const model = models.get(`${binding.provider}\0${binding.model}`);
+      if (!model) console.log(` ! ${binding.provider}/${binding.model} — unavailable`);
+      else console.log(` ${model.contextWindow <= CONTEXT_WINDOW_CEILING ? "✓" : "!"} ${binding.provider}/${binding.model} — ${model.contextWindow}${model.contextWindow > CONTEXT_WINDOW_CEILING ? " — run qq-profile context install" : ""}`);
+    }
+    return;
+  }
+
+  throw new Error(`unknown command: ${command}`);
+}
+
+main().catch((error) => {
+  console.error(`qq-profile: ${error instanceof Error ? error.message : String(error)}`);
+  process.exitCode = 1;
+});

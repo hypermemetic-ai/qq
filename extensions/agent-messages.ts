@@ -6,8 +6,12 @@ import { constants } from "node:fs";
 import { lstat, mkdir, open, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { EventPlaneClient } from "../bin/lib/event-plane-client.ts";
+import { ROLE_SET, roleForRepository } from "../bin/lib/roles.mjs";
+
+const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const MESSAGE_SCHEMA = "qq.agent-message/v2";
 const CUSTOM_TYPE = "qq-agent-message";
@@ -127,7 +131,7 @@ async function atomicPrivateJson(path, value) {
 function validPresence(value, now = Date.now()) {
   if (!value || value.schema !== "qq.agent-presence/v2" || value.version !== 2) return undefined;
   if (!SESSION_ID.test(value.session_id ?? "")) return undefined;
-  if (!SIMPLE.test(value.project ?? "") || !SIMPLE.test(value.role ?? "")) return undefined;
+  if (!SIMPLE.test(value.project ?? "") || !ROLE_SET.has(value.role)) return undefined;
   let tasks;
   try { tasks = normalizeTasks(value.tasks); } catch { return undefined; }
   if (JSON.stringify(tasks) !== JSON.stringify(value.tasks)) return undefined;
@@ -163,6 +167,8 @@ function parseMessage(record) {
   const message = payload?.message;
   if (payload?.schema !== MESSAGE_SCHEMA || typeof message !== "object" || message === null) return undefined;
   if (!SESSION_ID.test(message.from ?? "") || !sessionIdFromPlaneAgent(record.recipient_id)) return undefined;
+  if (!SIMPLE.test(message.project ?? "") || !ROLE_SET.has(message.role)) return undefined;
+  if (message.pane !== null && (typeof message.pane !== "string" || message.pane.length > 128 || message.pane.includes("\0"))) return undefined;
   if (typeof message.content !== "string" || message.content.length === 0 || message.content.length > 65_536) return undefined;
   if (!DELIVERY.has(message.delivery)) return undefined;
   let tasks;
@@ -280,7 +286,7 @@ export default function register(pi, deps = {}) {
     try {
       await (deps.sendMessage ?? pi.sendMessage.bind(pi))({
         customType: CUSTOM_TYPE,
-        content: `[Agent message from ${message.from} | ${message.project} / ${message.role}${message.tasks.length ? ` / tasks: ${message.tasks.join(", ")}` : ""}]\n${message.content}\n[message_id: ${message.event_id}]`,
+        content: `[message ${message.event_id} from ${message.from} — ${message.project} / ${message.role}${message.tasks.length ? ` — tasks: ${message.tasks.join(", ")}` : ""}]\n${message.content}`,
         display: true,
         details: { schema: MESSAGE_SCHEMA, event_id: message.event_id, content_hash: message.content_hash, from: message.from, delivery: message.delivery },
       }, options);
@@ -311,7 +317,7 @@ export default function register(pi, deps = {}) {
   async function start(_event, ctx) {
     currentContext = ctx;
     const config = await readProjectConfig(ctx.cwd);
-    const role = configuredRole(env, config);
+    const role = roleForRepository(ctx.cwd, QQ_ROOT, env, configuredRole(env, config));
     if (!role) return;
     const sessionId = ctx.sessionManager?.getSessionId?.();
     if (typeof sessionId !== "string" || sessionId === "") return;
@@ -341,7 +347,7 @@ export default function register(pi, deps = {}) {
   pi.registerTool({
     name: "agent_messages",
     label: "Agent messages",
-    description: "List other live messaging sessions across projects, send one durable message, or inspect delivery status. The calling session is excluded from list. A recipient is identified only by its canonical Pi session_id. Project, role, optional tasks, and pane are discovery metadata: for example, 'the QQ architect on T-12' means project qq, role architect, and task T-12. If multiple candidates remain, ask rather than guess. Copy the complete session_id unchanged. Use immediate delivery only when the recipient must see the message now; it interrupts their current run.",
+    description: "List other live messaging sessions across projects, send one durable message, or inspect delivery status. The calling session is excluded from list. A recipient is identified only by its canonical Pi session_id. Project, role, optional tasks, and pane are discovery metadata: for example, 'the qq runner on T-12' means project qq, role runner, and task T-12. If multiple candidates remain, ask rather than guess. Copy the complete session_id unchanged. Use immediate delivery only when the recipient must see the message now; it interrupts their current run.",
     parameters: {
       type: "object", additionalProperties: false,
       properties: {
@@ -358,7 +364,9 @@ export default function register(pi, deps = {}) {
         if (params.action === "list") {
           const agents = (await list(paths.presence, { project: params.project, role: params.role, task: params.task }, now()))
             .filter((agent) => agent.session_id !== current?.session_id);
-          const text = agents.length ? agents.map((agent) => `session_id=${agent.session_id} — project=${agent.project} — role=${agent.role}${agent.tasks.length ? ` — tasks=[${agent.tasks.join(", ")}]` : ""}${agent.pane ? ` — pane=${agent.pane}` : ""}`).join("\n") : "No other messaging-enabled live sessions found.";
+          const text = agents.length
+            ? `live sessions:\n${agents.map((agent) => `- ${agent.session_id} — ${agent.project} / ${agent.role}${agent.tasks.length ? ` — tasks: ${agent.tasks.join(", ")}` : ""}${agent.pane ? ` — pane: ${agent.pane}` : ""}`).join("\n")}`
+            : "No live messaging sessions.";
           return { content: [{ type: "text", text }], details: { status: "current", agents } };
         }
         if (params.action === "send") {
@@ -375,14 +383,15 @@ export default function register(pi, deps = {}) {
           });
           const messageId = result.record.event_id;
           const state = statusName(await client.status({ event_id: messageId, wait_ms: 0 }));
-          return { content: [{ type: "text", text: `Message ${messageId} is ${state}.` }], details: { status: state, message_id: messageId, to: params.to, delivery } };
+          return { content: [{ type: "text", text: `message sent: ${messageId}` }], details: { status: state, message_id: messageId, to: params.to, delivery } };
         }
         if (params.action === "status") {
           bounded(params.message_id, "message_id", 128);
           const result = await client.status({ event_id: params.message_id, wait_ms: 0 });
           const state = statusName(result);
           const reasons = (result.obligations ?? []).map((item) => item.last_reason).filter(Boolean);
-          return { content: [{ type: "text", text: `Message ${params.message_id} is ${state}${reasons.length ? `: ${reasons.join("; ")}` : ""}.` }], details: { status: state, message_id: params.message_id, result } };
+          const showReasons = ["blocked", "expired", "failed"].includes(state);
+          return { content: [{ type: "text", text: `Message ${params.message_id} is ${state}${showReasons && reasons.length ? `: ${reasons.join("; ")}` : ""}.` }], details: { status: state, message_id: params.message_id, result } };
         }
         throw new Error("action must be list, send, or status");
       } catch (error) {
@@ -403,6 +412,12 @@ export default function register(pi, deps = {}) {
     },
   });
 
+  pi.events.on("qq:role-selected", (selection) => {
+    if (!ROLE_SET.has(selection?.role)) return;
+    if (!current) return;
+    current.role = selection.role;
+    void writePresence();
+  });
   pi.on("session_start", start);
   pi.on("session_shutdown", stop);
 }

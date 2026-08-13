@@ -14,12 +14,14 @@ assert.equal(module.planeAgentId(first), `agents/${first}`);
 const now = Date.now();
 const valid = {
   schema: "qq.agent-presence/v2", version: 2, session_id: first,
-  project: "deciq", role: "architect", tasks: ["A-90", "T-12"], pane: "w1:p2",
+  project: "deciq", role: "runner", tasks: ["A-90", "T-12"], pane: "w1:p2",
   updated_at: now, expires_at: now + 30_000,
 };
 assert.deepEqual(module.validPresence(valid, now)?.tasks, ["A-90", "T-12"]);
 assert.deepEqual(module.normalizeTasks("T-12, T-18, T-12"), ["T-12", "T-18"]);
 assert.equal(module.validPresence({ ...valid, expires_at: now }, now), undefined);
+assert.equal(module.validPresence({ ...valid, role: "architect" }, now)?.role, "architect");
+assert.equal(module.validPresence({ ...valid, role: "observer" }, now), undefined, "an unreal role was accepted");
 
 const directory = await mkdtemp(join(homedir(), "agent-presence-test."));
 try {
@@ -34,11 +36,12 @@ try {
 const record = {
   event_id: "evt_test", accepted_at: now, recipient_id: module.planeAgentId(first),
   envelope: { payload: { schema: "qq.agent-message/v2", message: {
-    from: second, project: "deciq", role: "architect", tasks: [], pane: null,
+    from: second, project: "deciq", role: "runner", tasks: [], pane: null,
     content: "hello", delivery: "immediate",
   } } },
 };
 assert.equal(module.parseMessage(record)?.delivery, "immediate");
+assert.equal(module.parseMessage({ ...record, envelope: { payload: { ...record.envelope.payload, message: { ...record.envelope.payload.message, role: "observer" } } } }), undefined);
 assert.equal(module.parseMessage({ ...record, envelope: { payload: { ...record.envelope.payload, message: { ...record.envelope.payload.message, delivery: "urgent" } } } }), undefined);
 assert.equal(module.statusName({ obligations: [{ status: "pending" }] }), "queued");
 assert.equal(module.statusName({ obligations: [{ status: "in_flight" }] }), "delivering");
