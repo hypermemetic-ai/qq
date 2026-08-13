@@ -18,6 +18,9 @@ assert.equal(review.formatPack({ summary: "small fix", files: [{ path: "src/a.ts
 
 const scratch = await mkdtemp(join(homedir(), "qq-review-test."));
 try {
+  const availableShell = JSON.stringify({
+    result: { process_info: { shell_pid: 10, foreground_process_group_id: 10, foreground_processes: [{ pid: 10, name: "zsh" }] } },
+  });
   const worktree = join(scratch, "worktree");
   const mainRoot = join(scratch, "main");
   await mkdir(worktree);
@@ -180,6 +183,7 @@ try {
   const failLook = join(scratch, "state", "qa-look-1.json");
   const herdrCalls = [];
   let qaPromptAtLaunch;
+  let reviewAgentGets = 0;
   const reviewRun = async (command, args, options = {}) => {
     herdrCalls.push({ command, args, options });
     if (command === "herdr" && args[0] === "agent" && args[1] === "start" && args.includes("--system-prompt")) {
@@ -199,7 +203,11 @@ try {
       });
     }
     if (command === "herdr" && args[0] === "agent" && args[1] === "get") {
-      return { code: 0, stdout: JSON.stringify({ result: { agent_status: "done" } }), stderr: "" };
+      const agent_status = reviewAgentGets++ === 0 ? "idle" : "done";
+      return { code: 0, stdout: JSON.stringify({ result: { agent: { agent_status } } }), stderr: "" };
+    }
+    if (command === "herdr" && args[0] === "pane" && args[1] === "process-info") {
+      return { code: 0, stdout: availableShell, stderr: "" };
     }
     return { code: 0, stdout: "", stderr: "" };
   };
@@ -223,6 +231,15 @@ try {
   assert.ok(!herdrCalls.some(({ command, args }) => command === "pi" || args.includes("--print")));
   assert.equal(started[1].args[2], review.runnerAgentName(afterFail));
   assert.equal(started[1].args[6], "w2T:p9");
+  const runnerStop = herdrCalls.findIndex(({ args }) => args[0] === "agent" && args[1] === "send-keys");
+  const firstShellCheck = herdrCalls.findIndex(({ args }) => args[0] === "pane" && args[1] === "process-info");
+  const qaStart = herdrCalls.findIndex(({ args }) => args[0] === "agent" && args[1] === "start");
+  assert.ok(runnerStop >= 0 && runnerStop < firstShellCheck && firstShellCheck < qaStart);
+  assert.ok(herdrCalls.some(({ args }) => args[0] === "pane" && args[1] === "process-info" && args[2] === "--pane" && args[3] === "w2T:p9"));
+  assert.ok(!herdrCalls.some(({ args }) => args[0] === "pane" && args[1] === "wait-output"));
+  const qaStop = herdrCalls.findIndex(({ args }, index) => index > qaStart && args[0] === "agent" && args[1] === "get");
+  const runnerStart = herdrCalls.findIndex(({ args }, index) => index > qaStart && args[0] === "agent" && args[1] === "start");
+  assert.ok(herdrCalls.some(({ args }, index) => index > qaStop && index < runnerStart && args[0] === "pane" && args[1] === "process-info"));
   assert.ok(!herdrCalls.some(({ args }) => args[0] === "pane" && args[1] === "close"));
   assert.ok(!herdrCalls.some(({ args }) => args[0] === "tab" && args[1] === "create"));
   const returned = herdrCalls.find(({ args }) => args[0] === "agent" && args[1] === "prompt" && args[2] === "w2T:p9" && String(args[3]).includes("call done again"));
@@ -234,6 +251,7 @@ try {
   await workshop.atomicPrivateJson(statePath, prepared);
   const passLook = join(scratch, "state", "qa-look-2.json");
   const passCalls = [];
+  let passAgentGets = 0;
   const passRun = async (command, args, options = {}) => {
     passCalls.push({ command, args, options });
     if (command === "git" && args[0] === "status") return { code: 0, stdout: "", stderr: "" };
@@ -245,7 +263,11 @@ try {
       });
     }
     if (command === "herdr" && args[0] === "agent" && args[1] === "get") {
-      return { code: 0, stdout: JSON.stringify({ result: { agent_status: "done" } }), stderr: "" };
+      const agent_status = passAgentGets++ === 0 ? "idle" : "done";
+      return { code: 0, stdout: JSON.stringify({ result: { agent: { agent_status } } }), stderr: "" };
+    }
+    if (command === "herdr" && args[0] === "pane" && args[1] === "process-info") {
+      return { code: 0, stdout: availableShell, stderr: "" };
     }
     return { code: 0, stdout: "", stderr: "" };
   };
@@ -260,6 +282,7 @@ try {
   assert.ok(passStarts[0].args.includes("--session"));
   assert.ok(!passStarts[0].args.includes("--print"));
   assert.ok(passCalls.some(({ args }) => args[0] === "pane" && args[1] === "close" && args[2] === "w2T:p9"));
+  assert.ok(!passCalls.some(({ args }) => args[0] === "pane" && args[1] === "wait-output"));
   assert.ok(!passCalls.some(({ args }) => args[0] === "tab" && args[1] === "create"));
 
   prepared.status = "commented";
