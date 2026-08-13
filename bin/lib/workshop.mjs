@@ -8,6 +8,10 @@ const SAFE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const BRIEF_GATE_PLUGIN = "qq.brief-gate";
 const BRIEF_GATE_ENTRYPOINT = "review";
 const BRIEF_GATE_MARKER = "QQ_BRIEF_GATE_DECIDED";
+const PANE_SHELLS = new Set([
+  "sh", "bash", "dash", "zsh", "fish", "ksh", "mksh", "csh", "tcsh",
+  "elvish", "xonsh", "nu", "pwsh", "powershell", "cmd",
+]);
 
 export function parseHerdr(stdout) {
   if (typeof stdout !== "string") return undefined;
@@ -181,6 +185,35 @@ export async function awaitBriefGate(options) {
   return decision;
 }
 
+function processName(name) {
+  if (typeof name !== "string") return "";
+  return (name.split(/[/\\]/).pop() ?? name).replace(/^-+/, "").replace(/\.exe$/i, "").toLowerCase();
+}
+
+export function paneHasAvailableShell(value) {
+  const info = value?.process_info ?? value;
+  const shellPid = info?.shell_pid;
+  const processes = info?.foreground_processes;
+  if (!Number.isInteger(shellPid) || shellPid <= 0 || info?.foreground_process_group_id !== shellPid) return false;
+  if (!Array.isArray(processes) || processes.length === 0 || processes.some((process) => process?.pid !== shellPid)) return false;
+  return PANE_SHELLS.has(processName(processes.find((process) => process?.pid === shellPid)?.name));
+}
+
+async function waitForAvailableShell(run, paneId, options = {}) {
+  const timeoutMs = options.timeoutMs ?? 5_000;
+  const intervalMs = options.intervalMs ?? 50;
+  const sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const now = options.now ?? Date.now;
+  const deadline = now() + timeoutMs;
+  let last;
+  while (now() < deadline) {
+    last = await run("herdr", ["pane", "process-info", "--pane", paneId], {});
+    if (last?.code === 0 && paneHasAvailableShell(parseHerdr(last.stdout))) return last;
+    await sleep(intervalMs);
+  }
+  throw new Error(`workshop pane ${paneId} never became an available shell: ${reason(last, "not a free shell")}`);
+}
+
 export async function spawnWorkshop(options) {
   const { run, cwd, env = process.env, task, architectSession, qaBinding } = options;
   if (typeof run !== "function") throw new Error("spawnWorkshop requires a command runner");
@@ -238,6 +271,7 @@ export async function spawnWorkshop(options) {
       briefPath, statePath, qa: qaBinding, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
     await atomicPrivateJson(statePath, state);
+    await waitForAvailableShell(run, paneId);
     await checked(run, "herdr", ["agent", "start", `runner-${slug}-${nonce}`, "--kind", "pi", "--pane", paneId], {}, "cannot start workshop runner");
     const prompt = `Work from the outbound brief at ${briefPath}. Implement the task in this worktree, commit the result, then call done with ref HEAD. Do not merge.\n\n${runnerBrief.trimEnd()}`;
     const prompted = await run("herdr", ["agent", "prompt", paneId, prompt], {});

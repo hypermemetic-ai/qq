@@ -13,6 +13,18 @@ assert.equal(lib.taskSlug("T-1"), "t-1");
 assert.equal(lib.taskSlug("A-71.12"), "a-71-12");
 assert.throws(() => lib.taskSlug("bad task"), /T-1/);
 assert.equal(lib.parseHerdr(JSON.stringify({ result: { pane: { pane_id: "w2T:p9" } } })).pane.pane_id, "w2T:p9");
+assert.equal(lib.paneHasAvailableShell({
+  process_info: { shell_pid: 10, foreground_process_group_id: 10, foreground_processes: [{ pid: 10, name: "bash" }] },
+}), true);
+assert.equal(lib.paneHasAvailableShell({
+  process_info: { shell_pid: 10, foreground_process_group_id: 10, foreground_processes: [{ pid: 11, name: "bash" }] },
+}), false);
+assert.equal(lib.paneHasAvailableShell({
+  process_info: { shell_pid: 10, foreground_process_group_id: 11, foreground_processes: [{ pid: 10, name: "bash" }] },
+}), false);
+assert.equal(lib.paneHasAvailableShell({
+  process_info: { shell_pid: 10, foreground_process_group_id: 10, foreground_processes: [{ pid: 10, name: "pi" }] },
+}), false);
 
 const scratch = await mkdtemp(join(homedir(), "qq-workshop-test."));
 try {
@@ -65,6 +77,20 @@ try {
     if (command === "git" && args[0] === "symbolic-ref") return { code: 0, stdout: "main\n", stderr: "" };
     if (command === "herdr" && args[0] === "tab" && args[1] === "list") return { code: 0, stdout: JSON.stringify({ result: { tabs: [] } }), stderr: "" };
     if (command === "herdr" && args[0] === "tab" && args[1] === "create") return { code: 0, stdout: JSON.stringify({ result: { root_pane: { pane_id: "w2T:p9" }, tab: { tab_id: "w2T:t9" } } }), stderr: "" };
+    if (command === "herdr" && args[0] === "pane" && args[1] === "process-info") {
+      const ready = spawnCalls.filter((call) => call.command === "herdr" && call.args[0] === "pane" && call.args[1] === "process-info").length >= 2;
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          result: {
+            process_info: ready
+              ? { pane_id: "w2T:p9", shell_pid: 10, foreground_process_group_id: 10, foreground_processes: [{ pid: 10, name: "-zsh" }] }
+              : { pane_id: "w2T:p9" },
+          },
+        }),
+        stderr: "",
+      };
+    }
     return { code: 0, stdout: "", stderr: "" };
   };
   const state = await lib.spawnWorkshop({
@@ -80,6 +106,13 @@ try {
   const create = spawnCalls.find(({ command, args }) => command === "herdr" && args[0] === "tab" && args[1] === "create");
   assert.ok(create.args.includes("QQ_AGENT_ROLE=runner"));
   assert.ok(create.args.some((arg) => arg.startsWith("QQ_WORKSHOP_STATE=")));
+  const herdrOps = spawnCalls.filter(({ command }) => command === "herdr").map(({ args }) => `${args[0]} ${args[1]}`);
+  const processInfo = herdrOps.filter((op) => op === "pane process-info");
+  assert.equal(processInfo.length, 2);
+  assert.ok(herdrOps.indexOf("pane process-info") > herdrOps.indexOf("pane rename"));
+  assert.ok(herdrOps.lastIndexOf("pane process-info") < herdrOps.indexOf("agent start"));
+  const start = spawnCalls.find(({ command, args }) => command === "herdr" && args[0] === "agent" && args[1] === "start");
+  assert.deepEqual(start.args.slice(0, 2), ["agent", "start"]);
   const prompt = spawnCalls.find(({ command, args }) => command === "herdr" && args[0] === "agent" && args[1] === "prompt");
   assert.match(prompt.args[3], /call done with ref HEAD/);
   assert.ok(prompt.args[3].endsWith(exactBrief));
