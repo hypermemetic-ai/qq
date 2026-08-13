@@ -9,8 +9,9 @@ const lib = await import(pathToFileURL(join(root, "bin/lib/workshop.mjs")));
 const extension = await import(pathToFileURL(join(root, "extensions/workshop.ts")));
 
 assert.equal(lib.taskSlug("TASK-1"), "task-1");
+assert.equal(lib.taskSlug("T-1"), "t-1");
 assert.equal(lib.taskSlug("A-71.12"), "a-71-12");
-assert.throws(() => lib.taskSlug("bad task"), /TASK-1/);
+assert.throws(() => lib.taskSlug("bad task"), /T-1/);
 assert.equal(lib.parseHerdr(JSON.stringify({ result: { pane: { pane_id: "w2T:p9" } } })).pane.pane_id, "w2T:p9");
 
 const scratch = await mkdtemp(join(homedir(), "qq-workshop-test."));

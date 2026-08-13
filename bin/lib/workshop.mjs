@@ -12,7 +12,7 @@ export function parseHerdr(stdout) {
 }
 
 export function taskSlug(value) {
-  if (typeof value !== "string" || !TASK_ID.test(value)) throw new Error("task id must look like TASK-1");
+  if (typeof value !== "string" || !TASK_ID.test(value)) throw new Error("task id must look like T-1");
   const slug = value.toLowerCase().replaceAll(".", "-");
   if (!SAFE.test(slug)) throw new Error("task id cannot form a safe slug");
   return slug;
