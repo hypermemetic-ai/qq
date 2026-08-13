@@ -140,8 +140,25 @@ export function qaLaunchArgs(state, options) {
 
 export function qaLookPrompt(state) {
   return state.look === 1
-    ? `Look 1. Review ref ${state.ref} against the outbound brief at ${state.briefPath}. Base is ${state.baseRef}. Reject bad or excess tests, bloat, and over-engineering.`
-    : `Look 2, the final look. Review updated ref ${state.ref} against the same outbound brief at ${state.briefPath} and your prior rejection. There is no third look. Do not edit files on look 2.`;
+    ? `Look 1. Review ref ${state.ref} against the outbound brief at ${state.briefPath}. Base is ${state.baseRef}. You own test quality: you may edit tests and commit test-only changes. Never edit or commit production code. Reject bad or excess tests, bloat, and over-engineering.`
+    : `Look 2, the final look. Review updated ref ${state.ref} against the same outbound brief at ${state.briefPath} and your prior rejection. You still own test quality: you may edit tests and commit test-only changes, but never edit or commit production code. There is no third look.`;
+}
+
+export function isTestPath(path) {
+  const parts = String(path).split("/").filter(Boolean);
+  const name = parts.at(-1) ?? "";
+  if (parts.some((part) => ["test", "tests", "spec", "specs", "__tests__", "fixtures", "__fixtures__", "snapshots", "__snapshots__"].includes(part.toLowerCase()))) return true;
+  return /(?:^test[_-].+|.+[._-](?:test|spec|snap))\.[^.]+$/i.test(name);
+}
+
+function appendVerdictFailure(verdict, feedback) {
+  verdict.verdict = "fail";
+  verdict.feedback = `${verdict.feedback ? `${verdict.feedback}\n` : ""}${feedback}`;
+}
+
+function parseChangedPaths(source) {
+  const text = String(source ?? "");
+  return text.split(text.includes("\0") ? "\0" : "\n").filter(Boolean);
 }
 
 export function look1FixPrompt(state, verdict) {
@@ -202,7 +219,7 @@ export async function conductReview(run, statePath, options = {}) {
   await atomicPrivateJson(statePath, state);
 
   const servicePrompt = (await readFile(join(QQ_ROOT, "prompts", "services", "qa.md"), "utf8")).trim() +
-    "\n\nInspect the worktree and run the narrow checks that prove the brief. You may rewrite tests on look 1, but a test rewrite is a failure and must be disclosed to the runner. Do not commit. End by calling qa_verdict exactly once. A pass requires a clean worktree.";
+    "\n\nInspect the worktree and run the narrow checks that prove the brief. On both looks, you own the tests and may commit test-only changes. Never edit or commit production code. End by calling qa_verdict exactly once. A pass requires a clean worktree; any test changes must already be committed.";
   const servicePromptPath = join(dirname(statePath), `qa-system-prompt-${state.look}.md`);
   await rm(servicePromptPath, { force: true });
   await writeFile(servicePromptPath, servicePrompt, { mode: 0o600, flag: "wx" });
@@ -221,11 +238,28 @@ export async function conductReview(run, statePath, options = {}) {
   catch { throw new Error("qa ended without a structured verdict"); }
   if (verdict.schema !== "qq.qa-verdict/v1" || !["pass", "fail"].includes(verdict.verdict)) throw new Error("qa verdict is malformed");
 
-  const dirty = await run("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: state.worktree });
-  if (verdict.verdict === "pass" && dirty.stdout.trim()) {
-    verdict.verdict = "fail";
-    verdict.feedback = `${verdict.feedback ? `${verdict.feedback}\n` : ""}qa left uncommitted worktree changes.`;
+  const dirty = await checked(run, "git", ["status", "--porcelain", "--untracked-files=all"], { cwd: state.worktree }, "cannot inspect qa worktree");
+  const headRevision = await checked(run, "git", ["rev-parse", "--verify", "HEAD^{commit}"], { cwd: state.worktree }, "cannot inspect qa commit");
+  const qaHead = headRevision.stdout.trim();
+  let testOnlyCommit = false;
+
+  if (dirty.stdout.trim() && verdict.verdict === "pass") appendVerdictFailure(verdict, "qa left uncommitted worktree changes.");
+
+  if (!dirty.stdout.trim() && qaHead !== state.ref) {
+    const descendant = await run("git", ["merge-base", "--is-ancestor", state.ref, qaHead], { cwd: state.worktree });
+    if (descendant?.code !== 0) {
+      appendVerdictFailure(verdict, "qa replaced or rewrote the reviewed commit instead of adding test-only changes.");
+    } else {
+      const changed = await checked(run, "git", ["diff", "--name-only", "--no-renames", "-z", `${state.ref}..${qaHead}`], { cwd: state.worktree }, "cannot inspect qa commits");
+      const paths = parseChangedPaths(changed.stdout);
+      const productionPaths = paths.filter((path) => !isTestPath(path));
+      if (!paths.length) appendVerdictFailure(verdict, "qa created a commit without test changes.");
+      else if (productionPaths.length) appendVerdictFailure(verdict, `qa committed production-code changes: ${productionPaths.join(", ")}.`);
+      else testOnlyCommit = true;
+    }
   }
+
+  if (verdict.verdict === "pass" && testOnlyCommit) state.ref = qaHead;
   verdict.summary = String(verdict.summary).replace(/\s+/g, " ").trim().slice(0, 240);
   state.qaVerdict = verdict;
   state.updatedAt = new Date().toISOString();

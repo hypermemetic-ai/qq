@@ -174,116 +174,169 @@ try {
   assert.ok(afterComment.every((item) => item.options.includes("approve")));
   await architectEvents.get("session_shutdown")();
 
-  prepared.status = "reviewing";
-  prepared.look = 1;
-  prepared.ref = "refsha";
-  prepared.qaSessionId = undefined;
-  prepared.pane = "w2T:p9";
-  await workshop.atomicPrivateJson(statePath, prepared);
-  const failLook = join(scratch, "state", "qa-look-1.json");
-  const herdrCalls = [];
-  let qaPromptAtLaunch;
-  let reviewAgentGets = 0;
-  const reviewRun = async (command, args, options = {}) => {
-    herdrCalls.push({ command, args, options });
-    if (command === "herdr" && args[0] === "agent" && args[1] === "start" && args.includes("--system-prompt")) {
-      const promptPath = args[args.indexOf("--system-prompt") + 1];
-      qaPromptAtLaunch = {
-        path: promptPath,
-        content: await readFile(promptPath, "utf8"),
-        mode: (await stat(promptPath)).mode & 0o777,
-      };
-    }
-    if (command === "git" && args[0] === "status") return { code: 0, stdout: "", stderr: "" };
-    if (command === "git" && args[0] === "diff") return { code: 0, stdout: "2\t1\tsrc/a.ts\n", stderr: "" };
-    if (command === "herdr" && args[0] === "agent" && args[1] === "prompt" && args[2] === "w2T:p9") {
-      await workshop.atomicPrivateJson(failLook, {
-        schema: "qq.qa-verdict/v1", version: 1, verdict: "fail", summary: "needs one fix",
-        feedback: "tighten tests", tests_modified: false,
-      });
-    }
-    if (command === "herdr" && args[0] === "agent" && args[1] === "get") {
-      const agent_status = reviewAgentGets++ === 0 ? "idle" : "done";
-      return { code: 0, stdout: JSON.stringify({ result: { agent: { agent_status } } }), stderr: "" };
-    }
-    if (command === "herdr" && args[0] === "pane" && args[1] === "process-info") {
-      return { code: 0, stdout: availableShell, stderr: "" };
-    }
-    return { code: 0, stdout: "", stderr: "" };
+  assert.equal(review.isTestPath("tests/test-review-flow.mjs"), true);
+  assert.equal(review.isTestPath("src/widget.test.ts"), true);
+  assert.equal(review.isTestPath("src/__snapshots__/widget.snap"), true);
+  assert.equal(review.isTestPath("src/widget.ts"), false);
+
+  const runQaCase = async ({
+    look = 1, ref = "refsha", qaSessionId, head = ref, dirty = "", changedPaths = [], descendant = true,
+    verdict = "pass", summary = "looks right", feedback = "", testsModified = false,
+  } = {}) => {
+    const caseState = {
+      ...prepared, status: "reviewing", look, ref, qaSessionId, pane: "w2T:p9",
+    };
+    await workshop.atomicPrivateJson(statePath, caseState);
+    const verdictPath = join(scratch, "state", `qa-look-${look}.json`);
+    const caseCalls = [];
+    let agentGets = 0;
+    let qaPromptAtLaunch;
+    const caseRun = async (command, args, options = {}) => {
+      caseCalls.push({ command, args, options });
+      if (command === "git" && args[0] === "status") return { code: 0, stdout: dirty, stderr: "" };
+      if (command === "git" && args[0] === "rev-parse") return { code: 0, stdout: `${head}\n`, stderr: "" };
+      if (command === "git" && args[0] === "merge-base") return { code: descendant ? 0 : 1, stdout: "", stderr: "" };
+      if (command === "git" && args[0] === "diff" && args.includes("--name-only")) {
+        return { code: 0, stdout: changedPaths.length ? `${changedPaths.join("\0")}\0` : "", stderr: "" };
+      }
+      if (command === "git" && args[0] === "diff") {
+        const paths = changedPaths.length ? changedPaths : ["src/a.ts"];
+        return { code: 0, stdout: paths.map((path) => `2\t1\t${path}`).join("\n") + "\n", stderr: "" };
+      }
+      if (command === "herdr" && args[0] === "agent" && args[1] === "start" && args.includes("--system-prompt")) {
+        const promptPath = args[args.indexOf("--system-prompt") + 1];
+        qaPromptAtLaunch = {
+          path: promptPath,
+          content: await readFile(promptPath, "utf8"),
+          mode: (await stat(promptPath)).mode & 0o777,
+        };
+      }
+      if (command === "herdr" && args[0] === "agent" && args[1] === "prompt" && String(args[3]).startsWith(`Look ${look}`)) {
+        await workshop.atomicPrivateJson(verdictPath, {
+          schema: "qq.qa-verdict/v1", version: 1, verdict, summary, feedback, tests_modified: testsModified,
+        });
+      }
+      if (command === "herdr" && args[0] === "agent" && args[1] === "get") {
+        const agent_status = agentGets++ === 0 ? "idle" : "done";
+        return { code: 0, stdout: JSON.stringify({ result: { agent: { agent_status } } }), stderr: "" };
+      }
+      if (command === "herdr" && args[0] === "pane" && args[1] === "process-info") {
+        return { code: 0, stdout: availableShell, stderr: "" };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const state = await review.conductReview(caseRun, statePath, { env: listEnv });
+    return { state, calls: caseCalls, qaPromptAtLaunch };
   };
-  const afterFail = await review.conductReview(reviewRun, statePath, { env: listEnv });
-  assert.equal(afterFail.status, "waiting_fix");
-  assert.equal(afterFail.look, 1);
-  assert.ok(afterFail.qaSessionId);
-  const started = herdrCalls.filter(({ command, args }) => command === "herdr" && args[0] === "agent" && args[1] === "start");
+
+  const committedTests = await runQaCase({
+    head: "qa-tests-ref", changedPaths: ["tests/test-review-flow.mjs"], testsModified: true,
+  });
+  assert.equal(committedTests.state.status, "proposal");
+  assert.equal(committedTests.state.ref, "qa-tests-ref");
+  assert.equal(committedTests.state.qaVerdict.tests_modified, true);
+  assert.deepEqual(committedTests.state.pack.files, [{ path: "tests/test-review-flow.mjs", added: 2, deleted: 1 }]);
+  const qaStart = committedTests.calls.find(({ args }) => args[0] === "agent" && args[1] === "start");
+  assert.equal(committedTests.qaPromptAtLaunch.path, join(scratch, "state", "qa-system-prompt-1.md"));
+  assert.equal(committedTests.qaPromptAtLaunch.mode, 0o600);
+  assert.match(committedTests.qaPromptAtLaunch.content, /own the tests and may commit test-only changes/);
+  assert.match(committedTests.qaPromptAtLaunch.content, /Never edit or commit production code/);
+  assert.match(committedTests.qaPromptAtLaunch.content, /Don't invent importance/);
+  assert.ok(!qaStart.args.some((arg) => String(arg).includes("Don't invent importance")));
+  assert.ok(!qaStart.args.some((arg) => String(arg).includes("\n")));
+  await assert.rejects(access(committedTests.qaPromptAtLaunch.path), { code: "ENOENT" });
+  const runnerStop = committedTests.calls.findIndex(({ args }) => args[0] === "agent" && args[1] === "send-keys");
+  const firstShellCheck = committedTests.calls.findIndex(({ args }) => args[0] === "pane" && args[1] === "process-info");
+  const qaStartIndex = committedTests.calls.findIndex(({ args }) => args[0] === "agent" && args[1] === "start");
+  assert.ok(runnerStop >= 0 && runnerStop < firstShellCheck && firstShellCheck < qaStartIndex);
+  assert.ok(!committedTests.calls.some(({ args }) => args[0] === "pane" && args[1] === "wait-output"));
+  const firstLookPrompt = committedTests.calls.find(({ args }) => args[0] === "agent" && args[1] === "prompt");
+  assert.match(firstLookPrompt.args[3], /own test quality/);
+  assert.match(firstLookPrompt.args[3], /commit test-only changes/);
+
+  const dirtyPass = await runQaCase({ dirty: " M tests/test-review-flow.mjs\n", testsModified: true });
+  assert.equal(dirtyPass.state.status, "waiting_fix");
+  assert.equal(dirtyPass.state.qaVerdict.verdict, "fail");
+  assert.match(dirtyPass.state.qaVerdict.feedback, /uncommitted worktree changes/);
+
+  const productionCommit = await runQaCase({ head: "qa-production-ref", changedPaths: ["src/a.ts"] });
+  assert.equal(productionCommit.state.status, "waiting_fix");
+  assert.equal(productionCommit.state.ref, "refsha");
+  assert.equal(productionCommit.state.qaVerdict.verdict, "fail");
+  assert.match(productionCommit.state.qaVerdict.feedback, /committed production-code changes: src\/a\.ts/);
+
+  const failedRewrite = await runQaCase({
+    head: "qa-feedback-tests", changedPaths: ["tests/a.test.ts"], verdict: "fail",
+    summary: "needs one fix", feedback: "tighten production code", testsModified: true,
+  });
+  assert.equal(failedRewrite.state.status, "waiting_fix");
+  assert.equal(failedRewrite.state.ref, "refsha");
+  assert.equal(failedRewrite.state.qaVerdict.tests_modified, true);
+  const returned = failedRewrite.calls.find(({ args }) => args[0] === "agent" && args[1] === "prompt" && String(args[3]).includes("call done again"));
+  assert.match(returned.args[3], /qa rewrote tests; inspect those changes/);
+  const started = failedRewrite.calls.filter(({ command, args }) => command === "herdr" && args[0] === "agent" && args[1] === "start");
   assert.equal(started.length, 2);
-  assert.equal(started[0].args[2], review.qaAgentName(afterFail));
+  assert.equal(started[0].args[2], review.qaAgentName(failedRewrite.state));
   assert.equal(started[0].args[4], "pi");
   assert.equal(started[0].args[6], "w2T:p9");
-  assert.equal(qaPromptAtLaunch.path, join(scratch, "state", "qa-system-prompt-1.md"));
-  assert.equal(qaPromptAtLaunch.mode, 0o600);
-  assert.match(qaPromptAtLaunch.content, /Don't invent importance/);
-  assert.match(qaPromptAtLaunch.content, /End by calling qa_verdict exactly once/);
-  assert.ok(!started[0].args.some((arg) => String(arg).includes("Don't invent importance")));
-  assert.ok(!started[0].args.some((arg) => String(arg).includes("\n")));
-  await assert.rejects(access(qaPromptAtLaunch.path), { code: "ENOENT" });
   assert.ok(!started[0].args.includes("--print"));
-  assert.ok(!herdrCalls.some(({ command, args }) => command === "pi" || args.includes("--print")));
-  assert.equal(started[1].args[2], review.runnerAgentName(afterFail));
+  assert.ok(!failedRewrite.calls.some(({ command, args }) => command === "pi" || args.includes("--print")));
+  assert.equal(started[1].args[2], review.runnerAgentName(failedRewrite.state));
   assert.equal(started[1].args[6], "w2T:p9");
-  const runnerStop = herdrCalls.findIndex(({ args }) => args[0] === "agent" && args[1] === "send-keys");
-  const firstShellCheck = herdrCalls.findIndex(({ args }) => args[0] === "pane" && args[1] === "process-info");
-  const qaStart = herdrCalls.findIndex(({ args }) => args[0] === "agent" && args[1] === "start");
-  assert.ok(runnerStop >= 0 && runnerStop < firstShellCheck && firstShellCheck < qaStart);
-  assert.ok(herdrCalls.some(({ args }) => args[0] === "pane" && args[1] === "process-info" && args[2] === "--pane" && args[3] === "w2T:p9"));
-  assert.ok(!herdrCalls.some(({ args }) => args[0] === "pane" && args[1] === "wait-output"));
-  const qaStop = herdrCalls.findIndex(({ args }, index) => index > qaStart && args[0] === "agent" && args[1] === "get");
-  const runnerStart = herdrCalls.findIndex(({ args }, index) => index > qaStart && args[0] === "agent" && args[1] === "start");
-  assert.ok(herdrCalls.some(({ args }, index) => index > qaStop && index < runnerStart && args[0] === "pane" && args[1] === "process-info"));
-  assert.ok(!herdrCalls.some(({ args }) => args[0] === "pane" && args[1] === "close"));
-  assert.ok(!herdrCalls.some(({ args }) => args[0] === "tab" && args[1] === "create"));
-  const returned = herdrCalls.find(({ args }) => args[0] === "agent" && args[1] === "prompt" && args[2] === "w2T:p9" && String(args[3]).includes("call done again"));
-  assert.ok(returned);
+  assert.ok(!failedRewrite.calls.some(({ args }) => args[0] === "pane" && args[1] === "close"));
+  assert.ok(!failedRewrite.calls.some(({ args }) => args[0] === "tab" && args[1] === "create"));
 
-  prepared.status = "reviewing";
-  prepared.look = 2;
-  prepared.qaSessionId = afterFail.qaSessionId;
-  await workshop.atomicPrivateJson(statePath, prepared);
-  const passLook = join(scratch, "state", "qa-look-2.json");
-  const passCalls = [];
-  let passAgentGets = 0;
-  const passRun = async (command, args, options = {}) => {
-    passCalls.push({ command, args, options });
-    if (command === "git" && args[0] === "status") return { code: 0, stdout: "", stderr: "" };
-    if (command === "git" && args[0] === "diff") return { code: 0, stdout: "2\t1\tsrc/a.ts\n", stderr: "" };
-    if (command === "herdr" && args[0] === "agent" && args[1] === "prompt" && args[2] === "w2T:p9") {
-      await workshop.atomicPrivateJson(passLook, {
-        schema: "qq.qa-verdict/v1", version: 1, verdict: "pass", summary: "looks right",
-        feedback: "", tests_modified: false,
-      });
-    }
-    if (command === "herdr" && args[0] === "agent" && args[1] === "get") {
-      const agent_status = passAgentGets++ === 0 ? "idle" : "done";
-      return { code: 0, stdout: JSON.stringify({ result: { agent: { agent_status } } }), stderr: "" };
-    }
-    if (command === "herdr" && args[0] === "pane" && args[1] === "process-info") {
-      return { code: 0, stdout: availableShell, stderr: "" };
-    }
-    return { code: 0, stdout: "", stderr: "" };
-  };
-  const afterPass = await review.conductReview(passRun, statePath, { env: listEnv });
-  assert.equal(afterPass.status, "proposal");
-  assert.equal(afterPass.look, 2);
-  assert.equal(afterPass.qaSessionId, afterFail.qaSessionId);
-  const passStarts = passCalls.filter(({ args }) => args[0] === "agent" && args[1] === "start");
+  const cleanLook2 = await runQaCase({ look: 2, qaSessionId: failedRewrite.state.qaSessionId });
+  assert.equal(cleanLook2.state.status, "proposal");
+  assert.equal(cleanLook2.state.look, 2);
+  assert.equal(cleanLook2.state.qaSessionId, failedRewrite.state.qaSessionId);
+  const passStarts = cleanLook2.calls.filter(({ args }) => args[0] === "agent" && args[1] === "start");
   assert.equal(passStarts.length, 1);
-  assert.equal(passStarts[0].args[2], review.qaAgentName(afterPass));
+  assert.equal(passStarts[0].args[2], review.qaAgentName(cleanLook2.state));
   assert.equal(passStarts[0].args[6], "w2T:p9");
   assert.ok(passStarts[0].args.includes("--session"));
   assert.ok(!passStarts[0].args.includes("--print"));
-  assert.ok(passCalls.some(({ args }) => args[0] === "pane" && args[1] === "close" && args[2] === "w2T:p9"));
-  assert.ok(!passCalls.some(({ args }) => args[0] === "pane" && args[1] === "wait-output"));
-  assert.ok(!passCalls.some(({ args }) => args[0] === "tab" && args[1] === "create"));
+  assert.ok(cleanLook2.calls.some(({ args }) => args[0] === "pane" && args[1] === "close" && args[2] === "w2T:p9"));
+  assert.ok(!cleanLook2.calls.some(({ args }) => args[0] === "tab" && args[1] === "create"));
+  const secondLookPrompt = cleanLook2.calls.find(({ args }) => args[0] === "agent" && args[1] === "prompt");
+  assert.match(secondLookPrompt.args[3], /still own test quality/);
+  assert.match(secondLookPrompt.args[3], /There is no third look/);
+
+  const committedLook2 = await runQaCase({
+    look: 2, qaSessionId: failedRewrite.state.qaSessionId, head: "qa-look2-tests",
+    changedPaths: ["tests/a.test.ts"], testsModified: true,
+  });
+  assert.equal(committedLook2.state.status, "proposal");
+  assert.equal(committedLook2.state.ref, "qa-look2-tests");
+  assert.equal(committedLook2.state.qaVerdict.verdict, "pass");
+  assert.equal(committedLook2.state.qaVerdict.tests_modified, true);
+  assert.ok(!committedLook2.calls.some(({ args }) => args[0] === "agent" && args[1] === "start" && args[2] === review.runnerAgentName(committedLook2.state)));
+
+  const dirtyLook2 = await runQaCase({
+    look: 2, qaSessionId: failedRewrite.state.qaSessionId, dirty: " M tests/a.test.ts\n", testsModified: true,
+  });
+  assert.equal(dirtyLook2.state.status, "blocked");
+  assert.equal(dirtyLook2.state.qaVerdict.verdict, "fail");
+  assert.match(dirtyLook2.state.qaVerdict.feedback, /uncommitted worktree changes/);
+
+  const productionLook2 = await runQaCase({
+    look: 2, qaSessionId: failedRewrite.state.qaSessionId, head: "qa-look2-production",
+    changedPaths: ["src/a.ts"], testsModified: false,
+  });
+  assert.equal(productionLook2.state.status, "blocked");
+  assert.equal(productionLook2.state.ref, "refsha");
+  assert.equal(productionLook2.state.qaVerdict.verdict, "fail");
+  assert.match(productionLook2.state.qaVerdict.feedback, /committed production-code changes: src\/a\.ts/);
+  assert.ok(!productionLook2.calls.some(({ args }) => args[0] === "agent" && args[1] === "start" && args[2] === review.runnerAgentName(productionLook2.state)));
+
+  const rewrittenLook2 = await runQaCase({
+    look: 2, qaSessionId: failedRewrite.state.qaSessionId, head: "rewritten-look2",
+    changedPaths: ["tests/a.test.ts"], descendant: false,
+  });
+  assert.equal(rewrittenLook2.state.status, "blocked");
+  assert.equal(rewrittenLook2.state.ref, "refsha");
+  assert.equal(rewrittenLook2.state.qaVerdict.verdict, "fail");
+  assert.match(rewrittenLook2.state.qaVerdict.feedback, /replaced or rewrote the reviewed commit/);
 
   prepared.status = "commented";
   prepared.ref = "refsha";
