@@ -252,6 +252,9 @@ export async function spawnWorkshop(options) {
       const created = await checked(run, "herdr", args, {}, "cannot create runs tab");
       paneId = paneFromTabCreate(created);
     } else {
+      if (runsTab.label === "workshop") {
+        await checked(run, "herdr", ["tab", "rename", runsTab.tab_id, "runs"], {}, "cannot rename workshop tab to runs");
+      }
       const panesResult = await checked(run, "herdr", ["pane", "list", "--workspace", workspace], {}, "cannot list runs panes");
       const parent = (parseHerdr(panesResult.stdout)?.panes ?? [])
         .filter((pane) => pane?.tab_id === runsTab.tab_id)
