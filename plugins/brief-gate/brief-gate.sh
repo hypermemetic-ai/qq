@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -u
+umask 077
+
+brief=${QQ_BRIEF_GATE_BRIEF:?QQ_BRIEF_GATE_BRIEF is required}
+decision=${QQ_BRIEF_GATE_DECISION:?QQ_BRIEF_GATE_DECISION is required}
+glow=${QQ_BRIEF_GATE_GLOW:-/home/linuxbrew/.linuxbrew/bin/glow}
+
+if [[ ! -f $brief || -L $brief ]]; then
+  printf 'Brief gate refused an unsafe brief path.\n' >&2
+  exit 1
+fi
+if [[ ! -x $glow ]]; then
+  printf 'Brief gate requires Glow 2.1.2 at %s.\n' "$glow" >&2
+  exit 1
+fi
+
+"$glow" -t "$brief" || {
+  printf 'Glow could not render the delegate brief.\n' >&2
+  exit 1
+}
+
+printf '\nDelegate with this exact brief?  [a] approve   [c] cancel\n'
+while true; do
+  printf '> '
+  IFS= read -r -n 1 choice || exit 1
+  printf '\n'
+  case $choice in
+    a|A) outcome=approved; break ;;
+    c|C) outcome=cancelled; break ;;
+    *) printf 'Press a to approve or c to cancel.\n' ;;
+  esac
+done
+
+temporary="${decision}.$$"
+printf '%s\n' "$outcome" > "$temporary"
+mv -f -- "$temporary" "$decision"
+printf 'QQ_BRIEF_GATE_DECIDED\n'
+
+# The delegate closes this plugin-owned pane after reading the decision.
+trap 'exit 0' HUP INT TERM
+while true; do sleep 3600 & wait $!; done

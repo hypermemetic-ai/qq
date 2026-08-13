@@ -1,0 +1,13 @@
+id = "qq.brief-gate"
+name = "QQ Brief Gate"
+version = "0.1.0"
+min_herdr_version = "0.7.5"
+description = "Operator-owned approval gate for workshop briefs"
+platforms = ["linux"]
+
+[[panes]]
+id = "review"
+title = "Review delegate brief"
+description = "Read the exact runner brief and approve or cancel delegation"
+placement = "overlay"
+command = ["bash", "brief-gate.sh"]
