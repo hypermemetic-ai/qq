@@ -4,6 +4,9 @@ After=network.target
 
 [Service]
 Type=simple
+# Keep the service active across Herdr's live handoff, whose replacement server
+# remains in this cgroup after the original main process exits.
+ExitType=cgroup
 ExecStart=%h/.local/lib/qq/herdr/bin/herdr server
 Restart=on-failure
 RestartSec=2

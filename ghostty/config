@@ -1,0 +1,50 @@
+# Fullscreen 4K/TV terminal surface for the QQ Herdr cockpit.
+# Keep the readable 2x MxPlus grid, but do not recreate the retired square
+# 480-point side padding or the right-edge masking shader.
+font-family = MxPlus IBM VGA 8x16
+font-family = BigBlue TerminalPlus
+font-size = 24
+font-synthetic-style = false
+font-feature = -liga
+font-feature = -calt
+freetype-load-flags = hinting,monochrome
+
+# Exact palette exposed by this machine's Linux virtual terminal.
+palette = 0=#010101
+palette = 1=#de382b
+palette = 2=#39b54a
+palette = 3=#ffc706
+palette = 4=#006fb8
+palette = 5=#762671
+palette = 6=#2cb5e9
+palette = 7=#cccccc
+palette = 8=#808080
+palette = 9=#ff0000
+palette = 10=#00ff00
+palette = 11=#ffff00
+palette = 12=#0000ff
+palette = 13=#ff00ff
+palette = 14=#00ffff
+palette = 15=#ffffff
+background = #010101
+foreground = #cccccc
+cursor-color = #cccccc
+cursor-text = #010101
+selection-background = #cccccc
+selection-foreground = #010101
+minimum-contrast = 4.5
+faint-opacity = 0.75
+background-opacity = 1
+unfocused-split-opacity = 1
+
+# Use the full display aspect ratio. Twelve points retain only a small safe edge;
+# the former 480-point 4K padding produced the retired 160-column square field.
+window-padding-x = 12
+window-padding-y = 0
+fullscreen = true
+
+cursor-style = block
+cursor-style-blink = false
+
+# Ctrl+C copies when text is selected, otherwise passes through (SIGINT).
+keybind = performable:ctrl+c=copy_to_clipboard

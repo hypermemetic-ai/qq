@@ -12,10 +12,13 @@ QQ pins Herdr source and carries one deliberately small downstream patch.
 ```text
 qq-herdr-build build
 qq-herdr-build install
+qq-herdr-activate
 qq-herdr-upgrade
 ```
 
 `qq-herdr-build` verifies the immutable upstream commit, applies the patch from a clean checkout, runs formatting and tests, builds a release binary, then proves centering and balancing against a disposable server/client session. `install` atomically writes `~/.local/lib/qq/herdr/bin/herdr`; it does not switch the running service.
+
+`qq-herdr-activate` validates a Homebrew 0.7.5 server outside the systemd service cgroup, restores the direct Alt-arrow navigation bindings, pins the local client and future service, performs Herdr's live handoff, and refuses success unless every workspace, tab, pane, and pane shell process survives. The current client detaches once; run `~/.local/bin/herdr` at the outer terminal prompt to reconnect (an existing shell may have cached Homebrew's old path).
 
 `qq-herdr-upgrade` checks the latest release, or a supplied version such as `v0.8.1`, in a temporary checkout. A patch conflict blocks the upgrade. If it applies, pin the printed tag and commit in `upstream.env`, then run the normal build.
 

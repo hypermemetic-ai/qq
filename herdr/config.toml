@@ -6,6 +6,12 @@ auto_switch = false
 switch_workspace = "prefix+1..9"
 focus_agent = "prefix+alt+1..9"
 
+# Direct navigation: tabs horizontally, spaces vertically.
+previous_workspace = "alt+up"
+next_workspace = "alt+down"
+previous_tab = "alt+left"
+next_tab = "alt+right"
+
 [[keys.command]]
 key = "prefix+f"
 type = "pane"
