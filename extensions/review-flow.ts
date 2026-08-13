@@ -38,7 +38,7 @@ export default function registerReviewFlow(pi, deps = {}) {
     parameters: { type: "object", additionalProperties: false, required: ["ref"], properties: { ref: { type: "string", minLength: 1 } } },
     async execute(_id, params, signal, _update, ctx) {
       const statePath = env.QQ_WORKSHOP_STATE;
-      if (role !== "runner" || !statePath) return result("done is available only to a delegated workshop runner.", { status: "refused" });
+      if (role !== "runner" || !statePath) return result("done is available only to a delegated runs runner.", { status: "refused" });
       try {
         const state = await prepareDone(run, ctx.cwd, statePath, params.ref);
         const pid = await launchReview(statePath);
@@ -102,8 +102,8 @@ export default function registerReviewFlow(pi, deps = {}) {
   }
 
   pi.registerTool({
-    name: "review", label: "Review", promptSnippet: "Reopen waiting workshop reviews",
-    description: "Offer waiting proposal, blocked, and commented workshop handoffs for approve, discuss, or later. Architect sessions only. Reopens a later deferral without reloading and can land an existing QA-passed ref after discuss without re-delegating.",
+    name: "review", label: "Review", promptSnippet: "Reopen waiting runs reviews",
+    description: "Offer waiting proposal, blocked, and commented runs handoffs for approve, discuss, or later. Architect sessions only. Reopens a later deferral without reloading and can land an existing QA-passed ref after discuss without re-delegating.",
     parameters: { type: "object", additionalProperties: false, properties: {} },
     async execute(_id, _params, _signal, _update, ctx) {
       if (role !== "architect") return result("review is available only in an architect session.", { status: "refused" });

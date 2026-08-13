@@ -76,6 +76,9 @@ try {
   };
   let shutdowns = 0;
   extension.default(pi, { env: { QQ_AGENT_ROLE: "runner", QQ_WORKSHOP_STATE: statePath }, exec: run, launchReview(path) { launched = path; return 99; } });
+  const runnerReviewTool = tools.find(({ name }) => name === "review");
+  assert.match(`${runnerReviewTool.promptSnippet} ${runnerReviewTool.description}`, /runs/);
+  assert.doesNotMatch(`${runnerReviewTool.promptSnippet} ${runnerReviewTool.description}`, /workshop/i);
   const done = tools.find(({ name }) => name === "done");
   const outcome = await done.execute("d", { ref: "HEAD" }, undefined, undefined, { cwd: worktree, shutdown() { shutdowns += 1; }, abort() { throw new Error("done should shut down, not abort"); } });
   assert.equal(outcome.details.status, "reviewing");

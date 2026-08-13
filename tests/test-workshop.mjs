@@ -104,6 +104,7 @@ try {
   assert.equal(await readFile(state.briefPath, "utf8"), `${exactBrief}\n`);
   assert.equal(JSON.parse(await readFile(state.statePath, "utf8")).status, "running");
   const create = spawnCalls.find(({ command, args }) => command === "herdr" && args[0] === "tab" && args[1] === "create");
+  assert.deepEqual(create.args.slice(0, 6), ["tab", "create", "--workspace", "w2T", "--label", "runs"]);
   assert.ok(create.args.includes("QQ_AGENT_ROLE=runner"));
   assert.ok(create.args.some((arg) => arg.startsWith("QQ_WORKSHOP_STATE=")));
   const herdrOps = spawnCalls.filter(({ command }) => command === "herdr").map(({ args }) => `${args[0]} ${args[1]}`);
@@ -116,6 +117,58 @@ try {
   const prompt = spawnCalls.find(({ command, args }) => command === "herdr" && args[0] === "agent" && args[1] === "prompt");
   assert.match(prompt.args[3], /call done with ref HEAD/);
   assert.ok(prompt.args[3].endsWith(exactBrief));
+
+  for (const [id, label] of [["TASK-4", "runs"], ["TASK-5", "workshop"]]) {
+    const existingTask = { id, title: `Reuse ${label}` };
+    const existingPreparation = await lib.prepareWorkshop({ cwd: "/repo", env, project: "qq", task: existingTask, brief: exactBrief });
+    const existingCalls = [];
+    const existingRun = async (command, args, options = {}) => {
+      existingCalls.push({ command, args, options });
+      if (command === "git" && args[0] === "rev-parse" && args[1] === "--show-toplevel") return { code: 0, stdout: "/repo\n", stderr: "" };
+      if (command === "git" && args[0] === "rev-parse" && args[1] === "HEAD") return { code: 0, stdout: "abc123\n", stderr: "" };
+      if (command === "git" && args[0] === "symbolic-ref") return { code: 0, stdout: "main\n", stderr: "" };
+      if (command === "herdr" && args[0] === "tab" && args[1] === "list") {
+        return { code: 0, stdout: JSON.stringify({ result: { tabs: [{ tab_id: "w2T:tR", label }] } }), stderr: "" };
+      }
+      if (command === "herdr" && args[0] === "pane" && args[1] === "list") {
+        return {
+          code: 0,
+          stdout: JSON.stringify({ result: { panes: [
+            { pane_id: "w2T:p0", tab_id: "w2T:t0" },
+            { pane_id: "w2T:p-left", tab_id: "w2T:tR" },
+            { pane_id: "w2T:p-right", tab_id: "w2T:tR" },
+          ] } }),
+          stderr: "",
+        };
+      }
+      if (command === "herdr" && args[0] === "pane" && args[1] === "split") {
+        return { code: 0, stdout: JSON.stringify({ result: { pane: { pane_id: "w2T:p-new" } } }), stderr: "" };
+      }
+      if (command === "herdr" && args[0] === "pane" && args[1] === "process-info") {
+        return {
+          code: 0,
+          stdout: JSON.stringify({ result: { process_info: {
+            pane_id: "w2T:p-new", shell_pid: 10, foreground_process_group_id: 10,
+            foreground_processes: [{ pid: 10, name: "zsh" }],
+          } } }),
+          stderr: "",
+        };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const existingState = await lib.spawnWorkshop({
+      run: existingRun, cwd: "/repo", env, task: existingTask, prepared: existingPreparation,
+      architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9", qaBinding: {},
+    });
+    assert.equal(existingState.pane, "w2T:p-new");
+    assert.equal(existingCalls.some(({ command, args }) => command === "herdr" && args[0] === "tab" && args[1] === "create"), false);
+    assert.equal(existingCalls.some(({ command, args }) => command === "herdr" &&
+      args[0] === "tab" && args[1] === "rename" && args[2] === "w2T:tR" && args[3] === "runs"), label === "workshop");
+    const split = existingCalls.find(({ command, args }) => command === "herdr" && args[0] === "pane" && args[1] === "split");
+    assert.deepEqual(split.args.slice(0, 8), [
+      "pane", "split", "w2T:p-right", "--direction", "right", "--cwd", existingPreparation.worktree, "--no-focus",
+    ]);
+  }
 
   const cancelledPreparation = await lib.prepareWorkshop({ cwd: "/repo", env, project: "qq", task: { id: "TASK-2", title: "Cancel" }, brief: exactBrief });
   await lib.discardWorkshop(cancelledPreparation);
@@ -225,7 +278,7 @@ try {
     async discardWorkshop() { rollbackDiscarded = true; },
   });
   const rolledBack = await rollbackTool.execute("spawn-failure", { id: task.id }, undefined, undefined, ctx);
-  assert.match(rolledBack.content[0].text, /workshop operation failed/);
+  assert.match(rolledBack.content[0].text, /runs operation failed/);
   assert.doesNotMatch(JSON.stringify(rolledBack), new RegExp(exactBrief));
   assert.deepEqual(rollbackStatuses, ["In Progress", "To Do"]);
   assert.equal(rollbackDiscarded, true);

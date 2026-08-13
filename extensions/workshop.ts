@@ -147,7 +147,7 @@ export default function registerWorkshop(pi, deps = {}) {
           try { await (deps.discardWorkshop ?? discardWorkshop)(prepared); } catch {}
         }
         const message = error instanceof Error ? error.message : String(error);
-        const safeMessage = outboundBrief && message.includes(outboundBrief) ? "workshop operation failed" : message;
+        const safeMessage = outboundBrief && message.includes(outboundBrief) ? "runs operation failed" : message;
         return result(`delegate refused: ${safeMessage}`, { status: "refused" });
       }
     },
