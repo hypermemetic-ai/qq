@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, realpath, rm } from "node:fs/promises";
+import { mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -129,7 +129,7 @@ export function runnerAgentName(state) {
 export function qaLaunchArgs(state, options) {
   const args = [
     "--model", `${state.qa.provider}/${state.qa.model}`, "--thinking", state.qa.effort,
-    "--system-prompt", options.servicePrompt, "--no-extensions", "--extension", join(QQ_ROOT, "extensions", "qa-result.ts"),
+    "--system-prompt", options.servicePromptPath, "--no-extensions", "--extension", join(QQ_ROOT, "extensions", "qa-result.ts"),
     "--no-skills", "--no-prompt-templates", "--no-context-files", "--tools", "read,bash,edit,write,qa_verdict",
     "--session-dir", options.sessionDir,
   ];
@@ -202,10 +202,17 @@ export async function conductReview(run, statePath, options = {}) {
 
   const servicePrompt = (await readFile(join(QQ_ROOT, "prompts", "services", "qa.md"), "utf8")).trim() +
     "\n\nInspect the worktree and run the narrow checks that prove the brief. You may rewrite tests on look 1, but a test rewrite is a failure and must be disclosed to the runner. Do not commit. End by calling qa_verdict exactly once. A pass requires a clean worktree.";
-  const launchArgs = qaLaunchArgs(state, { servicePrompt, sessionDir, qaSessionId });
-  await takePane(run, state.pane, qaAgentName(state), launchArgs);
-  await herdr(run, ["agent", "prompt", state.pane, qaLookPrompt(state), "--wait", "--until", "idle", "--until", "done", "--until", "blocked"], "qa did not settle");
-  await stopAgent(run, state.pane);
+  const servicePromptPath = join(dirname(statePath), `qa-system-prompt-${state.look}.md`);
+  await rm(servicePromptPath, { force: true });
+  await writeFile(servicePromptPath, servicePrompt, { mode: 0o600, flag: "wx" });
+  const launchArgs = qaLaunchArgs(state, { servicePromptPath, sessionDir, qaSessionId });
+  try {
+    await takePane(run, state.pane, qaAgentName(state), launchArgs);
+    await herdr(run, ["agent", "prompt", state.pane, qaLookPrompt(state), "--wait", "--until", "idle", "--until", "done", "--until", "blocked"], "qa did not settle");
+    await stopAgent(run, state.pane);
+  } finally {
+    await rm(servicePromptPath, { force: true });
+  }
 
   let verdict;
   try { verdict = JSON.parse(await readFile(verdictPath, "utf8")); }

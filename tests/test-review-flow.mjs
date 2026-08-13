@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -179,8 +179,17 @@ try {
   await workshop.atomicPrivateJson(statePath, prepared);
   const failLook = join(scratch, "state", "qa-look-1.json");
   const herdrCalls = [];
+  let qaPromptAtLaunch;
   const reviewRun = async (command, args, options = {}) => {
     herdrCalls.push({ command, args, options });
+    if (command === "herdr" && args[0] === "agent" && args[1] === "start" && args.includes("--system-prompt")) {
+      const promptPath = args[args.indexOf("--system-prompt") + 1];
+      qaPromptAtLaunch = {
+        path: promptPath,
+        content: await readFile(promptPath, "utf8"),
+        mode: (await stat(promptPath)).mode & 0o777,
+      };
+    }
     if (command === "git" && args[0] === "status") return { code: 0, stdout: "", stderr: "" };
     if (command === "git" && args[0] === "diff") return { code: 0, stdout: "2\t1\tsrc/a.ts\n", stderr: "" };
     if (command === "herdr" && args[0] === "agent" && args[1] === "prompt" && args[2] === "w2T:p9") {
@@ -203,6 +212,13 @@ try {
   assert.equal(started[0].args[2], review.qaAgentName(afterFail));
   assert.equal(started[0].args[4], "pi");
   assert.equal(started[0].args[6], "w2T:p9");
+  assert.equal(qaPromptAtLaunch.path, join(scratch, "state", "qa-system-prompt-1.md"));
+  assert.equal(qaPromptAtLaunch.mode, 0o600);
+  assert.match(qaPromptAtLaunch.content, /Don't invent importance/);
+  assert.match(qaPromptAtLaunch.content, /End by calling qa_verdict exactly once/);
+  assert.ok(!started[0].args.some((arg) => String(arg).includes("Don't invent importance")));
+  assert.ok(!started[0].args.some((arg) => String(arg).includes("\n")));
+  await assert.rejects(access(qaPromptAtLaunch.path), { code: "ENOENT" });
   assert.ok(!started[0].args.includes("--print"));
   assert.ok(!herdrCalls.some(({ command, args }) => command === "pi" || args.includes("--print")));
   assert.equal(started[1].args[2], review.runnerAgentName(afterFail));
