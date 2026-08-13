@@ -71,12 +71,15 @@ try {
     on(name, fn) { events.set(name, fn); },
     exec: run,
   };
+  let shutdowns = 0;
   extension.default(pi, { env: { QQ_AGENT_ROLE: "runner", QQ_WORKSHOP_STATE: statePath }, exec: run, launchReview(path) { launched = path; return 99; } });
   const done = tools.find(({ name }) => name === "done");
-  const outcome = await done.execute("d", { ref: "HEAD" }, undefined, undefined, { cwd: worktree, abort() {} });
+  const outcome = await done.execute("d", { ref: "HEAD" }, undefined, undefined, { cwd: worktree, shutdown() { shutdowns += 1; }, abort() { throw new Error("done should shut down, not abort"); } });
   assert.equal(outcome.details.status, "reviewing");
   assert.equal(outcome.details.worker_pid, 99);
   assert.equal(launched, statePath);
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(shutdowns, 1);
 
   const verdictTools = [];
   let written;
@@ -140,10 +143,10 @@ try {
     },
   };
   await architectEvents.get("session_start")({}, ctx);
-  assert.deepEqual(choices.map((item) => item.options), [["approve", "comment", "later"]]);
+  assert.deepEqual(choices.map((item) => item.options), [["approve", "discuss", "later"]]);
   assert.equal(choices[0].pack, "small fix\nsrc/a.ts +2/-1");
 
-  queued.push("comment", "later");
+  queued.push("discuss", "later");
   const laterAgain = await reviewTool.execute("r", {}, undefined, undefined, ctx);
   assert.equal(laterAgain.details.status, "offered");
   assert.equal(laterAgain.details.count, 2);
@@ -154,7 +157,7 @@ try {
   assert.equal(commented.ref, "refsha");
   assert.equal(commented.operatorComment, "tighten the summary");
   assert.deepEqual(boardCalls.at(-1).slice(0, 5), ["task", "edit", "TASK-3", "--status", "To Do"]);
-  assert.equal(messages[0].payload.content, "TASK-3 comment:\ntighten the summary\n\nsmall fix\nsrc/a.ts +2/-1");
+  assert.equal(messages[0].payload.content, "TASK-3 discuss:\ntighten the summary\n\nsmall fix\nsrc/a.ts +2/-1");
   assert.deepEqual(messages[0].options, { triggerTurn: true, deliverAs: "steer" });
   assert.deepEqual((await review.listProposals("qq", listEnv)).map((item) => item.id), []);
   assert.deepEqual((await review.listReviews("qq", listEnv)).map((item) => item.id).sort(), ["task-commented", "task-later"]);
@@ -167,6 +170,81 @@ try {
   assert.equal(afterComment.length, 2);
   assert.ok(afterComment.every((item) => item.options.includes("approve")));
   await architectEvents.get("session_shutdown")();
+
+  prepared.status = "reviewing";
+  prepared.look = 1;
+  prepared.ref = "refsha";
+  prepared.qaSessionId = undefined;
+  prepared.pane = "w2T:p9";
+  await workshop.atomicPrivateJson(statePath, prepared);
+  const failLook = join(scratch, "state", "qa-look-1.json");
+  const herdrCalls = [];
+  const reviewRun = async (command, args, options = {}) => {
+    herdrCalls.push({ command, args, options });
+    if (command === "git" && args[0] === "status") return { code: 0, stdout: "", stderr: "" };
+    if (command === "git" && args[0] === "diff") return { code: 0, stdout: "2\t1\tsrc/a.ts\n", stderr: "" };
+    if (command === "herdr" && args[0] === "agent" && args[1] === "prompt" && args[2] === "w2T:p9") {
+      await workshop.atomicPrivateJson(failLook, {
+        schema: "qq.qa-verdict/v1", version: 1, verdict: "fail", summary: "needs one fix",
+        feedback: "tighten tests", tests_modified: false,
+      });
+    }
+    if (command === "herdr" && args[0] === "agent" && args[1] === "get") {
+      return { code: 0, stdout: JSON.stringify({ result: { agent_status: "done" } }), stderr: "" };
+    }
+    return { code: 0, stdout: "", stderr: "" };
+  };
+  const afterFail = await review.conductReview(reviewRun, statePath, { env: listEnv });
+  assert.equal(afterFail.status, "waiting_fix");
+  assert.equal(afterFail.look, 1);
+  assert.ok(afterFail.qaSessionId);
+  const started = herdrCalls.filter(({ command, args }) => command === "herdr" && args[0] === "agent" && args[1] === "start");
+  assert.equal(started.length, 2);
+  assert.equal(started[0].args[2], review.qaAgentName(afterFail));
+  assert.equal(started[0].args[4], "pi");
+  assert.equal(started[0].args[6], "w2T:p9");
+  assert.ok(!started[0].args.includes("--print"));
+  assert.ok(!herdrCalls.some(({ command, args }) => command === "pi" || args.includes("--print")));
+  assert.equal(started[1].args[2], review.runnerAgentName(afterFail));
+  assert.equal(started[1].args[6], "w2T:p9");
+  assert.ok(!herdrCalls.some(({ args }) => args[0] === "pane" && args[1] === "close"));
+  assert.ok(!herdrCalls.some(({ args }) => args[0] === "tab" && args[1] === "create"));
+  const returned = herdrCalls.find(({ args }) => args[0] === "agent" && args[1] === "prompt" && args[2] === "w2T:p9" && String(args[3]).includes("call done again"));
+  assert.ok(returned);
+
+  prepared.status = "reviewing";
+  prepared.look = 2;
+  prepared.qaSessionId = afterFail.qaSessionId;
+  await workshop.atomicPrivateJson(statePath, prepared);
+  const passLook = join(scratch, "state", "qa-look-2.json");
+  const passCalls = [];
+  const passRun = async (command, args, options = {}) => {
+    passCalls.push({ command, args, options });
+    if (command === "git" && args[0] === "status") return { code: 0, stdout: "", stderr: "" };
+    if (command === "git" && args[0] === "diff") return { code: 0, stdout: "2\t1\tsrc/a.ts\n", stderr: "" };
+    if (command === "herdr" && args[0] === "agent" && args[1] === "prompt" && args[2] === "w2T:p9") {
+      await workshop.atomicPrivateJson(passLook, {
+        schema: "qq.qa-verdict/v1", version: 1, verdict: "pass", summary: "looks right",
+        feedback: "", tests_modified: false,
+      });
+    }
+    if (command === "herdr" && args[0] === "agent" && args[1] === "get") {
+      return { code: 0, stdout: JSON.stringify({ result: { agent_status: "done" } }), stderr: "" };
+    }
+    return { code: 0, stdout: "", stderr: "" };
+  };
+  const afterPass = await review.conductReview(passRun, statePath, { env: listEnv });
+  assert.equal(afterPass.status, "proposal");
+  assert.equal(afterPass.look, 2);
+  assert.equal(afterPass.qaSessionId, afterFail.qaSessionId);
+  const passStarts = passCalls.filter(({ args }) => args[0] === "agent" && args[1] === "start");
+  assert.equal(passStarts.length, 1);
+  assert.equal(passStarts[0].args[2], review.qaAgentName(afterPass));
+  assert.equal(passStarts[0].args[6], "w2T:p9");
+  assert.ok(passStarts[0].args.includes("--session"));
+  assert.ok(!passStarts[0].args.includes("--print"));
+  assert.ok(passCalls.some(({ args }) => args[0] === "pane" && args[1] === "close" && args[2] === "w2T:p9"));
+  assert.ok(!passCalls.some(({ args }) => args[0] === "tab" && args[1] === "create"));
 
   prepared.status = "commented";
   prepared.ref = "refsha";

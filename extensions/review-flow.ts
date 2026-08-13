@@ -34,7 +34,7 @@ export default function registerReviewFlow(pi, deps = {}) {
 
   pi.registerTool({
     name: "done", label: "Done", promptSnippet: "Submit the delegated ref to independent qa and stop",
-    description: "Final runner call for delegated work. Validates a clean committed ref, starts the pinned two-look qa service asynchronously, and stops this run. It never merges.",
+    description: "Final runner call for delegated work. Validates a clean committed ref, hands this pane to the pinned two-look qa service, and stops this run. It never merges.",
     parameters: { type: "object", additionalProperties: false, required: ["ref"], properties: { ref: { type: "string", minLength: 1 } } },
     async execute(_id, params, signal, _update, ctx) {
       const statePath = env.QQ_WORKSHOP_STATE;
@@ -43,7 +43,7 @@ export default function registerReviewFlow(pi, deps = {}) {
         const state = await prepareDone(run, ctx.cwd, statePath, params.ref);
         const pid = await launchReview(statePath);
         const message = `Submitted ${state.task.id} to qa look ${state.look}. The runner is finished; stop now.`;
-        setTimeout(() => { try { ctx.abort?.(); } catch {} }, 25).unref?.();
+        setTimeout(() => { try { ctx.shutdown?.(); } catch { try { ctx.abort?.(); } catch {} } }, 25).unref?.();
         return result(message, { status: "reviewing", look: state.look, worker_pid: pid, state_path: statePath });
       } catch (error) {
         return result(`done refused: ${error instanceof Error ? error.message : String(error)}`, { status: "refused" });
@@ -68,12 +68,12 @@ export default function registerReviewFlow(pi, deps = {}) {
     shown.add(key);
     try {
       const pack = formatPack(state.pack ?? { summary: state.blockedReason || "qa blocked", files: [] });
-      const choices = state.status === "blocked" ? ["comment", "later"] : ["approve", "comment", "later"];
+      const choices = state.status === "blocked" ? ["discuss", "later"] : ["approve", "discuss", "later"];
       const choice = await ctx.ui.select(pack, choices);
       if (choice === "approve") {
         await land(state, ctx);
-      } else if (choice === "comment") {
-        const comment = await ctx.ui.input("Operator comment");
+      } else if (choice === "discuss") {
+        const comment = await ctx.ui.input("Operator discuss note");
         if (!comment) return;
         state.status = "commented";
         state.operatorComment = comment;
@@ -82,7 +82,7 @@ export default function registerReviewFlow(pi, deps = {}) {
         await setBoardStatus(run, ctx.cwd || state.mainRoot, state.task.id, "To Do");
         pi.sendMessage({
           customType: "qq-operator-comment",
-          content: `${state.task.id} comment:\n${comment}\n\n${pack}`,
+          content: `${state.task.id} discuss:\n${comment}\n\n${pack}`,
           display: true,
           details: { task: state.task.id },
         }, { triggerTurn: true, deliverAs: "steer" });
@@ -103,7 +103,7 @@ export default function registerReviewFlow(pi, deps = {}) {
 
   pi.registerTool({
     name: "review", label: "Review", promptSnippet: "Reopen waiting workshop reviews",
-    description: "Offer waiting proposal, blocked, and commented workshop handoffs for approve, comment, or later. Architect sessions only. Reopens a later deferral without reloading and can land an existing QA-passed ref after comment without re-delegating.",
+    description: "Offer waiting proposal, blocked, and commented workshop handoffs for approve, discuss, or later. Architect sessions only. Reopens a later deferral without reloading and can land an existing QA-passed ref after discuss without re-delegating.",
     parameters: { type: "object", additionalProperties: false, properties: {} },
     async execute(_id, _params, _signal, _update, ctx) {
       if (role !== "architect") return result("review is available only in an architect session.", { status: "refused" });
