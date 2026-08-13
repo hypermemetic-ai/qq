@@ -57,6 +57,7 @@ try {
   assert.ok(operations.includes("merge"));
   assert.ok(operations.includes("worktree"));
   assert.ok(operations.includes("branch"));
+  assert.ok(calls.some(({ args }) => args[0] === "task" && args[1] === "edit" && args[2] === "TASK-1" && args.includes("Done")));
 
   prepared.status = "running";
   prepared.look = 0;
@@ -86,6 +87,93 @@ try {
   assert.equal(written.value.schema, "qq.qa-verdict/v1");
   const duplicate = await verdict.execute("q2", { verdict: "fail", summary: "again", feedback: "x", tests_modified: false });
   assert.equal(duplicate.details.status, "refused");
+
+  const xdg = join(scratch, "xdg");
+  const workshopDir = join(xdg, "qq", "workshops", "qq");
+  const listEnv = { HOME: scratch, XDG_STATE_HOME: xdg, QQ_AGENT_PROJECT: "qq" };
+  const proposalState = {
+    ...prepared, status: "proposal", look: 1, ref: "refsha",
+    pack: { summary: "small fix", files: [{ path: "src/a.ts", added: 2, deleted: 1 }] },
+    updatedAt: "2026-04-01T00:00:00.000Z",
+  };
+  const commentedPath = join(workshopDir, "task-commented", "handoff.json");
+  const laterPath = join(workshopDir, "task-later", "handoff.json");
+  await workshop.atomicPrivateJson(commentedPath, {
+    ...proposalState, id: "task-commented", status: "commented", operatorComment: "old note",
+    task: { id: "TASK-2", title: "Commented task" }, statePath: commentedPath, updatedAt: "2026-04-01T00:00:01.000Z",
+  });
+  await workshop.atomicPrivateJson(laterPath, {
+    ...proposalState, id: "task-later", task: { id: "TASK-3", title: "Later task" }, statePath: laterPath,
+  });
+  const listedProposals = await review.listProposals("qq", listEnv);
+  const listedReviews = await review.listReviews("qq", listEnv);
+  assert.deepEqual(listedProposals.map((item) => item.id), ["task-later"]);
+  assert.deepEqual(listedReviews.map((item) => item.id), ["task-later", "task-commented"]);
+
+  const boardCalls = [];
+  const messages = [];
+  const architectTools = [];
+  const architectEvents = new Map();
+  const architectRun = async (command, args) => {
+    if (args[0] === "task" && args[1] === "edit") boardCalls.push(args);
+    return { code: 0, stdout: "", stderr: "" };
+  };
+  const architectPi = {
+    registerTool(tool) { architectTools.push(tool); },
+    events: { on(name, fn) { architectEvents.set(name, fn); } },
+    on(name, fn) { architectEvents.set(name, fn); },
+    exec: architectRun,
+    sendMessage(payload, options) { messages.push({ payload, options }); },
+  };
+  extension.default(architectPi, { env: { ...listEnv, QQ_AGENT_ROLE: "architect" }, exec: architectRun });
+  const reviewTool = architectTools.find(({ name }) => name === "review");
+  const choices = [];
+  const queued = ["later"];
+  const ctx = {
+    cwd: mainRoot,
+    hasUI: true,
+    isIdle: () => true,
+    ui: {
+      async select(pack, options) { choices.push({ pack, options }); return queued.shift() ?? "later"; },
+      async input() { return "tighten the summary"; },
+      notify() {},
+    },
+  };
+  await architectEvents.get("session_start")({}, ctx);
+  assert.deepEqual(choices.map((item) => item.options), [["approve", "comment", "later"]]);
+  assert.equal(choices[0].pack, "small fix\nsrc/a.ts +2/-1");
+
+  queued.push("comment", "later");
+  const laterAgain = await reviewTool.execute("r", {}, undefined, undefined, ctx);
+  assert.equal(laterAgain.details.status, "offered");
+  assert.equal(laterAgain.details.count, 2);
+  assert.equal(choices.length, 3);
+  assert.ok(choices.some((item) => item.pack === "small fix\nsrc/a.ts +2/-1" && item.options.includes("approve")));
+  const commented = JSON.parse(await readFile(laterPath, "utf8"));
+  assert.equal(commented.status, "commented");
+  assert.equal(commented.ref, "refsha");
+  assert.equal(commented.operatorComment, "tighten the summary");
+  assert.deepEqual(boardCalls.at(-1).slice(0, 5), ["task", "edit", "TASK-3", "--status", "To Do"]);
+  assert.equal(messages[0].payload.content, "TASK-3 comment:\ntighten the summary\n\nsmall fix\nsrc/a.ts +2/-1");
+  assert.deepEqual(messages[0].options, { triggerTurn: true, deliverAs: "steer" });
+  assert.deepEqual((await review.listProposals("qq", listEnv)).map((item) => item.id), []);
+  assert.deepEqual((await review.listReviews("qq", listEnv)).map((item) => item.id).sort(), ["task-commented", "task-later"]);
+
+  const afterComment = [];
+  await reviewTool.execute("r2", {}, undefined, undefined, {
+    ...ctx,
+    ui: { ...ctx.ui, async select(pack, options) { afterComment.push({ pack, options }); return "later"; } },
+  });
+  assert.equal(afterComment.length, 2);
+  assert.ok(afterComment.every((item) => item.options.includes("approve")));
+  await architectEvents.get("session_shutdown")();
+
+  prepared.status = "commented";
+  prepared.ref = "refsha";
+  await workshop.atomicPrivateJson(statePath, prepared);
+  await review.landHandoff(run, statePath);
+  assert.equal(JSON.parse(await readFile(statePath, "utf8")).status, "landed");
+  assert.ok(calls.some(({ args }) => args[0] === "task" && args[1] === "edit" && args[2] === "TASK-1" && args.includes("Done")));
 } finally {
   await rm(scratch, { recursive: true, force: true });
 }
