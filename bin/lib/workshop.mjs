@@ -136,8 +136,8 @@ export async function awaitBriefGate(options) {
   const { run, env = process.env, prepared, pluginRoot, signal } = options;
   if (typeof run !== "function") throw new Error("awaitBriefGate requires a command runner");
   if (typeof pluginRoot !== "string" || pluginRoot === "") throw new Error("brief gate plugin path is unavailable");
-  const workspace = env.HERDR_WORKSPACE_ID;
-  if (typeof workspace !== "string" || workspace === "") throw new Error("delegate requires a Herdr workspace");
+  const callerPane = env.HERDR_PANE_ID;
+  if (typeof callerPane !== "string" || callerPane === "") throw new Error("delegate requires a Herdr pane");
 
   const listed = await checked(run, "herdr", ["plugin", "list", "--json"], { signal }, "cannot inspect Herdr plugins");
   const plugins = parseHerdr(listed.stdout)?.plugins;
@@ -152,7 +152,7 @@ export async function awaitBriefGate(options) {
   await unlink(prepared.decisionPath).catch((error) => { if (error?.code !== "ENOENT") throw error; });
   const opened = await checked(run, "herdr", [
     "plugin", "pane", "open", "--plugin", BRIEF_GATE_PLUGIN, "--entrypoint", BRIEF_GATE_ENTRYPOINT,
-    "--placement", "overlay", "--workspace", workspace,
+    "--placement", "zoomed", "--target-pane", callerPane,
     "--env", `QQ_BRIEF_GATE_BRIEF=${prepared.briefPath}`,
     "--env", `QQ_BRIEF_GATE_DECISION=${prepared.decisionPath}`,
     "--focus",

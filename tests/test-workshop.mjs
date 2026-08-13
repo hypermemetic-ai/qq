@@ -34,6 +34,7 @@ try {
     XDG_STATE_HOME: join(scratch, "state"),
     QQ_WORKTREE_ROOT: join(scratch, "worktrees"),
     HERDR_WORKSPACE_ID: "w2T",
+    HERDR_PANE_ID: "w2T:pA",
   };
   const task = { id: "TASK-1", title: "One task" };
   const prepared = await lib.prepareWorkshop({ cwd: "/repo", env, project: "qq", task, brief: exactBrief });
@@ -61,7 +62,9 @@ try {
   }), "approved");
   const gateOpen = gateCalls.find(({ args }) => args[0] === "plugin" && args[1] === "pane" && args[2] === "open");
   assert.ok(gateOpen.args.includes("--focus"));
-  assert.ok(gateOpen.args.includes("overlay"));
+  assert.ok(gateOpen.args.includes("zoomed"));
+  assert.deepEqual(gateOpen.args.slice(gateOpen.args.indexOf("--target-pane"), gateOpen.args.indexOf("--target-pane") + 2), ["--target-pane", "w2T:pA"]);
+  assert.equal(gateOpen.args.includes("--workspace"), false);
   assert.ok(gateOpen.args.includes(`QQ_BRIEF_GATE_BRIEF=${prepared.briefPath}`));
   assert.ok(gateOpen.args.includes(`QQ_BRIEF_GATE_DECISION=${prepared.decisionPath}`));
   assert.equal(gateCalls.filter(({ args }) => args[0] === "plugin" && args[1] === "pane" && args[2] === "open").length, 1);
