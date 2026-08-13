@@ -1,54 +1,79 @@
 ---
 type: Workflow architecture
-title: Workshop Delegation
-description: Architect-only Backlog tools and the asynchronous workflow that briefs a task, creates an isolated Git worktree, and starts a messaging-enabled runner in Herdr.
-tags: [workshops, delegation, backlog, herdr]
+title: Workshop Delegation and Review
+description: Architect-approved delegation into an isolated Git worktree, followed by runner submission, two-look QA, operator review, and locked landing.
+tags: [workshops, delegation, backlog, herdr, qa]
 openwiki:
-  roles: [workflow, architecture]
-  change_kinds: [delegation, lifecycle]
-  source_paths: [extensions/workshop.ts, bin/lib/workshop.mjs]
-  symbols: [registerWorkshop, makeBrief, spawnWorkshop]
-  test_paths: [tests/test-workshop.mjs]
-  invariants: [Only architect sessions can sketch note or delegate., Delegation accepts only To Do tasks and returns after runner startup., A failed startup removes resources created by that attempt.]
-  validation_commands: [node --experimental-strip-types tests/test-workshop.mjs .]
+  roles: [workflow, architecture, testing]
+  change_kinds: [delegation, lifecycle, review]
+  source_paths: [extensions/workshop.ts, extensions/review-flow.ts, extensions/qa-result.ts, bin/lib/workshop.mjs, bin/lib/review.mjs]
+  symbols: [registerWorkshop, registerReviewFlow, prepareWorkshop, awaitBriefGate, spawnWorkshop, prepareDone, conductReview, landHandoff]
+  test_paths: [tests/test-workshop.mjs, tests/test-brief-gate.mjs, tests/test-review-flow.mjs]
+  invariants: [Only architect sessions can sketch note delegate or review., Delegation provisions a runner only after exact-brief operator approval., QA gets at most two looks and may commit only test changes., Landing requires explicit architect approval and serializes merges.]
+  validation_commands: [node --experimental-strip-types tests/test-workshop.mjs ., node tests/test-brief-gate.mjs ., node --experimental-strip-types tests/test-review-flow.mjs .]
 ---
 
-# Workshop Delegation
+# Workshop Delegation and Review
 
-The workshop extension turns an architect's board item into an isolated asynchronous runner. It depends on [execution profiles](../agent-runtime/execution-profiles.md) for role, compactor, and QA bindings; starts a runner that participates in [agent messaging](../agent-messaging/extension.md); and relies on the [Backlog guard](../agent-runtime/session-safety.md) to keep board Markdown CLI-managed.
+This workflow turns an architect's Backlog item into isolated runner work, independent QA, and an operator-approved merge. It depends on [execution profiles](../agent-runtime/execution-profiles.md) for compactor and QA bindings, uses [agent messaging](../agent-messaging/extension.md) presence to find the architect on final QA failure, and follows the [Backlog safety boundary](../agent-runtime/session-safety.md).
 
-## Tools
+## Agent-facing tools
 
-- `sketch(title, note?)` creates one Backlog task.
-- `note(id, text)` appends task notes.
-- `delegate(id)` requires an architect role and a task in `To Do`; it generates a compact outbound brief, starts the workshop, moves the task to `In Progress`, and returns without waiting for implementation.
+| Tool | Role | Contract |
+|---|---|---|
+| `sketch(title, note?)` | architect | Creates one Backlog task. |
+| `note(id, text)` | architect | Appends task notes through the Backlog CLI. |
+| `delegate(id)` | architect | Compacts a `To Do` task into a brief, asks the operator to approve that exact brief, then starts an isolated runner. |
+| `done(ref)` | delegated runner | Requires a clean worktree and committed descendant of the delegated base; submits at most twice and stops the runner. |
+| `review()` | architect with UI | Reopens waiting proposals, blocked results, and discussed reviews. |
+| `qa_verdict(...)` | isolated QA service only | Atomically records exactly one structured pass/fail verdict. |
 
-## Delegation flow
+## Lifecycle
 
 ```mermaid
-sequenceDiagram
-    participant Architect
-    participant Workshop as Workshop extension
-    participant Backlog
-    participant Compactor
-    participant Git
-    participant Herdr
-    Architect->>Workshop: delegate task id
-    Workshop->>Backlog: view task and require To Do
-    Workshop->>Compactor: summarize task conversation and file operations
-    Workshop->>Git: create unique qq branch and worktree
-    Workshop->>Herdr: create or split workshop pane
-    Workshop->>Herdr: start runner and send brief
-    Workshop->>Backlog: set In Progress
-    Workshop-->>Architect: return running pane worktree and state
+stateDiagram-v2
+    [*] --> Briefed: delegate To Do task
+    Briefed --> [*]: operator cancels
+    Briefed --> Running: operator approves and runner starts
+    Running --> Reviewing1: done with clean committed ref
+    Reviewing1 --> WaitingFix: QA look 1 fails
+    WaitingFix --> Reviewing2: runner fixes and calls done
+    Reviewing1 --> Proposal: QA passes
+    Reviewing2 --> Proposal: QA passes
+    Reviewing2 --> Blocked: QA fails
+    Proposal --> Commented: architect discusses
+    Proposal --> Landed: architect approves
+    Commented --> Landed: architect later approves
+    Blocked --> Blocked: review later
+    Landed --> [*]
 ```
 
-*Delegation provisions a runner and returns; merging and completion are outside this implemented flow.*
+*The handoff file is the durable state machine; there is one repair cycle and no third QA look.*
 
-`makeBrief` serializes current conversation context and records files read versus modified, then invokes the policy's compactor with no cache retention. `spawnWorkshop` requires a named base branch and `HERDR_WORKSPACE_ID`, creates branch `qq/<task>-<nonce>`, writes private `brief.md` and `qq.workshop-handoff/v1` state, reuses or creates a no-focus `workshop` tab, and starts a Pi runner with `QQ_AGENT_ROLE=runner`, workshop identity, and architect session metadata. The runner is prompted to implement, commit, and call `done`; this repository does not yet track that completion/merge implementation.
+### Delegation
 
-If pane or runner setup fails, the function attempts to close its pane, force-remove its worktree, delete its branch, and remove private handoff state. If the runner starts but the board update fails, `delegate` reports a partial result rather than pretending nothing started.
+`makeBrief` compacts task and conversation context, including files read versus modified, with no cache retention. `prepareWorkshop` writes private `brief.md`; `awaitBriefGate` links/enables `plugins/brief-gate`, opens a focused Herdr overlay, renders the exact brief with Glow, and accepts only `approved` or `cancelled` from an owned private decision file. Cancellation removes prepared state without moving the task.
+
+After approval, `delegate` moves the task to `In Progress`. `spawnWorkshop` creates `qq/<task>-<nonce>` and a private worktree, creates or splits the no-focus `workshop` tab, waits until the pane contains only an available shell, writes `qq.workshop-handoff/v1`, and starts a Pi runner. Startup failure removes attempt-owned pane, worktree, branch, state, and restores the task to `To Do`.
+
+### QA and operator review
+
+`done` pins the submitted commit and starts `bin/qq-review-worker.mjs`. `conductReview` takes over the same workshop pane with the policy-pinned QA model, a private file-backed system prompt, only the declared tools, and a persistent QA session shared by both looks. QA may add committed test-only changes; dirty output, rewritten ancestry, empty commits, or production-file changes turn a pass into failure.
+
+A first failure returns the pane to the runner with feedback. A pass closes the pane and creates an operator pack (summary plus diff numstat). A second failure becomes `blocked`, closes the pane, and also steers the architect when its presence can be resolved. Architect polling and `review()` offer `approve`, `discuss`, or `later`; discussion moves the task to `To Do`, records the comment, and steers the current architect session without discarding the reviewed ref.
+
+Approval runs `bin/qq-land-worker.mjs` under a common-Git-directory `flock`. `landHandoff` requires the original base branch, a clean delegated worktree, and a clean `merge-tree` check; it then performs a non-fast-forward merge, removes worktree and branch, marks the handoff `landed`, and moves the task to `Done`. Failures persist as `blocked`.
 
 ## Change and validation
 
-Changes to handoff schema must update writer, `readHandoff`, runner consumers when present, and tests. Changes to delegation must preserve To Do gating, unique branch/worktree isolation, private state, no-focus Herdr startup, asynchronous return, and scoped cleanup. Run `node --experimental-strip-types tests/test-workshop.mjs .`; also run profile or messaging tests when changing those boundaries. Full `npm test` is conditional on cross-extension wiring.
+Keep handoff schema/state transitions synchronized across both extensions, both libraries, workers, and tests. Preserve exact-brief approval, private mode-0600 artifacts, named-base and clean-worktree checks, two-look limit, QA test-only ownership, same-pane handoff, explicit architect approval, and serialized landing.
+
+Run the narrow checks separately:
+
+```bash
+node --experimental-strip-types tests/test-workshop.mjs .
+node tests/test-brief-gate.mjs .
+node --experimental-strip-types tests/test-review-flow.mjs .
+```
+
+Run profile tests when compactor/QA bindings change, messaging tests when architect lookup changes, and `npm test` only for composition or cross-area changes.

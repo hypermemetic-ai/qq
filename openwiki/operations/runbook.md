@@ -5,7 +5,9 @@ description: Practical commands for Event Plane administration, focused reposito
 tags: [operations, event-plane, testing, openwiki]
 openwiki:
   roles: [operations, testing]
-  source_paths: [bin/event-plane, bin/event-plane-admin, package.json, systemd/user/qq-openwiki.service, systemd/user/qq-openwiki.timer]
+  source_paths: [bin/event-plane, bin/event-plane-admin, bin/lib/task-prefix.mjs, bin/qq-migrate-task-prefix.mjs, package.json, systemd/user/qq-openwiki.service, systemd/user/qq-openwiki.timer]
+  symbols: [migrateTaskPrefix]
+  test_paths: [tests/test-task-prefix.mjs]
   validation_commands: [npm test]
 ---
 
@@ -45,6 +47,9 @@ The instance ID fences replacement; `authorization` records intent but is not au
 | Execution profiles, roles, prompt composition | `node --experimental-strip-types tests/test-execution-profiles.mjs .` | `npm test` for role-event or composition changes |
 | Agent helper/schema/presence | `node --experimental-strip-types tests/test-agent-messages.mjs .` | `tests/test-agent-messages-live.sh` for lifecycle/delivery |
 | One Pi extension | matching `node --experimental-strip-types tests/test-<name>.mjs .` | `npm test` when registration/shared state changes |
+| Workshop delegation or brief gate | `node --experimental-strip-types tests/test-workshop.mjs .` and `node tests/test-brief-gate.mjs .` | `npm test` when review/composition also changes |
+| QA, review, or landing | `node --experimental-strip-types tests/test-review-flow.mjs .` | `npm test` when workshop/profile wiring also changes |
+| Task-prefix migrator | `node --experimental-strip-types tests/test-task-prefix.mjs .` | no broader check unless Backlog/workshop schemas change |
 | Telemetry/profile display | `tests/test-telemetry.sh` | manual provider calls only for operator diagnosis |
 | Test composition or multiple runtime areas | `npm test` | — |
 
@@ -63,3 +68,7 @@ systemd-analyze --user verify systemd/user/qq-openwiki.service systemd/user/qq-o
 ## Repository workflow
 
 [Workshop tools](../workflows/workshops.md) use the installed `backlog.md` CLI. The [Backlog guard](../agent-runtime/session-safety.md) blocks Pi `write` and `edit` calls into `backlog/`, including its resolved symlink target; use Backlog commands instead. For provider usage and credential-safe Qwen setup, see [Telemetry](telemetry.md).
+
+### Task-prefix migration
+
+`bin/qq-migrate-task-prefix.mjs [repo]` is a one-time, destructive migrator from `TASK-*` to `T-*`. It updates task front matter and filenames across active, draft, completed, and archived tasks; changes `backlog/config.yml`; and atomically updates matching workshop `handoff.json` task IDs. It does not rewrite arbitrary prose references. Commit or back up the board first, run `node --experimental-strip-types tests/test-task-prefix.mjs .` after implementation changes, and inspect the JSON report plus `git diff` after an actual migration.
