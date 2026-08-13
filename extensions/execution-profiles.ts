@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { profileFor, readExecutionPolicy } from "../bin/lib/execution-profiles.mjs";
-import { DEFAULT_ROLE, isActivatedRepository, ROLE_NAMES } from "../bin/lib/roles.mjs";
+import { DEFAULT_ROLE, isActivatedRepository, ROLE_NAMES, validateRole } from "../bin/lib/roles.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -126,9 +126,10 @@ export default function registerExecutionProfiles(pi, deps = {}) {
 
   async function start(_event, ctx) {
     currentContext = ctx;
-    activated = isActivatedRepository(ctx.cwd, QQ_ROOT, env);
     startupError = undefined;
-    currentRole = DEFAULT_ROLE;
+    const forcedRole = env.QQ_AGENT_ROLE === undefined ? undefined : validateRole(env.QQ_AGENT_ROLE);
+    activated = forcedRole !== undefined || isActivatedRepository(ctx.cwd, QQ_ROOT, env);
+    currentRole = forcedRole ?? DEFAULT_ROLE;
     activeProfileName = undefined;
     if (!activated) return;
     try {
@@ -140,7 +141,7 @@ export default function registerExecutionProfiles(pi, deps = {}) {
       policy = await policyPromise;
       prompts = Object.fromEntries(promptEntries);
       validateRuntimeProfiles(ctx);
-      await applyRoleProfile(DEFAULT_ROLE, policy.roles[DEFAULT_ROLE].default, ctx, false);
+      await applyRoleProfile(currentRole, policy.roles[currentRole].default, ctx, false);
     } catch (error) {
       startupError = error instanceof Error ? error.message : String(error);
       ctx.ui.setStatus?.("qq-profile", `${DEFAULT_ROLE}:refused`);

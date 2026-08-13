@@ -7,6 +7,7 @@ import registerSessionScrub from "./session-scrub.ts";
 import registerDictationPrivate from "./dictation-private.ts";
 import registerBacklogGuard from "./backlog-guard.ts";
 import registerLoopGuard from "./loop-guard.ts";
+import registerWorkshop from "./workshop.ts";
 
 export default function registerQQ(pi) {
   registerExecutionProfiles(pi);
@@ -17,4 +18,5 @@ export default function registerQQ(pi) {
   registerDictationPrivate(pi);
   registerBacklogGuard(pi);
   registerLoopGuard(pi);
+  registerWorkshop(pi);
 }

@@ -147,6 +147,13 @@ try {
   assert.ok(notifications.some(({ message }) => message.includes("sol-high")));
   await handlers.get("session_shutdown")({ reason: "quit" }, ctx);
 
+  ctx.cwd = temporary;
+  extension.default(pi, { policyPath, env: { ...process.env, QQ_AGENT_ROLE: "runner", XDG_STATE_HOME: join(temporary, "forced-state") } });
+  await handlers.get("session_start")({ reason: "startup" }, ctx);
+  assert.equal(currentModel.id, "grok-4.6", "forced worktree role did not activate profiles outside the qq root");
+  await handlers.get("session_shutdown")({ reason: "quit" }, ctx);
+  ctx.cwd = root;
+
   modelObjects.get("openai-codex/gpt-5.6-sol").contextWindow = 272000;
   extension.default(pi, { policyPath, env: { ...process.env, XDG_STATE_HOME: join(temporary, "state-2") } });
   await handlers.get("session_start")({ reason: "startup" }, ctx);
