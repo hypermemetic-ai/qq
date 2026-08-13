@@ -6,14 +6,21 @@ MAIN_ROOT="${QQ_OPENWIKI_MAIN_ROOT:-$ROOT}"
 MAIN_BRANCH="${QQ_OPENWIKI_MAIN_BRANCH:-main}"
 BRANCH="${QQ_OPENWIKI_BRANCH:-qq/openwiki-refresh}"
 STATE_HOME="${XDG_STATE_HOME:-${HOME:?HOME is required}/.local/state}"
-WORKTREE="${QQ_OPENWIKI_WORKTREE:-$STATE_HOME/qq/openwiki/worktree}"
 OPENWIKI_BIN="${QQ_OPENWIKI_BIN:-openwiki}"
 SHELL_ENV_PRELOAD="${QQ_OPENWIKI_SHELL_ENV_PRELOAD:-$ROOT/bin/qq-openwiki-shell-env.cjs}"
 PROMPT="${QQ_OPENWIKI_PROMPT:-Keep this wiki short and practical.}"
+ACTION="${QQ_OPENWIKI_ACTION:-auto}"
 
 MAIN_ROOT="$(git -C "$MAIN_ROOT" rev-parse --show-toplevel)"
+REPO_KEY="${QQ_OPENWIKI_REPO_KEY:-$(basename -- "$MAIN_ROOT")}"
+if [[ ! "$REPO_KEY" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]]; then
+  echo "OpenWiki repository key is malformed: $REPO_KEY" >&2
+  exit 1
+fi
+WORKTREE="${QQ_OPENWIKI_WORKTREE:-$STATE_HOME/qq/openwiki/$REPO_KEY/worktree}"
 COMMON_DIR="$(git -C "$MAIN_ROOT" rev-parse --path-format=absolute --git-common-dir)"
 
+case "$ACTION" in auto|init|update) ;; *) echo "OpenWiki action must be auto, init, or update." >&2; exit 1 ;; esac
 git -C "$MAIN_ROOT" check-ref-format --branch "$BRANCH" >/dev/null
 mkdir -p -- "$(dirname -- "$WORKTREE")"
 chmod 700 -- "$(dirname -- "$WORKTREE")"
@@ -62,18 +69,26 @@ fi
 
 git -C "$MAIN_ROOT" worktree add --quiet -b "$BRANCH" "$WORKTREE" "$MAIN_BRANCH"
 
+if [[ "$ACTION" == "auto" ]]; then
+  if [[ -f "$WORKTREE/openwiki/.last-update.json" ]]; then ACTION=update; else ACTION=init; fi
+fi
 node_options="${NODE_OPTIONS:-}"
 if [[ -n "$node_options" ]]; then node_options+=" "; fi
 node_options+="--require=$SHELL_ENV_PRELOAD"
 (
   cd -- "$WORKTREE"
-  NODE_OPTIONS="$node_options" "$OPENWIKI_BIN" code --update --print "$PROMPT"
+  NODE_OPTIONS="$node_options" "$OPENWIKI_BIN" code "--$ACTION" --print "$PROMPT"
 )
 
-rm -f -- "$WORKTREE/CLAUDE.md" "$WORKTREE/.github/workflows/openwiki-update.yml"
+for generated_root_file in AGENTS.md CLAUDE.md .github/workflows/openwiki-update.yml; do
+  if git -C "$WORKTREE" ls-files --error-unmatch -- "$generated_root_file" >/dev/null 2>&1; then
+    git -C "$WORKTREE" restore --source=HEAD --staged --worktree -- "$generated_root_file"
+  else
+    rm -f -- "$WORKTREE/$generated_root_file"
+  fi
+done
 rmdir -- "$WORKTREE/.github/workflows" 2>/dev/null || true
 rmdir -- "$WORKTREE/.github" 2>/dev/null || true
-git -C "$WORKTREE" restore --source=HEAD --staged --worktree -- AGENTS.md
 
 mapfile -t changed_paths < <(
   {

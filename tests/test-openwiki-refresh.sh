@@ -44,7 +44,9 @@ cat >"$FAKE" <<'SH'
 set -euo pipefail
 command -v node >/dev/null
 [[ "$NODE_OPTIONS" == *"qq-openwiki-shell-env.cjs"* ]]
+printf '%s\n' "$*" >"$QQ_TEST_ARGS"
 printf 'new wiki\n' >openwiki/index.md
+printf '{"status":"complete"}\n' >openwiki/.last-update.json
 printf 'temporary\n' >CLAUDE.md
 printf 'rewritten instructions\n' >AGENTS.md
 mkdir -p .github/workflows
@@ -56,9 +58,11 @@ QQ_OPENWIKI_MAIN_ROOT="$REPO" \
 QQ_OPENWIKI_WORKTREE="$WORKTREE" \
 QQ_OPENWIKI_BRANCH="qq/test-openwiki" \
 QQ_OPENWIKI_BIN="$FAKE" \
+QQ_TEST_ARGS="$TMP/args" \
 XDG_STATE_HOME="$TMP/state" \
   "$ROOT/bin/qq-openwiki-refresh" >/dev/null
 
+[[ "$(<"$TMP/args")" == "code --init --print Keep this wiki short and practical." ]]
 [[ "$(git -C "$REPO" branch --show-current)" == "main" ]]
 [[ -z "$(git -C "$REPO" status --porcelain --untracked-files=all)" ]]
 [[ "$(<"$REPO/openwiki/index.md")" == "new wiki" ]]
@@ -72,21 +76,25 @@ if git -C "$REPO" show-ref --verify --quiet refs/heads/qq/test-openwiki; then
 fi
 [[ "$(git -C "$REPO" rev-list --count HEAD)" == "3" ]]
 [[ "$(git -C "$REPO" log -1 --format=%P | wc -w)" == "2" ]]
-[[ "$(git -C "$REPO" diff-tree --no-commit-id --name-only -r HEAD^2)" == "openwiki/index.md" ]]
+git -C "$REPO" diff-tree --no-commit-id --name-only -r HEAD^2 | grep -Fxq 'openwiki/.last-update.json'
+git -C "$REPO" diff-tree --no-commit-id --name-only -r HEAD^2 | grep -Fxq 'openwiki/index.md'
 
 BEFORE="$(git -C "$REPO" rev-parse HEAD)"
 cat >"$FAKE" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 command -v node >/dev/null
+printf '%s\n' "$*" >"$QQ_TEST_ARGS"
 SH
 chmod +x "$FAKE"
 QQ_OPENWIKI_MAIN_ROOT="$REPO" \
 QQ_OPENWIKI_WORKTREE="$WORKTREE" \
 QQ_OPENWIKI_BRANCH="qq/test-openwiki" \
 QQ_OPENWIKI_BIN="$FAKE" \
+QQ_TEST_ARGS="$TMP/args" \
 XDG_STATE_HOME="$TMP/state" \
   "$ROOT/bin/qq-openwiki-refresh" >/dev/null
+[[ "$(<"$TMP/args")" == "code --update --print Keep this wiki short and practical." ]]
 [[ "$(git -C "$REPO" rev-parse HEAD)" == "$BEFORE" ]]
 
 printf 'dirty\n' >>"$REPO/source.txt"
@@ -120,8 +128,32 @@ fi
 [[ "$(git -C "$REPO" rev-parse HEAD)" == "$BEFORE" ]]
 [[ ! -e "$WORKTREE" ]]
 
+REPO_WITHOUT_AGENTS="$TMP/repo-without-agents"
+mkdir -p "$REPO_WITHOUT_AGENTS"
+git -C "$REPO_WITHOUT_AGENTS" init -q -b main
+git -C "$REPO_WITHOUT_AGENTS" config user.name qq-test
+git -C "$REPO_WITHOUT_AGENTS" config user.email qq-test.invalid
+git -C "$REPO_WITHOUT_AGENTS" commit -q --allow-empty -m initial
+cat >"$FAKE" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p openwiki
+printf 'first wiki\n' >openwiki/quickstart.md
+printf 'generated instructions\n' >AGENTS.md
+SH
+chmod +x "$FAKE"
+QQ_OPENWIKI_MAIN_ROOT="$REPO_WITHOUT_AGENTS" \
+QQ_OPENWIKI_WORKTREE="$WORKTREE" \
+QQ_OPENWIKI_BRANCH="qq/test-openwiki" \
+QQ_OPENWIKI_BIN="$FAKE" \
+XDG_STATE_HOME="$TMP/state" \
+  "$ROOT/bin/qq-openwiki-refresh" >/dev/null
+[[ -f "$REPO_WITHOUT_AGENTS/openwiki/quickstart.md" ]]
+[[ ! -e "$REPO_WITHOUT_AGENTS/AGENTS.md" ]]
+[[ -z "$(git -C "$REPO_WITHOUT_AGENTS" status --porcelain --untracked-files=all)" ]]
+
 SERVICE="$ROOT/systemd/user/qq-openwiki.service"
-grep -Fq 'ExecStart=%h/projects/qq/bin/qq-openwiki-refresh' "$SERVICE"
+grep -Fq 'ExecStart=%h/projects/qq/bin/qq-openwiki-dispatch' "$SERVICE"
 grep -Fq 'Environment="PATH=%h/.local/bin:' "$SERVICE"
 if grep -Fq 'ExecStopPost=' "$SERVICE"; then
   echo "service still mutates the main checkout after refresh" >&2
