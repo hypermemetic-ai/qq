@@ -134,7 +134,7 @@ export default function registerExecutionProfiles(pi, deps = {}) {
       const policyPromise = readExecutionPolicy(deps.policyPath);
       const promptEntries = await Promise.all(ROLE_NAMES.map(async (role) => [
         role,
-        await readFile(deps.promptPaths?.[role] ?? join(QQ_ROOT, "prompts", `${role}.md`), "utf8"),
+        await readFile(deps.promptPaths?.[role] ?? join(QQ_ROOT, "prompts", "system", `${role}.md`), "utf8"),
       ]));
       policy = await policyPromise;
       prompts = Object.fromEntries(promptEntries);
