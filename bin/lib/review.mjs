@@ -191,7 +191,7 @@ export async function takePane(run, pane, name, args, timeoutMs = 30_000) {
   await waitForShell(run, pane);
   const start = ["agent", "start", name, "--kind", "pi", "--pane", pane, "--timeout", String(timeoutMs)];
   if (args.length) start.push("--", ...args);
-  await herdr(run, start, `cannot start ${name} in workshop pane`);
+  await herdr(run, start, `cannot start ${name} in runs pane`);
 }
 
 export async function stopAgent(run, pane, timeoutMs = 15_000) {
@@ -208,7 +208,7 @@ export async function conductReview(run, statePath, options = {}) {
   const env = options.env ?? process.env;
   const state = await readHandoff(statePath);
   if (state.status !== "reviewing" || (state.look !== 1 && state.look !== 2)) throw new Error("handoff is not ready for qa");
-  if (!state.pane) throw new Error("handoff has no workshop pane");
+  if (!state.pane) throw new Error("handoff has no runs pane");
 
   const verdictPath = join(dirname(statePath), `qa-look-${state.look}.json`);
   await rm(verdictPath, { force: true });
@@ -265,7 +265,7 @@ export async function conductReview(run, statePath, options = {}) {
   state.updatedAt = new Date().toISOString();
 
   const closePane = async () => {
-    await herdr(run, ["pane", "close", state.pane], "cannot close workshop pane");
+    await herdr(run, ["pane", "close", state.pane], "cannot close runs pane");
   };
   const notify = async (title, body) => {
     await herdr(run, ["notification", "show", title, "--body", body.slice(0, 500), "--sound", "request"], "cannot notify operator");
@@ -284,7 +284,7 @@ export async function conductReview(run, statePath, options = {}) {
     state.status = "waiting_fix";
     await atomicPrivateJson(statePath, state);
     await takePane(run, state.pane, runnerAgentName(state), []);
-    await herdr(run, ["agent", "prompt", state.pane, look1FixPrompt(state, verdict)], "cannot return workshop pane to the runner");
+    await herdr(run, ["agent", "prompt", state.pane, look1FixPrompt(state, verdict)], "cannot return runs pane to the runner");
     return state;
   }
 

@@ -211,14 +211,14 @@ export async function waitForAvailableShell(run, paneId, options = {}) {
     if (last?.code === 0 && paneHasAvailableShell(parseHerdr(last.stdout))) return last;
     await sleep(intervalMs);
   }
-  throw new Error(`workshop pane ${paneId} never became an available shell: ${reason(last, "not a free shell")}`);
+  throw new Error(`runs pane ${paneId} never became an available shell: ${reason(last, "not a free shell")}`);
 }
 
 export async function spawnWorkshop(options) {
   const { run, cwd, env = process.env, task, architectSession, qaBinding } = options;
-  if (typeof run !== "function") throw new Error("spawnWorkshop requires a command runner");
+  if (typeof run !== "function") throw new Error("runs spawn requires a command runner");
   const prepared = options.prepared ?? await prepareWorkshop(options);
-  if (prepared.taskId !== task.id) throw new Error("prepared workshop belongs to another task");
+  if (prepared.taskId !== task.id) throw new Error("prepared delegation belongs to another task");
   const { project, slug, nonce, branch, worktree, stateDir, statePath, briefPath } = prepared;
   const workspace = env.HERDR_WORKSPACE_ID;
   if (typeof workspace !== "string" || workspace === "") throw new Error("delegate requires a Herdr workspace");
@@ -241,28 +241,30 @@ export async function spawnWorkshop(options) {
 
     const tabsResult = await checked(run, "herdr", ["tab", "list", "--workspace", workspace], {}, "cannot list Herdr tabs");
     const tabs = parseHerdr(tabsResult.stdout)?.tabs ?? [];
-    const workshop = tabs.find((tab) => tab?.label === "workshop");
+    const runsTab = tabs.find((tab) => tab?.label === "runs") ?? tabs.find((tab) => tab?.label === "workshop");
     const paneEnv = [
       `QQ_AGENT_ROLE=runner`, `QQ_AGENT_PROJECT=${project}`, `QQ_WORKSHOP_STATE=${statePath}`,
       `QQ_WORKSHOP_ID=${slug}-${nonce}`, `QQ_ARCHITECT_SESSION=${architectSession}`,
     ];
-    if (!workshop) {
-      const args = ["tab", "create", "--workspace", workspace, "--label", "workshop", "--cwd", worktree, "--no-focus"];
+    if (!runsTab) {
+      const args = ["tab", "create", "--workspace", workspace, "--label", "runs", "--cwd", worktree, "--no-focus"];
       for (const entry of paneEnv) args.push("--env", entry);
-      const created = await checked(run, "herdr", args, {}, "cannot create workshop tab");
+      const created = await checked(run, "herdr", args, {}, "cannot create runs tab");
       paneId = paneFromTabCreate(created);
     } else {
-      const panesResult = await checked(run, "herdr", ["pane", "list", "--workspace", workspace], {}, "cannot list workshop panes");
-      const parent = (parseHerdr(panesResult.stdout)?.panes ?? []).find((pane) => pane?.tab_id === workshop.tab_id)?.pane_id;
-      if (!parent) throw new Error("workshop tab has no pane to split");
-      const args = ["pane", "split", parent, "--direction", "down", "--cwd", worktree, "--no-focus"];
+      const panesResult = await checked(run, "herdr", ["pane", "list", "--workspace", workspace], {}, "cannot list runs panes");
+      const parent = (parseHerdr(panesResult.stdout)?.panes ?? [])
+        .filter((pane) => pane?.tab_id === runsTab.tab_id)
+        .at(-1)?.pane_id;
+      if (!parent) throw new Error("runs tab has no pane to split");
+      const args = ["pane", "split", parent, "--direction", "right", "--cwd", worktree, "--no-focus"];
       for (const entry of paneEnv) args.push("--env", entry);
-      const split = await checked(run, "herdr", args, {}, "cannot add workshop pane");
+      const split = await checked(run, "herdr", args, {}, "cannot add runs pane");
       paneId = paneFromSplit(split);
     }
-    if (typeof paneId !== "string" || paneId === "") throw new Error("Herdr returned no workshop pane id");
+    if (typeof paneId !== "string" || paneId === "") throw new Error("Herdr returned no runs pane id");
     createdPane = true;
-    await checked(run, "herdr", ["pane", "rename", paneId, `${task.id}: ${task.title}`.slice(0, 80)], {}, "cannot label workshop pane");
+    await checked(run, "herdr", ["pane", "rename", paneId, `${task.id}: ${task.title}`.slice(0, 80)], {}, "cannot label runs pane");
 
     const state = {
       schema: "qq.workshop-handoff/v1", version: 1, id: `${slug}-${nonce}`, project,
@@ -272,10 +274,10 @@ export async function spawnWorkshop(options) {
     };
     await atomicPrivateJson(statePath, state);
     await waitForAvailableShell(run, paneId);
-    await checked(run, "herdr", ["agent", "start", `runner-${slug}-${nonce}`, "--kind", "pi", "--pane", paneId], {}, "cannot start workshop runner");
+    await checked(run, "herdr", ["agent", "start", `runner-${slug}-${nonce}`, "--kind", "pi", "--pane", paneId], {}, "cannot start runs runner");
     const prompt = `Work from the outbound brief at ${briefPath}. Implement the task in this worktree, commit the result, then call done with ref HEAD. Do not merge.\n\n${runnerBrief.trimEnd()}`;
     const prompted = await run("herdr", ["agent", "prompt", paneId, prompt], {});
-    if (prompted?.code !== 0) throw new Error("cannot brief workshop runner");
+    if (prompted?.code !== 0) throw new Error("cannot brief runs runner");
     state.status = "running";
     state.updatedAt = new Date().toISOString();
     await atomicPrivateJson(statePath, state);
@@ -294,6 +296,6 @@ export async function spawnWorkshop(options) {
 export async function readHandoff(path) {
   const source = await readFile(path, "utf8");
   const value = JSON.parse(source);
-  if (!value || value.schema !== "qq.workshop-handoff/v1" || value.version !== 1) throw new Error("workshop handoff is malformed");
+  if (!value || value.schema !== "qq.workshop-handoff/v1" || value.version !== 1) throw new Error("runs handoff is malformed");
   return value;
 }
