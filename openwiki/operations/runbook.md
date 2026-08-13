@@ -5,10 +5,10 @@ description: Practical commands for Event Plane administration, focused reposito
 tags: [operations, event-plane, testing, openwiki]
 openwiki:
   roles: [operations, testing]
-  source_paths: [bin/event-plane, bin/event-plane-admin, bin/lib/task-prefix.mjs, bin/qq-migrate-task-prefix.mjs, package.json, systemd/user/qq-openwiki.service, systemd/user/qq-openwiki.timer]
+  source_paths: [bin/event-plane, bin/event-plane-admin, bin/lib/task-prefix.mjs, bin/qq-migrate-task-prefix.mjs, bin/qq-openwiki-refresh, package.json, systemd/user/qq-openwiki.service, systemd/user/qq-openwiki.timer]
   symbols: [migrateTaskPrefix]
-  test_paths: [tests/test-task-prefix.mjs]
-  validation_commands: [npm test]
+  test_paths: [tests/test-task-prefix.mjs, tests/test-openwiki-refresh.sh]
+  validation_commands: [tests/test-openwiki-refresh.sh, npm test]
 ---
 
 # Operations and Validation
@@ -51,19 +51,25 @@ The instance ID fences replacement; `authorization` records intent but is not au
 | QA, review, or landing | `node --experimental-strip-types tests/test-review-flow.mjs .` | `npm test` when workshop/profile wiring also changes |
 | Task-prefix migrator | `node --experimental-strip-types tests/test-task-prefix.mjs .` | no broader check unless Backlog/workshop schemas change |
 | Telemetry/profile display | `tests/test-telemetry.sh` | manual provider calls only for operator diagnosis |
+| OpenWiki refresh wrapper or systemd units | `tests/test-openwiki-refresh.sh` | `npm test` only when full-suite composition also changes |
 | Test composition or multiple runtime areas | `npm test` | — |
 
 `package.json` is the authoritative full-suite order. The Event Plane suite uses isolated state and a test-only clock; never set `QQ_EVENT_PLANE_TESTING` or retention overrides in production.
 
 ## OpenWiki automation
 
-`systemd/user/qq-openwiki.timer` triggers at local 03:00 and 13:00, is not persistent, and runs `qq-openwiki.service`. The service executes `openwiki code --update --print "Keep this wiki short and practical."` in `%h/projects/qq` with a six-hour timeout and `OPENWIKI_PROVIDER=openai-chatgpt`.
+`systemd/user/qq-openwiki.timer` triggers at local 03:00 and 13:00, is not persistent, and runs `qq-openwiki.service`. The service uses a private umask, an explicit tool `PATH`, a six-hour timeout, and `OPENWIKI_PROVIDER=openai-chatgpt`; it delegates the refresh to `bin/qq-openwiki-refresh` rather than letting OpenWiki edit the main checkout.
 
-Every service exit removes local `CLAUDE.md` and `.github/workflows/openwiki-update.yml`, tries to remove empty workflow directories, and rewrites the OpenWiki sentence in `AGENTS.md` to name the local timer. This cleanup runs after failures too. Validate unit edits with:
+The wrapper requires a clean `main`, takes a non-blocking `qq-openwiki.lock`, and generates on a disposable `qq/openwiki-refresh` branch and worktree. After generation it restores `AGENTS.md`, removes generated `CLAUDE.md` and the OpenWiki GitHub workflow, and rejects every changed path outside `openwiki/`. If there is a wiki diff, it commits it, takes the same `qq-land.lock` used by [workshop landing](../workflows/workshops.md), rechecks branch and cleanliness, verifies a clean merge, and non-fast-forward merges into `main`. Its exit trap removes the worktree and refresh branch; no wiki diff is a successful no-op.
+
+Defaults can be overridden with the `QQ_OPENWIKI_*` variables declared at the top of `bin/qq-openwiki-refresh`; notably the worktree defaults beneath `$XDG_STATE_HOME/qq/openwiki`. Validate wrapper and unit behavior with:
 
 ```bash
+tests/test-openwiki-refresh.sh
 systemd-analyze --user verify systemd/user/qq-openwiki.service systemd/user/qq-openwiki.timer
 ```
+
+The shell test covers successful merge and cleanup, no-op behavior, dirty-main refusal, non-`openwiki/` output refusal, and service wiring. It is also the final check in `npm test`.
 
 ## Repository workflow
 

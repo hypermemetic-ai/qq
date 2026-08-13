@@ -60,13 +60,13 @@ After approval, `delegate` moves the task to `In Progress`. `spawnWorkshop` crea
 
 `done` pins the submitted commit and starts `bin/qq-review-worker.mjs`. `conductReview` takes over the same workshop pane with the policy-pinned QA model, a private file-backed system prompt, only the declared tools, and a persistent QA session shared by both looks. QA may add committed test-only changes; dirty output, rewritten ancestry, empty commits, or production-file changes turn a pass into failure.
 
-A first failure returns the pane to the runner with feedback. A pass closes the pane and creates an operator pack (summary plus diff numstat). A second failure becomes `blocked`, closes the pane, and also steers the architect when its presence can be resolved. Architect polling and `review()` offer `approve`, `discuss`, or `later`; discussion moves the task to `To Do`, records the comment, and steers the current architect session without discarding the reviewed ref.
+A first failure evicts the registered QA agent—even when Herdr reports it as done—waits for the pane's shell, then starts the runner in that same pane with feedback. This ordering prevents a completed QA registration from causing `agent_pane_busy`; the `failedRewrite` case in `tests/test-review-flow.mjs` pins it. A pass closes the pane and creates an operator pack (summary plus diff numstat). A second failure becomes `blocked`, closes the pane, and also steers the architect when its presence can be resolved. Architect polling and `review()` offer `approve`, `discuss`, or `later`; discussion moves the task to `To Do`, records the comment, and steers the current architect session without discarding the reviewed ref.
 
 Approval runs `bin/qq-land-worker.mjs` under a common-Git-directory `flock`. `landHandoff` requires the original base branch, a clean delegated worktree, and a clean `merge-tree` check; it then performs a non-fast-forward merge, removes worktree and branch, marks the handoff `landed`, and moves the task to `Done`. Failures persist as `blocked`.
 
 ## Change and validation
 
-Keep handoff schema/state transitions synchronized across both extensions, both libraries, workers, and tests. Preserve exact-brief approval, private mode-0600 artifacts, named-base and clean-worktree checks, two-look limit, QA test-only ownership, same-pane handoff, explicit architect approval, and serialized landing.
+Keep handoff schema/state transitions synchronized across both extensions, both libraries, workers, and tests. Preserve exact-brief approval, private mode-0600 artifacts, named-base and clean-worktree checks, two-look limit, QA test-only ownership, QA eviction before same-pane runner restart, explicit architect approval, and serialized landing. The landing lock is shared with the [OpenWiki refresh workflow](../operations/runbook.md#openwiki-automation), so changes to either path must retain common-Git-directory serialization.
 
 Run the narrow checks separately:
 
