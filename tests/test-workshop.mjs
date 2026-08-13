@@ -162,6 +162,8 @@ try {
     });
     assert.equal(existingState.pane, "w2T:p-new");
     assert.equal(existingCalls.some(({ command, args }) => command === "herdr" && args[0] === "tab" && args[1] === "create"), false);
+    assert.equal(existingCalls.some(({ command, args }) => command === "herdr" &&
+      args[0] === "tab" && args[1] === "rename" && args[2] === "w2T:tR" && args[3] === "runs"), label === "workshop");
     const split = existingCalls.find(({ command, args }) => command === "herdr" && args[0] === "pane" && args[1] === "split");
     assert.deepEqual(split.args.slice(0, 8), [
       "pane", "split", "w2T:p-right", "--direction", "right", "--cwd", existingPreparation.worktree, "--no-focus",
