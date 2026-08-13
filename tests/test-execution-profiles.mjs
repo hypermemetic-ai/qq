@@ -53,6 +53,9 @@ assert.equal(lib.parseTokenCount("200K"), 200000);
 assert.equal(lib.parseTokenCount("1M"), 1_000_000);
 const parsed = lib.parseModelList("provider model context max-out thinking images\nopenai-codex gpt-5.6-sol 272K 128K yes yes\n");
 assert.equal(parsed.get("openai-codex\0gpt-5.6-sol").contextWindow, 272000);
+assert.equal(lib.contextWindowCeilingFor(lib.validateExecutionPolicy(policy()), "xai"), 200000);
+assert.equal(lib.contextWindowCeilingFor(lib.validateExecutionPolicy(policy()), "openai-codex"), undefined);
+assert.equal(lib.contextWindowCeilingFor(lib.validateExecutionPolicy(policy()), "qwen-token-plan"), undefined);
 
 const temporary = await mkdtemp(join(homedir(), "qq-profiles-test."));
 try {
@@ -67,7 +70,14 @@ try {
 
   const modelsPath = join(temporary, "agent", "models.json");
   await mkdir(join(temporary, "agent"), { recursive: true, mode: 0o700 });
-  await writeFile(modelsPath, JSON.stringify({ providers: { unrelated: { baseUrl: "https://example.invalid" } } }), { mode: 0o600 });
+  await writeFile(modelsPath, JSON.stringify({
+    providers: {
+      unrelated: { baseUrl: "https://example.invalid" },
+      xai: { modelOverrides: { "grok-4.6": { temperature: 0.4 } } },
+      "qwen-token-plan": { modelOverrides: { "deepseek-v4-flash-0731": { contextWindow: 200000, maxTokens: 384000 } } },
+      "openai-codex": { modelOverrides: { "gpt-5.6-sol": { contextWindow: 200000 } } },
+    },
+  }), { mode: 0o600 });
   const models = new Map([
     ["xai\0grok-4.6", { contextWindow: 500000 }],
     ["qwen-token-plan\0deepseek-v4-flash-0731", { contextWindow: 1_000_000 }],
@@ -76,14 +86,16 @@ try {
   assert.deepEqual(await lib.installContextCeiling(lib.validateExecutionPolicy(policy()), models, modelsPath), ["xai/grok-4.6", "qwen-token-plan/deepseek-v4-flash-0731", "openai-codex/gpt-5.6-sol"]);
   const modelsDocument = JSON.parse(await readFile(modelsPath, "utf8"));
   assert.equal(modelsDocument.providers.xai.modelOverrides["grok-4.6"].contextWindow, 200000);
-  assert.equal(modelsDocument.providers["qwen-token-plan"].modelOverrides["deepseek-v4-flash-0731"].contextWindow, 200000);
-  assert.equal(modelsDocument.providers["openai-codex"].modelOverrides["gpt-5.6-sol"].contextWindow, 200000);
+  assert.equal(modelsDocument.providers.xai.modelOverrides["grok-4.6"].temperature, 0.4);
+  assert.equal(modelsDocument.providers["qwen-token-plan"].modelOverrides["deepseek-v4-flash-0731"].contextWindow, undefined);
+  assert.equal(modelsDocument.providers["qwen-token-plan"].modelOverrides["deepseek-v4-flash-0731"].maxTokens, 384000);
+  assert.equal(modelsDocument.providers["openai-codex"], undefined);
   assert.equal(modelsDocument.providers.unrelated.baseUrl, "https://example.invalid");
 
   const modelObjects = new Map([
     ["xai/grok-4.6", { provider: "xai", id: "grok-4.6", contextWindow: 200000 }],
-    ["qwen-token-plan/deepseek-v4-flash-0731", { provider: "qwen-token-plan", id: "deepseek-v4-flash-0731", contextWindow: 200000 }],
-    ["openai-codex/gpt-5.6-sol", { provider: "openai-codex", id: "gpt-5.6-sol", contextWindow: 200000 }],
+    ["qwen-token-plan/deepseek-v4-flash-0731", { provider: "qwen-token-plan", id: "deepseek-v4-flash-0731", contextWindow: 1_000_000 }],
+    ["openai-codex/gpt-5.6-sol", { provider: "openai-codex", id: "gpt-5.6-sol", contextWindow: 272000 }],
   ]);
   const handlers = new Map();
   let currentModel;
@@ -154,7 +166,7 @@ try {
   await handlers.get("session_shutdown")({ reason: "quit" }, ctx);
   ctx.cwd = root;
 
-  modelObjects.get("openai-codex/gpt-5.6-sol").contextWindow = 272000;
+  modelObjects.get("xai/grok-4.6").contextWindow = 500000;
   extension.default(pi, { policyPath, env: { ...process.env, XDG_STATE_HOME: join(temporary, "state-2") } });
   await handlers.get("session_start")({ reason: "startup" }, ctx);
   assert.deepEqual(await handlers.get("input")({}, ctx), { action: "handled" });

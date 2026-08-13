@@ -172,6 +172,10 @@ export function parseModelList(source) {
   return models;
 }
 
+export function contextWindowCeilingFor(policy, provider) {
+  return provider === "xai" ? policy.contextWindowCeiling : undefined;
+}
+
 export async function installContextCeiling(policy, availableModels, path = agentModelsPath()) {
   let document = { providers: {} };
   const source = await safeRegularFile(path, "Pi models configuration", { optional: true });
@@ -188,14 +192,36 @@ export async function installContextCeiling(policy, availableModels, path = agen
     const key = `${binding.provider}\0${binding.model}`;
     const available = availableModels.get(key);
     if (!available) throw new Error(`profile model is unavailable: ${binding.provider}/${binding.model}`);
-    if (available.contextWindow <= policy.contextWindowCeiling) continue;
-    const provider = document.providers[binding.provider] ??= {};
+    const ceiling = contextWindowCeilingFor(policy, binding.provider);
+    if (ceiling !== undefined) {
+      if (available.contextWindow <= ceiling) continue;
+      const provider = document.providers[binding.provider] ??= {};
+      if (provider === null || typeof provider !== "object" || Array.isArray(provider)) throw new Error(`Pi provider configuration is malformed: ${binding.provider}`);
+      const overrides = provider.modelOverrides ??= {};
+      if (overrides === null || typeof overrides !== "object" || Array.isArray(overrides)) throw new Error(`Pi modelOverrides is malformed: ${binding.provider}`);
+      const override = overrides[binding.model] ??= {};
+      if (override === null || typeof override !== "object" || Array.isArray(override)) throw new Error(`Pi model override is malformed: ${binding.provider}/${binding.model}`);
+      if (override.contextWindow !== ceiling) {
+        override.contextWindow = ceiling;
+        changed.push(`${binding.provider}/${binding.model}`);
+      }
+      continue;
+    }
+
+    const provider = document.providers[binding.provider];
+    if (provider === undefined) continue;
     if (provider === null || typeof provider !== "object" || Array.isArray(provider)) throw new Error(`Pi provider configuration is malformed: ${binding.provider}`);
-    const overrides = provider.modelOverrides ??= {};
+    const overrides = provider.modelOverrides;
+    if (overrides === undefined) continue;
     if (overrides === null || typeof overrides !== "object" || Array.isArray(overrides)) throw new Error(`Pi modelOverrides is malformed: ${binding.provider}`);
-    const override = overrides[binding.model] ??= {};
+    const override = overrides[binding.model];
+    if (override === undefined) continue;
     if (override === null || typeof override !== "object" || Array.isArray(override)) throw new Error(`Pi model override is malformed: ${binding.provider}/${binding.model}`);
-    override.contextWindow = policy.contextWindowCeiling;
+    if (!("contextWindow" in override)) continue;
+    delete override.contextWindow;
+    if (Object.keys(override).length === 0) delete overrides[binding.model];
+    if (Object.keys(overrides).length === 0) delete provider.modelOverrides;
+    if (Object.keys(provider).length === 0) delete document.providers[binding.provider];
     changed.push(`${binding.provider}/${binding.model}`);
   }
   if (changed.length) await atomicPrivateWrite(path, `${JSON.stringify(document, null, 2)}\n`);

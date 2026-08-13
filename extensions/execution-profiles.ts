@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { profileFor, readExecutionPolicy } from "../bin/lib/execution-profiles.mjs";
+import { contextWindowCeilingFor, profileFor, readExecutionPolicy } from "../bin/lib/execution-profiles.mjs";
 import { DEFAULT_ROLE, isActivatedRepository, ROLE_NAMES, validateRole } from "../bin/lib/roles.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -78,13 +78,19 @@ export default function registerExecutionProfiles(pi, deps = {}) {
     return undefined;
   }
 
+  function validateModelContext(label, profile, model) {
+    if (!Number.isInteger(model.contextWindow)) throw new Error(`${label} has an invalid context window`);
+    const ceiling = contextWindowCeilingFor(policy, profile.provider);
+    if (ceiling !== undefined && model.contextWindow > ceiling) {
+      throw new Error(`${label} exceeds the ${ceiling} Grok context cap; run qq-profile context install`);
+    }
+  }
+
   function validateRuntimeProfiles(ctx) {
     const check = (label, profile) => {
       const model = ctx.modelRegistry.find(profile.provider, profile.model);
       if (!model) throw new Error(`${label} model is unavailable: ${profile.provider}/${profile.model}`);
-      if (!Number.isInteger(model.contextWindow) || model.contextWindow > policy.contextWindowCeiling) {
-        throw new Error(`${label} exceeds the ${policy.contextWindowCeiling} context cap; run qq-profile context install`);
-      }
+      validateModelContext(label, profile, model);
     };
     for (const [roleName, role] of Object.entries(policy.roles)) {
       for (const [name, profile] of Object.entries(role.profiles)) check(`${roleName} profile ${name}`, profile);
@@ -97,7 +103,7 @@ export default function registerExecutionProfiles(pi, deps = {}) {
     const selected = profileFor(policy, roleName, profileName);
     const model = ctx.modelRegistry.find(selected.profile.provider, selected.profile.model);
     if (!model) throw new Error(`profile model is unavailable: ${selected.profile.provider}/${selected.profile.model}`);
-    if (model.contextWindow > policy.contextWindowCeiling) throw new Error(`profile exceeds the ${policy.contextWindowCeiling} context cap; run qq-profile context install`);
+    validateModelContext("profile", selected.profile, model);
     if (!await pi.setModel(model)) throw new Error(`profile model has no configured authentication: ${selected.profile.provider}/${selected.profile.model}`);
     pi.setThinkingLevel(selected.profile.effort);
     const actualEffort = pi.getThinkingLevel();

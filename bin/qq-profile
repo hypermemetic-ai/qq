@@ -2,6 +2,7 @@
 import { spawnSync } from "node:child_process";
 import {
   CONTEXT_WINDOW_CEILING,
+  contextWindowCeilingFor,
   executionProfilesPath,
   installContextCeiling,
   parseModelList,
@@ -85,14 +86,16 @@ async function main() {
     const models = availableModels();
     if (first === "install") {
       const changed = await installContextCeiling(policy, models);
-      console.log(changed.length ? `installed ${CONTEXT_WINDOW_CEILING} context cap: ${changed.join(", ")}` : `context cap already satisfied: ${CONTEXT_WINDOW_CEILING}`);
+      console.log(changed.length ? `updated provider context limits: ${changed.join(", ")}` : `provider context limits already satisfied`);
       return;
     }
-    console.log(`context ceiling: ${CONTEXT_WINDOW_CEILING}`);
+    console.log(`Grok context ceiling: ${CONTEXT_WINDOW_CEILING}; other providers use their defaults`);
     for (const binding of uniqueBindings(policy)) {
       const model = models.get(`${binding.provider}\0${binding.model}`);
+      const ceiling = contextWindowCeilingFor(policy, binding.provider);
       if (!model) console.log(` ! ${binding.provider}/${binding.model} — unavailable`);
-      else console.log(` ${model.contextWindow <= CONTEXT_WINDOW_CEILING ? "✓" : "!"} ${binding.provider}/${binding.model} — ${model.contextWindow}${model.contextWindow > CONTEXT_WINDOW_CEILING ? " — run qq-profile context install" : ""}`);
+      else if (ceiling === undefined) console.log(` · ${binding.provider}/${binding.model} — ${model.contextWindow} (provider default)`);
+      else console.log(` ${model.contextWindow <= ceiling ? "✓" : "!"} ${binding.provider}/${binding.model} — ${model.contextWindow}${model.contextWindow > ceiling ? " — run qq-profile context install" : ""}`);
     }
     return;
   }
