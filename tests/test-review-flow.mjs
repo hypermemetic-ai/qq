@@ -19,7 +19,8 @@ assert.equal(review.formatPack({ summary: "small fix", files: [{ path: "src/a.ts
 const scratch = await mkdtemp(join(homedir(), "qq-review-test."));
 try {
   const availableShell = JSON.stringify({
-    result: { process_info: { shell_pid: 10, foreground_process_group_id: 10, foreground_processes: [{ pid: 10, name: "zsh" }] } },
+    id: "cli:pane:process_info",
+    result: { type: "pane_process_info", process_info: { shell_pid: 10, foreground_process_group_id: 10, foreground_processes: [{ pid: 10, name: "zsh" }] } },
   });
   const worktree = join(scratch, "worktree");
   const mainRoot = join(scratch, "main");
@@ -221,7 +222,7 @@ try {
       }
       if (command === "herdr" && args[0] === "agent" && args[1] === "get") {
         const agent_status = agentGets++ === 0 ? "idle" : "done";
-        return { code: 0, stdout: JSON.stringify({ result: { agent: { agent_status } } }), stderr: "" };
+        return { code: 0, stdout: JSON.stringify({ id: "cli:agent:get", result: { type: "agent_info", agent: { agent_status } } }), stderr: "" };
       }
       if (command === "herdr" && args[0] === "pane" && args[1] === "process-info") {
         return { code: 0, stdout: availableShell, stderr: "" };

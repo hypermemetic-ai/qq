@@ -5,8 +5,9 @@ import { pathToFileURL } from "node:url";
 const root = process.argv[2];
 const module = await import(pathToFileURL(join(root, "extensions/operator-stage.ts")));
 
-assert.equal(module.parsePaneId(JSON.stringify({ result: { pane_id: "wM:p4Q" } })), "wM:p4Q");
-assert.equal(module.parsePaneId("created wM:p9Z"), "wM:p9Z");
+assert.equal(module.parsePaneId(JSON.stringify({ id: "cli:pane:split", result: { type: "pane_info", pane: { pane_id: "wM:p4Q" } } })), "wM:p4Q");
+assert.throws(() => module.parsePaneId("created wM:p9Z"), /malformed JSON/);
+assert.throws(() => module.parsePaneId(JSON.stringify({ id: "cli:pane:split", result: { type: "pane_info", pane_id: "wM:p4Q" } })), /no created pane id/);
 assert.equal(module.stagedLine("printf ok", "low"), "{ printf ok; } && exit");
 assert.equal(
   module.stagedLine("rm -rf build-output", "high"),
@@ -21,7 +22,7 @@ function harness(options = {}) {
     const call = { executable, args, options: execOptions };
     calls.push(call);
     if (options.execReply) return options.execReply(call);
-    if (executable === "qq-herdr-pane-add") return { code: 0, stdout: JSON.stringify({ result: { pane_id: "wM:p4Q" } }), stderr: "" };
+    if (executable === "qq-herdr-pane-add") return { code: 0, stdout: JSON.stringify({ id: "cli:pane:split", result: { type: "pane_info", pane: { pane_id: "wM:p4Q" } } }), stderr: "" };
     return { code: 0, stdout: "", stderr: "" };
   };
   module.default(pi, { exec, env: options.env ?? { HERDR_PANE_ID: "source-pane" } });
@@ -67,9 +68,19 @@ for (const testCase of [
   assert.equal(h.calls.length, 0, `${testCase.name} refusal ran herdr`);
 }
 
-const sendFail = harness({
+const malformedSplit = harness({
   execReply(call) {
     if (call.executable === "qq-herdr-pane-add") return { code: 0, stdout: "created wM:p9Z", stderr: "" };
+    return { code: 0, stdout: "", stderr: "" };
+  },
+});
+const malformedOutcome = await malformedSplit.tool.execute("malformed-split", { command: "printf ok", description: "bad split response", danger: "low" });
+assert.match(malformedOutcome.content[0].text, /malformed JSON/);
+assert.deepEqual(operations(malformedSplit.calls), ["split"]);
+
+const sendFail = harness({
+  execReply(call) {
+    if (call.executable === "qq-herdr-pane-add") return { code: 0, stdout: JSON.stringify({ id: "cli:pane:split", result: { type: "pane_info", pane: { pane_id: "wM:p9Z" } } }), stderr: "" };
     if (call.args[1] === "send-text") return { code: 1, stdout: "", stderr: "send denied" };
     return { code: 0, stdout: "", stderr: "" };
   },
@@ -81,7 +92,7 @@ assert.deepEqual(operations(sendFail.calls), ["split", "rename", "wait-output", 
 
 const notifyFail = harness({
   execReply(call) {
-    if (call.executable === "qq-herdr-pane-add") return { code: 0, stdout: "created wM:p6N", stderr: "" };
+    if (call.executable === "qq-herdr-pane-add") return { code: 0, stdout: JSON.stringify({ id: "cli:pane:split", result: { type: "pane_info", pane: { pane_id: "wM:p6N" } } }), stderr: "" };
     if (call.args[0] === "notification") return { code: 1, stdout: "", stderr: "notifications unavailable" };
     return { code: 0, stdout: "", stderr: "" };
   },
@@ -92,7 +103,7 @@ assert.deepEqual(operations(notifyFail.calls), ["split", "rename", "wait-output"
 
 const orphan = harness({
   execReply(call) {
-    if (call.executable === "qq-herdr-pane-add") return { code: 0, stdout: "created wM:p7T", stderr: "" };
+    if (call.executable === "qq-herdr-pane-add") return { code: 0, stdout: JSON.stringify({ id: "cli:pane:split", result: { type: "pane_info", pane: { pane_id: "wM:p7T" } } }), stderr: "" };
     if (call.args[1] === "send-text") return { code: 1, stdout: "", stderr: "send denied" };
     if (call.args[1] === "close") return { code: 1, stdout: "", stderr: "close denied" };
     return { code: 0, stdout: "", stderr: "" };

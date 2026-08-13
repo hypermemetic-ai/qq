@@ -196,9 +196,11 @@ export async function takePane(run, pane, name, args, timeoutMs = 30_000) {
 
 export async function stopAgent(run, pane, timeoutMs) {
   const listed = await run("herdr", ["agent", "get", pane], {});
-  const agent = parseHerdr(listed?.stdout);
-  if (listed?.code === 0 && (agent?.agent || agent?.agent_status)) {
-    await run("herdr", ["agent", "send-keys", pane, "ctrl+d"], {});
+  if (listed?.code === 0) {
+    const agent = parseHerdr(listed.stdout, "agent_info");
+    if (agent?.agent || agent?.agent_status) {
+      await run("herdr", ["agent", "send-keys", pane, "ctrl+d"], {});
+    }
   }
   await waitForShell(run, pane, timeoutMs);
 }

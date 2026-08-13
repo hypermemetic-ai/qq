@@ -16,7 +16,7 @@ qq-herdr-activate
 qq-herdr-upgrade
 ```
 
-`qq-herdr-build` verifies the immutable upstream commit, applies the patch from a clean checkout, runs formatting and tests, builds a release binary, then proves centering and balancing against a disposable server/client session. `install` atomically writes `~/.local/lib/qq/herdr/bin/herdr`; it does not switch the running service.
+`qq-herdr-build` verifies the immutable upstream commit, applies the patch from a clean checkout, runs formatting and tests, builds a release binary, then proves the centered-pane policy and QQ's public CLI operations against one disposable server/client session. `install` atomically writes `~/.local/lib/qq/herdr/bin/herdr`, reports outdated installed lifecycle integrations (including the required Pi integration), and does not update those integrations or switch the running service.
 
 `qq-herdr-activate` validates a Homebrew 0.7.5 server outside the systemd service cgroup, restores the direct Alt-arrow navigation bindings, pins the local client and future service, performs Herdr's live handoff, and refuses success unless every workspace, tab, pane, and pane shell process survives. The current client detaches once; run `~/.local/bin/herdr` at the outer terminal prompt to reconnect (an existing shell may have cached Homebrew's old path).
 

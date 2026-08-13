@@ -12,7 +12,12 @@ assert.equal(lib.taskSlug("TASK-1"), "task-1");
 assert.equal(lib.taskSlug("T-1"), "t-1");
 assert.equal(lib.taskSlug("A-71.12"), "a-71-12");
 assert.throws(() => lib.taskSlug("bad task"), /T-1/);
-assert.equal(lib.parseHerdr(JSON.stringify({ result: { pane: { pane_id: "w2T:p9" } } })).pane.pane_id, "w2T:p9");
+const paneResponse = JSON.stringify({ id: "cli:pane:split", result: { type: "pane_info", pane: { pane_id: "w2T:p9" } } });
+assert.equal(lib.parseHerdr(paneResponse, "pane_info").pane.pane_id, "w2T:p9");
+assert.throws(() => lib.parseHerdr(paneResponse, "tab_created"), /pane_info, expected tab_created/);
+assert.throws(() => lib.parseHerdr("created w2T:p9"), /malformed JSON/);
+assert.throws(() => lib.parseHerdr("{}"), /malformed response/);
+assert.throws(() => lib.parseHerdr(JSON.stringify({ result: [] })), /malformed response/);
 assert.equal(lib.paneHasAvailableShell({
   process_info: { shell_pid: 10, foreground_process_group_id: 10, foreground_processes: [{ pid: 10, name: "bash" }] },
 }), true);
@@ -46,10 +51,10 @@ try {
   const gateRun = async (command, args, options = {}) => {
     gateCalls.push({ command, args, options });
     if (args[0] === "plugin" && args[1] === "list") {
-      return { code: 0, stdout: JSON.stringify({ result: { plugins: [] } }), stderr: "" };
+      return { code: 0, stdout: JSON.stringify({ id: "cli:plugin", result: { type: "plugin_list", plugins: [] } }), stderr: "" };
     }
     if (args[0] === "plugin" && args[1] === "pane" && args[2] === "open") {
-      return { code: 0, stdout: JSON.stringify({ result: { plugin_pane: { pane: { pane_id: "w2T:pG" } } } }), stderr: "" };
+      return { code: 0, stdout: JSON.stringify({ id: "cli:plugin", result: { type: "plugin_pane_opened", plugin_pane: { pane: { pane_id: "w2T:pG" } } } }), stderr: "" };
     }
     if (args[0] === "pane" && args[1] === "wait-output") {
       await writeFile(prepared.decisionPath, "approved\n", { mode: 0o600 });
@@ -78,14 +83,16 @@ try {
     if (command === "git" && args[0] === "rev-parse" && args[1] === "--show-toplevel") return { code: 0, stdout: "/repo\n", stderr: "" };
     if (command === "git" && args[0] === "rev-parse" && args[1] === "HEAD") return { code: 0, stdout: "abc123\n", stderr: "" };
     if (command === "git" && args[0] === "symbolic-ref") return { code: 0, stdout: "main\n", stderr: "" };
-    if (command === "herdr" && args[0] === "tab" && args[1] === "list") return { code: 0, stdout: JSON.stringify({ result: { tabs: [] } }), stderr: "" };
-    if (command === "herdr" && args[0] === "tab" && args[1] === "create") return { code: 0, stdout: JSON.stringify({ result: { root_pane: { pane_id: "w2T:p9" }, tab: { tab_id: "w2T:t9" } } }), stderr: "" };
+    if (command === "herdr" && args[0] === "tab" && args[1] === "list") return { code: 0, stdout: JSON.stringify({ id: "cli:tab:list", result: { type: "tab_list", tabs: [] } }), stderr: "" };
+    if (command === "herdr" && args[0] === "tab" && args[1] === "create") return { code: 0, stdout: JSON.stringify({ id: "cli:tab:create", result: { type: "tab_created", root_pane: { pane_id: "w2T:p9" }, tab: { tab_id: "w2T:t9" } } }), stderr: "" };
     if (command === "herdr" && args[0] === "pane" && args[1] === "process-info") {
       const ready = spawnCalls.filter((call) => call.command === "herdr" && call.args[0] === "pane" && call.args[1] === "process-info").length >= 2;
       return {
         code: 0,
         stdout: JSON.stringify({
+          id: "cli:pane:process_info",
           result: {
+            type: "pane_process_info",
             process_info: ready
               ? { pane_id: "w2T:p9", shell_pid: 10, foreground_process_group_id: 10, foreground_processes: [{ pid: 10, name: "-zsh" }] }
               : { pane_id: "w2T:p9" },
@@ -131,12 +138,12 @@ try {
       if (command === "git" && args[0] === "rev-parse" && args[1] === "HEAD") return { code: 0, stdout: "abc123\n", stderr: "" };
       if (command === "git" && args[0] === "symbolic-ref") return { code: 0, stdout: "main\n", stderr: "" };
       if (command === "herdr" && args[0] === "tab" && args[1] === "list") {
-        return { code: 0, stdout: JSON.stringify({ result: { tabs: [{ tab_id: "w2T:tR", label }] } }), stderr: "" };
+        return { code: 0, stdout: JSON.stringify({ id: "cli:tab:list", result: { type: "tab_list", tabs: [{ tab_id: "w2T:tR", label }] } }), stderr: "" };
       }
       if (command === "herdr" && args[0] === "pane" && args[1] === "list") {
         return {
           code: 0,
-          stdout: JSON.stringify({ result: { panes: [
+          stdout: JSON.stringify({ id: "cli:pane:list", result: { type: "pane_list", panes: [
             { pane_id: "w2T:p0", tab_id: "w2T:t0" },
             { pane_id: "w2T:p-left", tab_id: "w2T:tR" },
             { pane_id: "w2T:p-right", tab_id: "w2T:tR" },
@@ -145,12 +152,12 @@ try {
         };
       }
       if (command === "qq-herdr-pane-add") {
-        return { code: 0, stdout: JSON.stringify({ result: { pane: { pane_id: "w2T:p-new" } } }), stderr: "" };
+        return { code: 0, stdout: JSON.stringify({ id: "cli:pane:split", result: { type: "pane_info", pane: { pane_id: "w2T:p-new" } } }), stderr: "" };
       }
       if (command === "herdr" && args[0] === "pane" && args[1] === "process-info") {
         return {
           code: 0,
-          stdout: JSON.stringify({ result: { process_info: {
+          stdout: JSON.stringify({ id: "cli:pane:process_info", result: { type: "pane_process_info", process_info: {
             pane_id: "w2T:p-new", shell_pid: 10, foreground_process_group_id: 10,
             foreground_processes: [{ pid: 10, name: "zsh" }],
           } } }),
@@ -168,8 +175,8 @@ try {
     assert.equal(existingCalls.some(({ command, args }) => command === "herdr" &&
       args[0] === "tab" && args[1] === "rename" && args[2] === "w2T:tR" && args[3] === "runs"), label === "workshop");
     const split = existingCalls.find(({ command }) => command === "qq-herdr-pane-add");
-    assert.deepEqual(split.args.slice(0, 4), [
-      "w2T:p-right", "--cwd", existingPreparation.worktree, "--no-focus",
+    assert.deepEqual(split.args.slice(0, 5), [
+      "--pane", "w2T:p-right", "--cwd", existingPreparation.worktree, "--no-focus",
     ]);
   }
 
@@ -182,8 +189,8 @@ try {
   await assert.rejects(lib.awaitBriefGate({
     env, prepared: failedGate, pluginRoot: join(root, "plugins", "brief-gate"),
     async run(_command, args) {
-      if (args[0] === "plugin" && args[1] === "list") return { code: 0, stdout: JSON.stringify({ result: { plugins: [{ plugin_id: "qq.brief-gate", enabled: true }] } }), stderr: "" };
-      if (args[0] === "plugin" && args[1] === "pane" && args[2] === "open") return { code: 0, stdout: JSON.stringify({ result: { plugin_pane: { pane: { pane_id: "w2T:pF" } } } }), stderr: "" };
+      if (args[0] === "plugin" && args[1] === "list") return { code: 0, stdout: JSON.stringify({ id: "cli:plugin", result: { type: "plugin_list", plugins: [{ plugin_id: "qq.brief-gate", enabled: true }] } }), stderr: "" };
+      if (args[0] === "plugin" && args[1] === "pane" && args[2] === "open") return { code: 0, stdout: JSON.stringify({ id: "cli:plugin", result: { type: "plugin_pane_opened", plugin_pane: { pane: { pane_id: "w2T:pF" } } } }), stderr: "" };
       if (args[0] === "pane" && args[1] === "wait-output") return { code: 1, stdout: exactBrief, stderr: "" };
       if (args[0] === "plugin" && args[1] === "pane" && args[2] === "close") { failedGateClosed = true; return { code: 0, stdout: "", stderr: "" }; }
       throw new Error(`unexpected command: ${args.join(" ")}`);

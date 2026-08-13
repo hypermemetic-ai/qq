@@ -25,6 +25,8 @@ grep -q '%h/.local/state/herdr/herdr.log' "$root/systemd/user/herdr.service"
 [[ -x "$root/bin/qq-herdr-pane-add" ]]
 [[ -x "$root/bin/qq-herdr-smoke" ]]
 [[ -x "$root/bin/qq-herdr-launch" ]]
+[[ -x "$root/tests/test-herdr-live.sh" ]]
+grep -q 'integration status --outdated-only' "$root/bin/qq-herdr-build"
 grep -q -- 'ghostty --gtk-single-instance=true --title=herdr -e' "$root/bin/qq-herdr-launch"
 
 ghostty_config="$root/ghostty/config"

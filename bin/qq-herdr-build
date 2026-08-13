@@ -70,6 +70,7 @@ if [[ "$mode" == install ]]; then
   temp_install="$install_path.tmp.$$"
   install -m 0755 "$binary_out" "$temp_install"
   mv -f "$temp_install" "$install_path"
+  "$install_path" integration status --outdated-only
   printf 'installed %s\n' "$install_path"
 else
   printf 'built %s\n' "$binary_out"

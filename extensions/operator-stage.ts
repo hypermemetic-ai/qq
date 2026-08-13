@@ -3,14 +3,14 @@
 // The agent never sends keys. Low danger: Enter runs it. High danger: Enter, then y.
 
 export function parsePaneId(stdout) {
-  if (typeof stdout !== "string") return undefined;
-  try {
-    const response = JSON.parse(stdout);
-    for (const candidate of [response?.result?.pane_id, response?.result?.pane?.pane_id, response?.result?.id]) {
-      if (typeof candidate === "string" && candidate.length > 0) return candidate;
-    }
-  } catch {}
-  return stdout.match(/\b\w+:[A-Za-z0-9]+\b/)?.[0];
+  let response;
+  try { response = JSON.parse(stdout); } catch { throw new Error("Herdr returned malformed JSON"); }
+  const paneId = response?.result?.pane?.pane_id;
+  if (typeof response?.id !== "string" || response.id.length === 0 ||
+      response?.result?.type !== "pane_info" || typeof paneId !== "string" || paneId.length === 0) {
+    throw new Error("Herdr returned no created pane id");
+  }
+  return paneId;
 }
 
 export function stagedLine(command, danger) {
@@ -86,9 +86,11 @@ export default function registerOperatorStage(pi, deps = {}) {
         return result(`operator_stage could not create a pane: ${executionReason(split, "unknown herdr split error")}`, details);
       }
 
-      const paneId = parsePaneId(split.stdout);
-      if (!paneId) {
-        return result(`operator_stage could not read the created pane id: ${executionReason(split, "herdr returned no readable pane id")}`, details);
+      let paneId;
+      try {
+        paneId = parsePaneId(split.stdout);
+      } catch (error) {
+        return result(`operator_stage could not read the created pane id: ${error instanceof Error ? error.message : String(error)}`, details);
       }
       details.pane_id = paneId;
 
