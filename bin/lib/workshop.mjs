@@ -13,9 +13,19 @@ const PANE_SHELLS = new Set([
   "elvish", "xonsh", "nu", "pwsh", "powershell", "cmd",
 ]);
 
-export function parseHerdr(stdout) {
-  if (typeof stdout !== "string") return undefined;
-  try { return JSON.parse(stdout)?.result; } catch { return undefined; }
+export function parseHerdr(stdout, expectedType) {
+  let response;
+  try { response = JSON.parse(stdout); } catch { throw new Error("Herdr returned malformed JSON"); }
+  if (!response || typeof response !== "object" || Array.isArray(response) ||
+      typeof response.id !== "string" || response.id.length === 0 ||
+      !response.result || typeof response.result !== "object" || Array.isArray(response.result) ||
+      typeof response.result.type !== "string" || response.result.type.length === 0) {
+    throw new Error("Herdr returned a malformed response");
+  }
+  if (expectedType !== undefined && response.result.type !== expectedType) {
+    throw new Error(`Herdr returned ${response.result.type}, expected ${expectedType}`);
+  }
+  return response.result;
 }
 
 export function taskSlug(value) {
@@ -108,17 +118,15 @@ async function checked(run, command, args, options, label) {
 }
 
 function paneFromTabCreate(result) {
-  const parsed = parseHerdr(result?.stdout);
-  return parsed?.root_pane?.pane_id;
+  return parseHerdr(result?.stdout, "tab_created")?.root_pane?.pane_id;
 }
 
 function paneFromSplit(result) {
-  const parsed = parseHerdr(result?.stdout);
-  return parsed?.pane?.pane_id || parsed?.pane_id;
+  return parseHerdr(result?.stdout, "pane_info")?.pane?.pane_id;
 }
 
 function paneFromPluginOpen(result) {
-  return parseHerdr(result?.stdout)?.plugin_pane?.pane?.pane_id;
+  return parseHerdr(result?.stdout, "plugin_pane_opened")?.plugin_pane?.pane?.pane_id;
 }
 
 async function readGateDecision(path) {
@@ -140,7 +148,7 @@ export async function awaitBriefGate(options) {
   if (typeof callerPane !== "string" || callerPane === "") throw new Error("delegate requires a Herdr pane");
 
   const listed = await checked(run, "herdr", ["plugin", "list", "--json"], { signal }, "cannot inspect Herdr plugins");
-  const plugins = parseHerdr(listed.stdout)?.plugins;
+  const plugins = parseHerdr(listed.stdout, "plugin_list")?.plugins;
   if (!Array.isArray(plugins)) throw new Error("Herdr returned a malformed plugin list");
   const installed = plugins.find((plugin) => plugin?.plugin_id === BRIEF_GATE_PLUGIN);
   if (!installed) {
@@ -208,7 +216,7 @@ export async function waitForAvailableShell(run, paneId, options = {}) {
   let last;
   while (now() < deadline) {
     last = await run("herdr", ["pane", "process-info", "--pane", paneId], {});
-    if (last?.code === 0 && paneHasAvailableShell(parseHerdr(last.stdout))) return last;
+    if (last?.code === 0 && paneHasAvailableShell(parseHerdr(last.stdout, "pane_process_info"))) return last;
     await sleep(intervalMs);
   }
   throw new Error(`runs pane ${paneId} never became an available shell: ${reason(last, "not a free shell")}`);
@@ -240,7 +248,7 @@ export async function spawnWorkshop(options) {
     createdWorktree = true;
 
     const tabsResult = await checked(run, "herdr", ["tab", "list", "--workspace", workspace], {}, "cannot list Herdr tabs");
-    const tabs = parseHerdr(tabsResult.stdout)?.tabs ?? [];
+    const tabs = parseHerdr(tabsResult.stdout, "tab_list")?.tabs ?? [];
     const runsTab = tabs.find((tab) => tab?.label === "runs") ?? tabs.find((tab) => tab?.label === "workshop");
     const paneEnv = [
       `QQ_AGENT_ROLE=runner`, `QQ_AGENT_PROJECT=${project}`, `QQ_WORKSHOP_STATE=${statePath}`,
@@ -256,11 +264,11 @@ export async function spawnWorkshop(options) {
         await checked(run, "herdr", ["tab", "rename", runsTab.tab_id, "runs"], {}, "cannot rename workshop tab to runs");
       }
       const panesResult = await checked(run, "herdr", ["pane", "list", "--workspace", workspace], {}, "cannot list runs panes");
-      const parent = (parseHerdr(panesResult.stdout)?.panes ?? [])
+      const parent = (parseHerdr(panesResult.stdout, "pane_list")?.panes ?? [])
         .filter((pane) => pane?.tab_id === runsTab.tab_id)
         .at(-1)?.pane_id;
       if (!parent) throw new Error("runs tab has no pane to split");
-      const args = [parent, "--cwd", worktree, "--no-focus"];
+      const args = ["--pane", parent, "--cwd", worktree, "--no-focus"];
       for (const entry of paneEnv) args.push("--env", entry);
       const split = await checked(run, "qq-herdr-pane-add", args, {}, "cannot add runs pane");
       paneId = paneFromSplit(split);

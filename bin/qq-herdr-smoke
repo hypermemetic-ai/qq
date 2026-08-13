@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=/dev/null
+source "$root/herdr/downstream/upstream.env"
 binary=${1:-${QQ_HERDR_BINARY:-${XDG_CACHE_HOME:-$HOME/.cache}/qq/herdr/bin/herdr}}
 [[ -x "$binary" ]] || { printf 'qq-herdr-smoke: binary not executable: %s\n' "$binary" >&2; exit 1; }
+expected_version="herdr ${HERDR_UPSTREAM_TAG#v}"
+[[ $("$binary" --version) == "$expected_version" ]] || {
+  printf 'qq-herdr-smoke: expected %s, found %s\n' "$expected_version" "$("$binary" --version)" >&2
+  exit 1
+}
 
 base=$(mktemp -d)
 server=
@@ -19,30 +27,42 @@ cleanup() {
   rm -rf "$base"
 }
 trap cleanup EXIT
-mkdir -p "$base/config/herdr" "$base/runtime"
+mkdir -p "$base/config/herdr" "$base/runtime" "$base/state" "$base/home"
 printf 'onboarding = false\n[ui]\npane_preferred_width = 60\n' > "$base/config/herdr/config.toml"
 
-run=(env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_TAB_ID -u HERDR_WORKSPACE_ID \
-  XDG_CONFIG_HOME="$base/config" XDG_RUNTIME_DIR="$base/runtime" \
-  HERDR_SOCKET_PATH="$base/runtime/herdr.sock" SHELL=/bin/bash)
+run=(env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_TAB_ID -u HERDR_WORKSPACE_ID -u HERDR_CONFIG_PATH \
+  HOME="$base/home" XDG_CONFIG_HOME="$base/config" XDG_RUNTIME_DIR="$base/runtime" \
+  XDG_STATE_HOME="$base/state" HERDR_SOCKET_PATH="$base/runtime/herdr.sock" SHELL=/bin/bash)
 "${run[@]}" "$binary" server >"$base/server.log" 2>&1 &
 server=$!
 for _ in $(seq 1 200); do
   [[ -S "$base/runtime/herdr.sock" ]] && break
+  kill -0 "$server" 2>/dev/null || { cat "$base/server.log" >&2; exit 1; }
   sleep .05
 done
 [[ -S "$base/runtime/herdr.sock" ]] || { cat "$base/server.log" >&2; exit 1; }
 
-pane=$(python3 - "$base/runtime/herdr.sock" <<'PY'
-import json, socket, sys
-sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-sock.connect(sys.argv[1])
-sock.sendall(b'{"id":"create","method":"workspace.create","params":{"cwd":"/tmp","focus":true}}\n')
-print(json.loads(sock.makefile().readline())["result"]["root_pane"]["pane_id"])
-PY
-)
+result_value() {
+  python3 -c '
+import json, sys
+response = json.load(sys.stdin)
+assert isinstance(response, dict) and isinstance(response.get("id"), str), response
+result = response.get("result")
+assert isinstance(result, dict) and result.get("type") == sys.argv[1], response
+value = result
+for key in sys.argv[2:]:
+    value = value[key]
+assert isinstance(value, (str, int, bool)), value
+print(value)
+' "$@"
+}
+
+created=$("${run[@]}" "$binary" workspace create --cwd /tmp --focus)
+workspace=$(printf '%s' "$created" | result_value workspace_created workspace workspace_id)
+pane=$(printf '%s' "$created" | result_value workspace_created root_pane pane_id)
+
 timeout 30 script -qfec \
-  "stty rows 50 cols 160; exec env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_TAB_ID -u HERDR_WORKSPACE_ID XDG_CONFIG_HOME='$base/config' XDG_RUNTIME_DIR='$base/runtime' HERDR_SOCKET_PATH='$base/runtime/herdr.sock' SHELL=/bin/bash '$binary'" \
+  "stty rows 50 cols 160; exec env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_TAB_ID -u HERDR_WORKSPACE_ID -u HERDR_CONFIG_PATH HOME='$base/home' XDG_CONFIG_HOME='$base/config' XDG_RUNTIME_DIR='$base/runtime' XDG_STATE_HOME='$base/state' HERDR_SOCKET_PATH='$base/runtime/herdr.sock' SHELL=/bin/bash '$binary'" \
   "$base/client.typescript" >/dev/null 2>&1 &
 client=$!
 
@@ -81,5 +101,93 @@ assert area == {"x": 26, "y": 1, "width": 134, "height": 49}, area
 request("pane.close", {"pane_id": second})
 root = request("layout.export", {"pane_id": first})["layout"]["root"]
 assert abs(root["ratio"] - .5) < 1e-5, root
-print("herdr disposable-session geometry passed")
+request("pane.close", {"pane_id": third})
 PY
+
+printf '# Exact disposable brief\n' > "$base/brief.md"
+cat > "$base/glow" <<'EOF'
+#!/usr/bin/env bash
+[[ "$1" == "-t" ]]
+cat "$2"
+EOF
+chmod 0700 "$base/glow"
+
+linked=$("${run[@]}" "$binary" plugin link "$root/plugins/brief-gate" --enabled)
+[[ $(printf '%s' "$linked" | result_value plugin_linked plugin plugin_id) == qq.brief-gate ]]
+plugins=$("${run[@]}" "$binary" plugin list --json)
+printf '%s' "$plugins" | python3 -c '
+import json, sys
+response = json.load(sys.stdin)
+result = response.get("result", {})
+assert isinstance(response.get("id"), str) and result.get("type") == "plugin_list", response
+assert any(plugin.get("plugin_id") == "qq.brief-gate" and plugin.get("enabled") for plugin in result.get("plugins", [])), result
+'
+
+opened=$("${run[@]}" "$binary" plugin pane open \
+  --plugin qq.brief-gate --entrypoint review --placement zoomed --target-pane "$pane" \
+  --env "QQ_BRIEF_GATE_BRIEF=$base/brief.md" \
+  --env "QQ_BRIEF_GATE_DECISION=$base/decision" \
+  --env "QQ_BRIEF_GATE_GLOW=$base/glow" --focus)
+gate=$(printf '%s' "$opened" | result_value plugin_pane_opened plugin_pane pane pane_id)
+"${run[@]}" "$binary" pane send-text "$gate" a >/dev/null
+waited=$("${run[@]}" "$binary" pane wait-output "$gate" \
+  --source recent-unwrapped --match QQ_BRIEF_GATE_DECIDED --timeout 5000)
+[[ $(printf '%s' "$waited" | result_value output_matched pane_id) == "$gate" ]]
+[[ $(<"$base/decision") == approved ]]
+closed_gate=$("${run[@]}" "$binary" plugin pane close "$gate")
+[[ $(printf '%s' "$closed_gate" | result_value plugin_pane_closed pane_id) == "$gate" ]]
+
+runs=$("${run[@]}" "$binary" tab create --workspace "$workspace" --label runs --cwd /tmp --no-focus)
+runs_pane=$(printf '%s' "$runs" | result_value tab_created root_pane pane_id)
+tabs=$("${run[@]}" "$binary" tab list --workspace "$workspace")
+printf '%s' "$tabs" | python3 -c '
+import json, sys
+response = json.load(sys.stdin)
+result = response.get("result", {})
+assert isinstance(response.get("id"), str) and result.get("type") == "tab_list", response
+assert any(tab.get("label") == "runs" for tab in result.get("tabs", [])), result
+'
+
+split=$("${run[@]}" QQ_HERDR_BIN="$binary" "$root/bin/qq-herdr-pane-add" \
+  --pane "$runs_pane" --cwd /tmp --no-focus)
+split_pane=$(printf '%s' "$split" | result_value pane_info pane pane_id)
+renamed=$("${run[@]}" "$binary" pane rename "$split_pane" 'contract pane')
+[[ $(printf '%s' "$renamed" | result_value pane_info pane pane_id) == "$split_pane" ]]
+
+ready=false
+for _ in $(seq 1 100); do
+  info=$("${run[@]}" "$binary" pane process-info --pane "$split_pane")
+  if printf '%s' "$info" | python3 -c '
+import json, os, sys
+response = json.load(sys.stdin)
+result = response.get("result", {})
+assert isinstance(response.get("id"), str) and result.get("type") == "pane_process_info", response
+info = result.get("process_info", {})
+shell = info.get("shell_pid")
+processes = info.get("foreground_processes", [])
+ok = isinstance(shell, int) and shell > 0 and info.get("foreground_process_group_id") == shell
+ok = ok and len(processes) == 1 and processes[0].get("pid") == shell
+ok = ok and os.path.basename(processes[0].get("name", "")).lstrip("-") in {"sh", "bash", "zsh"}
+raise SystemExit(0 if ok else 1)
+'; then
+    ready=true
+    break
+  fi
+  sleep .05
+done
+[[ "$ready" == true ]] || { echo 'qq-herdr-smoke: split pane never exposed an available shell' >&2; exit 1; }
+
+notification=$("${run[@]}" "$binary" notification show 'QQ contract smoke' --body disposable --sound none)
+printf '%s' "$notification" | result_value notification_show type >/dev/null
+closed_pane=$("${run[@]}" "$binary" pane close "$split_pane")
+printf '%s' "$closed_pane" | result_value ok type >/dev/null
+panes=$("${run[@]}" "$binary" pane list --workspace "$workspace")
+printf '%s' "$panes" | python3 -c '
+import json, sys
+response = json.load(sys.stdin)
+result = response.get("result", {})
+assert isinstance(response.get("id"), str) and result.get("type") == "pane_list", response
+assert all(pane.get("pane_id") != sys.argv[1] for pane in result.get("panes", [])), result
+' "$split_pane"
+
+printf 'herdr disposable-session geometry and QQ CLI contract passed\n'
