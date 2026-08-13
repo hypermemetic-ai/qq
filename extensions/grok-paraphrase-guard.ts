@@ -1,11 +1,12 @@
 // @ts-nocheck
 import { profileFor, readExecutionPolicy } from "../bin/lib/execution-profiles.mjs";
 
-// Grok 4.6 only. Adjacent text-bearing turns that stay similar five times
-// abort the run. First trip rewinds /tree once. Second trip switches this
-// session to the runner sol-high profile (gpt-5.6-sol · xhigh). If that
-// profile is missing, it just stops. Delete this file and its index.ts
-// import to retire.
+// Grok 4.6 only. Three exact repetitions of a substantial block inside one
+// streamed response abort and receive one terse grounding message. A recurrence
+// within the next few completed turns enters the existing escalation: rewind
+// once, then switch to runner sol-high. Five adjacent similar completed turns
+// still enter that escalation directly. Delete this file and its index import
+// to retire.
 
 export const STREAK_LIMIT = 5;
 export const MIN_CHARS = 40;
@@ -14,8 +15,16 @@ export const TEXT_CAP = 240;
 export const TARGET_MODEL = "grok-4.6";
 export const FALLBACK_ROLE = "runner";
 export const FALLBACK_PROFILE = "sol-high";
+export const SANITY_MESSAGE = "Stop, you are repeating yourself. Continue with the work.";
+export const RECOVERY_TURNS = 3;
+export const REPEAT_MIN_WORDS = 12;
+export const REPEAT_MAX_WORDS = 48;
+export const REPEAT_COUNT = 3;
+export const STREAM_TEXT_CAP = 12_000;
+export const STREAM_WORD_CAP = 256;
 
 const WHITESPACE = /\s+/g;
+const WORD = /[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu;
 
 export function normalizeText(value) {
   return String(value ?? "").replace(WHITESPACE, " ").trim().toLowerCase();
@@ -46,6 +55,30 @@ export function jaccard(left, right) {
   let overlap = 0;
   for (const gram of a) if (b.has(gram)) overlap += 1;
   return overlap / (a.size + b.size - overlap);
+}
+
+export function repeatedStreamBlock(value, options = {}) {
+  const repeats = Number.isInteger(options.repeats) ? options.repeats : REPEAT_COUNT;
+  const minimum = Number.isInteger(options.minimum) ? options.minimum : REPEAT_MIN_WORDS;
+  const maximum = Number.isInteger(options.maximum) ? options.maximum : REPEAT_MAX_WORDS;
+  const words = (normalizeText(value).match(WORD) ?? []).slice(-STREAM_WORD_CAP);
+  if (repeats < 2 || minimum < 1 || maximum < minimum || words.length < repeats * minimum) return undefined;
+
+  for (let end = repeats * minimum; end <= words.length; end += 1) {
+    const largest = Math.min(maximum, Math.floor(end / repeats));
+    for (let size = minimum; size <= largest; size += 1) {
+      const start = end - repeats * size;
+      let same = true;
+      for (let offset = size; offset < repeats * size; offset += 1) {
+        if (words[start + offset] !== words[start + (offset % size)]) {
+          same = false;
+          break;
+        }
+      }
+      if (same) return { repeats, words: size, text: words.slice(start, start + size).join(" ") };
+    }
+  }
+  return undefined;
 }
 
 export function isGrok46(ctx) {
@@ -84,6 +117,8 @@ export default function registerGrokParaphraseGuard(pi, deps = {}) {
   let preTurnLeaf;
   let recovered = false;
   let pending;
+  let streamText = "";
+  let sanityTurns = 0;
 
   const resetStreak = () => {
     lastText = "";
@@ -96,6 +131,8 @@ export default function registerGrokParaphraseGuard(pi, deps = {}) {
     resetStreak();
     recovered = false;
     pending = undefined;
+    streamText = "";
+    sanityTurns = 0;
   };
 
   pi.on("session_start", reset);
@@ -106,15 +143,37 @@ export default function registerGrokParaphraseGuard(pi, deps = {}) {
 
   pi.on("turn_start", (_event, ctx) => {
     if (pending) return;
+    streamText = "";
     preTurnLeaf = ctx.sessionManager?.getLeafId?.();
+  });
+
+  pi.on("message_update", (event, ctx) => {
+    if (pending || !isGrok46(ctx)) return;
+    const update = event?.assistantMessageEvent;
+    if ((update?.type !== "thinking_delta" && update?.type !== "text_delta") || typeof update.delta !== "string") return;
+    streamText = (streamText + update.delta).slice(-STREAM_TEXT_CAP);
+    const repeat = repeatedStreamBlock(streamText, deps.streamRepeat);
+    if (!repeat) return;
+
+    const sanity = sanityTurns === 0 && !recovered;
+    if (!sanity) sanityTurns = 0;
+    pending = {
+      sanity,
+      source: "stream",
+      streak: repeat.repeats,
+      target: lastGoodId ?? usableRewindTarget(ctx.sessionManager?.getBranch?.() ?? [], preTurnLeaf),
+    };
+    ctx.abort();
   });
 
   pi.on("turn_end", (event, ctx) => {
     if (pending) return;
     if (!isGrok46(ctx)) {
       resetStreak();
+      sanityTurns = 0;
       return;
     }
+    if (sanityTurns > 0) sanityTurns -= 1;
     const text = assistantText(event);
     if (!text) return;
 
@@ -127,7 +186,7 @@ export default function registerGrokParaphraseGuard(pi, deps = {}) {
     lastText = text;
     if (streak < limit) return;
 
-    pending = { streak, target: lastGoodId };
+    pending = { source: "turn", streak, target: lastGoodId };
     ctx.abort();
   });
 
@@ -135,7 +194,17 @@ export default function registerGrokParaphraseGuard(pi, deps = {}) {
     const action = pending;
     if (!action) return;
     pending = undefined;
+    streamText = "";
 
+    if (action.sanity) {
+      resetStreak();
+      sanityTurns = RECOVERY_TURNS;
+      pi.sendUserMessage(SANITY_MESSAGE);
+      ctx.ui?.notify?.("qq grok-paraphrase-guard: aborted in-turn repetition and steered once.", "warning");
+      return;
+    }
+
+    sanityTurns = 0;
     if (!recovered) {
       if (action.target && typeof ctx.navigateTree === "function") {
         await ctx.navigateTree(action.target, { summarize: false });
