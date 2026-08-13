@@ -9,7 +9,7 @@ source "$downstream/upstream.env"
 [[ "$HERDR_UPSTREAM_TAG" == v0.8.0 ]]
 [[ "$HERDR_UPSTREAM_COMMIT" == 346411fa21afd297f5ed3b3fa56f9e3fbf7654b7 ]]
 [[ -s "$downstream/patches/0001-centered-pane-row.patch" ]]
-grep -q 'pane_preferred_width = 60' "$root/herdr/config.toml"
+grep -q 'pane_preferred_width = 80' "$root/herdr/config.toml"
 grep -q 'previous_workspace = "alt+up"' "$root/herdr/config.toml"
 grep -q 'next_workspace = "alt+down"' "$root/herdr/config.toml"
 grep -q 'previous_tab = "alt+left"' "$root/herdr/config.toml"

@@ -24,4 +24,4 @@ command = "bash -ic 'hcbr; exec bash -i'"
 
 [ui]
 agent_panel_sort = "spaces"
-pane_preferred_width = 60
+pane_preferred_width = 80

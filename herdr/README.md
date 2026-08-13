@@ -4,7 +4,7 @@ QQ pins Herdr source and carries one deliberately small downstream patch.
 
 - `downstream/upstream.env` is the source/tag/commit manifest.
 - `downstream/patches/0001-centered-pane-row.patch` adds `ui.pane_preferred_width`, centers only the pane canvas, and balances horizontal rows after ordinary split-right and close operations.
-- `config.toml` is the live configuration, with a 60-column preferred pane width.
+- `config.toml` is the live configuration, with an 80-column preferred pane width.
 - `qq-herdr-pane-add` is the only QQ-owned add-pane primitive. It fixes direction to right and leaves explicit ratio/layout overrides available through raw Herdr APIs when needed.
 
 ## Build and upgrade
