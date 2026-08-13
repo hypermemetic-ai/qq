@@ -5,7 +5,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { readExecutionPolicy } from "../bin/lib/execution-profiles.mjs";
-import { spawnWorkshop } from "../bin/lib/workshop.mjs";
+import { awaitBriefGate, discardWorkshop, prepareWorkshop, spawnWorkshop } from "../bin/lib/workshop.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BACKLOG = join(QQ_ROOT, "node_modules", ".bin", "backlog");
@@ -107,28 +107,48 @@ export default function registerWorkshop(pi, deps = {}) {
   });
 
   pi.registerTool({
-    name: "delegate", label: "Delegate", promptSnippet: "Brief and spawn one aligned task in a workshop worktree",
-    description: "Brief one To Do task, create an isolated worktree, and start a messaging-enabled runner in the current Herdr workspace. Returns after startup; it never waits for the runner's work. Architect sessions only.",
+    name: "delegate", label: "Delegate", promptSnippet: "Brief, obtain operator approval, and spawn one aligned task",
+    description: "Brief one To Do task, wait for approval or cancellation in an operator-owned Glow pane, then create an isolated worktree and start a messaging-enabled runner if approved. Architect sessions only.",
     parameters: { type: "object", additionalProperties: false, required: ["id"], properties: { id: { type: "string" } } },
     async execute(_id, params, signal, _update, ctx) {
       if (role !== "architect") return result("delegate is available only in an architect session.");
       let claimedTask;
+      let prepared;
+      let outboundBrief;
       try {
         const task = await taskView(run, ctx.cwd, params.id, signal);
         if (task.status !== "To Do") return result(`delegate refused: ${task.id} is ${task.status}, not To Do.`, { task_id: task.id });
+        const { brief, qaBinding } = await (deps.makeBrief ?? makeBrief)(ctx, task, deps);
+        outboundBrief = brief;
+        const project = env.QQ_AGENT_PROJECT || basename(resolve(ctx.cwd));
+        prepared = await (deps.prepareWorkshop ?? prepareWorkshop)({ cwd: ctx.cwd, env, project, task, brief });
+        const decision = await (deps.awaitBriefGate ?? awaitBriefGate)({
+          run, env, prepared, signal,
+          pluginRoot: deps.briefGatePluginPath ?? join(QQ_ROOT, "plugins", "brief-gate"),
+        });
+        if (decision === "cancelled") {
+          await (deps.discardWorkshop ?? discardWorkshop)(prepared);
+          prepared = undefined;
+          return result(`Cancelled ${task.id}; runner not started.`, { status: "cancelled", task_id: task.id });
+        }
+
         const moved = await run(BACKLOG, ["task", "edit", task.id, "--status", "In Progress", "--plain"], { cwd: ctx.cwd, signal });
         if (moved?.code !== 0) throw new Error(`cannot align ${task.id}: ${commandReason(moved, "Backlog failed")}`);
         claimedTask = task.id;
-        const { brief, qaBinding } = await (deps.makeBrief ?? makeBrief)(ctx, task, deps);
-        const state = await spawnWorkshop({
-          run, cwd: ctx.cwd, env, task, brief, qaBinding,
-          project: env.QQ_AGENT_PROJECT || basename(resolve(ctx.cwd)),
+        await (deps.spawnWorkshop ?? spawnWorkshop)({
+          run, cwd: ctx.cwd, env, task, prepared, qaBinding, project,
           architectSession: ctx.sessionManager.getSessionId(),
         });
-        return result(`Delegated ${task.id} to runner pane ${state.pane}. The runner is working asynchronously in ${state.worktree}.`, { status: "running", ...state });
+        prepared = undefined;
+        return result(`Approved ${task.id}; runner started.`, { status: "approved", task_id: task.id });
       } catch (error) {
-        if (claimedTask) await run(BACKLOG, ["task", "edit", claimedTask, "--status", "To Do", "--plain"], { cwd: ctx.cwd, signal }).catch(() => {});
-        return result(`delegate refused: ${error instanceof Error ? error.message : String(error)}`, { status: "refused" });
+        if (claimedTask) await run(BACKLOG, ["task", "edit", claimedTask, "--status", "To Do", "--plain"], { cwd: ctx.cwd }).catch(() => {});
+        if (prepared) {
+          try { await (deps.discardWorkshop ?? discardWorkshop)(prepared); } catch {}
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        const safeMessage = outboundBrief && message.includes(outboundBrief) ? "workshop operation failed" : message;
+        return result(`delegate refused: ${safeMessage}`, { status: "refused" });
       }
     },
   });

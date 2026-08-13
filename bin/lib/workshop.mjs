@@ -5,6 +5,9 @@ import { basename, dirname, join, resolve } from "node:path";
 
 const TASK_ID = /^[A-Za-z]+-[1-9][0-9]*(?:\.[1-9][0-9]*)?$/;
 const SAFE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+const BRIEF_GATE_PLUGIN = "qq.brief-gate";
+const BRIEF_GATE_ENTRYPOINT = "review";
+const BRIEF_GATE_MARKER = "QQ_BRIEF_GATE_DECIDED";
 
 export function parseHerdr(stdout) {
   if (typeof stdout !== "string") return undefined;
@@ -40,6 +43,43 @@ async function privateDirectory(path) {
   }
 }
 
+function projectSlug(value) {
+  const project = String(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  if (!SAFE.test(project)) throw new Error("project cannot form a safe slug");
+  return project;
+}
+
+export async function prepareWorkshop(options) {
+  const { cwd, env = process.env, task, brief } = options;
+  const project = projectSlug(options.project || basename(resolve(cwd)));
+  const workspace = env.HERDR_WORKSPACE_ID;
+  if (typeof workspace !== "string" || workspace === "") throw new Error("delegate requires a Herdr workspace");
+  if (typeof brief !== "string" || brief.trim() === "") throw new Error("delegate requires a non-empty brief");
+  const slug = taskSlug(task.id);
+  const nonce = randomUUID().slice(0, 8);
+  const stateDir = join(workshopRoot(project, env), `${slug}-${nonce}`);
+  const prepared = {
+    taskId: task.id, project, slug, nonce, stateDir,
+    branch: `qq/${slug}-${nonce}`,
+    worktree: join(worktreeRoot(project, env), `${slug}-${nonce}`),
+    statePath: join(stateDir, "handoff.json"),
+    briefPath: join(stateDir, "brief.md"),
+    decisionPath: join(stateDir, "brief-gate-decision"),
+  };
+  try {
+    await privateDirectory(stateDir);
+    await writeFile(prepared.briefPath, `${brief.trim()}\n`, { mode: 0o600, flag: "wx" });
+    return prepared;
+  } catch (error) {
+    await rm(stateDir, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+export async function discardWorkshop(prepared) {
+  if (prepared?.stateDir) await rm(prepared.stateDir, { recursive: true, force: true });
+}
+
 export async function atomicPrivateJson(path, value) {
   await privateDirectory(dirname(path));
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
@@ -73,18 +113,80 @@ function paneFromSplit(result) {
   return parsed?.pane?.pane_id || parsed?.pane_id;
 }
 
+function paneFromPluginOpen(result) {
+  return parseHerdr(result?.stdout)?.plugin_pane?.pane?.pane_id;
+}
+
+async function readGateDecision(path) {
+  let info;
+  try { info = await lstat(path); } catch { throw new Error("brief gate closed without a decision"); }
+  if (!info.isFile() || info.isSymbolicLink() || info.uid !== process.getuid() || (info.mode & 0o077) !== 0) {
+    throw new Error("brief gate returned an unsafe decision");
+  }
+  const decision = (await readFile(path, "utf8")).trim();
+  if (decision !== "approved" && decision !== "cancelled") throw new Error("brief gate returned an invalid decision");
+  return decision;
+}
+
+export async function awaitBriefGate(options) {
+  const { run, env = process.env, prepared, pluginRoot, signal } = options;
+  if (typeof run !== "function") throw new Error("awaitBriefGate requires a command runner");
+  if (typeof pluginRoot !== "string" || pluginRoot === "") throw new Error("brief gate plugin path is unavailable");
+  const workspace = env.HERDR_WORKSPACE_ID;
+  if (typeof workspace !== "string" || workspace === "") throw new Error("delegate requires a Herdr workspace");
+
+  const listed = await checked(run, "herdr", ["plugin", "list", "--json"], { signal }, "cannot inspect Herdr plugins");
+  const plugins = parseHerdr(listed.stdout)?.plugins;
+  if (!Array.isArray(plugins)) throw new Error("Herdr returned a malformed plugin list");
+  const installed = plugins.find((plugin) => plugin?.plugin_id === BRIEF_GATE_PLUGIN);
+  if (!installed) {
+    await checked(run, "herdr", ["plugin", "link", pluginRoot, "--enabled"], { signal }, "cannot link brief gate plugin");
+  } else if (!installed.enabled) {
+    await checked(run, "herdr", ["plugin", "enable", BRIEF_GATE_PLUGIN], { signal }, "cannot enable brief gate plugin");
+  }
+
+  await unlink(prepared.decisionPath).catch((error) => { if (error?.code !== "ENOENT") throw error; });
+  const opened = await checked(run, "herdr", [
+    "plugin", "pane", "open", "--plugin", BRIEF_GATE_PLUGIN, "--entrypoint", BRIEF_GATE_ENTRYPOINT,
+    "--placement", "overlay", "--workspace", workspace,
+    "--env", `QQ_BRIEF_GATE_BRIEF=${prepared.briefPath}`,
+    "--env", `QQ_BRIEF_GATE_DECISION=${prepared.decisionPath}`,
+    "--focus",
+  ], { signal }, "cannot open brief gate pane");
+  const paneId = paneFromPluginOpen(opened);
+  if (!paneId) throw new Error("Herdr returned no brief gate pane id");
+
+  let decision;
+  let failure;
+  try {
+    const waited = await run("herdr", [
+      "pane", "wait-output", paneId, "--source", "recent-unwrapped", "--match", BRIEF_GATE_MARKER,
+    ], { signal });
+    if (waited?.code !== 0) throw new Error("brief gate closed without a decision");
+    decision = await readGateDecision(prepared.decisionPath);
+  } catch (error) {
+    failure = error;
+  }
+
+  let closeFailure;
+  try {
+    const closed = await run("herdr", ["plugin", "pane", "close", paneId], {});
+    if (closed?.code !== 0) closeFailure = new Error("cannot close brief gate pane");
+  } catch {
+    closeFailure = new Error("cannot close brief gate pane");
+  }
+  await unlink(prepared.decisionPath).catch(() => {});
+  if (failure) throw failure;
+  if (closeFailure) throw closeFailure;
+  return decision;
+}
+
 export async function spawnWorkshop(options) {
-  const { run, cwd, env = process.env, task, brief, architectSession, qaBinding } = options;
+  const { run, cwd, env = process.env, task, architectSession, qaBinding } = options;
   if (typeof run !== "function") throw new Error("spawnWorkshop requires a command runner");
-  const project = String(options.project || basename(resolve(cwd))).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  if (!SAFE.test(project)) throw new Error("project cannot form a safe slug");
-  const slug = taskSlug(task.id);
-  const nonce = randomUUID().slice(0, 8);
-  const branch = `qq/${slug}-${nonce}`;
-  const worktree = join(worktreeRoot(project, env), `${slug}-${nonce}`);
-  const stateDir = join(workshopRoot(project, env), `${slug}-${nonce}`);
-  const statePath = join(stateDir, "handoff.json");
-  const briefPath = join(stateDir, "brief.md");
+  const prepared = options.prepared ?? await prepareWorkshop(options);
+  if (prepared.taskId !== task.id) throw new Error("prepared workshop belongs to another task");
+  const { project, slug, nonce, branch, worktree, stateDir, statePath, briefPath } = prepared;
   const workspace = env.HERDR_WORKSPACE_ID;
   if (typeof workspace !== "string" || workspace === "") throw new Error("delegate requires a Herdr workspace");
 
@@ -95,6 +197,7 @@ export async function spawnWorkshop(options) {
   let createdWorktree = false;
   let createdPane = false;
   try {
+    const runnerBrief = await readFile(briefPath, "utf8");
     mainRoot = (await checked(run, "git", ["rev-parse", "--show-toplevel"], { cwd }, "cannot identify repository")).stdout.trim();
     baseRef = (await checked(run, "git", ["rev-parse", "HEAD"], { cwd: mainRoot }, "cannot identify base ref")).stdout.trim();
     baseBranch = (await checked(run, "git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: mainRoot }, "delegate requires a named base branch")).stdout.trim();
@@ -102,7 +205,6 @@ export async function spawnWorkshop(options) {
     await privateDirectory(stateDir);
     await checked(run, "git", ["worktree", "add", "-b", branch, worktree, baseRef], { cwd: mainRoot }, "cannot create worktree");
     createdWorktree = true;
-    await writeFile(briefPath, `${brief.trim()}\n`, { mode: 0o600 });
 
     const tabsResult = await checked(run, "herdr", ["tab", "list", "--workspace", workspace], {}, "cannot list Herdr tabs");
     const tabs = parseHerdr(tabsResult.stdout)?.tabs ?? [];
@@ -137,8 +239,9 @@ export async function spawnWorkshop(options) {
     };
     await atomicPrivateJson(statePath, state);
     await checked(run, "herdr", ["agent", "start", `runner-${slug}-${nonce}`, "--kind", "pi", "--pane", paneId], {}, "cannot start workshop runner");
-    const prompt = `Work from the outbound brief at ${briefPath}. Implement the task in this worktree, commit the result, then call done with ref HEAD. Do not merge.\n\n${brief}`;
-    await checked(run, "herdr", ["agent", "prompt", paneId, prompt], {}, "cannot brief workshop runner");
+    const prompt = `Work from the outbound brief at ${briefPath}. Implement the task in this worktree, commit the result, then call done with ref HEAD. Do not merge.\n\n${runnerBrief.trimEnd()}`;
+    const prompted = await run("herdr", ["agent", "prompt", paneId, prompt], {});
+    if (prompted?.code !== 0) throw new Error("cannot brief workshop runner");
     state.status = "running";
     state.updatedAt = new Date().toISOString();
     await atomicPrivateJson(statePath, state);
