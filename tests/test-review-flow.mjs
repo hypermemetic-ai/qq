@@ -286,6 +286,10 @@ try {
   assert.ok(!failedRewrite.calls.some(({ command, args }) => command === "pi" || args.includes("--print")));
   assert.equal(started[1].args[2], review.runnerAgentName(failedRewrite.state));
   assert.equal(started[1].args[6], "w2T:p9");
+  const qaStartAt = failedRewrite.calls.findIndex(({ args }) => args[0] === "agent" && args[1] === "start" && args[2] === review.qaAgentName(failedRewrite.state));
+  const runnerStartAt = failedRewrite.calls.findIndex(({ args }) => args[0] === "agent" && args[1] === "start" && args[2] === review.runnerAgentName(failedRewrite.state));
+  const evictDoneQa = failedRewrite.calls.findIndex(({ args }, index) => index > qaStartAt && args[0] === "agent" && args[1] === "send-keys");
+  assert.ok(evictDoneQa > qaStartAt && evictDoneQa < runnerStartAt);
   assert.ok(!failedRewrite.calls.some(({ args }) => args[0] === "pane" && args[1] === "close"));
   assert.ok(!failedRewrite.calls.some(({ args }) => args[0] === "tab" && args[1] === "create"));
 

@@ -183,8 +183,8 @@ async function herdr(run, args, label) {
   return checked(run, "herdr", args, {}, label);
 }
 
-export async function waitForShell(run, pane, timeoutMs = 15_000) {
-  await waitForAvailableShell(run, pane, { timeoutMs });
+export async function waitForShell(run, pane, timeoutMs) {
+  await waitForAvailableShell(run, pane, timeoutMs == null ? {} : { timeoutMs });
 }
 
 export async function takePane(run, pane, name, args, timeoutMs = 30_000) {
@@ -194,11 +194,10 @@ export async function takePane(run, pane, name, args, timeoutMs = 30_000) {
   await herdr(run, start, `cannot start ${name} in runs pane`);
 }
 
-export async function stopAgent(run, pane, timeoutMs = 15_000) {
+export async function stopAgent(run, pane, timeoutMs) {
   const listed = await run("herdr", ["agent", "get", pane], {});
   const agent = parseHerdr(listed?.stdout);
-  const status = agent?.agent?.agent_status ?? agent?.agent_status;
-  if (listed?.code === 0 && status && status !== "done" && status !== "unknown") {
+  if (listed?.code === 0 && (agent?.agent || agent?.agent_status)) {
     await run("herdr", ["agent", "send-keys", pane, "ctrl+d"], {});
   }
   await waitForShell(run, pane, timeoutMs);
