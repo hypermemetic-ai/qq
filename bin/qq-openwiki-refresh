@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+MAIN_ROOT="${QQ_OPENWIKI_MAIN_ROOT:-$ROOT}"
+MAIN_BRANCH="${QQ_OPENWIKI_MAIN_BRANCH:-main}"
+BRANCH="${QQ_OPENWIKI_BRANCH:-qq/openwiki-refresh}"
+STATE_HOME="${XDG_STATE_HOME:-${HOME:?HOME is required}/.local/state}"
+WORKTREE="${QQ_OPENWIKI_WORKTREE:-$STATE_HOME/qq/openwiki/worktree}"
+OPENWIKI_BIN="${QQ_OPENWIKI_BIN:-openwiki}"
+PROMPT="${QQ_OPENWIKI_PROMPT:-Keep this wiki short and practical.}"
+
+MAIN_ROOT="$(git -C "$MAIN_ROOT" rev-parse --show-toplevel)"
+COMMON_DIR="$(git -C "$MAIN_ROOT" rev-parse --path-format=absolute --git-common-dir)"
+
+git -C "$MAIN_ROOT" check-ref-format --branch "$BRANCH" >/dev/null
+mkdir -p -- "$(dirname -- "$WORKTREE")"
+chmod 700 -- "$(dirname -- "$WORKTREE")"
+
+exec 9>"$COMMON_DIR/qq-openwiki.lock"
+if ! flock -n 9; then
+  echo "OpenWiki refresh is already running."
+  exit 0
+fi
+
+registered_worktree() {
+  git -C "$MAIN_ROOT" worktree list --porcelain | grep -Fqx "worktree $WORKTREE"
+}
+
+cleanup() {
+  if registered_worktree; then
+    git -C "$MAIN_ROOT" worktree remove --force -- "$WORKTREE" >/dev/null 2>&1 || true
+  fi
+  git -C "$MAIN_ROOT" worktree prune >/dev/null 2>&1 || true
+  if git -C "$MAIN_ROOT" show-ref --verify --quiet "refs/heads/$BRANCH"; then
+    git -C "$MAIN_ROOT" branch -D -- "$BRANCH" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+
+current_branch="$(git -C "$MAIN_ROOT" symbolic-ref --quiet --short HEAD)"
+if [[ "$current_branch" != "$MAIN_BRANCH" ]]; then
+  echo "OpenWiki main checkout is on $current_branch, not $MAIN_BRANCH." >&2
+  exit 1
+fi
+if [[ -n "$(git -C "$MAIN_ROOT" status --porcelain --untracked-files=all)" ]]; then
+  echo "OpenWiki will not merge into a dirty main checkout." >&2
+  exit 1
+fi
+
+if registered_worktree; then
+  git -C "$MAIN_ROOT" worktree remove --force -- "$WORKTREE"
+elif [[ -e "$WORKTREE" ]]; then
+  echo "OpenWiki worktree path exists but is not a registered Git worktree: $WORKTREE" >&2
+  exit 1
+fi
+git -C "$MAIN_ROOT" worktree prune
+if git -C "$MAIN_ROOT" show-ref --verify --quiet "refs/heads/$BRANCH"; then
+  git -C "$MAIN_ROOT" branch -D -- "$BRANCH" >/dev/null
+fi
+
+git -C "$MAIN_ROOT" worktree add --quiet -b "$BRANCH" "$WORKTREE" "$MAIN_BRANCH"
+
+(
+  cd -- "$WORKTREE"
+  "$OPENWIKI_BIN" code --update --print "$PROMPT"
+)
+
+rm -f -- "$WORKTREE/CLAUDE.md" "$WORKTREE/.github/workflows/openwiki-update.yml"
+rmdir -- "$WORKTREE/.github/workflows" 2>/dev/null || true
+rmdir -- "$WORKTREE/.github" 2>/dev/null || true
+git -C "$WORKTREE" restore --source=HEAD --staged --worktree -- AGENTS.md
+
+mapfile -t changed_paths < <(
+  {
+    git -C "$WORKTREE" diff --name-only HEAD --
+    git -C "$WORKTREE" ls-files --others --exclude-standard
+  } | sort -u
+)
+for path in "${changed_paths[@]}"; do
+  case "$path" in
+    openwiki/*) ;;
+    *)
+      echo "OpenWiki changed a non-generated path: $path" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if (( ${#changed_paths[@]} == 0 )); then
+  echo "OpenWiki is already current."
+  exit 0
+fi
+
+git -C "$WORKTREE" diff --check -- openwiki
+git -C "$WORKTREE" add -- openwiki
+git -C "$WORKTREE" commit --quiet -m "Refresh OpenWiki"
+refresh_ref="$(git -C "$WORKTREE" rev-parse HEAD)"
+
+exec 8>"$COMMON_DIR/qq-land.lock"
+flock 8
+
+current_branch="$(git -C "$MAIN_ROOT" symbolic-ref --quiet --short HEAD)"
+if [[ "$current_branch" != "$MAIN_BRANCH" ]]; then
+  echo "OpenWiki main checkout moved to $current_branch before merge." >&2
+  exit 1
+fi
+if [[ -n "$(git -C "$MAIN_ROOT" status --porcelain --untracked-files=all)" ]]; then
+  echo "OpenWiki generated $refresh_ref but main became dirty before merge." >&2
+  exit 1
+fi
+if ! git -C "$MAIN_ROOT" merge-tree --write-tree HEAD "$refresh_ref" >/dev/null; then
+  echo "OpenWiki generated $refresh_ref but it no longer merges cleanly." >&2
+  exit 1
+fi
+if ! git -C "$MAIN_ROOT" merge --quiet --no-ff --no-edit "$refresh_ref"; then
+  git -C "$MAIN_ROOT" merge --abort >/dev/null 2>&1 || true
+  exit 1
+fi
+
+echo "Merged OpenWiki refresh $refresh_ref into $MAIN_BRANCH."

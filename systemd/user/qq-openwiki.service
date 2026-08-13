@@ -5,9 +5,7 @@ Description=Refresh qq OpenWiki
 Type=oneshot
 TimeoutStartSec=6h
 WorkingDirectory=%h/projects/qq
+UMask=0077
 Environment=OPENWIKI_PROVIDER=openai-chatgpt
-ExecStart=/home/linuxbrew/.linuxbrew/bin/openwiki code --update --print "Keep this wiki short and practical."
-ExecStopPost=/usr/bin/rm -f %h/projects/qq/CLAUDE.md %h/projects/qq/.github/workflows/openwiki-update.yml
-ExecStopPost=-/usr/bin/sed -i "s|The scheduled OpenWiki GitHub Actions workflow refreshes the repository wiki.|A local systemd timer refreshes the repository wiki.|" %h/projects/qq/AGENTS.md
-ExecStopPost=-/usr/bin/rmdir %h/projects/qq/.github/workflows
-ExecStopPost=-/usr/bin/rmdir %h/projects/qq/.github
+Environment="PATH=%h/.local/bin:%h/.bun/bin:%h/.opencode/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=%h/projects/qq/bin/qq-openwiki-refresh
