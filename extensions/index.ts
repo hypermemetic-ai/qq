@@ -8,6 +8,7 @@ import registerDictationPrivate from "./dictation-private.ts";
 import registerBacklogGuard from "./backlog-guard.ts";
 import registerLoopGuard from "./loop-guard.ts";
 import registerWorkshop from "./workshop.ts";
+import registerReviewFlow from "./review-flow.ts";
 
 export default function registerQQ(pi) {
   registerExecutionProfiles(pi);
@@ -19,4 +20,5 @@ export default function registerQQ(pi) {
   registerBacklogGuard(pi);
   registerLoopGuard(pi);
   registerWorkshop(pi);
+  registerReviewFlow(pi);
 }

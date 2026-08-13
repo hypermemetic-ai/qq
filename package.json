@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "tests/test-event-plane.sh && node --experimental-strip-types tests/test-execution-profiles.mjs . && tests/test-telemetry.sh && node --experimental-strip-types tests/test-agent-messages.mjs . && tests/test-agent-messages-live.sh && node --experimental-strip-types tests/test-operator-stage.mjs . && node --experimental-strip-types tests/test-continue.mjs . && node --experimental-strip-types tests/test-session-scrub.mjs . && node --experimental-strip-types tests/test-dictation-private.mjs . && node --experimental-strip-types tests/test-backlog-guard.mjs . && node --experimental-strip-types tests/test-loop-guard.mjs . && node --experimental-strip-types tests/test-workshop.mjs ."
+    "test": "tests/test-event-plane.sh && node --experimental-strip-types tests/test-execution-profiles.mjs . && tests/test-telemetry.sh && node --experimental-strip-types tests/test-agent-messages.mjs . && tests/test-agent-messages-live.sh && node --experimental-strip-types tests/test-operator-stage.mjs . && node --experimental-strip-types tests/test-continue.mjs . && node --experimental-strip-types tests/test-session-scrub.mjs . && node --experimental-strip-types tests/test-dictation-private.mjs . && node --experimental-strip-types tests/test-backlog-guard.mjs . && node --experimental-strip-types tests/test-loop-guard.mjs . && node --experimental-strip-types tests/test-workshop.mjs . && node --experimental-strip-types tests/test-review-flow.mjs ."
   },
   "dependencies": {
     "backlog.md": "1.49.1"

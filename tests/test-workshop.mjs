@@ -57,6 +57,22 @@ try {
   const runnerRefusal = await delegate.execute("x", { id: "TASK-1" }, undefined, undefined, {});
   assert.match(runnerRefusal.content[0].text, /architect session/);
   events.get("qq:role-selected")({ role: "architect" });
+
+  const rollbackTools = [];
+  const rollbackEvents = new Map();
+  const statusChanges = [];
+  const rollbackRun = async (_command, args) => {
+    if (args[0] === "task" && args[1] === "view") return { code: 0, stdout: JSON.stringify({ task: { id: "TASK-1", title: "One task", status: "To Do", description: "Do it" } }), stderr: "" };
+    if (args[0] === "task" && args[1] === "edit") { statusChanges.push(args[4]); return { code: 0, stdout: "", stderr: "" }; }
+    throw new Error(`unexpected command: ${args.join(" ")}`);
+  };
+  extension.default({ registerTool(tool) { rollbackTools.push(tool); }, events: { on(name, fn) { rollbackEvents.set(name, fn); } } }, {
+    env, exec: rollbackRun, async makeBrief() { throw new Error("brief failed"); },
+  });
+  rollbackEvents.get("qq:role-selected")({ role: "architect" });
+  const rolledBack = await rollbackTools.find(({ name }) => name === "delegate").execute("x", { id: "TASK-1" }, undefined, undefined, { cwd: "/repo", sessionManager: { getSessionId() { return "session"; } } });
+  assert.match(rolledBack.content[0].text, /brief failed/);
+  assert.deepEqual(statusChanges, ["In Progress", "To Do"]);
 } finally {
   await rm(scratch, { recursive: true, force: true });
 }

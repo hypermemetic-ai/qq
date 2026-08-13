@@ -112,21 +112,22 @@ export default function registerWorkshop(pi, deps = {}) {
     parameters: { type: "object", additionalProperties: false, required: ["id"], properties: { id: { type: "string" } } },
     async execute(_id, params, signal, _update, ctx) {
       if (role !== "architect") return result("delegate is available only in an architect session.");
+      let claimedTask;
       try {
         const task = await taskView(run, ctx.cwd, params.id, signal);
         if (task.status !== "To Do") return result(`delegate refused: ${task.id} is ${task.status}, not To Do.`, { task_id: task.id });
+        const moved = await run(BACKLOG, ["task", "edit", task.id, "--status", "In Progress", "--plain"], { cwd: ctx.cwd, signal });
+        if (moved?.code !== 0) throw new Error(`cannot align ${task.id}: ${commandReason(moved, "Backlog failed")}`);
+        claimedTask = task.id;
         const { brief, qaBinding } = await (deps.makeBrief ?? makeBrief)(ctx, task, deps);
         const state = await spawnWorkshop({
           run, cwd: ctx.cwd, env, task, brief, qaBinding,
           project: env.QQ_AGENT_PROJECT || basename(resolve(ctx.cwd)),
           architectSession: ctx.sessionManager.getSessionId(),
         });
-        const moved = await run(BACKLOG, ["task", "edit", task.id, "--status", "In Progress", "--plain"], { cwd: ctx.cwd, signal });
-        if (moved?.code !== 0) {
-          return result(`Runner started in pane ${state.pane}, but the board status could not be updated: ${commandReason(moved, "Backlog failed")}`, { status: "partial", ...state });
-        }
         return result(`Delegated ${task.id} to runner pane ${state.pane}. The runner is working asynchronously in ${state.worktree}.`, { status: "running", ...state });
       } catch (error) {
+        if (claimedTask) await run(BACKLOG, ["task", "edit", claimedTask, "--status", "To Do", "--plain"], { cwd: ctx.cwd, signal }).catch(() => {});
         return result(`delegate refused: ${error instanceof Error ? error.message : String(error)}`, { status: "refused" });
       }
     },
