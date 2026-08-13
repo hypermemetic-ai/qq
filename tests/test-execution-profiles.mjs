@@ -136,7 +136,7 @@ try {
   assert.equal(effort, "high");
   prompt = await handlers.get("before_agent_start")({ systemPrompt: "You are an expert coding assistant operating inside pi", systemPromptOptions: promptOptions }, ctx);
   assert.match(prompt.systemPrompt, /^This session's qq role is architect\./);
-  assert.match(prompt.systemPrompt, /Do the least that settles it\. Extra work only to prevent more work\./);
+  assert.match(prompt.systemPrompt, /Think with the operator\. Settle the decision, not the tree\./);
   assert.doesNotMatch(prompt.systemPrompt, /You are an expert coding assistant/);
   assert.deepEqual(roleSelections.at(-1), { role: "architect", profile: "grok-high" });
   assert.ok(notifications.some(({ message }) => message.includes("qwen-deepseek-max")));
