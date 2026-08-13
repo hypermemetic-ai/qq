@@ -1,57 +1,62 @@
 // @ts-nocheck
-// Stop Grok-style turn degeneration: five identical consecutive turns abort
-// the run. The first trip rewinds /tree to the last non-copy leaf; a second
-// trip in the same session just stops.
+// Grok 4.6 only. Adjacent text-bearing turns that stay similar five times
+// abort the run. First trip rewinds /tree once; a second trip just stops.
+// Delete this file and its index.ts import to retire.
 
 export const STREAK_LIMIT = 5;
+export const MIN_CHARS = 40;
+export const SIMILARITY = 0.6;
+export const TEXT_CAP = 240;
+export const TARGET_MODEL = "grok-4.6";
 
 const WHITESPACE = /\s+/g;
 
 export function normalizeText(value) {
-  return String(value ?? "").replace(WHITESPACE, " ").trim();
+  return String(value ?? "").replace(WHITESPACE, " ").trim().toLowerCase();
 }
 
-function stable(value) {
-  if (value === null || typeof value !== "object") return value;
-  if (Array.isArray(value)) return value.map(stable);
-  return Object.fromEntries(
-    Object.keys(value)
-      .sort()
-      .map((key) => [key, stable(value[key])]),
-  );
-}
-
-function fingerprintPart(part) {
-  if (!part || typeof part !== "object") return null;
-  if (part.type === "text") return ["text", normalizeText(part.text)];
-  if (part.type === "toolCall") {
-    return ["tool", part.name ?? "", JSON.stringify(stable(part.arguments ?? {}))];
-  }
-  return null;
-}
-
-export function fingerprintTurn(event) {
+export function assistantText(event) {
   const message = event?.message;
   if (!message || message.role !== "assistant") return "";
   const parts = [];
   for (const part of Array.isArray(message.content) ? message.content : []) {
-    const fingerprinted = fingerprintPart(part);
-    if (fingerprinted) parts.push(fingerprinted);
+    if (part?.type === "text" && typeof part.text === "string") parts.push(part.text);
   }
-  if (!parts.length) return "";
-  return JSON.stringify(parts);
+  const text = normalizeText(parts.join(" "));
+  return text.length >= MIN_CHARS ? text.slice(0, TEXT_CAP) : "";
 }
 
-export function usableRewindTarget(branch, id) {
+export function trigrams(text) {
+  const grams = new Set();
+  for (let i = 0; i <= text.length - 3; i += 1) grams.add(text.slice(i, i + 3));
+  return grams;
+}
+
+export function jaccard(left, right) {
+  if (!left || !right) return 0;
+  const a = trigrams(left);
+  const b = trigrams(right);
+  if (a.size === 0 || b.size === 0) return 0;
+  let overlap = 0;
+  for (const gram of a) if (b.has(gram)) overlap += 1;
+  return overlap / (a.size + b.size - overlap);
+}
+
+export function isGrok46(ctx) {
+  return ctx?.model?.id === TARGET_MODEL;
+}
+
+function usableRewindTarget(branch, id) {
   if (typeof id !== "string" || id === "") return undefined;
   const entry = Array.isArray(branch) ? branch.find((item) => item?.id === id) : undefined;
   if (entry?.type === "message" && entry.message?.role === "user") return undefined;
   return id;
 }
 
-export default function registerLoopGuard(pi, deps = {}) {
+export default function registerGrokParaphraseGuard(pi, deps = {}) {
   const limit = Number.isInteger(deps.limit) && deps.limit > 0 ? deps.limit : STREAK_LIMIT;
-  let lastFingerprint = "";
+  const threshold = typeof deps.similarity === "number" ? deps.similarity : SIMILARITY;
+  let lastText = "";
   let streak = 0;
   let lastGoodId;
   let preTurnLeaf;
@@ -59,7 +64,7 @@ export default function registerLoopGuard(pi, deps = {}) {
   let pending;
 
   const resetStreak = () => {
-    lastFingerprint = "";
+    lastText = "";
     streak = 0;
     lastGoodId = undefined;
     preTurnLeaf = undefined;
@@ -84,19 +89,20 @@ export default function registerLoopGuard(pi, deps = {}) {
 
   pi.on("turn_end", (event, ctx) => {
     if (pending) return;
-    const fingerprint = fingerprintTurn(event);
-    if (!fingerprint) {
+    if (!isGrok46(ctx)) {
       resetStreak();
       return;
     }
+    const text = assistantText(event);
+    if (!text) return;
 
-    if (fingerprint === lastFingerprint) {
+    if (lastText && jaccard(lastText, text) >= threshold) {
       streak += 1;
     } else {
-      lastFingerprint = fingerprint;
       streak = 1;
       lastGoodId = usableRewindTarget(ctx.sessionManager?.getBranch?.() ?? [], preTurnLeaf);
     }
+    lastText = text;
     if (streak < limit) return;
 
     pending = { streak, target: lastGoodId };
@@ -115,8 +121,8 @@ export default function registerLoopGuard(pi, deps = {}) {
       resetStreak();
       ctx.ui?.notify?.(
         again
-          ? `qq loop-guard: ${action.streak} identical turns after rewind; stopped.`
-          : `qq loop-guard: ${action.streak} identical turns; stopped.`,
+          ? `qq grok-paraphrase-guard: ${action.streak} similar turns after rewind; stopped.`
+          : `qq grok-paraphrase-guard: ${action.streak} similar turns; stopped.`,
         "warning",
       );
       return;
@@ -126,7 +132,7 @@ export default function registerLoopGuard(pi, deps = {}) {
     recovered = true;
     resetStreak();
     ctx.ui?.notify?.(
-      "qq loop-guard: rewound to the last good leaf after identical turns.",
+      "qq grok-paraphrase-guard: rewound to the last good leaf after similar turns.",
       "warning",
     );
   });

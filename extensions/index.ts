@@ -6,7 +6,7 @@ import registerContinue from "./continue.ts";
 import registerSessionScrub from "./session-scrub.ts";
 import registerDictationPrivate from "./dictation-private.ts";
 import registerBacklogGuard from "./backlog-guard.ts";
-import registerLoopGuard from "./loop-guard.ts";
+import registerGrokParaphraseGuard from "./grok-paraphrase-guard.ts";
 import registerWorkshop from "./workshop.ts";
 import registerReviewFlow from "./review-flow.ts";
 
@@ -18,7 +18,7 @@ export default function registerQQ(pi) {
   registerSessionScrub(pi);
   registerDictationPrivate(pi);
   registerBacklogGuard(pi);
-  registerLoopGuard(pi);
+  registerGrokParaphraseGuard(pi);
   registerWorkshop(pi);
   registerReviewFlow(pi);
 }
