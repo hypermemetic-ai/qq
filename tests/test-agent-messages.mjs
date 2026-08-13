@@ -22,12 +22,16 @@ assert.deepEqual(module.normalizeTasks("T-12, T-18, T-12"), ["T-12", "T-18"]);
 assert.equal(module.validPresence({ ...valid, expires_at: now }, now), undefined);
 assert.equal(module.validPresence({ ...valid, role: "architect" }, now)?.role, "architect");
 assert.equal(module.validPresence({ ...valid, role: "observer" }, now), undefined, "an unreal role was accepted");
+assert.equal(module.presenceCard({ ...valid, busy: "tool", tool: "bash", busy_since: now - 3_000 }, now), "");
+assert.equal(module.presenceCard({ ...valid, busy: "tool", tool: "bash", busy_since: now - 12_000 }, now), "tool bash 12s");
+assert.equal(module.presenceCard({ ...valid, busy: "thinking", busy_since: now - 8_000 }, now), "thinking 8s");
+assert.equal(module.validPresence({ ...valid, busy: "sleeping" }, now), undefined);
 
 const directory = await mkdtemp(join(homedir(), "agent-presence-test."));
 try {
   await mkdir(join(directory, "presence"), { mode: 0o700 });
   await writeFile(join(directory, "presence", "one.json"), JSON.stringify(valid), { mode: 0o600 });
-  await writeFile(join(directory, "presence", "two.json"), JSON.stringify({ ...valid, session_id: second, tasks: [], pane: null }), { mode: 0o600 });
+  await writeFile(join(directory, "presence", "two.json"), JSON.stringify({ ...valid, session_id: second, tasks: [], pane: null, busy: "idle", tool: null, busy_since: 0 }), { mode: 0o600 });
   await writeFile(join(directory, "presence", "expired.json"), JSON.stringify({ ...valid, session_id: "019ff733-8c3b-78a9-a37f-db33d42bddb9", project: "qq", role: "runner", expires_at: now - 1 }), { mode: 0o600 });
   assert.equal((await module.listPresence(join(directory, "presence"), {}, now)).length, 2);
   assert.equal((await module.listPresence(join(directory, "presence"), { task: "A-90" }, now)).length, 1);

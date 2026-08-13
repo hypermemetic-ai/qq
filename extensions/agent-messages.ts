@@ -21,8 +21,11 @@ const LEASE_MS = 45_000;
 const RENEW_MS = 15_000;
 const RECEIVE_WAIT_MS = 30_000;
 const RECONNECT_MS = 500;
+const CARD_AFTER_MS = 5_000;
 const SESSION_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const SIMPLE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+const TOOL_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,62}$/;
+const BUSY = new Set(["idle", "thinking", "tool"]);
 const DELIVERY = new Set(["default", "immediate"]);
 
 function stateHome(env = process.env) {
@@ -136,8 +139,32 @@ function validPresence(value, now = Date.now()) {
   try { tasks = normalizeTasks(value.tasks); } catch { return undefined; }
   if (JSON.stringify(tasks) !== JSON.stringify(value.tasks)) return undefined;
   if (value.pane !== null && (typeof value.pane !== "string" || value.pane.length > 128 || value.pane.includes("\0"))) return undefined;
+  if (value.busy !== undefined && !BUSY.has(value.busy)) return undefined;
+  if (value.tool !== undefined && value.tool !== null && (typeof value.tool !== "string" || !TOOL_NAME.test(value.tool))) return undefined;
+  if (value.busy_since !== undefined && !Number.isSafeInteger(value.busy_since)) return undefined;
   if (!Number.isSafeInteger(value.updated_at) || !Number.isSafeInteger(value.expires_at) || value.expires_at <= now) return undefined;
   return value;
+}
+
+function toolLabel(name) {
+  if (typeof name !== "string") return "tool";
+  const cleaned = name.trim().slice(0, 63);
+  return TOOL_NAME.test(cleaned) ? cleaned : "tool";
+}
+
+function presenceCard(presence, now = Date.now()) {
+  const busy = presence?.busy;
+  if (busy !== "thinking" && busy !== "tool") return "";
+  const since = presence.busy_since;
+  if (!Number.isSafeInteger(since) || now - since < CARD_AFTER_MS) return "";
+  const seconds = Math.max(1, Math.floor((now - since) / 1000));
+  if (busy === "tool") return `tool ${presence.tool && TOOL_NAME.test(presence.tool) ? presence.tool : "tool"} ${seconds}s`;
+  return `thinking ${seconds}s`;
+}
+
+function agentLine(agent, now) {
+  const card = presenceCard(agent, now);
+  return `- ${agent.session_id} — ${agent.project} / ${agent.role}${agent.tasks.length ? ` — tasks: ${agent.tasks.join(", ")}` : ""}${agent.pane ? ` — pane: ${agent.pane}` : ""}${card ? ` — ${card}` : ""}`;
 }
 
 async function listPresence(directory, filters = {}, now = Date.now()) {
@@ -202,7 +229,7 @@ function statusName(result) {
   return result?.terminal_failure ? "failed" : "queued";
 }
 
-export { listPresence, normalizeTasks, parseMessage, planeAgentId, statusName, validPresence };
+export { listPresence, normalizeTasks, parseMessage, planeAgentId, presenceCard, statusName, validPresence };
 
 export default function register(pi, deps = {}) {
   const env = deps.env ?? process.env;
@@ -216,8 +243,28 @@ export default function register(pi, deps = {}) {
   let current;
   let currentContext;
   let tasks = [];
+  let busy = "idle";
+  let tool = null;
+  let busySince = 0;
   const injectedMessages = deps.injectedMessages ?? new Set();
+  const inFlight = new Map();
   let renewTimer;
+
+  async function setBusy(nextBusy, nextTool = null) {
+    const next = nextBusy === "tool" || nextBusy === "thinking" ? nextBusy : "idle";
+    const name = next === "tool" ? toolLabel(nextTool) : null;
+    if (busy === next && tool === name) return;
+    if (next === "idle") {
+      busy = "idle";
+      tool = null;
+      busySince = 0;
+    } else {
+      busy = next;
+      tool = name;
+      busySince = now();
+    }
+    await writePresence();
+  }
 
   async function writePresence() {
     if (!current) return;
@@ -226,7 +273,8 @@ export default function register(pi, deps = {}) {
     await atomicPrivateJson(presencePath(paths.presence, current.session_id), {
       schema: "qq.agent-presence/v2", version: 2,
       session_id: current.session_id, project: current.project, role: current.role,
-      tasks, pane: current.pane, updated_at: timestamp, expires_at: timestamp + LEASE_MS,
+      tasks, pane: current.pane, busy, tool, busy_since: busySince,
+      updated_at: timestamp, expires_at: timestamp + LEASE_MS,
     });
   }
 
@@ -270,9 +318,13 @@ export default function register(pi, deps = {}) {
       return;
     }
     const injectionKey = `${message.event_id}:${message.content_hash}`;
-    if (injectedMessages.has(injectionKey) || await receiptExists(message.event_id, message.content_hash)) {
+    if (await receiptExists(message.event_id, message.content_hash)) {
       await client.acknowledge(deliveryGuard(delivery));
       injectedMessages.delete(injectionKey);
+      return;
+    }
+    if (injectedMessages.has(injectionKey)) {
+      await client.retry({ ...deliveryGuard(delivery), reason: "Pi session persistence not yet observable" });
       return;
     }
     if (!active || localEpoch !== epoch || !currentContext) return;
@@ -281,7 +333,7 @@ export default function register(pi, deps = {}) {
       try { currentContext.abort?.(); } catch {}
     }
     const options = currentContext.isIdle?.() === false
-      ? { triggerTurn: true, deliverAs: message.delivery === "immediate" ? "steer" : "followUp" }
+      ? { triggerTurn: true, deliverAs: "steer" }
       : { triggerTurn: true };
     try {
       await (deps.sendMessage ?? pi.sendMessage.bind(pi))({
@@ -339,9 +391,13 @@ export default function register(pi, deps = {}) {
     if (renewTimer) clearInterval(renewTimer);
     renewTimer = undefined;
     injectedMessages.clear();
+    inFlight.clear();
     await removePresence();
     current = undefined;
     currentContext = undefined;
+    busy = "idle";
+    tool = null;
+    busySince = 0;
   }
 
   pi.registerTool({
@@ -365,7 +421,7 @@ export default function register(pi, deps = {}) {
           const agents = (await list(paths.presence, { project: params.project, role: params.role, task: params.task }, now()))
             .filter((agent) => agent.session_id !== current?.session_id);
           const text = agents.length
-            ? `live sessions:\n${agents.map((agent) => `- ${agent.session_id} — ${agent.project} / ${agent.role}${agent.tasks.length ? ` — tasks: ${agent.tasks.join(", ")}` : ""}${agent.pane ? ` — pane: ${agent.pane}` : ""}`).join("\n")}`
+            ? `live sessions:\n${agents.map((agent) => agentLine(agent, now())).join("\n")}`
             : "No live messaging sessions.";
           return { content: [{ type: "text", text }], details: { status: "current", agents } };
         }
@@ -391,7 +447,16 @@ export default function register(pi, deps = {}) {
           const state = statusName(result);
           const reasons = (result.obligations ?? []).map((item) => item.last_reason).filter(Boolean);
           const showReasons = ["blocked", "expired", "failed"].includes(state);
-          return { content: [{ type: "text", text: `Message ${params.message_id} is ${state}${showReasons && reasons.length ? `: ${reasons.join("; ")}` : ""}.` }], details: { status: state, message_id: params.message_id, result } };
+          let card = "";
+          if (state === "queued" || state === "delivering") {
+            const recipientId = sessionIdFromPlaneAgent(result.record?.recipient_id);
+            const recipient = recipientId
+              ? (await list(paths.presence, {}, now())).find((agent) => agent.session_id === recipientId)
+              : undefined;
+            card = recipient ? presenceCard(recipient, now()) : "";
+          }
+          const text = [`Message ${params.message_id} is ${state}${showReasons && reasons.length ? `: ${reasons.join("; ")}` : ""}.`, card].filter(Boolean).join("\n");
+          return { content: [{ type: "text", text }], details: { status: state, message_id: params.message_id, card, result } };
         }
         throw new Error("action must be list, send, or status");
       } catch (error) {
@@ -420,4 +485,18 @@ export default function register(pi, deps = {}) {
   });
   pi.on("session_start", start);
   pi.on("session_shutdown", stop);
+  pi.on("agent_start", async () => { await setBusy("thinking"); });
+  pi.on("agent_settled", async () => { await setBusy("idle"); });
+  pi.on("tool_execution_start", async (event) => {
+    inFlight.set(event.toolCallId, toolLabel(event.toolName));
+    await setBusy("tool", event.toolName);
+  });
+  pi.on("tool_execution_end", async (event) => {
+    inFlight.delete(event.toolCallId);
+    if (inFlight.size === 0) {
+      await setBusy(currentContext ? "thinking" : "idle");
+      return;
+    }
+    await setBusy("tool", [...inFlight.values()].at(-1));
+  });
 }

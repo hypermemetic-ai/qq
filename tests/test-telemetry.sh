@@ -39,6 +39,7 @@ output=$(HOME="$TMP/home" QQ_TELEMETRY_PROFILES_FILE="$TMP/config/qq/execution-p
 [[ "$output" == *'deepseek-v4-flash-0731'*'max'* ]]
 [[ "$output" == *'gpt-5.6-sol'*'high'* ]]
 [[ "$output" == *'grok-4.6'*'high'* ]]
+[[ "$output" == *'grok-4.6'*'high'*'default'* ]]
 [[ "$output" != *'gpt-5.6-luna'* ]]
 [[ "$output" != *'qwen-deepseek-max'* ]]
 [[ "$output" != *'qwen-token-plan/deepseek-v4-flash-0731'* ]]
@@ -48,6 +49,17 @@ output=$(HOME="$TMP/home" QQ_TELEMETRY_PROFILES_FILE="$TMP/config/qq/execution-p
 [[ "$output" == *'qa'* ]]
 [[ "$output" == *'qa (service)'* ]]
 [[ "$output" == *'gpt-5.6-sol'*'xhigh'* ]]
+[[ "$output" != *'cap 200000'* ]]
+
+frame=$(HOME="$TMP/home" QQ_TELEMETRY_PROFILES_FILE="$TMP/config/qq/execution-profiles.json" \
+  bash -c 'source "$1"; validate_profiles_file; load_roles; GPT_WEEK="7d       unavailable"; GROK_WEEK="7d       unavailable"; QWEN_L1="7d       unavailable"; QWEN_L2=""; render_body' _ "$ROOT/bin/qq-telemetry")
+[[ "$frame" == *'Codex'* ]]
+[[ "$frame" == *'Grok'* ]]
+[[ "$frame" == *'Qwen'* ]]
+[[ "$frame" != *'no cookie session'* ]]
+[[ "$frame" != *'cap 200000'* ]]
+plain=$(printf '%s' "$frame" | sed 's/\x1b\[[0-9;]*m//g')
+[[ "$plain" == *$'\n\n\n Execution profiles\n'* ]]
 
 jq '.contextWindowCeiling = 262144' "$TMP/config/qq/execution-profiles.json" >"$TMP/bad.json"
 if HOME="$TMP/home" QQ_TELEMETRY_PROFILES_FILE="$TMP/bad.json" bash -c 'source "$1"; validate_profiles_file' _ "$ROOT/bin/qq-telemetry"; then

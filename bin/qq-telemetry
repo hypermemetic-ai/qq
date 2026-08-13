@@ -79,7 +79,7 @@ usage() {
   cat <<'EOF'
 Usage: qq-telemetry [--once] [--help]
 
-Render live Codex and Qwen provider usage.
+Render live Codex, Grok, and Qwen provider usage.
   --once  Fetch and render one screen, then exit.
   --help  Show this help.
 
@@ -92,6 +92,7 @@ ONCE=0
 
 # Per-provider display state.
 GPT_WEEK='7d       unavailable'
+GROK_WEEK='7d       unavailable'
 QWEN_L1='7d       unavailable'
 QWEN_L2=''
 
@@ -138,8 +139,8 @@ profiles_refusal() {
 }
 
 load_roles() {
-  local rows kind role model effort width=0
-  local -a kinds=() roles=() models=() efforts=() lines=()
+  local rows kind role model effort mark width=0 first=1 extra
+  local -a kinds=() roles=() models=() efforts=() marks=() lines=()
   ROLES_BODY=''
   if ! validate_profiles_file; then
     profiles_refusal
@@ -147,26 +148,33 @@ load_roles() {
   fi
   rows=$(jq -r '
     (.roles | to_entries[] as $role
-      | ["role", $role.key, "", ""],
+      | ["role", $role.key, "", "", ""],
         ($role.value.profiles | to_entries
          | sort_by(if .key == $role.value.default then 0 else 1 end)
-         | .[] | ["profile", $role.key, .value.model, .value.effort])),
-    ["service", "compactor", .compactor.model, .compactor.effort],
-    ["service", "qa", .qa.model, .qa.effort]
+         | .[] | ["profile", $role.key, .value.model, .value.effort,
+                  (if .key == $role.value.default then "default" else "" end)])),
+    ["service", "compactor", .compactor.model, .compactor.effort, ""],
+    ["service", "qa", .qa.model, .qa.effort, ""]
     | @tsv' "$PROFILES_FILE" 2>/dev/null) || return 65
-  while IFS=$'\t' read -r kind role model effort; do
+  while IFS=$'\t' read -r kind role model effort mark; do
     [ -n "$kind" ] || continue
-    kinds+=("$kind"); roles+=("$role"); models+=("$model"); efforts+=("$effort")
+    kinds+=("$kind"); roles+=("$role"); models+=("$model"); efforts+=("$effort"); marks+=("$mark")
     [ "${#model}" -gt "$width" ] && width=${#model}
   done <<<"$rows"
   for i in "${!kinds[@]}"; do
     if [ "${kinds[$i]}" = role ]; then
-      lines+=("   ${roles[$i]}")
+      [ "$first" = 1 ] || lines+=("")
+      first=0
+      lines+=("   ${C_BOLD}${roles[$i]}${C_RESET}")
     elif [ "${kinds[$i]}" = service ]; then
-      lines+=("   ${roles[$i]} (service)")
-      lines+=("      $(printf "%-*s" $((width + 2)) "${models[$i]}")${efforts[$i]}")
+      [ "$first" = 1 ] || lines+=("")
+      first=0
+      lines+=("   ${C_BOLD}${roles[$i]} (service)${C_RESET}")
+      lines+=("      $(printf "%-*s" $((width + 2)) "${models[$i]}")${C_DIM}${efforts[$i]}${C_RESET}")
     else
-      lines+=("      $(printf "%-*s" $((width + 2)) "${models[$i]}")${efforts[$i]}")
+      extra=''
+      [ "${marks[$i]}" = default ] && extra="  ${C_DIM}default${C_RESET}"
+      lines+=("      $(printf "%-*s" $((width + 2)) "${models[$i]}")${C_DIM}${efforts[$i]}${C_RESET}${extra}")
     fi
   done
   [ "${#lines[@]}" -eq 0 ] || ROLES_BODY=$(IFS=$'\n'; printf '%s' "${lines[*]}")
@@ -667,13 +675,9 @@ qwen_update() {
     return
   fi
 
-  # State 4 — nothing usable; render unavailable like the other providers,
-  # with a dim cause hint. The meter never renders as a token count.
-  if [ "$have_cookies" = 1 ]; then
-    QWEN_L1="7d       unavailable${C_DIM} (gateway unreachable)${C_RESET}"
-  else
-    QWEN_L1="7d       unavailable${C_DIM} (no cookie session)${C_RESET}"
-  fi
+  # State 4 — nothing usable; render unavailable like the other providers.
+  # The meter never renders as a token count.
+  QWEN_L1='7d       unavailable'
   flag="$(exhausted_flag 0 "$QWEN_WALL_TEXT")"
   [ -n "$flag" ] && QWEN_L1+="  $flag"
 }
@@ -684,28 +688,43 @@ fetch_all() {
   local pct reset_at now
   local codex_file codex_body=''
   local -a pids=()
+  local grok_access grok_file grok_body=''
   load_roles || return
   GPT_WEEK='7d       unavailable'
+  GROK_WEEK='7d       unavailable'
   [ -r "$AUTH_FILE" ] && auth=$(cat "$AUTH_FILE" 2>/dev/null || true)
   now=$(now_epoch)
 
   codex_access=$(jq -r '."openai-codex".oauth.access // ."openai-codex".access // empty' <<<"$auth" 2>/dev/null || true)
   codex_account=$(jq -r '."openai-codex".oauth.accountId // ."openai-codex".accountId // empty' <<<"$auth" 2>/dev/null || true)
+  grok_access=$(jq -r '.xai.oauth.access // .xai.access // empty' <<<"$auth" 2>/dev/null || true)
 
   if [ -n "$TELEMETRY_TMP" ]; then
     codex_file="$TELEMETRY_TMP/codex.json"
+    grok_file="$TELEMETRY_TMP/grok.json"
     : >"$codex_file"
+    : >"$grok_file"
     if [ -n "$codex_access" ] && [ -n "$codex_account" ]; then
       api_get 'https://chatgpt.com/backend-api/wham/usage' \
         -H "Authorization: Bearer $codex_access" -H "ChatGPT-Account-Id: $codex_account" >"$codex_file" &
       pids+=($!)
     fi
+    if [ -n "$grok_access" ]; then
+      api_get 'https://cli-chat-proxy.grok.com/v1/billing?format=credits' \
+        -H "Authorization: Bearer $grok_access" >"$grok_file" &
+      pids+=($!)
+    fi
     if [ "${#pids[@]}" -gt 0 ]; then wait "${pids[@]}"; fi
     codex_body=$(cat "$codex_file" 2>/dev/null || true)
+    grok_body=$(cat "$grok_file" 2>/dev/null || true)
   else
     if [ -n "$codex_access" ] && [ -n "$codex_account" ]; then
       codex_body=$(api_get 'https://chatgpt.com/backend-api/wham/usage' \
         -H "Authorization: Bearer $codex_access" -H "ChatGPT-Account-Id: $codex_account")
+    fi
+    if [ -n "$grok_access" ]; then
+      grok_body=$(api_get 'https://cli-chat-proxy.grok.com/v1/billing?format=credits' \
+        -H "Authorization: Bearer $grok_access")
     fi
   fi
 
@@ -717,6 +736,20 @@ fetch_all() {
       frac=$(awk -v p="$pct" 'BEGIN { print p/100 }')
       col=$(color_frac "$frac")
       GPT_WEEK="7d       ${col}$(bar "$frac")${C_RESET} ${col}${pct}%${C_RESET}   ${C_DIM}reset $(epoch_local "$reset_at")${C_RESET}"
+    fi
+  fi
+
+  if [ -n "$grok_body" ]; then
+    body="$grok_body"
+    pct=$(jq -r '.config.creditUsagePercent // empty' <<<"$body" 2>/dev/null || true)
+    reset_at=$(jq -r '.config.currentPeriod.end // .config.billingPeriodEnd // empty' <<<"$body" 2>/dev/null || true)
+    if [[ "$pct" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+      frac=$(awk -v p="$pct" 'BEGIN { print p/100 }')
+      col=$(color_frac "$frac")
+      GROK_WEEK="7d       ${col}$(bar "$frac")${C_RESET} ${col}${pct}%${C_RESET}"
+      if [ -n "$reset_at" ] && [ "$reset_at" != null ]; then
+        GROK_WEEK+="   ${C_DIM}reset $(iso_local "$reset_at")${C_RESET}"
+      fi
     fi
   fi
 
@@ -743,11 +776,15 @@ render_body() {
   printf '%s\n' "${C_BOLD} Codex${C_RESET}"
   printf '   %s\n' "$(row_or_dim "$GPT_WEEK")"
   printf '%s\n' ''
+  printf '%s\n' "${C_BOLD} Grok${C_RESET}"
+  printf '   %s\n' "$(row_or_dim "$GROK_WEEK")"
+  printf '%s\n' ''
   printf '%s\n' "${C_BOLD} Qwen${C_RESET}"
   [ -n "$QWEN_L1" ] && printf '   %s\n' "$(row_or_dim "$QWEN_L1")"
   [ -n "$QWEN_L2" ] && printf '   %s\n' "$(row_or_dim "$QWEN_L2")"
   printf '%s\n' ''
-  printf '%s\n' "${C_BOLD} Execution profiles${C_RESET}  ${C_DIM}cap 200000${C_RESET}"
+  printf '%s\n' ''
+  printf '%s\n' "${C_BOLD} Execution profiles${C_RESET}"
   [ -n "$ROLES_BODY" ] && printf '%s\n' "$(row_or_dim "$ROLES_BODY")"
   printf '%s\n' "$sep"
   printf '%s\n' "${C_DIM}r refresh · q quit · auto ${REFRESH_SECS}s · Qwen ping ${QWEN_GW_CADENCE}s${C_RESET}"
