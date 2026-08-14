@@ -87,9 +87,16 @@ export async function listReviews(project, env = process.env) {
   return listHandoffs(project, env, ["proposal", "blocked", "commented"]);
 }
 
+function hasPassedQa(state) {
+  return state.qaVerdict?.schema === "qq.qa-verdict/v1" && state.qaVerdict.verdict === "pass";
+}
+
+export function isFailedLand(state) {
+  return state.status === "blocked" && typeof state.blockedReason === "string" && state.blockedReason.length > 0 && hasPassedQa(state);
+}
+
 export function isQaPassedProposal(state) {
-  return (state.status === "proposal" || state.status === "commented") &&
-    state.qaVerdict?.schema === "qq.qa-verdict/v1" && state.qaVerdict.verdict === "pass";
+  return (state.status === "proposal" || state.status === "commented" || isFailedLand(state)) && hasPassedQa(state);
 }
 
 export async function landHandoff(run, statePath) {
