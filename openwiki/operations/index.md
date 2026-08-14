@@ -1,4 +1,4 @@
 # Files
 
-- [Operations and Validation](runbook.md) - Practical commands for Event Plane administration, focused repository validation, Backlog discipline, and local OpenWiki refresh.
-- [Provider Telemetry](telemetry.md) - Commands and safety boundaries for the live Codex, Grok, and Qwen usage panel and gated Qwen browser-cookie snapshot.
+- [Operations and Validation](runbook.md) - Practical commands for Event Plane administration, focused validation, Herdr distribution, and multi-repository OpenWiki refresh.
+- [Provider Telemetry](telemetry.md) - Live Codex, Grok, and Qwen usage display, execution-profile integration, and the credential-safe Qwen browser-cookie gate.

@@ -4,7 +4,7 @@ okf_version: "0.1"
 
 # Files
 
-- [QQ Quickstart](quickstart.md) - Practical entrypoint to QQ's Pi runtime, roles, workshop delegation and review, durable messaging, safety guards, telemetry, Event Plane, and focused tests.
+- [QQ Quickstart](quickstart.md) - Practical entrypoint to QQ's Pi runtime, roles, board delegation and run review, messaging, safety guards, telemetry, Herdr, Event Plane, and focused tests.
 
 # Directories
 

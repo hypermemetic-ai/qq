@@ -1,79 +1,80 @@
 ---
 type: Workflow architecture
-title: Workshop Delegation and Review
-description: Architect-approved delegation into an isolated Git worktree, followed by runner submission, two-look QA, operator review, and locked landing.
-tags: [workshops, delegation, backlog, herdr, qa]
+title: Board Delegation and Run Review
+description: Architect delegation from a vetted Backlog ticket into an isolated Git run, followed by runner submission, two-look QA, operator review, and locked landing.
+tags: [board, delegation, runs, herdr, qa]
 openwiki:
   roles: [workflow, architecture, testing]
   change_kinds: [delegation, lifecycle, review]
-  source_paths: [extensions/workshop.ts, extensions/review-flow.ts, extensions/qa-result.ts, bin/lib/workshop.mjs, bin/lib/review.mjs]
-  symbols: [registerWorkshop, registerReviewFlow, prepareWorkshop, awaitBriefGate, spawnWorkshop, prepareDone, conductReview, landHandoff]
-  test_paths: [tests/test-workshop.mjs, tests/test-brief-gate.mjs, tests/test-review-flow.mjs]
-  invariants: [Only architect sessions can sketch note delegate or review., Delegation provisions a runner only after exact-brief operator approval., QA gets at most two looks and may commit only test changes., Landing requires explicit architect approval and serializes merges.]
-  validation_commands: [node --experimental-strip-types tests/test-workshop.mjs ., node tests/test-brief-gate.mjs ., node --experimental-strip-types tests/test-review-flow.mjs .]
+  source_paths: [extensions/board.ts, extensions/review-flow.ts, extensions/qa-result.ts, bin/lib/admission.mjs, bin/lib/run.mjs, bin/lib/review.mjs]
+  symbols: [registerBoard, admitDelegate, makeNote, prepareRun, awaitBriefGate, startRun, prepareDone, conductReview, landHandoff]
+  test_paths: [tests/test-delegation.mjs, tests/test-brief-gate.mjs, tests/test-review-flow.mjs]
+  invariants: [Only architect sessions can sketch note delegate or review., Delegation is serialized and provisions a runner only after admission and operator approval., QA gets at most two looks and may commit only test changes., Landing requires a QA pass explicit architect approval and clean main and delegated worktrees.]
+  validation_commands: [node --experimental-strip-types tests/test-delegation.mjs ., node tests/test-brief-gate.mjs ., node --experimental-strip-types tests/test-review-flow.mjs .]
 ---
 
-# Workshop Delegation and Review
+# Board Delegation and Run Review
 
-This workflow turns an architect's Backlog item into isolated runner work, independent QA, and an operator-approved merge. It depends on [execution profiles](../agent-runtime/execution-profiles.md) for compactor and QA bindings, uses [agent messaging](../agent-messaging/extension.md) presence to find the architect on final QA failure, and follows the [Backlog safety boundary](../agent-runtime/session-safety.md).
+This workflow turns an architect's Backlog ticket into isolated runner work, independent QA, and an operator-approved merge. It uses the `scribe` and `qa` [execution-profile bindings](../agent-runtime/execution-profiles.md), [agent messaging](../agent-messaging/extension.md) to steer the architect after final failure, and the [Backlog write boundary](../agent-runtime/session-safety.md).
 
 ## Agent-facing tools
 
 | Tool | Role | Contract |
 |---|---|---|
-| `sketch(title, note?)` | architect | Creates one Backlog task. |
-| `note(id, text)` | architect | Appends task notes through the Backlog CLI. |
-| `delegate(id)` | architect | Compacts a `To Do` task into a brief, asks the operator to approve that exact brief, then starts an isolated runner. |
-| `done(ref)` | delegated runner | Requires a clean worktree and committed descendant of the delegated base; submits at most twice and stops the runner. |
-| `review()` | architect with UI | Reopens waiting proposals, blocked results, and discussed reviews. |
-| `qa_verdict(...)` | isolated QA service only | Atomically records exactly one structured pass/fail verdict. |
+| `sketch(title, note?)`, `note(id, text)` | architect | Create or append to a Backlog ticket through the CLI. |
+| `delegate(id)` | architect | Vet one `To Do` ticket, claim it, generate a short note, obtain operator approval, and start an isolated run. |
+| `done(ref)` | delegated runner | Submit a clean committed descendant of the delegated base; at most two submissions. |
+| `review()` | architect with UI | Reopen proposals, blocked results, comments, and retryable failed landings. |
+| `qa_verdict(...)` | isolated QA only | Atomically record one structured pass/fail verdict. |
 
 ## Lifecycle
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Briefed: delegate To Do task
-    Briefed --> [*]: operator cancels
-    Briefed --> Running: operator approves and runner starts
-    Running --> Reviewing1: done with clean committed ref
-    Reviewing1 --> WaitingFix: QA look 1 fails
-    WaitingFix --> Reviewing2: runner fixes and calls done
+    [*] --> Admission: delegate To Do ticket
+    Admission --> [*]: bounced or refused
+    Admission --> Approval: claimed and note prepared
+    Approval --> [*]: operator cancels and ticket returns To Do
+    Approval --> Running: operator approves
+    Running --> Reviewing1: done
+    Reviewing1 --> Running: QA look 1 fails
     Reviewing1 --> Proposal: QA passes
+    Running --> Reviewing2: done again
     Reviewing2 --> Proposal: QA passes
     Reviewing2 --> Blocked: QA fails
     Proposal --> Commented: architect discusses
     Proposal --> Landed: architect approves
-    Commented --> Landed: architect later approves
-    Blocked --> Blocked: review later
+    Commented --> Landed: architect approves later
+    Proposal --> FailedLand: landing fails
+    Commented --> FailedLand: landing fails
+    FailedLand --> Landed: architect retries approval
     Landed --> [*]
 ```
 
-*The handoff file is the durable state machine; there is one repair cycle and no third QA look.*
+*The private `qq.run-handoff/v1` file is durable workflow state; QA allows one repair cycle, while a QA-passed ref survives a failed landing for retry.*
 
-### Delegation
+## Delegation
 
-`makeBrief` compacts task and conversation context, including files read versus modified, with no cache retention. `prepareWorkshop` writes private `brief.md`; `awaitBriefGate` links/enables `plugins/brief-gate`, opens a focused Herdr overlay, renders the exact brief with Glow, and accepts only `approved` or `cancelled` from an owned private decision file. Cancellation removes prepared state without moving the task.
+`admitDelegate` runs under the common-Git-directory `qq-admit.lock`. It supplies the low-reasoning, no-cache `scribe` model with the incoming full ticket, every `To Do` and `In Progress` ticket, live worktree file diffs against main, and any prior note/brief for the ticket. The admission vet returns only `clear` or `bounce`; a clear decision rechecks the ticket and atomically claims it as `In Progress`. This serialization prevents concurrent delegates from admitting overlapping work against stale evidence.
 
-After approval, `delegate` moves the task to `In Progress`. `spawnWorkshop` creates `qq/<task>-<nonce>` and a private worktree, creates or splits the no-focus `workshop` tab, waits until the pane contains only an available shell, writes `qq.workshop-handoff/v1`, and starts a Pi runner. Startup failure removes attempt-owned pane, worktree, branch, state, and restores the task to `To Do`.
+`makeNote` then gives the scribe the ticket, recent architect transcript, and observed read/modified paths. `prepareRun` writes private mode-0600 `ticket.md`, `transcript.md`, `note.md`, and combined `gate.md`. `awaitBriefGate` shows the literal ticket and delegate note in an operator-focused Herdr plugin pane. Cancellation returns the ticket to `To Do` and deletes prepared state.
 
-### QA and operator review
+After approval, `startRun` creates `qq/<task>-<nonce>`, a private worktree, and a no-focus pane in the literal `runs` tab. It writes `handoff.json` under `$XDG_STATE_HOME/qq/runs/<project>/...`, waits for an available shell, starts the runner, and sends the full ticket plus note. Startup failure removes attempt-owned pane, worktree, branch, state, and restores the ticket.
 
-`done` pins the submitted commit and starts `bin/qq-review-worker.mjs`. `conductReview` takes over the same workshop pane with the policy-pinned QA model, a private file-backed system prompt, only the declared tools, and a persistent QA session shared by both looks. QA may add committed test-only changes; dirty output, rewritten ancestry, empty commits, or production-file changes turn a pass into failure.
+## QA and landing
 
-A first failure evicts the registered QA agent—even when Herdr reports it as done—waits for the pane's shell, then starts the runner in that same pane with feedback. This ordering prevents a completed QA registration from causing `agent_pane_busy`; the `failedRewrite` case in `tests/test-review-flow.mjs` pins it. A pass closes the pane and creates an operator pack (summary plus diff numstat). A second failure becomes `blocked`, closes the pane, and also steers the architect when its presence can be resolved. Architect polling and `review()` offer `approve`, `discuss`, or `later`; discussion moves the task to `To Do`, records the comment, and steers the current architect session without discarding the reviewed ref.
+`done` reads `QQ_RUN_STATE`, pins the submitted commit, and starts `bin/qq-review-worker.mjs`. `conductReview` takes over the same pane with the policy-pinned QA model, a private system prompt, and a persistent QA session across both looks. QA can commit tests only; dirty output, rewritten ancestry, empty commits, or production-file edits invalidate a pass. Before reusing the pane, review waits for Herdr's agent identity to disappear and then for a free shell.
 
-Approval runs `bin/qq-land-worker.mjs` under a common-Git-directory `flock`. `landHandoff` requires the original base branch, a clean delegated worktree, and a clean `merge-tree` check; it then performs a non-fast-forward merge, removes worktree and branch, marks the handoff `landed`, and moves the task to `Done`. Failures persist as `blocked`.
+Only a state carrying `qq.qa-verdict/v1` with `verdict: pass` can offer `approve`. Infrastructure/QA blocks offer only `discuss` or `later`. Approval executes `landHandoff` under `qq-land.lock`: the main checkout must still be on the original base branch and completely clean, the delegated worktree must be clean, and `merge-tree` must succeed before a non-fast-forward merge. A failed land remains `blocked` with its QA pass and ref intact; `review()` can retry it. Polling suppresses the unchanged failure but surfaces a changed failure reason.
 
 ## Change and validation
 
-Keep handoff schema/state transitions synchronized across both extensions, both libraries, workers, and tests. Preserve exact-brief approval, private mode-0600 artifacts, named-base and clean-worktree checks, two-look limit, QA test-only ownership, QA eviction before same-pane runner restart, explicit architect approval, and serialized landing. The landing lock is shared with the [OpenWiki refresh workflow](../operations/runbook.md#openwiki-automation), so changes to either path must retain common-Git-directory serialization.
-
-Run the narrow checks separately:
+Keep the run schema synchronized across board, run, review, workers, and tests. Preserve admission serialization, literal ticket/note approval, private files, exact `runs` names, two-look/test-only QA, identity-drop-before-pane-reuse, QA-pass-only approval, clean-main checks, and the shared landing lock used by [OpenWiki automation](../operations/runbook.md#openwiki-automation).
 
 ```bash
-node --experimental-strip-types tests/test-workshop.mjs .
+node --experimental-strip-types tests/test-delegation.mjs .
 node tests/test-brief-gate.mjs .
 node --experimental-strip-types tests/test-review-flow.mjs .
 ```
 
-Run profile tests when compactor/QA bindings change, messaging tests when architect lookup changes, and `npm test` only for composition or cross-area changes.
+Also run profile tests for `scribe`/QA binding changes, live messaging tests for architect steering, and `npm test` only for composition or cross-area changes.
