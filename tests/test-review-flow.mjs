@@ -240,7 +240,8 @@ try {
     await workshop.atomicPrivateJson(statePath, caseState);
     const verdictPath = join(scratch, "state", `qa-look-${look}.json`);
     const caseCalls = [];
-    let agentGets = 0;
+    let agentEvicted = false;
+    let releaseGets = 0;
     let qaPromptAtLaunch;
     const caseRun = async (command, args, options = {}) => {
       caseCalls.push({ command, args, options });
@@ -254,22 +255,32 @@ try {
         const paths = changedPaths.length ? changedPaths : ["src/a.ts"];
         return { code: 0, stdout: paths.map((path) => `2\t1\t${path}`).join("\n") + "\n", stderr: "" };
       }
-      if (command === "herdr" && args[0] === "agent" && args[1] === "start" && args.includes("--system-prompt")) {
-        const promptPath = args[args.indexOf("--system-prompt") + 1];
-        qaPromptAtLaunch = {
-          path: promptPath,
-          content: await readFile(promptPath, "utf8"),
-          mode: (await stat(promptPath)).mode & 0o777,
-        };
+      if (command === "herdr" && args[0] === "agent" && args[1] === "start") {
+        agentEvicted = false;
+        releaseGets = 0;
+        if (args.includes("--system-prompt")) {
+          const promptPath = args[args.indexOf("--system-prompt") + 1];
+          qaPromptAtLaunch = {
+            path: promptPath,
+            content: await readFile(promptPath, "utf8"),
+            mode: (await stat(promptPath)).mode & 0o777,
+          };
+        }
       }
       if (command === "herdr" && args[0] === "agent" && args[1] === "prompt" && String(args[3]).startsWith(`Look ${look}`)) {
         await workshop.atomicPrivateJson(verdictPath, {
           schema: "qq.qa-verdict/v1", version: 1, verdict, summary, feedback, tests_modified: testsModified,
         });
       }
+      if (command === "herdr" && args[0] === "agent" && args[1] === "send-keys") {
+        agentEvicted = true;
+      }
       if (command === "herdr" && args[0] === "agent" && args[1] === "get") {
-        const agent_status = agentGets++ === 0 ? "idle" : "done";
-        return { code: 0, stdout: JSON.stringify({ id: "cli:agent:get", result: { type: "agent_info", agent: { agent_status } } }), stderr: "" };
+        if (!agentEvicted || releaseGets++ === 0) {
+          const agent_status = agentEvicted ? "done" : "idle";
+          return { code: 0, stdout: JSON.stringify({ id: "cli:agent:get", result: { type: "agent_info", agent: { agent_status } } }), stderr: "" };
+        }
+        return { code: 1, stdout: "", stderr: JSON.stringify({ id: "cli:agent:get", error: { code: "agent_not_found", message: "agent target not found" } }) };
       }
       if (command === "herdr" && args[0] === "pane" && args[1] === "process-info") {
         return { code: 0, stdout: availableShell, stderr: "" };
@@ -298,8 +309,12 @@ try {
   await assert.rejects(access(committedTests.qaPromptAtLaunch.path), { code: "ENOENT" });
   const runnerStop = committedTests.calls.findIndex(({ args }) => args[0] === "agent" && args[1] === "send-keys");
   const firstShellCheck = committedTests.calls.findIndex(({ args }) => args[0] === "pane" && args[1] === "process-info");
+  const runnerReleaseGets = committedTests.calls
+    .map(({ args }, index) => ({ args, index }))
+    .filter(({ args, index }) => index > runnerStop && index < firstShellCheck && args[0] === "agent" && args[1] === "get");
   const qaStartIndex = committedTests.calls.findIndex(({ args }) => args[0] === "agent" && args[1] === "start");
-  assert.ok(runnerStop >= 0 && runnerStop < firstShellCheck && firstShellCheck < qaStartIndex);
+  assert.equal(runnerReleaseGets.length, 2);
+  assert.ok(runnerStop >= 0 && runnerReleaseGets.at(-1).index < firstShellCheck && firstShellCheck < qaStartIndex);
   assert.ok(!committedTests.calls.some(({ args }) => args[0] === "pane" && args[1] === "wait-output"));
   const firstLookPrompt = committedTests.calls.find(({ args }) => args[0] === "agent" && args[1] === "prompt");
   assert.match(firstLookPrompt.args[3], /own test quality/);
