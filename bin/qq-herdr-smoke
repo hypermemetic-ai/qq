@@ -107,8 +107,7 @@ read -r second third <<<"$pane_ids"
 printf '# Exact disposable ticket\n\n## Delegate note\n\nExact disposable note\n' > "$base/gate.md"
 cat > "$base/glow" <<'EOF'
 #!/usr/bin/env bash
-[[ "$1" == "-t" ]]
-cat "$2"
+cat "$1"
 EOF
 chmod 0700 "$base/glow"
 
