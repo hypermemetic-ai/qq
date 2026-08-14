@@ -6,7 +6,7 @@ import registerContinue from "./continue.ts";
 import registerSessionScrub from "./session-scrub.ts";
 import registerBacklogGuard from "./backlog-guard.ts";
 import registerGrokParaphraseGuard from "./grok-paraphrase-guard.ts";
-import registerWorkshop from "./workshop.ts";
+import registerBoard from "./board.ts";
 import registerReviewFlow from "./review-flow.ts";
 
 export default function registerQQ(pi) {
@@ -17,6 +17,6 @@ export default function registerQQ(pi) {
   registerSessionScrub(pi);
   registerBacklogGuard(pi);
   registerGrokParaphraseGuard(pi);
-  registerWorkshop(pi);
+  registerBoard(pi);
   registerReviewFlow(pi);
 }

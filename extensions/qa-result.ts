@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, open, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { readHandoff } from "../bin/lib/workshop.mjs";
+import { readHandoff } from "../bin/lib/run.mjs";
 
 async function writePrivate(path, value) {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
@@ -32,10 +32,10 @@ export default function registerQaResult(pi, deps = {}) {
     async execute(_id, params, _signal, _update, ctx) {
       if (submitted) return { content: [{ type: "text", text: "qa_verdict was already submitted." }], details: { status: "refused" } };
       let resultPath = env.QQ_QA_RESULT;
-      if (!resultPath && env.QQ_WORKSHOP_STATE) {
+      if (!resultPath && env.QQ_RUN_STATE) {
         try {
-          const state = await readHandoff(env.QQ_WORKSHOP_STATE);
-          if (state.look === 1 || state.look === 2) resultPath = join(dirname(env.QQ_WORKSHOP_STATE), `qa-look-${state.look}.json`);
+          const state = await readHandoff(env.QQ_RUN_STATE);
+          if (state.look === 1 || state.look === 2) resultPath = join(dirname(env.QQ_RUN_STATE), `qa-look-${state.look}.json`);
         } catch {}
       }
       if (!resultPath) return { content: [{ type: "text", text: "qa result path is unavailable." }], details: { status: "refused" } };

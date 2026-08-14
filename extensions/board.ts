@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { readExecutionPolicy } from "../bin/lib/execution-profiles.mjs";
 import { collectLiveWorktreeDiffs, findExistingBrief, withAdmissionLock } from "../bin/lib/admission.mjs";
-import { awaitBriefGate, discardWorkshop, formatNoteTake, formatTicket, prepareWorkshop, spawnWorkshop } from "../bin/lib/workshop.mjs";
+import { awaitBriefGate, discardRun, formatNoteTake, formatTicket, prepareRun, startRun } from "../bin/lib/run.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BACKLOG = join(QQ_ROOT, "node_modules", ".bin", "backlog");
@@ -242,7 +242,7 @@ export async function makeNote(ctx, task, deps = {}) {
   return { note, transcript, qaBinding: policy.qa };
 }
 
-export default function registerWorkshop(pi, deps = {}) {
+export default function registerBoard(pi, deps = {}) {
   const env = deps.env ?? process.env;
   const run = deps.exec ?? ((command, args, options) => pi.exec(command, args, options));
   const now = deps.now ?? (() => new Date());
@@ -301,7 +301,7 @@ export default function registerWorkshop(pi, deps = {}) {
 
         const { note, transcript, qaBinding } = await (deps.makeNote ?? makeNote)(operationCtx, task, deps);
         outboundNote = note;
-        prepared = await (deps.prepareWorkshop ?? prepareWorkshop)({ cwd: ctx.cwd, env, project, task, note, transcript });
+        prepared = await (deps.prepareRun ?? prepareRun)({ cwd: ctx.cwd, env, project, task, note, transcript });
         const decision = await (deps.withGlowTurn ?? withGlowTurn)(admission.commonDir || project, () => (deps.awaitBriefGate ?? awaitBriefGate)({
           run, env, prepared, signal,
           pluginRoot: deps.briefGatePluginPath ?? join(QQ_ROOT, "plugins", "brief-gate"),
@@ -310,12 +310,12 @@ export default function registerWorkshop(pi, deps = {}) {
           const returned = await run(BACKLOG, ["task", "edit", task.id, "--status", "To Do", "--plain"], { cwd: ctx.cwd, signal });
           if (returned?.code !== 0) throw new Error(`cannot return ${task.id} to To Do: ${commandReason(returned, "Backlog failed")}`);
           claimedTask = undefined;
-          await (deps.discardWorkshop ?? discardWorkshop)(prepared);
+          await (deps.discardRun ?? discardRun)(prepared);
           prepared = undefined;
           return result(`Cancelled ${task.id}; runner not started.`, { status: "cancelled", task_id: task.id });
         }
 
-        await (deps.spawnWorkshop ?? spawnWorkshop)({
+        await (deps.startRun ?? startRun)({
           run, cwd: ctx.cwd, env, task, prepared, qaBinding, project,
           architectSession: ctx.sessionManager.getSessionId(),
         });
@@ -325,7 +325,7 @@ export default function registerWorkshop(pi, deps = {}) {
       } catch (error) {
         if (claimedTask) await run(BACKLOG, ["task", "edit", claimedTask, "--status", "To Do", "--plain"], { cwd: ctx.cwd }).catch(() => {});
         if (prepared) {
-          try { await (deps.discardWorkshop ?? discardWorkshop)(prepared); } catch {}
+          try { await (deps.discardRun ?? discardRun)(prepared); } catch {}
         }
         const message = error instanceof Error ? error.message : String(error);
         const safeMessage = outboundNote && message.includes(outboundNote) ? "runs operation failed" : message;

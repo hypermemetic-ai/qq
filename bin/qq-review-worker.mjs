@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 
-import { atomicPrivateJson, readHandoff } from "./lib/workshop.mjs";
+import { atomicPrivateJson, readHandoff } from "./lib/run.mjs";
 import { conductReview } from "./lib/review.mjs";
 
 const statePath = process.argv[2];
