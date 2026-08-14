@@ -6,16 +6,16 @@ downstream="$root/herdr/downstream"
 # shellcheck source=/dev/null
 source "$downstream/upstream.env"
 
-[[ "$HERDR_UPSTREAM_TAG" == v0.8.0 ]]
-[[ "$HERDR_UPSTREAM_COMMIT" == 346411fa21afd297f5ed3b3fa56f9e3fbf7654b7 ]]
-[[ -s "$downstream/patches/0001-centered-pane-row.patch" ]]
+[[ "$HERDR_UPSTREAM_URL" == https://github.com/hypermemetic-ai/herdr.git ]]
+[[ "$HERDR_UPSTREAM_TAG" == qq-v0.8.0-1 ]]
+[[ "$HERDR_UPSTREAM_COMMIT" == f1e8f5793ecad4feab4c6df6bebca3f564cdbe05 ]]
+[[ -z ${HERDR_PATCHES+x} ]]
+[[ ! -e "$downstream/patches/0001-centered-pane-row.patch" ]]
 grep -q 'pane_preferred_width = 80' "$root/herdr/config.toml"
 grep -q 'previous_workspace = "alt+up"' "$root/herdr/config.toml"
 grep -q 'next_workspace = "alt+down"' "$root/herdr/config.toml"
 grep -q 'previous_tab = "alt+left"' "$root/herdr/config.toml"
 grep -q 'next_tab = "alt+right"' "$root/herdr/config.toml"
-grep -q 'pane_preferred_width' "$downstream/patches/0001-centered-pane-row.patch"
-grep -q 'balance_horizontal_row' "$downstream/patches/0001-centered-pane-row.patch"
 grep -q '%h/.local/lib/qq/herdr/bin/herdr server' "$root/systemd/user/herdr.service"
 grep -q '^ExitType=cgroup$' "$root/systemd/user/herdr.service"
 grep -q '%h/.local/state/herdr/herdr.log' "$root/systemd/user/herdr.service"
@@ -27,6 +27,11 @@ grep -q '%h/.local/state/herdr/herdr.log' "$root/systemd/user/herdr.service"
 [[ -x "$root/bin/qq-herdr-launch" ]]
 [[ -x "$root/tests/test-herdr-live.sh" ]]
 grep -q 'integration status --outdated-only' "$root/bin/qq-herdr-build"
+grep -q 'refs/tags/qq-v' "$root/bin/qq-herdr-upgrade"
+if grep -Eq 'git .*apply|HERDR_PATCHES' "$root/bin/qq-herdr-build" "$root/bin/qq-herdr-upgrade"; then
+  echo 'retired QQ Rust patch flow returned' >&2
+  exit 1
+fi
 grep -q -- 'ghostty --gtk-single-instance=true --title=herdr -e' "$root/bin/qq-herdr-launch"
 
 ghostty_config="$root/ghostty/config"
@@ -48,11 +53,14 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 git init -q "$work/source"
 git -C "$work/source" remote add origin "$HERDR_UPSTREAM_URL"
-git -C "$work/source" fetch -q --depth 1 origin "$HERDR_UPSTREAM_COMMIT"
-git -C "$work/source" checkout -q --detach FETCH_HEAD
-for patch in $HERDR_PATCHES; do
-  git -C "$work/source" apply --check "$downstream/$patch"
-done
+git -C "$work/source" fetch -q --depth 1 origin \
+  "refs/tags/$HERDR_UPSTREAM_TAG:refs/tags/$HERDR_UPSTREAM_TAG"
+tag_commit=$(git -C "$work/source" rev-list -n1 "$HERDR_UPSTREAM_TAG")
+[[ "$tag_commit" == "$HERDR_UPSTREAM_COMMIT" ]]
+git -C "$work/source" checkout -q --detach "$HERDR_UPSTREAM_COMMIT"
+grep -Rqs --include='*.rs' 'pane_preferred_width' "$work/source/src"
+grep -Rqs --include='*.rs' 'balance_horizontal_row' "$work/source/src"
+[[ -z $(git -C "$work/source" status --porcelain) ]]
 
 mock="$work/mock"
 mkdir -p "$mock"

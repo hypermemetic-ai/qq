@@ -91,6 +91,7 @@ fi
 
 DEFAULT_REGISTRY="$ROOT/config/openwiki-repositories"
 grep -Fxq qq "$DEFAULT_REGISTRY"
+grep -Fxq herdr "$DEFAULT_REGISTRY"
 grep -Fxq discuss "$DEFAULT_REGISTRY"
 grep -Fxq qq-dictation "$DEFAULT_REGISTRY"
 if grep -Eiq 'deciq' <(grep -v '^[[:space:]]*#' "$DEFAULT_REGISTRY"); then

@@ -6,7 +6,8 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 source "$root/herdr/downstream/upstream.env"
 binary=${1:-${QQ_HERDR_BINARY:-${XDG_CACHE_HOME:-$HOME/.cache}/qq/herdr/bin/herdr}}
 [[ -x "$binary" ]] || { printf 'qq-herdr-smoke: binary not executable: %s\n' "$binary" >&2; exit 1; }
-expected_version="herdr ${HERDR_UPSTREAM_TAG#v}"
+fork_version=${HERDR_UPSTREAM_TAG#qq-v}
+expected_version="herdr ${fork_version%-*}"
 [[ $("$binary" --version) == "$expected_version" ]] || {
   printf 'qq-herdr-smoke: expected %s, found %s\n' "$expected_version" "$("$binary" --version)" >&2
   exit 1

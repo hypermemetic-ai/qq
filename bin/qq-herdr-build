@@ -32,6 +32,7 @@ if [[ ! -d "$source_dir/.git" ]]; then
   git clone --filter=blob:none --no-checkout "$HERDR_UPSTREAM_URL" "$source_dir"
 fi
 
+git -C "$source_dir" remote set-url origin "$HERDR_UPSTREAM_URL"
 git -C "$source_dir" fetch --force origin "refs/tags/$HERDR_UPSTREAM_TAG:refs/tags/$HERDR_UPSTREAM_TAG"
 tag_commit=$(git -C "$source_dir" rev-list -n1 "$HERDR_UPSTREAM_TAG")
 if [[ "$tag_commit" != "$HERDR_UPSTREAM_COMMIT" ]]; then
@@ -42,16 +43,11 @@ fi
 
 git -C "$source_dir" reset --hard "$HERDR_UPSTREAM_COMMIT"
 git -C "$source_dir" clean -ffd
-for patch in $HERDR_PATCHES; do
-  git -C "$source_dir" apply --check "$downstream/$patch"
-  git -C "$source_dir" apply "$downstream/$patch"
-done
-
 git -C "$source_dir" diff --check
 (
   cd "$source_dir"
   cargo fmt --all -- --check
-  # Two upstream v0.8.0 tests are invalid in this environment: the workspace
+  # Two Herdr v0.8.0 tests are invalid in this environment: the workspace
   # id assertion depends on a process-global counter, and the PTY fd handoff
   # assertion cannot observe a replacement server under this Herdr-hosted run.
   # Run everything else serially, then prove the counter-sensitive test alone.
