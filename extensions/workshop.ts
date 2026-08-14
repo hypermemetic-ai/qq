@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { readExecutionPolicy } from "../bin/lib/execution-profiles.mjs";
 import { collectLiveWorktreeDiffs, findExistingBrief, withAdmissionLock } from "../bin/lib/admission.mjs";
-import { awaitBriefGate, discardWorkshop, formatTicket, prepareWorkshop, spawnWorkshop } from "../bin/lib/workshop.mjs";
+import { awaitBriefGate, discardWorkshop, formatNoteTake, formatTicket, prepareWorkshop, spawnWorkshop } from "../bin/lib/workshop.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BACKLOG = join(QQ_ROOT, "node_modules", ".bin", "backlog");
@@ -245,6 +245,7 @@ export async function makeNote(ctx, task, deps = {}) {
 export default function registerWorkshop(pi, deps = {}) {
   const env = deps.env ?? process.env;
   const run = deps.exec ?? ((command, args, options) => pi.exec(command, args, options));
+  const now = deps.now ?? (() => new Date());
   let role = env.QQ_AGENT_ROLE || "runner";
   pi.events.on("qq:role-selected", (selection) => { if (selection?.role) role = selection.role; });
 
@@ -255,7 +256,7 @@ export default function registerWorkshop(pi, deps = {}) {
     async execute(_id, params, signal, _update, ctx) {
       if (role !== "architect") return result("sketch is available only in an architect session.");
       const args = ["task", "create", params.title, "--plain"];
-      if (params.note) args.push("--notes", params.note);
+      if (params.note) args.push("--notes", formatNoteTake(params.note, now()));
       const execution = await run(BACKLOG, args, { cwd: ctx.cwd, signal });
       if (execution?.code !== 0) return result(`sketch refused: ${commandReason(execution, "Backlog failed")}`);
       const id = execution.stdout.match(/Task ([A-Za-z]+-[0-9.]+)/)?.[1];
@@ -269,7 +270,7 @@ export default function registerWorkshop(pi, deps = {}) {
     parameters: { type: "object", additionalProperties: false, required: ["id", "text"], properties: { id: { type: "string" }, text: { type: "string", minLength: 1 } } },
     async execute(_id, params, signal, _update, ctx) {
       if (role !== "architect") return result("note is available only in an architect session.");
-      const execution = await run(BACKLOG, ["task", "edit", params.id, "--append-notes", params.text, "--plain"], { cwd: ctx.cwd, signal });
+      const execution = await run(BACKLOG, ["task", "edit", params.id, "--append-notes", formatNoteTake(params.text, now()), "--plain"], { cwd: ctx.cwd, signal });
       if (execution?.code !== 0) return result(`note refused: ${commandReason(execution, "Backlog failed")}`);
       return result(`Noted ${params.id}.`, { task_id: params.id });
     },

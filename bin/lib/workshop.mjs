@@ -43,6 +43,15 @@ export function formatTicket(task) {
   ].join("\n\n").trimEnd();
 }
 
+export function formatNoteTake(text, value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error("note timestamp is invalid");
+  const pad = (part) => String(part).padStart(2, "0");
+  const timestamp = [date.getFullYear(), pad(date.getMonth() + 1), pad(date.getDate())].join("-") +
+    ` ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return `---\n\n${timestamp}\n\n${text}`;
+}
+
 export function formatGateDocument(ticket, note) {
   return `${ticket.trimEnd()}\n\n---\n\n## Delegate note\n\n${note.trim()}\n`;
 }
