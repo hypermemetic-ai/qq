@@ -105,6 +105,9 @@ export async function landHandoff(run, statePath) {
   try {
     const branch = await checked(run, "git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: state.mainRoot }, "main checkout is detached");
     if (branch.stdout.trim() !== state.baseBranch) throw new Error(`main checkout is on ${branch.stdout.trim()}, not ${state.baseBranch}`);
+    const mainStatus = await checked(run, "git", ["status", "--porcelain", "--untracked-files=all"], { cwd: state.mainRoot }, "cannot inspect main checkout");
+    const dirtyMainStatus = String(mainStatus.stdout ?? "").trimEnd();
+    if (dirtyMainStatus.trim()) throw new Error(`main checkout clean-checkout invariant violation; dirty paths:\n${dirtyMainStatus}`);
     const worktreeStatus = await checked(run, "git", ["status", "--porcelain", "--untracked-files=all"], { cwd: state.worktree }, "cannot inspect delegated worktree");
     if (worktreeStatus.stdout.trim()) throw new Error("delegated worktree has uncommitted residue");
     await checked(run, "git", ["merge-tree", "--write-tree", "HEAD", state.ref], { cwd: state.mainRoot }, "proposal no longer merges cleanly");
