@@ -7,9 +7,9 @@ openwiki:
   roles: [workflow, architecture, testing]
   change_kinds: [delegation, lifecycle, review]
   source_paths: [extensions/board.ts, extensions/review-flow.ts, extensions/qa-result.ts, bin/lib/admission.mjs, bin/lib/run.mjs, bin/lib/review.mjs]
-  symbols: [registerBoard, admitDelegate, makeNote, prepareRun, awaitBriefGate, startRun, prepareDone, conductReview, landHandoff]
+  symbols: [registerBoard, admitDelegate, makeNote, prepareRun, awaitBriefGate, startRun, prepareDone, conductReview, ownsHandoff, landedMessage, landHandoff]
   test_paths: [tests/test-delegation.mjs, tests/test-brief-gate.mjs, tests/test-review-flow.mjs]
-  invariants: [Only architect sessions can sketch note delegate or review., Delegation is serialized and provisions a runner only after admission and operator approval., QA gets at most two looks and may commit only test changes., Landing requires a QA pass explicit architect approval and clean main and delegated worktrees.]
+  invariants: [Only architect sessions can sketch note or delegate and only the delegating architect session can review its handoffs., Delegation is serialized and provisions a runner only after admission and operator approval., QA gets at most two looks and may commit only test changes., Landing requires a QA pass explicit owning-architect approval and clean main and delegated worktrees., A successful land is recorded in the owning architect transcript without triggering an agent turn.]
   validation_commands: [node --experimental-strip-types tests/test-delegation.mjs ., node tests/test-brief-gate.mjs ., node --experimental-strip-types tests/test-review-flow.mjs .]
 ---
 
@@ -24,7 +24,7 @@ This workflow turns an architect's Backlog ticket into isolated runner work, ind
 | `sketch(title, note?)`, `note(id, text)` | architect | Create or append to a Backlog ticket through the CLI. |
 | `delegate(id)` | architect | Vet one `To Do` ticket, claim it, generate a short note, obtain operator approval, and start an isolated run. |
 | `done(ref)` | delegated runner | Submit a clean committed descendant of the delegated base; at most two submissions. |
-| `review()` | architect with UI | Reopen proposals, blocked results, comments, and retryable failed landings. |
+| `review()` | owning architect session with UI | Reopen only that session's proposals, blocked results, comments, and retryable failed landings. |
 | `qa_verdict(...)` | isolated QA only | Atomically record one structured pass/fail verdict. |
 
 ## Lifecycle
@@ -43,8 +43,8 @@ stateDiagram-v2
     Reviewing2 --> Proposal: QA passes
     Reviewing2 --> Blocked: QA fails
     Proposal --> Commented: architect discusses
-    Proposal --> Landed: architect approves
-    Commented --> Landed: architect approves later
+    Proposal --> Landed: owning architect approves
+    Commented --> Landed: owning architect approves later
     Proposal --> FailedLand: landing fails
     Commented --> FailedLand: landing fails
     FailedLand --> Landed: architect retries approval
@@ -65,11 +65,11 @@ After approval, `startRun` creates `qq/<task>-<nonce>`, a private worktree, and 
 
 `done` reads `QQ_RUN_STATE`, pins the submitted commit, and starts `bin/qq-review-worker.mjs`. `conductReview` takes over the same pane with the policy-pinned QA model, a private system prompt, and a persistent QA session across both looks. QA can commit tests only; dirty output, rewritten ancestry, empty commits, or production-file edits invalidate a pass. Before reusing the pane, review waits for Herdr's agent identity to disappear and then for a free shell.
 
-Only a state carrying `qq.qa-verdict/v1` with `verdict: pass` can offer `approve`. Infrastructure/QA blocks offer only `discuss` or `later`. Approval executes `landHandoff` under `qq-land.lock`: the main checkout must still be on the original base branch and completely clean, the delegated worktree must be clean, and `merge-tree` must succeed before a non-fast-forward merge. A failed land remains `blocked` with its QA pass and ref intact; `review()` can retry it. Polling suppresses the unchanged failure but surfaces a changed failure reason.
+Only a state carrying `qq.qa-verdict/v1` with `verdict: pass` can offer `approve`. Review polling, prompts, and `review()` results are scoped to the current Pi session ID matching the handoff's `architectSession`, so another architect session cannot discuss, approve, or retry that run. Infrastructure/QA blocks offer only `discuss` or `later`. Approval executes `landHandoff` under `qq-land.lock`: the main checkout must still be on the original base branch and completely clean, the delegated worktree must be clean, and `merge-tree` must succeed before a non-fast-forward merge. After the worker records `status: landed`, the extension rereads the handoff and appends a displayed `qq-run-landed` / `qq.run-landed/v1` record—task, ref, target, timestamp, summary, and files—to the owning architect transcript with `triggerTurn: false`. Failed lands emit no success record and remain `blocked` with their QA pass and ref intact; `review()` can retry them. Polling suppresses the unchanged failure but surfaces a changed failure reason.
 
 ## Change and validation
 
-Keep the run schema synchronized across board, run, review, workers, and tests. Preserve admission serialization, literal ticket/note approval, private files, exact `runs` names, two-look/test-only QA, identity-drop-before-pane-reuse, QA-pass-only approval, clean-main checks, and the shared landing lock used by [OpenWiki automation](../operations/runbook.md#openwiki-automation).
+Keep the run schema synchronized across board, run, review, workers, and tests. Preserve admission serialization, literal ticket/note approval, private files, exact `runs` names, two-look/test-only QA, identity-drop-before-pane-reuse, QA-pass-only approval, architect-session ownership checks, clean-main checks, the shared landing lock used by [OpenWiki automation](../operations/runbook.md#openwiki-automation), and success-message emission only after persisted landed state. The review-flow suite covers non-owner isolation, the exact `qq.run-landed/v1` payload, non-triggering delivery, deduplication after settling, and no success message on failed land.
 
 ```bash
 node --experimental-strip-types tests/test-delegation.mjs .
