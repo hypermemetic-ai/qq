@@ -9,6 +9,7 @@ import { ROLE_NAMES } from "./roles.mjs";
 export const POLICY_SCHEMA = "qq.execution-profiles/v1";
 export const CONTEXT_WINDOW_CEILING = 200_000;
 export const EFFORTS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const EFFORT_ORDER = Object.freeze([...EFFORTS]);
 const NAME = /^[a-z][a-z0-9-]{0,62}$/;
 const BINDING = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,190}$/;
 
@@ -129,6 +130,16 @@ export async function updateRoleDefault(roleName, profileName, path = executionP
   next.roles[roleName].default = profileName;
   await writeExecutionPolicy(next, path);
   return { previous, current: profileName };
+}
+
+export function listedProfiles(role) {
+  return Object.entries(role.profiles).sort(([leftName, left], [rightName, right]) => {
+    const byModel = left.model.localeCompare(right.model);
+    if (byModel) return byModel;
+    const byEffort = EFFORT_ORDER.indexOf(left.effort) - EFFORT_ORDER.indexOf(right.effort);
+    if (byEffort) return byEffort;
+    return leftName.localeCompare(rightName);
+  });
 }
 
 export function profileFor(policy, roleName, profileName) {

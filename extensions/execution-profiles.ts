@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { contextWindowCeilingFor, profileFor, readExecutionPolicy } from "../bin/lib/execution-profiles.mjs";
+import { contextWindowCeilingFor, listedProfiles, profileFor, readExecutionPolicy } from "../bin/lib/execution-profiles.mjs";
 import { DEFAULT_ROLE, isActivatedRepository, ROLE_NAMES, validateRole } from "../bin/lib/roles.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -119,7 +119,7 @@ export default function registerExecutionProfiles(pi, deps = {}) {
     const role = policy.roles[roleName];
     if (!role) throw new Error(`unknown execution-profile role: ${roleName}`);
     if (requestedProfile) return requestedProfile;
-    const names = Object.keys(role.profiles);
+    const names = listedProfiles(role).map(([name]) => name);
     if (names.length === 1) return names[0];
     const labels = names.map((candidate) => {
       const profile = role.profiles[candidate];

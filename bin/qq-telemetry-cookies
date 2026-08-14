@@ -362,7 +362,8 @@ gateway_roundtrip() {
 
   [ -n "$GATEWAY_SPEC" ] &&
     [[ "$GATEWAY_WEEKLY" =~ ^[0-9]+([.][0-9]+)?$ ]] &&
-    [[ "$GATEWAY_RESET" =~ ^[0-9]+$ ]] &&
+    { [[ "$GATEWAY_RESET" =~ ^[0-9]+$ ]] ||
+      [ "$(awk -v p="$GATEWAY_WEEKLY" 'BEGIN { print (p==0) ? 1 : 0 }')" = 1 ]; } &&
     [[ "$GATEWAY_WEEKLY_CEILING" =~ ^[0-9]+$ ]] &&
     [[ "$GATEWAY_5H_CEILING" =~ ^[0-9]+$ ]]
 }
@@ -370,7 +371,11 @@ gateway_roundtrip() {
 print_gateway_summary() {
   local weekly_percent reset_text
   weekly_percent=$(awk -v fraction="$GATEWAY_WEEKLY" 'BEGIN { printf "%.1f", fraction*100 }')
-  reset_text=$(date -d "@$((GATEWAY_RESET / 1000))" '+%Y-%m-%d %H:%M %Z' 2>/dev/null || printf 'unavailable')
+  if [[ "$GATEWAY_RESET" =~ ^[0-9]+$ ]]; then
+    reset_text=$(date -d "@$((GATEWAY_RESET / 1000))" '+%Y-%m-%d %H:%M %Z' 2>/dev/null || printf 'unavailable')
+  else
+    reset_text='window not started'
+  fi
   printf 'gateway round-trip: ok\n'
   printf 'specCode: %s\n' "$GATEWAY_SPEC"
   printf 'weekly usage: %s%%\n' "$weekly_percent"

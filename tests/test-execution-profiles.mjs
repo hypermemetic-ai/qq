@@ -49,6 +49,14 @@ assert.throws(() => lib.validateExecutionPolicy(withoutCompactor), /invalid top-
 assert.throws(() => lib.validateExecutionPolicy({ ...policy(), roles: { ...policy().roles, observer: policy().roles.runner } }), /exactly: runner, architect/);
 assert.throws(() => lib.validateExecutionPolicy({ ...policy(), roles: { runner: policy().roles.runner, architect: policy().roles.architect, compactor: policy().roles.runner } }), /exactly: runner, architect/);
 assert.throws(() => lib.validateExecutionPolicy({ ...policy(), roles: { ...policy().roles, runner: { ...policy().roles.runner, default: "missing" } } }), /does not name/);
+assert.deepEqual(lib.listedProfiles({
+  default: "sol-high",
+  profiles: {
+    "sol-high": { provider: "openai-codex", model: "gpt-5.6-sol", effort: "high" },
+    "grok-xhigh": { provider: "xai", model: "grok-4.6", effort: "xhigh" },
+    "grok-high": { provider: "xai", model: "grok-4.6", effort: "high" },
+  },
+}).map(([name]) => name), ["sol-high", "grok-high", "grok-xhigh"]);
 assert.equal(lib.parseTokenCount("200K"), 200000);
 assert.equal(lib.parseTokenCount("1M"), 1_000_000);
 const parsed = lib.parseModelList("provider model context max-out thinking images\nopenai-codex gpt-5.6-sol 272K 128K yes yes\n");
@@ -103,6 +111,7 @@ try {
   const notifications = [];
   const statuses = [];
   const roleSelections = [];
+  const selections = [];
   const pi = {
     registerCommand(name, command) { this.command = { name, ...command }; },
     on(name, handler) { handlers.set(name, handler); },
@@ -121,7 +130,10 @@ try {
     ui: {
       notify(message, level) { notifications.push({ message, level }); },
       setStatus(key, value) { statuses.push({ key, value }); },
-      async select() { return "sol-high — openai-codex/gpt-5.6-sol · high"; },
+      async select(_title, labels) {
+        if (labels) selections.push(labels);
+        return labels?.find((label) => label.startsWith("sol-high")) ?? "sol-high — openai-codex/gpt-5.6-sol · high";
+      },
     },
   };
   extension.default(pi, { policyPath, env: { ...process.env, XDG_STATE_HOME: join(temporary, "state") } });
@@ -129,6 +141,12 @@ try {
   assert.equal(currentModel.id, "grok-4.6");
   assert.equal(currentModel.provider, "xai");
   assert.equal(effort, "high");
+  await pi.command.handler("runner", ctx);
+  assert.deepEqual(selections.at(-1), [
+    "qwen-deepseek-max — qwen-token-plan/deepseek-v4-flash-0731 · max",
+    "sol-high — openai-codex/gpt-5.6-sol · high",
+    "grok-high (current, default) — xai/grok-4.6 · high",
+  ]);
   await pi.command.handler("runner qwen-deepseek-max", ctx);
   assert.equal(currentModel.id, "deepseek-v4-flash-0731");
   assert.equal(effort, "max");

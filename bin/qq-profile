@@ -6,6 +6,7 @@ import {
   executionProfilesPath,
   installContextCeiling,
   parseModelList,
+  listedProfiles,
   profileFor,
   readExecutionPolicy,
   uniqueBindings,
@@ -33,7 +34,7 @@ function availableModels() {
 
 function printRole(name, role) {
   console.log(`${name} (default: ${role.default})`);
-  for (const [profileName, profile] of Object.entries(role.profiles)) {
+  for (const [profileName, profile] of listedProfiles(role)) {
     const marker = profileName === role.default ? "*" : " ";
     console.log(` ${marker} ${profileName.padEnd(16)} ${profile.provider}/${profile.model} · ${profile.effort}`);
   }
