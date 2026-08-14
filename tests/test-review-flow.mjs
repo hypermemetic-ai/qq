@@ -61,6 +61,28 @@ try {
   assert.equal(review.isQaPassedProposal({ ...prepared, status: "blocked" }), false);
   assert.equal(review.isQaPassedProposal({ ...prepared, status: "commented", qaVerdict: undefined }), false);
   await workshop.atomicPrivateJson(statePath, prepared);
+  const dirtyMainCalls = [];
+  const dirtyMainRun = async (command, args, options = {}) => {
+    dirtyMainCalls.push({ command, args, options });
+    if (command === "git" && args[0] === "status" && options.cwd === mainRoot) {
+      return { code: 0, stdout: " M src/local edit.js\n?? notes/untracked file.md\n", stderr: "" };
+    }
+    return run(command, args, options);
+  };
+  await assert.rejects(
+    review.landHandoff(dirtyMainRun, statePath),
+    /main checkout clean-checkout invariant violation; dirty paths:\n M src\/local edit\.js\n\?\? notes\/untracked file\.md/,
+  );
+  const dirtyMainState = JSON.parse(await readFile(statePath, "utf8"));
+  assert.equal(dirtyMainState.status, "blocked");
+  assert.equal(dirtyMainState.ref, "refsha");
+  assert.deepEqual(dirtyMainState.qaVerdict, prepared.qaVerdict);
+  assert.equal(review.isQaPassedProposal(dirtyMainState), true);
+  const mainStatusCall = dirtyMainCalls.find(({ command, args }) => command === "git" && args[0] === "status");
+  assert.deepEqual(mainStatusCall.args, ["status", "--porcelain", "--untracked-files=all"]);
+  assert.equal(mainStatusCall.options.cwd, mainRoot);
+  assert.equal(dirtyMainCalls.some(({ command, args }) => command === "git" && ["merge-tree", "merge", "stash", "reset"].includes(args[0])), false);
+
   await review.landHandoff(run, statePath);
   assert.equal(JSON.parse(await readFile(statePath, "utf8")).status, "landed");
   const operations = calls.filter(({ command }) => command === "git").map(({ args }) => args[0]);
