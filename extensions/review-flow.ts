@@ -22,6 +22,34 @@ function commandReason(execution, fallback) {
   return execution?.stderr?.trim() || execution?.stdout?.trim() || fallback;
 }
 
+function landedMessage(state) {
+  const pack = state.pack ?? { summary: "landed", files: [] };
+  return {
+    customType: "qq-run-landed",
+    content: [
+      `Landed ${state.task.id} — ${state.task.title}`,
+      `Ref: ${state.ref}`,
+      `Target: ${state.baseBranch}`,
+      `At: ${state.landedAt}`,
+      "",
+      formatPack(pack),
+    ].join("\n"),
+    display: true,
+    details: {
+      schema: "qq.run-landed/v1",
+      run_id: state.id,
+      task: { id: state.task.id, title: state.task.title },
+      landing: {
+        ref: state.ref,
+        target_branch: state.baseBranch,
+        landed_at: state.landedAt,
+        summary: pack.summary,
+        files: pack.files ?? [],
+      },
+    },
+  };
+}
+
 export default function registerReviewFlow(pi, deps = {}) {
   const env = deps.env ?? process.env;
   const run = deps.exec ?? ((command, args, options) => pi.exec(command, args, options));
@@ -52,13 +80,15 @@ export default function registerReviewFlow(pi, deps = {}) {
     },
   });
 
-  async function land(state, ctx) {
+  async function land(state) {
     const common = await run("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: state.mainRoot });
     if (common?.code !== 0) throw new Error(commandReason(common, "cannot find the main git directory"));
     const lockPath = join(common.stdout.trim(), "qq-land.lock");
     const execution = await run("flock", [lockPath, process.execPath, join(QQ_ROOT, "bin", "qq-land-worker.mjs"), state.statePath], { cwd: state.mainRoot });
     if (execution?.code !== 0) throw new Error(commandReason(execution, "land failed"));
-    ctx.ui.notify(`Landed ${state.task.id}.`, "info");
+    const landed = await readHandoff(state.statePath);
+    if (landed.status !== "landed") throw new Error("land worker completed without recording a landed handoff");
+    await pi.sendMessage(landedMessage(landed), { triggerTurn: false });
   }
 
   function offerKey(state) {
@@ -88,7 +118,7 @@ export default function registerReviewFlow(pi, deps = {}) {
       const choices = isQaPassedProposal(state) ? ["approve", "discuss", "later"] : ["discuss", "later"];
       choice = await ctx.ui.select(pack, choices);
       if (choice === "approve") {
-        await land(state, ctx);
+        await land(state);
       } else if (choice === "discuss") {
         const comment = await ctx.ui.input("Operator discuss note");
         if (!comment) return;

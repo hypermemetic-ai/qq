@@ -265,6 +265,79 @@ try {
   await assert.rejects(review.landHandoff(run, infrastructureCommentedPath), /not a qa-passed proposal ready to land/);
   await architectEvents.get("session_shutdown")();
 
+  const successfulLandXdg = join(scratch, "successful-land-xdg");
+  const successfulLandDir = join(successfulLandXdg, "qq", "runs", "qq", "task-successful-land");
+  const successfulLandPath = join(successfulLandDir, "handoff.json");
+  const successfulLandEnv = { HOME: scratch, XDG_STATE_HOME: successfulLandXdg, QQ_AGENT_PROJECT: "qq", QQ_AGENT_ROLE: "architect" };
+  const successfulLandState = {
+    ...proposalState, id: "task-successful-land", task: { id: "TASK-6", title: "Successful land" },
+    statePath: successfulLandPath, updatedAt: "2026-04-01T00:00:04.000Z",
+  };
+  await runLib.atomicPrivateJson(successfulLandPath, successfulLandState);
+  const successfulLandTools = [];
+  const successfulLandEvents = new Map();
+  const successfulLandMessages = [];
+  const successfulLandNotifications = [];
+  const successfulLandRun = async (command, args) => {
+    if (command === "git" && args[0] === "rev-parse") return { code: 0, stdout: `${join(scratch, "git-common")}\n`, stderr: "" };
+    if (command === "flock") {
+      const landed = JSON.parse(await readFile(args.at(-1), "utf8"));
+      landed.status = "landed";
+      landed.landedAt = "2026-04-01T00:00:05.000Z";
+      landed.updatedAt = landed.landedAt;
+      await runLib.atomicPrivateJson(landed.statePath, landed);
+      return { code: 0, stdout: `Landed ${landed.task.id}.\n`, stderr: "" };
+    }
+    return { code: 0, stdout: "", stderr: "" };
+  };
+  const successfulLandPi = {
+    registerTool(tool) { successfulLandTools.push(tool); },
+    events: { on(name, fn) { successfulLandEvents.set(name, fn); } },
+    on(name, fn) { successfulLandEvents.set(name, fn); },
+    exec: successfulLandRun,
+    sendMessage(payload, options) { successfulLandMessages.push({ payload, options }); },
+  };
+  extension.default(successfulLandPi, { env: successfulLandEnv, exec: successfulLandRun });
+  const successfulLandCtx = {
+    ...ctx,
+    sessionManager: { getSessionId() { return successfulLandState.architectSession; } },
+    ui: {
+      async select() { return "approve"; },
+      async input() { throw new Error("successful land should not request input"); },
+      notify(message, level) { successfulLandNotifications.push({ message, level }); },
+    },
+  };
+  await successfulLandEvents.get("session_start")({}, successfulLandCtx);
+  assert.equal(successfulLandMessages.length, 1);
+  assert.equal(successfulLandMessages[0].payload.customType, "qq-run-landed");
+  assert.equal(successfulLandMessages[0].payload.display, true);
+  assert.equal(successfulLandMessages[0].payload.content, [
+    "Landed TASK-6 — Successful land",
+    "Ref: refsha",
+    "Target: main",
+    "At: 2026-04-01T00:00:05.000Z",
+    "",
+    "small fix",
+    "src/a.ts +2/-1",
+  ].join("\n"));
+  assert.deepEqual(successfulLandMessages[0].payload.details, {
+    schema: "qq.run-landed/v1",
+    run_id: "task-successful-land",
+    task: { id: "TASK-6", title: "Successful land" },
+    landing: {
+      ref: "refsha",
+      target_branch: "main",
+      landed_at: "2026-04-01T00:00:05.000Z",
+      summary: "small fix",
+      files: [{ path: "src/a.ts", added: 2, deleted: 1 }],
+    },
+  });
+  assert.deepEqual(successfulLandMessages[0].options, { triggerTurn: false });
+  assert.deepEqual(successfulLandNotifications, []);
+  await successfulLandEvents.get("agent_settled")();
+  assert.equal(successfulLandMessages.length, 1);
+  await successfulLandEvents.get("session_shutdown")();
+
   const failedLandXdg = join(scratch, "failed-land-xdg");
   const failedLandDir = join(failedLandXdg, "qq", "runs", "qq", "task-failed-land");
   const failedLandPath = join(failedLandDir, "handoff.json");
@@ -318,6 +391,7 @@ try {
   assert.equal(firstFailedLand.status, "blocked");
   assert.equal(firstFailedLand.blockedReason, "merge failed: checkout busy");
   assert.deepEqual(failedLandChoices[0].options, ["approve", "discuss", "later"]);
+  assert.equal(failedLandMessages.filter(({ payload }) => payload.customType === "qq-run-landed").length, 0);
 
   landError = "merge failed: branch moved";
   failedLandQueued.push("approve");
@@ -352,6 +426,7 @@ try {
   assert.deepEqual(failedLandChoices.at(-1).options, ["approve", "discuss", "later"]);
   await failedLandEvents.get("agent_settled")();
   assert.equal(failedLandChoices.length, 7);
+  assert.equal(failedLandMessages.filter(({ payload }) => payload.customType === "qq-run-landed").length, 0);
   await failedLandEvents.get("session_shutdown")();
 
   const restartedFailedLandEvents = new Map();
