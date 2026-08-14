@@ -241,6 +241,7 @@ export default function register(pi, deps = {}) {
   let active = false;
   let epoch = 0;
   let current;
+  let selectedRole;
   let currentContext;
   let tasks = [];
   let busy = "idle";
@@ -369,7 +370,7 @@ export default function register(pi, deps = {}) {
   async function start(_event, ctx) {
     currentContext = ctx;
     const config = await readProjectConfig(ctx.cwd);
-    const role = roleForRepository(ctx.cwd, QQ_ROOT, env, configuredRole(env, config));
+    const role = selectedRole ?? roleForRepository(ctx.cwd, QQ_ROOT, env, configuredRole(env, config));
     if (!role) return;
     const sessionId = ctx.sessionManager?.getSessionId?.();
     if (typeof sessionId !== "string" || sessionId === "") return;
@@ -394,6 +395,7 @@ export default function register(pi, deps = {}) {
     inFlight.clear();
     await removePresence();
     current = undefined;
+    selectedRole = undefined;
     currentContext = undefined;
     busy = "idle";
     tool = null;
@@ -479,8 +481,9 @@ export default function register(pi, deps = {}) {
 
   pi.events.on("qq:role-selected", (selection) => {
     if (!ROLE_SET.has(selection?.role)) return;
+    selectedRole = selection.role;
     if (!current) return;
-    current.role = selection.role;
+    current.role = selectedRole;
     void writePresence();
   });
   pi.on("session_start", start);
