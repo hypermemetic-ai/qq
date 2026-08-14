@@ -87,9 +87,14 @@ export async function listReviews(project, env = process.env) {
   return listHandoffs(project, env, ["proposal", "blocked", "commented"]);
 }
 
+export function isQaPassedProposal(state) {
+  return (state.status === "proposal" || state.status === "commented") &&
+    state.qaVerdict?.schema === "qq.qa-verdict/v1" && state.qaVerdict.verdict === "pass";
+}
+
 export async function landHandoff(run, statePath) {
   const state = await readHandoff(statePath);
-  if (state.status !== "proposal" && state.status !== "commented") throw new Error(`handoff is ${state.status}, not ready to land`);
+  if (!isQaPassedProposal(state)) throw new Error(`handoff is ${state.status}, not a qa-passed proposal ready to land`);
   try {
     const branch = await checked(run, "git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: state.mainRoot }, "main checkout is detached");
     if (branch.stdout.trim() !== state.baseBranch) throw new Error(`main checkout is on ${branch.stdout.trim()}, not ${state.baseBranch}`);

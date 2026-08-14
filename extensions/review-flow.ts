@@ -4,7 +4,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { atomicPrivateJson, readHandoff } from "../bin/lib/workshop.mjs";
-import { formatPack, listProposals, listReviews, prepareDone, projectFromCwd, setBoardStatus } from "../bin/lib/review.mjs";
+import { formatPack, isQaPassedProposal, listProposals, listReviews, prepareDone, projectFromCwd, setBoardStatus } from "../bin/lib/review.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -68,17 +68,18 @@ export default function registerReviewFlow(pi, deps = {}) {
     shown.add(key);
     try {
       const pack = formatPack(state.pack ?? { summary: state.blockedReason || "qa blocked", files: [] });
-      const choices = state.status === "blocked" ? ["discuss", "later"] : ["approve", "discuss", "later"];
+      const choices = isQaPassedProposal(state) ? ["approve", "discuss", "later"] : ["discuss", "later"];
       const choice = await ctx.ui.select(pack, choices);
       if (choice === "approve") {
         await land(state, ctx);
       } else if (choice === "discuss") {
         const comment = await ctx.ui.input("Operator discuss note");
         if (!comment) return;
-        state.status = "commented";
+        if (state.status === "proposal") state.status = "commented";
         state.operatorComment = comment;
         state.updatedAt = new Date().toISOString();
         await atomicPrivateJson(state.statePath, state);
+        shown.add(`${state.id}:${state.updatedAt}`);
         await setBoardStatus(run, ctx.cwd || state.mainRoot, state.task.id, "To Do");
         pi.sendMessage({
           customType: "qq-operator-comment",
@@ -103,7 +104,7 @@ export default function registerReviewFlow(pi, deps = {}) {
 
   pi.registerTool({
     name: "review", label: "Review", promptSnippet: "Reopen waiting runs reviews",
-    description: "Offer waiting proposal, blocked, and commented runs handoffs for approve, discuss, or later. Architect sessions only. Reopens a later deferral without reloading and can land an existing QA-passed ref after discuss without re-delegating.",
+    description: "Offer waiting proposal, blocked, and commented runs handoffs for review. Architect sessions only. Approves only QA-passed proposals, while reopening later deferrals and QA-passed refs after discuss without re-delegating.",
     parameters: { type: "object", additionalProperties: false, properties: {} },
     async execute(_id, _params, _signal, _update, ctx) {
       if (role !== "architect") return result("review is available only in an architect session.", { status: "refused" });

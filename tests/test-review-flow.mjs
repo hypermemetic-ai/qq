@@ -52,7 +52,13 @@ try {
   assert.ok(calls.some(({ args }) => args[0] === "merge-base"));
 
   prepared.status = "proposal";
+  prepared.qaVerdict = {
+    schema: "qq.qa-verdict/v1", version: 1, verdict: "pass", summary: "small fix", feedback: "", tests_modified: false,
+  };
   prepared.pack = { summary: "small fix", files: [{ path: "src/a.ts", added: 2, deleted: 1 }] };
+  assert.equal(review.isQaPassedProposal(prepared), true);
+  assert.equal(review.isQaPassedProposal({ ...prepared, status: "blocked" }), false);
+  assert.equal(review.isQaPassedProposal({ ...prepared, status: "commented", qaVerdict: undefined }), false);
   await workshop.atomicPrivateJson(statePath, prepared);
   await review.landHandoff(run, statePath);
   assert.equal(JSON.parse(await readFile(statePath, "utf8")).status, "landed");
@@ -176,6 +182,47 @@ try {
   });
   assert.equal(afterComment.length, 2);
   assert.ok(afterComment.every((item) => item.options.includes("approve")));
+
+  const blockedPath = join(workshopDir, "task-blocked", "handoff.json");
+  await workshop.atomicPrivateJson(blockedPath, {
+    ...proposalState, id: "task-blocked", status: "blocked", qaVerdict: undefined, pack: undefined,
+    blockedReason: "qa infrastructure failed: pane busy", task: { id: "TASK-4", title: "Blocked task" },
+    statePath: blockedPath, updatedAt: "2026-04-01T00:00:02.000Z",
+  });
+  const blockedOffers = [];
+  await reviewTool.execute("r3", {}, undefined, undefined, {
+    ...ctx,
+    ui: {
+      ...ctx.ui,
+      async select(pack, options) {
+        blockedOffers.push({ pack, options });
+        return pack === "qa infrastructure failed: pane busy" ? "discuss" : "later";
+      },
+    },
+  });
+  const blockedOffer = blockedOffers.find(({ pack }) => pack === "qa infrastructure failed: pane busy");
+  assert.deepEqual(blockedOffer.options, ["discuss", "later"]);
+  const discussedBlocked = JSON.parse(await readFile(blockedPath, "utf8"));
+  assert.equal(discussedBlocked.status, "blocked");
+  assert.equal(discussedBlocked.operatorComment, "tighten the summary");
+  await assert.rejects(review.landHandoff(run, blockedPath), /not a qa-passed proposal ready to land/);
+
+  const infrastructureCommentedPath = join(workshopDir, "task-infrastructure-commented", "handoff.json");
+  await workshop.atomicPrivateJson(infrastructureCommentedPath, {
+    ...discussedBlocked, id: "task-infrastructure-commented", status: "commented",
+    blockedReason: "qa infrastructure failed: legacy comment", task: { id: "TASK-5", title: "Legacy blocked task" },
+    statePath: infrastructureCommentedPath, updatedAt: "2026-04-01T00:00:03.000Z",
+  });
+  const reopenedOffers = [];
+  await reviewTool.execute("r4", {}, undefined, undefined, {
+    ...ctx,
+    ui: { ...ctx.ui, async select(pack, options) { reopenedOffers.push({ pack, options }); return "later"; } },
+  });
+  const reopenedBlocked = reopenedOffers.find(({ pack }) => pack === "qa infrastructure failed: pane busy");
+  const legacyCommented = reopenedOffers.find(({ pack }) => pack === "qa infrastructure failed: legacy comment");
+  assert.deepEqual(reopenedBlocked.options, ["discuss", "later"]);
+  assert.deepEqual(legacyCommented.options, ["discuss", "later"]);
+  await assert.rejects(review.landHandoff(run, infrastructureCommentedPath), /not a qa-passed proposal ready to land/);
   await architectEvents.get("session_shutdown")();
 
   assert.equal(review.isTestPath("tests/test-review-flow.mjs"), true);
