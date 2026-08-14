@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-STATE_HOME="${XDG_STATE_HOME:-${HOME:?HOME is required}/.local/state}"
-OUTPUT_ROOT="${QQ_OPENWIKI_OUTPUT_ROOT:-$STATE_HOME/qq/openwiki}"
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+MAIN_ROOT="${QQ_OPENWIKI_MAIN_ROOT:-$ROOT}"
+MAIN_BRANCH="${QQ_OPENWIKI_MAIN_BRANCH:-main}"
+PUBLISHED_REPO_KEY="${QQ_OPENWIKI_PUBLISHED_REPO_KEY:-qq}"
+BRANCH="openwiki"
 
 if (( $# != 2 )); then
   echo "usage: qq-openwiki-publish REPOSITORY_KEY GENERATED_DIRECTORY" >&2
@@ -14,6 +17,10 @@ if [[ ! "$key" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]]; then
   echo "OpenWiki repository key is malformed: $key" >&2
   exit 1
 fi
+if [[ "$key" != "$PUBLISHED_REPO_KEY" ]]; then
+  echo "OpenWiki branch publication is enabled only for $PUBLISHED_REPO_KEY, not $key." >&2
+  exit 1
+fi
 if [[ ! -d "$generated" || -L "$generated" ]]; then
   echo "Generated OpenWiki output is not a directory: $generated" >&2
   exit 1
@@ -23,40 +30,51 @@ if find "$generated" -mindepth 1 ! -type d ! -type f -print -quit | grep -q .; t
   exit 1
 fi
 
-store="$OUTPUT_ROOT/$key"
-releases="$store/releases"
-mkdir -p -- "$releases"
-chmod 0755 -- "$OUTPUT_ROOT" "$store" "$releases"
-exec 9>"$store/publish.lock"
+MAIN_ROOT="$(git -C "$MAIN_ROOT" rev-parse --show-toplevel)"
+COMMON_DIR="$(git -C "$MAIN_ROOT" rev-parse --path-format=absolute --git-common-dir)"
+exec 9>"$COMMON_DIR/qq-openwiki-publish.lock"
 flock 9
 
-incoming="$(mktemp -d "$releases/.incoming.XXXXXX")"
-next=""
-cleanup() {
-  if [[ -n "$incoming" && -d "$incoming" ]]; then
-    chmod -R u+w -- "$incoming" 2>/dev/null || true
-    rm -rf -- "$incoming"
-  fi
-  if [[ -n "$next" ]]; then rm -f -- "$next"; fi
-}
+index="$(mktemp "$COMMON_DIR/qq-openwiki-index.XXXXXX")"
+cleanup() { rm -f -- "$index"; }
 trap cleanup EXIT
-cp -a -- "$generated/." "$incoming/"
-find "$incoming" -type f -exec chmod 0444 {} +
-find "$incoming" -type d -exec chmod 0555 {} +
+rm -f -- "$index"
+GIT_INDEX_FILE="$index" git -C "$MAIN_ROOT" --work-tree="$generated" read-tree --empty
+GIT_INDEX_FILE="$index" git -C "$MAIN_ROOT" --work-tree="$generated" add -f -A -- .
+tree="$(GIT_INDEX_FILE="$index" git -C "$MAIN_ROOT" write-tree)"
 
-if [[ -L "$store/current" && -d "$store/current" ]] \
-  && diff -qr -- "$store/current" "$incoming" >/dev/null; then
-  echo "OpenWiki is already current."
-  exit 0
+branch_ref="refs/heads/$BRANCH"
+parent=""
+if git -C "$MAIN_ROOT" show-ref --verify --quiet "$branch_ref"; then
+  parent="$(git -C "$MAIN_ROOT" rev-parse "$branch_ref")"
+elif git -C "$MAIN_ROOT" show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
+  parent="$(git -C "$MAIN_ROOT" rev-parse "refs/remotes/origin/$BRANCH")"
+  git -C "$MAIN_ROOT" update-ref "$branch_ref" "$parent"
+fi
+if [[ -n "$parent" ]] && git -C "$MAIN_ROOT" merge-base "$parent" "refs/heads/$MAIN_BRANCH" >/dev/null 2>&1; then
+  echo "OpenWiki publication branch is not orphaned from main." >&2
+  exit 1
 fi
 
-release="$(date -u +%Y%m%dT%H%M%S)-${incoming##*.incoming.}"
-release_path="$releases/$release"
-mv -T -- "$incoming" "$release_path"
-incoming=""
-next="$store/.current.$$.$RANDOM"
-ln -s -- "releases/$release" "$next"
-mv -Tf -- "$next" "$store/current"
-next=""
-trap - EXIT
-printf 'Published OpenWiki release %s for %s.\n' "$release" "$key"
+changed=true
+if [[ -n "$parent" && "$(git -C "$MAIN_ROOT" rev-parse "$parent^{tree}")" == "$tree" ]]; then
+  changed=false
+else
+  if [[ -n "$parent" ]]; then
+    commit="$(printf 'Refresh OpenWiki\n' | git -C "$MAIN_ROOT" commit-tree "$tree" -p "$parent")"
+    git -C "$MAIN_ROOT" update-ref "$branch_ref" "$commit" "$parent"
+  else
+    commit="$(printf 'Publish OpenWiki\n' | git -C "$MAIN_ROOT" commit-tree "$tree")"
+    git -C "$MAIN_ROOT" update-ref "$branch_ref" "$commit"
+  fi
+fi
+
+if git -C "$MAIN_ROOT" remote get-url origin >/dev/null 2>&1; then
+  git -C "$MAIN_ROOT" push --quiet origin "$branch_ref:$branch_ref"
+fi
+
+if [[ "$changed" == true ]]; then
+  printf 'Published OpenWiki commit %s for %s.\n' "$(git -C "$MAIN_ROOT" rev-parse "$branch_ref")" "$key"
+else
+  echo "OpenWiki is already current."
+fi

@@ -13,7 +13,7 @@ FAKE="$TMP/fake-refresh"
 PUBLISH_FAKE="$TMP/published-refresh"
 LEGACY_FAKE="$TMP/legacy-refresh"
 mkdir -p "$PROJECTS" "$STATE"
-for repo in qq discuss qq-dictation deciq; do
+for repo in qq qq-newspaper herdr discuss qq-dictation deciq; do
   mkdir -p "$PROJECTS/$repo"
   git -C "$PROJECTS/$repo" init -q -b main
   git -C "$PROJECTS/$repo" config user.name qq-test
@@ -22,6 +22,8 @@ for repo in qq discuss qq-dictation deciq; do
 done
 cat >"$REGISTRY" <<'EOF'
 qq
+qq-newspaper
+herdr
 discuss
 qq-dictation
 EOF
@@ -68,7 +70,7 @@ QQ_TEST_STATE="$STATE" \
   "$ROOT/bin/qq-openwiki-dispatch" >/dev/null
 
 [[ "$(<"$STATE/max")" == 3 ]]
-printf '%s\n' published:qq legacy:discuss legacy:qq-dictation | sort >"$TMP/expected"
+printf '%s\n' published:qq legacy:qq-newspaper legacy:herdr legacy:discuss legacy:qq-dictation | sort >"$TMP/expected"
 sort "$STATE/started" >"$TMP/started"
 sort "$STATE/finished" >"$TMP/finished"
 cmp -s "$TMP/expected" "$TMP/started"
@@ -106,9 +108,11 @@ grep -Fxq legacy:qq-dictation "$STATE/finished"
 
 DEFAULT_REGISTRY="$ROOT/config/openwiki-repositories"
 grep -Fxq qq "$DEFAULT_REGISTRY"
+grep -Fxq qq-newspaper "$DEFAULT_REGISTRY"
 grep -Fxq herdr "$DEFAULT_REGISTRY"
 grep -Fxq discuss "$DEFAULT_REGISTRY"
 grep -Fxq qq-dictation "$DEFAULT_REGISTRY"
+[[ "$(grep -Evc '^[[:space:]]*(#|$)' "$DEFAULT_REGISTRY")" == 5 ]]
 if grep -Eiq 'deciq' <(grep -v '^[[:space:]]*#' "$DEFAULT_REGISTRY"); then
   echo "live OpenWiki registry includes frozen DecIQ" >&2
   exit 1

@@ -1,5 +1,5 @@
 [Unit]
-Description=Refresh QQ publication and registered legacy OpenWikis
+Description=Publish QQ OpenWiki branch and refresh registered legacy OpenWikis
 
 [Service]
 Type=oneshot
@@ -8,6 +8,5 @@ WorkingDirectory=%h/projects/qq
 UMask=0077
 Environment=OPENWIKI_PROVIDER=openai-chatgpt
 Environment=QQ_OPENWIKI_PUBLISHED_REPO_KEY=qq
-Environment=QQ_OPENWIKI_OUTPUT_ROOT=%h/.local/state/qq/openwiki
 Environment="PATH=%h/.local/bin:%h/.bun/bin:%h/.opencode/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ExecStart=%h/projects/qq/bin/qq-openwiki-dispatch
