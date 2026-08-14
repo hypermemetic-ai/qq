@@ -66,7 +66,7 @@ timeout 30 script -qfec \
   "$base/client.typescript" >/dev/null 2>&1 &
 client=$!
 
-python3 - "$base/runtime/herdr.sock" "$pane" <<'PY'
+pane_ids=$(python3 - "$base/runtime/herdr.sock" "$pane" <<'PY'
 import json, socket, sys, time
 path, first = sys.argv[1:]
 def request(method, params):
@@ -98,11 +98,10 @@ for _ in range(100):
     time.sleep(.05)
 assert area == {"x": 26, "y": 1, "width": 134, "height": 49}, area
 
-request("pane.close", {"pane_id": second})
-root = request("layout.export", {"pane_id": first})["layout"]["root"]
-assert abs(root["ratio"] - .5) < 1e-5, root
-request("pane.close", {"pane_id": third})
+print(second, third)
 PY
+)
+read -r second third <<<"$pane_ids"
 
 printf '# Exact disposable ticket\n\n## Delegate note\n\nExact disposable note\n' > "$base/gate.md"
 cat > "$base/glow" <<'EOF'
@@ -124,11 +123,26 @@ assert any(plugin.get("plugin_id") == "qq.brief-gate" and plugin.get("enabled") 
 '
 
 opened=$("${run[@]}" "$binary" plugin pane open \
-  --plugin qq.brief-gate --entrypoint review --placement split --target-pane "$pane" --direction right \
+  --plugin qq.brief-gate --entrypoint review --placement split --target-pane "$third" --direction right \
   --env "QQ_BRIEF_GATE_DOCUMENT=$base/gate.md" \
   --env "QQ_BRIEF_GATE_DECISION=$base/decision" \
   --env "QQ_BRIEF_GATE_GLOW=$base/glow" --focus)
 gate=$(printf '%s' "$opened" | result_value plugin_pane_opened plugin_pane pane pane_id)
+python3 - "$base/runtime/herdr.sock" "$pane" <<'PY'
+import json, socket, sys
+path, first = sys.argv[1:]
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+sock.connect(path)
+sock.sendall((json.dumps({"id": "layout.export", "method": "layout.export", "params": {"pane_id": first}}) + "\n").encode())
+response = json.loads(sock.makefile().readline())
+root = response["result"]["layout"]["root"]
+def shares(node, share=1.0):
+    if "ratio" not in node:
+        return [share]
+    return shares(node["first"], share * node["ratio"]) + shares(node["second"], share * (1 - node["ratio"]))
+widths = shares(root)
+assert len(widths) == 4 and all(abs(width - .25) < 1e-5 for width in widths), root
+PY
 "${run[@]}" "$binary" pane send-text "$gate" a >/dev/null
 waited=$("${run[@]}" "$binary" pane wait-output "$gate" \
   --source recent-unwrapped --match QQ_BRIEF_GATE_DECIDED --timeout 5000)
@@ -136,6 +150,25 @@ waited=$("${run[@]}" "$binary" pane wait-output "$gate" \
 [[ $(<"$base/decision") == approved ]]
 closed_gate=$("${run[@]}" "$binary" plugin pane close "$gate")
 [[ $(printf '%s' "$closed_gate" | result_value plugin_pane_closed pane_id) == "$gate" ]]
+python3 - "$base/runtime/herdr.sock" "$pane" "$second" "$third" <<'PY'
+import json, socket, sys
+path, first, second, third = sys.argv[1:]
+def request(method, params):
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.connect(path)
+    sock.sendall((json.dumps({"id": method, "method": method, "params": params}) + "\n").encode())
+    response = json.loads(sock.makefile().readline())
+    assert "result" in response, response
+    return response["result"]
+
+root = request("layout.export", {"pane_id": first})["layout"]["root"]
+assert abs(root["ratio"] - 1 / 3) < 1e-5, root
+assert abs(root["second"]["ratio"] - 1 / 2) < 1e-5, root
+request("pane.close", {"pane_id": second})
+root = request("layout.export", {"pane_id": first})["layout"]["root"]
+assert abs(root["ratio"] - .5) < 1e-5, root
+request("pane.close", {"pane_id": third})
+PY
 
 runs=$("${run[@]}" "$binary" tab create --workspace "$workspace" --label runs --cwd /tmp --no-focus)
 runs_pane=$(printf '%s' "$runs" | result_value tab_created root_pane pane_id)

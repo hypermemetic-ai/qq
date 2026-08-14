@@ -75,6 +75,22 @@ index 72798a1..229986e 100644
      #[test]
      fn api_pane_close_closes_linked_worktree_workspace_only() {
          let mut app = app_with_linked_worktree();
+diff --git a/src/app/api/plugins/panes.rs b/src/app/api/plugins/panes.rs
+index 8b0749e..b699a5d 100644
+--- a/src/app/api/plugins/panes.rs
++++ b/src/app/api/plugins/panes.rs
+@@ -140,6 +140,11 @@ impl App {
+                 )
+             }
+         };
++        if self.state.pane_preferred_width > 0 && direction == Direction::Horizontal {
++            self.state.workspaces[ws_idx].tabs[tab_idx]
++                .layout
++                .balance_horizontal_row();
++        }
+         if params.focus || placement == PluginPanePlacement::Zoomed {
+             self.state.switch_workspace_tab(ws_idx, tab_idx);
+             self.state
 diff --git a/src/app/mod.rs b/src/app/mod.rs
 index d049c0f..546c654 100644
 --- a/src/app/mod.rs
