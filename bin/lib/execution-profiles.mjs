@@ -9,7 +9,7 @@ import { ROLE_NAMES } from "./roles.mjs";
 export const POLICY_SCHEMA = "qq.execution-profiles/v1";
 export const PROFILE_LIST_SCHEMA = "qq.profile-list/v1";
 export const CONTEXT_WINDOW_CEILING = 200_000;
-export const GROK_PROVIDERS = new Set(["xai", "xai-auth"]);
+export const GROK_PROVIDERS = new Set(["xai-auth"]);
 export const EFFORTS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const EFFORT_ORDER = Object.freeze([...EFFORTS]);
 const NAME = /^[a-z][a-z0-9-]{0,62}$/;
@@ -43,6 +43,7 @@ export function agentModelsPath(env = process.env) {
 function validateProfile(value, label) {
   if (!exactKeys(value, ["provider", "model", "effort"])) throw new Error(`${label} must contain exactly provider, model, and effort`);
   if (typeof value.provider !== "string" || !BINDING.test(value.provider)) throw new Error(`${label}.provider is malformed`);
+  if (value.provider === "xai") throw new Error(`${label}.provider xai is disabled; use xai-auth`);
   if (typeof value.model !== "string" || !BINDING.test(value.model)) throw new Error(`${label}.model is malformed`);
   if (typeof value.effort !== "string" || !EFFORTS.has(value.effort)) throw new Error(`${label}.effort is unsupported`);
   return Object.freeze({ provider: value.provider, model: value.model, effort: value.effort });

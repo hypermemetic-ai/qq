@@ -14,13 +14,13 @@ function policy(defaultProfile = "grok-high") {
   return {
     schema: "qq.execution-profiles/v1",
     contextWindowCeiling: 200000,
-    scribe: { provider: "xai", model: "grok-4.6", effort: "high" },
+    scribe: { provider: "xai-auth", model: "grok-4.6", effort: "high" },
     qa: { provider: "openai-codex", model: "gpt-5.6-sol", effort: "xhigh" },
     roles: {
       runner: {
         default: defaultProfile,
         profiles: {
-          "grok-high": { provider: "xai", model: "grok-4.6", effort: "high" },
+          "grok-high": { provider: "xai-auth", model: "grok-4.6", effort: "high" },
           "qwen-deepseek-max": { provider: "qwen-token-plan", model: "deepseek-v4-flash-0731", effort: "max" },
           "sol-high": { provider: "openai-codex", model: "gpt-5.6-sol", effort: "high" },
         },
@@ -28,7 +28,7 @@ function policy(defaultProfile = "grok-high") {
       architect: {
         default: "grok-high",
         profiles: {
-          "grok-high": { provider: "xai", model: "grok-4.6", effort: "high" },
+          "grok-high": { provider: "xai-auth", model: "grok-4.6", effort: "high" },
         },
       },
     },
@@ -40,8 +40,11 @@ assert.equal(roles.validateRole("runner"), "runner");
 assert.equal(roles.validateRole("architect"), "architect");
 assert.throws(() => roles.validateRole("observer"), /unknown qq role/);
 assert.equal(lib.validateExecutionPolicy(policy()).roles.runner.default, "grok-high");
-assert.deepEqual(lib.validateExecutionPolicy(policy()).scribe, { provider: "xai", model: "grok-4.6", effort: "high" });
+assert.deepEqual(lib.validateExecutionPolicy(policy()).scribe, { provider: "xai-auth", model: "grok-4.6", effort: "high" });
 assert.deepEqual(lib.validateExecutionPolicy(policy()).qa, { provider: "openai-codex", model: "gpt-5.6-sol", effort: "xhigh" });
+const publicXaiPolicy = policy();
+publicXaiPolicy.roles.runner.profiles["grok-high"].provider = "xai";
+assert.throws(() => lib.validateExecutionPolicy(publicXaiPolicy), /xai is disabled; use xai-auth/);
 assert.throws(() => lib.validateExecutionPolicy({ ...policy(), contextWindowCeiling: 262144 }), /200000/);
 const { qa: _ignoredQa, ...withoutQa } = policy();
 assert.throws(() => lib.validateExecutionPolicy(withoutQa), /invalid top-level shape/);
@@ -54,8 +57,8 @@ assert.deepEqual(lib.listedProfiles({
   default: "sol-high",
   profiles: {
     "sol-high": { provider: "openai-codex", model: "gpt-5.6-sol", effort: "high" },
-    "grok-xhigh": { provider: "xai", model: "grok-4.6", effort: "xhigh" },
-    "grok-high": { provider: "xai", model: "grok-4.6", effort: "high" },
+    "grok-xhigh": { provider: "xai-auth", model: "grok-4.6", effort: "xhigh" },
+    "grok-high": { provider: "xai-auth", model: "grok-4.6", effort: "high" },
   },
 }).map(([name]) => name), ["sol-high", "grok-high", "grok-xhigh"]);
 const expectedProfileList = {
@@ -67,19 +70,19 @@ const expectedProfileList = {
       profiles: [
         { name: "qwen-deepseek-max", provider: "qwen-token-plan", model: "deepseek-v4-flash-0731", effort: "max" },
         { name: "sol-high", provider: "openai-codex", model: "gpt-5.6-sol", effort: "high" },
-        { name: "grok-high", provider: "xai", model: "grok-4.6", effort: "high" },
+        { name: "grok-high", provider: "xai-auth", model: "grok-4.6", effort: "high" },
       ],
     },
     {
       name: "architect",
       default: "grok-high",
       profiles: [
-        { name: "grok-high", provider: "xai", model: "grok-4.6", effort: "high" },
+        { name: "grok-high", provider: "xai-auth", model: "grok-4.6", effort: "high" },
       ],
     },
   ],
   services: [
-    { name: "scribe", provider: "xai", model: "grok-4.6", effort: "high" },
+    { name: "scribe", provider: "xai-auth", model: "grok-4.6", effort: "high" },
     { name: "qa", provider: "openai-codex", model: "gpt-5.6-sol", effort: "xhigh" },
   ],
 };
@@ -88,7 +91,7 @@ assert.equal(lib.parseTokenCount("200K"), 200000);
 assert.equal(lib.parseTokenCount("1M"), 1_000_000);
 const parsed = lib.parseModelList("provider model context max-out thinking images\nopenai-codex gpt-5.6-sol 272K 128K yes yes\n");
 assert.equal(parsed.get("openai-codex\0gpt-5.6-sol").contextWindow, 272000);
-assert.equal(lib.contextWindowCeilingFor(lib.validateExecutionPolicy(policy()), "xai"), 200000);
+assert.equal(lib.contextWindowCeilingFor(lib.validateExecutionPolicy(policy()), "xai"), undefined);
 assert.equal(lib.contextWindowCeilingFor(lib.validateExecutionPolicy(policy()), "xai-auth"), 200000);
 assert.equal(lib.contextWindowCeilingFor(lib.validateExecutionPolicy(policy()), "openai-codex"), undefined);
 assert.equal(lib.contextWindowCeilingFor(lib.validateExecutionPolicy(policy()), "qwen-token-plan"), undefined);
@@ -123,27 +126,27 @@ try {
   await writeFile(modelsPath, JSON.stringify({
     providers: {
       unrelated: { baseUrl: "https://example.invalid" },
-      xai: { modelOverrides: { "grok-4.6": { temperature: 0.4 } } },
+      "xai-auth": { modelOverrides: { "grok-4.6": { temperature: 0.4 } } },
       "qwen-token-plan": { modelOverrides: { "deepseek-v4-flash-0731": { contextWindow: 200000, maxTokens: 384000 } } },
       "openai-codex": { modelOverrides: { "gpt-5.6-sol": { contextWindow: 200000 } } },
     },
   }), { mode: 0o600 });
   const models = new Map([
-    ["xai\0grok-4.6", { contextWindow: 500000 }],
+    ["xai-auth\0grok-4.6", { contextWindow: 500000 }],
     ["qwen-token-plan\0deepseek-v4-flash-0731", { contextWindow: 1_000_000 }],
     ["openai-codex\0gpt-5.6-sol", { contextWindow: 272000 }],
   ]);
-  assert.deepEqual(await lib.installContextCeiling(lib.validateExecutionPolicy(policy()), models, modelsPath), ["xai/grok-4.6", "qwen-token-plan/deepseek-v4-flash-0731", "openai-codex/gpt-5.6-sol"]);
+  assert.deepEqual(await lib.installContextCeiling(lib.validateExecutionPolicy(policy()), models, modelsPath), ["xai-auth/grok-4.6", "qwen-token-plan/deepseek-v4-flash-0731", "openai-codex/gpt-5.6-sol"]);
   const modelsDocument = JSON.parse(await readFile(modelsPath, "utf8"));
-  assert.equal(modelsDocument.providers.xai.modelOverrides["grok-4.6"].contextWindow, 200000);
-  assert.equal(modelsDocument.providers.xai.modelOverrides["grok-4.6"].temperature, 0.4);
+  assert.equal(modelsDocument.providers["xai-auth"].modelOverrides["grok-4.6"].contextWindow, 200000);
+  assert.equal(modelsDocument.providers["xai-auth"].modelOverrides["grok-4.6"].temperature, 0.4);
   assert.equal(modelsDocument.providers["qwen-token-plan"].modelOverrides["deepseek-v4-flash-0731"].contextWindow, undefined);
   assert.equal(modelsDocument.providers["qwen-token-plan"].modelOverrides["deepseek-v4-flash-0731"].maxTokens, 384000);
   assert.equal(modelsDocument.providers["openai-codex"], undefined);
   assert.equal(modelsDocument.providers.unrelated.baseUrl, "https://example.invalid");
 
   const modelObjects = new Map([
-    ["xai/grok-4.6", { provider: "xai", id: "grok-4.6", contextWindow: 200000 }],
+    ["xai-auth/grok-4.6", { provider: "xai-auth", id: "grok-4.6", contextWindow: 200000 }],
     ["qwen-token-plan/deepseek-v4-flash-0731", { provider: "qwen-token-plan", id: "deepseek-v4-flash-0731", contextWindow: 1_000_000 }],
     ["openai-codex/gpt-5.6-sol", { provider: "openai-codex", id: "gpt-5.6-sol", contextWindow: 272000 }],
   ]);
@@ -185,13 +188,13 @@ try {
   extension.default(pi, { policyPath, env: paneEnv });
   await handlers.get("session_start")({ reason: "startup" }, ctx);
   assert.equal(currentModel.id, "grok-4.6");
-  assert.equal(currentModel.provider, "xai");
+  assert.equal(currentModel.provider, "xai-auth");
   assert.equal(effort, "high");
   await pi.command.handler("runner", ctx);
   assert.deepEqual(selections.at(-1), [
     "qwen-deepseek-max — qwen-token-plan/deepseek-v4-flash-0731 · max",
     "sol-high — openai-codex/gpt-5.6-sol · high",
-    "grok-high (current, default) — xai/grok-4.6 · high",
+    "grok-high (current, default) — xai-auth/grok-4.6 · high",
   ]);
   await pi.command.handler("runner qwen-deepseek-max", ctx);
   assert.equal(currentModel.id, "deepseek-v4-flash-0731");
@@ -264,7 +267,7 @@ try {
   await handlers.get("session_shutdown")({ reason: "quit" }, ctx);
   ctx.cwd = root;
 
-  modelObjects.get("xai/grok-4.6").contextWindow = 500000;
+  modelObjects.get("xai-auth/grok-4.6").contextWindow = 500000;
   extension.default(pi, { policyPath, env: { ...process.env, XDG_STATE_HOME: join(temporary, "state-2") } });
   await handlers.get("session_start")({ reason: "startup" }, ctx);
   assert.deepEqual(await handlers.get("input")({}, ctx), { action: "handled" });
