@@ -13,6 +13,11 @@ assert.equal(lib.taskSlug("TASK-1"), "task-1");
 assert.equal(lib.taskSlug("T-1"), "t-1");
 assert.equal(lib.taskSlug("A-71.12"), "a-71-12");
 assert.throws(() => lib.taskSlug("bad task"), /T-1/);
+assert.equal(
+  lib.formatNoteTake("A later take.", new Date(2025, 0, 2, 3, 4)),
+  "---\n\n2025-01-02 03:04\n\nA later take.",
+);
+assert.throws(() => lib.formatNoteTake("A later take.", "not a date"), /timestamp is invalid/);
 const paneResponse = JSON.stringify({ id: "cli:pane:split", result: { type: "pane_info", pane: { pane_id: "w2T:p9" } } });
 assert.equal(lib.parseHerdr(paneResponse, "pane_info").pane.pane_id, "w2T:p9");
 assert.throws(() => lib.parseHerdr(paneResponse, "tab_created"), /pane_info, expected tab_created/);
@@ -574,6 +579,30 @@ try {
   assert.deepEqual(registrations.map(({ name }) => name), ["sketch", "note", "delegate"]);
   const runnerRefusal = await registrations.find(({ name }) => name === "delegate").execute("runner", { id: task.id }, undefined, undefined, {});
   assert.match(runnerRefusal.content[0].text, /architect session/);
+
+  const noteCalls = [];
+  const architectTools = [];
+  extension.default({
+    registerTool(tool) { architectTools.push(tool); },
+    events: { on() {} },
+  }, {
+    env: { ...env, QQ_AGENT_ROLE: "architect" },
+    now: () => new Date(2025, 0, 2, 3, 4),
+    async exec(_command, args) {
+      noteCalls.push(args);
+      return { code: 0, stdout: args[1] === "create" ? "Task TASK-2 created\n" : "", stderr: "" };
+    },
+  });
+  const sketchResult = await architectTools.find(({ name }) => name === "sketch")
+    .execute("sketch", { title: "A sketch", note: "The first take." }, undefined, undefined, { cwd: "/repo" });
+  const noteResult = await architectTools.find(({ name }) => name === "note")
+    .execute("note", { id: "TASK-2", text: "A later take." }, undefined, undefined, { cwd: "/repo" });
+  assert.equal(sketchResult.content[0].text, "Sketched TASK-2: A sketch");
+  assert.equal(noteResult.content[0].text, "Noted TASK-2.");
+  assert.deepEqual(noteCalls, [
+    ["task", "create", "A sketch", "--plain", "--notes", "---\n\n2025-01-02 03:04\n\nThe first take."],
+    ["task", "edit", "TASK-2", "--append-notes", "---\n\n2025-01-02 03:04\n\nA later take.", "--plain"],
+  ]);
 } finally {
   await rm(scratch, { recursive: true, force: true });
 }
