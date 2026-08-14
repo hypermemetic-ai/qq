@@ -5,6 +5,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { readExecutionPolicy } from "../bin/lib/execution-profiles.mjs";
+import { collectLiveWorktreeDiffs, findExistingBrief, withAdmissionLock } from "../bin/lib/admission.mjs";
 import { awaitBriefGate, discardWorkshop, formatTicket, prepareWorkshop, spawnWorkshop } from "../bin/lib/workshop.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -85,6 +86,129 @@ function fileOperations(entries) {
   };
 }
 
+function oneLine(value) {
+  return String(value).replace(/\s+/g, " ").trim();
+}
+
+export function parseAdmissionDecision(source) {
+  const text = source.trim();
+  let value;
+  try { value = JSON.parse(text); } catch {
+    if (/^clear$/i.test(text)) return { decision: "clear" };
+    const bounce = /^bounce:\s*(.+)$/i.exec(text);
+    if (bounce) return { decision: "bounce", reason: oneLine(bounce[1]) };
+    throw new Error("admission vet returned a malformed decision");
+  }
+  if (value?.decision === "clear" && Object.keys(value).length === 1) return { decision: "clear" };
+  if (value?.decision === "bounce" && typeof value.reason === "string" && oneLine(value.reason)) {
+    return { decision: "bounce", reason: oneLine(value.reason) };
+  }
+  throw new Error("admission vet returned a malformed decision");
+}
+
+function admissionTask(task) {
+  return {
+    id: task.id,
+    title: task.title,
+    status: task.status,
+    description: task.description ?? null,
+    dependencies: task.dependencies ?? [],
+    implementationPlan: task.implementationPlan ?? null,
+    implementationNotes: task.implementationNotes ?? null,
+    acceptanceCriteria: task.acceptanceCriteria ?? [],
+    definitionOfDone: task.definitionOfDone ?? [],
+    comments: task.comments ?? [],
+  };
+}
+
+export function formatAdmissionEvidence({ incoming, tasks, worktrees, existingBrief }) {
+  return [
+    "Incoming ticket:",
+    JSON.stringify(admissionTask(incoming), null, 2),
+    existingBrief ? `Existing brief for the incoming ticket:\n${existingBrief}` : "Existing brief for the incoming ticket: none",
+    "Current To Do and In Progress tickets:",
+    JSON.stringify(tasks.map(admissionTask), null, 2),
+    "Live worktree diffs since each worktree's common base with main HEAD (an empty files array means no live diff):",
+    JSON.stringify(worktrees, null, 2),
+  ].join("\n\n");
+}
+
+async function taskList(run, cwd, status, signal) {
+  const execution = await run(BACKLOG, ["task", "list", "--status", status, "--json"], { cwd, signal });
+  if (execution?.code !== 0) throw new Error(commandReason(execution, `cannot list ${status} tasks`));
+  let value;
+  try { value = JSON.parse(execution.stdout); } catch { throw new Error("Backlog returned a malformed task list"); }
+  if (!Array.isArray(value?.tasks) || value.tasks.some((task) => typeof task?.id !== "string")) {
+    throw new Error("Backlog returned a malformed task list");
+  }
+  return value.tasks;
+}
+
+async function admissionTasks(run, cwd, incoming, signal) {
+  const summaries = [
+    ...await taskList(run, cwd, "To Do", signal),
+    ...await taskList(run, cwd, "In Progress", signal),
+  ];
+  const found = new Map([[incoming.id, incoming]]);
+  for (const { id } of summaries) {
+    if (!found.has(id)) found.set(id, await taskView(run, cwd, id, signal));
+  }
+  return [...found.values()];
+}
+
+export async function makeAdmissionDecision(ctx, evidence, deps = {}) {
+  const policy = await readExecutionPolicy(deps.policyPath);
+  const prompt = await readFile(deps.admissionPromptPath ?? join(QQ_ROOT, "prompts", "services", "admission-vet.md"), "utf8");
+  const model = ctx.modelRegistry.find(policy.scribe.provider, policy.scribe.model);
+  if (!model) throw new Error(`admission vet model is unavailable: ${policy.scribe.provider}/${policy.scribe.model}`);
+  const response = await ctx.modelRegistry.complete(
+    model,
+    { systemPrompt: prompt.trim(), messages: [{ role: "user", content: [{ type: "text", text: evidence }], timestamp: Date.now() }] },
+    { reasoning: "low", cacheRetention: "none", sessionId: randomUUID(), signal: ctx.signal },
+  );
+  if (response.stopReason === "aborted") throw new Error("admission vet was cancelled");
+  const source = response.content.filter((part) => part.type === "text").map((part) => part.text).join("\n").trim();
+  return parseAdmissionDecision(source);
+}
+
+export async function admitDelegate(ctx, id, options = {}) {
+  const { run, env = process.env, signal, deps = {} } = options;
+  const project = env.QQ_AGENT_PROJECT || basename(resolve(ctx.cwd));
+  return (deps.withAdmissionLock ?? withAdmissionLock)({ run, cwd: ctx.cwd, signal }, async ({ commonDir }) => {
+    const incoming = await taskView(run, ctx.cwd, id, signal);
+    if (incoming.status !== "To Do") return { kind: "refused", task: incoming };
+    const tasks = await admissionTasks(run, ctx.cwd, incoming, signal);
+    const worktrees = await (deps.collectLiveWorktreeDiffs ?? collectLiveWorktreeDiffs)({ run, cwd: ctx.cwd, signal });
+    const existingBrief = await (deps.findExistingBrief ?? findExistingBrief)({ taskId: incoming.id, project, env });
+    const evidence = formatAdmissionEvidence({ incoming, tasks, worktrees, existingBrief });
+    const decision = await (deps.makeAdmissionDecision ?? makeAdmissionDecision)(ctx, evidence, deps);
+    if (decision.decision === "bounce") return { kind: "bounced", task: incoming, reason: decision.reason };
+
+    const current = await taskView(run, ctx.cwd, id, signal);
+    if (current.status !== "To Do") return { kind: "refused", task: current };
+    const moved = await run(BACKLOG, ["task", "edit", current.id, "--status", "In Progress", "--plain"], { cwd: ctx.cwd, signal });
+    if (moved?.code !== 0) throw new Error(`cannot claim ${current.id}: ${commandReason(moved, "Backlog failed")}`);
+    return { kind: "claimed", task: current, project, commonDir };
+  });
+}
+
+const glowTails = new Map();
+
+export async function withGlowTurn(key, action) {
+  const previous = glowTails.get(key) ?? Promise.resolve();
+  let release;
+  const held = new Promise((resolveHeld) => { release = resolveHeld; });
+  const tail = previous.then(() => held);
+  glowTails.set(key, tail);
+  await previous;
+  try {
+    return await action();
+  } finally {
+    release();
+    if (glowTails.get(key) === tail) glowTails.delete(key);
+  }
+}
+
 export async function makeNote(ctx, task, deps = {}) {
   const policy = await readExecutionPolicy(deps.policyPath);
   const prompt = await readFile(deps.scribePromptPath ?? join(QQ_ROOT, "prompts", "services", "scribe.md"), "utf8");
@@ -152,8 +276,8 @@ export default function registerWorkshop(pi, deps = {}) {
   });
 
   pi.registerTool({
-    name: "delegate", label: "Delegate", promptSnippet: "Prepare a note, obtain operator approval, and spawn one aligned task",
-    description: "Prepare a note for one To Do ticket, wait for approval or cancellation in an operator-owned Glow pane, then create an isolated worktree and start a messaging-enabled runner if approved. Architect sessions only.",
+    name: "delegate", label: "Delegate", promptSnippet: "Vet and claim one aligned task, then prepare its note and approval gate",
+    description: "Vet one To Do ticket against active work, bounce conflicts in chat, or claim it; then prepare its note, wait for approval or cancellation in an operator-owned Glow pane, and start an isolated messaging-enabled runner if approved. Architect sessions only.",
     parameters: { type: "object", additionalProperties: false, required: ["id"], properties: { id: { type: "string" } } },
     async execute(_id, params, signal, _update, ctx) {
       if (role !== "architect") return result("delegate is available only in an architect session.");
@@ -161,29 +285,40 @@ export default function registerWorkshop(pi, deps = {}) {
       let prepared;
       let outboundNote;
       try {
-        const task = await taskView(run, ctx.cwd, params.id, signal);
-        if (task.status !== "To Do") return result(`delegate refused: ${task.id} is ${task.status}, not To Do.`, { task_id: task.id });
-        const { note, transcript, qaBinding } = await (deps.makeNote ?? makeNote)(ctx, task, deps);
+        const operationCtx = { ...ctx, signal: signal ?? ctx.signal };
+        const admission = await (deps.admitDelegate ?? admitDelegate)(operationCtx, params.id, { run, env, signal, deps });
+        const task = admission?.task;
+        if (admission?.kind === "refused") {
+          return result(`delegate refused: ${task.id} is ${task.status}, not To Do.`, { task_id: task.id });
+        }
+        if (admission?.kind === "bounced") {
+          return result(`Bounced ${task.id}: ${oneLine(admission.reason)}`, { status: "bounced", task_id: task.id });
+        }
+        if (admission?.kind !== "claimed" || !task?.id) throw new Error("delegate admission returned a malformed claim");
+        claimedTask = task.id;
+        const project = admission.project || env.QQ_AGENT_PROJECT || basename(resolve(ctx.cwd));
+
+        const { note, transcript, qaBinding } = await (deps.makeNote ?? makeNote)(operationCtx, task, deps);
         outboundNote = note;
-        const project = env.QQ_AGENT_PROJECT || basename(resolve(ctx.cwd));
         prepared = await (deps.prepareWorkshop ?? prepareWorkshop)({ cwd: ctx.cwd, env, project, task, note, transcript });
-        const decision = await (deps.awaitBriefGate ?? awaitBriefGate)({
+        const decision = await (deps.withGlowTurn ?? withGlowTurn)(admission.commonDir || project, () => (deps.awaitBriefGate ?? awaitBriefGate)({
           run, env, prepared, signal,
           pluginRoot: deps.briefGatePluginPath ?? join(QQ_ROOT, "plugins", "brief-gate"),
-        });
+        }));
         if (decision === "cancelled") {
+          const returned = await run(BACKLOG, ["task", "edit", task.id, "--status", "To Do", "--plain"], { cwd: ctx.cwd, signal });
+          if (returned?.code !== 0) throw new Error(`cannot return ${task.id} to To Do: ${commandReason(returned, "Backlog failed")}`);
+          claimedTask = undefined;
           await (deps.discardWorkshop ?? discardWorkshop)(prepared);
           prepared = undefined;
           return result(`Cancelled ${task.id}; runner not started.`, { status: "cancelled", task_id: task.id });
         }
 
-        const moved = await run(BACKLOG, ["task", "edit", task.id, "--status", "In Progress", "--plain"], { cwd: ctx.cwd, signal });
-        if (moved?.code !== 0) throw new Error(`cannot align ${task.id}: ${commandReason(moved, "Backlog failed")}`);
-        claimedTask = task.id;
         await (deps.spawnWorkshop ?? spawnWorkshop)({
           run, cwd: ctx.cwd, env, task, prepared, qaBinding, project,
           architectSession: ctx.sessionManager.getSessionId(),
         });
+        claimedTask = undefined;
         prepared = undefined;
         return result(`Approved ${task.id}; runner started.`, { status: "approved", task_id: task.id });
       } catch (error) {
