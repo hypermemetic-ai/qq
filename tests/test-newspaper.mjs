@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, readdir, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -9,6 +9,7 @@ import {
   archiveName,
   editionWindow,
   parseRepositoryRegistry,
+  pruneNewspaperState,
   publishEdition,
   runNewsroom,
   writerSystemPrompt,
@@ -84,7 +85,7 @@ assert.equal(quiet.reason, "quiet");
 const fakePi = join(scratch, "fake-pi");
 const capture = join(scratch, "capture");
 await mkdir(capture);
-await writeFile(fakePi, `#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\\n' "$*" >>"$QQ_TEST_CAPTURE/args"\nprompt=\nfor ((i=1;i<=$#;i++)); do if [[ \${!i} == --system-prompt ]]; then j=$((i+1)); prompt=\${!j}; fi; done\nif [[ $prompt == *writer-system.md ]]; then cp "$prompt" "$QQ_TEST_CAPTURE/writer-system"; printf '# Draft\\n\\nA draft.\\n'; else cp "$prompt" "$QQ_TEST_CAPTURE/editor-system"; printf '# Final\\n\\nAn edition.\\n'; fi\n`, { mode: 0o700 });
+await writeFile(fakePi, `#!/usr/bin/env node\nconst fs=require("fs");\nconst args=process.argv.slice(2);\nfs.appendFileSync(process.env.QQ_TEST_CAPTURE+"/args",args.join(" ")+"\\n");\nconst at=args.indexOf("--system-prompt"); const prompt=args[at+1]; const writer=prompt.endsWith("writer-system.md");\nfs.copyFileSync(prompt,process.env.QQ_TEST_CAPTURE+(writer?"/writer-system":"/editor-system"));\nconst emit=(value)=>console.log(JSON.stringify(value));\nemit({type:"session",timestamp:new Date().toISOString()});\nemit({type:"message_update",assistantMessageEvent:{type:"thinking_delta",delta:"PRIVATE REASONING"}});\nif(writer){\n emit({type:"message_end",message:{role:"assistant",content:[{type:"thinking",thinking:"PRIVATE REASONING"},{type:"toolCall",name:"investigate",arguments:{request:"Confirm the fact."}},{type:"text",text:"# Draft\\n\\nA draft."}]}});\n emit({type:"tool_execution_start",toolName:"investigate",toolCallId:"call-1"});\n emit({type:"tool_execution_end",toolName:"investigate",toolCallId:"call-1"});\n}else emit({type:"message_end",message:{role:"assistant",content:[{type:"text",text:"# Final\\n\\nAn edition."}]}});\nemit({type:"agent_end"});\n`, { mode: 0o700 });
 process.env.QQ_TEST_CAPTURE = capture;
 const newsroom = await runNewsroom({
   root, stateRoot: join(scratch, "agent-state"), edition: "daily", period: "yesterday",
@@ -98,6 +99,37 @@ const capturedArgs = await readFile(join(capture, "args"), "utf8");
 assert.match(capturedArgs, /--no-context-files/);
 assert.match(capturedArgs, /--no-builtin-tools --tools investigate/);
 assert.match(capturedArgs, /--no-extensions --no-tools/);
+assert.match(capturedArgs, /--mode json/);
+const runDirectories = await readdir(join(scratch, "agent-state", "runs"));
+assert.equal(runDirectories.length, 1);
+const auditRoot = join(scratch, "agent-state", "runs", runDirectories[0]);
+assert.equal(await readFile(join(auditRoot, "draft.md"), "utf8"), "# Draft\n\nA draft.\n");
+assert.equal(await readFile(join(auditRoot, "final.md"), "utf8"), "# Final\n\nAn edition.\n");
+const activity = await readFile(join(auditRoot, "activity.jsonl"), "utf8");
+assert.match(activity, /"event":"writer.started"/);
+assert.match(activity, /"event":"investigator.requested"/);
+assert.match(activity, /"event":"investigator.finished"/);
+assert.match(activity, /"event":"editor.finished"/);
+assert.doesNotMatch(activity, /PRIVATE REASONING/);
+
+const retentionRoot = join(scratch, "retention");
+const oldRun = join(retentionRoot, "runs", "old");
+const activeRun = join(retentionRoot, "runs", "active");
+const oldArchive = join(retentionRoot, "archive", "hourly", "old.md");
+await mkdir(oldRun, { recursive: true });
+await mkdir(activeRun, { recursive: true });
+await mkdir(join(retentionRoot, "archive", "hourly"), { recursive: true });
+await writeFile(join(oldRun, "activity.jsonl"), "old\n");
+await writeFile(join(activeRun, ".active"), `${process.pid}\n`);
+await writeFile(oldArchive, "old\n");
+const oldTime = new Date("2026-08-01T00:00:00Z");
+await utimes(oldRun, oldTime, oldTime);
+await utimes(activeRun, oldTime, oldTime);
+await utimes(oldArchive, oldTime, oldTime);
+assert.equal(await pruneNewspaperState(retentionRoot, { now: new Date("2026-08-10T00:00:00Z") }), 2);
+await assert.rejects(access(oldRun), { code: "ENOENT" });
+await assert.rejects(access(oldArchive), { code: "ENOENT" });
+await access(activeRun);
 
 let tool;
 const investigationLog = join(scratch, "investigations.md");

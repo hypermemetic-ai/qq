@@ -7,11 +7,13 @@ TMP=$(mktemp -d)
 cleanup() { rm -rf -- "$TMP"; }
 trap cleanup EXIT
 
-mkdir -p "$TMP/state/current"
+mkdir -p "$TMP/state/current" "$TMP/state/status"
 printf '# Small headline\n\nA compact edition.\n' >"$TMP/state/current/hourly.md"
+printf '%s\n' '{"state":"running","stage":"writer","last_activity_at":"2026-08-14T02:00:00Z"}' >"$TMP/state/status/hourly.json"
 QQ_NEWSPAPER_STATE_ROOT="$TMP/state" QQ_NEWSPAPER_PANEL_ONCE=1 \
   "$ROOT/bin/qq-newspaper-panel" hourly >"$TMP/panel"
 grep -Fq 'the qq newspaper · HOURLY' "$TMP/panel"
+grep -Fq 'WRITER · activity' "$TMP/panel"
 grep -Fq 'A compact edition.' "$TMP/panel"
 
 cat >"$TMP/herdr" <<'SH'

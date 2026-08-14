@@ -1,8 +1,10 @@
-import { execFile as execFileCallback } from "node:child_process";
+import { execFile as execFileCallback, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { access, mkdir, open, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
+import { createWriteStream } from "node:fs";
+import { access, appendFile, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
@@ -10,6 +12,7 @@ const SAFE_KEY = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const EDITIONS = new Set(["hourly", "daily", "weekly"]);
 
 export const DEFAULT_MODEL = "qwen-token-plan/deepseek-v4-flash-0731";
+export const AUDIT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 function pad(value) {
   return String(value).padStart(2, "0");
@@ -136,17 +139,146 @@ async function optionalFile(path, fallback) {
   catch (error) { if (error?.code === "ENOENT") return fallback; throw error; }
 }
 
+function processAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; }
+  catch { return false; }
+}
+
+async function directoryEntries(path) {
+  try { return await readdir(path, { withFileTypes: true }); }
+  catch (error) { if (error?.code === "ENOENT") return []; throw error; }
+}
+
+export async function pruneNewspaperState(stateRoot, options = {}) {
+  const now = options.now instanceof Date ? options.now.getTime() : Number(options.now ?? Date.now());
+  const retentionMs = Number(options.retentionMs ?? AUDIT_RETENTION_MS);
+  if (!Number.isFinite(now) || !Number.isFinite(retentionMs) || retentionMs < 0) throw new Error("newspaper retention values are invalid");
+  const cutoff = now - retentionMs;
+  let removed = 0;
+
+  const runsRoot = join(stateRoot, "runs");
+  for (const entry of await directoryEntries(runsRoot)) {
+    if (!entry.isDirectory()) continue;
+    const path = join(runsRoot, entry.name);
+    const activePath = join(path, ".active");
+    let active = false;
+    try {
+      const pid = Number.parseInt((await readFile(activePath, "utf8")).trim(), 10);
+      active = processAlive(pid);
+      if (!active) await unlink(activePath).catch(() => {});
+    } catch (error) { if (error?.code !== "ENOENT") throw error; }
+    if (active) continue;
+    if ((await stat(path)).mtimeMs < cutoff) { await rm(path, { recursive: true, force: true }); removed += 1; }
+  }
+
+  const archiveRoot = join(stateRoot, "archive");
+  for (const edition of await directoryEntries(archiveRoot)) {
+    if (!edition.isDirectory()) continue;
+    const path = join(archiveRoot, edition.name);
+    for (const entry of await directoryEntries(path)) {
+      if (!entry.isFile()) continue;
+      const file = join(path, entry.name);
+      if ((await stat(file)).mtimeMs < cutoff) { await unlink(file); removed += 1; }
+    }
+  }
+  return removed;
+}
+
+async function recordActivity(options, event, detail = {}) {
+  const timestamp = new Date().toISOString();
+  const value = { timestamp, edition: options.edition, run_id: options.runId, event, ...detail };
+  await appendFile(options.activityPath, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+  await atomicWrite(options.statusPath, `${JSON.stringify({
+    edition: options.edition,
+    run_id: options.runId,
+    state: detail.state ?? "running",
+    stage: detail.stage ?? event.split(".", 1)[0],
+    event,
+    started_at: options.startedAt,
+    last_activity_at: timestamp,
+  }, null, 2)}\n`);
+}
+
+function assistantParts(event) {
+  if (event?.type !== "message_end" || event?.message?.role !== "assistant" || !Array.isArray(event.message.content)) return [];
+  return event.message.content;
+}
+
 async function runPi(args, options) {
-  const result = await execFile(options.piBin, args, {
+  await recordActivity(options.audit, `${options.stage}.started`, { stage: options.stage });
+  const child = spawn(options.piBin, args, {
     cwd: options.cwd,
     env: options.env,
-    encoding: "utf8",
-    maxBuffer: 16 * 1024 * 1024,
-    timeout: options.timeoutMs,
+    stdio: ["ignore", "pipe", "pipe"],
   });
-  const output = result.stdout.trim();
-  if (!output) throw new Error("newspaper agent returned an empty response");
-  return `${output}\n`;
+  const stderr = createWriteStream(options.stderrPath, { flags: "a", mode: 0o600 });
+  child.stderr.pipe(stderr, { end: false });
+  let spawnError;
+  child.once("error", (error) => { spawnError = error; });
+  const closed = new Promise((resolve) => child.once("close", (code, signal) => resolve({ code, signal })));
+  let timer;
+  if (options.timeoutMs > 0) timer = setTimeout(() => child.kill("SIGTERM"), options.timeoutMs);
+
+  let output = "";
+  let updates = 0;
+  let recordedUpdates = 0;
+  let lastProgress = 0;
+  const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
+  for await (const line of lines) {
+    let event;
+    try { event = JSON.parse(line); }
+    catch {
+      await recordActivity(options.audit, `${options.stage}.protocol-error`, { stage: options.stage, bytes: Buffer.byteLength(line) });
+      continue;
+    }
+    if (event.type === "message_update") {
+      updates += 1;
+      const now = Date.now();
+      if (recordedUpdates === 0 || now - lastProgress >= 5_000) {
+        await recordActivity(options.audit, `${options.stage}.output`, { stage: options.stage, updates });
+        recordedUpdates = updates;
+        lastProgress = now;
+      }
+      continue;
+    }
+    for (const part of assistantParts(event)) {
+      if (part.type === "text" && typeof part.text === "string" && part.text.trim()) output = part.text;
+      if (part.type === "toolCall") {
+        await recordActivity(options.audit, "investigator.requested", {
+          stage: options.stage,
+          tool: part.name,
+          request: typeof part.arguments?.request === "string" ? part.arguments.request : undefined,
+        });
+      }
+    }
+    if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
+      await recordActivity(options.audit, event.type === "tool_execution_start" ? "investigator.started" : "investigator.finished", {
+        stage: options.stage,
+        tool: event.toolName,
+        call_id: event.toolCallId,
+      });
+    }
+  }
+  const result = await closed;
+  if (timer) clearTimeout(timer);
+  stderr.end();
+  if (updates > recordedUpdates) await recordActivity(options.audit, `${options.stage}.output`, { stage: options.stage, updates });
+  if (spawnError) {
+    await recordActivity(options.audit, `${options.stage}.failed`, { stage: options.stage, state: "failed", error: spawnError.message });
+    throw spawnError;
+  }
+  if (result.code !== 0) {
+    const error = `newspaper ${options.stage} exited ${result.signal ? `on ${result.signal}` : `with status ${result.code}`}`;
+    await recordActivity(options.audit, `${options.stage}.failed`, { stage: options.stage, state: "failed", error });
+    throw new Error(error);
+  }
+  if (!output.trim()) {
+    await recordActivity(options.audit, `${options.stage}.failed`, { stage: options.stage, state: "failed", error: "empty response" });
+    throw new Error("newspaper agent returned an empty response");
+  }
+  await recordActivity(options.audit, `${options.stage}.finished`, { stage: options.stage, characters: output.length });
+  return `${output.trim()}\n`;
 }
 
 export function writerSystemPrompt(template, edition, period) {
@@ -159,23 +291,35 @@ export async function runNewsroom(options) {
     model = DEFAULT_MODEL, thinking = "high",
     piBin = join(root, "bin", "pi"), timeoutMs = 0,
   } = options;
-  const temporaryRoot = join(stateRoot, "tmp", `${edition}-${process.pid}-${randomUUID()}`);
-  await privateDirectory(temporaryRoot);
-  const sourcePath = join(temporaryRoot, "source.md");
-  const previousPath = join(temporaryRoot, "previous.md");
-  const draftPath = join(temporaryRoot, "draft.md");
-  const investigationsPath = join(temporaryRoot, "investigations.md");
-  const writerPromptPath = join(temporaryRoot, "writer-system.md");
+  const startedAt = new Date().toISOString();
+  const runId = `${startedAt.replaceAll(":", "-").replace(".", "-")}-${edition}-${randomUUID().slice(0, 8)}`;
+  const runRoot = join(stateRoot, "runs", runId);
+  await privateDirectory(runRoot);
+  const activePath = join(runRoot, ".active");
+  const sourcePath = join(runRoot, "evidence.md");
+  const previousPath = join(runRoot, "previous.md");
+  const draftPath = join(runRoot, "draft.md");
+  const finalPath = join(runRoot, "final.md");
+  const investigationsPath = join(runRoot, "investigations.md");
+  const writerPromptPath = join(runRoot, "writer-system.md");
+  const activityPath = join(runRoot, "activity.jsonl");
+  const stderrPath = join(runRoot, "stderr.log");
+  const statusPath = join(stateRoot, "status", `${edition}.json`);
   const investigatorPromptPath = join(root, "prompts", "services", "newspaper-investigator.md");
   const editorPromptPath = join(root, "prompts", "services", "newspaper-editor.md");
   const writerTemplate = await readFile(join(root, "prompts", "services", "newspaper-writer.md"), "utf8");
+  const audit = { edition, runId, startedAt, activityPath, statusPath };
+  await writeFile(activePath, `${process.pid}\n`, { mode: 0o600 });
   await writeFile(sourcePath, source, { mode: 0o600 });
   await writeFile(previousPath, previous, { mode: 0o600 });
   await writeFile(investigationsPath, "# Investigations\n\n", { mode: 0o600 });
   await writeFile(writerPromptPath, writerSystemPrompt(writerTemplate, edition, period), { mode: 0o600 });
+  await writeFile(stderrPath, "", { mode: 0o600 });
+  await writeFile(activityPath, "", { mode: 0o600 });
+  await recordActivity(audit, "run.started", { stage: "collecting", model, period });
 
   const shared = [
-    "--model", model, "--thinking", thinking, "--mode", "text",
+    "--model", model, "--thinking", thinking, "--mode", "json",
     "--no-skills", "--no-prompt-templates", "--no-context-files", "--no-session", "-p",
   ];
   const webExtension = options.webExtension ?? join(process.env.HOME || homedir(), ".pi", "agent", "npm", "node_modules", "@juicesharp", "rpiv-web-tools", "index.ts");
@@ -200,8 +344,9 @@ export async function runNewsroom(options) {
       "--no-extensions", "--extension", join(root, "extensions", "newspaper-investigate.ts"),
       "--no-builtin-tools", "--tools", "investigate",
       ...shared, `@${sourcePath}`, `@${previousPath}`, "Write this edition now.",
-    ], { piBin, cwd: root, env: writerEnv, timeoutMs });
+    ], { piBin, cwd: root, env: writerEnv, timeoutMs, stage: "writer", audit, stderrPath });
     await writeFile(draftPath, draft, { mode: 0o600 });
+    await recordActivity(audit, "draft.saved", { stage: "writer", characters: draft.length });
     const investigations = await optionalFile(investigationsPath, "# Investigations\n\n");
     const editionText = await runPi([
       "--system-prompt", editorPromptPath,
@@ -209,10 +354,15 @@ export async function runNewsroom(options) {
       ...shared,
       `@${sourcePath}`, `@${investigationsPath}`, `@${draftPath}`, `@${previousPath}`,
       "Edit this edition now.",
-    ], { piBin, cwd: root, env: process.env, timeoutMs });
-    return { edition: editionText, draft, investigations };
+    ], { piBin, cwd: root, env: process.env, timeoutMs, stage: "editor", audit, stderrPath });
+    await writeFile(finalPath, editionText, { mode: 0o600 });
+    await recordActivity(audit, "run.finished", { stage: "complete", state: "complete", characters: editionText.length });
+    return { edition: editionText, draft, investigations, runId, runRoot };
+  } catch (error) {
+    await recordActivity(audit, "run.failed", { stage: "failed", state: "failed", error: error instanceof Error ? error.message : String(error) }).catch(() => {});
+    throw error;
   } finally {
-    await rm(temporaryRoot, { recursive: true, force: true });
+    await unlink(activePath).catch(() => {});
   }
 }
 
@@ -221,6 +371,10 @@ export async function publishEdition(options) {
   const edition = options.edition;
   if (!EDITIONS.has(edition)) throw new Error(`unknown newspaper edition: ${edition}`);
   const stateRoot = resolve(options.stateRoot ?? join(process.env.XDG_STATE_HOME || join(process.env.HOME || homedir(), ".local", "state"), "qq", "newspaper"));
+  await pruneNewspaperState(stateRoot, {
+    now: options.pruneNow ?? options.now ?? new Date(),
+    retentionMs: options.retentionMs ?? AUDIT_RETENTION_MS,
+  });
   const archiveRoot = join(stateRoot, "archive");
   const currentRoot = join(stateRoot, "current");
   const window = editionWindow(edition, options.now ?? new Date());
