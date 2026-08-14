@@ -11,7 +11,7 @@ cat >"$TMP/config/qq/execution-profiles.json" <<'JSON'
 {
   "schema": "qq.execution-profiles/v1",
   "contextWindowCeiling": 200000,
-  "compactor": {"provider":"xai","model":"grok-4.6","effort":"high"},
+  "scribe": {"provider":"xai","model":"grok-4.6","effort":"high"},
   "qa": {"provider":"openai-codex","model":"gpt-5.6-sol","effort":"xhigh"},
   "roles": {
     "runner": {
@@ -44,8 +44,8 @@ output=$(HOME="$TMP/home" QQ_TELEMETRY_PROFILES_FILE="$TMP/config/qq/execution-p
 [[ "$output" != *'qwen-deepseek-max'* ]]
 [[ "$output" != *'qwen-token-plan/deepseek-v4-flash-0731'* ]]
 [[ "$output" == *'architect'* ]]
-[[ "$output" == *'compactor'* ]]
-[[ "$output" == *'compactor (service)'* ]]
+[[ "$output" == *'scribe'* ]]
+[[ "$output" == *'scribe (service)'* ]]
 [[ "$output" == *'qa'* ]]
 [[ "$output" == *'qa (service)'* ]]
 [[ "$output" == *'gpt-5.6-sol'*'xhigh'* ]]

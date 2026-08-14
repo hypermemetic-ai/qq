@@ -104,7 +104,7 @@ assert abs(root["ratio"] - .5) < 1e-5, root
 request("pane.close", {"pane_id": third})
 PY
 
-printf '# Exact disposable brief\n' > "$base/brief.md"
+printf '# Exact disposable ticket\n\n## Delegate note\n\nExact disposable note\n' > "$base/gate.md"
 cat > "$base/glow" <<'EOF'
 #!/usr/bin/env bash
 [[ "$1" == "-t" ]]
@@ -124,8 +124,8 @@ assert any(plugin.get("plugin_id") == "qq.brief-gate" and plugin.get("enabled") 
 '
 
 opened=$("${run[@]}" "$binary" plugin pane open \
-  --plugin qq.brief-gate --entrypoint review --placement zoomed --target-pane "$pane" \
-  --env "QQ_BRIEF_GATE_BRIEF=$base/brief.md" \
+  --plugin qq.brief-gate --entrypoint review --placement split --target-pane "$pane" --direction right \
+  --env "QQ_BRIEF_GATE_DOCUMENT=$base/gate.md" \
   --env "QQ_BRIEF_GATE_DECISION=$base/decision" \
   --env "QQ_BRIEF_GATE_GLOW=$base/glow" --focus)
 gate=$(printf '%s' "$opened" | result_value plugin_pane_opened plugin_pane pane pane_id)

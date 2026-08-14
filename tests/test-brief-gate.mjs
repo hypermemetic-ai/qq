@@ -8,7 +8,7 @@ const root = process.argv[2];
 const pluginRoot = join(root, "plugins", "brief-gate");
 const manifest = await readFile(join(pluginRoot, "herdr-plugin.toml"), "utf8");
 assert.match(manifest, /id = "qq\.brief-gate"/);
-assert.match(manifest, /placement = "overlay"/);
+assert.match(manifest, /placement = "split"/);
 assert.match(manifest, /command = \["bash", "brief-gate\.sh"\]/);
 
 async function waitFor(path) {
@@ -21,11 +21,11 @@ async function waitFor(path) {
 
 async function exercise(key, expected) {
   const scratch = await mkdtemp(join(tmpdir(), "qq-brief-gate-test."));
-  const briefPath = join(scratch, "brief.md");
+  const documentPath = join(scratch, "gate.md");
   const decisionPath = join(scratch, "decision");
   const glowPath = join(scratch, "glow");
   const glowLog = join(scratch, "glow.args");
-  await writeFile(briefPath, "# Exact private brief\n", { mode: 0o600 });
+  await writeFile(documentPath, "# Exact private ticket\n\n## Delegate note\n\nPrivate note\n", { mode: 0o600 });
   await writeFile(glowPath, "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"$QQ_TEST_GLOW_LOG\"\n", { mode: 0o700 });
   await chmod(glowPath, 0o700);
 
@@ -33,7 +33,7 @@ async function exercise(key, expected) {
     detached: true,
     env: {
       ...process.env,
-      QQ_BRIEF_GATE_BRIEF: briefPath,
+      QQ_BRIEF_GATE_DOCUMENT: documentPath,
       QQ_BRIEF_GATE_DECISION: decisionPath,
       QQ_BRIEF_GATE_GLOW: glowPath,
       QQ_TEST_GLOW_LOG: glowLog,
@@ -47,7 +47,7 @@ async function exercise(key, expected) {
 
   try {
     assert.equal((await waitFor(decisionPath)).trim(), expected);
-    assert.equal(await readFile(glowLog, "utf8"), `-t\n${briefPath}\n`);
+    assert.equal(await readFile(glowLog, "utf8"), `-t\n${documentPath}\n`);
     assert.match(output, /\[a\] approve   \[c\] cancel/);
     assert.match(output, /QQ_BRIEF_GATE_DECIDED/);
   } finally {

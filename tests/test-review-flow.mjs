@@ -32,7 +32,8 @@ try {
     task: { id: "TASK-1", title: "One task" }, status: "running", look: 0,
     mainRoot, baseBranch: "main", baseRef: "base", branch: "qq/task-1-x", worktree,
     pane: "w2T:p9", architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9",
-    briefPath: join(scratch, "brief.md"), statePath,
+    ticketPath: join(scratch, "ticket.md"), transcriptPath: join(scratch, "transcript.md"),
+    notePath: join(scratch, "note.md"), gatePath: join(scratch, "gate.md"), statePath,
     qa: { provider: "openai-codex", model: "gpt-5.6-sol", effort: "xhigh" },
   };
   await workshop.atomicPrivateJson(statePath, base);
@@ -241,6 +242,9 @@ try {
   assert.equal(committedTests.state.qaVerdict.tests_modified, true);
   assert.deepEqual(committedTests.state.pack.files, [{ path: "tests/test-review-flow.mjs", added: 2, deleted: 1 }]);
   const qaStart = committedTests.calls.find(({ args }) => args[0] === "agent" && args[1] === "start");
+  const qaTaskPrompt = committedTests.calls.find(({ args }) => args[0] === "agent" && args[1] === "prompt");
+  assert.match(qaTaskPrompt.args[3], /outbound ticket and note/);
+  assert.match(qaTaskPrompt.args[3], new RegExp(base.gatePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.equal(committedTests.qaPromptAtLaunch.path, join(scratch, "state", "qa-system-prompt-1.md"));
   assert.equal(committedTests.qaPromptAtLaunch.mode, 0o600);
   assert.match(committedTests.qaPromptAtLaunch.content, /own the tests and may commit test-only changes/);
