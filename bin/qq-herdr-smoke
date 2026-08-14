@@ -6,8 +6,7 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 source "$root/herdr/downstream/upstream.env"
 binary=${1:-${QQ_HERDR_BINARY:-${XDG_CACHE_HOME:-$HOME/.cache}/qq/herdr/bin/herdr}}
 [[ -x "$binary" ]] || { printf 'qq-herdr-smoke: binary not executable: %s\n' "$binary" >&2; exit 1; }
-fork_version=${HERDR_UPSTREAM_TAG#qq-v}
-expected_version="herdr ${fork_version%-*}"
+expected_version="herdr $HERDR_UPSTREAM_VERSION"
 [[ $("$binary" --version) == "$expected_version" ]] || {
   printf 'qq-herdr-smoke: expected %s, found %s\n' "$expected_version" "$("$binary" --version)" >&2
   exit 1
@@ -113,13 +112,32 @@ chmod 0700 "$base/glow"
 
 linked=$("${run[@]}" "$binary" plugin link "$root/plugins/brief-gate" --enabled)
 [[ $(printf '%s' "$linked" | result_value plugin_linked plugin plugin_id) == qq.brief-gate ]]
+q_mode_linked=$("${run[@]}" "$binary" plugin link "$root/plugins/q-mode" --enabled)
+[[ $(printf '%s' "$q_mode_linked" | result_value plugin_linked plugin plugin_id) == qq.q-mode ]]
 plugins=$("${run[@]}" "$binary" plugin list --json)
 printf '%s' "$plugins" | python3 -c '
 import json, sys
 response = json.load(sys.stdin)
 result = response.get("result", {})
 assert isinstance(response.get("id"), str) and result.get("type") == "plugin_list", response
-assert any(plugin.get("plugin_id") == "qq.brief-gate" and plugin.get("enabled") for plugin in result.get("plugins", [])), result
+expected = {"qq.brief-gate", "qq.q-mode"}
+enabled = {
+    plugin.get("plugin_id")
+    for plugin in result.get("plugins", [])
+    if plugin.get("enabled")
+}
+assert expected <= enabled, result
+'
+actions=$("${run[@]}" "$binary" plugin action list --plugin qq.q-mode)
+printf '%s' "$actions" | python3 -c '
+import json, sys
+response = json.load(sys.stdin)
+result = response.get("result", {})
+assert result.get("type") == "plugin_action_list", response
+assert {
+    "{}.{}".format(action.get("plugin_id"), action.get("action_id"))
+    for action in result.get("actions", [])
+} == {"qq.q-mode.cancel", "qq.q-mode.start-or-stop"}, result
 '
 
 opened=$("${run[@]}" "$binary" plugin pane open \
@@ -210,7 +228,7 @@ raise SystemExit(0 if ok else 1)
 done
 [[ "$ready" == true ]] || { echo 'qq-herdr-smoke: split pane never exposed an available shell' >&2; exit 1; }
 
-notification=$("${run[@]}" "$binary" notification show 'QQ contract smoke' --body disposable --sound none)
+notification=$("${run[@]}" "$binary" notification show 'qq contract smoke' --body disposable --sound none)
 printf '%s' "$notification" | result_value notification_show type >/dev/null
 closed_pane=$("${run[@]}" "$binary" pane close "$split_pane")
 printf '%s' "$closed_pane" | result_value ok type >/dev/null
@@ -223,4 +241,4 @@ assert isinstance(response.get("id"), str) and result.get("type") == "pane_list"
 assert all(pane.get("pane_id") != sys.argv[1] for pane in result.get("panes", [])), result
 ' "$split_pane"
 
-printf 'herdr disposable-session geometry and QQ CLI contract passed\n'
+printf 'herdr disposable-session geometry and qq CLI contract passed\n'

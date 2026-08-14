@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=/dev/null
+source "$root/herdr/downstream/upstream.env"
+mode=${1:-preflight}
+case "$mode" in
+  preflight|post-activate) ;;
+  *) printf 'usage: qq-q-mode-uat [preflight|post-activate]\n' >&2; exit 2 ;;
+esac
+
+herdr=${QQ_HERDR_TEST_BINARY:-$HOME/.local/lib/qq/herdr/bin/herdr}
+herdr_commit=${QQ_HERDR_TEST_COMMIT:-${herdr}.commit}
+live_config=${QQ_HERDR_LIVE_CONFIG:-$HOME/.config/herdr/config.toml}
+socket=${HERDR_SOCKET_PATH:-$HOME/.config/herdr/herdr.sock}
+q_mode_plugin="$root/plugins/q-mode"
+
+[[ -x $herdr ]] || { printf 'q mode UAT: Herdr is not executable: %s\n' "$herdr" >&2; exit 1; }
+[[ $("$herdr" --version) == "herdr $HERDR_UPSTREAM_VERSION" ]] || {
+  printf 'q mode UAT: unexpected Herdr version\n' >&2
+  exit 1
+}
+[[ -f $herdr_commit && ! -L $herdr_commit \
+  && $(<"$herdr_commit") == "$HERDR_UPSTREAM_COMMIT" ]] || {
+  printf 'q mode UAT: installed Herdr commit is not %s\n' "$HERDR_UPSTREAM_COMMIT" >&2
+  exit 1
+}
+HERDR_CONFIG_PATH="$root/herdr/config.toml" "$herdr" config check
+"$q_mode_plugin/q-mode.sh" check
+
+# Compatibility is intentionally retained until a later coordinated retirement.
+[[ -f $HOME/.config/systemd/user/handy-ptt.service ]]
+[[ -x $HOME/.local/bin/handy-ptt-bridge.py ]]
+grep -q 'Control_L' "$HOME/.local/bin/handy-ptt-bridge.py"
+
+if [[ $mode == post-activate ]]; then
+  cmp -s "$root/herdr/config.toml" "$live_config" || {
+    printf 'q mode UAT: live Herdr config is not the staged q mode config\n' >&2
+    exit 1
+  }
+  plugin_json=$(env -u HERDR_ENV HERDR_SOCKET_PATH="$socket" \
+    "$herdr" plugin list --json)
+  printf '%s' "$plugin_json" | python3 -c '
+import json, sys
+response = json.load(sys.stdin)
+plugins = response.get("result", {}).get("plugins", [])
+assert any(
+    plugin.get("plugin_id") == "qq.q-mode" and plugin.get("enabled")
+    for plugin in plugins
+), response
+'
+  mapfile -t server_pids < <(pgrep -f "${herdr} server")
+  [[ ${#server_pids[@]} -eq 1 \
+    && $(readlink -f "/proc/${server_pids[0]}/exe") == "$herdr" ]] || {
+    printf 'q mode UAT: the pinned Herdr binary does not own the live server\n' >&2
+    exit 1
+  }
+fi
+
+cat <<'EOF'
+Automated q mode seam checks passed.
+
+Manual focused-cockpit UAT (do not synthesize these keys):
+  1. Tap Right Alt cleanly; the small Herdr indicator appears. Tap it again;
+     any active Handy operation cancels and the indicator disappears.
+  2. In q mode, Left/Right walk panes, Up/Down walk spaces, Ctrl+Left/Right
+     walk tabs, 1-9 focus visible agents, and ? shows this configured q mode map.
+  3. Space starts Handy with its normal HUD. Navigate elsewhere, press Space,
+     and verify delivery occurs once in the pane focused when recording began.
+  4. Delete cancels recording or processing while the Herdr indicator stays on.
+  5. Escape, Right Alt, and outer focus loss each cancel active dictation and
+     exit q mode. An unconfigured printable key is consumed, not sent to a pane.
+  6. Confirm the retained Left-Control bridge and remote/laptop workflows have
+     not changed. Do not retire the bridge as part of this cutover.
+EOF

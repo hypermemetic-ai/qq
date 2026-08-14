@@ -10,7 +10,9 @@ source "$downstream/upstream.env"
 cache_root=${XDG_CACHE_HOME:-$HOME/.cache}/qq/herdr
 source_dir=${QQ_HERDR_SOURCE_DIR:-$cache_root/source}
 binary_out=${QQ_HERDR_BINARY_OUT:-$cache_root/bin/herdr}
+binary_commit_out=${QQ_HERDR_BINARY_COMMIT_OUT:-${binary_out}.commit}
 install_path=${QQ_HERDR_INSTALL_PATH:-$HOME/.local/lib/qq/herdr/bin/herdr}
+install_commit_path=${QQ_HERDR_INSTALL_COMMIT_PATH:-${install_path}.commit}
 mode=${1:-build}
 
 case "$mode" in
@@ -26,18 +28,31 @@ case "$(zig version)" in
   *) printf 'qq-herdr-build: expected Zig 0.15.x, found %s\n' "$(zig version)" >&2; exit 1 ;;
 esac
 
-mkdir -p "$cache_root" "$(dirname "$binary_out")"
+mkdir -p "$cache_root" "$(dirname "$binary_out")" "$(dirname "$binary_commit_out")"
 if [[ ! -d "$source_dir/.git" ]]; then
   rm -rf "$source_dir"
   git clone --filter=blob:none --no-checkout "$HERDR_UPSTREAM_URL" "$source_dir"
 fi
 
 git -C "$source_dir" remote set-url origin "$HERDR_UPSTREAM_URL"
-git -C "$source_dir" fetch --force origin "refs/tags/$HERDR_UPSTREAM_TAG:refs/tags/$HERDR_UPSTREAM_TAG"
-tag_commit=$(git -C "$source_dir" rev-list -n1 "$HERDR_UPSTREAM_TAG")
-if [[ "$tag_commit" != "$HERDR_UPSTREAM_COMMIT" ]]; then
-  printf 'qq-herdr-build: %s moved: expected %s, got %s\n' \
-    "$HERDR_UPSTREAM_TAG" "$HERDR_UPSTREAM_COMMIT" "$tag_commit" >&2
+git -C "$source_dir" fetch --force origin "$HERDR_UPSTREAM_REF"
+if ! git -C "$source_dir" cat-file -e "$HERDR_UPSTREAM_COMMIT^{commit}" 2>/dev/null \
+  && [[ -d $HERDR_LANDED_REPOSITORY ]] \
+  && git -C "$HERDR_LANDED_REPOSITORY" cat-file -e \
+    "$HERDR_UPSTREAM_COMMIT^{commit}" 2>/dev/null; then
+  git -C "$source_dir" fetch --force "$HERDR_LANDED_REPOSITORY" \
+    "$HERDR_UPSTREAM_COMMIT"
+fi
+if ! git -C "$source_dir" cat-file -e "$HERDR_UPSTREAM_COMMIT^{commit}"; then
+  printf 'qq-herdr-build: pinned commit %s is unavailable from %s or %s\n' \
+    "$HERDR_UPSTREAM_COMMIT" "$HERDR_UPSTREAM_REF" \
+    "$HERDR_LANDED_REPOSITORY" >&2
+  exit 1
+fi
+if ! git -C "$source_dir" merge-base --is-ancestor \
+  "$HERDR_OPERATOR_INPUT_COMMIT" "$HERDR_UPSTREAM_COMMIT"; then
+  printf 'qq-herdr-build: pinned commit does not contain operator input ref %s\n' \
+    "$HERDR_OPERATOR_INPUT_COMMIT" >&2
   exit 1
 fi
 
@@ -58,16 +73,22 @@ git -C "$source_dir" diff --check
   cargo build --release --locked
 )
 install -m 0755 "$source_dir/target/release/herdr" "$binary_out"
+temp_binary_commit="$binary_commit_out.tmp.$$"
+printf '%s\n' "$HERDR_UPSTREAM_COMMIT" >"$temp_binary_commit"
+mv -f "$temp_binary_commit" "$binary_commit_out"
 "$binary_out" --version
 "$smoke" "$binary_out"
 
 if [[ "$mode" == install ]]; then
-  mkdir -p "$(dirname "$install_path")"
+  mkdir -p "$(dirname "$install_path")" "$(dirname "$install_commit_path")"
   temp_install="$install_path.tmp.$$"
+  temp_install_commit="$install_commit_path.tmp.$$"
   install -m 0755 "$binary_out" "$temp_install"
+  printf '%s\n' "$HERDR_UPSTREAM_COMMIT" >"$temp_install_commit"
   mv -f "$temp_install" "$install_path"
+  mv -f "$temp_install_commit" "$install_commit_path"
   "$install_path" integration status --outdated-only
-  printf 'installed %s\n' "$install_path"
+  printf 'installed %s at %s\n' "$install_path" "$HERDR_UPSTREAM_COMMIT"
 else
   printf 'built %s\n' "$binary_out"
 fi

@@ -22,13 +22,19 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 git -c advice.detachedHead=false clone --quiet --filter=blob:none --branch "$candidate" --depth 1 "$HERDR_UPSTREAM_URL" "$work/source"
 commit=$(git -C "$work/source" rev-parse HEAD)
+version=${candidate#qq-v}
+version=${version%-*}
 cat <<EOF
 source:    $HERDR_UPSTREAM_URL
 candidate: $candidate
+ref:       refs/tags/$candidate
 commit:    $commit
+version:   $version
 
-To pin this immutable fork candidate, update HERDR_UPSTREAM_TAG and HERDR_UPSTREAM_COMMIT in:
+To pin this immutable fork candidate, update HERDR_UPSTREAM_REF,
+HERDR_UPSTREAM_COMMIT, and HERDR_UPSTREAM_VERSION in:
   $downstream/upstream.env
-Then run:
+Keep HERDR_OPERATOR_INPUT_COMMIT pinned until the candidate is verified to
+contain that accepted seam. Then run:
   qq-herdr-build build
 EOF
