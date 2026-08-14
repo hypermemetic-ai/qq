@@ -4,7 +4,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { atomicPrivateJson, readHandoff } from "../bin/lib/workshop.mjs";
-import { formatPack, isQaPassedProposal, listProposals, listReviews, prepareDone, projectFromCwd, setBoardStatus } from "../bin/lib/review.mjs";
+import { formatPack, isFailedLand, isQaPassedProposal, listProposals, listReviews, prepareDone, projectFromCwd, setBoardStatus } from "../bin/lib/review.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -31,6 +31,7 @@ export default function registerReviewFlow(pi, deps = {}) {
   let timer;
   let showing = false;
   const shown = new Set();
+  const polledFailedLandKeys = new Map();
 
   pi.registerTool({
     name: "done", label: "Done", promptSnippet: "Submit the delegated ref to independent qa and stop",
@@ -60,16 +61,32 @@ export default function registerReviewFlow(pi, deps = {}) {
     ctx.ui.notify(`Landed ${state.task.id}.`, "info");
   }
 
+  function offerKey(state) {
+    return isFailedLand(state) ? `${state.id}:land:${state.blockedReason}` : `${state.id}:${state.updatedAt}`;
+  }
+
+  async function rememberFailedLand(previous) {
+    try {
+      const current = await readHandoff(previous.statePath);
+      if (isFailedLand(current) && (!isFailedLand(previous) || current.blockedReason === previous.blockedReason)) {
+        const key = offerKey(current);
+        shown.add(key);
+        polledFailedLandKeys.set(current.id, key);
+      }
+    } catch {}
+  }
+
   async function offer(state, ctx, options = {}) {
-    const key = `${state.id}:${state.updatedAt}`;
+    const key = offerKey(state);
     if (showing || role !== "architect" || !ctx.hasUI) return;
     if (!options.force && (shown.has(key) || ctx.isIdle?.() === false)) return;
     showing = true;
     shown.add(key);
+    let choice;
     try {
       const pack = formatPack(state.pack ?? { summary: state.blockedReason || "qa blocked", files: [] });
       const choices = isQaPassedProposal(state) ? ["approve", "discuss", "later"] : ["discuss", "later"];
-      const choice = await ctx.ui.select(pack, choices);
+      choice = await ctx.ui.select(pack, choices);
       if (choice === "approve") {
         await land(state, ctx);
       } else if (choice === "discuss") {
@@ -79,7 +96,7 @@ export default function registerReviewFlow(pi, deps = {}) {
         state.operatorComment = comment;
         state.updatedAt = new Date().toISOString();
         await atomicPrivateJson(state.statePath, state);
-        shown.add(`${state.id}:${state.updatedAt}`);
+        shown.add(offerKey(state));
         await setBoardStatus(run, ctx.cwd || state.mainRoot, state.task.id, "To Do");
         pi.sendMessage({
           customType: "qq-operator-comment",
@@ -89,6 +106,7 @@ export default function registerReviewFlow(pi, deps = {}) {
         }, { triggerTurn: true, deliverAs: "steer" });
       }
     } catch (error) {
+      if (choice === "approve") await rememberFailedLand(state);
       ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
     } finally {
       showing = false;
@@ -99,7 +117,14 @@ export default function registerReviewFlow(pi, deps = {}) {
     const ctx = currentContext;
     if (!ctx || role !== "architect") return;
     const project = projectFromCwd(ctx.cwd, env);
-    for (const state of await listProposals(project, env)) await offer(state, ctx);
+    for (const state of await listProposals(project, env)) {
+      if (isFailedLand(state)) {
+        const key = offerKey(state);
+        if (!polledFailedLandKeys.has(state.id)) shown.add(key);
+        polledFailedLandKeys.set(state.id, key);
+      }
+      await offer(state, ctx);
+    }
   }
 
   pi.registerTool({

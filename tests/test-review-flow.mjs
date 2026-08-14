@@ -70,6 +70,24 @@ try {
   assert.ok(operations.includes("branch"));
   assert.ok(calls.some(({ args }) => args[0] === "task" && args[1] === "edit" && args[2] === "TASK-1" && args.includes("Done")));
 
+  await workshop.atomicPrivateJson(statePath, prepared);
+  const doneCallsBeforeFailure = calls.filter(({ args }) => args[0] === "task" && args[1] === "edit" && args.includes("Done")).length;
+  const failingLandRun = async (command, args, options = {}) => {
+    if (command === "git" && args[0] === "merge-tree") return { code: 1, stdout: "", stderr: "content conflict" };
+    return run(command, args, options);
+  };
+  await assert.rejects(review.landHandoff(failingLandRun, statePath), /proposal no longer merges cleanly: content conflict/);
+  const failedLand = JSON.parse(await readFile(statePath, "utf8"));
+  assert.equal(failedLand.status, "blocked");
+  assert.equal(failedLand.blockedReason, "proposal no longer merges cleanly: content conflict");
+  assert.equal(failedLand.ref, "refsha");
+  assert.deepEqual(failedLand.qaVerdict, prepared.qaVerdict);
+  assert.equal(review.isFailedLand(failedLand), true);
+  assert.equal(review.isQaPassedProposal(failedLand), true);
+  assert.equal(calls.filter(({ args }) => args[0] === "task" && args[1] === "edit" && args.includes("Done")).length, doneCallsBeforeFailure);
+  await review.landHandoff(run, statePath);
+  assert.equal(JSON.parse(await readFile(statePath, "utf8")).status, "landed");
+
   prepared.status = "running";
   prepared.look = 0;
   await workshop.atomicPrivateJson(statePath, prepared);
@@ -225,6 +243,126 @@ try {
   assert.deepEqual(legacyCommented.options, ["discuss", "later"]);
   await assert.rejects(review.landHandoff(run, infrastructureCommentedPath), /not a qa-passed proposal ready to land/);
   await architectEvents.get("session_shutdown")();
+
+  const failedLandXdg = join(scratch, "failed-land-xdg");
+  const failedLandDir = join(failedLandXdg, "qq", "workshops", "qq", "task-failed-land");
+  const failedLandPath = join(failedLandDir, "handoff.json");
+  const failedLandEnv = { HOME: scratch, XDG_STATE_HOME: failedLandXdg, QQ_AGENT_PROJECT: "qq", QQ_AGENT_ROLE: "architect" };
+  await workshop.atomicPrivateJson(failedLandPath, {
+    ...proposalState, id: "task-failed-land", task: { id: "TASK-6", title: "Failed land" },
+    statePath: failedLandPath, updatedAt: "2026-04-01T00:00:04.000Z",
+  });
+  const failedLandTools = [];
+  const failedLandEvents = new Map();
+  const failedLandMessages = [];
+  let landError = "merge failed: checkout busy";
+  let landAttempt = 0;
+  const failedLandRun = async (command, args) => {
+    if (command === "git" && args[0] === "rev-parse") return { code: 0, stdout: `${join(scratch, "git-common")}\n`, stderr: "" };
+    if (command === "flock") {
+      const current = JSON.parse(await readFile(args.at(-1), "utf8"));
+      current.status = "blocked";
+      current.blockedReason = landError;
+      current.updatedAt = `2026-04-01T00:00:${String(5 + landAttempt++).padStart(2, "0")}.000Z`;
+      await workshop.atomicPrivateJson(current.statePath, current);
+      return { code: 1, stdout: "", stderr: landError };
+    }
+    return { code: 0, stdout: "", stderr: "" };
+  };
+  const failedLandPi = {
+    registerTool(tool) { failedLandTools.push(tool); },
+    events: { on(name, fn) { failedLandEvents.set(name, fn); } },
+    on(name, fn) { failedLandEvents.set(name, fn); },
+    exec: failedLandRun,
+    sendMessage(payload, options) { failedLandMessages.push({ payload, options }); },
+  };
+  extension.default(failedLandPi, { env: failedLandEnv, exec: failedLandRun });
+  const failedLandReviewTool = failedLandTools.find(({ name }) => name === "review");
+  const failedLandChoices = [];
+  const failedLandQueued = ["approve"];
+  const failedLandCtx = {
+    ...ctx,
+    ui: {
+      async select(pack, options) {
+        failedLandChoices.push({ pack, options });
+        return failedLandQueued.shift() ?? "later";
+      },
+      async input() { return "leave this blocked"; },
+      notify() {},
+    },
+  };
+  await failedLandEvents.get("session_start")({}, failedLandCtx);
+  assert.equal(failedLandChoices.length, 1);
+  const firstFailedLand = JSON.parse(await readFile(failedLandPath, "utf8"));
+  assert.equal(firstFailedLand.status, "blocked");
+  assert.equal(firstFailedLand.blockedReason, "merge failed: checkout busy");
+  assert.deepEqual(failedLandChoices[0].options, ["approve", "discuss", "later"]);
+
+  landError = "merge failed: branch moved";
+  failedLandQueued.push("approve");
+  await failedLandReviewTool.execute("failed-retry-before-poll", {}, undefined, undefined, failedLandCtx);
+  assert.equal(failedLandChoices.length, 2);
+  await failedLandEvents.get("agent_settled")();
+  assert.equal(failedLandChoices.length, 3);
+  assert.deepEqual(failedLandChoices.at(-1).options, ["approve", "discuss", "later"]);
+  await failedLandEvents.get("agent_settled")();
+  assert.equal(failedLandChoices.length, 3);
+
+  failedLandQueued.push("discuss");
+  await failedLandReviewTool.execute("failed-discuss", {}, undefined, undefined, failedLandCtx);
+  const discussedFailedLand = JSON.parse(await readFile(failedLandPath, "utf8"));
+  assert.equal(discussedFailedLand.status, "blocked");
+  assert.equal(discussedFailedLand.operatorComment, "leave this blocked");
+  assert.equal(failedLandMessages.length, 1);
+  await failedLandEvents.get("agent_settled")();
+  assert.equal(failedLandChoices.length, 4);
+
+  failedLandQueued.push("approve");
+  await failedLandReviewTool.execute("failed-retry-same", {}, undefined, undefined, failedLandCtx);
+  await failedLandEvents.get("agent_settled")();
+  assert.equal(failedLandChoices.length, 5);
+
+  landError = "merge failed: worktree locked";
+  failedLandQueued.push("approve");
+  await failedLandReviewTool.execute("failed-retry-changed", {}, undefined, undefined, failedLandCtx);
+  assert.equal(failedLandChoices.length, 6);
+  await failedLandEvents.get("agent_settled")();
+  assert.equal(failedLandChoices.length, 7);
+  assert.deepEqual(failedLandChoices.at(-1).options, ["approve", "discuss", "later"]);
+  await failedLandEvents.get("agent_settled")();
+  assert.equal(failedLandChoices.length, 7);
+  await failedLandEvents.get("session_shutdown")();
+
+  const restartedFailedLandEvents = new Map();
+  const restartedFailedLandChoices = [];
+  const restartedFailedLandPi = {
+    registerTool() {},
+    events: { on(name, fn) { restartedFailedLandEvents.set(name, fn); } },
+    on(name, fn) { restartedFailedLandEvents.set(name, fn); },
+    exec: failedLandRun,
+    sendMessage() {},
+  };
+  extension.default(restartedFailedLandPi, { env: failedLandEnv, exec: failedLandRun });
+  const restartedFailedLandCtx = {
+    ...failedLandCtx,
+    ui: {
+      ...failedLandCtx.ui,
+      async select(pack, options) {
+        restartedFailedLandChoices.push({ pack, options });
+        return "later";
+      },
+    },
+  };
+  await restartedFailedLandEvents.get("session_start")({}, restartedFailedLandCtx);
+  assert.equal(restartedFailedLandChoices.length, 0);
+  const changedAfterRestart = JSON.parse(await readFile(failedLandPath, "utf8"));
+  changedAfterRestart.blockedReason = "merge failed: permission denied";
+  changedAfterRestart.updatedAt = "2026-04-01T00:00:08.000Z";
+  await workshop.atomicPrivateJson(failedLandPath, changedAfterRestart);
+  await restartedFailedLandEvents.get("agent_settled")();
+  assert.equal(restartedFailedLandChoices.length, 1);
+  assert.deepEqual(restartedFailedLandChoices[0].options, ["approve", "discuss", "later"]);
+  await restartedFailedLandEvents.get("session_shutdown")();
 
   assert.equal(review.isTestPath("tests/test-review-flow.mjs"), true);
   assert.equal(review.isTestPath("src/widget.test.ts"), true);
