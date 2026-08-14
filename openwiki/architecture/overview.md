@@ -1,8 +1,8 @@
 ---
 type: Architecture overview
 title: QQ Architecture
-description: Runtime map of QQ's composed Pi extensions, workshop delegation and two-look review workflow, provider operations, and durable machine-local Event Plane.
-tags: [architecture, pi-extension, event-plane, workshops]
+description: Runtime map of QQ's composed Pi extensions, board delegation and two-look run review, provider operations, Herdr cockpit, and durable Event Plane.
+tags: [architecture, pi-extension, event-plane, runs]
 openwiki:
   roles: [architecture, repository]
   source_paths: [extensions/index.ts, package.json]
@@ -12,52 +12,52 @@ openwiki:
 
 # QQ Architecture
 
-QQ has four cooperating areas: a composed Pi runtime, asynchronous [workshops](../workflows/workshops.md), provider [telemetry](../operations/telemetry.md), and the durable [Event Plane](../event-plane/service.md). `extensions/index.ts:registerQQ` is the Pi composition root; registration order starts with [execution profiles](../agent-runtime/execution-profiles.md), then messaging and independent safety/workflow extensions.
+QQ combines a Pi runtime, asynchronous [board/run workflow](../workflows/workshops.md), [provider telemetry](../operations/telemetry.md), [Herdr operations](../operations/runbook.md#herdr-distribution), and a durable [Event Plane](../event-plane/service.md). `extensions/index.ts:registerQQ` is the Pi composition root: [execution profiles](../agent-runtime/execution-profiles.md) register first, followed by messaging, independent safety guards, board tools, and review.
 
 ## Runtime map
 
 ```mermaid
 flowchart TD
     Pi["Pi session"] --> Root["extensions/index.ts registerQQ"]
-    Root --> Profiles["Roles and execution profiles"]
+    Root --> Profiles["Roles and pane profiles"]
     Root --> Messaging["Agent messaging"]
-    Root --> Safety["Session safety extensions"]
-    Root --> Workshop["Workshop and review tools"]
+    Root --> Safety["Session safety"]
+    Root --> Board["Board and review tools"]
     Profiles --> Messaging
-    Profiles --> Workshop
-    Messaging --> Plane["Event Plane service"]
+    Profiles --> Board
+    Messaging --> Plane["Event Plane"]
     Plane --> Db["Private SQLite journal"]
-    Workshop --> Backlog["Backlog CLI"]
-    Workshop --> Worktree["Git worktree"]
-    Workshop --> Herdr["Herdr runner and QA pane"]
-    Workshop --> Review["Architect approval and serialized landing"]
-    Telemetry["qq-telemetry"] --> Policy["Execution-profile policy"]
-    Profiles --> Policy
+    Board --> Backlog["Backlog CLI"]
+    Board --> Admission["Serialized admission vet"]
+    Admission --> Run["Private run handoff"]
+    Run --> Worktree["Git worktree"]
+    Run --> Herdr["Herdr runner and QA pane"]
+    Run --> Landing["QA-passed locked landing"]
+    Telemetry["qq-telemetry"] --> ProfileCli["qq-profile list JSON"]
+    Profiles --> ProfileCli
 ```
 
-*Role selection is shared runtime state; messaging persists through Event Plane, while workshops provision isolated runners through Backlog, Git, and Herdr.*
+*Profile role events coordinate extensions; Event Plane owns message custody, while an admitted ticket becomes a private run spanning Backlog, Git, and Herdr.*
 
 ## Ownership
 
 | Area | Entrypoint | Owns |
 |---|---|---|
-| Pi composition | `extensions/index.ts` | Extension registration order only |
-| Roles/profiles | `extensions/execution-profiles.ts`, `bin/qq-profile` | Activation, model/effort binding, prompt replacement, profile policy |
-| Messaging | `extensions/agent-messages.ts` | Presence, discovery, Pi injection, receipt-aware acknowledgement |
-| Session safety | `extensions/operator-stage.ts` and sibling guards | Operator execution boundary, privacy markers, managed-file guard, Grok stall recovery |
-| Workshops | `extensions/workshop.ts`, `bin/lib/workshop.mjs` | Backlog tools, approved brief, worktree and Herdr runner startup |
-| Review and landing | `extensions/review-flow.ts`, `bin/lib/review.mjs` | `done`, two-look QA, architect choice, serialized merge and cleanup |
-| Event Plane | `bin/event-plane` -> `event_plane_service.py:main` | Generic journal, obligations, retries, leases, retention |
-| Operations | `bin/qq-telemetry*`, `bin/event-plane-admin`, systemd units | Usage display, cookie gate, service administration, wiki refresh |
+| Pi composition | `extensions/index.ts` | Extension registration order |
+| Roles/profiles | `extensions/execution-profiles.ts`, `bin/qq-profile`, `bin/qq-methodology` | Activation, pane selection, prompts, policy and profile-list API |
+| Messaging | `extensions/agent-messages.ts` | Presence, discovery, injection, receipt-aware acknowledgement |
+| Session safety | `extensions/operator-stage.ts` and sibling guards | Operator boundary, transcript scrub, managed-file and Grok guards |
+| Board and run | `extensions/board.ts`, `bin/lib/admission.mjs`, `bin/lib/run.mjs` | Tickets, admission, operator gate, worktree and runner startup |
+| Review/landing | `extensions/review-flow.ts`, `bin/lib/review.mjs` | `done`, two-look QA, architect choice, serialized merge |
+| Event Plane | `bin/event-plane` -> `event_plane_service.py:main` | Journal, obligations, retries, leases, retention |
+| Operations | `bin/qq-telemetry*`, `bin/qq-herdr-*`, `bin/qq-openwiki-*` | Usage, cockpit distribution, wiki automation |
 
 ## Cross-system invariants
 
-- `runner` and `architect` are the only roles. Profile selection emits `qq:role-selected`; messaging refreshes presence and workshops update role gating.
-- Agent addressing always uses canonical Pi session IDs. Presence metadata—including role, tasks, pane, and busy card—is discovery only.
-- Event Plane owns durable custody; Pi transcript evidence gates acknowledgement.
-- Workshop delegation requires operator approval of the exact generated brief before claiming the task or starting a runner.
-- A runner can submit at most two QA looks. Only architect approval lands, under a repository lock; landing requires the original base branch and clean delegated worktree.
-- Private filesystem ownership and modes protect Event Plane, profile, workshop, privacy, telemetry, and cookie state.
-- Operator staging inserts text but never executes it; transcript scrub touches only an identity-matched finalized previous session.
+- `runner` and `architect` are the only roles. A pane selection emits `qq:role-selected`; messaging and board/review consume the selected role.
+- Event Plane acknowledgement follows observable Pi transcript persistence, not message injection.
+- Delegation is admitted against active tickets and live worktrees, then requires operator approval of the literal ticket and generated note.
+- QA has at most two looks and may own tests only. Landing requires a QA pass, architect approval, original base branch, clean main and run worktrees, and the shared repository lock.
+- Private ownership and modes protect Event Plane, profile, run, scrub, telemetry, and cookie state.
 
-Use the component page linked above for exact symbols and focused checks. Run `npm test` for composition-root, shared-role, or multi-area changes.
+Use the linked component page for symbols and focused checks. Run `npm test` only for composition-root, shared-role, packaging, or multi-area changes.

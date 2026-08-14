@@ -1,82 +1,70 @@
 ---
 type: Operations runbook
 title: Operations and Validation
-description: Practical commands for Event Plane administration, focused repository validation, Backlog discipline, and local OpenWiki refresh.
-tags: [operations, event-plane, testing, openwiki]
+description: Practical commands for Event Plane administration, focused validation, Herdr distribution, and multi-repository OpenWiki refresh.
+tags: [operations, event-plane, testing, openwiki, herdr]
 openwiki:
   roles: [operations, testing]
-  source_paths: [bin/event-plane, bin/event-plane-admin, bin/lib/task-prefix.mjs, bin/qq-migrate-task-prefix.mjs, bin/qq-openwiki-refresh, bin/qq-openwiki-shell-env.cjs, package.json, systemd/user/qq-openwiki.service, systemd/user/qq-openwiki.timer]
-  symbols: [migrateTaskPrefix, spawnWithSafeOpenWikiEnv]
-  test_paths: [tests/test-task-prefix.mjs, tests/test-openwiki-refresh.sh]
-  validation_commands: [tests/test-openwiki-refresh.sh, npm test]
+  source_paths: [bin/event-plane, bin/event-plane-admin, bin/qq-methodology, bin/qq-openwiki-refresh, bin/qq-openwiki-dispatch, bin/qq-openwiki-shell-env.cjs, herdr/README.md, package.json]
+  symbols: [spawnWithSafeOpenWikiEnv]
+  test_paths: [tests/test-methodology.sh, tests/test-openwiki-refresh.sh, tests/test-openwiki-dispatch.sh, tests/test-herdr-downstream.sh]
+  validation_commands: [tests/test-openwiki-refresh.sh, tests/test-openwiki-dispatch.sh, npm test]
 ---
 
 # Operations and Validation
 
 ## Event Plane
 
-Start in the foreground with `bin/event-plane serve`. State defaults to `$XDG_STATE_HOME/qq/event-plane` or `$HOME/.local/state/qq/event-plane`. For isolated work, pass an account-owned mode-0700 `--state-dir`; never edit SQLite directly, relax permissions, add symlinks, or proxy the socket. The [protocol trust model](../event-plane/protocol-and-clients.md#trust-and-authorization-boundary) treats filesystem access as authority.
-
-Inspect before acting:
+Start with `bin/event-plane serve`. State defaults to `$XDG_STATE_HOME/qq/event-plane` or `$HOME/.local/state/qq/event-plane`. For isolation, pass an account-owned mode-0700 `--state-dir`; never edit SQLite directly, relax permissions, add symlinks, or proxy the socket. Filesystem access is authority under the [protocol trust model](../event-plane/protocol-and-clients.md#trust-and-authorization-boundary).
 
 ```bash
 bin/event-plane-admin inspect '{"view":"health"}'
 bin/event-plane-admin inspect '{"view":"integrity"}'
 bin/event-plane-admin inspect '{"view":"obligations","status":"blocked"}'
-```
-
-Back up only to a new absolute name outside state, beneath a safe chain and mode-0700 immediate parent:
-
-```bash
 bin/event-plane-admin backup '{"path":"/absolute/private/new-snapshot.sqlite3"}'
 ```
 
-There is no restore API. For shutdown, copy `instance_id` from health immediately before calling:
+Backups require a new absolute path beneath a safe mode-0700 parent. There is no restore API. For shutdown, copy the current `instance_id` from health immediately before `bin/event-plane-admin shutdown '{"expected_instance_id":"plane_...","authorization":"operator"}'`; the ID fences replacement, while `authorization` records intent rather than authenticating.
 
-```bash
-bin/event-plane-admin shutdown '{"expected_instance_id":"plane_...","authorization":"operator"}'
-```
-
-The instance ID fences replacement; `authorization` records intent but is not authentication.
-
-## Validation
+## Focused validation
 
 | Change | Minimal check | Conditional broader check |
 |---|---|---|
-| Event Plane service, client, protocol, launcher | `tests/test-event-plane.sh` | `npm test` when messaging/public composition also changes |
-| Execution profiles, roles, prompt composition | `node --experimental-strip-types tests/test-execution-profiles.mjs .` | `npm test` for role-event or composition changes |
-| Agent helper/schema/presence | `node --experimental-strip-types tests/test-agent-messages.mjs .` | `tests/test-agent-messages-live.sh` for lifecycle/delivery |
-| One Pi extension | matching `node --experimental-strip-types tests/test-<name>.mjs .` | `npm test` when registration/shared state changes |
-| Workshop delegation or brief gate | `node --experimental-strip-types tests/test-workshop.mjs .` and `node tests/test-brief-gate.mjs .` | `npm test` when review/composition also changes |
-| QA, review, or landing | `node --experimental-strip-types tests/test-review-flow.mjs .` | `npm test` when workshop/profile wiring also changes |
-| Task-prefix migrator | `node --experimental-strip-types tests/test-task-prefix.mjs .` | no broader check unless Backlog/workshop schemas change |
-| Telemetry/profile display | `tests/test-telemetry.sh` | manual provider calls only for operator diagnosis |
-| OpenWiki refresh wrapper or systemd units | `tests/test-openwiki-refresh.sh` | `npm test` only when full-suite composition also changes |
-| Test composition or multiple runtime areas | `npm test` | — |
+| Repository linking | `tests/test-methodology.sh` | profile test when activation semantics change |
+| Event Plane | `tests/test-event-plane.sh` | `npm test` when messaging/public composition changes |
+| Profiles and prompts | `node --experimental-strip-types tests/test-execution-profiles.mjs .` | telemetry for list contract; `npm test` for role events/composition |
+| Agent messaging | `node --experimental-strip-types tests/test-agent-messages.mjs .` | live suite for lifecycle/delivery |
+| One safety extension | matching `tests/test-<name>.mjs` | `npm test` for registration/shared state |
+| Board admission/delegation | `node --experimental-strip-types tests/test-delegation.mjs .` plus `node tests/test-brief-gate.mjs .` | `npm test` when review/profile wiring changes |
+| QA, review, landing | `node --experimental-strip-types tests/test-review-flow.mjs .` | `npm test` for cross-workflow changes |
+| Telemetry | `tests/test-telemetry.sh` | live provider calls only for integration diagnosis |
+| Herdr packaging/config | `tests/test-herdr-downstream.sh` | `tests/test-herdr-live.sh` only for live integration |
+| OpenWiki single repo | `tests/test-openwiki-refresh.sh` | `npm test` only for suite composition |
+| OpenWiki registry/dispatch | `tests/test-openwiki-dispatch.sh` | refresh test when wrapper contract changes |
+| Multiple runtime areas | `npm test` | — |
 
-`package.json` is the authoritative full-suite order. The Event Plane suite uses isolated state and a test-only clock; never set `QQ_EVENT_PLANE_TESTING` or retention overrides in production.
+`package.json` owns full-suite order. Event Plane test-only clock/retention variables must never be used in production.
+
+## Herdr distribution
+
+QQ's [board/run workflow](../workflows/workshops.md) and operator staging depend on the pinned Herdr fork described by `herdr/downstream/upstream.env`; the Rust source lives in a separately linked Herdr repository. `qq-herdr-build build|install` verifies the immutable tag/commit, tests and builds it, and runs `bin/qq-herdr-smoke`. `qq-herdr-upgrade` discovers a new immutable release but does not repin automatically. `systemd/user/herdr.service` runs the installed binary.
+
+`qq-herdr-activate` performs the live handoff from Homebrew 0.7.5 and refuses success unless workspaces, tabs, panes, and shell processes survive. `qq-herdr-launch` opens the fullscreen Ghostty cockpit with a literal `herdr` title and clears inherited pane context; `qq-herdr-pane-add` is QQ's right-split primitive. Treat activate/restart as operator-visible. Validate packaging/config with `tests/test-herdr-downstream.sh`; run `tests/test-herdr-live.sh` only when the live Pi integration contract changes.
 
 ## OpenWiki automation
 
-`systemd/user/qq-openwiki.timer` triggers at local 03:00 and 13:00, is not persistent, and runs `qq-openwiki.service`. The service uses a private umask, an explicit tool `PATH`, a six-hour timeout, and `OPENWIKI_PROVIDER=openai-chatgpt`; it delegates the refresh to `bin/qq-openwiki-refresh` rather than letting OpenWiki edit the main checkout.
+`systemd/user/qq-openwiki.timer` triggers at local 03:00 and 13:00 and runs `qq-openwiki.service`. The service invokes `bin/qq-openwiki-dispatch`, which reads `config/openwiki-repositories`, resolves each repository, and runs at most `QQ_OPENWIKI_MAX_PARALLEL` refreshes (default 3). One failure does not stop already scheduled repositories, but the dispatcher exits nonzero after reporting all failures.
 
-The wrapper requires a clean `main`, takes a non-blocking `qq-openwiki.lock`, and generates on a disposable `qq/openwiki-refresh` branch and worktree. It preloads `bin/qq-openwiki-shell-env.cjs` into the OpenWiki Node process through `NODE_OPTIONS`, preserving existing options. The shim intervenes only when Node spawns a shell with an explicitly empty environment: it copies the available `PATH`, `HOME`, `TMPDIR`, `LANG`, and `LC_ALL` values so repository checks can find tools without exposing the rest of the service environment. Other spawn calls are unchanged.
-
-After generation the wrapper restores `AGENTS.md`, removes generated `CLAUDE.md` and the OpenWiki GitHub workflow, and rejects every changed path outside `openwiki/`. If there is a wiki diff, it commits it, takes the same `qq-land.lock` used by [workshop landing](../workflows/workshops.md), rechecks branch and cleanliness, verifies a clean merge, and non-fast-forward merges into `main`. Its exit trap removes the worktree and refresh branch; no wiki diff is a successful no-op.
-
-Defaults can be overridden with the `QQ_OPENWIKI_*` variables declared at the top of `bin/qq-openwiki-refresh`; notably the worktree defaults beneath `$XDG_STATE_HOME/qq/openwiki`, and `QQ_OPENWIKI_SHELL_ENV_PRELOAD` selects the preload path. Keep the shim narrow when changing it: adding an environment key expands what shell checks inherit, while changing the spawn predicate can affect unrelated subprocesses. Validate wrapper and unit behavior with:
+For each repository, `bin/qq-openwiki-refresh` requires clean `main`, takes a per-repository `qq-openwiki.lock`, and generates in `$XDG_STATE_HOME/qq/openwiki/<repo-key>/worktree`. Its Node preload restores only selected safe environment keys for explicitly empty-environment shell spawns. The wrapper restores prohibited root files, rejects changes outside `openwiki/`, commits a real wiki diff, then takes the same common-Git-directory `qq-land.lock` as [run landing](../workflows/workshops.md), rechecks clean main and mergeability, and non-fast-forward merges. No wiki diff is a successful no-op.
 
 ```bash
 tests/test-openwiki-refresh.sh
+tests/test-openwiki-dispatch.sh
 systemd-analyze --user verify systemd/user/qq-openwiki.service systemd/user/qq-openwiki.timer
 ```
 
-The shell test covers safe `PATH` and `HOME` restoration for an empty-environment shell spawn, preload propagation, successful merge and cleanup, no-op behavior, dirty-main refusal, non-`openwiki/` output refusal, and service wiring. It is also the final check in `npm test`.
+The refresh test covers environment confinement, output allowlisting, merge, cleanup, dirty-main refusal, and no-op behavior. The dispatch test covers registry parsing, repository-key isolation, parallel invocation, prefixed output, and aggregate failure.
 
 ## Repository workflow
 
-[Workshop tools](../workflows/workshops.md) use the installed `backlog.md` CLI. The [Backlog guard](../agent-runtime/session-safety.md) blocks Pi `write` and `edit` calls into `backlog/`, including its resolved symlink target; use Backlog commands instead. For provider usage and credential-safe Qwen setup, see [Telemetry](telemetry.md).
-
-### Task-prefix migration
-
-`bin/qq-migrate-task-prefix.mjs [repo]` is a one-time, destructive migrator from `TASK-*` to `T-*`. It updates task front matter and filenames across active, draft, completed, and archived tasks; changes `backlog/config.yml`; and atomically updates matching workshop `handoff.json` task IDs. It does not rewrite arbitrary prose references. Commit or back up the board first, run `node --experimental-strip-types tests/test-task-prefix.mjs .` after implementation changes, and inspect the JSON report plus `git diff` after an actual migration.
+Use `qq-methodology link|unlink|inspect` to control QQ activation for another Git repository; see [execution profiles](../agent-runtime/execution-profiles.md#activation-and-startup). Board tools use the installed `backlog.md` CLI, while the [Backlog guard](../agent-runtime/session-safety.md) blocks direct Pi writes into `backlog/`. Provider operations are in [Telemetry](telemetry.md).
