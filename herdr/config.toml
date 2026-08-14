@@ -12,6 +12,32 @@ next_workspace = "alt+down"
 previous_tab = "alt+left"
 next_tab = "alt+right"
 
+# q mode is local to the focused Herdr cockpit input source. A clean Right Alt
+# tap toggles it; all unconfigured input is consumed while it is active.
+[keys.quick_navigation]
+label = "q mode"
+trigger = "right-alt"
+exit = "esc"
+previous_pane = "left"
+next_pane = "right"
+previous_workspace = "up"
+next_workspace = "down"
+previous_tab = "ctrl+left"
+next_tab = "ctrl+right"
+focus_agent = "1..9"
+help = "?"
+on_exit = "qq.q-mode.cancel"
+
+[[keys.quick_navigation.plugin_action]]
+key = "space"
+action = "qq.q-mode.start-or-stop"
+description = "q mode start, stop, and submit dictation"
+
+[[keys.quick_navigation.plugin_action]]
+key = "delete"
+action = "qq.q-mode.cancel"
+description = "q mode cancel dictation and stay active"
+
 [[keys.command]]
 key = "prefix+f"
 type = "pane"

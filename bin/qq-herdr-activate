@@ -2,20 +2,25 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-old=${QQ_HERDR_OLD_BIN:-/home/linuxbrew/.linuxbrew/opt/herdr/bin/herdr}
+# shellcheck source=/dev/null
+source "$root/herdr/downstream/upstream.env"
 new=${QQ_HERDR_NEW_BIN:-$HOME/.local/lib/qq/herdr/bin/herdr}
+old=${QQ_HERDR_OLD_BIN:-$new}
+new_commit=${QQ_HERDR_NEW_COMMIT:-${new}.commit}
+q_mode_plugin="$root/plugins/q-mode"
 sock=${HERDR_SOCKET_PATH:-$HOME/.config/herdr/herdr.sock}
 live_config=${QQ_HERDR_LIVE_CONFIG:-$HOME/.config/herdr/config.toml}
 local_cli=${QQ_HERDR_LOCAL_CLI:-$HOME/.local/bin/herdr}
 service=${QQ_HERDR_SERVICE:-$HOME/.config/systemd/user/herdr.service}
 tmp=$(mktemp -d)
 committed=0
+prepared=0
 had_local=0
 
 cleanup() {
   local rc=$?
   trap - EXIT
-  if [[ $rc -ne 0 && $committed -eq 0 ]]; then
+  if [[ $rc -ne 0 && $committed -eq 0 && $prepared -eq 1 ]]; then
     install -m 0644 "$tmp/config.before" "$live_config"
     if [[ $had_local -eq 1 ]]; then
       rm -f "$local_cli"
@@ -30,16 +35,39 @@ cleanup() {
 }
 trap cleanup EXIT
 
-[[ $("$new" --version) == "herdr 0.8.0" ]]
+[[ $("$new" --version) == "herdr $HERDR_UPSTREAM_VERSION" ]] || {
+  echo 'refusing handoff because the staged Herdr version is unexpected' >&2
+  exit 1
+}
+[[ -f $new_commit && ! -L $new_commit \
+  && $(<"$new_commit") == "$HERDR_UPSTREAM_COMMIT" ]] || {
+  echo 'refusing handoff because the staged Herdr commit is unproven' >&2
+  exit 1
+}
+"$q_mode_plugin/q-mode.sh" check
 [[ $(systemctl --user show herdr.service -p ActiveState --value) == inactive ]] || {
   echo 'refusing live handoff while herdr.service owns the server cgroup' >&2
   exit 1
 }
-mapfile -t server_pids < <(pgrep -f '/home/linuxbrew/.linuxbrew/(Cellar|opt)/herdr/.*/herdr server')
+mapfile -t server_pids < <(
+  while read -r pid; do
+    command=()
+    mapfile -d '' command <"/proc/$pid/cmdline" 2>/dev/null || continue
+    [[ ${command[1]:-} == server ]] && printf '%s\n' "$pid"
+  done < <(pgrep -x herdr)
+)
 [[ ${#server_pids[@]} -eq 1 ]] || {
-  echo "expected one Homebrew Herdr server, found ${#server_pids[@]}" >&2
+  echo "expected one Herdr server, found ${#server_pids[@]}" >&2
   exit 1
 }
+server_executable=$(readlink "/proc/${server_pids[0]}/exe")
+server_executable=${server_executable% (deleted)}
+if [[ $server_executable != "$new" \
+  && ! $server_executable =~ ^/home/linuxbrew/\.linuxbrew/(Cellar|opt)/herdr/.*/herdr$ ]]; then
+  printf 'refusing handoff from unexpected Herdr executable: %s\n' \
+    "$server_executable" >&2
+  exit 1
+fi
 grep -q 'app-ghostty-.*\.scope' "/proc/${server_pids[0]}/cgroup" || {
   echo 'refusing handoff because the current server is not in the Ghostty scope' >&2
   exit 1
@@ -51,6 +79,7 @@ if [[ -e $local_cli || -L $local_cli ]]; then
   had_local=1
   cp -a "$local_cli" "$tmp/herdr.before"
 fi
+prepared=1
 env -u HERDR_ENV HERDR_SOCKET_PATH="$sock" "$old" api snapshot >"$tmp/before.json"
 python3 - "$sock" "$tmp/before.json" "$tmp/processes.before.json" <<'PY'
 import json
@@ -89,7 +118,7 @@ ln -s "$new" "$tmp/herdr-link"
 mv -Tf "$tmp/herdr-link" "$local_cli"
 
 HERDR_ENV=1 HERDR_SOCKET_PATH="$sock" "$new" server live-handoff \
-  --import-exe "$new" --expected-protocol 19 --expected-version 0.8.0
+  --import-exe "$new" --expected-protocol 19 --expected-version "$HERDR_UPSTREAM_VERSION"
 committed=1
 install -m 0644 "$root/systemd/user/herdr.service" "$service"
 systemctl --user daemon-reload
@@ -178,5 +207,18 @@ print(
 )
 PY
 
+env -u HERDR_ENV HERDR_SOCKET_PATH="$sock" "$new" plugin link \
+  "$q_mode_plugin" --enabled >"$tmp/q-mode-plugin.json"
+python3 - "$tmp/q-mode-plugin.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1]) as handle:
+    response = json.load(handle)
+plugin = response.get("result", {}).get("plugin", {})
+if plugin.get("plugin_id") != "qq.q-mode" or not plugin.get("enabled"):
+    raise SystemExit(f"q mode plugin did not activate: {response}")
+PY
 env -u HERDR_ENV HERDR_SOCKET_PATH="$sock" "$new" config check
 printf '\nHandoff complete. Reconnect from the outer Ghostty prompt with ~/.local/bin/herdr.\n'
+printf 'Run qq-q-mode-uat post-activate before accepting the coordinated cutover.\n'

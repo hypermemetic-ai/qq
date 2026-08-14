@@ -7,8 +7,11 @@ downstream="$root/herdr/downstream"
 source "$downstream/upstream.env"
 
 [[ "$HERDR_UPSTREAM_URL" == https://github.com/hypermemetic-ai/herdr.git ]]
-[[ "$HERDR_UPSTREAM_TAG" == qq-v0.8.0-1 ]]
-[[ "$HERDR_UPSTREAM_COMMIT" == f1e8f5793ecad4feab4c6df6bebca3f564cdbe05 ]]
+[[ "$HERDR_UPSTREAM_REF" == refs/heads/master ]]
+[[ "$HERDR_LANDED_REPOSITORY" == /home/qqp/projects/herdr ]]
+[[ "$HERDR_UPSTREAM_COMMIT" == c9bce319a03752e86313aff4b0aa3fd541211e18 ]]
+[[ "$HERDR_OPERATOR_INPUT_COMMIT" == 60d7167c2658deb766681e8642cee9f4d5bc7c0d ]]
+[[ "$HERDR_UPSTREAM_VERSION" == 0.8.0 ]]
 [[ -z ${HERDR_PATCHES+x} ]]
 [[ ! -e "$downstream/patches/0001-centered-pane-row.patch" ]]
 grep -q 'pane_preferred_width = 80' "$root/herdr/config.toml"
@@ -16,6 +19,11 @@ grep -q 'previous_workspace = "alt+up"' "$root/herdr/config.toml"
 grep -q 'next_workspace = "alt+down"' "$root/herdr/config.toml"
 grep -q 'previous_tab = "alt+left"' "$root/herdr/config.toml"
 grep -q 'next_tab = "alt+right"' "$root/herdr/config.toml"
+grep -q '^label = "q mode"$' "$root/herdr/config.toml"
+grep -q '^trigger = "right-alt"$' "$root/herdr/config.toml"
+grep -q '^on_exit = "qq.q-mode.cancel"$' "$root/herdr/config.toml"
+grep -q '^action = "qq.q-mode.start-or-stop"$' "$root/herdr/config.toml"
+grep -q '^action = "qq.q-mode.cancel"$' "$root/herdr/config.toml"
 grep -q '%h/.local/lib/qq/herdr/bin/herdr server' "$root/systemd/user/herdr.service"
 grep -q '^ExitType=cgroup$' "$root/systemd/user/herdr.service"
 grep -q '%h/.local/state/herdr/herdr.log' "$root/systemd/user/herdr.service"
@@ -25,11 +33,17 @@ grep -q '%h/.local/state/herdr/herdr.log' "$root/systemd/user/herdr.service"
 [[ -x "$root/bin/qq-herdr-pane-add" ]]
 [[ -x "$root/bin/qq-herdr-smoke" ]]
 [[ -x "$root/bin/qq-herdr-launch" ]]
+[[ -x "$root/bin/qq-q-mode-uat" ]]
+[[ -x "$root/plugins/q-mode/q-mode.sh" ]]
 [[ -x "$root/tests/test-herdr-live.sh" ]]
+[[ -x "$root/tests/test-q-mode.sh" ]]
 grep -q 'integration status --outdated-only' "$root/bin/qq-herdr-build"
+grep -q 'HERDR_OPERATOR_INPUT_COMMIT' "$root/bin/qq-herdr-build"
+grep -q 'q-mode.sh" check' "$root/bin/qq-herdr-activate"
+grep -q 'plugin link' "$root/bin/qq-herdr-activate"
 grep -q 'refs/tags/qq-v' "$root/bin/qq-herdr-upgrade"
 if grep -Eq 'git .*apply|HERDR_PATCHES' "$root/bin/qq-herdr-build" "$root/bin/qq-herdr-upgrade"; then
-  echo 'retired QQ Rust patch flow returned' >&2
+  echo 'retired qq Rust patch flow returned' >&2
   exit 1
 fi
 grep -q -- 'ghostty --gtk-single-instance=true --title=herdr -e' "$root/bin/qq-herdr-launch"
@@ -51,15 +65,23 @@ fi
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-git init -q "$work/source"
-git -C "$work/source" remote add origin "$HERDR_UPSTREAM_URL"
-git -C "$work/source" fetch -q --depth 1 origin \
-  "refs/tags/$HERDR_UPSTREAM_TAG:refs/tags/$HERDR_UPSTREAM_TAG"
-tag_commit=$(git -C "$work/source" rev-list -n1 "$HERDR_UPSTREAM_TAG")
-[[ "$tag_commit" == "$HERDR_UPSTREAM_COMMIT" ]]
+contract_source=${QQ_HERDR_CONTRACT_SOURCE:-$HERDR_LANDED_REPOSITORY}
+if [[ -d $contract_source/.git ]] \
+  && git -C "$contract_source" cat-file -e "$HERDR_UPSTREAM_COMMIT^{commit}" 2>/dev/null; then
+  git clone -q --no-hardlinks --no-checkout "$contract_source" "$work/source"
+else
+  git init -q "$work/source"
+  git -C "$work/source" remote add origin "$HERDR_UPSTREAM_URL"
+  git -C "$work/source" fetch -q origin "$HERDR_UPSTREAM_REF"
+fi
+git -C "$work/source" cat-file -e "$HERDR_UPSTREAM_COMMIT^{commit}"
+git -C "$work/source" merge-base --is-ancestor \
+  "$HERDR_OPERATOR_INPUT_COMMIT" "$HERDR_UPSTREAM_COMMIT"
 git -C "$work/source" checkout -q --detach "$HERDR_UPSTREAM_COMMIT"
 grep -Rqs --include='*.rs' 'pane_preferred_width' "$work/source/src"
 grep -Rqs --include='*.rs' 'balance_horizontal_row' "$work/source/src"
+grep -Rqs --include='*.rs' 'ResolvedOperatorInputConfig' "$work/source/src"
+grep -Rqs --include='*.rs' 'operator_input_active' "$work/source/src"
 [[ -z $(git -C "$work/source" status --porcelain) ]]
 
 mock="$work/mock"

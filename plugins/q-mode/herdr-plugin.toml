@@ -1,0 +1,19 @@
+id = "qq.q-mode"
+name = "qq q mode"
+version = "0.1.0"
+min_herdr_version = "0.8.0"
+description = "Pane-bound dictation controls for q mode"
+platforms = ["linux"]
+
+[[actions]]
+id = "start-or-stop"
+title = "Start or stop q mode dictation"
+description = "Start or submit dictation to the pane selected at record start"
+contexts = ["pane"]
+command = ["bash", "q-mode.sh", "start-or-stop"]
+
+[[actions]]
+id = "cancel"
+title = "Cancel q mode dictation"
+description = "Cancel workstation dictation without changing q mode"
+command = ["bash", "q-mode.sh", "cancel"]
