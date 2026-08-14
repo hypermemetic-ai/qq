@@ -144,7 +144,11 @@ try {
       },
     },
   };
-  extension.default(pi, { policyPath, env: { ...process.env, XDG_STATE_HOME: join(temporary, "state") } });
+  const paneId = "w2T:pA";
+  const stateHome = join(temporary, "state");
+  const paneEnv = { ...process.env, QQ_AGENT_ROLE: undefined, XDG_STATE_HOME: stateHome, HERDR_PANE_ID: paneId };
+  const paneProfilePath = join(stateHome, "qq", "pane-profiles", `${paneId}.json`);
+  extension.default(pi, { policyPath, env: paneEnv });
   await handlers.get("session_start")({ reason: "startup" }, ctx);
   assert.equal(currentModel.id, "grok-4.6");
   assert.equal(currentModel.provider, "xai");
@@ -158,7 +162,19 @@ try {
   await pi.command.handler("runner qwen-deepseek-max", ctx);
   assert.equal(currentModel.id, "deepseek-v4-flash-0731");
   assert.equal(effort, "max");
-  assert.equal((await lib.readExecutionPolicy(policyPath)).roles.runner.default, "grok-high", "session switch persisted the default");
+  assert.deepEqual(JSON.parse(await readFile(paneProfilePath, "utf8")), {
+    version: 1,
+    paneId,
+    role: "runner",
+    profile: "qwen-deepseek-max",
+  });
+  assert.equal((await stat(paneProfilePath)).mode & 0o777, 0o600);
+  assert.equal((await stat(join(stateHome, "qq", "pane-profiles"))).mode & 0o777, 0o700);
+  assert.equal((await lib.readExecutionPolicy(policyPath)).roles.runner.default, "grok-high", "pane switch must not change the durable default");
+  await handlers.get("session_start")({ reason: "new" }, ctx);
+  assert.equal(currentModel.id, "deepseek-v4-flash-0731", "/new restored the non-default pane profile");
+  assert.equal(effort, "max");
+  assert.deepEqual(roleSelections.at(-1), { role: "runner", profile: "qwen-deepseek-max" });
   const promptOptions = {
     selectedTools: ["read", "edit"],
     toolSnippets: { read: "Read file contents", edit: "Make precise file edits" },
@@ -183,12 +199,34 @@ try {
   assert.deepEqual(roleSelections.at(-1), { role: "architect", profile: "grok-high" });
   assert.ok(notifications.some(({ message }) => message.includes("qwen-deepseek-max")));
   assert.ok(notifications.some(({ message }) => message.includes("sol-high")));
+
+  await handlers.get("session_start")({ reason: "new" }, ctx);
+  assert.equal(currentModel.id, "grok-4.6", "/new restored the pane profile");
+  assert.deepEqual(roleSelections.at(-1), { role: "architect", profile: "grok-high" }, "/new emitted the restored role");
+  await handlers.get("session_shutdown")({ reason: "reload" }, ctx);
+
+  extension.default(pi, { policyPath, env: paneEnv });
+  await handlers.get("session_start")({ reason: "reload" }, ctx);
+  assert.equal(currentModel.id, "grok-4.6", "/reload restored the pane profile");
+  assert.deepEqual(roleSelections.at(-1), { role: "architect", profile: "grok-high" }, "/reload emitted the restored role");
+  await handlers.get("session_shutdown")({ reason: "reload" }, ctx);
+
+  extension.default(pi, { policyPath, env: { ...paneEnv, HERDR_PANE_ID: "w2T:pB" } });
+  await handlers.get("session_start")({ reason: "startup" }, ctx);
+  assert.deepEqual(roleSelections.at(-1), { role: "runner", profile: "grok-high" }, "a different pane did not inherit the mark");
   await handlers.get("session_shutdown")({ reason: "quit" }, ctx);
 
   ctx.cwd = temporary;
-  extension.default(pi, { policyPath, env: { ...process.env, QQ_AGENT_ROLE: "runner", XDG_STATE_HOME: join(temporary, "forced-state") } });
+  extension.default(pi, { policyPath, env: { ...paneEnv, QQ_AGENT_ROLE: "runner" } });
   await handlers.get("session_start")({ reason: "startup" }, ctx);
   assert.equal(currentModel.id, "grok-4.6", "forced worktree role did not activate profiles outside the qq root");
+  assert.deepEqual(roleSelections.at(-1), { role: "runner", profile: "grok-high" }, "forced role won over the pane mark");
+  assert.deepEqual(JSON.parse(await readFile(paneProfilePath, "utf8")), {
+    version: 1,
+    paneId,
+    role: "architect",
+    profile: "grok-high",
+  }, "forced startup left the operator's pane mark unchanged");
   await handlers.get("session_shutdown")({ reason: "quit" }, ctx);
   ctx.cwd = root;
 
