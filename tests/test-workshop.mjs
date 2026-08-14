@@ -492,8 +492,8 @@ try {
   }
 
   const overlapBoard = new Map([
-    ["TASK-6", { id: "TASK-6", title: "Change review flow", status: "To Do", implementationNotes: "Edit review.mjs" }],
-    ["TASK-7", { id: "TASK-7", title: "Also change review flow", status: "To Do", implementationNotes: "Edit review.mjs" }],
+    ["TASK-6", { id: "TASK-6", title: "Change workshop flow", status: "To Do", implementationNotes: "Edit extensions/workshop.ts" }],
+    ["TASK-7", { id: "TASK-7", title: "Also change workshop flow", status: "To Do", implementationNotes: "Edit extensions/workshop.ts" }],
   ]);
   const overlapEvents = [];
   let releaseOverlapVet;
@@ -509,7 +509,7 @@ try {
         return { decision: "clear" };
       }
       assert.match(evidence, /"id": "TASK-6"[\s\S]*?"status": "In Progress"/);
-      return { decision: "bounce", reason: "bin/lib/review.mjs is already live in TASK-6" };
+      return { decision: "bounce", reason: "extensions/workshop.ts is already claimed by TASK-6" };
     },
   });
   const firstOverlap = overlap.tool.execute("overlap-1", { id: "TASK-6" }, undefined, undefined, ctx);
@@ -518,7 +518,7 @@ try {
   releaseOverlapVet();
   const [firstOverlapResult, secondOverlapResult] = await Promise.all([firstOverlap, secondOverlap]);
   assert.equal(firstOverlapResult.content[0].text, "Approved TASK-6; runner started.");
-  assert.equal(secondOverlapResult.content[0].text, "Bounced TASK-7: bin/lib/review.mjs is already live in TASK-6");
+  assert.equal(secondOverlapResult.content[0].text, "Bounced TASK-7: extensions/workshop.ts is already claimed by TASK-6");
   assert.equal(secondOverlapResult.content[0].text.includes("\n"), false);
   assert.equal(overlapBoard.get("TASK-7").status, "To Do");
   assert.deepEqual(overlap.calls.notes, ["TASK-6"]);
