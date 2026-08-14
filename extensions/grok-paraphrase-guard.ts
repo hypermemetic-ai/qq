@@ -1,8 +1,8 @@
 // @ts-nocheck
 import { profileFor, readExecutionPolicy } from "../bin/lib/execution-profiles.mjs";
 
-// Grok 4.6 only. Three exact repetitions of a substantial block inside one
-// streamed response abort and receive one terse grounding message. A recurrence
+// Grok 4.6 only. Three exact repetitions of a substantial block (up to 96
+// words) inside one streamed response abort and receive one terse grounding message. A recurrence
 // within the next few completed turns enters the existing escalation: rewind
 // once, then switch to runner sol-high. Five adjacent similar completed turns
 // still enter that escalation directly. Delete this file and its index import
@@ -18,10 +18,10 @@ export const FALLBACK_PROFILE = "sol-high";
 export const SANITY_MESSAGE = "Stop, you are repeating yourself. Continue with the work.";
 export const RECOVERY_TURNS = 3;
 export const REPEAT_MIN_WORDS = 12;
-export const REPEAT_MAX_WORDS = 48;
+export const REPEAT_MAX_WORDS = 96;
 export const REPEAT_COUNT = 3;
 export const STREAM_TEXT_CAP = 12_000;
-export const STREAM_WORD_CAP = 256;
+export const STREAM_WORD_CAP = REPEAT_COUNT * REPEAT_MAX_WORDS + REPEAT_MAX_WORDS;
 
 const WHITESPACE = /\s+/g;
 const WORD = /[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu;

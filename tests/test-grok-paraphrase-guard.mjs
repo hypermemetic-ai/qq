@@ -14,6 +14,10 @@ const {
 } = await import(pathToFileURL(join(root, "extensions/grok-paraphrase-guard.ts")));
 
 const RUNAWAY = "I can also add tests to verify the new behavior. Just let me know how you'd like to proceed. ";
+const OBSERVED_LONG_RUNAWAY = [
+  "I hope this helps clarify things. Let me know if you have any questions or if there's more you'd like to explore. I can also help with any specific changes you'd like to make. What do you think?",
+  "I appreciate the feedback on the T-16 discuss. It's helpful to see these edge cases. Let me know if there's anything else you'd like to discuss. I can also help with any specific changes you'd like to make. What do you think?",
+].join(" ");
 
 const STALL = [
   "I have the spawn and review seams. Next I’ll pin the remaining APIs, then implement workshop spawn and the `done`/`qa`/`land` chain.",
@@ -161,6 +165,14 @@ for (let i = 1; i < STALL.length; i += 1) {
   const h = harness();
   h.setLeaf("good");
   await h.stream(RUNAWAY.repeat(3), "text_delta", 10_000);
+  await h.emit("agent_settled");
+  assert.deepEqual(h.sent, [SANITY_MESSAGE]);
+}
+
+{
+  const h = harness();
+  await h.stream(`A distinct introduction before the long repeated block. ${OBSERVED_LONG_RUNAWAY.repeat(3)}`);
+  assert.equal(h.aborted, 1);
   await h.emit("agent_settled");
   assert.deepEqual(h.sent, [SANITY_MESSAGE]);
 }
