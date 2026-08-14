@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 
 const root = process.argv[2];
 const review = await import(pathToFileURL(join(root, "bin/lib/review.mjs")));
-const workshop = await import(pathToFileURL(join(root, "bin/lib/workshop.mjs")));
+const runLib = await import(pathToFileURL(join(root, "bin/lib/run.mjs")));
 const extension = await import(pathToFileURL(join(root, "extensions/review-flow.ts")));
 const qaResult = await import(pathToFileURL(join(root, "extensions/qa-result.ts")));
 
@@ -28,7 +28,7 @@ try {
   await mkdir(mainRoot);
   const statePath = join(scratch, "state", "handoff.json");
   const base = {
-    schema: "qq.workshop-handoff/v1", version: 1, id: "task-1-x", project: "qq",
+    schema: "qq.run-handoff/v1", version: 1, id: "task-1-x", project: "qq",
     task: { id: "TASK-1", title: "One task" }, status: "running", look: 0,
     mainRoot, baseBranch: "main", baseRef: "base", branch: "qq/task-1-x", worktree,
     pane: "w2T:p9", architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9",
@@ -36,7 +36,7 @@ try {
     notePath: join(scratch, "note.md"), gatePath: join(scratch, "gate.md"), statePath,
     qa: { provider: "openai-codex", model: "gpt-5.6-sol", effort: "xhigh" },
   };
-  await workshop.atomicPrivateJson(statePath, base);
+  await runLib.atomicPrivateJson(statePath, base);
   const calls = [];
   const run = async (command, args, options = {}) => {
     calls.push({ command, args, options });
@@ -60,7 +60,7 @@ try {
   assert.equal(review.isQaPassedProposal(prepared), true);
   assert.equal(review.isQaPassedProposal({ ...prepared, status: "blocked" }), false);
   assert.equal(review.isQaPassedProposal({ ...prepared, status: "commented", qaVerdict: undefined }), false);
-  await workshop.atomicPrivateJson(statePath, prepared);
+  await runLib.atomicPrivateJson(statePath, prepared);
   const dirtyMainCalls = [];
   const dirtyMainRun = async (command, args, options = {}) => {
     dirtyMainCalls.push({ command, args, options });
@@ -92,7 +92,7 @@ try {
   assert.ok(operations.includes("branch"));
   assert.ok(calls.some(({ args }) => args[0] === "task" && args[1] === "edit" && args[2] === "TASK-1" && args.includes("Done")));
 
-  await workshop.atomicPrivateJson(statePath, prepared);
+  await runLib.atomicPrivateJson(statePath, prepared);
   const doneCallsBeforeFailure = calls.filter(({ args }) => args[0] === "task" && args[1] === "edit" && args.includes("Done")).length;
   const failingLandRun = async (command, args, options = {}) => {
     if (command === "git" && args[0] === "merge-tree") return { code: 1, stdout: "", stderr: "content conflict" };
@@ -112,7 +112,7 @@ try {
 
   prepared.status = "running";
   prepared.look = 0;
-  await workshop.atomicPrivateJson(statePath, prepared);
+  await runLib.atomicPrivateJson(statePath, prepared);
   const tools = [];
   const events = new Map();
   let launched;
@@ -123,10 +123,9 @@ try {
     exec: run,
   };
   let shutdowns = 0;
-  extension.default(pi, { env: { QQ_AGENT_ROLE: "runner", QQ_WORKSHOP_STATE: statePath }, exec: run, launchReview(path) { launched = path; return 99; } });
+  extension.default(pi, { env: { QQ_AGENT_ROLE: "runner", QQ_RUN_STATE: statePath }, exec: run, launchReview(path) { launched = path; return 99; } });
   const runnerReviewTool = tools.find(({ name }) => name === "review");
   assert.match(`${runnerReviewTool.promptSnippet} ${runnerReviewTool.description}`, /runs/);
-  assert.doesNotMatch(`${runnerReviewTool.promptSnippet} ${runnerReviewTool.description}`, /workshop/i);
   const done = tools.find(({ name }) => name === "done");
   const outcome = await done.execute("d", { ref: "HEAD" }, undefined, undefined, { cwd: worktree, shutdown() { shutdowns += 1; }, abort() { throw new Error("done should shut down, not abort"); } });
   assert.equal(outcome.details.status, "reviewing");
@@ -146,20 +145,20 @@ try {
   assert.equal(duplicate.details.status, "refused");
 
   const xdg = join(scratch, "xdg");
-  const workshopDir = join(xdg, "qq", "workshops", "qq");
+  const runsDir = join(xdg, "qq", "runs", "qq");
   const listEnv = { HOME: scratch, XDG_STATE_HOME: xdg, QQ_AGENT_PROJECT: "qq" };
   const proposalState = {
     ...prepared, status: "proposal", look: 1, ref: "refsha",
     pack: { summary: "small fix", files: [{ path: "src/a.ts", added: 2, deleted: 1 }] },
     updatedAt: "2026-04-01T00:00:00.000Z",
   };
-  const commentedPath = join(workshopDir, "task-commented", "handoff.json");
-  const laterPath = join(workshopDir, "task-later", "handoff.json");
-  await workshop.atomicPrivateJson(commentedPath, {
+  const commentedPath = join(runsDir, "task-commented", "handoff.json");
+  const laterPath = join(runsDir, "task-later", "handoff.json");
+  await runLib.atomicPrivateJson(commentedPath, {
     ...proposalState, id: "task-commented", status: "commented", operatorComment: "old note",
     task: { id: "TASK-2", title: "Commented task" }, statePath: commentedPath, updatedAt: "2026-04-01T00:00:01.000Z",
   });
-  await workshop.atomicPrivateJson(laterPath, {
+  await runLib.atomicPrivateJson(laterPath, {
     ...proposalState, id: "task-later", task: { id: "TASK-3", title: "Later task" }, statePath: laterPath,
   });
   const listedProposals = await review.listProposals("qq", listEnv);
@@ -224,8 +223,8 @@ try {
   assert.equal(afterComment.length, 2);
   assert.ok(afterComment.every((item) => item.options.includes("approve")));
 
-  const blockedPath = join(workshopDir, "task-blocked", "handoff.json");
-  await workshop.atomicPrivateJson(blockedPath, {
+  const blockedPath = join(runsDir, "task-blocked", "handoff.json");
+  await runLib.atomicPrivateJson(blockedPath, {
     ...proposalState, id: "task-blocked", status: "blocked", qaVerdict: undefined, pack: undefined,
     blockedReason: "qa infrastructure failed: pane busy", task: { id: "TASK-4", title: "Blocked task" },
     statePath: blockedPath, updatedAt: "2026-04-01T00:00:02.000Z",
@@ -248,8 +247,8 @@ try {
   assert.equal(discussedBlocked.operatorComment, "tighten the summary");
   await assert.rejects(review.landHandoff(run, blockedPath), /not a qa-passed proposal ready to land/);
 
-  const infrastructureCommentedPath = join(workshopDir, "task-infrastructure-commented", "handoff.json");
-  await workshop.atomicPrivateJson(infrastructureCommentedPath, {
+  const infrastructureCommentedPath = join(runsDir, "task-infrastructure-commented", "handoff.json");
+  await runLib.atomicPrivateJson(infrastructureCommentedPath, {
     ...discussedBlocked, id: "task-infrastructure-commented", status: "commented",
     blockedReason: "qa infrastructure failed: legacy comment", task: { id: "TASK-5", title: "Legacy blocked task" },
     statePath: infrastructureCommentedPath, updatedAt: "2026-04-01T00:00:03.000Z",
@@ -267,10 +266,10 @@ try {
   await architectEvents.get("session_shutdown")();
 
   const failedLandXdg = join(scratch, "failed-land-xdg");
-  const failedLandDir = join(failedLandXdg, "qq", "workshops", "qq", "task-failed-land");
+  const failedLandDir = join(failedLandXdg, "qq", "runs", "qq", "task-failed-land");
   const failedLandPath = join(failedLandDir, "handoff.json");
   const failedLandEnv = { HOME: scratch, XDG_STATE_HOME: failedLandXdg, QQ_AGENT_PROJECT: "qq", QQ_AGENT_ROLE: "architect" };
-  await workshop.atomicPrivateJson(failedLandPath, {
+  await runLib.atomicPrivateJson(failedLandPath, {
     ...proposalState, id: "task-failed-land", task: { id: "TASK-6", title: "Failed land" },
     statePath: failedLandPath, updatedAt: "2026-04-01T00:00:04.000Z",
   });
@@ -286,7 +285,7 @@ try {
       current.status = "blocked";
       current.blockedReason = landError;
       current.updatedAt = `2026-04-01T00:00:${String(5 + landAttempt++).padStart(2, "0")}.000Z`;
-      await workshop.atomicPrivateJson(current.statePath, current);
+      await runLib.atomicPrivateJson(current.statePath, current);
       return { code: 1, stdout: "", stderr: landError };
     }
     return { code: 0, stdout: "", stderr: "" };
@@ -380,7 +379,7 @@ try {
   const changedAfterRestart = JSON.parse(await readFile(failedLandPath, "utf8"));
   changedAfterRestart.blockedReason = "merge failed: permission denied";
   changedAfterRestart.updatedAt = "2026-04-01T00:00:08.000Z";
-  await workshop.atomicPrivateJson(failedLandPath, changedAfterRestart);
+  await runLib.atomicPrivateJson(failedLandPath, changedAfterRestart);
   await restartedFailedLandEvents.get("agent_settled")();
   assert.equal(restartedFailedLandChoices.length, 1);
   assert.deepEqual(restartedFailedLandChoices[0].options, ["approve", "discuss", "later"]);
@@ -398,7 +397,7 @@ try {
     const caseState = {
       ...prepared, status: "reviewing", look, ref, qaSessionId, pane: "w2T:p9",
     };
-    await workshop.atomicPrivateJson(statePath, caseState);
+    await runLib.atomicPrivateJson(statePath, caseState);
     const verdictPath = join(scratch, "state", `qa-look-${look}.json`);
     const caseCalls = [];
     let agentEvicted = false;
@@ -429,7 +428,7 @@ try {
         }
       }
       if (command === "herdr" && args[0] === "agent" && args[1] === "prompt" && String(args[3]).startsWith(`Look ${look}`)) {
-        await workshop.atomicPrivateJson(verdictPath, {
+        await runLib.atomicPrivateJson(verdictPath, {
           schema: "qq.qa-verdict/v1", version: 1, verdict, summary, feedback, tests_modified: testsModified,
         });
       }
@@ -574,7 +573,7 @@ try {
 
   prepared.status = "commented";
   prepared.ref = "refsha";
-  await workshop.atomicPrivateJson(statePath, prepared);
+  await runLib.atomicPrivateJson(statePath, prepared);
   await review.landHandoff(run, statePath);
   assert.equal(JSON.parse(await readFile(statePath, "utf8")).status, "landed");
   assert.ok(calls.some(({ args }) => args[0] === "task" && args[1] === "edit" && args[2] === "TASK-1" && args.includes("Done")));

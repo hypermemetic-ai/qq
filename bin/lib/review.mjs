@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { atomicPrivateJson, parseHerdr, readHandoff, stateHome, waitForAvailableShell, workshopRoot } from "./workshop.mjs";
+import { atomicPrivateJson, parseHerdr, readHandoff, runsRoot, stateHome, waitForAvailableShell } from "./run.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const BACKLOG = join(QQ_ROOT, "node_modules", ".bin", "backlog");
@@ -64,7 +64,7 @@ export async function setBoardStatus(run, cwd, taskId, status) {
 }
 
 async function listHandoffs(project, env, statuses) {
-  const root = workshopRoot(project, env);
+  const root = runsRoot(project, env);
   const found = [];
   let entries;
   try { entries = await readdir(root, { withFileTypes: true }); } catch (error) { if (error?.code === "ENOENT") return []; throw error; }

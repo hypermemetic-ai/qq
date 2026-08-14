@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { open, readFile, readdir, stat, unlink } from "node:fs/promises";
 import { basename, isAbsolute, join, resolve } from "node:path";
 
-import { taskSlug, workshopRoot } from "./workshop.mjs";
+import { runsRoot, taskSlug } from "./run.mjs";
 
 function reason(result, fallback) {
   return result?.stderr?.trim() || result?.stdout?.trim() || fallback;
@@ -151,7 +151,7 @@ async function briefCandidate(path) {
 
 export async function findExistingBrief(options) {
   const { taskId, project, env = process.env } = options;
-  const root = workshopRoot(project, env);
+  const root = runsRoot(project, env);
   const prefix = `${taskSlug(taskId)}-`;
   let entries;
   try { entries = await readdir(root, { withFileTypes: true }); }

@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const root = process.argv[2];
-const lib = await import(pathToFileURL(join(root, "bin/lib/workshop.mjs")));
+const lib = await import(pathToFileURL(join(root, "bin/lib/run.mjs")));
 const admission = await import(pathToFileURL(join(root, "bin/lib/admission.mjs")));
-const extension = await import(pathToFileURL(join(root, "extensions/workshop.ts")));
+const extension = await import(pathToFileURL(join(root, "extensions/board.ts")));
 
 assert.equal(lib.taskSlug("TASK-1"), "task-1");
 assert.equal(lib.taskSlug("T-1"), "t-1");
@@ -48,7 +48,7 @@ assert.equal(lib.paneHasAvailableShell({
   process_info: { shell_pid: 10, foreground_process_group_id: 10, foreground_processes: [{ pid: 10, name: "pi" }] },
 }), false);
 
-const scratch = await mkdtemp(join(homedir(), "qq-workshop-test."));
+const scratch = await mkdtemp(join(homedir(), "qq-delegation-test."));
 try {
   const exactNote = "PRIVATE exact runner note";
   const env = {
@@ -128,7 +128,7 @@ try {
   assert.notEqual(vetRequest.options.sessionId, scribeRequest.options.sessionId);
   assert.equal(vetRequest.request.messages[0].content[0].text, "live evidence");
 
-  const prepared = await lib.prepareWorkshop({ cwd: "/repo", env, project: "qq", task, note: exactNote, transcript });
+  const prepared = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task, note: exactNote, transcript });
   assert.equal(await readFile(prepared.ticketPath, "utf8"), `${ticket}\n`);
   assert.equal(await readFile(prepared.transcriptPath, "utf8"), `${transcript}\n`);
   assert.equal(await readFile(prepared.notePath, "utf8"), `${exactNote}\n`);
@@ -226,13 +226,14 @@ try {
     }
     return { code: 0, stdout: "", stderr: "" };
   };
-  const state = await lib.spawnWorkshop({
+  const state = await lib.startRun({
     run: spawnRun, cwd: "/repo", env, task, prepared,
     architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9",
     qaBinding: { provider: "openai-codex", model: "gpt-5.6-sol", effort: "xhigh" },
   });
   assert.equal(state.pane, "w2T:p9");
   assert.equal(state.status, "running");
+  assert.equal(state.schema, "qq.run-handoff/v1");
   assert.equal(state.ticketPath, prepared.ticketPath);
   assert.equal(state.transcriptPath, prepared.transcriptPath);
   assert.equal(state.notePath, prepared.notePath);
@@ -242,7 +243,8 @@ try {
   const create = spawnCalls.find(({ command, args }) => command === "herdr" && args[0] === "tab" && args[1] === "create");
   assert.deepEqual(create.args.slice(0, 6), ["tab", "create", "--workspace", "w2T", "--label", "runs"]);
   assert.ok(create.args.includes("QQ_AGENT_ROLE=runner"));
-  assert.ok(create.args.some((arg) => arg.startsWith("QQ_WORKSHOP_STATE=")));
+  assert.ok(create.args.some((arg) => arg.startsWith("QQ_RUN_STATE=")));
+  assert.ok(create.args.some((arg) => arg.startsWith("QQ_RUN_ID=")));
   const herdrOps = spawnCalls.filter(({ command }) => command === "herdr").map(({ args }) => `${args[0]} ${args[1]}`);
   const processInfo = herdrOps.filter((op) => op === "pane process-info");
   assert.equal(processInfo.length, 2);
@@ -256,63 +258,60 @@ try {
   assert.match(prompt.args[3], /## Architect notes \/ scratch/);
   assert.ok(prompt.args[3].endsWith(exactNote));
 
-  for (const [id, label] of [["TASK-4", "runs"], ["TASK-5", "workshop"]]) {
-    const existingTask = { id, title: `Reuse ${label}` };
-    const existingPreparation = await lib.prepareWorkshop({ cwd: "/repo", env, project: "qq", task: existingTask, note: exactNote });
-    const existingCalls = [];
-    const existingRun = async (command, args, options = {}) => {
-      existingCalls.push({ command, args, options });
-      if (command === "git" && args[0] === "rev-parse" && args[1] === "--show-toplevel") return { code: 0, stdout: "/repo\n", stderr: "" };
-      if (command === "git" && args[0] === "rev-parse" && args[1] === "HEAD") return { code: 0, stdout: "abc123\n", stderr: "" };
-      if (command === "git" && args[0] === "symbolic-ref") return { code: 0, stdout: "main\n", stderr: "" };
-      if (command === "herdr" && args[0] === "tab" && args[1] === "list") {
-        return { code: 0, stdout: JSON.stringify({ id: "cli:tab:list", result: { type: "tab_list", tabs: [{ tab_id: "w2T:tR", label }] } }), stderr: "" };
-      }
-      if (command === "herdr" && args[0] === "pane" && args[1] === "list") {
-        return {
-          code: 0,
-          stdout: JSON.stringify({ id: "cli:pane:list", result: { type: "pane_list", panes: [
-            { pane_id: "w2T:p0", tab_id: "w2T:t0" },
-            { pane_id: "w2T:p-left", tab_id: "w2T:tR" },
-            { pane_id: "w2T:p-right", tab_id: "w2T:tR" },
-          ] } }),
-          stderr: "",
-        };
-      }
-      if (command === "qq-herdr-pane-add") {
-        return { code: 0, stdout: JSON.stringify({ id: "cli:pane:split", result: { type: "pane_info", pane: { pane_id: "w2T:p-new" } } }), stderr: "" };
-      }
-      if (command === "herdr" && args[0] === "pane" && args[1] === "process-info") {
-        return {
-          code: 0,
-          stdout: JSON.stringify({ id: "cli:pane:process_info", result: { type: "pane_process_info", process_info: {
-            pane_id: "w2T:p-new", shell_pid: 10, foreground_process_group_id: 10,
-            foreground_processes: [{ pid: 10, name: "zsh" }],
-          } } }),
-          stderr: "",
-        };
-      }
-      return { code: 0, stdout: "", stderr: "" };
-    };
-    const existingState = await lib.spawnWorkshop({
-      run: existingRun, cwd: "/repo", env, task: existingTask, prepared: existingPreparation,
-      architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9", qaBinding: {},
-    });
-    assert.equal(existingState.pane, "w2T:p-new");
-    assert.equal(existingCalls.some(({ command, args }) => command === "herdr" && args[0] === "tab" && args[1] === "create"), false);
-    assert.equal(existingCalls.some(({ command, args }) => command === "herdr" &&
-      args[0] === "tab" && args[1] === "rename" && args[2] === "w2T:tR" && args[3] === "runs"), label === "workshop");
-    const split = existingCalls.find(({ command }) => command === "qq-herdr-pane-add");
-    assert.deepEqual(split.args.slice(0, 5), [
-      "--pane", "w2T:p-right", "--cwd", existingPreparation.worktree, "--no-focus",
-    ]);
-  }
+  const existingTask = { id: "TASK-4", title: "Reuse runs" };
+  const existingPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: existingTask, note: exactNote });
+  const existingCalls = [];
+  const existingRun = async (command, args, options = {}) => {
+    existingCalls.push({ command, args, options });
+    if (command === "git" && args[0] === "rev-parse" && args[1] === "--show-toplevel") return { code: 0, stdout: "/repo\n", stderr: "" };
+    if (command === "git" && args[0] === "rev-parse" && args[1] === "HEAD") return { code: 0, stdout: "abc123\n", stderr: "" };
+    if (command === "git" && args[0] === "symbolic-ref") return { code: 0, stdout: "main\n", stderr: "" };
+    if (command === "herdr" && args[0] === "tab" && args[1] === "list") {
+      return { code: 0, stdout: JSON.stringify({ id: "cli:tab:list", result: { type: "tab_list", tabs: [{ tab_id: "w2T:tR", label: "runs" }] } }), stderr: "" };
+    }
+    if (command === "herdr" && args[0] === "pane" && args[1] === "list") {
+      return {
+        code: 0,
+        stdout: JSON.stringify({ id: "cli:pane:list", result: { type: "pane_list", panes: [
+          { pane_id: "w2T:p0", tab_id: "w2T:t0" },
+          { pane_id: "w2T:p-left", tab_id: "w2T:tR" },
+          { pane_id: "w2T:p-right", tab_id: "w2T:tR" },
+        ] } }),
+        stderr: "",
+      };
+    }
+    if (command === "qq-herdr-pane-add") {
+      return { code: 0, stdout: JSON.stringify({ id: "cli:pane:split", result: { type: "pane_info", pane: { pane_id: "w2T:p-new" } } }), stderr: "" };
+    }
+    if (command === "herdr" && args[0] === "pane" && args[1] === "process-info") {
+      return {
+        code: 0,
+        stdout: JSON.stringify({ id: "cli:pane:process_info", result: { type: "pane_process_info", process_info: {
+          pane_id: "w2T:p-new", shell_pid: 10, foreground_process_group_id: 10,
+          foreground_processes: [{ pid: 10, name: "zsh" }],
+        } } }),
+        stderr: "",
+      };
+    }
+    return { code: 0, stdout: "", stderr: "" };
+  };
+  const existingState = await lib.startRun({
+    run: existingRun, cwd: "/repo", env, task: existingTask, prepared: existingPreparation,
+    architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9", qaBinding: {},
+  });
+  assert.equal(existingState.pane, "w2T:p-new");
+  assert.equal(existingCalls.some(({ command, args }) => command === "herdr" && args[0] === "tab" && args[1] === "create"), false);
+  assert.equal(existingCalls.some(({ command, args }) => command === "herdr" && args[0] === "tab" && args[1] === "rename"), false);
+  const split = existingCalls.find(({ command }) => command === "qq-herdr-pane-add");
+  assert.deepEqual(split.args.slice(0, 5), [
+    "--pane", "w2T:p-right", "--cwd", existingPreparation.worktree, "--no-focus",
+  ]);
 
-  const cancelledPreparation = await lib.prepareWorkshop({ cwd: "/repo", env, project: "qq", task: { id: "TASK-2", title: "Cancel" }, note: exactNote });
-  await lib.discardWorkshop(cancelledPreparation);
+  const cancelledPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: { id: "TASK-2", title: "Cancel" }, note: exactNote });
+  await lib.discardRun(cancelledPreparation);
   await assert.rejects(access(cancelledPreparation.stateDir), { code: "ENOENT" });
 
-  const failedGate = await lib.prepareWorkshop({ cwd: "/repo", env, project: "qq", task: { id: "TASK-3", title: "Fail" }, note: exactNote });
+  const failedGate = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: { id: "TASK-3", title: "Fail" }, note: exactNote });
   let failedGateClosed = false;
   await assert.rejects(lib.awaitBriefGate({
     env, prepared: failedGate, pluginRoot: join(root, "plugins", "brief-gate"),
@@ -330,7 +329,7 @@ try {
     return true;
   });
   assert.equal(failedGateClosed, true);
-  await lib.discardWorkshop(failedGate);
+  await lib.discardRun(failedGate);
 
   function delegateHarness({ run, ...deps }) {
     const registrations = [];
@@ -368,13 +367,13 @@ try {
   const approvedTool = delegateHarness({
     run: backlogRun(approvalStatuses, approvalOrder),
     async makeNote() { approvalOrder.push("scribe"); assert.deepEqual(approvalStatuses, ["In Progress"]); return { note: exactNote, qaBinding: { model: "qa" } }; },
-    async prepareWorkshop(options) { approvalOrder.push("prepare"); assert.equal(options.note, exactNote); assert.deepEqual(approvalStatuses, ["In Progress"]); return approvedPreparation; },
+    async prepareRun(options) { approvalOrder.push("prepare"); assert.equal(options.note, exactNote); assert.deepEqual(approvalStatuses, ["In Progress"]); return approvedPreparation; },
     async awaitBriefGate(options) { approvalOrder.push("gate"); assert.equal(options.prepared, approvedPreparation); assert.deepEqual(approvalStatuses, ["In Progress"]); return "approved"; },
-    async spawnWorkshop(options) { approvalOrder.push("spawn"); assert.equal(options.prepared, approvedPreparation); assert.deepEqual(approvalStatuses, ["In Progress"]); return { pane: "runner" }; },
-    async discardWorkshop() { approvalOrder.push("discard"); },
+    async startRun(options) { approvalOrder.push("start"); assert.equal(options.prepared, approvedPreparation); assert.deepEqual(approvalStatuses, ["In Progress"]); return { pane: "runner" }; },
+    async discardRun() { approvalOrder.push("discard"); },
   });
   const approved = await approvedTool.execute("approve", { id: task.id }, undefined, undefined, ctx);
-  assert.deepEqual(approvalOrder, ["status:In Progress", "scribe", "prepare", "gate", "spawn"]);
+  assert.deepEqual(approvalOrder, ["status:In Progress", "scribe", "prepare", "gate", "start"]);
   assert.deepEqual(approvalStatuses, ["In Progress"]);
   assert.equal(approved.content[0].text, `Approved ${task.id}; runner started.`);
   assert.equal(approved.content[0].text.includes("\n"), false);
@@ -382,19 +381,19 @@ try {
 
   const cancelOrder = [];
   const cancelStatuses = [];
-  let cancelSpawned = false;
+  let cancelStarted = false;
   const cancelledTool = delegateHarness({
     run: backlogRun(cancelStatuses, cancelOrder),
     async makeNote() { cancelOrder.push("scribe"); return { note: exactNote, qaBinding: {} }; },
-    async prepareWorkshop() { cancelOrder.push("prepare"); return approvedPreparation; },
+    async prepareRun() { cancelOrder.push("prepare"); return approvedPreparation; },
     async awaitBriefGate() { cancelOrder.push("gate"); assert.deepEqual(cancelStatuses, ["In Progress"]); return "cancelled"; },
-    async discardWorkshop() { cancelOrder.push("discard"); },
-    async spawnWorkshop() { cancelSpawned = true; },
+    async discardRun() { cancelOrder.push("discard"); },
+    async startRun() { cancelStarted = true; },
   });
   const cancelled = await cancelledTool.execute("cancel", { id: task.id }, undefined, undefined, ctx);
   assert.deepEqual(cancelOrder, ["status:In Progress", "scribe", "prepare", "gate", "status:To Do", "discard"]);
   assert.deepEqual(cancelStatuses, ["In Progress", "To Do"]);
-  assert.equal(cancelSpawned, false);
+  assert.equal(cancelStarted, false);
   assert.equal(cancelled.content[0].text, `Cancelled ${task.id}; runner not started.`);
   assert.equal(cancelled.content[0].text.includes("\n"), false);
   assert.doesNotMatch(JSON.stringify(cancelled), new RegExp(exactNote));
@@ -404,9 +403,9 @@ try {
   const failedTool = delegateHarness({
     run: backlogRun(failureStatuses),
     async makeNote() { return { note: exactNote, qaBinding: {} }; },
-    async prepareWorkshop() { return approvedPreparation; },
+    async prepareRun() { return approvedPreparation; },
     async awaitBriefGate() { throw new Error("gate unavailable"); },
-    async discardWorkshop() { failureDiscarded = true; },
+    async discardRun() { failureDiscarded = true; },
   });
   const gateFailure = await failedTool.execute("gate-failure", { id: task.id }, undefined, undefined, ctx);
   assert.match(gateFailure.content[0].text, /gate unavailable/);
@@ -418,12 +417,12 @@ try {
   const rollbackTool = delegateHarness({
     run: backlogRun(rollbackStatuses),
     async makeNote() { return { note: exactNote, qaBinding: {} }; },
-    async prepareWorkshop() { return approvedPreparation; },
+    async prepareRun() { return approvedPreparation; },
     async awaitBriefGate() { return "approved"; },
-    async spawnWorkshop() { throw new Error(`spawn failed: ${exactNote}`); },
-    async discardWorkshop() { rollbackDiscarded = true; },
+    async startRun() { throw new Error(`start failed: ${exactNote}`); },
+    async discardRun() { rollbackDiscarded = true; },
   });
-  const rolledBack = await rollbackTool.execute("spawn-failure", { id: task.id }, undefined, undefined, ctx);
+  const rolledBack = await rollbackTool.execute("start-failure", { id: task.id }, undefined, undefined, ctx);
   assert.match(rolledBack.content[0].text, /runs operation failed/);
   assert.doesNotMatch(JSON.stringify(rolledBack), new RegExp(exactNote));
   assert.deepEqual(rollbackStatuses, ["In Progress", "To Do"]);
@@ -466,7 +465,7 @@ try {
 
   function actualAdmissionTool(board, boardEvents, overrides = {}) {
     const run = admissionBoardRun(board, boardEvents);
-    const calls = { notes: [], gates: [], spawns: [] };
+    const calls = { notes: [], gates: [], starts: [] };
     const tool = delegateHarness({
       run,
       admitDelegate: extension.admitDelegate,
@@ -482,7 +481,7 @@ try {
         calls.notes.push(admittedTask.id);
         return { note: `${exactNote} for ${admittedTask.id}`, qaBinding: {} };
       },
-      async prepareWorkshop({ task: admittedTask }) {
+      async prepareRun({ task: admittedTask }) {
         return { taskId: admittedTask.id, stateDir: `/private/${admittedTask.id}`, notePath: `/private/${admittedTask.id}/note.md` };
       },
       async awaitBriefGate({ prepared: gatePreparation }) {
@@ -490,15 +489,15 @@ try {
         if (overrides.awaitBriefGate) return overrides.awaitBriefGate(gatePreparation);
         return "approved";
       },
-      async spawnWorkshop({ task: admittedTask }) { calls.spawns.push(admittedTask.id); },
-      async discardWorkshop() {},
+      async startRun({ task: admittedTask }) { calls.starts.push(admittedTask.id); },
+      async discardRun() {},
     });
     return { tool, calls };
   }
 
   const overlapBoard = new Map([
-    ["TASK-6", { id: "TASK-6", title: "Change workshop flow", status: "To Do", implementationNotes: "Edit extensions/workshop.ts" }],
-    ["TASK-7", { id: "TASK-7", title: "Also change workshop flow", status: "To Do", implementationNotes: "Edit extensions/workshop.ts" }],
+    ["TASK-6", { id: "TASK-6", title: "Change board flow", status: "To Do", implementationNotes: "Edit extensions/board.ts" }],
+    ["TASK-7", { id: "TASK-7", title: "Also change board flow", status: "To Do", implementationNotes: "Edit extensions/board.ts" }],
   ]);
   const overlapEvents = [];
   let releaseOverlapVet;
@@ -514,7 +513,7 @@ try {
         return { decision: "clear" };
       }
       assert.match(evidence, /"id": "TASK-6"[\s\S]*?"status": "In Progress"/);
-      return { decision: "bounce", reason: "extensions/workshop.ts is already claimed by TASK-6" };
+      return { decision: "bounce", reason: "extensions/board.ts is already claimed by TASK-6" };
     },
   });
   const firstOverlap = overlap.tool.execute("overlap-1", { id: "TASK-6" }, undefined, undefined, ctx);
@@ -523,15 +522,15 @@ try {
   releaseOverlapVet();
   const [firstOverlapResult, secondOverlapResult] = await Promise.all([firstOverlap, secondOverlap]);
   assert.equal(firstOverlapResult.content[0].text, "Approved TASK-6; runner started.");
-  assert.equal(secondOverlapResult.content[0].text, "Bounced TASK-7: extensions/workshop.ts is already claimed by TASK-6");
+  assert.equal(secondOverlapResult.content[0].text, "Bounced TASK-7: extensions/board.ts is already claimed by TASK-6");
   assert.equal(secondOverlapResult.content[0].text.includes("\n"), false);
   assert.equal(overlapBoard.get("TASK-7").status, "To Do");
   assert.deepEqual(overlap.calls.notes, ["TASK-6"]);
   assert.deepEqual(overlap.calls.gates, ["TASK-6"]);
-  assert.deepEqual(overlap.calls.spawns, ["TASK-6"]);
+  assert.deepEqual(overlap.calls.starts, ["TASK-6"]);
 
   const clearBoard = new Map([
-    ["TASK-8", { id: "TASK-8", title: "Change workshop", status: "To Do", implementationNotes: "Edit workshop.ts" }],
+    ["TASK-8", { id: "TASK-8", title: "Change board", status: "To Do", implementationNotes: "Edit board.ts" }],
     ["TASK-9", { id: "TASK-9", title: "Change telemetry", status: "To Do", implementationNotes: "Edit telemetry-lib.sh" }],
   ]);
   const clearEvents = [];
@@ -570,7 +569,7 @@ try {
   ]);
   assert.ok(clearEvents.indexOf("status:TASK-8:In Progress") < clearEvents.indexOf("second-vet-after-first-claim"));
   assert.deepEqual(clear.calls.notes.sort(), ["TASK-8", "TASK-9"]);
-  assert.deepEqual(clear.calls.spawns.sort(), ["TASK-8", "TASK-9"]);
+  assert.deepEqual(clear.calls.starts.sort(), ["TASK-8", "TASK-9"]);
   assert.equal(maximumActiveGates, 1);
 
   const registrations = [];
@@ -607,4 +606,4 @@ try {
   await rm(scratch, { recursive: true, force: true });
 }
 
-console.log("test-workshop: pass");
+console.log("test-delegation: pass");

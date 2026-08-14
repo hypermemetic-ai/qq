@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { atomicPrivateJson, readHandoff } from "../bin/lib/workshop.mjs";
+import { atomicPrivateJson, readHandoff } from "../bin/lib/run.mjs";
 import { formatPack, isFailedLand, isQaPassedProposal, listProposals, listReviews, prepareDone, projectFromCwd, setBoardStatus } from "../bin/lib/review.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -38,7 +38,7 @@ export default function registerReviewFlow(pi, deps = {}) {
     description: "Final runner call for delegated work. Validates a clean committed ref, hands this pane to the pinned two-look qa service, and stops this run. It never merges.",
     parameters: { type: "object", additionalProperties: false, required: ["ref"], properties: { ref: { type: "string", minLength: 1 } } },
     async execute(_id, params, signal, _update, ctx) {
-      const statePath = env.QQ_WORKSHOP_STATE;
+      const statePath = env.QQ_RUN_STATE;
       if (role !== "runner" || !statePath) return result("done is available only to a delegated runs runner.", { status: "refused" });
       try {
         const state = await prepareDone(run, ctx.cwd, statePath, params.ref);

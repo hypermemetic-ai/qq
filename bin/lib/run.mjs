@@ -60,9 +60,9 @@ export function stateHome(env = process.env) {
   return resolve(env.XDG_STATE_HOME || join(env.HOME || homedir(), ".local", "state"));
 }
 
-export function workshopRoot(project, env = process.env) {
+export function runsRoot(project, env = process.env) {
   if (!SAFE.test(project)) throw new Error("project is malformed");
-  return join(stateHome(env), "qq", "workshops", project);
+  return join(stateHome(env), "qq", "runs", project);
 }
 
 export function worktreeRoot(project, env = process.env) {
@@ -84,7 +84,7 @@ function projectSlug(value) {
   return project;
 }
 
-export async function prepareWorkshop(options) {
+export async function prepareRun(options) {
   const { cwd, env = process.env, task, note } = options;
   const project = projectSlug(options.project || basename(resolve(cwd)));
   const workspace = env.HERDR_WORKSPACE_ID;
@@ -92,7 +92,7 @@ export async function prepareWorkshop(options) {
   if (typeof note !== "string" || note.trim() === "") throw new Error("delegate requires a non-empty note");
   const slug = taskSlug(task.id);
   const nonce = randomUUID().slice(0, 8);
-  const stateDir = join(workshopRoot(project, env), `${slug}-${nonce}`);
+  const stateDir = join(runsRoot(project, env), `${slug}-${nonce}`);
   const prepared = {
     taskId: task.id, project, slug, nonce, stateDir,
     branch: `qq/${slug}-${nonce}`,
@@ -118,7 +118,7 @@ export async function prepareWorkshop(options) {
   }
 }
 
-export async function discardWorkshop(prepared) {
+export async function discardRun(prepared) {
   if (prepared?.stateDir) await rm(prepared.stateDir, { recursive: true, force: true });
 }
 
@@ -260,10 +260,10 @@ export async function waitForAvailableShell(run, paneId, options = {}) {
   throw new Error(`runs pane ${paneId} never became an available shell: ${reason(last, "not a free shell")}`);
 }
 
-export async function spawnWorkshop(options) {
+export async function startRun(options) {
   const { run, cwd, env = process.env, task, architectSession, qaBinding } = options;
-  if (typeof run !== "function") throw new Error("runs spawn requires a command runner");
-  const prepared = options.prepared ?? await prepareWorkshop(options);
+  if (typeof run !== "function") throw new Error("run start requires a command runner");
+  const prepared = options.prepared ?? await prepareRun(options);
   if (prepared.taskId !== task.id) throw new Error("prepared delegation belongs to another task");
   const { project, slug, nonce, branch, worktree, stateDir, statePath, ticketPath, transcriptPath, notePath, gatePath } = prepared;
   const workspace = env.HERDR_WORKSPACE_ID;
@@ -288,10 +288,10 @@ export async function spawnWorkshop(options) {
 
     const tabsResult = await checked(run, "herdr", ["tab", "list", "--workspace", workspace], {}, "cannot list Herdr tabs");
     const tabs = parseHerdr(tabsResult.stdout, "tab_list")?.tabs ?? [];
-    const runsTab = tabs.find((tab) => tab?.label === "runs") ?? tabs.find((tab) => tab?.label === "workshop");
+    const runsTab = tabs.find((tab) => tab?.label === "runs");
     const paneEnv = [
-      `QQ_AGENT_ROLE=runner`, `QQ_AGENT_PROJECT=${project}`, `QQ_WORKSHOP_STATE=${statePath}`,
-      `QQ_WORKSHOP_ID=${slug}-${nonce}`, `QQ_ARCHITECT_SESSION=${architectSession}`,
+      `QQ_AGENT_ROLE=runner`, `QQ_AGENT_PROJECT=${project}`, `QQ_RUN_STATE=${statePath}`,
+      `QQ_RUN_ID=${slug}-${nonce}`, `QQ_ARCHITECT_SESSION=${architectSession}`,
     ];
     if (!runsTab) {
       const args = ["tab", "create", "--workspace", workspace, "--label", "runs", "--cwd", worktree, "--no-focus"];
@@ -299,9 +299,6 @@ export async function spawnWorkshop(options) {
       const created = await checked(run, "herdr", args, {}, "cannot create runs tab");
       paneId = paneFromTabCreate(created);
     } else {
-      if (runsTab.label === "workshop") {
-        await checked(run, "herdr", ["tab", "rename", runsTab.tab_id, "runs"], {}, "cannot rename workshop tab to runs");
-      }
       const panesResult = await checked(run, "herdr", ["pane", "list", "--workspace", workspace], {}, "cannot list runs panes");
       const parent = (parseHerdr(panesResult.stdout, "pane_list")?.panes ?? [])
         .filter((pane) => pane?.tab_id === runsTab.tab_id)
@@ -317,7 +314,7 @@ export async function spawnWorkshop(options) {
     await checked(run, "herdr", ["pane", "rename", paneId, `${task.id}: ${task.title}`.slice(0, 80)], {}, "cannot label runs pane");
 
     const state = {
-      schema: "qq.workshop-handoff/v1", version: 1, id: `${slug}-${nonce}`, project,
+      schema: "qq.run-handoff/v1", version: 1, id: `${slug}-${nonce}`, project,
       task: { id: task.id, title: task.title }, status: "starting", look: 0,
       mainRoot, baseBranch, baseRef, branch, worktree, pane: paneId, architectSession,
       ticketPath, transcriptPath, notePath, gatePath, statePath, qa: qaBinding, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
@@ -346,6 +343,6 @@ export async function spawnWorkshop(options) {
 export async function readHandoff(path) {
   const source = await readFile(path, "utf8");
   const value = JSON.parse(source);
-  if (!value || value.schema !== "qq.workshop-handoff/v1" || value.version !== 1) throw new Error("runs handoff is malformed");
+  if (!value || value.schema !== "qq.run-handoff/v1" || value.version !== 1) throw new Error("runs handoff is malformed");
   return value;
 }

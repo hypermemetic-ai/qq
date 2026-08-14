@@ -21,9 +21,9 @@ const OBSERVED_LONG_RUNAWAY = [
 ].join(" ");
 
 const STALL = [
-  "I have the spawn and review seams. Next I’ll pin the remaining APIs, then implement workshop spawn and the `done`/`qa`/`land` chain.",
-  "I have the spawn and review shape. Next I’ll pin the last APIs, then implement workshop spawn and the `done`/`qa`/`land` chain as two commits.",
-  "I’ll pin the last APIs, then implement workshop spawn and the `done`/`qa`/`land` chain as two commits.",
+  "I have the spawn and review seams. Next I’ll pin the remaining APIs, then implement run start and the `done`/`qa`/`land` chain.",
+  "I have the spawn and review shape. Next I’ll pin the last APIs, then implement run start and the `done`/`qa`/`land` chain as two commits.",
+  "I’ll pin the last APIs, then implement run start and the `done`/`qa`/`land` chain as two commits.",
   "I’ll pin the last APIs, then implement spawn and the `done`/`qa`/`land` chain as two commits.",
   "The last batch died mid-read. I’ll recover those APIs, then implement spawn and the `done`/`qa`/`land` chain as two commits.",
 ];
