@@ -49,13 +49,16 @@ async function waitFor(label, predicate) {
 const senderSession = "019ff7b9-2fcd-78cd-bc16-c770a9ccff11";
 const runnerSession = "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9";
 let clock = Date.now();
-const sender = harness("runner", senderSession, "w1:p1", { now: () => clock });
+const sender = harness(undefined, senderSession, "w1:p1", { now: () => clock });
 const runnerSessionFile = join(stateRoot, "runner.jsonl");
 const runner = harness("runner", runnerSession, "w1:p2", { sessionFile: runnerSessionFile, now: () => clock });
+sender.eventHandlers.get("qq:role-selected")({ role: "architect", profile: "grok-high" });
 await sender.handlers.get("session_start")({ reason: "startup" }, sender.ctx);
 await runner.handlers.get("session_start")({ reason: "startup" }, runner.ctx);
 await runner.pi.command.handler("T-12, T-18", runner.ctx);
 
+const senderPresence = await runner.pi.tool.execute("list", { action: "list" });
+assert.equal(senderPresence.details.agents.find((agent) => agent.session_id === senderSession).role, "architect", "a restored role emitted before agent-messages session_start was lost");
 const listing = await sender.pi.tool.execute("list", { action: "list" });
 assert.equal(listing.details.agents.length, 1);
 const runnerId = listing.details.agents.find((agent) => agent.role === "runner").session_id;

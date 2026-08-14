@@ -1,12 +1,113 @@
 // @ts-nocheck
-import { readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { constants } from "node:fs";
+import { chmod, lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { contextWindowCeilingFor, listedProfiles, profileFor, readExecutionPolicy } from "../bin/lib/execution-profiles.mjs";
+import { contextWindowCeilingFor, profileFor, readExecutionPolicy } from "../bin/lib/execution-profiles.mjs";
 import { DEFAULT_ROLE, isActivatedRepository, ROLE_NAMES, validateRole } from "../bin/lib/roles.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const PANE_ID = /^w[A-Za-z0-9]+:p[A-Za-z0-9]+$/;
+const PANE_PROFILE_KEYS = ["paneId", "profile", "role", "version"];
+const PROFILE_EFFORT_ORDER = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+function paneProfileRoot(env, deps) {
+  if (deps.paneProfileRoot !== undefined) return resolve(deps.paneProfileRoot);
+  const stateHome = env.XDG_STATE_HOME
+    ? resolve(env.XDG_STATE_HOME)
+    : join(resolve(env.HOME || homedir()), ".local", "state");
+  return join(stateHome, "qq", "pane-profiles");
+}
+
+function paneIdFor(env) {
+  const paneId = env.HERDR_PANE_ID;
+  return typeof paneId === "string" && paneId.length <= 64 && PANE_ID.test(paneId)
+    ? paneId
+    : undefined;
+}
+
+function paneProfilePath(root, paneId) {
+  return join(root, `${paneId}.json`);
+}
+
+async function privateDirectory(path) {
+  await mkdir(path, { recursive: true, mode: 0o700 });
+  const info = await lstat(path);
+  if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.getuid()) {
+    throw new Error("pane-profile state directory is unsafe");
+  }
+  await chmod(path, 0o700);
+}
+
+function validPaneProfile(value, paneId) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) &&
+    JSON.stringify(Object.keys(value).sort()) === JSON.stringify(PANE_PROFILE_KEYS) &&
+    value.version === 1 && value.paneId === paneId &&
+    typeof value.role === "string" && typeof value.profile === "string";
+}
+
+async function readPaneProfile(env, deps, policy) {
+  const paneId = paneIdFor(env);
+  if (!paneId) return undefined;
+  try {
+    const root = paneProfileRoot(env, deps);
+    const directory = await lstat(root);
+    if (!directory.isDirectory() || directory.isSymbolicLink() || directory.uid !== process.getuid() ||
+        (directory.mode & 0o077) !== 0) return undefined;
+    const handle = await open(paneProfilePath(root, paneId), constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    try {
+      const info = await handle.stat();
+      if (!info.isFile() || info.uid !== process.getuid() || (info.mode & 0o077) !== 0) return undefined;
+      const value = JSON.parse(await handle.readFile("utf8"));
+      if (!validPaneProfile(value, paneId) || !policy.roles[value.role]?.profiles[value.profile]) return undefined;
+      return { role: value.role, profile: value.profile };
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return undefined;
+  }
+}
+
+async function writePaneProfile(env, deps, role, profile) {
+  const paneId = paneIdFor(env);
+  if (!paneId) return;
+  const root = paneProfileRoot(env, deps);
+  await privateDirectory(root);
+  const path = paneProfilePath(root, paneId);
+  const temporary = join(root, `.${paneId}.${process.pid}.${randomUUID()}.tmp`);
+  let exists = false;
+  try {
+    const handle = await open(
+      temporary,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
+      0o600,
+    );
+    exists = true;
+    try {
+      await handle.writeFile(`${JSON.stringify({ version: 1, paneId, role, profile })}\n`, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temporary, path);
+    exists = false;
+  } finally {
+    if (exists) await unlink(temporary).catch(() => {});
+  }
+}
+
+function listedRoleProfiles(role) {
+  return Object.entries(role.profiles).sort(([leftName, left], [rightName, right]) => {
+    const byModel = left.model.localeCompare(right.model);
+    if (byModel) return byModel;
+    const byEffort = PROFILE_EFFORT_ORDER.indexOf(left.effort) - PROFILE_EFFORT_ORDER.indexOf(right.effort);
+    return byEffort || leftName.localeCompare(rightName);
+  });
+}
 
 function escapeXml(value) {
   return String(value)
@@ -113,20 +214,21 @@ export default function registerExecutionProfiles(pi, deps = {}) {
     ctx.ui.setStatus?.("qq-profile", `${currentRole}:${selected.name}`);
     pi.events.emit("qq:role-selected", { role: currentRole, profile: selected.name });
     if (notify) ctx.ui.notify(`${currentRole}: ${selected.name} — ${selected.profile.provider}/${selected.profile.model} · ${selected.profile.effort}`, "info");
+    return selected;
   }
 
   async function chooseProfile(roleName, ctx, requestedProfile) {
     const role = policy.roles[roleName];
     if (!role) throw new Error(`unknown execution-profile role: ${roleName}`);
     if (requestedProfile) return requestedProfile;
-    const names = listedProfiles(role).map(([name]) => name);
+    const names = listedRoleProfiles(role).map(([name]) => name);
     if (names.length === 1) return names[0];
     const labels = names.map((candidate) => {
       const profile = role.profiles[candidate];
       const markers = [roleName === currentRole && candidate === activeProfileName ? "current" : "", candidate === role.default ? "default" : ""].filter(Boolean).join(", ");
       return `${candidate}${markers ? ` (${markers})` : ""} — ${profile.provider}/${profile.model} · ${profile.effort}`;
     });
-    const chosen = await ctx.ui.select(`${roleName} execution profile (session only)`, labels);
+    const chosen = await ctx.ui.select(`${roleName} execution profile (this Herdr pane)`, labels);
     return chosen ? names[labels.indexOf(chosen)] : undefined;
   }
 
@@ -147,7 +249,14 @@ export default function registerExecutionProfiles(pi, deps = {}) {
       policy = await policyPromise;
       prompts = Object.fromEntries(promptEntries);
       validateRuntimeProfiles(ctx);
-      await applyRoleProfile(currentRole, policy.roles[currentRole].default, ctx, false);
+      const restored = forcedRole === undefined ? await readPaneProfile(env, deps, policy) : undefined;
+      currentRole = forcedRole ?? restored?.role ?? DEFAULT_ROLE;
+      await applyRoleProfile(
+        currentRole,
+        restored?.profile ?? policy.roles[currentRole].default,
+        ctx,
+        false,
+      );
     } catch (error) {
       startupError = error instanceof Error ? error.message : String(error);
       ctx.ui.setStatus?.("qq-profile", `${DEFAULT_ROLE}:refused`);
@@ -167,7 +276,7 @@ export default function registerExecutionProfiles(pi, deps = {}) {
   }
 
   pi.registerCommand("profile", {
-    description: "Select this session's qq role and execution profile without changing durable defaults",
+    description: "Select this Herdr pane's qq role and execution profile without changing durable defaults",
     handler: async (args, ctx) => {
       if (!activated) { ctx.ui.notify("This repository is not qq-linked.", "warning"); return; }
       if (startupError || !policy) { ctx.ui.notify(`qq profiles unavailable: ${startupError ?? "policy is unavailable"}`, "error"); return; }
@@ -176,14 +285,17 @@ export default function registerExecutionProfiles(pi, deps = {}) {
       let roleName = parts[0];
       if (!roleName) {
         const labels = ROLE_NAMES.map((role) => `${role}${role === currentRole ? " (current)" : ""}`);
-        const chosen = await ctx.ui.select("qq role (session only)", labels);
+        const chosen = await ctx.ui.select("qq role (this Herdr pane)", labels);
         if (!chosen) return;
         roleName = ROLE_NAMES[labels.indexOf(chosen)];
       }
       if (!policy.roles[roleName]) { ctx.ui.notify(`Unknown qq role: ${roleName}`, "warning"); return; }
       try {
         const profileName = await chooseProfile(roleName, ctx, parts[1]);
-        if (profileName) await applyRoleProfile(roleName, profileName, ctx);
+        if (profileName) {
+          const selected = await applyRoleProfile(roleName, profileName, ctx);
+          await writePaneProfile(env, deps, roleName, selected.name);
+        }
       } catch (error) {
         ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
       }
