@@ -33,7 +33,7 @@ assert.equal(lib.paneHasAvailableShell({
 
 const scratch = await mkdtemp(join(homedir(), "qq-workshop-test."));
 try {
-  const exactBrief = "PRIVATE exact runner brief";
+  const exactNote = "PRIVATE exact runner note";
   const env = {
     HOME: scratch,
     XDG_STATE_HOME: join(scratch, "state"),
@@ -41,17 +41,85 @@ try {
     HERDR_WORKSPACE_ID: "w2T",
     HERDR_PANE_ID: "w2T:pA",
   };
-  const task = { id: "TASK-1", title: "One task" };
-  const prepared = await lib.prepareWorkshop({ cwd: "/repo", env, project: "qq", task, brief: exactBrief });
-  assert.equal(await readFile(prepared.briefPath, "utf8"), `${exactBrief}\n`);
+  const task = { id: "TASK-1", title: "One task", description: "Do the task.", implementationNotes: "Try the narrow seam." };
+  const ticket = lib.formatTicket(task);
+  const branch = [];
+  for (let index = 0; index < 102; index += 1) {
+    branch.push({ type: "message", message: { role: "user", content: [{ type: "text", text: `operator-${index}` }] } });
+    branch.push({ type: "message", message: { role: "assistant", content: index === 101 ? [
+      { type: "thinking", thinking: "SECRET_THINKING" },
+      { type: "text", text: "Observed the final turn." },
+      { type: "toolCall", name: "read", arguments: { path: "src/final.ts" } },
+    ] : [{ type: "text", text: `reply-${index}` }] } });
+    if (index === 50) branch.push({ type: "compaction", summary: "SECRET_COMPACTION" });
+  }
+  branch.push({ type: "message", message: { role: "toolResult", content: [{ type: "text", text: "SECRET_TOOL_RESULT" }] } });
+  const transcript = extension.serializeTranscript(branch);
+  assert.equal(transcript.includes("[User]: operator-0\n\n"), false);
+  assert.equal(transcript.includes("[User]: operator-1\n\n"), false);
+  assert.match(transcript, /\[User\]: operator-2/);
+  assert.match(transcript, /\[User\]: operator-101/);
+  assert.match(transcript, /\[Assistant tools\]: read/);
+  assert.doesNotMatch(transcript, /SECRET_THINKING|SECRET_COMPACTION|SECRET_TOOL_RESULT|src\/final\.ts/);
+
+  const policyPath = join(scratch, "execution-profiles.json");
+  await writeFile(policyPath, JSON.stringify({
+    schema: "qq.execution-profiles/v1", contextWindowCeiling: 200000,
+    roles: {
+      runner: { default: "one", profiles: { one: { provider: "test", model: "runner", effort: "high" } } },
+      architect: { default: "one", profiles: { one: { provider: "test", model: "architect", effort: "high" } } },
+    },
+    scribe: { provider: "test", model: "scribe", effort: "low" },
+    qa: { provider: "test", model: "qa", effort: "xhigh" },
+  }), { mode: 0o600 });
+  let scribeRequest;
+  const generated = await extension.makeNote({
+    signal: undefined,
+    sessionManager: { getBranch: () => branch },
+    modelRegistry: {
+      find(provider, model) { assert.equal(`${provider}/${model}`, "test/scribe"); return { provider, id: model }; },
+      async complete(_model, request, options) {
+        scribeRequest = { request, options };
+        return { stopReason: "stop", content: [{ type: "text", text: exactNote }] };
+      },
+    },
+  }, task, { policyPath, scribePromptPath: join(root, "prompts", "services", "scribe.md") });
+  assert.equal(generated.note, exactNote);
+  assert.equal(generated.transcript, transcript);
+  assert.equal(scribeRequest.request.systemPrompt, "Write a helpful note for the next agent.\nOnly what's missing in the ticket: decisions, files, names, constraints, and what's still open.\nPlain language.");
+  const scribeInput = scribeRequest.request.messages[0].content[0].text;
+  assert.match(scribeInput, /Attached ticket \(ticket\.md\):/);
+  assert.match(scribeInput, /# TASK-1 — One task/);
+  assert.match(scribeInput, /## Architect notes \/ scratch\n\nTry the narrow seam\./);
+  assert.match(scribeInput, /Attached architect transcript \(transcript\.md\):/);
+  assert.match(scribeInput, /Read files:\n- src\/final\.ts/);
+  assert.doesNotMatch(scribeInput, /operator-0\n|operator-1\n|SECRET_THINKING|SECRET_COMPACTION|SECRET_TOOL_RESULT/);
+  assert.equal(scribeRequest.options.reasoning, "low");
+  assert.equal(scribeRequest.options.cacheRetention, "none");
+
+  const prepared = await lib.prepareWorkshop({ cwd: "/repo", env, project: "qq", task, note: exactNote, transcript });
+  assert.equal(await readFile(prepared.ticketPath, "utf8"), `${ticket}\n`);
+  assert.equal(await readFile(prepared.transcriptPath, "utf8"), `${transcript}\n`);
+  assert.equal(await readFile(prepared.notePath, "utf8"), `${exactNote}\n`);
+  assert.equal(await readFile(prepared.gatePath, "utf8"), lib.formatGateDocument(ticket, exactNote));
   assert.equal((await lstat(prepared.stateDir)).mode & 0o077, 0);
-  assert.equal((await lstat(prepared.briefPath)).mode & 0o077, 0);
+  assert.equal((await lstat(prepared.ticketPath)).mode & 0o077, 0);
+  assert.equal((await lstat(prepared.transcriptPath)).mode & 0o077, 0);
+  assert.equal((await lstat(prepared.notePath)).mode & 0o077, 0);
+  assert.equal((await lstat(prepared.gatePath)).mode & 0o077, 0);
 
   const gateCalls = [];
   const gateRun = async (command, args, options = {}) => {
     gateCalls.push({ command, args, options });
     if (args[0] === "plugin" && args[1] === "list") {
       return { code: 0, stdout: JSON.stringify({ id: "cli:plugin", result: { type: "plugin_list", plugins: [] } }), stderr: "" };
+    }
+    if (args[0] === "pane" && args[1] === "list") {
+      return { code: 0, stdout: JSON.stringify({ id: "cli:pane:list", result: { type: "pane_list", panes: [
+        { pane_id: "w2T:pA", tab_id: "w2T:tA" },
+        { pane_id: "w2T:pR", tab_id: "w2T:tA" },
+        { pane_id: "w2T:pO", tab_id: "w2T:tO" },
+      ] } }), stderr: "" };
     }
     if (args[0] === "plugin" && args[1] === "pane" && args[2] === "open") {
       return { code: 0, stdout: JSON.stringify({ id: "cli:plugin", result: { type: "plugin_pane_opened", plugin_pane: { pane: { pane_id: "w2T:pG" } } } }), stderr: "" };
@@ -67,10 +135,12 @@ try {
   }), "approved");
   const gateOpen = gateCalls.find(({ args }) => args[0] === "plugin" && args[1] === "pane" && args[2] === "open");
   assert.ok(gateOpen.args.includes("--focus"));
-  assert.ok(gateOpen.args.includes("zoomed"));
-  assert.deepEqual(gateOpen.args.slice(gateOpen.args.indexOf("--target-pane"), gateOpen.args.indexOf("--target-pane") + 2), ["--target-pane", "w2T:pA"]);
+  assert.ok(gateOpen.args.includes("split"));
+  assert.equal(gateOpen.args.includes("zoomed"), false);
+  assert.deepEqual(gateOpen.args.slice(gateOpen.args.indexOf("--target-pane"), gateOpen.args.indexOf("--target-pane") + 2), ["--target-pane", "w2T:pR"]);
+  assert.deepEqual(gateOpen.args.slice(gateOpen.args.indexOf("--direction"), gateOpen.args.indexOf("--direction") + 2), ["--direction", "right"]);
   assert.equal(gateOpen.args.includes("--workspace"), false);
-  assert.ok(gateOpen.args.includes(`QQ_BRIEF_GATE_BRIEF=${prepared.briefPath}`));
+  assert.ok(gateOpen.args.includes(`QQ_BRIEF_GATE_DOCUMENT=${prepared.gatePath}`));
   assert.ok(gateOpen.args.includes(`QQ_BRIEF_GATE_DECISION=${prepared.decisionPath}`));
   assert.equal(gateCalls.filter(({ args }) => args[0] === "plugin" && args[1] === "pane" && args[2] === "open").length, 1);
   assert.ok(gateCalls.some(({ args }) => args[0] === "plugin" && args[1] === "link"));
@@ -110,8 +180,11 @@ try {
   });
   assert.equal(state.pane, "w2T:p9");
   assert.equal(state.status, "running");
-  assert.equal(state.briefPath, prepared.briefPath);
-  assert.equal(await readFile(state.briefPath, "utf8"), `${exactBrief}\n`);
+  assert.equal(state.ticketPath, prepared.ticketPath);
+  assert.equal(state.transcriptPath, prepared.transcriptPath);
+  assert.equal(state.notePath, prepared.notePath);
+  assert.equal(state.gatePath, prepared.gatePath);
+  assert.equal(await readFile(state.notePath, "utf8"), `${exactNote}\n`);
   assert.equal(JSON.parse(await readFile(state.statePath, "utf8")).status, "running");
   const create = spawnCalls.find(({ command, args }) => command === "herdr" && args[0] === "tab" && args[1] === "create");
   assert.deepEqual(create.args.slice(0, 6), ["tab", "create", "--workspace", "w2T", "--label", "runs"]);
@@ -126,11 +199,13 @@ try {
   assert.deepEqual(start.args.slice(0, 2), ["agent", "start"]);
   const prompt = spawnCalls.find(({ command, args }) => command === "herdr" && args[0] === "agent" && args[1] === "prompt");
   assert.match(prompt.args[3], /call done with ref HEAD/);
-  assert.ok(prompt.args[3].endsWith(exactBrief));
+  assert.match(prompt.args[3], /# TASK-1 — One task/);
+  assert.match(prompt.args[3], /## Architect notes \/ scratch/);
+  assert.ok(prompt.args[3].endsWith(exactNote));
 
   for (const [id, label] of [["TASK-4", "runs"], ["TASK-5", "workshop"]]) {
     const existingTask = { id, title: `Reuse ${label}` };
-    const existingPreparation = await lib.prepareWorkshop({ cwd: "/repo", env, project: "qq", task: existingTask, brief: exactBrief });
+    const existingPreparation = await lib.prepareWorkshop({ cwd: "/repo", env, project: "qq", task: existingTask, note: exactNote });
     const existingCalls = [];
     const existingRun = async (command, args, options = {}) => {
       existingCalls.push({ command, args, options });
@@ -180,24 +255,25 @@ try {
     ]);
   }
 
-  const cancelledPreparation = await lib.prepareWorkshop({ cwd: "/repo", env, project: "qq", task: { id: "TASK-2", title: "Cancel" }, brief: exactBrief });
+  const cancelledPreparation = await lib.prepareWorkshop({ cwd: "/repo", env, project: "qq", task: { id: "TASK-2", title: "Cancel" }, note: exactNote });
   await lib.discardWorkshop(cancelledPreparation);
   await assert.rejects(access(cancelledPreparation.stateDir), { code: "ENOENT" });
 
-  const failedGate = await lib.prepareWorkshop({ cwd: "/repo", env, project: "qq", task: { id: "TASK-3", title: "Fail" }, brief: exactBrief });
+  const failedGate = await lib.prepareWorkshop({ cwd: "/repo", env, project: "qq", task: { id: "TASK-3", title: "Fail" }, note: exactNote });
   let failedGateClosed = false;
   await assert.rejects(lib.awaitBriefGate({
     env, prepared: failedGate, pluginRoot: join(root, "plugins", "brief-gate"),
     async run(_command, args) {
       if (args[0] === "plugin" && args[1] === "list") return { code: 0, stdout: JSON.stringify({ id: "cli:plugin", result: { type: "plugin_list", plugins: [{ plugin_id: "qq.brief-gate", enabled: true }] } }), stderr: "" };
+      if (args[0] === "pane" && args[1] === "list") return { code: 0, stdout: JSON.stringify({ id: "cli:pane:list", result: { type: "pane_list", panes: [{ pane_id: "w2T:pA", tab_id: "w2T:tA" }] } }), stderr: "" };
       if (args[0] === "plugin" && args[1] === "pane" && args[2] === "open") return { code: 0, stdout: JSON.stringify({ id: "cli:plugin", result: { type: "plugin_pane_opened", plugin_pane: { pane: { pane_id: "w2T:pF" } } } }), stderr: "" };
-      if (args[0] === "pane" && args[1] === "wait-output") return { code: 1, stdout: exactBrief, stderr: "" };
+      if (args[0] === "pane" && args[1] === "wait-output") return { code: 1, stdout: exactNote, stderr: "" };
       if (args[0] === "plugin" && args[1] === "pane" && args[2] === "close") { failedGateClosed = true; return { code: 0, stdout: "", stderr: "" }; }
       throw new Error(`unexpected command: ${args.join(" ")}`);
     },
   }), (error) => {
     assert.match(error.message, /without a decision/);
-    assert.doesNotMatch(error.message, new RegExp(exactBrief));
+    assert.doesNotMatch(error.message, new RegExp(exactNote));
     return true;
   });
   assert.equal(failedGateClosed, true);
@@ -228,46 +304,46 @@ try {
 
   const approvalOrder = [];
   const approvalStatuses = [];
-  const approvedPreparation = { taskId: task.id, stateDir: "/private/gate", briefPath: "/private/gate/brief.md" };
+  const approvedPreparation = { taskId: task.id, stateDir: "/private/gate", notePath: "/private/gate/note.md", gatePath: "/private/gate/gate.md" };
   const approvedTool = delegateHarness({
     run: backlogRun(approvalStatuses, approvalOrder),
-    async makeBrief() { approvalOrder.push("compact"); assert.deepEqual(approvalStatuses, []); return { brief: exactBrief, qaBinding: { model: "qa" } }; },
-    async prepareWorkshop(options) { approvalOrder.push("prepare"); assert.equal(options.brief, exactBrief); assert.deepEqual(approvalStatuses, []); return approvedPreparation; },
+    async makeNote() { approvalOrder.push("scribe"); assert.deepEqual(approvalStatuses, []); return { note: exactNote, qaBinding: { model: "qa" } }; },
+    async prepareWorkshop(options) { approvalOrder.push("prepare"); assert.equal(options.note, exactNote); assert.deepEqual(approvalStatuses, []); return approvedPreparation; },
     async awaitBriefGate(options) { approvalOrder.push("gate"); assert.equal(options.prepared, approvedPreparation); assert.deepEqual(approvalStatuses, []); return "approved"; },
     async spawnWorkshop(options) { approvalOrder.push("spawn"); assert.equal(options.prepared, approvedPreparation); assert.deepEqual(approvalStatuses, ["In Progress"]); return { pane: "runner" }; },
     async discardWorkshop() { approvalOrder.push("discard"); },
   });
   const approved = await approvedTool.execute("approve", { id: task.id }, undefined, undefined, ctx);
-  assert.deepEqual(approvalOrder, ["compact", "prepare", "gate", "status:In Progress", "spawn"]);
+  assert.deepEqual(approvalOrder, ["scribe", "prepare", "gate", "status:In Progress", "spawn"]);
   assert.deepEqual(approvalStatuses, ["In Progress"]);
   assert.equal(approved.content[0].text, `Approved ${task.id}; runner started.`);
   assert.equal(approved.content[0].text.includes("\n"), false);
-  assert.doesNotMatch(JSON.stringify(approved), new RegExp(exactBrief));
+  assert.doesNotMatch(JSON.stringify(approved), new RegExp(exactNote));
 
   const cancelOrder = [];
   const cancelStatuses = [];
   let cancelSpawned = false;
   const cancelledTool = delegateHarness({
     run: backlogRun(cancelStatuses, cancelOrder),
-    async makeBrief() { cancelOrder.push("compact"); return { brief: exactBrief, qaBinding: {} }; },
+    async makeNote() { cancelOrder.push("scribe"); return { note: exactNote, qaBinding: {} }; },
     async prepareWorkshop() { cancelOrder.push("prepare"); return approvedPreparation; },
     async awaitBriefGate() { cancelOrder.push("gate"); assert.deepEqual(cancelStatuses, []); return "cancelled"; },
     async discardWorkshop() { cancelOrder.push("discard"); },
     async spawnWorkshop() { cancelSpawned = true; },
   });
   const cancelled = await cancelledTool.execute("cancel", { id: task.id }, undefined, undefined, ctx);
-  assert.deepEqual(cancelOrder, ["compact", "prepare", "gate", "discard"]);
+  assert.deepEqual(cancelOrder, ["scribe", "prepare", "gate", "discard"]);
   assert.deepEqual(cancelStatuses, []);
   assert.equal(cancelSpawned, false);
   assert.equal(cancelled.content[0].text, `Cancelled ${task.id}; runner not started.`);
   assert.equal(cancelled.content[0].text.includes("\n"), false);
-  assert.doesNotMatch(JSON.stringify(cancelled), new RegExp(exactBrief));
+  assert.doesNotMatch(JSON.stringify(cancelled), new RegExp(exactNote));
 
   const failureStatuses = [];
   let failureDiscarded = false;
   const failedTool = delegateHarness({
     run: backlogRun(failureStatuses),
-    async makeBrief() { return { brief: exactBrief, qaBinding: {} }; },
+    async makeNote() { return { note: exactNote, qaBinding: {} }; },
     async prepareWorkshop() { return approvedPreparation; },
     async awaitBriefGate() { throw new Error("gate unavailable"); },
     async discardWorkshop() { failureDiscarded = true; },
@@ -281,26 +357,26 @@ try {
   let rollbackDiscarded = false;
   const rollbackTool = delegateHarness({
     run: backlogRun(rollbackStatuses),
-    async makeBrief() { return { brief: exactBrief, qaBinding: {} }; },
+    async makeNote() { return { note: exactNote, qaBinding: {} }; },
     async prepareWorkshop() { return approvedPreparation; },
     async awaitBriefGate() { return "approved"; },
-    async spawnWorkshop() { throw new Error(`spawn failed: ${exactBrief}`); },
+    async spawnWorkshop() { throw new Error(`spawn failed: ${exactNote}`); },
     async discardWorkshop() { rollbackDiscarded = true; },
   });
   const rolledBack = await rollbackTool.execute("spawn-failure", { id: task.id }, undefined, undefined, ctx);
   assert.match(rolledBack.content[0].text, /runs operation failed/);
-  assert.doesNotMatch(JSON.stringify(rolledBack), new RegExp(exactBrief));
+  assert.doesNotMatch(JSON.stringify(rolledBack), new RegExp(exactNote));
   assert.deepEqual(rollbackStatuses, ["In Progress", "To Do"]);
   assert.equal(rollbackDiscarded, true);
 
-  const briefFailureStatuses = [];
-  const briefFailureTool = delegateHarness({
-    run: backlogRun(briefFailureStatuses),
-    async makeBrief() { throw new Error("brief failed"); },
+  const noteFailureStatuses = [];
+  const noteFailureTool = delegateHarness({
+    run: backlogRun(noteFailureStatuses),
+    async makeNote() { throw new Error("note failed"); },
   });
-  const briefFailure = await briefFailureTool.execute("brief-failure", { id: task.id }, undefined, undefined, ctx);
-  assert.match(briefFailure.content[0].text, /brief failed/);
-  assert.deepEqual(briefFailureStatuses, []);
+  const noteFailure = await noteFailureTool.execute("note-failure", { id: task.id }, undefined, undefined, ctx);
+  assert.match(noteFailure.content[0].text, /note failed/);
+  assert.deepEqual(noteFailureStatuses, []);
 
   const registrations = [];
   const events = new Map();

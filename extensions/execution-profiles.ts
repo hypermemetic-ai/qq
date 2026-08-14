@@ -95,7 +95,7 @@ export default function registerExecutionProfiles(pi, deps = {}) {
     for (const [roleName, role] of Object.entries(policy.roles)) {
       for (const [name, profile] of Object.entries(role.profiles)) check(`${roleName} profile ${name}`, profile);
     }
-    check("compactor", policy.compactor);
+    check("scribe", policy.scribe);
     check("qa", policy.qa);
   }
 

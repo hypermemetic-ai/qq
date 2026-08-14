@@ -50,7 +50,7 @@ async function main() {
   if (command === "list") {
     if (second) throw new Error("list accepts at most one role");
     if (first) {
-      if (first === "compactor" || first === "qa") {
+      if (first === "scribe" || first === "qa") {
         const profile = policy[first];
         console.log(`${first} (service)`);
         console.log(`   ${profile.provider}/${profile.model} · ${profile.effort}`);
@@ -61,7 +61,7 @@ async function main() {
       printRole(first, role);
     } else {
       for (const [name, role] of Object.entries(policy.roles)) printRole(name, role);
-      for (const name of ["compactor", "qa"]) {
+      for (const name of ["scribe", "qa"]) {
         const profile = policy[name];
         console.log(`${name} (service)`);
         console.log(`   ${profile.provider}/${profile.model} · ${profile.effort}`);

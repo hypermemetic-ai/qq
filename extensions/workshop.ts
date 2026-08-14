@@ -5,10 +5,12 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { readExecutionPolicy } from "../bin/lib/execution-profiles.mjs";
-import { awaitBriefGate, discardWorkshop, prepareWorkshop, spawnWorkshop } from "../bin/lib/workshop.mjs";
+import { awaitBriefGate, discardWorkshop, formatTicket, prepareWorkshop, spawnWorkshop } from "../bin/lib/workshop.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BACKLOG = join(QQ_ROOT, "node_modules", ".bin", "backlog");
+
+export { formatTicket };
 
 function result(message, details = {}) {
   return { content: [{ type: "text", text: message }], details: { ...details, message } };
@@ -27,10 +29,49 @@ async function taskView(run, cwd, id, signal) {
   return value.task;
 }
 
-function fileOperations(messages) {
+function textContent(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.filter((block) => block?.type === "text" && typeof block.text === "string")
+    .map((block) => block.text).join("\n");
+}
+
+function latestOperatorTurnEntries(branch, limit = 100) {
+  if (!Array.isArray(branch)) return [];
+  const operatorTurns = [];
+  for (let index = 0; index < branch.length; index += 1) {
+    if (branch[index]?.type === "message" && branch[index].message?.role === "user") operatorTurns.push(index);
+  }
+  if (operatorTurns.length === 0) return [];
+  return branch.slice(operatorTurns[Math.max(0, operatorTurns.length - limit)]);
+}
+
+export function serializeTranscript(branch, limit = 100) {
+  const parts = [];
+  for (const entry of latestOperatorTurnEntries(branch, limit)) {
+    if (entry?.type !== "message") continue;
+    const message = entry.message;
+    if (message?.role === "user") {
+      const text = textContent(message.content);
+      if (text) parts.push(`[User]: ${text}`);
+      continue;
+    }
+    if (message?.role !== "assistant") continue;
+    const text = textContent(message.content);
+    if (text) parts.push(`[Assistant]: ${text}`);
+    const tools = Array.isArray(message.content)
+      ? message.content.filter((block) => block?.type === "toolCall" && typeof block.name === "string").map((block) => block.name)
+      : [];
+    if (tools.length) parts.push(`[Assistant tools]: ${tools.join(", ")}`);
+  }
+  return parts.join("\n\n");
+}
+
+function fileOperations(entries) {
   const read = new Set();
   const modified = new Set();
-  for (const message of messages) {
+  for (const entry of entries) {
+    const message = entry?.type === "message" ? entry.message : entry;
     if (message?.role !== "assistant" || !Array.isArray(message.content)) continue;
     for (const block of message.content) {
       if (block?.type !== "toolCall" || typeof block.arguments?.path !== "string") continue;
@@ -44,33 +85,37 @@ function fileOperations(messages) {
   };
 }
 
-export async function makeBrief(ctx, task, deps = {}) {
+export async function makeNote(ctx, task, deps = {}) {
   const policy = await readExecutionPolicy(deps.policyPath);
-  const prompt = await readFile(deps.briefPromptPath ?? join(QQ_ROOT, "prompts", "services", "brief.md"), "utf8");
-  const model = ctx.modelRegistry.find(policy.compactor.provider, policy.compactor.model);
-  if (!model) throw new Error(`compactor model is unavailable: ${policy.compactor.provider}/${policy.compactor.model}`);
-  const messages = ctx.sessionManager.buildSessionContext().messages;
-  const helpers = deps.messageHelpers ?? await import("@earendil-works/pi-coding-agent");
-  const conversation = helpers.serializeConversation(helpers.convertToLlm(messages));
-  const files = fileOperations(messages);
+  const prompt = await readFile(deps.scribePromptPath ?? join(QQ_ROOT, "prompts", "services", "scribe.md"), "utf8");
+  const model = ctx.modelRegistry.find(policy.scribe.provider, policy.scribe.model);
+  if (!model) throw new Error(`scribe model is unavailable: ${policy.scribe.provider}/${policy.scribe.model}`);
+  const entries = latestOperatorTurnEntries(ctx.sessionManager.getBranch());
+  const transcript = serializeTranscript(entries);
+  const files = fileOperations(entries);
   const fileText = [
     files.read.length ? `Read files:\n${files.read.map((path) => `- ${path}`).join("\n")}` : "",
     files.modified.length ? `Modified files:\n${files.modified.map((path) => `- ${path}`).join("\n")}` : "",
   ].filter(Boolean).join("\n\n");
+  const attachments = [
+    `Attached ticket (ticket.md):\n\n${formatTicket(task)}`,
+    `Attached architect transcript (transcript.md):\n\n${transcript}`,
+    fileText,
+  ].filter(Boolean).join("\n\n");
   const userMessage = {
     role: "user",
-    content: [{ type: "text", text: `Task ${task.id}: ${task.title}\n\n${task.description ?? ""}\n\n<conversation>\n${conversation}\n</conversation>${fileText ? `\n\n${fileText}` : ""}` }],
+    content: [{ type: "text", text: attachments }],
     timestamp: Date.now(),
   };
   const response = await ctx.modelRegistry.complete(
     model,
     { systemPrompt: prompt.trim(), messages: [userMessage] },
-    { reasoning: policy.compactor.effort, cacheRetention: "none", sessionId: randomUUID(), signal: ctx.signal },
+    { reasoning: policy.scribe.effort, cacheRetention: "none", sessionId: randomUUID(), signal: ctx.signal },
   );
-  if (response.stopReason === "aborted") throw new Error("brief generation was cancelled");
-  const brief = response.content.filter((part) => part.type === "text").map((part) => part.text).join("\n").trim();
-  if (!brief) throw new Error("compactor returned an empty brief");
-  return { brief, qaBinding: policy.qa };
+  if (response.stopReason === "aborted") throw new Error("note generation was cancelled");
+  const note = response.content.filter((part) => part.type === "text").map((part) => part.text).join("\n").trim();
+  if (!note) throw new Error("scribe returned an empty note");
+  return { note, transcript, qaBinding: policy.qa };
 }
 
 export default function registerWorkshop(pi, deps = {}) {
@@ -107,21 +152,21 @@ export default function registerWorkshop(pi, deps = {}) {
   });
 
   pi.registerTool({
-    name: "delegate", label: "Delegate", promptSnippet: "Brief, obtain operator approval, and spawn one aligned task",
-    description: "Brief one To Do task, wait for approval or cancellation in an operator-owned Glow pane, then create an isolated worktree and start a messaging-enabled runner if approved. Architect sessions only.",
+    name: "delegate", label: "Delegate", promptSnippet: "Prepare a note, obtain operator approval, and spawn one aligned task",
+    description: "Prepare a note for one To Do ticket, wait for approval or cancellation in an operator-owned Glow pane, then create an isolated worktree and start a messaging-enabled runner if approved. Architect sessions only.",
     parameters: { type: "object", additionalProperties: false, required: ["id"], properties: { id: { type: "string" } } },
     async execute(_id, params, signal, _update, ctx) {
       if (role !== "architect") return result("delegate is available only in an architect session.");
       let claimedTask;
       let prepared;
-      let outboundBrief;
+      let outboundNote;
       try {
         const task = await taskView(run, ctx.cwd, params.id, signal);
         if (task.status !== "To Do") return result(`delegate refused: ${task.id} is ${task.status}, not To Do.`, { task_id: task.id });
-        const { brief, qaBinding } = await (deps.makeBrief ?? makeBrief)(ctx, task, deps);
-        outboundBrief = brief;
+        const { note, transcript, qaBinding } = await (deps.makeNote ?? makeNote)(ctx, task, deps);
+        outboundNote = note;
         const project = env.QQ_AGENT_PROJECT || basename(resolve(ctx.cwd));
-        prepared = await (deps.prepareWorkshop ?? prepareWorkshop)({ cwd: ctx.cwd, env, project, task, brief });
+        prepared = await (deps.prepareWorkshop ?? prepareWorkshop)({ cwd: ctx.cwd, env, project, task, note, transcript });
         const decision = await (deps.awaitBriefGate ?? awaitBriefGate)({
           run, env, prepared, signal,
           pluginRoot: deps.briefGatePluginPath ?? join(QQ_ROOT, "plugins", "brief-gate"),
@@ -147,7 +192,7 @@ export default function registerWorkshop(pi, deps = {}) {
           try { await (deps.discardWorkshop ?? discardWorkshop)(prepared); } catch {}
         }
         const message = error instanceof Error ? error.message : String(error);
-        const safeMessage = outboundBrief && message.includes(outboundBrief) ? "runs operation failed" : message;
+        const safeMessage = outboundNote && message.includes(outboundNote) ? "runs operation failed" : message;
         return result(`delegate refused: ${safeMessage}`, { status: "refused" });
       }
     },

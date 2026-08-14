@@ -13,7 +13,7 @@ function policy(defaultProfile = "grok-high") {
   return {
     schema: "qq.execution-profiles/v1",
     contextWindowCeiling: 200000,
-    compactor: { provider: "xai", model: "grok-4.6", effort: "high" },
+    scribe: { provider: "xai", model: "grok-4.6", effort: "high" },
     qa: { provider: "openai-codex", model: "gpt-5.6-sol", effort: "xhigh" },
     roles: {
       runner: {
@@ -39,15 +39,15 @@ assert.equal(roles.validateRole("runner"), "runner");
 assert.equal(roles.validateRole("architect"), "architect");
 assert.throws(() => roles.validateRole("observer"), /unknown qq role/);
 assert.equal(lib.validateExecutionPolicy(policy()).roles.runner.default, "grok-high");
-assert.deepEqual(lib.validateExecutionPolicy(policy()).compactor, { provider: "xai", model: "grok-4.6", effort: "high" });
+assert.deepEqual(lib.validateExecutionPolicy(policy()).scribe, { provider: "xai", model: "grok-4.6", effort: "high" });
 assert.deepEqual(lib.validateExecutionPolicy(policy()).qa, { provider: "openai-codex", model: "gpt-5.6-sol", effort: "xhigh" });
 assert.throws(() => lib.validateExecutionPolicy({ ...policy(), contextWindowCeiling: 262144 }), /200000/);
 const { qa: _ignoredQa, ...withoutQa } = policy();
 assert.throws(() => lib.validateExecutionPolicy(withoutQa), /invalid top-level shape/);
-const { compactor: _ignored, ...withoutCompactor } = policy();
-assert.throws(() => lib.validateExecutionPolicy(withoutCompactor), /invalid top-level shape/);
+const { scribe: _ignored, ...withoutScribe } = policy();
+assert.throws(() => lib.validateExecutionPolicy(withoutScribe), /invalid top-level shape/);
 assert.throws(() => lib.validateExecutionPolicy({ ...policy(), roles: { ...policy().roles, observer: policy().roles.runner } }), /exactly: runner, architect/);
-assert.throws(() => lib.validateExecutionPolicy({ ...policy(), roles: { runner: policy().roles.runner, architect: policy().roles.architect, compactor: policy().roles.runner } }), /exactly: runner, architect/);
+assert.throws(() => lib.validateExecutionPolicy({ ...policy(), roles: { runner: policy().roles.runner, architect: policy().roles.architect, scribe: policy().roles.runner } }), /exactly: runner, architect/);
 assert.throws(() => lib.validateExecutionPolicy({ ...policy(), roles: { ...policy().roles, runner: { ...policy().roles.runner, default: "missing" } } }), /does not name/);
 assert.deepEqual(lib.listedProfiles({
   default: "sol-high",

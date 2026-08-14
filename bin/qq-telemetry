@@ -149,10 +149,10 @@ validate_profiles_file() {
       and (.profiles | type == "object" and length > 0)
       and ([.profiles | to_entries[] | (.key | name) and (.value | profile)] | all)
       and (.profiles[.default] != null);
-    type == "object" and keys == ["compactor", "contextWindowCeiling", "qa", "roles", "schema"]
+    type == "object" and keys == ["contextWindowCeiling", "qa", "roles", "schema", "scribe"]
     and (.schema == "qq.execution-profiles/v1")
     and (.contextWindowCeiling == 200000)
-    and (.compactor | profile)
+    and (.scribe | profile)
     and (.qa | profile)
     and (.roles | type == "object" and keys == ["architect", "runner"])
     and ([.roles | to_entries[] | (.key | name) and (.value | role)] | all)
@@ -182,7 +182,7 @@ load_roles() {
          | sort_by([.value.model, ({off:0,minimal:1,low:2,medium:3,high:4,xhigh:5,max:6}[.value.effort] // 99), .key])
          | .[] | ["profile", $role.key, .value.model, .value.effort,
                   (if .key == $role.value.default then "default" else "" end)])),
-    ["service", "compactor", .compactor.model, .compactor.effort, ""],
+    ["service", "scribe", .scribe.model, .scribe.effort, ""],
     ["service", "qa", .qa.model, .qa.effort, ""]
     | @tsv' "$PROFILES_FILE" 2>/dev/null) || return 65
   while IFS=$'\t' read -r kind role model effort mark; do

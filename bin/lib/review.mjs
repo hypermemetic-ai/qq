@@ -144,9 +144,10 @@ export function qaLaunchArgs(state, options) {
 }
 
 export function qaLookPrompt(state) {
+  const ticketAndNotePath = state.gatePath ?? state.briefPath;
   return state.look === 1
-    ? `Look 1. Review ref ${state.ref} against the outbound brief at ${state.briefPath}. Base is ${state.baseRef}. You own test quality: you may edit tests and commit test-only changes. Never edit or commit production code. Reject bad or excess tests, bloat, and over-engineering.`
-    : `Look 2, the final look. Review updated ref ${state.ref} against the same outbound brief at ${state.briefPath} and your prior rejection. You still own test quality: you may edit tests and commit test-only changes, but never edit or commit production code. There is no third look.`;
+    ? `Look 1. Review ref ${state.ref} against the outbound ticket and note at ${ticketAndNotePath}. Base is ${state.baseRef}. You own test quality: you may edit tests and commit test-only changes. Never edit or commit production code. Reject bad or excess tests, bloat, and over-engineering.`
+    : `Look 2, the final look. Review updated ref ${state.ref} against the same outbound ticket and note at ${ticketAndNotePath} and your prior rejection. You still own test quality: you may edit tests and commit test-only changes, but never edit or commit production code. There is no third look.`;
 }
 
 export function isTestPath(path) {
