@@ -37,6 +37,13 @@ if [[ ! -L "$MAIN_ROOT/openwiki" || "$(readlink -- "$MAIN_ROOT/openwiki")" != "$
   echo "OpenWiki locator does not point to the canonical publication: $current" >&2
   exit 1
 fi
+if [[ "$ACTION" == auto ]]; then
+  ACTION=update
+fi
+if [[ "$ACTION" == update && ( ! -L "$current" || ! -d "$current" ) ]]; then
+  echo "OpenWiki cannot refresh before the canonical publication is seeded. Seed it explicitly with QQ_OPENWIKI_ACTION=init." >&2
+  exit 1
+fi
 
 mkdir -p -- "$store"
 chmod 0755 -- "$OUTPUT_ROOT" "$store"
@@ -74,13 +81,6 @@ if [[ -L "$current" && -d "$current" ]]; then
   find "$project/openwiki" -type d -exec chmod u+rwx {} +
   find "$project/openwiki" -type f -exec chmod u+rw {} +
   has_current=true
-fi
-if [[ "$ACTION" == auto ]]; then
-  if [[ "$has_current" == true && -f "$project/openwiki/.last-update.json" ]]; then
-    ACTION=update
-  else
-    ACTION=init
-  fi
 fi
 if [[ "$ACTION" == update && "$has_current" == false ]]; then
   echo "OpenWiki cannot update before the canonical publication is seeded." >&2

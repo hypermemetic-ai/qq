@@ -41,10 +41,25 @@ printf 'disposable\n' >CLAUDE.md
 printf 'disposable rewrite\n' >AGENTS.md
 SH
 chmod +x "$FAKE"
+if QQ_OPENWIKI_MAIN_ROOT="$REPO" \
+  QQ_OPENWIKI_REPO_KEY=qq \
+  QQ_OPENWIKI_OUTPUT_ROOT="$OUTPUT" \
+  QQ_OPENWIKI_BIN="$FAKE" \
+  QQ_TEST_ARGS="$TMP/args" \
+  "$ROOT/bin/qq-openwiki-refresh" >/dev/null 2>&1; then
+  echo "default refresh unexpectedly seeded the canonical publication" >&2
+  exit 1
+fi
+[[ ! -e "$TMP/args" ]]
+[[ ! -e "$OUTPUT/qq" ]]
+[[ -z "$(git -C "$REPO" status --porcelain --untracked-files=all)" ]]
+[[ "$(git -C "$REPO" worktree list --porcelain | grep -c '^worktree ')" == 1 ]]
+
 QQ_OPENWIKI_MAIN_ROOT="$REPO" \
 QQ_OPENWIKI_REPO_KEY=qq \
 QQ_OPENWIKI_OUTPUT_ROOT="$OUTPUT" \
 QQ_OPENWIKI_BIN="$FAKE" \
+QQ_OPENWIKI_ACTION=init \
 QQ_TEST_ARGS="$TMP/args" \
   "$ROOT/bin/qq-openwiki-refresh" >/dev/null
 
