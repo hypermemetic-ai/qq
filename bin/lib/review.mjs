@@ -188,8 +188,39 @@ async function herdr(run, args, label) {
   return checked(run, "herdr", args, {}, label);
 }
 
+function herdrErrorCode(result) {
+  for (const output of [result?.stderr, result?.stdout]) {
+    if (typeof output !== "string" || !output.trim()) continue;
+    try {
+      const response = JSON.parse(output);
+      if (typeof response?.error?.code === "string") return response.error.code;
+    } catch {}
+  }
+  return undefined;
+}
+
 export async function waitForShell(run, pane, timeoutMs) {
   await waitForAvailableShell(run, pane, timeoutMs == null ? {} : { timeoutMs });
+}
+
+async function waitForAgentIdentityDrop(run, pane, timeoutMs) {
+  const deadline = Date.now() + (timeoutMs ?? 5_000);
+  let last;
+  let sentEot = false;
+  while (Date.now() < deadline) {
+    last = await run("herdr", ["agent", "get", pane], {});
+    if (last?.code !== 0) {
+      if (herdrErrorCode(last) === "agent_not_found") return last;
+    } else {
+      const info = parseHerdr(last.stdout, "agent_info");
+      if (!sentEot && info?.agent) {
+        await run("herdr", ["agent", "send-keys", pane, "ctrl+d"], {});
+        sentEot = true;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`runs pane ${pane} kept its Herdr agent identity: ${reason(last, "agent still registered")}`);
 }
 
 export async function takePane(run, pane, name, args, timeoutMs = 30_000) {
@@ -200,13 +231,7 @@ export async function takePane(run, pane, name, args, timeoutMs = 30_000) {
 }
 
 export async function stopAgent(run, pane, timeoutMs) {
-  const listed = await run("herdr", ["agent", "get", pane], {});
-  if (listed?.code === 0) {
-    const agent = parseHerdr(listed.stdout, "agent_info");
-    if (agent?.agent || agent?.agent_status) {
-      await run("herdr", ["agent", "send-keys", pane, "ctrl+d"], {});
-    }
-  }
+  await waitForAgentIdentityDrop(run, pane, timeoutMs);
   await waitForShell(run, pane, timeoutMs);
 }
 
