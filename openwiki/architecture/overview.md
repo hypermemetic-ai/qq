@@ -12,7 +12,7 @@ openwiki:
 
 # QQ Architecture
 
-QQ combines a Pi runtime, asynchronous [board/run workflow](../workflows/workshops.md), [provider telemetry](../operations/telemetry.md), [Herdr operations](../operations/runbook.md#herdr-distribution), and a durable [Event Plane](../event-plane/service.md). `extensions/index.ts:registerQQ` is the Pi composition root: [execution profiles](../agent-runtime/execution-profiles.md) register first, followed by messaging, independent safety guards, board tools, and review.
+QQ combines a Pi runtime, asynchronous [board/run workflow](../workflows/workshops.md), a pinned [provider Dashboard integration](../operations/telemetry.md), [Herdr operations](../operations/runbook.md#herdr-distribution), and a durable [Event Plane](../event-plane/service.md). `extensions/index.ts:registerQQ` is the Pi composition root: [execution profiles](../agent-runtime/execution-profiles.md) register first, followed by messaging, independent safety guards, board tools, and review.
 
 ## Runtime map
 
@@ -33,7 +33,8 @@ flowchart TD
     Run --> Worktree["Git worktree"]
     Run --> Herdr["Herdr runner and QA pane"]
     Run --> Landing["QA-passed locked landing"]
-    Telemetry["qq-telemetry"] --> ProfileCli["qq-profile list JSON"]
+    Dashboard["Pinned QQ Dashboard package"] --> ProfileCli["qq-profile list JSON"]
+    Launcher["bin/qq-dashboard"] --> Dashboard
     Profiles --> ProfileCli
 ```
 
@@ -50,7 +51,7 @@ flowchart TD
 | Board and run | `extensions/board.ts`, `bin/lib/admission.mjs`, `bin/lib/run.mjs` | Tickets, admission, operator gate, worktree and runner startup |
 | Review/landing | `extensions/review-flow.ts`, `bin/lib/review.mjs` | `done`, two-look QA, architect choice, serialized merge |
 | Event Plane | `bin/event-plane` -> `event_plane_service.py:main` | Journal, obligations, retries, leases, retention |
-| Operations | `bin/qq-telemetry*`, `bin/qq-herdr-*`, `bin/qq-openwiki-*` | Usage, cockpit distribution, wiki automation |
+| Operations | `bin/qq-dashboard*`, `bin/qq-herdr-*`, `bin/qq-openwiki-*` | Pinned Dashboard launch, cockpit distribution, wiki automation |
 
 ## Cross-system invariants
 
@@ -58,6 +59,6 @@ flowchart TD
 - Event Plane acknowledgement follows observable Pi transcript persistence, not message injection.
 - Delegation is admitted against active tickets and live worktrees, then requires operator approval of the literal ticket and generated note.
 - QA has at most two looks and may own tests only. Landing requires a QA pass, architect approval, original base branch, clean main and run worktrees, and the shared repository lock.
-- Private ownership and modes protect Event Plane, profile, run, scrub, telemetry, and cookie state.
+- Private ownership and modes protect Event Plane, profile, run, scrub, Dashboard state, and cookie state.
 
 Use the linked component page for symbols and focused checks. Run `npm test` only for composition-root, shared-role, packaging, or multi-area changes.

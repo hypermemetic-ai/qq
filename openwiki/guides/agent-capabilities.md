@@ -21,7 +21,7 @@ Use this page to confirm whether a surface is shipped, then follow its canonical
 | `sketch`, `note`, `delegate`, `done`, `review`, `qa_verdict` | board delegation, run, QA, and landing | [Board/run workflow](../workflows/workshops.md) |
 | `operator_stage`, `mark_session_for_scrub` | operator staging and transcript privacy | [Session safety](../agent-runtime/session-safety.md) |
 | Backlog and Grok guards; `shift+alt+enter` | automatic safety/recovery behavior | [Session safety](../agent-runtime/session-safety.md) |
-| `qq-telemetry`, `qq-telemetry-cookies` | provider usage operations | [Telemetry](../operations/telemetry.md) |
+| `qq-dashboard`, `qq-dashboard-cookies` | pinned provider usage dashboard and cookie operations | [Dashboard integration](../operations/telemetry.md) |
 | `qq-herdr-*` | pinned cockpit build, activation, launch, pane, smoke, and upgrade helpers | [Operations](../operations/runbook.md#herdr-distribution) |
 | `qq-openwiki-refresh`, `qq-openwiki-dispatch` | isolated wiki refresh for one or registered repositories | [Operations](../operations/runbook.md#openwiki-automation) |
 
