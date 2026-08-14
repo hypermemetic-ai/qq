@@ -1,162 +1,178 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-TMP="$(mktemp -d "$HOME/qq-openwiki-test.XXXXXX")"
-cleanup() { rm -rf -- "$TMP"; }
+TMP="$(mktemp -d "$HOME/qq-openwiki-publish-test.XXXXXX")"
+cleanup() {
+  chmod -R u+w -- "$TMP" 2>/dev/null || true
+  rm -rf -- "$TMP"
+}
 trap cleanup EXIT
 
 REPO="$TMP/repo"
-WORKTREE="$TMP/worktree"
+FRESH="$TMP/fresh-worktree"
+OUTPUT="$TMP/state/qq/openwiki"
 FAKE="$TMP/fake-openwiki"
-SAFE_BIN="$TMP/safe-bin"
-mkdir -p -- "$REPO/openwiki" "$SAFE_BIN" "$TMP/home"
-ln -s "$(command -v node)" "$SAFE_BIN/node"
-shell_env="$({
-  PATH="$SAFE_BIN:/usr/bin:/bin" HOME="$TMP/home" node \
-    --require "$ROOT/bin/qq-openwiki-shell-env.cjs" --input-type=module - <<'JS'
-import cp from "node:child_process";
-const output = await new Promise((resolve, reject) => {
-  const child = cp.spawn('printf "%s\\n" "$PATH" "$HOME"; command -v node', { shell: true, env: {} });
-  let stdout = "";
-  child.stdout.on("data", (chunk) => { stdout += chunk; });
-  child.on("error", reject);
-  child.on("close", (code) => code === 0 ? resolve(stdout) : reject(new Error(`child exited ${code}`)));
-});
-process.stdout.write(output);
-JS
-} )"
-[[ "$shell_env" == "$SAFE_BIN:/usr/bin:/bin"$'\n'"$TMP/home"$'\n'"$SAFE_BIN/node" ]]
-
-mkdir -p -- "$REPO/openwiki"
+mkdir -p -- "$REPO" "$OUTPUT"
 git -C "$REPO" init -q -b main
 git -C "$REPO" config user.name qq-test
 git -C "$REPO" config user.email qq-test.invalid
 git -C "$REPO" config commit.gpgsign false
 printf 'source\n' >"$REPO/source.txt"
 printf 'operator instructions\n' >"$REPO/AGENTS.md"
-printf 'old wiki\n' >"$REPO/openwiki/index.md"
+ln -s -- "$OUTPUT/qq/current" "$REPO/openwiki"
 git -C "$REPO" add .
 git -C "$REPO" commit -q -m initial
+HEAD_BEFORE="$(git -C "$REPO" rev-parse HEAD)"
 
 cat >"$FAKE" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-command -v node >/dev/null
-[[ "$NODE_OPTIONS" == *"qq-openwiki-shell-env.cjs"* ]]
+[[ "$(<source.txt)" == source ]]
+[[ -f .git ]]
+[[ -z "$(git status --short --untracked-files=all)" ]]
+[[ ! -e openwiki ]]
 printf '%s\n' "$*" >"$QQ_TEST_ARGS"
-printf 'new wiki\n' >openwiki/index.md
+mkdir openwiki
+printf 'version one\n' >openwiki/index.md
 printf '{"status":"complete"}\n' >openwiki/.last-update.json
-printf 'temporary\n' >CLAUDE.md
-printf 'rewritten instructions\n' >AGENTS.md
-mkdir -p .github/workflows
-printf 'temporary\n' >.github/workflows/openwiki-update.yml
+printf 'disposable\n' >CLAUDE.md
+printf 'disposable rewrite\n' >AGENTS.md
 SH
 chmod +x "$FAKE"
+if QQ_OPENWIKI_MAIN_ROOT="$REPO" \
+  QQ_OPENWIKI_REPO_KEY=qq \
+  QQ_OPENWIKI_OUTPUT_ROOT="$OUTPUT" \
+  QQ_OPENWIKI_BIN="$FAKE" \
+  QQ_TEST_ARGS="$TMP/args" \
+  "$ROOT/bin/qq-openwiki-refresh" >/dev/null 2>&1; then
+  echo "default refresh unexpectedly seeded the canonical publication" >&2
+  exit 1
+fi
+[[ ! -e "$TMP/args" ]]
+[[ ! -e "$OUTPUT/qq" ]]
+[[ -z "$(git -C "$REPO" status --porcelain --untracked-files=all)" ]]
+[[ "$(git -C "$REPO" worktree list --porcelain | grep -c '^worktree ')" == 1 ]]
 
 QQ_OPENWIKI_MAIN_ROOT="$REPO" \
-QQ_OPENWIKI_WORKTREE="$WORKTREE" \
-QQ_OPENWIKI_BRANCH="qq/test-openwiki" \
+QQ_OPENWIKI_REPO_KEY=qq \
+QQ_OPENWIKI_OUTPUT_ROOT="$OUTPUT" \
 QQ_OPENWIKI_BIN="$FAKE" \
+QQ_OPENWIKI_ACTION=init \
 QQ_TEST_ARGS="$TMP/args" \
-XDG_STATE_HOME="$TMP/state" \
   "$ROOT/bin/qq-openwiki-refresh" >/dev/null
 
 [[ "$(<"$TMP/args")" == "code --init --print Keep this wiki short and practical." ]]
-[[ "$(git -C "$REPO" branch --show-current)" == "main" ]]
-[[ -z "$(git -C "$REPO" status --porcelain --untracked-files=all)" ]]
-[[ "$(<"$REPO/openwiki/index.md")" == "new wiki" ]]
+[[ -L "$OUTPUT/qq/current" ]]
+[[ "$(<"$REPO/openwiki/index.md")" == "version one" ]]
 [[ "$(<"$REPO/AGENTS.md")" == "operator instructions" ]]
-[[ ! -e "$REPO/CLAUDE.md" ]]
-[[ ! -e "$REPO/.github" ]]
-[[ ! -e "$WORKTREE" ]]
-if git -C "$REPO" show-ref --verify --quiet refs/heads/qq/test-openwiki; then
-  echo "refresh branch was not removed" >&2
+[[ "$(git -C "$REPO" rev-parse HEAD)" == "$HEAD_BEFORE" ]]
+[[ -z "$(git -C "$REPO" status --porcelain --untracked-files=all)" ]]
+[[ "$(git -C "$REPO" worktree list --porcelain | grep -c '^worktree ')" == 1 ]]
+[[ "$(stat -Lc %a "$OUTPUT/qq/current")" == 555 ]]
+[[ "$(stat -Lc %a "$OUTPUT/qq/current/index.md")" == 444 ]]
+[[ -z "$(find "$OUTPUT/qq" -maxdepth 1 -name '.refresh.*' -print -quit)" ]]
+[[ -z "$(find "$OUTPUT/qq/releases" -maxdepth 1 -name '.incoming.*' -print -quit)" ]]
+
+before="$(sha256sum "$REPO/openwiki/index.md")"
+if { printf 'tampered\n' >"$REPO/openwiki/index.md"; } 2>/dev/null; then
+  echo "ordinary write through the OpenWiki locator unexpectedly succeeded" >&2
   exit 1
 fi
-[[ "$(git -C "$REPO" rev-list --count HEAD)" == "3" ]]
-[[ "$(git -C "$REPO" log -1 --format=%P | wc -w)" == "2" ]]
-git -C "$REPO" diff-tree --no-commit-id --name-only -r HEAD^2 | grep -Fxq 'openwiki/.last-update.json'
-git -C "$REPO" diff-tree --no-commit-id --name-only -r HEAD^2 | grep -Fxq 'openwiki/index.md'
+if touch "$REPO/openwiki/unexpected.md" 2>/dev/null; then
+  echo "ordinary file creation through the OpenWiki locator unexpectedly succeeded" >&2
+  exit 1
+fi
+[[ "$(sha256sum "$REPO/openwiki/index.md")" == "$before" ]]
 
-BEFORE="$(git -C "$REPO" rev-parse HEAD)"
+git -C "$REPO" worktree add -q --detach "$FRESH"
+[[ "$(readlink -- "$FRESH/openwiki")" == "$OUTPUT/qq/current" ]]
+[[ "$(<"$FRESH/openwiki/index.md")" == "version one" ]]
+if { printf 'tampered\n' >"$FRESH/openwiki/index.md"; } 2>/dev/null; then
+  echo "fresh worktree wrote through the OpenWiki locator" >&2
+  exit 1
+fi
+git -C "$REPO" worktree remove --force -- "$FRESH"
+if git -C "$REPO" worktree list --porcelain | grep -Fqx "worktree $FRESH"; then
+  echo "fresh proof worktree was not removed" >&2
+  exit 1
+fi
+
+first_release="$(readlink -- "$OUTPUT/qq/current")"
 cat >"$FAKE" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-command -v node >/dev/null
+[[ -f .git ]]
+[[ -f openwiki/.last-update.json ]]
+[[ -z "$(git status --short --untracked-files=all)" ]]
 printf '%s\n' "$*" >"$QQ_TEST_ARGS"
+printf 'version two\n' >openwiki/index.md
+sleep 0.15
 SH
 chmod +x "$FAKE"
+reader_stop="$TMP/reader-stop"
+reader_error="$TMP/reader-error"
+(
+  while [[ ! -e "$reader_stop" ]]; do
+    value="$(<"$REPO/openwiki/index.md")" || { printf 'unreadable\n' >"$reader_error"; exit 1; }
+    case "$value" in 'version one'|'version two') ;; *) printf '%s\n' "$value" >"$reader_error"; exit 1 ;; esac
+  done
+) &
+reader_pid=$!
 QQ_OPENWIKI_MAIN_ROOT="$REPO" \
-QQ_OPENWIKI_WORKTREE="$WORKTREE" \
-QQ_OPENWIKI_BRANCH="qq/test-openwiki" \
+QQ_OPENWIKI_REPO_KEY=qq \
+QQ_OPENWIKI_OUTPUT_ROOT="$OUTPUT" \
 QQ_OPENWIKI_BIN="$FAKE" \
 QQ_TEST_ARGS="$TMP/args" \
-XDG_STATE_HOME="$TMP/state" \
   "$ROOT/bin/qq-openwiki-refresh" >/dev/null
+touch "$reader_stop"
+wait "$reader_pid"
+[[ ! -e "$reader_error" ]]
 [[ "$(<"$TMP/args")" == "code --update --print Keep this wiki short and practical." ]]
-[[ "$(git -C "$REPO" rev-parse HEAD)" == "$BEFORE" ]]
-
-printf 'dirty\n' >>"$REPO/source.txt"
-if QQ_OPENWIKI_MAIN_ROOT="$REPO" \
-  QQ_OPENWIKI_WORKTREE="$WORKTREE" \
-  QQ_OPENWIKI_BRANCH="qq/test-openwiki" \
-  QQ_OPENWIKI_BIN="$FAKE" \
-  XDG_STATE_HOME="$TMP/state" \
-  "$ROOT/bin/qq-openwiki-refresh" >/dev/null 2>&1; then
-  echo "dirty main unexpectedly accepted" >&2
-  exit 1
-fi
-git -C "$REPO" restore -- source.txt
+second_release="$(readlink -- "$OUTPUT/qq/current")"
+[[ "$second_release" != "$first_release" ]]
+[[ "$(<"$REPO/openwiki/index.md")" == "version two" ]]
+[[ "$(<"$OUTPUT/qq/$first_release/index.md")" == "version one" ]]
+[[ "$(stat -Lc %a "$REPO/openwiki")" == 555 ]]
+[[ "$(stat -Lc %a "$REPO/openwiki/index.md")" == 444 ]]
 
 cat >"$FAKE" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-printf 'outside generated tree\n' >source.txt
+printf 'partial version\n' >openwiki/index.md
+exit 23
 SH
 chmod +x "$FAKE"
 if QQ_OPENWIKI_MAIN_ROOT="$REPO" \
-  QQ_OPENWIKI_WORKTREE="$WORKTREE" \
-  QQ_OPENWIKI_BRANCH="qq/test-openwiki" \
+  QQ_OPENWIKI_REPO_KEY=qq \
+  QQ_OPENWIKI_OUTPUT_ROOT="$OUTPUT" \
   QQ_OPENWIKI_BIN="$FAKE" \
-  XDG_STATE_HOME="$TMP/state" \
   "$ROOT/bin/qq-openwiki-refresh" >/dev/null 2>&1; then
-  echo "non-OpenWiki change unexpectedly accepted" >&2
+  echo "failed generation unexpectedly published" >&2
   exit 1
 fi
+[[ "$(readlink -- "$OUTPUT/qq/current")" == "$second_release" ]]
+[[ "$(<"$REPO/openwiki/index.md")" == "version two" ]]
+[[ -z "$(find "$OUTPUT/qq" -maxdepth 1 -name '.refresh.*' -print -quit)" ]]
+[[ -z "$(find "$OUTPUT/qq/releases" -maxdepth 1 -name '.incoming.*' -print -quit)" ]]
 [[ -z "$(git -C "$REPO" status --porcelain --untracked-files=all)" ]]
-[[ "$(git -C "$REPO" rev-parse HEAD)" == "$BEFORE" ]]
-[[ ! -e "$WORKTREE" ]]
+[[ "$(git -C "$REPO" worktree list --porcelain | grep -c '^worktree ')" == 1 ]]
 
-REPO_WITHOUT_AGENTS="$TMP/repo-without-agents"
-mkdir -p "$REPO_WITHOUT_AGENTS"
-git -C "$REPO_WITHOUT_AGENTS" init -q -b main
-git -C "$REPO_WITHOUT_AGENTS" config user.name qq-test
-git -C "$REPO_WITHOUT_AGENTS" config user.email qq-test.invalid
-git -C "$REPO_WITHOUT_AGENTS" commit -q --allow-empty -m initial
-cat >"$FAKE" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-mkdir -p openwiki
-printf 'first wiki\n' >openwiki/quickstart.md
-printf 'generated instructions\n' >AGENTS.md
-SH
-chmod +x "$FAKE"
-QQ_OPENWIKI_MAIN_ROOT="$REPO_WITHOUT_AGENTS" \
-QQ_OPENWIKI_WORKTREE="$WORKTREE" \
-QQ_OPENWIKI_BRANCH="qq/test-openwiki" \
-QQ_OPENWIKI_BIN="$FAKE" \
-XDG_STATE_HOME="$TMP/state" \
-  "$ROOT/bin/qq-openwiki-refresh" >/dev/null
-[[ -f "$REPO_WITHOUT_AGENTS/openwiki/quickstart.md" ]]
-[[ ! -e "$REPO_WITHOUT_AGENTS/AGENTS.md" ]]
-[[ -z "$(git -C "$REPO_WITHOUT_AGENTS" status --porcelain --untracked-files=all)" ]]
+if QQ_OPENWIKI_MAIN_ROOT="$REPO" \
+  QQ_OPENWIKI_REPO_KEY=discuss \
+  QQ_OPENWIKI_OUTPUT_ROOT="$OUTPUT" \
+  QQ_OPENWIKI_BIN="$FAKE" \
+  "$ROOT/bin/qq-openwiki-refresh" >/dev/null 2>&1; then
+  echo "non-QQ repository unexpectedly used canonical publication" >&2
+  exit 1
+fi
 
-SERVICE="$ROOT/systemd/user/qq-openwiki.service"
-grep -Fq 'ExecStart=%h/projects/qq/bin/qq-openwiki-dispatch' "$SERVICE"
-grep -Fq 'Environment="PATH=%h/.local/bin:' "$SERVICE"
-if grep -Fq 'ExecStopPost=' "$SERVICE"; then
-  echo "service still mutates the main checkout after refresh" >&2
+grep -Fq 'ExecStart=%h/projects/qq/bin/qq-openwiki-dispatch' "$ROOT/systemd/user/qq-openwiki.service"
+grep -Fq 'Environment=QQ_OPENWIKI_PUBLISHED_REPO_KEY=qq' "$ROOT/systemd/user/qq-openwiki.service"
+grep -Fq 'Environment=QQ_OPENWIKI_OUTPUT_ROOT=%h/.local/state/qq/openwiki' "$ROOT/systemd/user/qq-openwiki.service"
+if grep -Eq '(^|/)(sudo|setpriv)( |$)|^User=' "$ROOT/systemd/user/qq-openwiki.service"; then
+  echo "user refresher unexpectedly requires a privileged identity" >&2
   exit 1
 fi
 
