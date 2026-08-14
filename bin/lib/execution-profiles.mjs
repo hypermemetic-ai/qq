@@ -9,6 +9,7 @@ import { ROLE_NAMES } from "./roles.mjs";
 export const POLICY_SCHEMA = "qq.execution-profiles/v1";
 export const PROFILE_LIST_SCHEMA = "qq.profile-list/v1";
 export const CONTEXT_WINDOW_CEILING = 200_000;
+export const GROK_PROVIDERS = new Set(["xai", "xai-auth"]);
 export const EFFORTS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const EFFORT_ORDER = Object.freeze([...EFFORTS]);
 const NAME = /^[a-z][a-z0-9-]{0,62}$/;
@@ -217,7 +218,7 @@ export function parseModelList(source) {
 }
 
 export function contextWindowCeilingFor(policy, provider) {
-  return provider === "xai" ? policy.contextWindowCeiling : undefined;
+  return GROK_PROVIDERS.has(provider) ? policy.contextWindowCeiling : undefined;
 }
 
 export async function installContextCeiling(policy, availableModels, path = agentModelsPath()) {

@@ -89,6 +89,7 @@ assert.equal(lib.parseTokenCount("1M"), 1_000_000);
 const parsed = lib.parseModelList("provider model context max-out thinking images\nopenai-codex gpt-5.6-sol 272K 128K yes yes\n");
 assert.equal(parsed.get("openai-codex\0gpt-5.6-sol").contextWindow, 272000);
 assert.equal(lib.contextWindowCeilingFor(lib.validateExecutionPolicy(policy()), "xai"), 200000);
+assert.equal(lib.contextWindowCeilingFor(lib.validateExecutionPolicy(policy()), "xai-auth"), 200000);
 assert.equal(lib.contextWindowCeilingFor(lib.validateExecutionPolicy(policy()), "openai-codex"), undefined);
 assert.equal(lib.contextWindowCeilingFor(lib.validateExecutionPolicy(policy()), "qwen-token-plan"), undefined);
 
