@@ -32,12 +32,12 @@ Backups require a new absolute path beneath a safe mode-0700 parent. There is no
 |---|---|---|
 | Repository linking | `tests/test-methodology.sh` | profile test when activation semantics change |
 | Event Plane | `tests/test-event-plane.sh` | `npm test` when messaging/public composition changes |
-| Profiles and prompts | `node --experimental-strip-types tests/test-execution-profiles.mjs .` | telemetry for list contract; `npm test` for role events/composition |
+| Profiles and prompts | `node --experimental-strip-types tests/test-execution-profiles.mjs .` | installed Dashboard smoke for list-contract changes; `npm test` for role events/composition |
 | Agent messaging | `node --experimental-strip-types tests/test-agent-messages.mjs .` | live suite for lifecycle/delivery |
 | One safety extension | matching `tests/test-<name>.mjs` | `npm test` for registration/shared state |
 | Board admission/delegation | `node --experimental-strip-types tests/test-delegation.mjs .` plus `node tests/test-brief-gate.mjs .` | `npm test` when review/profile wiring changes |
 | QA, review, landing | `node --experimental-strip-types tests/test-review-flow.mjs .` | `npm test` for cross-workflow changes |
-| Telemetry | `tests/test-telemetry.sh` | live provider calls only for integration diagnosis |
+| Dashboard launchers or pin | install, then `bin/qq-dashboard --help` and `bin/qq-dashboard-cookies --help` | package tests and live provider calls only when changing the external integration |
 | Herdr packaging/config | `tests/test-herdr-downstream.sh` | `tests/test-herdr-live.sh` only for live integration |
 | OpenWiki single repo | `tests/test-openwiki-refresh.sh` | `npm test` only for suite composition |
 | OpenWiki registry/dispatch | `tests/test-openwiki-dispatch.sh` | refresh test when wrapper contract changes |
@@ -67,4 +67,4 @@ The refresh test covers environment confinement, output allowlisting, merge, cle
 
 ## Repository workflow
 
-Use `qq-methodology link|unlink|inspect` to control QQ activation for another Git repository; see [execution profiles](../agent-runtime/execution-profiles.md#activation-and-startup). Board tools use the installed `backlog.md` CLI, while the [Backlog guard](../agent-runtime/session-safety.md) blocks direct Pi writes into `backlog/`. Provider operations are in [Telemetry](telemetry.md).
+Use `qq-methodology link|unlink|inspect` to control QQ activation for another Git repository; see [execution profiles](../agent-runtime/execution-profiles.md#activation-and-startup). Board tools use the installed `backlog.md` CLI, while the [Backlog guard](../agent-runtime/session-safety.md) blocks direct Pi writes into `backlog/`. Provider operations are supplied through the pinned [QQ Dashboard integration](telemetry.md).

@@ -15,7 +15,7 @@ openwiki:
 
 # Roles and Execution Profiles
 
-Consult this page when changing activation, roles, prompts, `/profile`, `qq-profile`, or the policy shared with [telemetry](../operations/telemetry.md) and [run delegation](../workflows/workshops.md).
+Consult this page when changing activation, roles, prompts, `/profile`, `qq-profile`, or the public list contract consumed by the [QQ Dashboard](../operations/telemetry.md) and [run delegation](../workflows/workshops.md).
 
 ## Activation and startup
 
@@ -59,17 +59,17 @@ bin/qq-profile context inspect
 bin/qq-profile context install
 ```
 
-`list --json` emits `qq.profile-list/v1`, the consumer-facing contract used by [telemetry](../operations/telemetry.md). It contains ordered role profiles and `scribe`/`qa` service bindings without exposing the writable policy representation. `default` is the only command that changes a durable role default.
+`list --json` emits `qq.profile-list/v1`, the consumer-facing contract used by the pinned [QQ Dashboard](../operations/telemetry.md). It contains ordered role profiles and `scribe`/`qa` service bindings without exposing the writable policy representation. `default` is the only command that changes a durable role default.
 
 `context install` writes or updates only xAI context overrides in Pi's `models.json` and removes QQ's old context overrides from other configured providers while preserving unrelated provider/model fields. Policy, pane-state, and model writes are private and atomic.
 
 ## Change and validation
 
-A role change crosses `ROLE_NAMES`, policy validation, prompts, profile UI, messaging presence, board gating, telemetry, and tests. A policy or list-contract change must update `validateExecutionPolicy`, `profileListDocument`, `qq-profile`, consumers, and focused tests. Internal policy tests are not enough: smoke the shipped `bin/qq-profile list --json` path because telemetry executes that command.
+A role change crosses `ROLE_NAMES`, policy validation, prompts, profile UI, messaging presence, board gating, the Dashboard, and tests. A policy or list-contract change must update `validateExecutionPolicy`, `profileListDocument`, `qq-profile`, consumers, and focused tests. Internal policy tests are not enough: smoke `bin/qq-profile list --json`, then install dependencies and run `bin/qq-dashboard --once` because that is the real consumer path.
 
 ```bash
 node --experimental-strip-types tests/test-execution-profiles.mjs .
 tests/test-methodology.sh
 ```
 
-Run `tests/test-telemetry.sh` for profile-list or display changes, messaging live tests for role-event changes, and `npm test` only for composition or cross-extension changes.
+For profile-list changes, run the focused profile suite and then the installed `bin/qq-dashboard --once` consumer smoke. Run messaging live tests for role-event changes, and `npm test` only for composition or cross-extension changes.
