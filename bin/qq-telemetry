@@ -10,17 +10,7 @@ source "$SCRIPT_DIR/lib/telemetry-lib.sh"
 
 TELEMETRY_HOME="${HOME:-}"
 AUTH_FILE="${TELEMETRY_HOME}/.pi/agent/auth.json"
-PROFILES_PATH_ERROR=''
-if [ -n "${QQ_TELEMETRY_PROFILES_FILE:-}" ]; then
-  PROFILES_FILE="$QQ_TELEMETRY_PROFILES_FILE"
-elif [ -n "${XDG_CONFIG_HOME:-}" ] && [[ "$XDG_CONFIG_HOME" == /* ]]; then
-  PROFILES_FILE="${XDG_CONFIG_HOME%/}/qq/execution-profiles.json"
-elif [ -n "${HOME:-}" ] && [[ "$HOME" == /* ]]; then
-  PROFILES_FILE="${HOME%/}/.config/qq/execution-profiles.json"
-else
-  PROFILES_FILE=''
-  PROFILES_PATH_ERROR='XDG_CONFIG_HOME or HOME must be absolute'
-fi
+PROFILE_COMMAND="${QQ_PROFILE_BIN:-$SCRIPT_DIR/qq-profile}"
 METER_CACHE="${TELEMETRY_HOME}/.local/state/qq/telemetry/meter-cache.json"
 FRAME_FILE="${TELEMETRY_HOME}/.local/state/qq/telemetry/last-frame.txt"
 REFRESH_SECS="${TELEMETRY_REFRESH:-30}"
@@ -127,64 +117,53 @@ QWEN_L2=''
 
 ROLES_BODY=''
 
-validate_profiles_file() {
-  local canonical mode
-  [ -n "$PROFILES_FILE" ] || return 1
-  [ -f "$PROFILES_FILE" ] && [ ! -L "$PROFILES_FILE" ] || return 1
-  canonical=$(realpath -e -- "$PROFILES_FILE" 2>/dev/null) || return 1
-  [ "$canonical" = "$PROFILES_FILE" ] || return 1
-  [ "$(stat -c '%u' -- "$PROFILES_FILE" 2>/dev/null)" = "$(id -u)" ] || return 1
-  mode=$(stat -c '%a' -- "$PROFILES_FILE" 2>/dev/null) || return 1
-  (( (8#$mode & 8#022) == 0 )) || return 1
-  jq -e '
-    def name: type == "string" and test("^[a-z][a-z0-9-]{0,62}$");
-    def profile:
-      type == "object" and keys == ["effort", "model", "provider"]
-      and (.provider | type == "string" and length > 0)
-      and (.model | type == "string" and length > 0)
-      and (.effort | IN("off", "minimal", "low", "medium", "high", "xhigh", "max"));
-    def role:
-      type == "object" and keys == ["default", "profiles"]
-      and (.default | name)
-      and (.profiles | type == "object" and length > 0)
-      and ([.profiles | to_entries[] | (.key | name) and (.value | profile)] | all)
-      and (.profiles[.default] != null);
-    type == "object" and keys == ["contextWindowCeiling", "qa", "roles", "schema", "scribe"]
-    and (.schema == "qq.execution-profiles/v1")
-    and (.contextWindowCeiling == 200000)
-    and (.scribe | profile)
-    and (.qa | profile)
-    and (.roles | type == "object" and keys == ["architect", "runner"])
-    and ([.roles | to_entries[] | (.key | name) and (.value | role)] | all)
-  ' "$PROFILES_FILE" >/dev/null 2>&1
-}
-
 profiles_refusal() {
-  if [ -n "$PROFILES_PATH_ERROR" ]; then
-    printf 'qq-telemetry: execution-profile policy path is unresolved: %s\n' "$PROFILES_PATH_ERROR" >&2
-  else
-    printf 'qq-telemetry: execution-profile policy is unsafe, unavailable, or malformed at %s\n' "$PROFILES_FILE" >&2
-  fi
+  printf 'qq-telemetry: execution profiles unavailable from qq-profile\n' >&2
 }
 
 load_roles() {
-  local rows kind role model effort mark width=0 first=1 extra
+  local profiles_json rows kind role model effort mark width=0 first=1 extra
   local -a kinds=() roles=() models=() efforts=() marks=() lines=()
-  ROLES_BODY=''
-  if ! validate_profiles_file; then
+  ROLES_BODY="   unavailable"
+  profiles_json=$("$PROFILE_COMMAND" list --json 2>/dev/null) || {
     profiles_refusal
-    return 65
-  fi
-  rows=$(jq -r '
-    (.roles | to_entries[] as $role
-      | ["role", $role.key, "", "", ""],
-        ($role.value.profiles | to_entries
-         | sort_by([.value.model, ({off:0,minimal:1,low:2,medium:3,high:4,xhigh:5,max:6}[.value.effort] // 99), .key])
-         | .[] | ["profile", $role.key, .value.model, .value.effort,
-                  (if .key == $role.value.default then "default" else "" end)])),
-    ["service", "scribe", .scribe.model, .scribe.effort, ""],
-    ["service", "qa", .qa.model, .qa.effort, ""]
-    | @tsv' "$PROFILES_FILE" 2>/dev/null) || return 65
+    return 0
+  }
+  rows=$(jq -er '
+    def text: type == "string" and length > 0;
+    def profile:
+      type == "object"
+      and (.name | text)
+      and (.provider | text)
+      and (.model | text)
+      and (.effort | text);
+    def role:
+      type == "object"
+      and (.name | text)
+      and (.default | text)
+      and (.profiles | type == "array" and length > 0)
+      and ([.profiles[] | profile] | all)
+      and (.default as $default | [.profiles[].name] | index($default) != null);
+    if type == "object"
+      and .schema == "qq.profile-list/v1"
+      and (.roles | type == "array" and length > 0)
+      and ([.roles[] | role] | all)
+      and (.services | type == "array" and length > 0)
+      and ([.services[] | profile] | all)
+    then
+      (.roles[] as $role
+        | ["role", $role.name, "", "", ""],
+          ($role.profiles[]
+           | ["profile", $role.name, .model, .effort,
+              (if .name == $role.default then "default" else "" end)])),
+      (.services[] | ["service", .name, .model, .effort, ""])
+      | @tsv
+    else error("malformed profile list") end
+  ' <<<"$profiles_json" 2>/dev/null) || {
+    profiles_refusal
+    return 0
+  }
+  ROLES_BODY=''
   while IFS=$'\t' read -r kind role model effort mark; do
     [ -n "$kind" ] || continue
     kinds+=("$kind"); roles+=("$role"); models+=("$model"); efforts+=("$effort"); marks+=("$mark")
@@ -751,7 +730,7 @@ fetch_all() {
   local codex_file codex_body=''
   local -a pids=()
   local grok_access grok_file grok_body=''
-  load_roles || return
+  load_roles
   GPT_WEEK='7d       unavailable'
   GROK_WEEK='7d       unavailable'
   refresh_xai_auth
@@ -861,10 +840,6 @@ qq_telemetry_main() {
     *) usage >&2; return 2 ;;
   esac
   [ "$#" -le 1 ] || { usage >&2; return 2; }
-  if ! validate_profiles_file; then
-    profiles_refusal
-    return 65
-  fi
   if [ -z "$TELEMETRY_HOME" ] || [[ "$TELEMETRY_HOME" != /* ]]; then
     printf 'qq-telemetry: HOME must be absolute\n' >&2
     return 65

@@ -8,6 +8,7 @@ import {
   parseModelList,
   listedProfiles,
   profileFor,
+  profileListDocument,
   readExecutionPolicy,
   uniqueBindings,
   updateRoleDefault,
@@ -15,7 +16,7 @@ import {
 
 function usage() {
   console.log(`Usage:
-  qq-profile list [role]
+  qq-profile list [role] [--json]
   qq-profile default <role> [profile]
   qq-profile context inspect
   qq-profile context install
@@ -48,17 +49,25 @@ async function main() {
   const policy = await readExecutionPolicy(path);
 
   if (command === "list") {
-    if (second) throw new Error("list accepts at most one role");
-    if (first) {
-      if (first === "scribe" || first === "qa") {
-        const profile = policy[first];
-        console.log(`${first} (service)`);
+    const json = first === "--json" || second === "--json";
+    const roleName = first === "--json" ? undefined : first;
+    if ((first === "--json" && second) || (second && second !== "--json")) {
+      throw new Error("list accepts at most one role and --json");
+    }
+    if (json) {
+      console.log(JSON.stringify(profileListDocument(policy, roleName)));
+      return;
+    }
+    if (roleName) {
+      if (roleName === "scribe" || roleName === "qa") {
+        const profile = policy[roleName];
+        console.log(`${roleName} (service)`);
         console.log(`   ${profile.provider}/${profile.model} · ${profile.effort}`);
         return;
       }
-      const role = policy.roles[first];
-      if (!role) throw new Error(`unknown execution-profile role: ${first}`);
-      printRole(first, role);
+      const role = policy.roles[roleName];
+      if (!role) throw new Error(`unknown execution-profile role: ${roleName}`);
+      printRole(roleName, role);
     } else {
       for (const [name, role] of Object.entries(policy.roles)) printRole(name, role);
       for (const name of ["scribe", "qa"]) {

@@ -7,6 +7,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { ROLE_NAMES } from "./roles.mjs";
 
 export const POLICY_SCHEMA = "qq.execution-profiles/v1";
+export const PROFILE_LIST_SCHEMA = "qq.profile-list/v1";
 export const CONTEXT_WINDOW_CEILING = 200_000;
 export const EFFORTS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const EFFORT_ORDER = Object.freeze([...EFFORTS]);
@@ -145,6 +146,33 @@ export function listedProfiles(role) {
     if (byEffort) return byEffort;
     return leftName.localeCompare(rightName);
   });
+}
+
+function listedProfile(name, profile) {
+  return { name, provider: profile.provider, model: profile.model, effort: profile.effort };
+}
+
+export function profileListDocument(policy, roleName) {
+  const roleNames = roleName === undefined ? ROLE_NAMES : [roleName];
+  const roles = [];
+  const services = [];
+  for (const name of roleNames) {
+    if (name === "scribe" || name === "qa") {
+      services.push(listedProfile(name, policy[name]));
+      continue;
+    }
+    const role = policy.roles[name];
+    if (!role) throw new Error(`unknown execution-profile role: ${name}`);
+    roles.push({
+      name,
+      default: role.default,
+      profiles: listedProfiles(role).map(([profileName, profile]) => listedProfile(profileName, profile)),
+    });
+  }
+  if (roleName === undefined) {
+    for (const name of ["scribe", "qa"]) services.push(listedProfile(name, policy[name]));
+  }
+  return { schema: PROFILE_LIST_SCHEMA, roles, services };
 }
 
 export function profileFor(policy, roleName, profileName) {

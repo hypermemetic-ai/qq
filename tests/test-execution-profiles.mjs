@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { chmod, mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -57,6 +58,32 @@ assert.deepEqual(lib.listedProfiles({
     "grok-high": { provider: "xai", model: "grok-4.6", effort: "high" },
   },
 }).map(([name]) => name), ["sol-high", "grok-high", "grok-xhigh"]);
+const expectedProfileList = {
+  schema: "qq.profile-list/v1",
+  roles: [
+    {
+      name: "runner",
+      default: "grok-high",
+      profiles: [
+        { name: "qwen-deepseek-max", provider: "qwen-token-plan", model: "deepseek-v4-flash-0731", effort: "max" },
+        { name: "sol-high", provider: "openai-codex", model: "gpt-5.6-sol", effort: "high" },
+        { name: "grok-high", provider: "xai", model: "grok-4.6", effort: "high" },
+      ],
+    },
+    {
+      name: "architect",
+      default: "grok-high",
+      profiles: [
+        { name: "grok-high", provider: "xai", model: "grok-4.6", effort: "high" },
+      ],
+    },
+  ],
+  services: [
+    { name: "scribe", provider: "xai", model: "grok-4.6", effort: "high" },
+    { name: "qa", provider: "openai-codex", model: "gpt-5.6-sol", effort: "xhigh" },
+  ],
+};
+assert.deepEqual(lib.profileListDocument(lib.validateExecutionPolicy(policy())), expectedProfileList);
 assert.equal(lib.parseTokenCount("200K"), 200000);
 assert.equal(lib.parseTokenCount("1M"), 1_000_000);
 const parsed = lib.parseModelList("provider model context max-out thinking images\nopenai-codex gpt-5.6-sol 272K 128K yes yes\n");
@@ -72,6 +99,12 @@ try {
   await lib.writeExecutionPolicy(policy(), policyPath);
   assert.equal((await stat(policyPath)).mode & 0o777, 0o600);
   assert.equal((await lib.readExecutionPolicy(policyPath)).roles.runner.default, "grok-high");
+  const profileListResult = spawnSync(join(root, "bin/qq-profile"), ["list", "--json"], {
+    encoding: "utf8",
+    env: { ...process.env, HOME: temporary, XDG_CONFIG_HOME: join(temporary, "config") },
+  });
+  assert.equal(profileListResult.status, 0, profileListResult.stderr);
+  assert.deepEqual(JSON.parse(profileListResult.stdout), expectedProfileList);
   assert.deepEqual(await lib.updateRoleDefault("runner", "qwen-deepseek-max", policyPath), { previous: "grok-high", current: "qwen-deepseek-max" });
   assert.equal((await lib.readExecutionPolicy(policyPath)).roles.runner.default, "qwen-deepseek-max");
   const legacy = policy();
