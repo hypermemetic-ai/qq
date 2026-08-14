@@ -91,6 +91,11 @@ export default function registerReviewFlow(pi, deps = {}) {
     await pi.sendMessage(landedMessage(landed), { triggerTurn: false });
   }
 
+  function ownsHandoff(state, ctx) {
+    const sessionId = ctx.sessionManager?.getSessionId?.();
+    return typeof sessionId === "string" && sessionId.length > 0 && sessionId === state.architectSession;
+  }
+
   function offerKey(state) {
     return isFailedLand(state) ? `${state.id}:land:${state.blockedReason}` : `${state.id}:${state.updatedAt}`;
   }
@@ -108,7 +113,7 @@ export default function registerReviewFlow(pi, deps = {}) {
 
   async function offer(state, ctx, options = {}) {
     const key = offerKey(state);
-    if (showing || role !== "architect" || !ctx.hasUI) return;
+    if (showing || role !== "architect" || !ctx.hasUI || !ownsHandoff(state, ctx)) return;
     if (!options.force && (shown.has(key) || ctx.isIdle?.() === false)) return;
     showing = true;
     shown.add(key);
@@ -148,6 +153,7 @@ export default function registerReviewFlow(pi, deps = {}) {
     if (!ctx || role !== "architect") return;
     const project = projectFromCwd(ctx.cwd, env);
     for (const state of await listProposals(project, env)) {
+      if (!ownsHandoff(state, ctx)) continue;
       if (isFailedLand(state)) {
         const key = offerKey(state);
         if (!polledFailedLandKeys.has(state.id)) shown.add(key);
@@ -164,7 +170,7 @@ export default function registerReviewFlow(pi, deps = {}) {
     async execute(_id, _params, _signal, _update, ctx) {
       if (role !== "architect") return result("review is available only in an architect session.", { status: "refused" });
       if (!ctx.hasUI) return result("review requires an interactive architect session.", { status: "refused" });
-      const waiting = await listReviews(projectFromCwd(ctx.cwd, env), env);
+      const waiting = (await listReviews(projectFromCwd(ctx.cwd, env), env)).filter((state) => ownsHandoff(state, ctx));
       if (!waiting.length) return result("No waiting reviews.", { status: "idle" });
       for (const state of waiting) await offer(state, ctx, { force: true });
       return result(`Offered ${waiting.length} waiting review${waiting.length === 1 ? "" : "s"}.`, { status: "offered", count: waiting.length });

@@ -189,6 +189,7 @@ try {
     cwd: mainRoot,
     hasUI: true,
     isIdle: () => true,
+    sessionManager: { getSessionId() { return base.architectSession; } },
     ui: {
       async select(pack, options) { choices.push({ pack, options }); return queued.shift() ?? "later"; },
       async input() { return "tighten the summary"; },
@@ -298,6 +299,26 @@ try {
     sendMessage(payload, options) { successfulLandMessages.push({ payload, options }); },
   };
   extension.default(successfulLandPi, { env: successfulLandEnv, exec: successfulLandRun });
+  const successfulLandReviewTool = successfulLandTools.find(({ name }) => name === "review");
+  let mismatchedLandSelections = 0;
+  const mismatchedSuccessfulLandCtx = {
+    ...ctx,
+    sessionManager: { getSessionId() { return "019ff7ad-2cba-75a9-adc2-c15a0a92d6aa"; } },
+    ui: {
+      async select() { mismatchedLandSelections += 1; return "approve"; },
+      async input() { throw new Error("a non-owning architect should not receive this handoff"); },
+      notify(message, level) { successfulLandNotifications.push({ message, level }); },
+    },
+  };
+  await successfulLandEvents.get("session_start")({}, mismatchedSuccessfulLandCtx);
+  assert.equal(mismatchedLandSelections, 0);
+  assert.equal(successfulLandMessages.length, 0);
+  assert.equal(JSON.parse(await readFile(successfulLandPath, "utf8")).status, "proposal");
+  const mismatchedReview = await successfulLandReviewTool.execute("mismatched-review", {}, undefined, undefined, mismatchedSuccessfulLandCtx);
+  assert.equal(mismatchedReview.details.status, "idle");
+  assert.equal(mismatchedLandSelections, 0);
+  await successfulLandEvents.get("session_shutdown")();
+
   const successfulLandCtx = {
     ...ctx,
     sessionManager: { getSessionId() { return successfulLandState.architectSession; } },
