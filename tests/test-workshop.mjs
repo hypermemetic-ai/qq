@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 
 const root = process.argv[2];
 const lib = await import(pathToFileURL(join(root, "bin/lib/workshop.mjs")));
+const admission = await import(pathToFileURL(join(root, "bin/lib/admission.mjs")));
 const extension = await import(pathToFileURL(join(root, "extensions/workshop.ts")));
 
 assert.equal(lib.taskSlug("TASK-1"), "task-1");
@@ -18,6 +19,17 @@ assert.throws(() => lib.parseHerdr(paneResponse, "tab_created"), /pane_info, exp
 assert.throws(() => lib.parseHerdr("created w2T:p9"), /malformed JSON/);
 assert.throws(() => lib.parseHerdr("{}"), /malformed response/);
 assert.throws(() => lib.parseHerdr(JSON.stringify({ result: [] })), /malformed response/);
+assert.deepEqual(extension.parseAdmissionDecision('{"decision":"clear"}'), { decision: "clear" });
+assert.deepEqual(extension.parseAdmissionDecision("BOUNCE: review.mjs is already live"), {
+  decision: "bounce", reason: "review.mjs is already live",
+});
+assert.throws(() => extension.parseAdmissionDecision('{"decision":"bounce"}'), /malformed decision/);
+assert.deepEqual(admission.parseWorktreeList([
+  "worktree /repo", "HEAD aaa", "branch refs/heads/main", "", "worktree /runs/t-1", "HEAD bbb", "branch refs/heads/qq/t-1-nonce", "",
+].join("\n")), [
+  { path: "/repo", head: "aaa", branch: "main" },
+  { path: "/runs/t-1", head: "bbb", branch: "qq/t-1-nonce" },
+]);
 assert.equal(lib.paneHasAvailableShell({
   process_info: { shell_pid: 10, foreground_process_group_id: 10, foreground_processes: [{ pid: 10, name: "bash" }] },
 }), true);
@@ -73,17 +85,23 @@ try {
     qa: { provider: "test", model: "qa", effort: "xhigh" },
   }), { mode: 0o600 });
   let scribeRequest;
-  const generated = await extension.makeNote({
+  let vetRequest;
+  const completionCtx = {
     signal: undefined,
     sessionManager: { getBranch: () => branch },
     modelRegistry: {
       find(provider, model) { assert.equal(`${provider}/${model}`, "test/scribe"); return { provider, id: model }; },
       async complete(_model, request, options) {
+        if (request.systemPrompt.startsWith("Vet one proposed delegation")) {
+          vetRequest = { request, options };
+          return { stopReason: "stop", content: [{ type: "text", text: '{"decision":"bounce","reason":"review.mjs is already live"}' }] };
+        }
         scribeRequest = { request, options };
         return { stopReason: "stop", content: [{ type: "text", text: exactNote }] };
       },
     },
-  }, task, { policyPath, scribePromptPath: join(root, "prompts", "services", "scribe.md") });
+  };
+  const generated = await extension.makeNote(completionCtx, task, { policyPath, scribePromptPath: join(root, "prompts", "services", "scribe.md") });
   assert.equal(generated.note, exactNote);
   assert.equal(generated.transcript, transcript);
   assert.equal(scribeRequest.request.systemPrompt, "Write a helpful note for the next agent.\nOnly what's missing in the ticket: decisions, files, names, constraints, and what's still open.\nPlain language.");
@@ -96,6 +114,14 @@ try {
   assert.doesNotMatch(scribeInput, /operator-0\n|operator-1\n|SECRET_THINKING|SECRET_COMPACTION|SECRET_TOOL_RESULT/);
   assert.equal(scribeRequest.options.reasoning, "low");
   assert.equal(scribeRequest.options.cacheRetention, "none");
+  const vetDecision = await extension.makeAdmissionDecision(completionCtx, "live evidence", {
+    policyPath, admissionPromptPath: join(root, "prompts", "services", "admission-vet.md"),
+  });
+  assert.deepEqual(vetDecision, { decision: "bounce", reason: "review.mjs is already live" });
+  assert.equal(vetRequest.options.reasoning, "low");
+  assert.equal(vetRequest.options.cacheRetention, "none");
+  assert.notEqual(vetRequest.options.sessionId, scribeRequest.options.sessionId);
+  assert.equal(vetRequest.request.messages[0].content[0].text, "live evidence");
 
   const prepared = await lib.prepareWorkshop({ cwd: "/repo", env, project: "qq", task, note: exactNote, transcript });
   assert.equal(await readFile(prepared.ticketPath, "utf8"), `${ticket}\n`);
@@ -107,6 +133,28 @@ try {
   assert.equal((await lstat(prepared.transcriptPath)).mode & 0o077, 0);
   assert.equal((await lstat(prepared.notePath)).mode & 0o077, 0);
   assert.equal((await lstat(prepared.gatePath)).mode & 0o077, 0);
+  assert.equal(await admission.findExistingBrief({ taskId: task.id, project: "qq", env }), exactNote);
+
+  const lockOrder = [];
+  let releaseFirstLock;
+  let firstLockEntered;
+  const firstEntered = new Promise((resolveEntered) => { firstLockEntered = resolveEntered; });
+  const firstLock = admission.withAdmissionLock({ run: async () => assert.fail("commonDir avoids git"), cwd: "/repo", commonDir: scratch }, async () => {
+    lockOrder.push("first:enter");
+    firstLockEntered();
+    await new Promise((resolveRelease) => { releaseFirstLock = resolveRelease; });
+    lockOrder.push("first:leave");
+  });
+  await firstEntered;
+  const secondLock = admission.withAdmissionLock({ run: async () => assert.fail("commonDir avoids git"), cwd: "/repo", commonDir: scratch, intervalMs: 1 }, async () => {
+    lockOrder.push("second:enter");
+  });
+  await new Promise((resolveImmediate) => setImmediate(resolveImmediate));
+  assert.deepEqual(lockOrder, ["first:enter"]);
+  releaseFirstLock();
+  await Promise.all([firstLock, secondLock]);
+  assert.deepEqual(lockOrder, ["first:enter", "first:leave", "second:enter"]);
+  await assert.rejects(access(join(scratch, "qq-admit.lock")), { code: "ENOENT" });
 
   const gateCalls = [];
   const gateRun = async (command, args, options = {}) => {
@@ -282,10 +330,17 @@ try {
   function delegateHarness({ run, ...deps }) {
     const registrations = [];
     const events = new Map();
+    const admitDelegate = deps.admitDelegate ?? (async (ctx, id) => {
+      const viewed = await run("backlog", ["task", "view", id, "--json"], { cwd: ctx.cwd });
+      const admittedTask = JSON.parse(viewed.stdout).task;
+      const moved = await run("backlog", ["task", "edit", id, "--status", "In Progress", "--plain"], { cwd: ctx.cwd });
+      assert.equal(moved.code, 0);
+      return { kind: "claimed", task: admittedTask, project: "qq", commonDir: "/repo/.git" };
+    });
     extension.default({
       registerTool(tool) { registrations.push(tool); },
       events: { on(name, fn) { events.set(name, fn); } },
-    }, { env, exec: run, ...deps });
+    }, { env, exec: run, admitDelegate, ...deps });
     events.get("qq:role-selected")({ role: "architect" });
     return registrations.find(({ name }) => name === "delegate");
   }
@@ -307,14 +362,14 @@ try {
   const approvedPreparation = { taskId: task.id, stateDir: "/private/gate", notePath: "/private/gate/note.md", gatePath: "/private/gate/gate.md" };
   const approvedTool = delegateHarness({
     run: backlogRun(approvalStatuses, approvalOrder),
-    async makeNote() { approvalOrder.push("scribe"); assert.deepEqual(approvalStatuses, []); return { note: exactNote, qaBinding: { model: "qa" } }; },
-    async prepareWorkshop(options) { approvalOrder.push("prepare"); assert.equal(options.note, exactNote); assert.deepEqual(approvalStatuses, []); return approvedPreparation; },
-    async awaitBriefGate(options) { approvalOrder.push("gate"); assert.equal(options.prepared, approvedPreparation); assert.deepEqual(approvalStatuses, []); return "approved"; },
+    async makeNote() { approvalOrder.push("scribe"); assert.deepEqual(approvalStatuses, ["In Progress"]); return { note: exactNote, qaBinding: { model: "qa" } }; },
+    async prepareWorkshop(options) { approvalOrder.push("prepare"); assert.equal(options.note, exactNote); assert.deepEqual(approvalStatuses, ["In Progress"]); return approvedPreparation; },
+    async awaitBriefGate(options) { approvalOrder.push("gate"); assert.equal(options.prepared, approvedPreparation); assert.deepEqual(approvalStatuses, ["In Progress"]); return "approved"; },
     async spawnWorkshop(options) { approvalOrder.push("spawn"); assert.equal(options.prepared, approvedPreparation); assert.deepEqual(approvalStatuses, ["In Progress"]); return { pane: "runner" }; },
     async discardWorkshop() { approvalOrder.push("discard"); },
   });
   const approved = await approvedTool.execute("approve", { id: task.id }, undefined, undefined, ctx);
-  assert.deepEqual(approvalOrder, ["scribe", "prepare", "gate", "status:In Progress", "spawn"]);
+  assert.deepEqual(approvalOrder, ["status:In Progress", "scribe", "prepare", "gate", "spawn"]);
   assert.deepEqual(approvalStatuses, ["In Progress"]);
   assert.equal(approved.content[0].text, `Approved ${task.id}; runner started.`);
   assert.equal(approved.content[0].text.includes("\n"), false);
@@ -327,13 +382,13 @@ try {
     run: backlogRun(cancelStatuses, cancelOrder),
     async makeNote() { cancelOrder.push("scribe"); return { note: exactNote, qaBinding: {} }; },
     async prepareWorkshop() { cancelOrder.push("prepare"); return approvedPreparation; },
-    async awaitBriefGate() { cancelOrder.push("gate"); assert.deepEqual(cancelStatuses, []); return "cancelled"; },
+    async awaitBriefGate() { cancelOrder.push("gate"); assert.deepEqual(cancelStatuses, ["In Progress"]); return "cancelled"; },
     async discardWorkshop() { cancelOrder.push("discard"); },
     async spawnWorkshop() { cancelSpawned = true; },
   });
   const cancelled = await cancelledTool.execute("cancel", { id: task.id }, undefined, undefined, ctx);
-  assert.deepEqual(cancelOrder, ["scribe", "prepare", "gate", "discard"]);
-  assert.deepEqual(cancelStatuses, []);
+  assert.deepEqual(cancelOrder, ["status:In Progress", "scribe", "prepare", "gate", "status:To Do", "discard"]);
+  assert.deepEqual(cancelStatuses, ["In Progress", "To Do"]);
   assert.equal(cancelSpawned, false);
   assert.equal(cancelled.content[0].text, `Cancelled ${task.id}; runner not started.`);
   assert.equal(cancelled.content[0].text.includes("\n"), false);
@@ -350,7 +405,7 @@ try {
   });
   const gateFailure = await failedTool.execute("gate-failure", { id: task.id }, undefined, undefined, ctx);
   assert.match(gateFailure.content[0].text, /gate unavailable/);
-  assert.deepEqual(failureStatuses, []);
+  assert.deepEqual(failureStatuses, ["In Progress", "To Do"]);
   assert.equal(failureDiscarded, true);
 
   const rollbackStatuses = [];
@@ -376,7 +431,142 @@ try {
   });
   const noteFailure = await noteFailureTool.execute("note-failure", { id: task.id }, undefined, undefined, ctx);
   assert.match(noteFailure.content[0].text, /note failed/);
-  assert.deepEqual(noteFailureStatuses, []);
+  assert.deepEqual(noteFailureStatuses, ["In Progress", "To Do"]);
+
+  function admissionBoardRun(board, boardEvents) {
+    return async (_command, args) => {
+      if (args[0] === "task" && args[1] === "view") {
+        const viewed = board.get(args[2]);
+        return viewed
+          ? { code: 0, stdout: JSON.stringify({ task: viewed }), stderr: "" }
+          : { code: 1, stdout: "", stderr: "missing" };
+      }
+      if (args[0] === "task" && args[1] === "list") {
+        const status = args[args.indexOf("--status") + 1];
+        return {
+          code: 0,
+          stdout: JSON.stringify({ tasks: [...board.values()].filter((entry) => entry.status === status).map(({ id, title, status: taskStatus }) => ({ id, title, status: taskStatus })) }),
+          stderr: "",
+        };
+      }
+      if (args[0] === "task" && args[1] === "edit") {
+        const edited = board.get(args[2]);
+        edited.status = args[args.indexOf("--status") + 1];
+        boardEvents.push(`status:${edited.id}:${edited.status}`);
+        return { code: 0, stdout: "", stderr: "" };
+      }
+      throw new Error(`unexpected admission command: ${args.join(" ")}`);
+    };
+  }
+
+  function actualAdmissionTool(board, boardEvents, overrides = {}) {
+    const run = admissionBoardRun(board, boardEvents);
+    const calls = { notes: [], gates: [], spawns: [] };
+    const tool = delegateHarness({
+      run,
+      admitDelegate: extension.admitDelegate,
+      async withAdmissionLock(options, action) {
+        return admission.withAdmissionLock({ ...options, commonDir: scratch, intervalMs: 1 }, action);
+      },
+      async collectLiveWorktreeDiffs() {
+        return [{ path: "/runs/t-25", name: "t-25", branch: "qq/t-25-live", files: ["bin/lib/review.mjs"] }];
+      },
+      async findExistingBrief() { return undefined; },
+      makeAdmissionDecision: overrides.makeAdmissionDecision,
+      async makeNote(_ctx, admittedTask) {
+        calls.notes.push(admittedTask.id);
+        return { note: `${exactNote} for ${admittedTask.id}`, qaBinding: {} };
+      },
+      async prepareWorkshop({ task: admittedTask }) {
+        return { taskId: admittedTask.id, stateDir: `/private/${admittedTask.id}`, notePath: `/private/${admittedTask.id}/note.md` };
+      },
+      async awaitBriefGate({ prepared: gatePreparation }) {
+        calls.gates.push(gatePreparation.taskId);
+        if (overrides.awaitBriefGate) return overrides.awaitBriefGate(gatePreparation);
+        return "approved";
+      },
+      async spawnWorkshop({ task: admittedTask }) { calls.spawns.push(admittedTask.id); },
+      async discardWorkshop() {},
+    });
+    return { tool, calls };
+  }
+
+  const overlapBoard = new Map([
+    ["TASK-6", { id: "TASK-6", title: "Change workshop flow", status: "To Do", implementationNotes: "Edit extensions/workshop.ts" }],
+    ["TASK-7", { id: "TASK-7", title: "Also change workshop flow", status: "To Do", implementationNotes: "Edit extensions/workshop.ts" }],
+  ]);
+  const overlapEvents = [];
+  let releaseOverlapVet;
+  let overlapVetEntered;
+  const overlapVetWaiting = new Promise((resolveEntered) => { overlapVetEntered = resolveEntered; });
+  const overlap = actualAdmissionTool(overlapBoard, overlapEvents, {
+    async makeAdmissionDecision(_ctx, evidence) {
+      const incomingId = /Incoming ticket:\n\n\{\n  "id": "([^"]+)"/.exec(evidence)?.[1];
+      assert.match(evidence, /bin\/lib\/review\.mjs/);
+      if (incomingId === "TASK-6") {
+        overlapVetEntered();
+        await new Promise((resolveRelease) => { releaseOverlapVet = resolveRelease; });
+        return { decision: "clear" };
+      }
+      assert.match(evidence, /"id": "TASK-6"[\s\S]*?"status": "In Progress"/);
+      return { decision: "bounce", reason: "extensions/workshop.ts is already claimed by TASK-6" };
+    },
+  });
+  const firstOverlap = overlap.tool.execute("overlap-1", { id: "TASK-6" }, undefined, undefined, ctx);
+  await overlapVetWaiting;
+  const secondOverlap = overlap.tool.execute("overlap-2", { id: "TASK-7" }, undefined, undefined, ctx);
+  releaseOverlapVet();
+  const [firstOverlapResult, secondOverlapResult] = await Promise.all([firstOverlap, secondOverlap]);
+  assert.equal(firstOverlapResult.content[0].text, "Approved TASK-6; runner started.");
+  assert.equal(secondOverlapResult.content[0].text, "Bounced TASK-7: extensions/workshop.ts is already claimed by TASK-6");
+  assert.equal(secondOverlapResult.content[0].text.includes("\n"), false);
+  assert.equal(overlapBoard.get("TASK-7").status, "To Do");
+  assert.deepEqual(overlap.calls.notes, ["TASK-6"]);
+  assert.deepEqual(overlap.calls.gates, ["TASK-6"]);
+  assert.deepEqual(overlap.calls.spawns, ["TASK-6"]);
+
+  const clearBoard = new Map([
+    ["TASK-8", { id: "TASK-8", title: "Change workshop", status: "To Do", implementationNotes: "Edit workshop.ts" }],
+    ["TASK-9", { id: "TASK-9", title: "Change telemetry", status: "To Do", implementationNotes: "Edit telemetry-lib.sh" }],
+  ]);
+  const clearEvents = [];
+  let releaseClearVet;
+  let clearVetEntered;
+  let activeGates = 0;
+  let maximumActiveGates = 0;
+  const clearVetWaiting = new Promise((resolveEntered) => { clearVetEntered = resolveEntered; });
+  const clear = actualAdmissionTool(clearBoard, clearEvents, {
+    async makeAdmissionDecision(_ctx, evidence) {
+      const incomingId = /Incoming ticket:\n\n\{\n  "id": "([^"]+)"/.exec(evidence)?.[1];
+      if (incomingId === "TASK-8") {
+        clearVetEntered();
+        await new Promise((resolveRelease) => { releaseClearVet = resolveRelease; });
+      } else {
+        assert.equal(clearBoard.get("TASK-8").status, "In Progress");
+        clearEvents.push("second-vet-after-first-claim");
+      }
+      return { decision: "clear" };
+    },
+    async awaitBriefGate() {
+      activeGates += 1;
+      maximumActiveGates = Math.max(maximumActiveGates, activeGates);
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
+      activeGates -= 1;
+      return "approved";
+    },
+  });
+  const firstClear = clear.tool.execute("clear-1", { id: "TASK-8" }, undefined, undefined, ctx);
+  await clearVetWaiting;
+  const secondClear = clear.tool.execute("clear-2", { id: "TASK-9" }, undefined, undefined, ctx);
+  releaseClearVet();
+  const clearResults = await Promise.all([firstClear, secondClear]);
+  assert.deepEqual(clearResults.map((value) => value.content[0].text).sort(), [
+    "Approved TASK-8; runner started.", "Approved TASK-9; runner started.",
+  ]);
+  assert.ok(clearEvents.indexOf("status:TASK-8:In Progress") < clearEvents.indexOf("second-vet-after-first-claim"));
+  assert.deepEqual(clear.calls.notes.sort(), ["TASK-8", "TASK-9"]);
+  assert.deepEqual(clear.calls.spawns.sort(), ["TASK-8", "TASK-9"]);
+  assert.equal(maximumActiveGates, 1);
 
   const registrations = [];
   const events = new Map();
