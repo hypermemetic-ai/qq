@@ -2,7 +2,8 @@
 import { profileFor, readExecutionPolicy } from "../bin/lib/execution-profiles.mjs";
 
 // Grok 4.6 only. Three exact repetitions of a substantial block (up to 96
-// words) inside one streamed response abort and receive one terse grounding message. A recurrence
+// words) inside one streamed response abort and receive one terse grounding
+// message. A recurrence
 // within the next few completed turns enters the existing escalation: rewind
 // once, then switch to runner sol-high. Five adjacent similar completed turns
 // still enter that escalation directly. Delete this file and its index import
@@ -22,9 +23,35 @@ export const REPEAT_MAX_WORDS = 96;
 export const REPEAT_COUNT = 3;
 export const STREAM_TEXT_CAP = 12_000;
 export const STREAM_WORD_CAP = REPEAT_COUNT * REPEAT_MAX_WORDS + REPEAT_MAX_WORDS;
+// A repeat uses at most 288 of the 384 retained words. Scanning every eight
+// completed words delays detection by at most seven while leaving ample evidence.
+export const STREAM_SCAN_WORDS = 8;
 
 const WHITESPACE = /\s+/g;
 const WORD = /[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu;
+const WORD_CHARACTER = /[\p{L}\p{N}]/u;
+const STREAM_OUTSIDE_WORD = 0;
+const STREAM_BASE_WORD = 1;
+const STREAM_AFTER_APOSTROPHE = 2;
+const STREAM_SUFFIX_WORD = 3;
+const STREAM_WORD_STATE_MASK = 3;
+const STREAM_WORD_COMPLETED = 4;
+
+function streamWordTransition(state, character) {
+  const wordCharacter = WORD_CHARACTER.test(character);
+  if (state === STREAM_OUTSIDE_WORD) return wordCharacter ? STREAM_BASE_WORD : STREAM_OUTSIDE_WORD;
+  if (state === STREAM_BASE_WORD) {
+    if (wordCharacter) return STREAM_BASE_WORD;
+    if (character === "'" || character === "’") return STREAM_AFTER_APOSTROPHE;
+    return STREAM_WORD_COMPLETED | STREAM_OUTSIDE_WORD;
+  }
+  if (state === STREAM_AFTER_APOSTROPHE) {
+    return wordCharacter ? STREAM_SUFFIX_WORD : STREAM_WORD_COMPLETED | STREAM_OUTSIDE_WORD;
+  }
+  if (wordCharacter) return STREAM_SUFFIX_WORD;
+  if (character === "'" || character === "’") return STREAM_AFTER_APOSTROPHE;
+  return STREAM_WORD_COMPLETED | STREAM_OUTSIDE_WORD;
+}
 
 export function normalizeText(value) {
   return String(value ?? "").replace(WHITESPACE, " ").trim().toLowerCase();
@@ -111,6 +138,10 @@ function usableRewindTarget(branch, id) {
 export default function registerGrokParaphraseGuard(pi, deps = {}) {
   const limit = Number.isInteger(deps.limit) && deps.limit > 0 ? deps.limit : STREAK_LIMIT;
   const threshold = typeof deps.similarity === "number" ? deps.similarity : SIMILARITY;
+  const streamDetector = deps.streamDetector ?? repeatedStreamBlock;
+  const streamScanWords = Number.isInteger(deps.streamScanWords) && deps.streamScanWords > 0
+    ? deps.streamScanWords
+    : STREAM_SCAN_WORDS;
   let lastText = "";
   let streak = 0;
   let lastGoodId;
@@ -118,7 +149,15 @@ export default function registerGrokParaphraseGuard(pi, deps = {}) {
   let recovered = false;
   let pending;
   let streamText = "";
+  let streamWordState = STREAM_OUTSIDE_WORD;
+  let streamWordsSinceScan = 0;
   let sanityTurns = 0;
+
+  const resetStream = () => {
+    streamText = "";
+    streamWordState = STREAM_OUTSIDE_WORD;
+    streamWordsSinceScan = 0;
+  };
 
   const resetStreak = () => {
     lastText = "";
@@ -131,7 +170,7 @@ export default function registerGrokParaphraseGuard(pi, deps = {}) {
     resetStreak();
     recovered = false;
     pending = undefined;
-    streamText = "";
+    resetStream();
     sanityTurns = 0;
   };
 
@@ -143,17 +182,17 @@ export default function registerGrokParaphraseGuard(pi, deps = {}) {
 
   pi.on("turn_start", (_event, ctx) => {
     if (pending) return;
-    streamText = "";
+    resetStream();
     preTurnLeaf = ctx.sessionManager?.getLeafId?.();
   });
 
-  pi.on("message_update", (event, ctx) => {
-    if (pending || !isGrok46(ctx)) return;
-    const update = event?.assistantMessageEvent;
-    if ((update?.type !== "thinking_delta" && update?.type !== "text_delta") || typeof update.delta !== "string") return;
-    streamText = (streamText + update.delta).slice(-STREAM_TEXT_CAP);
-    const repeat = repeatedStreamBlock(streamText, deps.streamRepeat);
-    if (!repeat) return;
+  const scanStream = (ctx) => {
+    streamWordsSinceScan = 0;
+    const repeat = streamDetector(streamText, deps.streamRepeat);
+    // Trim only after scanning so an unscanned repeat cannot leave the character
+    // window during the bounded seven-word delay.
+    streamText = streamText.slice(-STREAM_TEXT_CAP);
+    if (!repeat) return false;
 
     const sanity = sanityTurns === 0 && !recovered;
     if (!sanity) sanityTurns = 0;
@@ -164,6 +203,36 @@ export default function registerGrokParaphraseGuard(pi, deps = {}) {
       target: lastGoodId ?? usableRewindTarget(ctx.sessionManager?.getBranch?.() ?? [], preTurnLeaf),
     };
     ctx.abort();
+    return true;
+  };
+
+  const appendStream = (value) => {
+    if (value) streamText += value;
+  };
+
+  pi.on("message_update", (event, ctx) => {
+    if (pending || !isGrok46(ctx)) return;
+    const update = event?.assistantMessageEvent;
+    if ((update?.type !== "thinking_delta" && update?.type !== "text_delta") || typeof update.delta !== "string") return;
+
+    let appendedThrough = 0;
+    let offset = 0;
+    for (const character of update.delta) {
+      offset += character.length;
+      const transition = streamWordTransition(streamWordState, character);
+      streamWordState = transition & STREAM_WORD_STATE_MASK;
+      if ((transition & STREAM_WORD_COMPLETED) === 0) continue;
+      streamWordsSinceScan += 1;
+      if (streamWordsSinceScan < streamScanWords) continue;
+
+      appendStream(update.delta.slice(appendedThrough, offset));
+      appendedThrough = offset;
+      if (scanStream(ctx)) return;
+    }
+    appendStream(update.delta.slice(appendedThrough));
+    // Bound a pathological unfinished word without evicting pending evidence:
+    // scan first, then let scanStream restore the normal character cap.
+    if (streamText.length > STREAM_TEXT_CAP * 2) scanStream(ctx);
   });
 
   pi.on("turn_end", (event, ctx) => {
@@ -173,6 +242,7 @@ export default function registerGrokParaphraseGuard(pi, deps = {}) {
       sanityTurns = 0;
       return;
     }
+    if (streamText && scanStream(ctx)) return;
     if (sanityTurns > 0) sanityTurns -= 1;
     const text = assistantText(event);
     if (!text) return;
@@ -194,7 +264,7 @@ export default function registerGrokParaphraseGuard(pi, deps = {}) {
     const action = pending;
     if (!action) return;
     pending = undefined;
-    streamText = "";
+    resetStream();
 
     if (action.sanity) {
       resetStreak();

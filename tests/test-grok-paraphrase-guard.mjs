@@ -11,6 +11,7 @@ const {
   normalizeText,
   repeatedStreamBlock,
   SANITY_MESSAGE,
+  STREAM_SCAN_WORDS,
 } = await import(pathToFileURL(join(root, "extensions/grok-paraphrase-guard.ts")));
 
 const RUNAWAY = "I can also add tests to verify the new behavior. Just let me know how you'd like to proceed. ";
@@ -43,6 +44,13 @@ function turn(text, tools = []) {
         })),
       ],
     },
+  };
+}
+
+function messageUpdate(delta, type = "thinking_delta") {
+  return {
+    type: "message_update",
+    assistantMessageEvent: { type, delta },
   };
 }
 
@@ -97,6 +105,8 @@ function harness(model = { id: "grok-4.6", provider: "xai" }, options = {}) {
     readPolicy: async () => options.policy ?? {
       roles: { runner: { default: "grok-high", profiles: { "sol-high": fallback.profile } } },
     },
+    streamDetector: options.streamDetector,
+    streamScanWords: options.streamScanWords,
   });
   return {
     notices,
@@ -116,11 +126,9 @@ function harness(model = { id: "grok-4.6", provider: "xai" }, options = {}) {
       await this.emit("turn_start", { type: "turn_start" });
       const before = aborted;
       for (let offset = 0; offset < text.length && aborted === before; offset += chunkSize) {
-        await this.emit("message_update", {
-          type: "message_update",
-          assistantMessageEvent: { type, delta: text.slice(offset, offset + chunkSize) },
-        });
+        await this.emit("message_update", messageUpdate(text.slice(offset, offset + chunkSize), type));
       }
+      if (aborted === before) await this.emit("turn_end", turn(type === "text_delta" ? text : ""));
     },
     setLeaf(id, entry = { type: "message", message: { role: "assistant" } }) {
       leaf = id;
@@ -147,6 +155,55 @@ assert.deepEqual(repeatedStreamBlock(RUNAWAY.repeat(3)), {
 for (let i = 1; i < STALL.length; i += 1) {
   const score = jaccard(normalizeText(STALL[i - 1]).slice(0, 240), normalizeText(STALL[i]).slice(0, 240));
   assert.ok(score >= 0.6, `stall line ${i} vs ${i - 1} scored ${score}`);
+}
+
+{
+  const scans = [];
+  const h = harness(undefined, {
+    streamDetector(text) { scans.push(text); return undefined; },
+  });
+  await h.emit("turn_start", { type: "turn_start" });
+  for (const character of "one you'd two we’ll rock'n'roll six seven eight ") {
+    await h.emit("message_update", messageUpdate(character));
+  }
+  assert.equal(STREAM_SCAN_WORDS, 8);
+  assert.equal(scans.length, 1, "split words and apostrophes count as eight completed matcher words");
+  for (const character of "nine ten eleven twelve thirteen fourteen fifteen ") {
+    await h.emit("message_update", messageUpdate(character));
+  }
+  assert.equal(scans.length, 1, "seven more completed words stay inside the proved delay bound");
+  await h.emit("turn_end", turn(""));
+  assert.equal(scans.length, 2, "turn end flushes a partial batch");
+}
+
+{
+  let scans = 0;
+  const h = harness(undefined, {
+    streamScanWords: 1,
+    streamDetector() { scans += 1; return undefined; },
+  });
+  const text = "Alpha beta's rock'n'roll we’ll naïve １２3 -- end' ";
+  const expectedWords = normalizeText(text).match(/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu).length;
+  await h.emit("turn_start", { type: "turn_start" });
+  for (const character of text) await h.emit("message_update", messageUpdate(character));
+  assert.equal(scans, expectedWords, "the incremental completion count matches the detector tokenizer");
+}
+
+{
+  const h = harness();
+  const stretch = (word, length) => word + "x".repeat(length - word.length);
+  const prefix = ["prefixa", "prefixb", "prefixc", "prefixd", "prefixe"].map((word) => stretch(word, 200));
+  const block = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet", "kilo", "lima"].map((word) => stretch(word, 280));
+  const tail = ["taila", "tailb", "tailc", "taild", "taile", "tailf", "tailg"].map((word) => stretch(word, 500));
+  await h.emit("turn_start", { type: "turn_start" });
+  for (const word of [...prefix, ...block, ...block, ...block]) {
+    await h.emit("message_update", messageUpdate(`${word} `));
+  }
+  assert.equal(h.aborted, 0, "a loop completing just after a scan waits for the next batch");
+  for (const word of tail.slice(0, -1)) await h.emit("message_update", messageUpdate(`${word} `));
+  assert.equal(h.aborted, 0);
+  await h.emit("message_update", messageUpdate(`${tail.at(-1)} `));
+  assert.equal(h.aborted, 1, "the same loop is caught after the maximum seven-word delay");
 }
 
 {
