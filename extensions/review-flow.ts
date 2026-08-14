@@ -22,6 +22,34 @@ function commandReason(execution, fallback) {
   return execution?.stderr?.trim() || execution?.stdout?.trim() || fallback;
 }
 
+function landedMessage(state) {
+  const pack = state.pack ?? { summary: "landed", files: [] };
+  return {
+    customType: "qq-run-landed",
+    content: [
+      `Landed ${state.task.id} — ${state.task.title}`,
+      `Ref: ${state.ref}`,
+      `Target: ${state.baseBranch}`,
+      `At: ${state.landedAt}`,
+      "",
+      formatPack(pack),
+    ].join("\n"),
+    display: true,
+    details: {
+      schema: "qq.run-landed/v1",
+      run_id: state.id,
+      task: { id: state.task.id, title: state.task.title },
+      landing: {
+        ref: state.ref,
+        target_branch: state.baseBranch,
+        landed_at: state.landedAt,
+        summary: pack.summary,
+        files: pack.files ?? [],
+      },
+    },
+  };
+}
+
 export default function registerReviewFlow(pi, deps = {}) {
   const env = deps.env ?? process.env;
   const run = deps.exec ?? ((command, args, options) => pi.exec(command, args, options));
@@ -52,13 +80,20 @@ export default function registerReviewFlow(pi, deps = {}) {
     },
   });
 
-  async function land(state, ctx) {
+  async function land(state) {
     const common = await run("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: state.mainRoot });
     if (common?.code !== 0) throw new Error(commandReason(common, "cannot find the main git directory"));
     const lockPath = join(common.stdout.trim(), "qq-land.lock");
     const execution = await run("flock", [lockPath, process.execPath, join(QQ_ROOT, "bin", "qq-land-worker.mjs"), state.statePath], { cwd: state.mainRoot });
     if (execution?.code !== 0) throw new Error(commandReason(execution, "land failed"));
-    ctx.ui.notify(`Landed ${state.task.id}.`, "info");
+    const landed = await readHandoff(state.statePath);
+    if (landed.status !== "landed") throw new Error("land worker completed without recording a landed handoff");
+    await pi.sendMessage(landedMessage(landed), { triggerTurn: false });
+  }
+
+  function ownsHandoff(state, ctx) {
+    const sessionId = ctx.sessionManager?.getSessionId?.();
+    return typeof sessionId === "string" && sessionId.length > 0 && sessionId === state.architectSession;
   }
 
   function offerKey(state) {
@@ -78,7 +113,7 @@ export default function registerReviewFlow(pi, deps = {}) {
 
   async function offer(state, ctx, options = {}) {
     const key = offerKey(state);
-    if (showing || role !== "architect" || !ctx.hasUI) return;
+    if (showing || role !== "architect" || !ctx.hasUI || !ownsHandoff(state, ctx)) return;
     if (!options.force && (shown.has(key) || ctx.isIdle?.() === false)) return;
     showing = true;
     shown.add(key);
@@ -88,7 +123,7 @@ export default function registerReviewFlow(pi, deps = {}) {
       const choices = isQaPassedProposal(state) ? ["approve", "discuss", "later"] : ["discuss", "later"];
       choice = await ctx.ui.select(pack, choices);
       if (choice === "approve") {
-        await land(state, ctx);
+        await land(state);
       } else if (choice === "discuss") {
         const comment = await ctx.ui.input("Operator discuss note");
         if (!comment) return;
@@ -118,6 +153,7 @@ export default function registerReviewFlow(pi, deps = {}) {
     if (!ctx || role !== "architect") return;
     const project = projectFromCwd(ctx.cwd, env);
     for (const state of await listProposals(project, env)) {
+      if (!ownsHandoff(state, ctx)) continue;
       if (isFailedLand(state)) {
         const key = offerKey(state);
         if (!polledFailedLandKeys.has(state.id)) shown.add(key);
@@ -134,7 +170,7 @@ export default function registerReviewFlow(pi, deps = {}) {
     async execute(_id, _params, _signal, _update, ctx) {
       if (role !== "architect") return result("review is available only in an architect session.", { status: "refused" });
       if (!ctx.hasUI) return result("review requires an interactive architect session.", { status: "refused" });
-      const waiting = await listReviews(projectFromCwd(ctx.cwd, env), env);
+      const waiting = (await listReviews(projectFromCwd(ctx.cwd, env), env)).filter((state) => ownsHandoff(state, ctx));
       if (!waiting.length) return result("No waiting reviews.", { status: "idle" });
       for (const state of waiting) await offer(state, ctx, { force: true });
       return result(`Offered ${waiting.length} waiting review${waiting.length === 1 ? "" : "s"}.`, { status: "offered", count: waiting.length });
