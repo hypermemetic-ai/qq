@@ -15,7 +15,8 @@ if [[ ! -x $glow ]]; then
   exit 1
 fi
 
-"$glow" -t "$document" || {
+# Static output stays in the plugin pane's primary screen across resizes.
+"$glow" "$document" || {
   printf 'Glow could not render the delegate ticket and note.\n' >&2
   exit 1
 }
