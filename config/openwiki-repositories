@@ -2,5 +2,6 @@
 # DecIQ repositories intentionally use their separately frozen QQ runtime.
 qq
 qq-newspaper
+herdr
 discuss
 qq-dictation
