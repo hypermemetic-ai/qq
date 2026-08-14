@@ -1,14 +1,48 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-for arg in "$@"; do
-  case "$arg" in
+pane=
+args=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --direction|--direction=*|--ratio|--ratio=*)
       echo 'qq-herdr-pane-add: direction and ratio are owned by the centered-row policy' >&2
       exit 2
+      ;;
+    --pane)
+      [[ $# -ge 2 ]] || { echo 'qq-herdr-pane-add: --pane requires a pane id' >&2; exit 2; }
+      [[ -z $pane ]] || { echo 'qq-herdr-pane-add: pane already set' >&2; exit 2; }
+      pane=$2
+      shift 2
+      ;;
+    --pane=*)
+      [[ -z $pane ]] || { echo 'qq-herdr-pane-add: pane already set' >&2; exit 2; }
+      pane=${1#--pane=}
+      shift
+      ;;
+    --cwd|--env)
+      [[ $# -ge 2 ]] || { echo "qq-herdr-pane-add: $1 requires a value" >&2; exit 2; }
+      args+=("$1" "$2")
+      shift 2
+      ;;
+    --current|--focus|--no-focus)
+      args+=("$1")
+      shift
+      ;;
+    --*)
+      echo "qq-herdr-pane-add: unknown option: $1" >&2
+      exit 2
+      ;;
+    *)
+      [[ -z $pane ]] || { echo 'qq-herdr-pane-add: pane already set' >&2; exit 2; }
+      pane=$1
+      shift
       ;;
   esac
 done
 
 herdr_bin=${QQ_HERDR_BIN:-herdr}
-exec "$herdr_bin" pane split --direction right "$@"
+if [[ -n $pane ]]; then
+  exec "$herdr_bin" pane split "$pane" --direction right "${args[@]}"
+fi
+exec "$herdr_bin" pane split --direction right "${args[@]}"

@@ -64,6 +64,9 @@ chmod +x "$mock/herdr"
 QQ_HERDR_TEST_ARGS="$work/args" QQ_HERDR_BIN="$mock/herdr" \
   "$root/bin/qq-herdr-pane-add" --current --cwd /tmp --no-focus
 [[ "$(cat "$work/args")" == 'pane split --direction right --current --cwd /tmp --no-focus' ]]
+QQ_HERDR_TEST_ARGS="$work/args" QQ_HERDR_BIN="$mock/herdr" \
+  "$root/bin/qq-herdr-pane-add" --pane w2T:p1M --cwd /tmp --no-focus
+[[ "$(cat "$work/args")" == 'pane split w2T:p1M --direction right --cwd /tmp --no-focus' ]]
 if QQ_HERDR_BIN="$mock/herdr" "$root/bin/qq-herdr-pane-add" --ratio 0.5 >/dev/null 2>&1; then
   echo 'qq-herdr-pane-add accepted a forbidden ratio' >&2
   exit 1
