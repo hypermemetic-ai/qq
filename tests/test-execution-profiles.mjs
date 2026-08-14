@@ -74,6 +74,14 @@ try {
   assert.equal((await lib.readExecutionPolicy(policyPath)).roles.runner.default, "grok-high");
   assert.deepEqual(await lib.updateRoleDefault("runner", "qwen-deepseek-max", policyPath), { previous: "grok-high", current: "qwen-deepseek-max" });
   assert.equal((await lib.readExecutionPolicy(policyPath)).roles.runner.default, "qwen-deepseek-max");
+  const legacy = policy();
+  legacy.compactor = legacy.scribe;
+  delete legacy.scribe;
+  await writeFile(policyPath, `${JSON.stringify(legacy, null, 2)}\n`, { mode: 0o600 });
+  assert.deepEqual((await lib.readExecutionPolicy(policyPath)).scribe, legacy.compactor);
+  const migrated = JSON.parse(await readFile(policyPath, "utf8"));
+  assert.equal(migrated.compactor, undefined);
+  assert.deepEqual(migrated.scribe, legacy.compactor);
   await lib.writeExecutionPolicy(policy(), policyPath);
 
   const modelsPath = join(temporary, "agent", "models.json");

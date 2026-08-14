@@ -97,6 +97,11 @@ export async function readExecutionPolicy(path = executionProfilesPath()) {
   let value;
   try { value = JSON.parse(source); }
   catch { throw new Error(`execution-profile policy is malformed at ${path}`); }
+  if (exactKeys(value, ["schema", "contextWindowCeiling", "roles", "compactor", "qa"])) {
+    value.scribe = value.compactor;
+    delete value.compactor;
+    await writeExecutionPolicy(value, path);
+  }
   return validateExecutionPolicy(value);
 }
 
