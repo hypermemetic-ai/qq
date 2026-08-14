@@ -69,7 +69,9 @@ export default function registerReviewFlow(pi, deps = {}) {
     try {
       const current = await readHandoff(previous.statePath);
       if (isFailedLand(current) && (!isFailedLand(previous) || current.blockedReason === previous.blockedReason)) {
-        shown.add(offerKey(current));
+        const key = offerKey(current);
+        shown.add(key);
+        polledFailedLandKeys.set(current.id, key);
       }
     } catch {}
   }

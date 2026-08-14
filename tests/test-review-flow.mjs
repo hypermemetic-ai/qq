@@ -297,8 +297,16 @@ try {
   assert.equal(firstFailedLand.status, "blocked");
   assert.equal(firstFailedLand.blockedReason, "merge failed: checkout busy");
   assert.deepEqual(failedLandChoices[0].options, ["approve", "discuss", "later"]);
+
+  landError = "merge failed: branch moved";
+  failedLandQueued.push("approve");
+  await failedLandReviewTool.execute("failed-retry-before-poll", {}, undefined, undefined, failedLandCtx);
+  assert.equal(failedLandChoices.length, 2);
   await failedLandEvents.get("agent_settled")();
-  assert.equal(failedLandChoices.length, 1);
+  assert.equal(failedLandChoices.length, 3);
+  assert.deepEqual(failedLandChoices.at(-1).options, ["approve", "discuss", "later"]);
+  await failedLandEvents.get("agent_settled")();
+  assert.equal(failedLandChoices.length, 3);
 
   failedLandQueued.push("discuss");
   await failedLandReviewTool.execute("failed-discuss", {}, undefined, undefined, failedLandCtx);
@@ -307,22 +315,22 @@ try {
   assert.equal(discussedFailedLand.operatorComment, "leave this blocked");
   assert.equal(failedLandMessages.length, 1);
   await failedLandEvents.get("agent_settled")();
-  assert.equal(failedLandChoices.length, 2);
+  assert.equal(failedLandChoices.length, 4);
 
   failedLandQueued.push("approve");
   await failedLandReviewTool.execute("failed-retry-same", {}, undefined, undefined, failedLandCtx);
   await failedLandEvents.get("agent_settled")();
-  assert.equal(failedLandChoices.length, 3);
+  assert.equal(failedLandChoices.length, 5);
 
-  landError = "merge failed: branch moved";
+  landError = "merge failed: worktree locked";
   failedLandQueued.push("approve");
   await failedLandReviewTool.execute("failed-retry-changed", {}, undefined, undefined, failedLandCtx);
-  assert.equal(failedLandChoices.length, 4);
+  assert.equal(failedLandChoices.length, 6);
   await failedLandEvents.get("agent_settled")();
-  assert.equal(failedLandChoices.length, 5);
+  assert.equal(failedLandChoices.length, 7);
   assert.deepEqual(failedLandChoices.at(-1).options, ["approve", "discuss", "later"]);
   await failedLandEvents.get("agent_settled")();
-  assert.equal(failedLandChoices.length, 5);
+  assert.equal(failedLandChoices.length, 7);
   await failedLandEvents.get("session_shutdown")();
 
   const restartedFailedLandEvents = new Map();
@@ -348,7 +356,7 @@ try {
   await restartedFailedLandEvents.get("session_start")({}, restartedFailedLandCtx);
   assert.equal(restartedFailedLandChoices.length, 0);
   const changedAfterRestart = JSON.parse(await readFile(failedLandPath, "utf8"));
-  changedAfterRestart.blockedReason = "merge failed: worktree locked";
+  changedAfterRestart.blockedReason = "merge failed: permission denied";
   changedAfterRestart.updatedAt = "2026-04-01T00:00:08.000Z";
   await workshop.atomicPrivateJson(failedLandPath, changedAfterRestart);
   await restartedFailedLandEvents.get("agent_settled")();
