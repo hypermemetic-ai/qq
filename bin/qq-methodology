@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+KEY='qq.methodology'
+GIT_BIN="${QQ_GIT_BIN:-git}"
+
+fail() {
+  printf 'qq-methodology: %s\n' "$*" >&2
+  exit 69
+}
+
+usage() {
+  cat >&2 <<'EOF'
+usage: qq-methodology <link|unlink|inspect>
+
+  link     link the current Git repository to QQ
+  unlink   unlink the current Git repository from QQ
+  inspect  report the current repository's fail-closed link state
+EOF
+  exit 64
+}
+
+require_git() {
+  if [[ "$GIT_BIN" == */* ]]; then
+    [[ -x "$GIT_BIN" ]] || fail "Git executable is unavailable: $GIT_BIN"
+  else
+    command -v "$GIT_BIN" >/dev/null 2>&1 || fail "Git executable is unavailable: $GIT_BIN"
+  fi
+}
+
+common_git_dir() {
+  local value
+  require_git
+  if ! value="$($GIT_BIN -C "$PWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+    || [[ -z "$value" || "$value" != /* || "$value" == *$'\n'* || ! -d "$value" ]]; then
+    return 1
+  fi
+  printf '%s\n' "$value"
+}
+
+link_repository() {
+  local common
+  common="$(common_git_dir)" || fail 'the current directory is not inside a Git repository'
+  "$GIT_BIN" --git-dir="$common" config --local --no-includes \
+    --replace-all "$KEY" true \
+    || fail "could not write $KEY to the current repository's common local Git config"
+  printf 'QQ linked for this repository (%s=true). Start a fresh Pi session or run /reload.\n' "$KEY"
+}
+
+unlink_repository() {
+  local common status
+  common="$(common_git_dir)" || fail 'the current directory is not inside a Git repository'
+  set +e
+  "$GIT_BIN" --git-dir="$common" config --local --no-includes --unset-all "$KEY"
+  status=$?
+  set -e
+  if (( status != 0 && status != 5 )); then
+    fail "could not remove $KEY from the current repository's common local Git config"
+  fi
+  printf 'QQ unlinked for this repository. Start a fresh Pi session or run /reload.\n'
+}
+
+inspect_repository() {
+  local common output status
+  local -a values=()
+  if ! common="$(common_git_dir)"; then
+    printf 'unlinked: current directory is not inside a Git repository\n'
+    return
+  fi
+
+  set +e
+  output="$($GIT_BIN --git-dir="$common" config --local --no-includes \
+    --type=bool --get-all "$KEY" 2>/dev/null)"
+  status=$?
+  set -e
+  if (( status == 1 )); then
+    printf 'unlinked: %s is absent from the repository common local Git config\n' "$KEY"
+    return
+  fi
+  if (( status != 0 )); then
+    printf 'unlinked (invalid): %s is not a readable Git boolean\n' "$KEY"
+    return
+  fi
+
+  mapfile -t values <<<"$output"
+  if (( ${#values[@]} != 1 )); then
+    printf 'unlinked (invalid): %s has multiple local values\n' "$KEY"
+  elif [[ "${values[0]}" == true ]]; then
+    printf 'linked: %s=true in the repository common local Git config\n' "$KEY"
+  elif [[ "${values[0]}" == false ]]; then
+    printf 'unlinked: %s=false in the repository common local Git config\n' "$KEY"
+  else
+    printf 'unlinked (invalid): %s is not a readable Git boolean\n' "$KEY"
+  fi
+}
+
+(( $# == 1 )) || usage
+case "$1" in
+  link) link_repository ;;
+  unlink) unlink_repository ;;
+  inspect) inspect_repository ;;
+  *) usage ;;
+esac

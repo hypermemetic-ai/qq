@@ -1,6 +1,6 @@
 # QQ Herdr distribution
 
-QQ pins an immutable release from the maintained Herdr fork. Herdr's centered-pane Rust source and tests live in the linked `/home/qqp/projects/herdr` repository, not in QQ.
+QQ pins an immutable release from the maintained Herdr fork. Herdr's centered-pane Rust source and tests live in the linked `/home/qqp/projects/herdr` repository, not in QQ. QQ linking is repository-local: run `qq-methodology link` from the target checkout, then start a fresh Pi session or run `/reload`; use `qq-methodology inspect` to verify it.
 
 - `downstream/upstream.env` is the fork URL/tag/commit manifest.
 - `config.toml` is the live configuration, with an 80-column preferred pane width.
