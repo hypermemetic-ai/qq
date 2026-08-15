@@ -66,6 +66,7 @@ git -C "$source_dir" diff --check
   # id assertion depends on a process-global counter, and the PTY fd handoff
   # assertion cannot observe a replacement server under this Herdr-hosted run.
   # Run everything else serially, then prove the counter-sensitive test alone.
+  exec 0</dev/null
   cargo test --locked -- --test-threads=1 \
     --skip generated_workspace_ids_are_short_base32_handles \
     --skip live_server_holds_one_pty_master_fd_per_pane
