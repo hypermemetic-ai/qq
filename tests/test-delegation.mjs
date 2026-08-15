@@ -226,8 +226,9 @@ try {
     }
     return { code: 0, stdout: "", stderr: "" };
   };
+  const startSignal = new AbortController().signal;
   const state = await lib.startRun({
-    run: spawnRun, cwd: "/repo", env, task, prepared,
+    run: spawnRun, cwd: "/repo", env, task, prepared, signal: startSignal,
     architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9",
     qaBinding: { provider: "openai-codex", model: "gpt-5.6-sol", effort: "xhigh" },
   });
@@ -240,6 +241,7 @@ try {
   assert.equal(state.gatePath, prepared.gatePath);
   assert.equal(await readFile(state.notePath, "utf8"), `${exactNote}\n`);
   assert.equal(JSON.parse(await readFile(state.statePath, "utf8")).status, "running");
+  assert.ok(spawnCalls.every(({ options }) => options.signal === startSignal));
   const create = spawnCalls.find(({ command, args }) => command === "herdr" && args[0] === "tab" && args[1] === "create");
   assert.deepEqual(create.args.slice(0, 6), ["tab", "create", "--workspace", "w2T", "--label", "runs"]);
   assert.ok(create.args.includes("QQ_AGENT_ROLE=runner"));
@@ -257,7 +259,7 @@ try {
   assert.match(prompt.args[3], /# TASK-1 — One task/);
   assert.match(prompt.args[3], /## Architect notes \/ scratch/);
   assert.ok(prompt.args[3].endsWith(exactNote));
-  assert.equal(prompt.args.at(-1), "--wait");
+  assert.deepEqual(prompt.args.slice(-5), ["--wait", "--until", "working", "--timeout", "5000"]);
 
   const droppedTask = { id: "TASK-5", title: "Dropped prompt" };
   const droppedPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: droppedTask, note: exactNote });
@@ -282,7 +284,7 @@ try {
   assert.ok(droppedOps.indexOf("herdr agent start") < droppedOps.indexOf("herdr agent prompt"));
   assert.ok(droppedOps.indexOf("herdr agent prompt") < droppedOps.indexOf("herdr pane close"));
   const droppedPrompt = droppedCalls.find(({ command, args }) => command === "herdr" && args[0] === "agent" && args[1] === "prompt");
-  assert.equal(droppedPrompt.args.at(-1), "--wait");
+  assert.deepEqual(droppedPrompt.args.slice(-5), ["--wait", "--until", "working", "--timeout", "5000"]);
   assert.ok(droppedCalls.some(({ command, args }) => command === "git" && args[0] === "worktree" && args[1] === "remove"));
   assert.ok(droppedCalls.some(({ command, args }) => command === "git" && args[0] === "branch" && args[1] === "-D"));
   await assert.rejects(access(droppedPreparation.stateDir), { code: "ENOENT" });
@@ -392,16 +394,17 @@ try {
 
   const approvalOrder = [];
   const approvalStatuses = [];
+  const approvalSignal = new AbortController().signal;
   const approvedPreparation = { taskId: task.id, stateDir: "/private/gate", notePath: "/private/gate/note.md", gatePath: "/private/gate/gate.md" };
   const approvedTool = delegateHarness({
     run: backlogRun(approvalStatuses, approvalOrder),
     async makeNote() { approvalOrder.push("scribe"); assert.deepEqual(approvalStatuses, ["In Progress"]); return { note: exactNote, qaBinding: { model: "qa" } }; },
     async prepareRun(options) { approvalOrder.push("prepare"); assert.equal(options.note, exactNote); assert.deepEqual(approvalStatuses, ["In Progress"]); return approvedPreparation; },
-    async awaitBriefGate(options) { approvalOrder.push("gate"); assert.equal(options.prepared, approvedPreparation); assert.deepEqual(approvalStatuses, ["In Progress"]); return "approved"; },
-    async startRun(options) { approvalOrder.push("start"); assert.equal(options.prepared, approvedPreparation); assert.deepEqual(approvalStatuses, ["In Progress"]); return { pane: "runner" }; },
+    async awaitBriefGate(options) { approvalOrder.push("gate"); assert.equal(options.prepared, approvedPreparation); assert.equal(options.signal, approvalSignal); assert.deepEqual(approvalStatuses, ["In Progress"]); return "approved"; },
+    async startRun(options) { approvalOrder.push("start"); assert.equal(options.prepared, approvedPreparation); assert.equal(options.signal, approvalSignal); assert.deepEqual(approvalStatuses, ["In Progress"]); return { pane: "runner" }; },
     async discardRun() { approvalOrder.push("discard"); },
   });
-  const approved = await approvedTool.execute("approve", { id: task.id }, undefined, undefined, ctx);
+  const approved = await approvedTool.execute("approve", { id: task.id }, approvalSignal, undefined, ctx);
   assert.deepEqual(approvalOrder, ["status:In Progress", "scribe", "prepare", "gate", "start"]);
   assert.deepEqual(approvalStatuses, ["In Progress"]);
   assert.equal(approved.content[0].text, `Approved ${task.id}; runner started.`);

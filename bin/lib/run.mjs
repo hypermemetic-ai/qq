@@ -250,10 +250,11 @@ export async function waitForAvailableShell(run, paneId, options = {}) {
   const intervalMs = options.intervalMs ?? 50;
   const sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const now = options.now ?? Date.now;
+  const signal = options.signal;
   const deadline = now() + timeoutMs;
   let last;
   while (now() < deadline) {
-    last = await run("herdr", ["pane", "process-info", "--pane", paneId], {});
+    last = await run("herdr", ["pane", "process-info", "--pane", paneId], { signal });
     if (last?.code === 0 && paneHasAvailableShell(parseHerdr(last.stdout, "pane_process_info"))) return last;
     await sleep(intervalMs);
   }
@@ -261,7 +262,7 @@ export async function waitForAvailableShell(run, paneId, options = {}) {
 }
 
 export async function startRun(options) {
-  const { run, cwd, env = process.env, task, architectSession, qaBinding } = options;
+  const { run, cwd, env = process.env, task, architectSession, qaBinding, signal } = options;
   if (typeof run !== "function") throw new Error("run start requires a command runner");
   const prepared = options.prepared ?? await prepareRun(options);
   if (prepared.taskId !== task.id) throw new Error("prepared delegation belongs to another task");
@@ -278,15 +279,15 @@ export async function startRun(options) {
   try {
     const runnerTicket = await readFile(ticketPath, "utf8");
     const runnerNote = await readFile(notePath, "utf8");
-    mainRoot = (await checked(run, "git", ["rev-parse", "--show-toplevel"], { cwd }, "cannot identify repository")).stdout.trim();
-    baseRef = (await checked(run, "git", ["rev-parse", "HEAD"], { cwd: mainRoot }, "cannot identify base ref")).stdout.trim();
-    baseBranch = (await checked(run, "git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: mainRoot }, "delegate requires a named base branch")).stdout.trim();
+    mainRoot = (await checked(run, "git", ["rev-parse", "--show-toplevel"], { cwd, signal }, "cannot identify repository")).stdout.trim();
+    baseRef = (await checked(run, "git", ["rev-parse", "HEAD"], { cwd: mainRoot, signal }, "cannot identify base ref")).stdout.trim();
+    baseBranch = (await checked(run, "git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: mainRoot, signal }, "delegate requires a named base branch")).stdout.trim();
     await privateDirectory(worktreeRoot(project, env));
     await privateDirectory(stateDir);
-    await checked(run, "git", ["worktree", "add", "-b", branch, worktree, baseRef], { cwd: mainRoot }, "cannot create worktree");
+    await checked(run, "git", ["worktree", "add", "-b", branch, worktree, baseRef], { cwd: mainRoot, signal }, "cannot create worktree");
     createdWorktree = true;
 
-    const tabsResult = await checked(run, "herdr", ["tab", "list", "--workspace", workspace], {}, "cannot list Herdr tabs");
+    const tabsResult = await checked(run, "herdr", ["tab", "list", "--workspace", workspace], { signal }, "cannot list Herdr tabs");
     const tabs = parseHerdr(tabsResult.stdout, "tab_list")?.tabs ?? [];
     const runsTab = tabs.find((tab) => tab?.label === "runs");
     const paneEnv = [
@@ -296,22 +297,22 @@ export async function startRun(options) {
     if (!runsTab) {
       const args = ["tab", "create", "--workspace", workspace, "--label", "runs", "--cwd", worktree, "--no-focus"];
       for (const entry of paneEnv) args.push("--env", entry);
-      const created = await checked(run, "herdr", args, {}, "cannot create runs tab");
+      const created = await checked(run, "herdr", args, { signal }, "cannot create runs tab");
       paneId = paneFromTabCreate(created);
     } else {
-      const panesResult = await checked(run, "herdr", ["pane", "list", "--workspace", workspace], {}, "cannot list runs panes");
+      const panesResult = await checked(run, "herdr", ["pane", "list", "--workspace", workspace], { signal }, "cannot list runs panes");
       const parent = (parseHerdr(panesResult.stdout, "pane_list")?.panes ?? [])
         .filter((pane) => pane?.tab_id === runsTab.tab_id)
         .at(-1)?.pane_id;
       if (!parent) throw new Error("runs tab has no pane to split");
       const args = ["--pane", parent, "--cwd", worktree, "--no-focus"];
       for (const entry of paneEnv) args.push("--env", entry);
-      const split = await checked(run, "qq-herdr-pane-add", args, {}, "cannot add runs pane");
+      const split = await checked(run, "qq-herdr-pane-add", args, { signal }, "cannot add runs pane");
       paneId = paneFromSplit(split);
     }
     if (typeof paneId !== "string" || paneId === "") throw new Error("Herdr returned no runs pane id");
     createdPane = true;
-    await checked(run, "herdr", ["pane", "rename", paneId, `${task.id}: ${task.title}`.slice(0, 80)], {}, "cannot label runs pane");
+    await checked(run, "herdr", ["pane", "rename", paneId, `${task.id}: ${task.title}`.slice(0, 80)], { signal }, "cannot label runs pane");
 
     const state = {
       schema: "qq.run-handoff/v1", version: 1, id: `${slug}-${nonce}`, project,
@@ -320,10 +321,10 @@ export async function startRun(options) {
       ticketPath, transcriptPath, notePath, gatePath, statePath, qa: qaBinding, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
     await atomicPrivateJson(statePath, state);
-    await waitForAvailableShell(run, paneId);
-    await checked(run, "herdr", ["agent", "start", `runner-${slug}-${nonce}`, "--kind", "pi", "--pane", paneId], {}, "cannot start runs runner");
+    await waitForAvailableShell(run, paneId, { signal });
+    await checked(run, "herdr", ["agent", "start", `runner-${slug}-${nonce}`, "--kind", "pi", "--pane", paneId], { signal }, "cannot start runs runner");
     const prompt = `Work from the full Backlog ticket and delegate note below. The note is also at ${notePath}. Implement the task in this worktree, commit the result, then call done with ref HEAD. Do not merge.\n\n${runnerTicket.trimEnd()}\n\n---\n\n## Delegate note\n\n${runnerNote.trimEnd()}`;
-    const prompted = await run("herdr", ["agent", "prompt", paneId, prompt, "--wait"], {});
+    const prompted = await run("herdr", ["agent", "prompt", paneId, prompt, "--wait", "--until", "working", "--timeout", "5000"], { signal });
     if (prompted?.code !== 0) throw new Error("cannot send the ticket and note to the runs runner");
     state.status = "running";
     state.updatedAt = new Date().toISOString();

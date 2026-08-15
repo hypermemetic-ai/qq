@@ -316,7 +316,7 @@ export default function registerBoard(pi, deps = {}) {
         }
 
         await (deps.startRun ?? startRun)({
-          run, cwd: ctx.cwd, env, task, prepared, qaBinding, project,
+          run, cwd: ctx.cwd, env, task, prepared, qaBinding, project, signal,
           architectSession: ctx.sessionManager.getSessionId(),
         });
         claimedTask = undefined;
