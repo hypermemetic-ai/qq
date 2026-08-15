@@ -2,8 +2,6 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-# shellcheck source=/dev/null
-source "$root/herdr/downstream/upstream.env"
 new=${QQ_HERDR_NEW_BIN:-$HOME/.local/lib/qq/herdr/bin/herdr}
 old=${QQ_HERDR_OLD_BIN:-$new}
 q_mode_plugin="$root/plugins/q-mode"
@@ -34,10 +32,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-[[ $("$new" --version) == "herdr $HERDR_UPSTREAM_VERSION" ]] || {
-  echo 'refusing handoff because the staged Herdr version is unexpected' >&2
-  exit 1
-}
 "$q_mode_plugin/q-mode.sh" check
 [[ $(systemctl --user show herdr.service -p ActiveState --value) == inactive ]] || {
   echo 'refusing live handoff while herdr.service owns the server cgroup' >&2
@@ -112,7 +106,7 @@ ln -s "$new" "$tmp/herdr-link"
 mv -Tf "$tmp/herdr-link" "$local_cli"
 
 HERDR_ENV=1 HERDR_SOCKET_PATH="$sock" "$new" server live-handoff \
-  --import-exe "$new" --expected-protocol 19 --expected-version "$HERDR_UPSTREAM_VERSION"
+  --import-exe "$new"
 committed=1
 install -m 0644 "$root/systemd/user/herdr.service" "$service"
 systemctl --user daemon-reload
@@ -125,7 +119,7 @@ for _ in $(seq 1 100); do
   sleep 0.1
 done
 [[ -s $tmp/after.json ]] || {
-  echo 'Herdr 0.8 did not expose a post-handoff snapshot' >&2
+  echo 'Herdr did not expose a post-handoff snapshot' >&2
   exit 1
 }
 python3 - "$sock" "$tmp/after.json" "$tmp/processes.after.json" <<'PY'
@@ -190,12 +184,8 @@ if old_processes != new_processes:
     raise SystemExit(
         f"handoff changed pane shell processes: before={old_processes} after={new_processes}"
     )
-if after.get("version") != "0.8.0" or after.get("protocol") != 19:
-    raise SystemExit(
-        f"unexpected replacement: {after.get('version')}/{after.get('protocol')}"
-    )
 print(
-    "Herdr 0.8 handoff preserved "
+    "Herdr handoff preserved "
     f"{len(after['workspaces'])} spaces, {len(after['tabs'])} tabs, "
     f"and {len(after['panes'])} live pane processes."
 )

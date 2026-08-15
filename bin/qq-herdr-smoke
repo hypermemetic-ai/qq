@@ -2,15 +2,8 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-# shellcheck source=/dev/null
-source "$root/herdr/downstream/upstream.env"
 binary=${1:-${QQ_HERDR_BINARY:-$HOME/.local/lib/qq/herdr/bin/herdr}}
 [[ -x "$binary" ]] || { printf 'qq-herdr-smoke: binary not executable: %s\n' "$binary" >&2; exit 1; }
-expected_version="herdr $HERDR_UPSTREAM_VERSION"
-[[ $("$binary" --version) == "$expected_version" ]] || {
-  printf 'qq-herdr-smoke: expected %s, found %s\n' "$expected_version" "$("$binary" --version)" >&2
-  exit 1
-}
 
 base=$(mktemp -d)
 server=

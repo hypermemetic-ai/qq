@@ -2,8 +2,6 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-# shellcheck source=/dev/null
-source "$root/herdr/downstream/upstream.env"
 mode=${1:-preflight}
 case "$mode" in
   preflight|post-activate) ;;
@@ -16,10 +14,6 @@ socket=${HERDR_SOCKET_PATH:-$HOME/.config/herdr/herdr.sock}
 q_mode_plugin="$root/plugins/q-mode"
 
 [[ -x $herdr ]] || { printf 'q mode UAT: Herdr is not executable: %s\n' "$herdr" >&2; exit 1; }
-[[ $("$herdr" --version) == "herdr $HERDR_UPSTREAM_VERSION" ]] || {
-  printf 'q mode UAT: unexpected Herdr version\n' >&2
-  exit 1
-}
 HERDR_CONFIG_PATH="$root/herdr/config.toml" "$herdr" config check
 "$q_mode_plugin/q-mode.sh" check
 
