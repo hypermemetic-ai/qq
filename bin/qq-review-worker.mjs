@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process";
 
 import { atomicPrivateJson, readHandoff } from "./lib/run.mjs";
-import { conductReview } from "./lib/review.mjs";
+import { conductReview, isQaPassedProposal, setBoardStatus } from "./lib/review.mjs";
 
 const statePath = process.argv[2];
 if (!statePath) throw new Error("usage: qq-review-worker.mjs <handoff.json>");
@@ -26,6 +26,7 @@ conductReview(run, statePath).catch(async (error) => {
     state.blockedReason = `qa infrastructure failed: ${error instanceof Error ? error.message : String(error)}`;
     state.updatedAt = new Date().toISOString();
     await atomicPrivateJson(statePath, state);
+    if (!isQaPassedProposal(state)) await setBoardStatus(run, state.mainRoot, state.task.id, "To Do");
     await run("herdr", ["notification", "show", "qa failed", "--body", `${state.task.id}: ${state.blockedReason}`.slice(0, 500), "--sound", "request"]);
   } catch {}
   process.exitCode = 1;

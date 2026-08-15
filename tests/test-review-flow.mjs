@@ -19,6 +19,12 @@ async function waitFor(label, predicate) {
   assert.fail(`timed out waiting for ${label}`);
 }
 
+function boardStatuses(calls) {
+  return calls
+    .filter(({ args }) => args[0] === "task" && args[1] === "edit" && args[3] === "--status")
+    .map(({ args }) => args[4]);
+}
+
 assert.deepEqual(review.parseNumstat("3\t1\tsrc/a.ts\n-\t-\tassets/x.bin\n"), [
   { path: "src/a.ts", added: 3, deleted: 1 },
   { path: "assets/x.bin", added: null, deleted: null },
@@ -62,6 +68,7 @@ try {
   assert.equal(prepared.status, "reviewing");
   assert.equal(prepared.ref, "refsha");
   assert.ok(calls.some(({ args }) => args[0] === "merge-base"));
+  assert.deepEqual(boardStatuses(calls), []);
 
   prepared.status = "proposal";
   prepared.qaVerdict = {
@@ -93,6 +100,7 @@ try {
   assert.deepEqual(mainStatusCall.args, ["status", "--porcelain", "--untracked-files=all"]);
   assert.equal(mainStatusCall.options.cwd, mainRoot);
   assert.equal(dirtyMainCalls.some(({ command, args }) => command === "git" && ["merge-tree", "merge", "stash", "reset"].includes(args[0])), false);
+  assert.deepEqual(boardStatuses(calls), []);
 
   await review.landHandoff(run, statePath);
   assert.equal(JSON.parse(await readFile(statePath, "utf8")).status, "landed");
@@ -109,8 +117,13 @@ try {
   assert.deepEqual(pushCall.args, ["push", "origin", "HEAD:refs/heads/main"]);
   assert.equal(pushCall.options.cwd, mainRoot);
   assert.ok(calls.some(({ args }) => args[0] === "task" && args[1] === "edit" && args[2] === "TASK-1" && args.includes("Done")));
+  const successfulPushIndex = calls.findIndex(({ command, args }) => command === "git" && args[0] === "push");
+  const successfulCleanupIndex = calls.findIndex(({ command, args }) => command === "git" && args[0] === "branch");
+  const successfulDoneIndex = calls.findIndex(({ args }) => args[0] === "task" && args[1] === "edit" && args.includes("Done"));
+  assert.ok(successfulPushIndex < successfulCleanupIndex && successfulCleanupIndex < successfulDoneIndex);
 
   await runLib.atomicPrivateJson(statePath, prepared);
+  const boardStatusesBeforeFailure = boardStatuses(calls);
   const doneCallsBeforeFailure = calls.filter(({ args }) => args[0] === "task" && args[1] === "edit" && args.includes("Done")).length;
   const failingLandRun = async (command, args, options = {}) => {
     if (command === "git" && args[0] === "merge-tree") return { code: 1, stdout: "", stderr: "content conflict" };
@@ -124,6 +137,7 @@ try {
   assert.deepEqual(failedLand.qaVerdict, prepared.qaVerdict);
   assert.equal(review.isFailedLand(failedLand), true);
   assert.equal(review.isQaPassedProposal(failedLand), true);
+  assert.deepEqual(boardStatuses(calls), boardStatusesBeforeFailure);
   assert.equal(calls.filter(({ args }) => args[0] === "task" && args[1] === "edit" && args.includes("Done")).length, doneCallsBeforeFailure);
   await review.landHandoff(run, statePath);
   assert.equal(JSON.parse(await readFile(statePath, "utf8")).status, "landed");
@@ -147,6 +161,7 @@ try {
     }
     return run(command, args, options);
   };
+  const boardStatusesBeforePushFailure = boardStatuses(calls);
   const doneCallsBeforePushFailure = calls.filter(({ args }) => args[0] === "task" && args[1] === "edit" && args.includes("Done")).length;
   await assert.rejects(review.landHandoff(pushRetryRun, statePath), /cannot push target branch to its upstream: remote rejected update/);
   const failedPush = JSON.parse(await readFile(statePath, "utf8"));
@@ -155,6 +170,7 @@ try {
   assert.deepEqual(failedPush.qaVerdict, prepared.qaVerdict);
   assert.equal(review.isQaPassedProposal(failedPush), true);
   assert.equal(publishCalls.some(({ command, args }) => command === "git" && ["worktree", "branch"].includes(args[0])), false);
+  assert.deepEqual(boardStatuses(calls), boardStatusesBeforePushFailure);
   assert.equal(calls.filter(({ args }) => args[0] === "task" && args[1] === "edit" && args.includes("Done")).length, doneCallsBeforePushFailure);
 
   const retryStart = publishCalls.length;
@@ -170,6 +186,7 @@ try {
   assert.equal(calls.filter(({ args }) => args[0] === "task" && args[1] === "edit" && args.includes("Done")).length, doneCallsBeforePushFailure + 1);
 
   await runLib.atomicPrivateJson(statePath, prepared);
+  const boardStatusesBeforeNoUpstream = boardStatuses(calls);
   const noUpstreamCalls = [];
   const noUpstreamRun = async (command, args, options = {}) => {
     noUpstreamCalls.push({ command, args, options });
@@ -180,6 +197,7 @@ try {
   const noUpstream = JSON.parse(await readFile(statePath, "utf8"));
   assert.equal(noUpstream.status, "blocked");
   assert.deepEqual(noUpstream.qaVerdict, prepared.qaVerdict);
+  assert.deepEqual(boardStatuses(calls), boardStatusesBeforeNoUpstream);
   assert.equal(noUpstreamCalls.some(({ command, args }) => command === "git" && args[0] === "merge"), true);
   assert.equal(noUpstreamCalls.some(({ command, args }) => command === "git" && ["push", "worktree", "branch"].includes(args[0])), false);
 
@@ -289,7 +307,7 @@ try {
   assert.equal(commented.status, "commented");
   assert.equal(commented.ref, "refsha");
   assert.equal(commented.operatorComment, "tighten the summary");
-  assert.deepEqual(boardCalls.at(-1).slice(0, 5), ["task", "edit", "TASK-3", "--status", "To Do"]);
+  assert.deepEqual(boardCalls, []);
   assert.equal(messages[0].payload.content, "TASK-3 discuss:\ntighten the summary\n\nsmall fix\nsrc/a.ts +2/-1");
   assert.deepEqual(messages[0].options, { triggerTurn: true, deliverAs: "steer" });
   await architectEvents.get("agent_settled")();
@@ -618,6 +636,7 @@ try {
   });
   assert.equal(committedTests.state.status, "proposal");
   assert.equal(committedTests.state.ref, "qa-tests-ref");
+  assert.deepEqual(boardStatuses(committedTests.calls), []);
   assert.equal(committedTests.state.qaVerdict.tests_modified, true);
   assert.deepEqual(committedTests.state.pack.files, [{ path: "tests/test-review-flow.mjs", added: 2, deleted: 1 }]);
   const qaStart = committedTests.calls.find(({ args }) => args[0] === "agent" && args[1] === "start");
@@ -648,6 +667,7 @@ try {
   const dirtyPass = await runQaCase({ dirty: " M tests/test-review-flow.mjs\n", testsModified: true });
   assert.equal(dirtyPass.state.status, "waiting_fix");
   assert.equal(dirtyPass.state.qaVerdict.verdict, "fail");
+  assert.deepEqual(boardStatuses(dirtyPass.calls), []);
   assert.match(dirtyPass.state.qaVerdict.feedback, /uncommitted worktree changes/);
 
   const productionCommit = await runQaCase({ head: "qa-production-ref", changedPaths: ["src/a.ts"] });
@@ -662,6 +682,7 @@ try {
   });
   assert.equal(failedRewrite.state.status, "waiting_fix");
   assert.equal(failedRewrite.state.ref, "refsha");
+  assert.deepEqual(boardStatuses(failedRewrite.calls), []);
   assert.equal(failedRewrite.state.qaVerdict.tests_modified, true);
   const returned = failedRewrite.calls.find(({ args }) => args[0] === "agent" && args[1] === "prompt" && String(args[3]).includes("call done again"));
   assert.match(returned.args[3], /qa rewrote tests; inspect those changes/);
@@ -684,6 +705,7 @@ try {
   const cleanLook2 = await runQaCase({ look: 2, qaSessionId: failedRewrite.state.qaSessionId });
   assert.equal(cleanLook2.state.status, "proposal");
   assert.equal(cleanLook2.state.look, 2);
+  assert.deepEqual(boardStatuses(cleanLook2.calls), []);
   assert.equal(cleanLook2.state.qaSessionId, failedRewrite.state.qaSessionId);
   const passStarts = cleanLook2.calls.filter(({ args }) => args[0] === "agent" && args[1] === "start");
   assert.equal(passStarts.length, 1);
@@ -712,6 +734,7 @@ try {
   });
   assert.equal(dirtyLook2.state.status, "blocked");
   assert.equal(dirtyLook2.state.qaVerdict.verdict, "fail");
+  assert.deepEqual(boardStatuses(dirtyLook2.calls), ["To Do"]);
   assert.match(dirtyLook2.state.qaVerdict.feedback, /uncommitted worktree changes/);
   assert.deepEqual(dirtyLook2.emittedRunEvents.map(({ kind }) => kind), [runEvents.RUN_BLOCKED_KIND]);
   const dirtyLook2Prompts = dirtyLook2.calls.filter(({ command, args }) => command === "herdr" && args[0] === "agent" && args[1] === "prompt");
@@ -724,6 +747,7 @@ try {
   });
   assert.equal(productionLook2.state.status, "blocked");
   assert.equal(productionLook2.state.ref, "refsha");
+  assert.deepEqual(boardStatuses(productionLook2.calls), ["To Do"]);
   assert.equal(productionLook2.state.qaVerdict.verdict, "fail");
   assert.match(productionLook2.state.qaVerdict.feedback, /committed production-code changes: src\/a\.ts/);
   assert.ok(!productionLook2.calls.some(({ args }) => args[0] === "agent" && args[1] === "start" && args[2] === review.runnerAgentName(productionLook2.state)));
@@ -734,6 +758,7 @@ try {
   });
   assert.equal(rewrittenLook2.state.status, "blocked");
   assert.equal(rewrittenLook2.state.ref, "refsha");
+  assert.deepEqual(boardStatuses(rewrittenLook2.calls), ["To Do"]);
   assert.equal(rewrittenLook2.state.qaVerdict.verdict, "fail");
   assert.match(rewrittenLook2.state.qaVerdict.feedback, /replaced or rewrote the reviewed commit/);
 
