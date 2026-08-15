@@ -17,7 +17,7 @@ next_tab = "alt+right"
 [keys.quick_navigation]
 label = "q mode"
 trigger = "right-alt"
-exit = "esc"
+exit = ["esc", "enter"]
 previous_pane = "left"
 next_pane = "right"
 previous_workspace = "up"
@@ -51,3 +51,4 @@ command = "bash -ic 'hcbr; exec bash -i'"
 [ui]
 agent_panel_sort = "spaces"
 pane_preferred_width = 80
+pane_borders = false

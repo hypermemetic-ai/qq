@@ -8,6 +8,8 @@ qq-dictation process pinned in `qq-dictation.env`.
   commit, process executable, PID, and overlay-readiness marker agree.
 - `cancel` is targetless and idempotent. If no accepted running process exists,
   it exits without launching Handy.
+- Escape and Enter both leave q mode and invoke `cancel` through `on_exit`;
+  neither submits dictation. Space remains the start, stop, and submit control.
 - Each semantic control is bounded. A secondary process that does not promptly
   forward to the existing instance is terminated instead of becoming a
   cold-start path. A successful exit proves forwarding only, not acceptance or

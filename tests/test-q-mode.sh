@@ -24,7 +24,7 @@ with open(sys.argv[1], "rb") as handle:
 mode = config["keys"]["quick_navigation"]
 assert mode["label"] == "q mode"
 assert mode["trigger"] == "right-alt"
-assert mode["exit"] == "esc"
+assert mode["exit"] == ["esc", "enter"]
 assert (mode["previous_pane"], mode["next_pane"]) == ("left", "right")
 assert (mode["previous_workspace"], mode["next_workspace"]) == ("up", "down")
 assert (mode["previous_tab"], mode["next_tab"]) == ("ctrl+left", "ctrl+right")
@@ -35,6 +35,7 @@ actions = {item["key"]: item for item in mode["plugin_action"]}
 assert actions["space"]["action"] == "qq.q-mode.start-or-stop"
 assert actions["delete"]["action"] == "qq.q-mode.cancel"
 assert all("q mode" in item["description"] for item in actions.values())
+assert config["ui"]["pane_borders"] is False
 
 with open(sys.argv[2], "rb") as handle:
     manifest = tomllib.load(handle)
