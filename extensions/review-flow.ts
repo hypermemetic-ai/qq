@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { EventPlaneClient } from "../bin/lib/event-plane-client.ts";
 import { atomicPrivateJson, readHandoff, stateHome } from "../bin/lib/run.mjs";
-import { formatPack, isFailedLand, isQaPassedProposal, listProposals, prepareDone, projectFromCwd, setBoardStatus } from "../bin/lib/review.mjs";
+import { formatPack, isFailedLand, isQaPassedProposal, listProposals, prepareDone, projectFromCwd } from "../bin/lib/review.mjs";
 import { RUN_BLOCKED_KIND, parseRunEvent, runEventDeliveryGuard, runEventEndpoint, runEventRecipient } from "../bin/lib/run-events.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -131,7 +131,6 @@ export default function registerReviewFlow(pi, deps = {}) {
         state.updatedAt = new Date().toISOString();
         await atomicPrivateJson(state.statePath, state);
         shown.add(offerKey(state));
-        await setBoardStatus(run, ctx.cwd || state.mainRoot, state.task.id, "To Do");
         pi.sendMessage({
           customType: "qq-operator-comment",
           content: `${state.task.id} discuss:\n${comment}\n\n${pack}`,

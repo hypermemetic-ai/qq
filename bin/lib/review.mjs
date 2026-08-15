@@ -326,6 +326,7 @@ export async function conductReview(run, statePath, options = {}) {
   state.status = "blocked";
   state.blockedReason = verdict.feedback || verdict.summary;
   await atomicPrivateJson(statePath, state);
+  await setBoardStatus(run, state.mainRoot, state.task.id, "To Do");
   await emitRunEvent(state, RUN_BLOCKED_KIND);
   await closePane();
   await notify("qa blocked after look 2", `${state.task.id}: ${verdict.summary}`);
