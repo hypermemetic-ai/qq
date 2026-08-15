@@ -47,10 +47,15 @@ function textResult(text, details) {
   return { content: [{ type: "text", text }], details };
 }
 
-function isBuiltInImageResult(result) {
-  if (result?.content?.some((item) => item?.type === "image")) return true;
-  const text = result?.content?.[0];
-  return text?.type === "text" && /^Read image file \[image\//.test(text.text);
+function hasImagePart(result) {
+  return result?.content?.some((item) => item?.type === "image") === true;
+}
+
+// Pi's file/type outcome, not the user-visible status text. Ordinary files may
+// begin with "Read image file [image/..."; only a mime hit or an image part
+// counts as image processing.
+function isImageProcessingOutcome(result, imageMimeType) {
+  return Boolean(imageMimeType) || hasImagePart(result);
 }
 
 function explicitSlice(text, offset, limit) {
@@ -173,6 +178,7 @@ export default function registerRead(pi, deps = {}) {
   const run = deps.exec ?? ((command, args, options) => pi.exec(command, args, options));
   const createBuiltInRead = deps.createReadToolDefinition;
   if (typeof createBuiltInRead !== "function") throw new Error("Pi's built-in read tool factory is required");
+  const detectImageMimeType = deps.detectImageMimeType;
   const builtInReads = new Map();
   const budget = deps.tokenBudget ?? TOKEN_BUDGET;
 
@@ -216,9 +222,13 @@ export default function registerRead(pi, deps = {}) {
         builtInReads.set(cwd, builtInRead);
       }
       const builtInResult = await builtInRead.execute(id, params, signal, onUpdate, ctx);
-      if (isBuiltInImageResult(builtInResult)) return builtInResult;
-
       const absolutePath = resolveFilePath(params.path, cwd);
+      const imageMimeType = typeof detectImageMimeType === "function"
+        ? await detectImageMimeType(absolutePath)
+        : undefined;
+      if (signal?.aborted) throw new Error("Operation aborted");
+      if (isImageProcessingOutcome(builtInResult, imageMimeType)) return builtInResult;
+
       const buffer = await readFile(absolutePath, signal);
       const text = buffer.toString("utf-8");
       if (params.ranges !== undefined) return textResult(rangeSlices(text, params.ranges), undefined);

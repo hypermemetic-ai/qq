@@ -32,11 +32,12 @@ function declaration(signature, start, end, children = []) {
   return { kind: "function", name: signature, signature, start_line: start, end_line: end, children };
 }
 
-function harness({ text = "", tokenBudget, execReply, builtInReadResult } = {}) {
+function harness({ text = "", tokenBudget, execReply, builtInReadResult, imageMimeType = null } = {}) {
   const registrations = [];
   const calls = [];
   const readCalls = [];
   const builtInCalls = [];
+  const mimeCalls = [];
   const pi = {
     registerTool(tool) { registrations.push(tool); },
     exec: async () => { throw new Error("unexpected real exec"); },
@@ -61,9 +62,13 @@ function harness({ text = "", tokenBudget, execReply, builtInReadResult } = {}) 
     },
     exec,
     createReadToolDefinition,
+    detectImageMimeType: async (path) => {
+      mimeCalls.push(path);
+      return typeof imageMimeType === "function" ? imageMimeType(path) : imageMimeType;
+    },
   });
   assert.equal(registrations.length, 1);
-  return { tool: registrations[0], calls, readCalls, builtInCalls };
+  return { tool: registrations[0], calls, readCalls, builtInCalls, mimeCalls };
 }
 
 const registered = harness();
@@ -166,77 +171,43 @@ assert.match(hugeFallbackText, /HEAD-/);
 assert.match(hugeFallbackText, /-TAIL/);
 assert.match(hugeFallbackText, /preview truncated to fit byte\/token budget/);
 
-const validPngBytes = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-  "base64",
-);
-const resizedPngResult = {
+const imageResult = {
   content: [
-    {
-      type: "text",
-      text: "Read image file [image/png]\n[Image: original 4000x3000, displayed at 2000x1500. Multiply coordinates by 2.00 to map to original image.]",
-    },
-    { type: "image", data: "pi-resized-png", mimeType: "image/png" },
+    { type: "text", text: "Read image file [image/png]" },
+    { type: "image", data: "pi-png", mimeType: "image/png" },
   ],
   details: undefined,
 };
-const png = harness({ text: validPngBytes, builtInReadResult: resizedPngResult });
-const pngResult = await png.tool.execute("image", { path: "image.png" }, undefined, undefined, { cwd: "/work" });
-assert.strictEqual(pngResult, resizedPngResult, "Pi's resize result was not returned unchanged");
-assert.equal(png.builtInCalls.length, 1);
-assert.equal(png.readCalls.length, 0, "wrapper re-read an image handled by Pi");
-assert.equal(png.calls.length, 0);
+const image = harness({ builtInReadResult: imageResult, imageMimeType: "image/png" });
+const imageOut = await image.tool.execute("image", { path: "image.png" }, undefined, undefined, { cwd: "/work" });
+assert.strictEqual(imageOut, imageResult);
+assert.equal(image.readCalls.length, 0);
+assert.equal(image.calls.length, 0);
 
-const validBmpBytes = Buffer.alloc(58);
-validBmpBytes.write("BM", 0, "ascii");
-validBmpBytes.writeUInt32LE(validBmpBytes.length, 2);
-validBmpBytes.writeUInt32LE(54, 10);
-validBmpBytes.writeUInt32LE(40, 14);
-validBmpBytes.writeInt32LE(1, 18);
-validBmpBytes.writeInt32LE(1, 22);
-validBmpBytes.writeUInt16LE(1, 26);
-validBmpBytes.writeUInt16LE(24, 28);
-validBmpBytes.writeUInt32LE(4, 34);
-validBmpBytes.set([0, 0, 255, 0], 54);
-const convertedBmpResult = {
-  content: [
-    { type: "text", text: "Read image file [image/png]\n[Image converted from image/bmp to image/png.]" },
-    { type: "image", data: "pi-converted-png", mimeType: "image/png" },
-  ],
+const omittedResult = {
+  content: [{ type: "text", text: "Read image file [image/bmp]\n[Image omitted: could not be converted to a supported inline image format.]" }],
   details: undefined,
 };
-const bmp = harness({ text: validBmpBytes, builtInReadResult: convertedBmpResult });
-const bmpResult = await bmp.tool.execute("bmp", { path: "image.bmp" }, undefined, undefined, { cwd: "/work" });
-assert.strictEqual(bmpResult, convertedBmpResult, "Pi's BMP conversion result was not returned unchanged");
-assert.equal(bmp.readCalls.length, 0);
+const omitted = harness({ builtInReadResult: omittedResult, imageMimeType: "image/bmp" });
+const omittedOut = await omitted.tool.execute("omitted", { path: "broken.bmp" }, undefined, undefined, { cwd: "/work" });
+assert.strictEqual(omittedOut, omittedResult);
+assert.equal(omitted.readCalls.length, 0);
+assert.equal(omitted.calls.length, 0);
 
-const failedImageResult = {
-  content: [{
-    type: "text",
-    text: "Read image file [image/bmp]\n[Image omitted: could not be converted to a supported inline image format.]",
-  }],
-  details: undefined,
-};
-// Pi recognizes the valid BMP header, then safely omits the truncated pixel payload.
-const failedImage = harness({ text: validBmpBytes.subarray(0, 54), builtInReadResult: failedImageResult });
-const failedResult = await failedImage.tool.execute("failed-image", { path: "broken.bmp" }, undefined, undefined, { cwd: "/work" });
-assert.strictEqual(failedResult, failedImageResult, "Pi's safe image failure was not returned unchanged");
-assert.equal(failedResult.content.some((item) => item.type === "image"), false);
-assert.equal(failedImage.readCalls.length, 0);
-
-for (const [name, bytes] of [
-  ["ordinary BM text", Buffer.from("BM this is ordinary text")],
-  ["truncated PNG prefix", Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0])],
-]) {
-  const decodedText = bytes.toString("utf-8");
-  const nonImage = harness({
-    text: bytes,
-    builtInReadResult: { content: [{ type: "text", text: decodedText }], details: undefined },
-  });
-  const nonImageResult = await nonImage.tool.execute(name, { path: "ordinary.txt" }, undefined, undefined, { cwd: "/work" });
-  assert.deepEqual(nonImageResult.content, [{ type: "text", text: decodedText }]);
-  assert.equal(nonImageResult.content.some((item) => item.type === "image"), false);
-  assert.equal(nonImage.readCalls.length, 1);
-}
+const prefixText = `Read image file [image/png]\n${"x".repeat(241)}`;
+const prefixBudget = 40;
+assert.ok(module.estimateTokens(prefixText) > prefixBudget);
+const prefix = harness({
+  text: prefixText,
+  tokenBudget: prefixBudget,
+  builtInReadResult: { content: [{ type: "text", text: prefixText }], details: undefined },
+  imageMimeType: null,
+});
+const prefixOut = await prefix.tool.execute("prefix", { path: "looks-like-image.txt" }, undefined, undefined, { cwd: "/work" });
+assert.match(prefixOut.content[0].text, /AST outline unavailable/);
+assert.notEqual(prefixOut.content[0].text, prefixText);
+assert.ok(module.estimateTokens(prefixOut.content[0].text) <= prefixBudget);
+assert.equal(prefix.readCalls.length, 1);
+assert.equal(prefix.calls.length, 1);
 
 console.log("test-read: pass");

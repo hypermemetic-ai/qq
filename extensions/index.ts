@@ -11,9 +11,25 @@ import registerGrokParaphraseGuard from "./grok-paraphrase-guard.ts";
 import registerBoard from "./board.ts";
 import registerReviewFlow from "./review-flow.ts";
 
+let detectFromPi;
+
+async function detectImageMimeType(path) {
+  if (!detectFromPi) {
+    for (const specifier of ["@mariozechner/pi-coding-agent", "@earendil-works/pi-coding-agent"]) {
+      try {
+        const mime = await import(new URL("./utils/mime.js", import.meta.resolve(specifier)).href);
+        detectFromPi = mime.detectSupportedImageMimeTypeFromFile;
+        break;
+      } catch {}
+    }
+    detectFromPi ??= async () => undefined;
+  }
+  return detectFromPi(path);
+}
+
 export default function registerQQ(pi) {
   registerExecutionProfiles(pi);
-  registerRead(pi, { createReadToolDefinition });
+  registerRead(pi, { createReadToolDefinition, detectImageMimeType });
   registerAgentMessages(pi);
   registerOperatorStage(pi);
   registerContinue(pi);
