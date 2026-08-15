@@ -603,6 +603,21 @@ try {
   assert.equal(review.isTestPath("src/__snapshots__/widget.snap"), true);
   assert.equal(review.isTestPath("src/widget.ts"), false);
 
+  const runnerReentryCalls = [];
+  await review.takePane(async (command, args, options = {}) => {
+    runnerReentryCalls.push({ command, args, options });
+    if (args[0] === "pane" && args[1] === "process-info") return { code: 0, stdout: availableShell, stderr: "" };
+    return { code: 0, stdout: "", stderr: "" };
+  }, "w2T:p9", review.runnerAgentName(prepared), ["--session", "runner-session"], 12_345);
+  assert.deepEqual(runnerReentryCalls.at(-1), {
+    command: "herdr",
+    args: [
+      "agent", "start", review.runnerAgentName(prepared),
+      "--kind", "pi", "--pane", "w2T:p9", "--timeout", "12345", "--", "--approve", "--session", "runner-session",
+    ],
+    options: {},
+  });
+
   const runQaCase = async ({
     look = 1, ref = "refsha", qaSessionId, head = ref, dirty = "", changedPaths = [], descendant = true,
     verdict = "pass", summary = "looks right", feedback = "", testsModified = false,
