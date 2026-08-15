@@ -7,4 +7,8 @@ binary=${QQ_HERDR_TEST_BINARY:-$HOME/.local/lib/qq/herdr/bin/herdr}
   printf 'test-herdr-live: installed binary not executable: %s\n' "$binary" >&2
   exit 1
 }
-"$root/bin/qq-herdr-smoke" "$binary"
+if [[ -n ${QQ_HERDR_TEST_BINARY:-} ]]; then
+  "$root/bin/qq-herdr-smoke" "$binary"
+else
+  "$root/bin/qq-herdr-smoke"
+fi
