@@ -3,7 +3,8 @@ import { mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { atomicPrivateJson, parseHerdr, readHandoff, runsRoot, stateHome, waitForAvailableShell } from "./run.mjs";
+import { atomicPrivateJson, parseHerdr, readHandoff, runsRoot, waitForAvailableShell } from "./run.mjs";
+import { RUN_BLOCKED_KIND, sendRunEvent } from "./run-events.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const BACKLOG = join(QQ_ROOT, "node_modules", ".bin", "backlog");
@@ -81,10 +82,6 @@ async function listHandoffs(project, env, statuses) {
 
 export async function listProposals(project, env = process.env) {
   return listHandoffs(project, env, ["proposal", "blocked"]);
-}
-
-export async function listReviews(project, env = process.env) {
-  return listHandoffs(project, env, ["proposal", "blocked", "commented"]);
 }
 
 function hasPassedQa(state) {
@@ -181,20 +178,6 @@ export function look1FixPrompt(state, verdict) {
   return `qa look 1 rejected ${state.task.id}. ${verdict.feedback || verdict.summary}${verdict.tests_modified ? " qa rewrote tests; inspect those changes." : ""} Fix once, commit the result, then call done again with ref HEAD.`;
 }
 
-async function findPaneForSession(sessionId, env) {
-  const directory = join(stateHome(env), "qq", "event-plane", "presence");
-  let entries;
-  try { entries = await readdir(directory); } catch { return undefined; }
-  for (const entry of entries) {
-    if (!entry.endsWith(".json")) continue;
-    try {
-      const value = JSON.parse(await readFile(join(directory, entry), "utf8"));
-      if (value.session_id === sessionId && typeof value.pane === "string") return value.pane;
-    } catch {}
-  }
-  return undefined;
-}
-
 async function herdr(run, args, label) {
   return checked(run, "herdr", args, {}, label);
 }
@@ -248,6 +231,7 @@ export async function stopAgent(run, pane, timeoutMs) {
 
 export async function conductReview(run, statePath, options = {}) {
   const env = options.env ?? process.env;
+  const emitRunEvent = options.emitRunEvent ?? ((outcome, kind) => sendRunEvent(outcome, kind, { env }));
   const state = await readHandoff(statePath);
   if (state.status !== "reviewing" || (state.look !== 1 && state.look !== 2)) throw new Error("handoff is not ready for qa");
   if (!state.pane) throw new Error("handoff has no runs pane");
@@ -334,11 +318,7 @@ export async function conductReview(run, statePath, options = {}) {
   state.status = "blocked";
   state.blockedReason = verdict.feedback || verdict.summary;
   await atomicPrivateJson(statePath, state);
-  const architectPane = await findPaneForSession(state.architectSession, env);
-  if (architectPane) {
-    const pack = formatPack(state.pack);
-    await herdr(run, ["agent", "prompt", architectPane, `qa rejected ${state.task.id} on look 2. ${state.blockedReason}\n\n${pack}`], "cannot notify architect of look 2 rejection");
-  }
+  await emitRunEvent(state, RUN_BLOCKED_KIND);
   await closePane();
   await notify("qa blocked after look 2", `${state.task.id}: ${verdict.summary}`);
   return state;

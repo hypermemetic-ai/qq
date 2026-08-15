@@ -2,6 +2,7 @@
 import { spawn } from "node:child_process";
 
 import { landHandoff } from "./lib/review.mjs";
+import { RUN_LANDED_KIND, sendRunEvent } from "./lib/run-events.mjs";
 
 const statePath = process.argv[2];
 if (!statePath) throw new Error("usage: qq-land-worker.mjs <handoff.json>");
@@ -18,7 +19,10 @@ function run(command, args, options = {}) {
   });
 }
 
-landHandoff(run, statePath).then(
-  (state) => process.stdout.write(`Landed ${state.task.id}.\n`),
-  (error) => { process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 1; },
-);
+landHandoff(run, statePath).then(async (state) => {
+  await sendRunEvent(state, RUN_LANDED_KIND);
+  process.stdout.write(`Landed ${state.task.id}.\n`);
+}).catch((error) => {
+  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = 1;
+});

@@ -1,10 +1,13 @@
 // @ts-nocheck
 import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { atomicPrivateJson, readHandoff } from "../bin/lib/run.mjs";
-import { formatPack, isFailedLand, isQaPassedProposal, listProposals, listReviews, prepareDone, projectFromCwd, setBoardStatus } from "../bin/lib/review.mjs";
+import { EventPlaneClient } from "../bin/lib/event-plane-client.ts";
+import { atomicPrivateJson, readHandoff, stateHome } from "../bin/lib/run.mjs";
+import { formatPack, isFailedLand, isQaPassedProposal, listProposals, prepareDone, projectFromCwd, setBoardStatus } from "../bin/lib/review.mjs";
+import { RUN_BLOCKED_KIND, parseRunEvent, runEventDeliveryGuard, runEventEndpoint, runEventRecipient } from "../bin/lib/run-events.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -22,31 +25,35 @@ function commandReason(execution, fallback) {
   return execution?.stderr?.trim() || execution?.stdout?.trim() || fallback;
 }
 
-function landedMessage(state) {
-  const pack = state.pack ?? { summary: "landed", files: [] };
+function runOutcomeMessage(event) {
+  const payload = event.payload;
+  if (event.kind === RUN_BLOCKED_KIND) {
+    return {
+      customType: "qq-run-blocked",
+      content: [
+        `QA blocked ${payload.task.id} after look ${payload.review.look} — ${payload.task.title}`,
+        `Ref: ${payload.review.ref}`,
+        `At: ${payload.review.blocked_at}`,
+        `Reason: ${payload.review.reason}`,
+        "",
+        formatPack({ summary: payload.review.summary, files: payload.review.files }),
+      ].join("\n"),
+      display: true,
+      details: { ...payload, event_id: event.eventId },
+    };
+  }
   return {
     customType: "qq-run-landed",
     content: [
-      `Landed ${state.task.id} — ${state.task.title}`,
-      `Ref: ${state.ref}`,
-      `Target: ${state.baseBranch}`,
-      `At: ${state.landedAt}`,
+      `Landed ${payload.task.id} — ${payload.task.title}`,
+      `Ref: ${payload.landing.ref}`,
+      `Target: ${payload.landing.target_branch}`,
+      `At: ${payload.landing.landed_at}`,
       "",
-      formatPack(pack),
+      formatPack({ summary: payload.landing.summary, files: payload.landing.files }),
     ].join("\n"),
     display: true,
-    details: {
-      schema: "qq.run-landed/v1",
-      run_id: state.id,
-      task: { id: state.task.id, title: state.task.title },
-      landing: {
-        ref: state.ref,
-        target_branch: state.baseBranch,
-        landed_at: state.landedAt,
-        summary: pack.summary,
-        files: pack.files ?? [],
-      },
-    },
+    details: { ...payload, event_id: event.eventId },
   };
 }
 
@@ -54,12 +61,16 @@ export default function registerReviewFlow(pi, deps = {}) {
   const env = deps.env ?? process.env;
   const run = deps.exec ?? ((command, args, options) => pi.exec(command, args, options));
   const launchReview = deps.launchReview ?? ((statePath) => detachedWorker(join(QQ_ROOT, "bin", "qq-review-worker.mjs"), statePath, { ...process.env, ...env }));
+  const eventClient = deps.eventClient ?? new EventPlaneClient(join(stateHome(env), "qq", "event-plane", "event-plane.sock"));
+  const sleep = deps.sleep ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
   let role = env.QQ_AGENT_ROLE || "runner";
   let currentContext;
   let timer;
+  let receiverActive = false;
+  let receiverEpoch = 0;
   let showing = false;
   const shown = new Set();
-  const polledFailedLandKeys = new Map();
+  const injectedRunEvents = new Set();
 
   pi.registerTool({
     name: "done", label: "Done", promptSnippet: "Submit the delegated ref to independent qa and stop",
@@ -88,7 +99,6 @@ export default function registerReviewFlow(pi, deps = {}) {
     if (execution?.code !== 0) throw new Error(commandReason(execution, "land failed"));
     const landed = await readHandoff(state.statePath);
     if (landed.status !== "landed") throw new Error("land worker completed without recording a landed handoff");
-    await pi.sendMessage(landedMessage(landed), { triggerTurn: false });
   }
 
   function ownsHandoff(state, ctx) {
@@ -100,21 +110,10 @@ export default function registerReviewFlow(pi, deps = {}) {
     return isFailedLand(state) ? `${state.id}:land:${state.blockedReason}` : `${state.id}:${state.updatedAt}`;
   }
 
-  async function rememberFailedLand(previous) {
-    try {
-      const current = await readHandoff(previous.statePath);
-      if (isFailedLand(current) && (!isFailedLand(previous) || current.blockedReason === previous.blockedReason)) {
-        const key = offerKey(current);
-        shown.add(key);
-        polledFailedLandKeys.set(current.id, key);
-      }
-    } catch {}
-  }
-
-  async function offer(state, ctx, options = {}) {
+  async function offer(state, ctx) {
     const key = offerKey(state);
     if (showing || role !== "architect" || !ctx.hasUI || !ownsHandoff(state, ctx)) return;
-    if (!options.force && (shown.has(key) || ctx.isIdle?.() === false)) return;
+    if (shown.has(key) || ctx.isIdle?.() === false) return;
     showing = true;
     shown.add(key);
     let choice;
@@ -139,9 +138,12 @@ export default function registerReviewFlow(pi, deps = {}) {
           display: true,
           details: { task: state.task.id },
         }, { triggerTurn: true, deliverAs: "steer" });
+      } else if (choice === "later") {
+        state.status = "later";
+        state.updatedAt = new Date().toISOString();
+        await atomicPrivateJson(state.statePath, state);
       }
     } catch (error) {
-      if (choice === "approve") await rememberFailedLand(state);
       ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
     } finally {
       showing = false;
@@ -153,45 +155,115 @@ export default function registerReviewFlow(pi, deps = {}) {
     if (!ctx || role !== "architect") return;
     const project = projectFromCwd(ctx.cwd, env);
     for (const state of await listProposals(project, env)) {
-      if (!ownsHandoff(state, ctx)) continue;
-      if (isFailedLand(state)) {
-        const key = offerKey(state);
-        if (!polledFailedLandKeys.has(state.id)) shown.add(key);
-        polledFailedLandKeys.set(state.id, key);
-      }
+      if (!ownsHandoff(state, ctx) || (state.status === "blocked" && !isFailedLand(state))) continue;
       await offer(state, ctx);
     }
   }
 
-  pi.registerTool({
-    name: "review", label: "Review", promptSnippet: "Reopen waiting runs reviews",
-    description: "Offer waiting proposal, blocked, and commented runs handoffs for review. Architect sessions only. Approves only QA-passed proposals, while reopening later deferrals and QA-passed refs after discuss without re-delegating.",
-    parameters: { type: "object", additionalProperties: false, properties: {} },
-    async execute(_id, _params, _signal, _update, ctx) {
-      if (role !== "architect") return result("review is available only in an architect session.", { status: "refused" });
-      if (!ctx.hasUI) return result("review requires an interactive architect session.", { status: "refused" });
-      const waiting = (await listReviews(projectFromCwd(ctx.cwd, env), env)).filter((state) => ownsHandoff(state, ctx));
-      if (!waiting.length) return result("No waiting reviews.", { status: "idle" });
-      for (const state of waiting) await offer(state, ctx, { force: true });
-      return result(`Offered ${waiting.length} waiting review${waiting.length === 1 ? "" : "s"}.`, { status: "offered", count: waiting.length });
-    },
-  });
+  async function runEventReceiptExists(eventId, customType) {
+    const path = currentContext?.sessionManager?.getSessionFile?.();
+    if (typeof path !== "string") return false;
+    const text = await readFile(path, "utf8").catch(() => "");
+    for (const line of text.split("\n")) {
+      if (!line) continue;
+      try {
+        const value = JSON.parse(line);
+        if (value?.type === "custom_message" && value.customType === customType && value.details?.event_id === eventId) return true;
+      } catch {}
+    }
+    return false;
+  }
+
+  async function receiveRunEvent(delivery, sessionId, localEpoch) {
+    const guard = runEventDeliveryGuard(delivery);
+    const event = parseRunEvent(delivery, sessionId);
+    if (!event) {
+      await eventClient.block({ ...guard, reason: "unsupported qq run outcome" });
+      return;
+    }
+    const message = runOutcomeMessage(event);
+    if (await runEventReceiptExists(event.eventId, message.customType)) {
+      await eventClient.acknowledge(guard);
+      injectedRunEvents.delete(event.eventId);
+      return;
+    }
+    if (injectedRunEvents.has(event.eventId)) {
+      await eventClient.retry({ ...guard, reason: "Pi session persistence not yet observable" });
+      return;
+    }
+    if (!receiverActive || localEpoch !== receiverEpoch || !currentContext) return;
+    injectedRunEvents.add(event.eventId);
+    const options = currentContext.isIdle?.() === false
+      ? { triggerTurn: true, deliverAs: "steer" }
+      : { triggerTurn: true };
+    try {
+      await pi.sendMessage(message, options);
+    } catch (error) {
+      injectedRunEvents.delete(event.eventId);
+      throw error;
+    }
+    if (await runEventReceiptExists(event.eventId, message.customType)) {
+      await eventClient.acknowledge(guard);
+      injectedRunEvents.delete(event.eventId);
+    } else {
+      await eventClient.retry({ ...guard, reason: "Pi session persistence not yet observable" });
+    }
+  }
+
+  async function receiveRunEvents(sessionId, localEpoch) {
+    const endpoint = runEventEndpoint();
+    while (receiverActive && localEpoch === receiverEpoch) {
+      try {
+        const next = await eventClient.next({
+          consumer_type: "recipient",
+          consumer_id: runEventRecipient(sessionId),
+          generation: 0,
+          endpoint_token: endpoint,
+          wait_ms: 30_000,
+        });
+        if (next?.delivery) await receiveRunEvent(next.delivery, sessionId, localEpoch);
+      } catch {
+        if (receiverActive && localEpoch === receiverEpoch) await sleep(500);
+      }
+    }
+  }
+
+  function startRunEventReceiver() {
+    if (receiverActive || role !== "architect" || !currentContext) return;
+    const sessionId = currentContext.sessionManager?.getSessionId?.();
+    if (typeof sessionId !== "string" || sessionId.length === 0) return;
+    receiverActive = true;
+    receiverEpoch += 1;
+    void receiveRunEvents(sessionId, receiverEpoch);
+  }
+
+  function stopRunEventReceiver() {
+    receiverActive = false;
+    receiverEpoch += 1;
+  }
 
   pi.events.on("qq:role-selected", (selection) => {
     if (!selection?.role) return;
     role = selection.role;
-    if (role === "architect") void poll();
+    if (role === "architect") {
+      startRunEventReceiver();
+      void poll();
+    } else {
+      stopRunEventReceiver();
+    }
   });
   pi.on("session_start", async (_event, ctx) => {
     currentContext = ctx;
     timer = setInterval(() => { void poll(); }, 2_000);
     timer.unref?.();
+    startRunEventReceiver();
     await poll();
   });
   pi.on("agent_settled", async () => { await poll(); });
   pi.on("session_shutdown", async () => {
     if (timer) clearInterval(timer);
     timer = undefined;
+    stopRunEventReceiver();
     currentContext = undefined;
     showing = false;
   });
