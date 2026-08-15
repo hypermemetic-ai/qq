@@ -4,10 +4,11 @@ import { readFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { retryBootstrapFailureOutbox } from "../bin/lib/bootstrap.mjs";
 import { EventPlaneClient } from "../bin/lib/event-plane-client.ts";
 import { atomicPrivateJson, readHandoff, stateHome } from "../bin/lib/run.mjs";
 import { formatPack, isFailedLand, isQaPassedProposal, listProposals, prepareDone, projectFromCwd } from "../bin/lib/review.mjs";
-import { RUN_BLOCKED_KIND, parseRunEvent, runEventDeliveryGuard, runEventEndpoint, runEventRecipient } from "../bin/lib/run-events.mjs";
+import { RUN_BLOCKED_KIND, RUN_BOOTSTRAP_FAILED_KIND, parseRunEvent, runEventDeliveryGuard, runEventEndpoint, runEventRecipient } from "../bin/lib/run-events.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -25,8 +26,21 @@ function commandReason(execution, fallback) {
   return execution?.stderr?.trim() || execution?.stdout?.trim() || fallback;
 }
 
-function runOutcomeMessage(event) {
+export function runOutcomeMessage(event) {
   const payload = event.payload;
+  if (event.kind === RUN_BOOTSTRAP_FAILED_KIND) {
+    return {
+      customType: "qq-run-bootstrap-failed",
+      content: [
+        `Runner start failed for ${payload.task.id} — ${payload.task.title}`,
+        `At: ${payload.bootstrap.failed_at}`,
+        `Reason: ${payload.bootstrap.reason}`,
+        payload.bootstrap.task_returned ? "The task was returned to To Do." : "The task could not be returned automatically; operator action is required.",
+      ].join("\n"),
+      display: true,
+      details: { ...payload, event_id: event.eventId },
+    };
+  }
   if (event.kind === RUN_BLOCKED_KIND) {
     return {
       customType: "qq-run-blocked",
@@ -62,6 +76,7 @@ export default function registerReviewFlow(pi, deps = {}) {
   const run = deps.exec ?? ((command, args, options) => pi.exec(command, args, options));
   const launchReview = deps.launchReview ?? ((statePath) => detachedWorker(join(QQ_ROOT, "bin", "qq-review-worker.mjs"), statePath, { ...process.env, ...env }));
   const eventClient = deps.eventClient ?? new EventPlaneClient(join(stateHome(env), "qq", "event-plane", "event-plane.sock"));
+  const retryBootstrapFailures = deps.retryBootstrapFailureOutbox ?? retryBootstrapFailureOutbox;
   const sleep = deps.sleep ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
   let role = env.QQ_AGENT_ROLE || "runner";
   let currentContext;
@@ -69,6 +84,7 @@ export default function registerReviewFlow(pi, deps = {}) {
   let receiverActive = false;
   let receiverEpoch = 0;
   let showing = false;
+  let retryingBootstrapFailures = false;
   const shown = new Set();
   const injectedRunEvents = new Set();
 
@@ -152,6 +168,13 @@ export default function registerReviewFlow(pi, deps = {}) {
   async function poll() {
     const ctx = currentContext;
     if (!ctx || role !== "architect") return;
+    const sessionId = ctx.sessionManager?.getSessionId?.();
+    if (!retryingBootstrapFailures && typeof sessionId === "string" && sessionId.length > 0) {
+      retryingBootstrapFailures = true;
+      void retryBootstrapFailures(sessionId, { env, client: eventClient })
+        .catch(() => {})
+        .finally(() => { retryingBootstrapFailures = false; });
+    }
     const project = projectFromCwd(ctx.cwd, env);
     for (const state of await listProposals(project, env)) {
       if (!ownsHandoff(state, ctx) || (state.status === "blocked" && !isFailedLand(state))) continue;

@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
@@ -6,10 +7,46 @@ import { fileURLToPath } from "node:url";
 
 import { readExecutionPolicy } from "../bin/lib/execution-profiles.mjs";
 import { collectLiveWorktreeDiffs, findExistingBrief, withAdmissionLock } from "../bin/lib/admission.mjs";
-import { awaitBriefGate, discardRun, formatNoteTake, formatTicket, prepareRun, startRun } from "../bin/lib/run.mjs";
+import { awaitBriefGate, discardRun, formatNoteTake, formatTicket, prepareBootstrapRequest, prepareRun } from "../bin/lib/run.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BACKLOG = join(QQ_ROOT, "node_modules", ".bin", "backlog");
+
+export function detachedBootstrapWorker(requestPath, env, options = {}) {
+  const spawnProcess = options.spawn ?? spawn;
+  const timeoutMs = options.timeoutMs ?? 5_000;
+  return new Promise((accept, reject) => {
+    const child = spawnProcess(process.execPath, [join(QQ_ROOT, "bin", "qq-start-worker.mjs"), requestPath], {
+      cwd: QQ_ROOT, env: { ...process.env, ...env }, detached: true,
+      stdio: ["ignore", "ignore", "ignore", "ipc"],
+    });
+    let settled = false;
+    const timer = setTimeout(() => finish(new Error("runner bootstrap worker did not accept its request")), timeoutMs);
+    timer.unref?.();
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.removeAllListeners?.();
+      if (error) {
+        try { child.kill?.(); } catch {}
+        try { child.disconnect?.(); } catch {}
+        child.unref?.();
+        reject(error);
+      } else {
+        try { child.disconnect?.(); } catch {}
+        child.unref?.();
+        accept(child.pid);
+      }
+    };
+    child.once("error", () => finish(new Error("cannot launch runner bootstrap worker")));
+    child.once("exit", () => finish(new Error("runner bootstrap worker exited before accepting its request")));
+    child.on("message", (message) => {
+      if (message?.type === "qq-bootstrap-accepted") finish();
+      else if (message?.type === "qq-bootstrap-rejected") finish(new Error("runner bootstrap worker could not read its private request"));
+    });
+  });
+}
 
 export { formatTicket };
 
@@ -286,8 +323,9 @@ export default function registerBoard(pi, deps = {}) {
       let prepared;
       let outboundNote;
       try {
-        const operationCtx = { ...ctx, signal: signal ?? ctx.signal };
-        const admission = await (deps.admitDelegate ?? admitDelegate)(operationCtx, params.id, { run, env, signal, deps });
+        const operationSignal = signal ?? ctx.signal;
+        const operationCtx = { ...ctx, signal: operationSignal };
+        const admission = await (deps.admitDelegate ?? admitDelegate)(operationCtx, params.id, { run, env, signal: operationSignal, deps });
         const task = admission?.task;
         if (admission?.kind === "refused") {
           return result(`delegate refused: ${task.id} is ${task.status}, not To Do.`, { task_id: task.id });
@@ -303,7 +341,7 @@ export default function registerBoard(pi, deps = {}) {
         outboundNote = note;
         prepared = await (deps.prepareRun ?? prepareRun)({ cwd: ctx.cwd, env, project, task, note, transcript });
         const decision = await (deps.withGlowTurn ?? withGlowTurn)(admission.commonDir || project, () => (deps.awaitBriefGate ?? awaitBriefGate)({
-          run, env, prepared, signal,
+          run, env, prepared, signal: operationSignal,
           pluginRoot: deps.briefGatePluginPath ?? join(QQ_ROOT, "plugins", "brief-gate"),
         }));
         if (decision === "cancelled") {
@@ -315,13 +353,15 @@ export default function registerBoard(pi, deps = {}) {
           return result(`Cancelled ${task.id}; runner not started.`, { status: "cancelled", task_id: task.id });
         }
 
-        await (deps.startRun ?? startRun)({
-          run, cwd: ctx.cwd, env, task, prepared, qaBinding, project, signal,
+        const bootstrap = await (deps.prepareBootstrapRequest ?? prepareBootstrapRequest)({
+          cwd: ctx.cwd, env, task, prepared, qaBinding, project, signal: operationSignal,
           architectSession: ctx.sessionManager.getSessionId(),
         });
+        if (operationSignal?.aborted) throw operationSignal.reason ?? new Error("delegation was cancelled");
+        const workerPid = await (deps.launchBootstrap ?? ((path) => detachedBootstrapWorker(path, env)))(bootstrap.bootstrapPath);
         claimedTask = undefined;
         prepared = undefined;
-        return result(`Approved ${task.id}; runner started.`, { status: "approved", task_id: task.id });
+        return result(`Approved ${task.id}; runner starting.`, { status: "starting", task_id: task.id, worker_pid: workerPid });
       } catch (error) {
         if (claimedTask) await run(BACKLOG, ["task", "edit", claimedTask, "--status", "To Do", "--plain"], { cwd: ctx.cwd }).catch(() => {});
         if (prepared) {
