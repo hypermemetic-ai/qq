@@ -47,6 +47,7 @@ cat >"$FAKE" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 [[ -z "${QQ_OPENWIKI_MAIN_ROOT+x}" ]]
+[[ "${NODE_OPTIONS:-}" != *qq-openwiki-shell-env.cjs* ]]
 [[ "$PWD" != "$QQ_TEST_MAIN" ]]
 [[ "$(git rev-parse --git-dir)" == .git ]]
 [[ -z "$(git remote)" ]]
@@ -389,6 +390,35 @@ if QQ_OPENWIKI_MAIN_ROOT="$REPO" \
   echo "non-qq repository unexpectedly used main publication" >&2
   exit 1
 fi
+
+# A changed update produces a new writer commit, merges it into main, and
+# pushes the resulting merge to the configured upstream.
+cat >"$FAKE" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "${NODE_OPTIONS:-}" != *qq-openwiki-shell-env.cjs* ]]
+[[ "$(<openwiki/index.md)" == "version one" ]]
+printf '%s\n' "$*" >"$QQ_TEST_ARGS"
+printf 'version two\n' >openwiki/index.md
+SH
+chmod +x "$FAKE"
+QQ_OPENWIKI_MAIN_ROOT="$REPO" \
+QQ_OPENWIKI_REPO_KEY=qq \
+QQ_OPENWIKI_BIN="$FAKE" \
+QQ_TEST_ARGS="$TMP/args" \
+  "$ROOT/bin/qq-openwiki-refresh" >/dev/null
+CHANGED_MERGE="$(git -C "$REPO" rev-parse HEAD)"
+CHANGED_WRITER="$(git -C "$REPO" rev-parse HEAD^2)"
+[[ "$(<"$TMP/args")" == "code --update --print Keep this wiki short and practical." ]]
+[[ "$CHANGED_MERGE" != "$FIRST_MERGE" ]]
+[[ "$(git -C "$REPO" rev-parse HEAD^1)" == "$FIRST_MERGE" ]]
+[[ "$(git -C "$REPO" rev-parse "$CHANGED_WRITER^")" == "$FIRST_MERGE" ]]
+[[ "$(git -C "$REPO" diff-tree --no-commit-id --name-only -r "$CHANGED_WRITER^" "$CHANGED_WRITER")" == "openwiki/index.md" ]]
+[[ "$(<"$REPO/openwiki/index.md")" == "version two" ]]
+[[ "$(git --git-dir="$REMOTE" rev-parse refs/heads/main)" == "$CHANGED_MERGE" ]]
+[[ -z "$(git -C "$REPO" status --porcelain --untracked-files=all)" ]]
+[[ "$(stat -c %a "$REPO/openwiki")" == 555 ]]
+[[ "$(stat -c %a "$REPO/openwiki/index.md")" == 444 ]]
 
 # Checked-in instructions only point to optional generated context; T-53 does
 # not require or carry generated output in its source commit.

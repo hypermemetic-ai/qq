@@ -137,6 +137,9 @@ try {
   const materializeCallIndex = calls.indexOf(materializeCall);
   const mergeCallIndex = calls.findIndex(({ command, args }) => command === "git" && args[0] === "merge");
   assert.ok(materializeCallIndex < mergeCallIndex);
+  const thawCallIndex = calls.findIndex(({ command, args }) => command.endsWith("/bin/qq-openwiki-materialize") && args[0] === "thaw");
+  const worktreeRemoveIndex = calls.findIndex(({ command, args }) => command === "git" && args[0] === "worktree" && args[1] === "remove");
+  assert.ok(thawCallIndex >= 0 && thawCallIndex < worktreeRemoveIndex);
   const pushCall = calls.find(({ command, args }) => command === "git" && args[0] === "push");
   assert.deepEqual(pushCall.args, ["push", "origin", "HEAD:refs/heads/main"]);
   assert.equal(pushCall.options.cwd, mainRoot);

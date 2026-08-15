@@ -6,7 +6,6 @@ MAIN_ROOT="${QQ_OPENWIKI_MAIN_ROOT:-$ROOT}"
 MAIN_BRANCH="${QQ_OPENWIKI_MAIN_BRANCH:-main}"
 PUBLISHED_REPO_KEY="${QQ_OPENWIKI_PUBLISHED_REPO_KEY:-qq}"
 OPENWIKI_BIN="${QQ_OPENWIKI_BIN:-openwiki}"
-SHELL_ENV_PRELOAD="${QQ_OPENWIKI_SHELL_ENV_PRELOAD:-$ROOT/bin/qq-openwiki-shell-env.cjs}"
 PUBLISH_BIN="${QQ_OPENWIKI_PUBLISH_BIN:-$ROOT/bin/qq-openwiki-publish}"
 MATERIALIZE_BIN="${QQ_OPENWIKI_MATERIALIZE_BIN:-$ROOT/bin/qq-openwiki-materialize}"
 PROMPT="${QQ_OPENWIKI_PROMPT:-Keep this wiki short and practical.}"
@@ -62,15 +61,11 @@ if [[ "$ACTION" == auto ]]; then
   if [[ -f "$project/openwiki/.last-update.json" ]]; then ACTION=update; else ACTION=init; fi
 fi
 
-node_options="${NODE_OPTIONS:-}"
-if [[ -n "$node_options" ]]; then node_options+=" "; fi
-node_options+="--require=$SHELL_ENV_PRELOAD"
 (
   cd -- "$project"
   env \
     -u QQ_OPENWIKI_MAIN_ROOT \
     -u QQ_OPENWIKI_MAIN_BRANCH \
-    NODE_OPTIONS="$node_options" \
     "$OPENWIKI_BIN" code "--$ACTION" --print "$PROMPT"
 )
 if [[ ! -d "$project/openwiki" || -L "$project/openwiki" ]]; then

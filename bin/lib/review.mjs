@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { atomicPrivateJson, parseHerdr, readHandoff, runsRoot, waitForAvailableShell } from "./run.mjs";
+import { atomicPrivateJson, parseHerdr, readHandoff, removeWorktree, runsRoot, waitForAvailableShell } from "./run.mjs";
 import { RUN_BLOCKED_KIND, sendRunEvent } from "./run-events.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -122,7 +122,7 @@ export async function landHandoff(run, statePath) {
     const [remote, remoteRef] = String(upstream.stdout ?? "").trimEnd().split("\0");
     if (!remote || !remoteRef) throw new Error(`target branch ${state.baseBranch} has no upstream`);
     await checked(run, "git", ["push", remote, `HEAD:${remoteRef}`], { cwd: state.mainRoot }, "cannot push target branch to its upstream");
-    await checked(run, "git", ["worktree", "remove", state.worktree], { cwd: state.mainRoot }, "merged but worktree cleanup failed");
+    await removeWorktree(run, state.mainRoot, state.worktree);
     await checked(run, "git", ["branch", "-d", state.branch], { cwd: state.mainRoot }, "merged but branch cleanup failed");
     state.status = "landed";
     state.landedAt = new Date().toISOString();

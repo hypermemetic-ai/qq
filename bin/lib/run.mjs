@@ -263,6 +263,14 @@ export async function waitForAvailableShell(run, paneId, options = {}) {
   throw new Error(`runs pane ${paneId} never became an available shell: ${reason(last, "not a free shell")}`);
 }
 
+export async function removeWorktree(run, mainRoot, worktree, options = {}) {
+  const args = ["worktree", "remove"];
+  if (options.force) args.push("--force");
+  args.push(worktree);
+  await checked(run, OPENWIKI_MATERIALIZE, ["thaw", worktree], { cwd: worktree, signal: options.signal }, "cannot prepare worktree cleanup");
+  return checked(run, "git", args, { cwd: mainRoot, signal: options.signal }, "worktree cleanup failed");
+}
+
 export async function startRun(options) {
   const { run, cwd, env = process.env, task, architectSession, qaBinding, signal } = options;
   if (typeof run !== "function") throw new Error("run start requires a command runner");
@@ -336,7 +344,7 @@ export async function startRun(options) {
   } catch (error) {
     if (createdPane && paneId) await run("herdr", ["pane", "close", paneId], {}).catch(() => {});
     if (createdWorktree && mainRoot) {
-      await run("git", ["worktree", "remove", "--force", worktree], { cwd: mainRoot }).catch(() => {});
+      await removeWorktree(run, mainRoot, worktree, { force: true }).catch(() => {});
       await run("git", ["branch", "-D", branch], { cwd: mainRoot }).catch(() => {});
     }
     await rm(stateDir, { recursive: true, force: true }).catch(() => {});
