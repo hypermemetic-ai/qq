@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 const root = process.argv[2];
 const review = await import(pathToFileURL(join(root, "bin/lib/review.mjs")));
 const runLib = await import(pathToFileURL(join(root, "bin/lib/run.mjs")));
+const runEvents = await import(pathToFileURL(join(root, "bin/lib/run-events.mjs")));
 const extension = await import(pathToFileURL(join(root, "extensions/review-flow.ts")));
 const qaResult = await import(pathToFileURL(join(root, "extensions/qa-result.ts")));
 
@@ -124,8 +125,7 @@ try {
   };
   let shutdowns = 0;
   extension.default(pi, { env: { QQ_AGENT_ROLE: "runner", QQ_RUN_STATE: statePath }, exec: run, launchReview(path) { launched = path; return 99; } });
-  const runnerReviewTool = tools.find(({ name }) => name === "review");
-  assert.match(`${runnerReviewTool.promptSnippet} ${runnerReviewTool.description}`, /runs/);
+  assert.equal(tools.some(({ name }) => name === "review"), false);
   const done = tools.find(({ name }) => name === "done");
   const outcome = await done.execute("d", { ref: "HEAD" }, undefined, undefined, { cwd: worktree, shutdown() { shutdowns += 1; }, abort() { throw new Error("done should shut down, not abort"); } });
   assert.equal(outcome.details.status, "reviewing");
@@ -162,14 +162,17 @@ try {
     ...proposalState, id: "task-later", task: { id: "TASK-3", title: "Later task" }, statePath: laterPath,
   });
   const listedProposals = await review.listProposals("qq", listEnv);
-  const listedReviews = await review.listReviews("qq", listEnv);
   assert.deepEqual(listedProposals.map((item) => item.id), ["task-later"]);
-  assert.deepEqual(listedReviews.map((item) => item.id), ["task-later", "task-commented"]);
 
   const boardCalls = [];
   const messages = [];
   const architectTools = [];
   const architectEvents = new Map();
+  const quietEventClient = {
+    next() { return new Promise(() => {}); },
+    async acknowledge() {},
+    async block() {},
+  };
   const architectRun = async (command, args) => {
     if (args[0] === "task" && args[1] === "edit") boardCalls.push(args);
     return { code: 0, stdout: "", stderr: "" };
@@ -181,8 +184,8 @@ try {
     exec: architectRun,
     sendMessage(payload, options) { messages.push({ payload, options }); },
   };
-  extension.default(architectPi, { env: { ...listEnv, QQ_AGENT_ROLE: "architect" }, exec: architectRun });
-  const reviewTool = architectTools.find(({ name }) => name === "review");
+  extension.default(architectPi, { env: { ...listEnv, QQ_AGENT_ROLE: "architect" }, exec: architectRun, eventClient: quietEventClient });
+  assert.equal(architectTools.some(({ name }) => name === "review"), false);
   const choices = [];
   const queued = ["later"];
   const ctx = {
@@ -199,13 +202,17 @@ try {
   await architectEvents.get("session_start")({}, ctx);
   assert.deepEqual(choices.map((item) => item.options), [["approve", "discuss", "later"]]);
   assert.equal(choices[0].pack, "small fix\nsrc/a.ts +2/-1");
+  assert.equal(JSON.parse(await readFile(laterPath, "utf8")).status, "later");
+  await architectEvents.get("agent_settled")();
+  assert.equal(choices.length, 1);
 
-  queued.push("discuss", "later");
-  const laterAgain = await reviewTool.execute("r", {}, undefined, undefined, ctx);
-  assert.equal(laterAgain.details.status, "offered");
-  assert.equal(laterAgain.details.count, 2);
-  assert.equal(choices.length, 3);
-  assert.ok(choices.some((item) => item.pack === "small fix\nsrc/a.ts +2/-1" && item.options.includes("approve")));
+  const laterAgain = JSON.parse(await readFile(laterPath, "utf8"));
+  laterAgain.status = "proposal";
+  laterAgain.updatedAt = "2026-04-01T00:00:09.000Z";
+  await runLib.atomicPrivateJson(laterPath, laterAgain);
+  queued.push("discuss");
+  await architectEvents.get("agent_settled")();
+  assert.equal(choices.length, 2);
   const commented = JSON.parse(await readFile(laterPath, "utf8"));
   assert.equal(commented.status, "commented");
   assert.equal(commented.ref, "refsha");
@@ -213,57 +220,20 @@ try {
   assert.deepEqual(boardCalls.at(-1).slice(0, 5), ["task", "edit", "TASK-3", "--status", "To Do"]);
   assert.equal(messages[0].payload.content, "TASK-3 discuss:\ntighten the summary\n\nsmall fix\nsrc/a.ts +2/-1");
   assert.deepEqual(messages[0].options, { triggerTurn: true, deliverAs: "steer" });
-  assert.deepEqual((await review.listProposals("qq", listEnv)).map((item) => item.id), []);
-  assert.deepEqual((await review.listReviews("qq", listEnv)).map((item) => item.id).sort(), ["task-commented", "task-later"]);
-
-  const afterComment = [];
-  await reviewTool.execute("r2", {}, undefined, undefined, {
-    ...ctx,
-    ui: { ...ctx.ui, async select(pack, options) { afterComment.push({ pack, options }); return "later"; } },
-  });
-  assert.equal(afterComment.length, 2);
-  assert.ok(afterComment.every((item) => item.options.includes("approve")));
+  await architectEvents.get("agent_settled")();
+  assert.equal(choices.length, 2);
 
   const blockedPath = join(runsDir, "task-blocked", "handoff.json");
   await runLib.atomicPrivateJson(blockedPath, {
-    ...proposalState, id: "task-blocked", status: "blocked", qaVerdict: undefined, pack: undefined,
-    blockedReason: "qa infrastructure failed: pane busy", task: { id: "TASK-4", title: "Blocked task" },
-    statePath: blockedPath, updatedAt: "2026-04-01T00:00:02.000Z",
+    ...proposalState, id: "task-blocked", status: "blocked", look: 2,
+    qaVerdict: { schema: "qq.qa-verdict/v1", version: 1, verdict: "fail", summary: "still wrong", feedback: "fix failed", tests_modified: false },
+    pack: { summary: "still wrong", files: [] }, blockedReason: "fix failed",
+    task: { id: "TASK-4", title: "Blocked task" }, statePath: blockedPath, updatedAt: "2026-04-01T00:00:10.000Z",
   });
-  const blockedOffers = [];
-  await reviewTool.execute("r3", {}, undefined, undefined, {
-    ...ctx,
-    ui: {
-      ...ctx.ui,
-      async select(pack, options) {
-        blockedOffers.push({ pack, options });
-        return pack === "qa infrastructure failed: pane busy" ? "discuss" : "later";
-      },
-    },
-  });
-  const blockedOffer = blockedOffers.find(({ pack }) => pack === "qa infrastructure failed: pane busy");
-  assert.deepEqual(blockedOffer.options, ["discuss", "later"]);
-  const discussedBlocked = JSON.parse(await readFile(blockedPath, "utf8"));
-  assert.equal(discussedBlocked.status, "blocked");
-  assert.equal(discussedBlocked.operatorComment, "tighten the summary");
+  await architectEvents.get("agent_settled")();
+  assert.equal(choices.length, 2);
+  assert.equal(review.isQaPassedProposal(JSON.parse(await readFile(blockedPath, "utf8"))), false);
   await assert.rejects(review.landHandoff(run, blockedPath), /not a qa-passed proposal ready to land/);
-
-  const infrastructureCommentedPath = join(runsDir, "task-infrastructure-commented", "handoff.json");
-  await runLib.atomicPrivateJson(infrastructureCommentedPath, {
-    ...discussedBlocked, id: "task-infrastructure-commented", status: "commented",
-    blockedReason: "qa infrastructure failed: legacy comment", task: { id: "TASK-5", title: "Legacy blocked task" },
-    statePath: infrastructureCommentedPath, updatedAt: "2026-04-01T00:00:03.000Z",
-  });
-  const reopenedOffers = [];
-  await reviewTool.execute("r4", {}, undefined, undefined, {
-    ...ctx,
-    ui: { ...ctx.ui, async select(pack, options) { reopenedOffers.push({ pack, options }); return "later"; } },
-  });
-  const reopenedBlocked = reopenedOffers.find(({ pack }) => pack === "qa infrastructure failed: pane busy");
-  const legacyCommented = reopenedOffers.find(({ pack }) => pack === "qa infrastructure failed: legacy comment");
-  assert.deepEqual(reopenedBlocked.options, ["discuss", "later"]);
-  assert.deepEqual(legacyCommented.options, ["discuss", "later"]);
-  await assert.rejects(review.landHandoff(run, infrastructureCommentedPath), /not a qa-passed proposal ready to land/);
   await architectEvents.get("session_shutdown")();
 
   const successfulLandXdg = join(scratch, "successful-land-xdg");
@@ -279,6 +249,19 @@ try {
   const successfulLandEvents = new Map();
   const successfulLandMessages = [];
   const successfulLandNotifications = [];
+  const acknowledgedRunEvents = [];
+  const runEventNextCalls = [];
+  let releaseRunEvent;
+  let architectBusy = false;
+  const successfulLandEventClient = {
+    next(body) {
+      runEventNextCalls.push(body);
+      if (runEventNextCalls.length > 1) return new Promise(() => {});
+      return new Promise((resolve) => { releaseRunEvent = resolve; });
+    },
+    async acknowledge(guard) { acknowledgedRunEvents.push(guard); },
+    async block() { throw new Error("a valid run outcome must not be blocked"); },
+  };
   const successfulLandRun = async (command, args) => {
     if (command === "git" && args[0] === "rev-parse") return { code: 0, stdout: `${join(scratch, "git-common")}\n`, stderr: "" };
     if (command === "flock") {
@@ -287,6 +270,18 @@ try {
       landed.landedAt = "2026-04-01T00:00:05.000Z";
       landed.updatedAt = landed.landedAt;
       await runLib.atomicPrivateJson(landed.statePath, landed);
+      architectBusy = true;
+      releaseRunEvent({ delivery: {
+        record: {
+          event_id: "evt_run_landed", product_id: "qq", kind: runEvents.RUN_LANDED_KIND,
+          producer_id: "qq/land-worker", origin_id: "qq/land-worker",
+          recipient_id: runEvents.runEventRecipient(landed.architectSession),
+          envelope: { payload: runEvents.runEventPayload(landed, runEvents.RUN_LANDED_KIND) },
+        },
+        obligation: { obligation_id: "obl_run_landed", consumer_type: "recipient", consumer_id: runEvents.runEventRecipient(landed.architectSession), generation: 0 },
+        attempt_token: "try_run_landed", endpoint_token: "endpoint_run_landed",
+        guard: { expected_high_water: 0, expected_gap_token: "gap_run_landed" },
+      } });
       return { code: 0, stdout: `Landed ${landed.task.id}.\n`, stderr: "" };
     }
     return { code: 0, stdout: "", stderr: "" };
@@ -298,29 +293,13 @@ try {
     exec: successfulLandRun,
     sendMessage(payload, options) { successfulLandMessages.push({ payload, options }); },
   };
-  extension.default(successfulLandPi, { env: successfulLandEnv, exec: successfulLandRun });
-  const successfulLandReviewTool = successfulLandTools.find(({ name }) => name === "review");
-  let mismatchedLandSelections = 0;
-  const mismatchedSuccessfulLandCtx = {
-    ...ctx,
-    sessionManager: { getSessionId() { return "019ff7ad-2cba-75a9-adc2-c15a0a92d6aa"; } },
-    ui: {
-      async select() { mismatchedLandSelections += 1; return "approve"; },
-      async input() { throw new Error("a non-owning architect should not receive this handoff"); },
-      notify(message, level) { successfulLandNotifications.push({ message, level }); },
-    },
-  };
-  await successfulLandEvents.get("session_start")({}, mismatchedSuccessfulLandCtx);
-  assert.equal(mismatchedLandSelections, 0);
-  assert.equal(successfulLandMessages.length, 0);
-  assert.equal(JSON.parse(await readFile(successfulLandPath, "utf8")).status, "proposal");
-  const mismatchedReview = await successfulLandReviewTool.execute("mismatched-review", {}, undefined, undefined, mismatchedSuccessfulLandCtx);
-  assert.equal(mismatchedReview.details.status, "idle");
-  assert.equal(mismatchedLandSelections, 0);
-  await successfulLandEvents.get("session_shutdown")();
-
+  extension.default(successfulLandPi, {
+    env: successfulLandEnv, exec: successfulLandRun, eventClient: successfulLandEventClient,
+  });
+  assert.equal(successfulLandTools.some(({ name }) => name === "review"), false);
   const successfulLandCtx = {
     ...ctx,
+    isIdle: () => !architectBusy,
     sessionManager: { getSessionId() { return successfulLandState.architectSession; } },
     ui: {
       async select() { return "approve"; },
@@ -329,6 +308,9 @@ try {
     },
   };
   await successfulLandEvents.get("session_start")({}, successfulLandCtx);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(JSON.parse(await readFile(successfulLandPath, "utf8")).status, "landed");
+  assert.equal(runEventNextCalls[0].consumer_id, `qq/review-flow/${successfulLandState.architectSession}`);
   assert.equal(successfulLandMessages.length, 1);
   assert.equal(successfulLandMessages[0].payload.customType, "qq-run-landed");
   assert.equal(successfulLandMessages[0].payload.display, true);
@@ -341,23 +323,57 @@ try {
     "small fix",
     "src/a.ts +2/-1",
   ].join("\n"));
-  assert.deepEqual(successfulLandMessages[0].payload.details, {
-    schema: "qq.run-landed/v1",
-    run_id: "task-successful-land",
-    task: { id: "TASK-6", title: "Successful land" },
-    landing: {
-      ref: "refsha",
-      target_branch: "main",
-      landed_at: "2026-04-01T00:00:05.000Z",
-      summary: "small fix",
-      files: [{ path: "src/a.ts", added: 2, deleted: 1 }],
-    },
-  });
-  assert.deepEqual(successfulLandMessages[0].options, { triggerTurn: false });
+  assert.equal(successfulLandMessages[0].payload.details.schema, "qq.run-landed/v1");
+  assert.equal(successfulLandMessages[0].payload.details.event_id, "evt_run_landed");
+  assert.deepEqual(successfulLandMessages[0].options, { triggerTurn: true, deliverAs: "steer" });
+  assert.equal(acknowledgedRunEvents.length, 1);
   assert.deepEqual(successfulLandNotifications, []);
-  await successfulLandEvents.get("agent_settled")();
-  assert.equal(successfulLandMessages.length, 1);
   await successfulLandEvents.get("session_shutdown")();
+
+  const blockedOutcome = {
+    ...proposalState,
+    status: "blocked", look: 2, updatedAt: "2026-04-01T00:00:06.000Z",
+    blockedReason: "the final fix is still wrong",
+    pack: { summary: "still wrong", files: [{ path: "src/a.ts", added: 2, deleted: 1 }] },
+  };
+  const blockedPayload = runEvents.runEventPayload(blockedOutcome, runEvents.RUN_BLOCKED_KIND);
+  const blockedMessages = [];
+  const blockedEvents = new Map();
+  let blockedNext = true;
+  const blockedEventClient = {
+    async next() {
+      if (!blockedNext) return new Promise(() => {});
+      blockedNext = false;
+      return { delivery: {
+        record: {
+          event_id: "evt_run_blocked", product_id: "qq", kind: runEvents.RUN_BLOCKED_KIND,
+          producer_id: "qq/review-worker", origin_id: "qq/review-worker",
+          recipient_id: runEvents.runEventRecipient(base.architectSession), envelope: { payload: blockedPayload },
+        },
+        obligation: { obligation_id: "obl_run_blocked", consumer_type: "recipient", consumer_id: runEvents.runEventRecipient(base.architectSession), generation: 0 },
+        attempt_token: "try_run_blocked", endpoint_token: "endpoint_run_blocked",
+        guard: { expected_high_water: 0, expected_gap_token: "gap_run_blocked" },
+      } };
+    },
+    async acknowledge() {},
+    async block() { throw new Error("a valid blocked outcome must not be blocked"); },
+  };
+  const blockedPi = {
+    registerTool() {},
+    events: { on(name, fn) { blockedEvents.set(name, fn); } },
+    on(name, fn) { blockedEvents.set(name, fn); },
+    sendMessage(payload, options) { blockedMessages.push({ payload, options }); },
+  };
+  const blockedEventEnv = { ...listEnv, XDG_STATE_HOME: join(scratch, "blocked-event-xdg"), QQ_AGENT_ROLE: "architect" };
+  extension.default(blockedPi, { env: blockedEventEnv, exec: architectRun, eventClient: blockedEventClient });
+  await blockedEvents.get("session_start")({}, ctx);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(blockedMessages.length, 1);
+  assert.equal(blockedMessages[0].payload.customType, "qq-run-blocked");
+  assert.equal(blockedMessages[0].payload.details.schema, "qq.run-blocked/v1");
+  assert.match(blockedMessages[0].payload.content, /QA blocked TASK-1 after look 2/);
+  assert.deepEqual(blockedMessages[0].options, { triggerTurn: true });
+  await blockedEvents.get("session_shutdown")();
 
   const failedLandXdg = join(scratch, "failed-land-xdg");
   const failedLandDir = join(failedLandXdg, "qq", "runs", "qq", "task-failed-land");
@@ -369,7 +385,6 @@ try {
   });
   const failedLandTools = [];
   const failedLandEvents = new Map();
-  const failedLandMessages = [];
   let landError = "merge failed: checkout busy";
   let landAttempt = 0;
   const failedLandRun = async (command, args) => {
@@ -389,10 +404,10 @@ try {
     events: { on(name, fn) { failedLandEvents.set(name, fn); } },
     on(name, fn) { failedLandEvents.set(name, fn); },
     exec: failedLandRun,
-    sendMessage(payload, options) { failedLandMessages.push({ payload, options }); },
+    sendMessage() {},
   };
-  extension.default(failedLandPi, { env: failedLandEnv, exec: failedLandRun });
-  const failedLandReviewTool = failedLandTools.find(({ name }) => name === "review");
+  extension.default(failedLandPi, { env: failedLandEnv, exec: failedLandRun, eventClient: quietEventClient });
+  assert.equal(failedLandTools.some(({ name }) => name === "review"), false);
   const failedLandChoices = [];
   const failedLandQueued = ["approve"];
   const failedLandCtx = {
@@ -412,74 +427,13 @@ try {
   assert.equal(firstFailedLand.status, "blocked");
   assert.equal(firstFailedLand.blockedReason, "merge failed: checkout busy");
   assert.deepEqual(failedLandChoices[0].options, ["approve", "discuss", "later"]);
-  assert.equal(failedLandMessages.filter(({ payload }) => payload.customType === "qq-run-landed").length, 0);
-
-  landError = "merge failed: branch moved";
-  failedLandQueued.push("approve");
-  await failedLandReviewTool.execute("failed-retry-before-poll", {}, undefined, undefined, failedLandCtx);
+  await failedLandEvents.get("agent_settled")();
   assert.equal(failedLandChoices.length, 2);
+  assert.deepEqual(failedLandChoices[1].options, ["approve", "discuss", "later"]);
+  assert.equal(JSON.parse(await readFile(failedLandPath, "utf8")).status, "later");
   await failedLandEvents.get("agent_settled")();
-  assert.equal(failedLandChoices.length, 3);
-  assert.deepEqual(failedLandChoices.at(-1).options, ["approve", "discuss", "later"]);
-  await failedLandEvents.get("agent_settled")();
-  assert.equal(failedLandChoices.length, 3);
-
-  failedLandQueued.push("discuss");
-  await failedLandReviewTool.execute("failed-discuss", {}, undefined, undefined, failedLandCtx);
-  const discussedFailedLand = JSON.parse(await readFile(failedLandPath, "utf8"));
-  assert.equal(discussedFailedLand.status, "blocked");
-  assert.equal(discussedFailedLand.operatorComment, "leave this blocked");
-  assert.equal(failedLandMessages.length, 1);
-  await failedLandEvents.get("agent_settled")();
-  assert.equal(failedLandChoices.length, 4);
-
-  failedLandQueued.push("approve");
-  await failedLandReviewTool.execute("failed-retry-same", {}, undefined, undefined, failedLandCtx);
-  await failedLandEvents.get("agent_settled")();
-  assert.equal(failedLandChoices.length, 5);
-
-  landError = "merge failed: worktree locked";
-  failedLandQueued.push("approve");
-  await failedLandReviewTool.execute("failed-retry-changed", {}, undefined, undefined, failedLandCtx);
-  assert.equal(failedLandChoices.length, 6);
-  await failedLandEvents.get("agent_settled")();
-  assert.equal(failedLandChoices.length, 7);
-  assert.deepEqual(failedLandChoices.at(-1).options, ["approve", "discuss", "later"]);
-  await failedLandEvents.get("agent_settled")();
-  assert.equal(failedLandChoices.length, 7);
-  assert.equal(failedLandMessages.filter(({ payload }) => payload.customType === "qq-run-landed").length, 0);
+  assert.equal(failedLandChoices.length, 2);
   await failedLandEvents.get("session_shutdown")();
-
-  const restartedFailedLandEvents = new Map();
-  const restartedFailedLandChoices = [];
-  const restartedFailedLandPi = {
-    registerTool() {},
-    events: { on(name, fn) { restartedFailedLandEvents.set(name, fn); } },
-    on(name, fn) { restartedFailedLandEvents.set(name, fn); },
-    exec: failedLandRun,
-    sendMessage() {},
-  };
-  extension.default(restartedFailedLandPi, { env: failedLandEnv, exec: failedLandRun });
-  const restartedFailedLandCtx = {
-    ...failedLandCtx,
-    ui: {
-      ...failedLandCtx.ui,
-      async select(pack, options) {
-        restartedFailedLandChoices.push({ pack, options });
-        return "later";
-      },
-    },
-  };
-  await restartedFailedLandEvents.get("session_start")({}, restartedFailedLandCtx);
-  assert.equal(restartedFailedLandChoices.length, 0);
-  const changedAfterRestart = JSON.parse(await readFile(failedLandPath, "utf8"));
-  changedAfterRestart.blockedReason = "merge failed: permission denied";
-  changedAfterRestart.updatedAt = "2026-04-01T00:00:08.000Z";
-  await runLib.atomicPrivateJson(failedLandPath, changedAfterRestart);
-  await restartedFailedLandEvents.get("agent_settled")();
-  assert.equal(restartedFailedLandChoices.length, 1);
-  assert.deepEqual(restartedFailedLandChoices[0].options, ["approve", "discuss", "later"]);
-  await restartedFailedLandEvents.get("session_shutdown")();
 
   assert.equal(review.isTestPath("tests/test-review-flow.mjs"), true);
   assert.equal(review.isTestPath("src/widget.test.ts"), true);
@@ -496,6 +450,7 @@ try {
     await runLib.atomicPrivateJson(statePath, caseState);
     const verdictPath = join(scratch, "state", `qa-look-${look}.json`);
     const caseCalls = [];
+    const emittedRunEvents = [];
     let agentEvicted = false;
     let releaseGets = 0;
     let qaPromptAtLaunch;
@@ -543,8 +498,11 @@ try {
       }
       return { code: 0, stdout: "", stderr: "" };
     };
-    const state = await review.conductReview(caseRun, statePath, { env: listEnv });
-    return { state, calls: caseCalls, qaPromptAtLaunch };
+    const state = await review.conductReview(caseRun, statePath, {
+      env: listEnv,
+      async emitRunEvent(outcome, kind) { emittedRunEvents.push({ outcome: structuredClone(outcome), kind }); },
+    });
+    return { state, calls: caseCalls, qaPromptAtLaunch, emittedRunEvents };
   };
 
   const committedTests = await runQaCase({
@@ -647,6 +605,10 @@ try {
   assert.equal(dirtyLook2.state.status, "blocked");
   assert.equal(dirtyLook2.state.qaVerdict.verdict, "fail");
   assert.match(dirtyLook2.state.qaVerdict.feedback, /uncommitted worktree changes/);
+  assert.deepEqual(dirtyLook2.emittedRunEvents.map(({ kind }) => kind), [runEvents.RUN_BLOCKED_KIND]);
+  const dirtyLook2Prompts = dirtyLook2.calls.filter(({ command, args }) => command === "herdr" && args[0] === "agent" && args[1] === "prompt");
+  assert.equal(dirtyLook2Prompts.length, 1);
+  assert.equal(dirtyLook2Prompts[0].args[2], "w2T:p9");
 
   const productionLook2 = await runQaCase({
     look: 2, qaSessionId: failedRewrite.state.qaSessionId, head: "qa-look2-production",
@@ -666,6 +628,18 @@ try {
   assert.equal(rewrittenLook2.state.ref, "refsha");
   assert.equal(rewrittenLook2.state.qaVerdict.verdict, "fail");
   assert.match(rewrittenLook2.state.qaVerdict.feedback, /replaced or rewrote the reviewed commit/);
+
+  const sentRunEvents = [];
+  const captureRunEventClient = { async send(envelope) { sentRunEvents.push(envelope); return { record: { event_id: "evt_capture" } }; } };
+  const landedForEvent = { ...successfulLandState, status: "landed", landedAt: "2026-04-01T00:00:05.000Z" };
+  await runEvents.sendRunEvent(landedForEvent, runEvents.RUN_LANDED_KIND, { client: captureRunEventClient, env: successfulLandEnv });
+  await runEvents.sendRunEvent(dirtyLook2.state, runEvents.RUN_BLOCKED_KIND, { client: captureRunEventClient, env: listEnv });
+  assert.equal(sentRunEvents[0].producer_id, "qq/land-worker");
+  assert.equal(sentRunEvents[1].producer_id, "qq/review-worker");
+  assert.ok(sentRunEvents.every(({ product_id }) => product_id === "qq"));
+  assert.ok(sentRunEvents.every(({ recipient_id }) => recipient_id === `qq/review-flow/${base.architectSession}`));
+  assert.ok(sentRunEvents.every(({ kind }) => kind !== "agent.message"));
+  assert.ok(sentRunEvents.every(({ payload }) => payload.schema !== "qq.agent-message/v2"));
 
   prepared.status = "commented";
   prepared.ref = "refsha";
