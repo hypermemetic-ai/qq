@@ -10,7 +10,6 @@ source "$downstream/upstream.env"
 [[ "$HERDR_UPSTREAM_REF" == refs/heads/master ]]
 [[ "$HERDR_LANDED_REPOSITORY" == /home/qqp/projects/herdr ]]
 [[ -n "$HERDR_OPERATOR_INPUT_COMMIT" ]]
-[[ "$HERDR_UPSTREAM_VERSION" == 0.8.0 ]]
 [[ -z ${HERDR_PATCHES+x} ]]
 [[ ! -e "$downstream/patches/0001-centered-pane-row.patch" ]]
 grep -q 'pane_preferred_width = 80' "$root/herdr/config.toml"

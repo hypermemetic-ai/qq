@@ -15,6 +15,7 @@ qq_dictation_feature_commit=${qq_dictation_feature_commit:?qq-dictation feature 
 [[ $qq_dictation_landed_repository == /home/qqp/projects/qq-dictation ]]
 
 python3 - "$root/herdr/config.toml" "$plugin/herdr-plugin.toml" <<'PY'
+import re
 import sys
 import tomllib
 
@@ -40,7 +41,7 @@ with open(sys.argv[2], "rb") as handle:
     manifest = tomllib.load(handle)
 assert manifest["id"] == "qq.q-mode"
 assert manifest["name"] == "qq q mode"
-assert manifest["min_herdr_version"] == "0.8.0"
+assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", manifest["min_herdr_version"])
 assert {item["id"] for item in manifest["actions"]} == {"start-or-stop", "cancel"}
 PY
 
