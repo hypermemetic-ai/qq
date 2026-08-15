@@ -36,7 +36,11 @@ function operations(calls) {
 
 const registered = harness();
 assert.equal(registered.tool.name, "operator_stage");
-assert.match(registered.tool.description, /no-focus Herdr pane/);
+assert.equal(
+  registered.tool.description,
+  "Save the operator a copy-paste: stage one command in a no-focus Herdr pane and notify them. They run it from that pane. The pane is a normal interactive shell.",
+);
+assert.equal(registered.tool.promptSnippet, "Stage a command for the operator to run");
 assert.deepEqual(registered.tool.parameters.required, ["command", "description", "danger"]);
 
 const low = harness();

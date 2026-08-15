@@ -102,4 +102,66 @@ if QQ_HERDR_BIN="$mock/herdr" "$root/bin/qq-herdr-pane-add" --ratio 0.5 >/dev/nu
   exit 1
 fi
 
+build_root="$work/build-root"
+build_mock="$work/build-mock"
+build_source="$work/build-source"
+mkdir -p "$build_root/bin" "$build_root/herdr/downstream" "$build_mock" \
+  "$build_source/.git"
+cp "$root/bin/qq-herdr-build" "$build_root/bin/qq-herdr-build"
+cp "$downstream/upstream.env" "$build_root/herdr/downstream/upstream.env"
+cat > "$build_root/bin/qq-herdr-smoke" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ -x $1 ]]
+[[ $("$1" --version) == 'herdr 0.8.0' ]]
+EOF
+cat > "$build_mock/git" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+cat > "$build_mock/zig" <<'EOF'
+#!/usr/bin/env bash
+[[ ${1:-} == version ]]
+printf '0.15.2\n'
+EOF
+cat > "$build_mock/cargo" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+stdin=$(readlink "/proc/$$/fd/0")
+[[ ! -t 0 ]] || stdin=tty
+printf '%s %s\n' "${1:-}" "$stdin" >> "$QQ_HERDR_CARGO_LOG"
+case ${1:-} in
+  fmt)
+    [[ $stdin == tty ]]
+    ;;
+  test)
+    [[ $stdin == /dev/null ]]
+    ;;
+  build)
+    [[ $stdin == /dev/null ]]
+    mkdir -p target/release
+    printf '#!/usr/bin/env bash\nprintf "herdr 0.8.0\\n"\n' > target/release/herdr
+    chmod +x target/release/herdr
+    ;;
+  *)
+    exit 64
+    ;;
+esac
+EOF
+chmod +x "$build_root/bin/qq-herdr-build" "$build_root/bin/qq-herdr-smoke" \
+  "$build_mock/git" "$build_mock/zig" "$build_mock/cargo"
+PATH="$build_mock:$PATH" \
+  XDG_CACHE_HOME="$work/build-cache" \
+  QQ_HERDR_SOURCE_DIR="$build_source" \
+  QQ_HERDR_BINARY_OUT="$work/build-output/herdr" \
+  QQ_HERDR_CARGO_LOG="$work/cargo.log" \
+  script -qfec "$build_root/bin/qq-herdr-build" /dev/null >/dev/null
+cat > "$work/expected-cargo.log" <<'EOF'
+fmt tty
+test /dev/null
+test /dev/null
+build /dev/null
+EOF
+diff -u "$work/expected-cargo.log" "$work/cargo.log"
+
 printf 'herdr downstream contract tests passed\n'

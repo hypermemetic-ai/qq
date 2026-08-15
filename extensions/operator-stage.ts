@@ -35,7 +35,8 @@ export default function registerOperatorStage(pi, deps = {}) {
     name: "operator_stage",
     label: "Operator Stage",
     description:
-      "Stage an operator-only command, unexecuted, in a no-focus Herdr pane and send a request notification. Never dictate copy-paste commands. The agent never sends keys into the pane.",
+      "Save the operator a copy-paste: stage one command in a no-focus Herdr pane and notify them. They run it from that pane. The pane is a normal interactive shell.",
+    promptSnippet: "Stage a command for the operator to run",
     parameters: {
       type: "object",
       additionalProperties: false,
