@@ -5,15 +5,14 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 plugin="$root/plugins/q-mode"
 # shellcheck source=/dev/null
 source "$plugin/qq-dictation.env"
-# shellcheck source=/dev/null
-source "$root/herdr/downstream/upstream.env"
-qq_dictation_commit=${qq_dictation_commit:?qq-dictation commit pin is required}
-qq_dictation_feature_commit=${qq_dictation_feature_commit:?qq-dictation feature pin is required}
+qq_dictation_upstream_url=${qq_dictation_upstream_url:?qq-dictation repository URL is required}
+qq_dictation_upstream_ref=${qq_dictation_upstream_ref:?qq-dictation branch ref is required}
+qq_dictation_landed_repository=${qq_dictation_landed_repository:?qq-dictation landed repository is required}
+qq_dictation_feature_commit=${qq_dictation_feature_commit:?qq-dictation feature floor is required}
 
-[[ $qq_dictation_commit == 1dd1b22fe782abb1c012b9c294fc19a343931b3b ]]
-[[ $qq_dictation_feature_commit == 38603a88b272e0031cac38ca7c3497aa8260f42c ]]
-[[ $HERDR_UPSTREAM_COMMIT == c9bce319a03752e86313aff4b0aa3fd541211e18 ]]
-[[ $HERDR_OPERATOR_INPUT_COMMIT == 60d7167c2658deb766681e8642cee9f4d5bc7c0d ]]
+[[ $qq_dictation_upstream_url == git@github.com:qqp-dev/qq-dictation.git ]]
+[[ $qq_dictation_upstream_ref == refs/heads/main ]]
+[[ $qq_dictation_landed_repository == /home/qqp/projects/qq-dictation ]]
 
 python3 - "$root/herdr/config.toml" "$plugin/herdr-plugin.toml" <<'PY'
 import sys
@@ -47,6 +46,21 @@ PY
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
+dictation_source="$work/dictation-source"
+contract_source=${QQ_DICTATION_CONTRACT_SOURCE:-$qq_dictation_landed_repository}
+if [[ -d $contract_source/.git ]] \
+  && git -C "$contract_source" cat-file -e "$qq_dictation_upstream_ref^{commit}" 2>/dev/null; then
+  git clone -q --no-hardlinks --no-checkout "$contract_source" "$dictation_source"
+else
+  git init -q "$dictation_source"
+  git -C "$dictation_source" remote add origin "$qq_dictation_upstream_url"
+  git -C "$dictation_source" fetch -q origin \
+    "$qq_dictation_upstream_ref:$qq_dictation_upstream_ref"
+fi
+dictation_tip=$(git -C "$dictation_source" rev-parse "$qq_dictation_upstream_ref^{commit}")
+git -C "$dictation_source" merge-base --is-ancestor \
+  "$qq_dictation_feature_commit" "$dictation_tip"
+
 home="$work/home"
 install="$home/.local/opt/qq-dictation/Handy.AppDir"
 launcher="$home/.local/bin/handy"
@@ -55,7 +69,7 @@ proc="$work/proc"
 log="$work/controls"
 pid=$$
 mkdir -p "$install/usr/bin" "$(dirname "$launcher")" "$runtime" "$proc/$pid"
-printf '%s\n' "$qq_dictation_commit" >"$install/qq-dictation-commit"
+printf 'build-provenance-only\n' >"$install/qq-dictation-commit"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$install/usr/bin/handy"
 chmod 0755 "$install/usr/bin/handy"
 ln -s "$install/usr/bin/handy" "$proc/$pid/exe"
@@ -92,15 +106,10 @@ for pane in '' malformed 'w:p1' 'w1:p' 'w1:p1:extra' 'w1:p-1'; do
 done
 [[ $(wc -l <"$log") -eq 2 ]]
 
-printf 'not-the-pin\n' >"$install/qq-dictation-commit"
-if "${run[@]}" HERDR_PANE_ID=w1:p1 \
-  "$plugin/q-mode.sh" start-or-stop >/dev/null 2>&1; then
-  echo 'q mode accepted an unpinned qq-dictation build' >&2
-  exit 1
-fi
-"${run[@]}" "$plugin/q-mode.sh" cancel >/dev/null 2>&1
-[[ $(wc -l <"$log") -eq 2 ]]
-printf '%s\n' "$qq_dictation_commit" >"$install/qq-dictation-commit"
+rm "$install/qq-dictation-commit"
+"${run[@]}" HERDR_PANE_ID=w1:p1 "$plugin/q-mode.sh" start-or-stop
+[[ $(tail -n1 "$log") == '--toggle-transcription --herdr-pane w1:p1' ]]
+[[ $(wc -l <"$log") -eq 3 ]]
 
 printf '999999 ready\n' >"$runtime/qq-dictation-handy-ready"
 if "${run[@]}" HERDR_PANE_ID=w1:p1 \
@@ -109,7 +118,7 @@ if "${run[@]}" HERDR_PANE_ID=w1:p1 \
   exit 1
 fi
 "${run[@]}" "$plugin/q-mode.sh" cancel >/dev/null 2>&1
-[[ $(wc -l <"$log") -eq 2 ]]
+[[ $(wc -l <"$log") -eq 3 ]]
 printf '%s ready\n' "$pid" >"$runtime/qq-dictation-handy-ready"
 
 if "${run[@]}" qq_q_mode_control_timeout=.05s qq_q_mode_test_sleep=1 \
