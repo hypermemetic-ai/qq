@@ -190,6 +190,16 @@ prepare_backlog() {
   fi
   grep -Eq '^[[:space:]]*auto_commit:[[:space:]]*false([[:space:]]*(#.*)?)?$' "$store/config.yml" \
     || fail "Backlog store config does not contain auto_commit: false: $store/config.yml"
+
+  if [[ -n "$tracked" ]]; then
+    "$GIT_BIN" -C "$root" add -- backlog \
+      || fail 'could not stage the updated tracked backlog symlink'
+    if ! "$GIT_BIN" -C "$root" diff --cached --quiet -- backlog; then
+      "$GIT_BIN" -C "$root" commit --quiet --only \
+        -m 'Retarget backlog to the qq store' -- backlog \
+        || fail 'could not commit the updated tracked backlog symlink'
+    fi
+  fi
 }
 
 json_property_is() {
