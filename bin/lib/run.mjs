@@ -547,7 +547,7 @@ export async function startRun(options) {
     };
     await atomicPrivateJson(statePath, state);
     await waitForAvailableShell(run, paneId, { signal });
-    await checked(run, "herdr", ["agent", "start", `runner-${slug}-${nonce}`, "--kind", "pi", "--pane", paneId], { signal }, "cannot start runs runner");
+    await checked(run, "herdr", ["agent", "start", `runner-${slug}-${nonce}`, "--kind", "pi", "--pane", paneId, "--", "--approve"], { signal }, "cannot start runs runner");
     prompt = `${marker}\n\nWork from the full Backlog ticket and delegate note below. The note is also at ${notePath}. Implement the task in this worktree, commit the result, then call done with ref HEAD. Do not merge.\n\n${runnerTicket.trimEnd()}\n\n---\n\n## Delegate note\n\n${runnerNote.trimEnd()}`;
     await (options.submitPrompt ?? submitAgentPrompt)(paneId, prompt, { env, signal });
     const inspectAgent = options.inspectAgent ?? ((target, requestOptions) =>

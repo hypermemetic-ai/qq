@@ -365,7 +365,12 @@ try {
   assert.equal(herdrOps.includes("agent prompt"), false, "the private prompt must not be placed in CLI argv");
   assert.equal(herdrOps.includes("agent get"), false, "prompt verification must not spawn a Herdr CLI poll");
   const start = spawnCalls.find(({ command, args }) => command === "herdr" && args[0] === "agent" && args[1] === "start");
-  assert.deepEqual(start.args.slice(0, 2), ["agent", "start"]);
+  assert.deepEqual(start.args, [
+    "agent", "start", `runner-${prepared.slug}-${prepared.nonce}`,
+    "--kind", "pi", "--pane", "w2T:p9", "--", "--approve",
+  ]);
+  assert.equal(spawnCalls.some(({ args }) => args.some((arg) => /^(?:config|trust|--config(?:=|$)|--trust(?:=|$))/.test(arg))), false,
+    "runner admission must not persist Pi trust or config state");
   assert.equal(submittedPrompts.length, 1);
   const prompt = submittedPrompts[0].prompt;
   assert.match(prompt, /^\[qq-bootstrap:/);
