@@ -1,113 +1,105 @@
 ---
 type: Operations guide
-title: Herdr and Dashboard Operations
-description: Source-grounded runbook for QQ's pinned Herdr distribution, live handoff, pane policy, Ghostty and systemd integration, and the private dashboard launcher boundary.
-tags: [herdr, dashboard, operations]
+title: Herdr, q Mode, and Dashboard Operations
+description: Practical runbook for QQ's Herdr integration, q mode dictation controls, coordinated live activation, smoke tests, and private dashboard launcher boundary.
+tags: [herdr, q-mode, dictation, dashboard, operations]
+openwiki:
+  roles: [integration, operations]
+  change_kinds: [runtime-integration, activation]
+  source_paths: [herdr/config.toml, herdr/downstream/upstream.env, plugins/q-mode/q-mode.sh, bin/qq-herdr-activate]
+  test_paths: [tests/test-q-mode.sh, tests/test-herdr-downstream.sh, tests/test-herdr-live.sh]
+  validation_commands: [tests/test-q-mode.sh, tests/test-herdr-downstream.sh]
 ---
 
-# Herdr and dashboard operations
+# Herdr, q mode, and dashboard operations
 
-## Scope and ownership
+## Ownership boundary
 
-QQ owns the distribution and operational policy around Herdr: the immutable upstream pin, build and smoke scripts, installation path, activation checks, pane-add wrapper, live configuration, Ghostty launch surface, and user service. Herdr's Rust implementation and centered-pane tests live in the pinned external repository, not this checkout. There is no QQ patch application step.
+QQ owns Herdr configuration, plugin integration, activation, smoke testing, pane policy, Ghostty/systemd launch surfaces, and dashboard wrappers. Herdr's Rust source, build, installation, and product tests belong to `/home/qqp/projects/herdr`; QQ intentionally has no `qq-herdr-build` or `qq-herdr-upgrade` wrapper.
 
-QQ also owns two dashboard launchers and the execution-profile producer contract. The installed `@hypermemetic-ai/qq-dashboard` package is private and absent from this checkout, so its server, UI, cookie handling, telemetry schema, and internal tests cannot be documented from repository evidence.
+`herdr/downstream/upstream.env` records the upstream `master` ref, the landed repository, and `HERDR_OPERATOR_INPUT_COMMIT`. That commit is a minimum capability floor for operator input, not a pinned product release. `tests/test-herdr-downstream.sh` uses the landed checkout when available and otherwise fetches the branch to prove that the floor is an ancestor and required Rust symbols exist.
 
-## Herdr release and configuration
+The private `@hypermemetic-ai/qq-dashboard` implementation is also outside this checkout. QQ owns only its exact dependency pin, launchers, `QQ_PROFILE_BIN` contract, and preserved state boundary.
 
-`herdr/downstream/upstream.env` pins all three immutable coordinates:
-
-- repository: `https://github.com/hypermemetic-ai/herdr.git`;
-- tag: `qq-v0.8.0-1`;
-- commit: `f1e8f5793ecad4feab4c6df6bebca3f564cdbe05`.
-
-`herdr/config.toml` selects Tokyo Night, disables automatic theme switching, gives workspaces vertical Alt-arrow navigation and tabs horizontal Alt-arrow navigation, defines `hcy` and `hcbr` pane commands, sorts the agent panel by spaces, and sets `pane_preferred_width = 80`.
-
-`bin/qq-herdr-pane-add` is the QQ-owned split primitive. It always invokes `herdr pane split --direction right`, accepts a pane target plus `--cwd`, `--env`, current/focus options, and rejects caller-supplied direction, ratio, and unknown options. Raw Herdr APIs remain the escape hatch when an explicit layout override is genuinely required.
-
-## Build, install, and activation lifecycle
+## q mode and dictation flow
 
 ```mermaid
-flowchart TD
-    Pin["Pin upstream tag and commit"] --> Build["qq-herdr-build build"]
-    Build --> Verify["Format tests release build smoke"]
-    Verify --> Install["qq-herdr-build install"]
-    Install --> Review["Review outdated integrations"]
-    Review --> Activate["qq-herdr-activate"]
-    Activate --> Commit["Live handoff commit point"]
-    Commit --> Prove["Compare objects processes protocol"]
-    Prove --> Reconnect["Reconnect outer Ghostty client"]
+sequenceDiagram
+    participant Operator
+    participant Herdr
+    participant Plugin as qq q mode plugin
+    participant Handy as running Handy process
+    participant Pane as captured Herdr pane
+
+    Operator->>Herdr: tap Right Alt
+    Herdr->>Herdr: enter q mode
+    Operator->>Herdr: press Space
+    Herdr->>Plugin: start-or-stop with pane id
+    Plugin->>Plugin: validate readiness marker and process executable
+    Plugin->>Handy: toggle transcription for pane id
+    Handy-->>Pane: deliver once to pane captured at record start
+    Operator->>Herdr: Escape Enter or clean Right Alt
+    Herdr->>Plugin: cancel
+    Plugin->>Handy: bounded targetless cancel
 ```
 
-*The release moves through separate verification, installation, live activation, and preservation proof stages.*
+*Q mode binds dictation to the pane selected at recording start and never cold-starts Handy.*
 
-### Build and smoke
+`herdr/config.toml` gives q mode a clean Right Alt toggle. While active, unconfigured input is consumed: arrows move among panes/workspaces, Ctrl+arrows move tabs, `1..9` focuses visible agents, `?` shows help, Space invokes `qq.q-mode.start-or-stop`, and Delete invokes `qq.q-mode.cancel`. Escape and Enter exit and run the configured cancel action; neither submits dictation. The configuration also keeps 80-column preferred panes and disables pane borders.
 
-`bin/qq-herdr-build [build|install]` requires Git, Cargo, and Zig 0.15.x. It reuses `${XDG_CACHE_HOME:-~/.cache}/qq/herdr/source` when it is already a Git checkout, otherwise clones it once. Every run resets the origin URL and force-fetches the exact tag ref, rejects a tag whose resolved commit moved, then hard-resets and cleans the checkout before running:
+`plugins/q-mode/q-mode.sh` is the adapter to qq-dictation:
 
-1. `git diff --check` and `cargo fmt --all -- --check`;
-2. locked Rust tests serially, skipping `generated_workspace_ids_are_short_base32_handles` because it depends on a process-global counter and `live_server_holds_one_pty_master_fd_per_pane` because a Herdr-hosted run cannot observe the replacement server's PTY descriptors; then rerun the workspace-ID test alone exactly (the PTY test remains excluded);
-3. a locked release build;
-4. `bin/qq-herdr-smoke` against the resulting binary.
+- `start-or-stop` requires an exact public `HERDR_PANE_ID` and forwards `handy --toggle-transcription --herdr-pane <id>`.
+- Before forwarding, it requires a non-symlink readiness marker under `XDG_RUNTIME_DIR`, an allowed `ready`, `prepared`, or `armed` state, a live PID, and `/proc/<pid>/exe` resolving to the installed Handy executable.
+- `cancel` is targetless and idempotent. Missing readiness means there is nothing to cancel; it must not launch Handy.
+- Every control is bounded by `timeout`. Success proves forwarding to the existing instance, not acceptance or completion of dictation.
+- `plugins/q-mode/qq-dictation.env` records the upstream branch, landed checkout, and pane-targeting feature floor. The installed `qq-dictation-commit` file is provenance only, not a runtime pin.
 
-The smoke test creates isolated HOME/XDG directories and a disposable server/client. It proves the expected version, preferred-width centering, balanced rightward splits, JSON CLI responses, workspace/tab/pane operations, pane shell process visibility, notification and close operations, and the linked `qq.brief-gate` plugin's open/approve/close path. The brief gate is consumed by delegation, but its decision workflow is documented with delegation rather than owned by Herdr operations.
+The retained Left-Control bridge and remote/laptop workflows are outside this integration and must not be retired as part of q mode work.
 
-`build` leaves the executable at `${XDG_CACHE_HOME:-~/.cache}/qq/herdr/bin/herdr`. `install` atomically replaces `~/.local/lib/qq/herdr/bin/herdr`, then reports `herdr integration status --outdated-only`; it neither updates integrations nor changes the running server.
+## Coordinated activation
 
-### Live activation
+Herdr and qq-dictation must be built and installed by their owning repositories. Then use:
 
-`bin/qq-herdr-activate` is intentionally specific to migration from a Homebrew Herdr 0.7.5 server to the pinned Herdr 0.8.0 protocol 19 binary. Before mutation it requires the user service to be inactive, exactly one Homebrew server, and that server to belong to a Ghostty scope. It snapshots all live objects and each pane's shell PID, validates the repository configuration, installs that configuration, and atomically points `~/.local/bin/herdr` at the pinned binary.
+```text
+qq-q-mode-uat preflight
+qq-herdr-activate
+qq-q-mode-uat post-activate
+```
 
-`server live-handoff` is the commit point. Before it, failure cleanup restores the prior config and client and asks the old server to reload configuration. After it, the script does not attempt rollback: it installs `systemd/user/herdr.service`, reloads the user manager, and proves that workspace, tab, and pane ID sets and pane shell PIDs are unchanged, while version and protocol became 0.8.0 and 19. The attached client detaches once; reconnect from the outer prompt with `~/.local/bin/herdr`.
+`bin/qq-herdr-activate` first checks q mode/Handy readiness, requires `herdr.service` to be inactive, and accepts exactly one live Herdr server in the Ghostty scope. The server executable must be either the installed QQ path or the supported Homebrew path. It snapshots workspaces, tabs, panes, and pane shell PIDs; installs `herdr/config.toml`; points `~/.local/bin/herdr` at the installed binary; and performs `server live-handoff --import-exe` without hard-coded version/protocol expectations.
 
-### Service and outer client
+The live handoff is the commit point. Before it, failure restores the prior config/client. After it, the script installs the user service, verifies all object IDs and pane shell processes survived, links and enables `qq.q-mode`, and checks the live config. Reconnect from the outer prompt with `~/.local/bin/herdr`, then run post-activation UAT.
 
-`systemd/user/herdr.service` starts the pinned library binary, uses `ExitType=cgroup` so a handoff replacement remains owned after the old main process exits, restarts on failure after two seconds, supplies an explicit `PATH` containing QQ/user, Bun, OpenCode, Homebrew, system, games, and Snap executable locations, and appends both streams to `~/.local/state/herdr/herdr.log`. Starting, restarting, or switching it affects the terminal server that owns active pane processes and is therefore operator-visible.
+`bin/qq-q-mode-uat` validates staged configuration, Handy readiness, and retained bridge files. In `post-activate` mode it additionally requires exact live config, an enabled plugin, and the installed Herdr binary owning the server. Its printed keyboard/dictation checklist is manual by design; do not synthesize those keys in automated validation.
 
-`bin/qq-herdr-launch` accepts no arguments. It clears inherited Herdr pane/workspace/socket variables and launches single-instance Ghostty with the exact title `herdr`; this makes a new outer client rather than a nested pane client. `ghostty/config` supplies fullscreen display, a 24-point MxPlus font, 12-point edge padding, and the same title. Large simulated margins and the retired edge-mask shader must not return: pane centering belongs to Herdr.
+## Other Herdr surfaces
 
-## Herdr invariants and upgrade recipe
+- `bin/qq-herdr-pane-add` always right-splits and rejects caller-supplied direction or ratio. Raw Herdr commands are the explicit layout escape hatch.
+- `bin/qq-herdr-smoke [PATH]` defaults to `~/.local/lib/qq/herdr/bin/herdr`, starts a disposable server/client, and tests public workspace/tab/pane operations plus both `qq.brief-gate` and `qq.q-mode` plugin contracts. It does not build Herdr or enforce a product version.
+- `systemd/user/herdr.service` runs the installed library binary with `ExitType=cgroup`; service changes affect the terminal server that owns live pane processes.
+- `bin/qq-herdr-launch` starts an outer single-instance Ghostty client after clearing inherited Herdr context. Layout policy belongs to Herdr, not Ghostty.
 
-Operational invariants are:
+The delegation workflow consumes Herdr panes and the brief-gate plugin; see [Delegation and review](../runtime/delegation-and-review.md). Profile and dashboard contracts are owned by [Profiles and extensions](../runtime/profiles-and-extensions.md).
 
-- a release tag must resolve to the pinned commit;
-- upstream source is built clean, without QQ Rust patches;
-- build, install, and activation are separate actions;
-- installation is atomic and does not silently update lifecycle integrations;
-- QQ-created panes split right without caller-selected ratios;
-- activation cannot run while the systemd service owns the old server;
-- successful handoff preserves every workspace, tab, pane, and pane shell process;
-- the service and local CLI resolve to the pinned binary;
-- Ghostty exposes the full canvas instead of implementing layout policy.
+## Dashboard boundary
 
-Upgrade safely:
+`package.json` and `package-lock.json` pin `@hypermemetic-ai/qq-dashboard` to an exact Git commit. `bin/qq-dashboard [--once]` executes only the installed package binary and exports this repository's exact `bin/qq-profile` as `QQ_PROFILE_BIN`; `bin/qq-dashboard-cookies` similarly delegates to the installed package. Neither launcher searches `PATH` or a sibling checkout.
 
-1. Run `bin/qq-herdr-upgrade` or pass a tag matching `qq-vMAJOR.MINOR.PATCH-REVISION`. With no argument it lists remote `refs/tags/qq-v*`, strips the prefix, version-sorts them, and selects the highest tag. It shallow-clones that exact candidate and prints its exact commit; it makes no changes.
-2. Validate the tagged release in the Herdr repository, then update both tag and commit in `herdr/downstream/upstream.env`.
-3. Update version/protocol assumptions in activation and tests if the release is not 0.8.0 protocol 19. Do not treat the current activation script as generic.
-4. Run `bin/qq-herdr-build build`, inspect the full upstream test and smoke results, then run `bin/qq-herdr-build install`.
-5. Review outdated integrations, especially Pi integration, before updating them deliberately.
-6. Run `bin/qq-herdr-activate` only in its supported source-state transition, then reconnect and inspect `systemctl --user status herdr.service` and the log.
+Preserve `~/.local/state/qq/telemetry/` across dashboard installs, including its usage caches and Qwen cookie snapshot. Validate an upgrade in the private repository, update both package manifests, install dependencies, run both launcher `--help` commands, and smoke `bin/qq-profile list --json` from a checkout without a sibling dashboard.
 
-Upstream synchronization and centered-pane implementation changes belong in the Herdr repository; QQ should advance only to a validated immutable release.
+## Focused validation
 
-## Dashboard launcher boundary
+```bash
+# q mode adapter, config, manifest, and qq-dictation capability floor
+tests/test-q-mode.sh
 
-`package.json` and `package-lock.json` pin `@hypermemetic-ai/qq-dashboard` 0.1.0 to commit `3eb1309535459089930984f5fd4e31a2661d5edf`. `npm install` materializes its two package binaries.
+# QQ Herdr config, wrappers, service, and Herdr capability floor; may fetch GitHub
+tests/test-herdr-downstream.sh
 
-- `bin/qq-dashboard [--once]` resolves the repository through its real script path, exports `QQ_PROFILE_BIN` as the exact repository `bin/qq-profile`, and executes only `node_modules/@hypermemetic-ai/qq-dashboard/bin/qq-dashboard`.
-- `bin/qq-dashboard-cookies ...` executes only the corresponding installed package binary. Repository documentation records `refresh`, `status`, and `validate` operations.
+# Conditional: installed binary and disposable live smoke
+bin/qq-herdr-smoke
+tests/test-herdr-live.sh
+```
 
-Neither launcher searches `PATH` for a dashboard binary or consults a sibling checkout. The documented consumer contract is `qq-profile list --json`; profile definition, role filtering, validation, and fail-closed behavior remain QQ responsibilities. See [Profiles and extensions](../runtime/profiles-and-extensions.md) for that producer contract.
-
-Dashboard installation or extraction must preserve `~/.local/state/qq/telemetry/`, including non-secret usage caches and the Qwen cookie snapshot. This repository supplies no evidence for files below that boundary beyond the README statement, and no evidence for cookie acquisition, storage security, HTTP endpoints, telemetry semantics, UI lifecycle, or `--once` internals. Those claims require the private package source.
-
-To upgrade the dashboard, validate a tagged release in its own repository, replace the exact dependency commit in `package.json`, regenerate `package-lock.json`, run `npm install`, and exercise both launcher `--help` commands from a checkout with no sibling dashboard repository. Preserve the telemetry state directory. Also verify `qq-profile list --json`; changing its output is a cross-package contract change.
-
-## Validation
-
-- `tests/test-herdr-downstream.sh` checks the immutable coordinates, absence of the retired patch flow, config/navigation policy, service paths and cgroup ownership, Ghostty invariants, executable scripts, upstream commit contents, and pane-wrapper argument rejection. It fetches the pinned upstream and therefore needs network access.
-- `tests/test-herdr-live.sh` requires an installed executable at `QQ_HERDR_TEST_BINARY` or `~/.local/lib/qq/herdr/bin/herdr`, then runs the disposable smoke suite.
-- `bin/qq-herdr-smoke PATH` is the focused binary contract test and does not use the live server.
-- `tests/test-brief-gate.mjs` and delegation/review tests cover the QQ workflow around the plugin; the Herdr smoke test covers only plugin compatibility.
-- `tests/test-execution-profiles.mjs` validates QQ's profile producer. There is no repository-owned dashboard implementation test; launcher `--help` and a private-package test run are upgrade gates, not substitutes for source inspection.
+Run `qq-q-mode-uat preflight` or `post-activate` only on a prepared workstation. Activation itself is an operator-visible mutation, not a routine test.

@@ -18,8 +18,8 @@ Source and tests are authoritative. Start with the narrowest check that owns the
 | Pi extension or tool | owning `extensions/*.ts`, registration in `extensions/index.ts` | matching `tests/test-*.mjs` | [Profiles and extensions](../runtime/profiles-and-extensions.md) |
 | Agent messages | `extensions/agent-messages.ts`, both Event Plane clients | isolated test, then live harness if needed | [Profiles and extensions](../runtime/profiles-and-extensions.md), [Event Plane](../services/event-plane.md) |
 | Event Plane protocol, state, or client | `bin/lib/event_plane_service.py`, `event_plane_client.py`, `event-plane-client.ts`, launchers | `tests/test-event-plane.sh` | [Event Plane](../services/event-plane.md) |
-| Delegation, handoff, QA, or landing | `extensions/{board,review-flow,qa-result}.ts`, `bin/lib/{admission,run,review}.mjs`, workers, brief-gate plugin | delegation, brief-gate, and review-flow tests | [Delegation and review](../runtime/delegation-and-review.md) |
-| Herdr distribution or pane policy | `herdr/downstream/upstream.env`, `herdr/config.toml`, `bin/qq-herdr-*`, systemd and Ghostty files | downstream contract; smoke/live only when prepared | [Herdr and dashboard](../operations/herdr-and-dashboard.md) |
+| Delegation, handoff, QA, outcomes, or landing | `extensions/{board,review-flow,qa-result}.ts`, `bin/lib/{admission,run,review,run-events}.mjs`, workers, brief-gate plugin | delegation, brief-gate, and review-flow tests | [Delegation and review](../runtime/delegation-and-review.md) |
+| Herdr, q mode, dictation, or pane policy | `herdr/downstream/upstream.env`, `herdr/config.toml`, `plugins/q-mode/`, `bin/qq-herdr-*`, `bin/qq-q-mode-uat` | q mode and downstream contracts; smoke/live only when prepared | [Herdr and dashboard](../operations/herdr-and-dashboard.md) |
 | Dashboard package boundary | `package.json`, `package-lock.json`, `bin/qq-dashboard*`, `dashboard/README.md` | launcher help and profile JSON contract | [Herdr and dashboard](../operations/herdr-and-dashboard.md) |
 | OpenWiki publication or registry | `bin/qq-openwiki-*`, `config/openwiki-repositories`, user timer/service | refresh, legacy, and dispatch tests | [OpenWiki automation](../operations/openwiki-automation.md) |
 | Pi skill | canonical `skills/<name>/SKILL.md` | metadata inspection plus a fresh matching-task session | [Profiles and extensions](../runtime/profiles-and-extensions.md) |
@@ -40,6 +40,7 @@ node --experimental-strip-types tests/test-grok-paraphrase-guard.mjs .
 node --experimental-strip-types tests/test-delegation.mjs .
 node tests/test-brief-gate.mjs .
 node --experimental-strip-types tests/test-review-flow.mjs .
+tests/test-q-mode.sh
 tests/test-methodology.sh
 tests/test-event-plane.sh
 tests/test-openwiki-refresh.sh
@@ -52,13 +53,13 @@ tests/test-openwiki-dispatch.sh
 ### Conditional checks
 
 - `tests/test-agent-messages-live.sh` starts a real local Event Plane Unix-socket service in temporary state. It needs Python 3, Node with type stripping, Unix sockets, and writable `$HOME`; it does not need external network access.
-- `tests/test-herdr-downstream.sh` fetches the pinned GitHub tag and therefore needs Git and network access. It also checks repository-owned config and launcher contracts.
-- `tests/test-herdr-live.sh` needs an executable pinned binary at `~/.local/lib/qq/herdr/bin/herdr`, or `QQ_HERDR_TEST_BINARY`. Its smoke run starts disposable server/client processes and needs `python3`, `script`, `timeout`, PTY support, and Unix sockets.
-- `bin/qq-herdr-build build` is a larger network/toolchain check: Git, Rust/Cargo, Zig 0.15.x, the pinned upstream tag, upstream tests, a release build, and the QQ smoke test.
+- `tests/test-q-mode.sh` and `tests/test-herdr-downstream.sh` use configured local landed repositories when available, otherwise fetch owner branch refs. They need Git and may need network/SSH access; each required capability commit must be an ancestor of the branch tip.
+- `tests/test-herdr-live.sh` needs an installed executable at `~/.local/lib/qq/herdr/bin/herdr`, or `QQ_HERDR_TEST_BINARY`. Its smoke run starts disposable server/client processes and needs `python3`, `script`, `timeout`, PTY support, and Unix sockets.
+- `bin/qq-q-mode-uat preflight|post-activate`, `bin/qq-herdr-activate`, and service operations are operator-visible checks requiring installed Herdr/Handy artifacts and live process state. Product builds run in their owner repositories; QQ has no build or upgrade wrapper.
 - `bin/qq-profile context inspect` and `context install` invoke `pi --list-models` (or `$PI_BIN`) and require the configured model registry. `context install` writes the private Pi model configuration.
 - Dashboard checks require the private dependency to be installed from its immutable Git commit. Dependency installation may require GitHub credentials and network access.
 
-`npm test` runs the package's authoritative order: methodology, Event Plane, profiles, agent messages, live agent messages, the remaining extensions, delegation, brief gate, review flow, Herdr downstream, Herdr live, and all OpenWiki tests. It is not an offline suite: do not use it as the first check when network access or the installed Herdr binary is unavailable.
+`npm test` runs the package's authoritative order: methodology, Event Plane, profiles, agent messages, live agent messages, the remaining extensions, delegation, brief gate, review flow, q mode, Herdr downstream, Herdr live, and all OpenWiki tests. It is not an offline suite: do not use it as the first check when network access or the installed Herdr binary is unavailable.
 
 ## State and permission checklist
 
@@ -104,13 +105,13 @@ Before a stateful or live check:
 3. Exercise the transition from every allowed and refused predecessor in `test-delegation.mjs` and `test-review-flow.mjs`; run `test-brief-gate.mjs` when operator-gate state or Herdr plugin interaction changes.
 4. Use injected runners for normal development. Reserve a real workspace trial for an operator-approved end-to-end change.
 
-### Pin a Herdr release
+### Change Herdr or q mode integration
 
-1. Run `bin/qq-herdr-upgrade [qq-vMAJOR.MINOR.PATCH-REVISION]` to inspect an immutable candidate; this is networked and does not change the pin.
-2. Update both tag and commit in `herdr/downstream/upstream.env`. Do not restore the retired QQ patch flow; upstream Rust work belongs in the Herdr repository.
-3. Update downstream assertions when the intentional pin changes, then run `tests/test-herdr-downstream.sh` and `bin/qq-herdr-build build`.
-4. Run `bin/qq-herdr-build install` only to atomically install the proven binary. It does not activate it.
-5. Run `bin/qq-herdr-activate` only as an operator-visible live change. It validates preservation of workspaces, tabs, panes, and shell processes before committing the service/client handoff. Follow with the live smoke check.
+1. Build and install Herdr in its owner repository. `HERDR_OPERATOR_INPUT_COMMIT` is a capability floor that must remain an ancestor of the landed `master` tip, not a product release pin.
+2. Update `herdr/downstream/upstream.env` only when the owner URL/ref, landed checkout, or capability floor changes. Do not restore product commit pins or QQ build/upgrade wrappers.
+3. For dictation controls, update `plugins/q-mode/` and its analogous qq-dictation capability floor together. Preserve readiness PID/state/executable checks, bounded forwarding, exact pane IDs, targetless idempotent cancel, and the retained Left-Control bridge.
+4. Run `tests/test-q-mode.sh`, `tests/test-herdr-downstream.sh`, and `bin/qq-herdr-smoke` against the installed artifact.
+5. For a live cutover, run `bin/qq-q-mode-uat preflight`, `bin/qq-herdr-activate`, reconnect, then `bin/qq-q-mode-uat post-activate` and its manual checklist.
 
 ### Pin a dashboard release
 
@@ -142,3 +143,6 @@ These tasks have mandatory canonical instructions. Read the skill before editing
 - **Mermaid creation or repair:** read `skills/mermaid-diagrams/SKILL.md`. Use diagrams for runtime flows, lifecycles, data models, and non-trivial control flow; ground every node and transition in source, add a caption, and treat parser-degraded fences as failures to repair.
 
 For connector and OKF work, validation belongs to the OpenWiki repository and generator that own those formats, not this QQ package suite. For Mermaid, successful OpenWiki fence validation is the final boundary in addition to source review.
+oundary in addition to source review.
+s the final boundary in addition to source review.
+iew.

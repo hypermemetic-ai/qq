@@ -7,7 +7,7 @@ tags: [architecture, qq, pi, herdr]
 
 # QQ architecture overview
 
-QQ is a private, local-first engineering workflow built around Pi. It composes execution policy, role-specific prompts, Backlog-managed planning, isolated Git worktrees, Herdr panes, independent QA, a local Event Plane, dashboard launchers, and OpenWiki maintenance. The repository owns the composition and policy; it does not own Pi, Git, Backlog, Herdr's Rust implementation, or the private dashboard implementation.
+QQ is a private, local-first engineering workflow built around Pi. It composes execution policy, role-specific prompts, externally stored Backlog planning, isolated Git worktrees, Herdr panes and q mode, independent QA, a local Event Plane, dashboard launchers, and OpenWiki maintenance. The repository owns the composition and policy; it does not own Pi, Git, Backlog, Herdr's Rust implementation, or the private dashboard implementation.
 
 ## System map
 
@@ -35,10 +35,10 @@ flowchart TD
 | Surface | Repository owner and stable entrypoints | Boundary |
 |---|---|---|
 | Pi composition | `extensions/index.ts`, default `registerQQ(pi)` | Registers the normal session extensions in fixed order. `extensions/qa-result.ts` is intentionally worker-only and is not in the aggregate. See [Profiles and extensions](../runtime/profiles-and-extensions.md). |
-| Activation and profiles | `bin/qq-methodology`; `bin/qq-profile`; `bin/lib/roles.mjs`; `bin/lib/execution-profiles.mjs`; `extensions/execution-profiles.ts` | QQ owns repository activation, profile schema, model/context checks, role prompt replacement, and pane-local selection. Pi owns model registration, authentication, tools, sessions, and events. |
-| Delegation and review | `extensions/board.ts`; `extensions/review-flow.ts`; `extensions/qa-result.ts`; `bin/lib/{admission,run,review}.mjs`; `bin/qq-{review,land}-worker.mjs` | QQ owns admission, private handoffs, worktree/pane orchestration, two-look QA, operator approval, and landing. Git, Backlog, and Herdr execute the underlying operations. |
+| Activation and profiles | `bin/qq-methodology`; `bin/qq-profile`; `bin/lib/roles.mjs`; `bin/lib/execution-profiles.mjs`; `extensions/execution-profiles.ts` | QQ owns activation, external Backlog setup, required Pi defaults/trust, profile validation, prompt replacement, and pane selection. Pi owns model registration, authentication, tools, sessions, and events. |
+| Delegation and review | `extensions/board.ts`; `extensions/review-flow.ts`; `extensions/qa-result.ts`; `bin/lib/{admission,run,review,run-events}.mjs`; workers | QQ owns admission, handoffs, two-look QA, durable outcomes, operator approval, upstream publication, and cleanup. Git, Backlog, Herdr, and Event Plane execute underlying operations. |
 | Event Plane integration | `bin/lib/event_plane_service.py`; `bin/lib/event-plane-client.ts`; `bin/lib/event_plane_client.py`; `extensions/agent-messages.ts`; `bin/event-plane`; `bin/event-plane-admin` | The Python service owns the Unix-socket protocol and SQLite delivery state. The extension owns Pi presence and message injection, not transport persistence. |
-| Herdr distribution | `herdr/downstream/upstream.env`; `herdr/config.toml`; `bin/qq-herdr-{build,smoke,activate,upgrade,pane-add,launch}`; `systemd/user/herdr.service` | QQ pins, validates, installs, activates, and configures Herdr. The centered-pane Rust implementation and its source tests live in the pinned upstream repository, not this checkout. |
+| Herdr and q mode | `herdr/downstream/upstream.env`; `herdr/config.toml`; `plugins/q-mode/`; `bin/qq-herdr-{smoke,activate,pane-add,launch}`; `bin/qq-q-mode-uat` | QQ validates capability floors, activates owner-built Herdr, and adapts q mode to owner-built qq-dictation. Product implementation and builds stay external. |
 | Dashboard | `package.json`; `package-lock.json`; `bin/qq-dashboard`; `bin/qq-dashboard-cookies`; `dashboard/README.md` | QQ pins and launches the private package and supplies `QQ_PROFILE_BIN`. Dashboard internals are unavailable here; its supported profile input is `qq-profile list --json`. |
 | OpenWiki automation | `bin/qq-openwiki-{refresh,publish,dispatch,refresh-legacy}`; `config/openwiki-repositories`; `systemd/user/qq-openwiki.{service,timer}`; `.github/workflows/openwiki-update.yml` | Local automation owns isolated refresh/publication and locking. The hosted workflow is a separate PR-producing path, not evidence of local timer authority. |
 
@@ -52,6 +52,7 @@ sequenceDiagram
     participant R as Runner Pi
     participant Q as QA worker
     participant G as Git
+    participant E as Event Plane
     A->>B: vet and claim To Do task
     A->>A: generate scribe note
     A->>H: open operator brief gate
@@ -61,21 +62,23 @@ sequenceDiagram
     R->>G: implement and commit
     R->>Q: done submits committed ref
     Q->>Q: run independent QA looks
+    Q->>E: publish blocked outcome when final QA fails
     Q-->>A: write proposal or blocked handoff
     A->>A: operator approves or discusses
-    A->>G: land under repository lock
+    A->>G: merge and push under repository lock
+    G->>E: publish landed outcome
     A->>B: update task state
 ```
 
 *Delegation separates operator approval, implementation, QA, and landing; no runner merges its own work.*
 
-The stable orchestration symbols are `admitDelegate()` and `makeNote()` in `extensions/board.ts`, `prepareRun()` and `startRun()` in `bin/lib/run.mjs`, `prepareDone()` and `conductReview()` in `bin/lib/review.mjs`, and `land()` inside `registerReviewFlow()` in `extensions/review-flow.ts`. The handoff records `schema: qq.run-handoff/v1`; `readHandoff()` rejects another schema/version. `startRun()` changes the handoff from `starting` to `running` only after the worktree, pane, agent, and prompt exist. Landing is serialized by `<git-common-dir>/qq-land.lock` and only a QA-passed proposal offers `approve`.
+The stable orchestration symbols are `admitDelegate()` and `makeNote()` in `extensions/board.ts`, `prepareRun()` and `startRun()` in `bin/lib/run.mjs`, `prepareDone()` and `conductReview()` in `bin/lib/review.mjs`, and `land()` inside `registerReviewFlow()` in `extensions/review-flow.ts`. The handoff records `schema: qq.run-handoff/v1`; `readHandoff()` rejects another schema/version. `startRun()` changes `starting` to `running` only after the prompt handshake reaches `working`. Landing is serialized by `<git-common-dir>/qq-land.lock`; only a QA-passed proposal offers `approve`, and completion requires pushing the target upstream before cleanup and `Done`. Workers wake the owning architect through durable `run.blocked` and `run.landed` Event Plane events.
 
 ## State and configuration
 
 | State/configuration | Location or schema | Owner and invariant |
 |---|---|---|
-| Repository activation | common local Git config `qq.methodology=true` | `bin/qq-methodology` and `isActivatedRepository()`. Shared by linked worktrees, absent from clones, and fail-closed for missing/invalid values. |
+| Repository activation | common local Git config `qq.methodology=true`; checkout `backlog` symlink; `${HOME}/.local/state/qq/store/<project>` | The marker is shared by worktrees and absent from clones; each checkout also needs its external Backlog link and required Pi defaults/trust. |
 | Execution policy | `${XDG_CONFIG_HOME:-~/.config}/qq/execution-profiles.json`, `qq.execution-profiles/v1` | Exact top-level and role/profile keys; only `runner` and `architect`; private regular file; Grok via `xai-auth`; 200,000 Grok context ceiling. |
 | Pane selection | `${XDG_STATE_HOME:-~/.local/state}/qq/pane-profiles/<HERDR_PANE_ID>.json` | Version 1 exact shape; owner-only directory/file; atomic write; ignored if unsafe, malformed, or no longer declared. It never changes the durable default. |
 | Event Plane | `${XDG_STATE_HOME:-~/.local/state}/qq/event-plane/` | Service owns the fixed socket/database namespace. Presence is extension-owned state conceptually adjacent to it; a production layout must not place an unexpected `presence/` entry in the core service directory because service startup validates fixed names. The live messaging harness separates those roots. |
@@ -99,7 +102,7 @@ The stable orchestration symbols are `admitDelegate()` and `makeNote()` in `exte
 - Add role/profile policy through `validateExecutionPolicy()` and the `qq-profile` CLI contract, not dashboard internals. Any schema change must update CLI JSON consumers and startup validation together.
 - Add delegated state only through validated handoff readers/writers and preserve architect ownership, private modes, rollback, and lock boundaries.
 - Add Event Plane behavior at the service protocol and both maintained clients before consuming it from an extension.
-- Update Herdr by changing the immutable upstream manifest and passing build, smoke, install, and activation checks; do not patch an installed binary.
+- Change Herdr integration by preserving capability floors, validating owner-built artifacts, and passing q mode, downstream, smoke, preflight, activation, and post-activation checks.
 
 ## Validation map
 
@@ -113,3 +116,4 @@ The stable orchestration symbols are `admitDelegate()` and `makeNote()` in `exte
 - OpenWiki: `tests/test-openwiki-refresh.sh`, `tests/test-openwiki-refresh-legacy.sh`, `tests/test-openwiki-dispatch.sh`
 
 Source and tests are authoritative. In particular, do not infer dashboard internals from its launcher contract or Herdr implementation details from QQ's downstream wrappers.
+ation details from QQ's downstream wrappers.

@@ -77,7 +77,7 @@ sequenceDiagram
 3. The profile-bound scribe model returns either exact `clear` or a one-line `bounce` reason. A clear result is followed by another task read before the status changes to `In Progress`.
 4. A separate scribe call builds the delegate note from the ticket, the last 100 operator turns, assistant text and tool names, and file read/write paths. Reasoning internals and tool results are not serialized. The selected profile’s QA binding is captured now.
 5. `prepareRun` creates a mode-`0700`, account-owned, non-symlink run directory and mode-`0600` ticket, transcript, note, and combined gate files. The operator reads the exact ticket and note in a focused right-hand Glow plugin split on the architect's current tab. Before opening, `awaitBriefGate()` deletes any old decision. It accepts only an account-owned, regular non-symlink decision file with no group/other bits and exact text `approved` or `cancelled`. Whether waiting or validation succeeds or fails, it attempts to close the owned plugin pane and deletes the decision file; close failure is itself a refusal.
-6. Cancellation returns the card to `To Do` before deleting prepared state. Approval creates `qq/<task-slug>-<nonce>` from the current named base branch, creates a private worktree, then creates a no-focus `runs` tab or right-splits its last pane. The pane receives `QQ_AGENT_ROLE=runner`, `QQ_AGENT_PROJECT`, `QQ_RUN_STATE`, `QQ_RUN_ID`, and `QQ_ARCHITECT_SESSION`. The handoff is written as `starting` before shell readiness and agent startup. The prompt embeds the full ticket and delegate note, points to the note path, requires a commit and `done HEAD`, and forbids merging; only after prompt delivery does the handoff become `running`.
+6. Cancellation returns the card to `To Do` before deleting prepared state. Approval creates `qq/<task-slug>-<nonce>` from the current named base branch, creates a private worktree, then creates a no-focus `runs` tab or right-splits its last pane. The pane receives `QQ_AGENT_ROLE=runner`, `QQ_AGENT_PROJECT`, `QQ_RUN_STATE`, `QQ_RUN_ID`, and `QQ_ARCHITECT_SESSION`. The handoff is written as `starting` before shell readiness and agent startup. The prompt embeds the full ticket and delegate note, points to the note path, requires a commit and `done HEAD`, and forbids merging. `agent prompt --wait --until working --timeout 5000` must observe the runner handshake before the handoff becomes `running`; failure or tool cancellation propagates through launch commands and rolls back the pane, worktree, branch, and private state.
 
 Gate turns for one shared Git common directory are serialized in-process by `withGlowTurn`; admission is serialized across processes by the lock.
 
@@ -95,17 +95,17 @@ stateDiagram-v2
     reviewing --> proposal: QA passes
     reviewing --> blocked: look 2 fails or QA infrastructure fails
     proposal --> commented: operator discusses
-    proposal --> blocked: landing fails
-    proposal --> landed: landing succeeds
-    commented --> landed: QA pass retained and approved
-    commented --> blocked: landing fails
+    proposal --> later: operator defers
+    proposal --> blocked: landing or push fails
+    proposal --> landed: merge and push succeed
+    blocked --> later: operator defers retryable landing
     blocked --> landed: failed landing retried and succeeds
     landed --> [*]
 ```
 
-*The persisted handoff lifecycle; `later` is deliberately not a state transition, and only QA-passed blocked states caused by failed landing can reach `landed`.*
+*The persisted handoff lifecycle. `later` suppresses repeated offers until another actor explicitly restores `proposal`; only QA-passed blocked states caused by failed landing can reach `landed`.*
 
-A QA verdict has `schema: qq.qa-verdict/v1`, `version: 1`, `verdict` (`pass` or `fail`), non-empty `summary` up to 240 characters, `feedback` up to 8000 characters, `tests_modified`, and `createdAt`. The landed architect message exposes `qq.run-landed/v1` details with run/task identity, merged ref, target branch, time, summary, and changed-file numstat.
+A QA verdict has `schema: qq.qa-verdict/v1`, `version: 1`, `verdict` (`pass` or `fail`), non-empty `summary` up to 240 characters, `feedback` up to 8000 characters, `tests_modified`, and `createdAt`. Run workers publish `run.landed` (`qq.run-landed/v1`) and `run.blocked` (`qq.run-blocked/v1`) Event Plane payloads with run/task identity, architect session, ref, outcome details, and changed-file numstat.
 
 ## QA, proposal, and review ownership
 
@@ -113,14 +113,17 @@ A QA verdict has `schema: qq.qa-verdict/v1`, `version: 1`, `verdict` (`pass` or 
 
 QA reuses the runs pane only after the prior Herdr agent identity disappears and the pane is an idle shell. It runs Pi with no normal extensions, skills, templates, or context files; allowed tools are `read,bash,edit,write,qa_verdict`. Look 1 starts a new QA session; look 2 resumes it. QA may add committed test-only changes. The conductor converts a claimed pass to failure if the tree is dirty, the reviewed history was replaced, no test path changed, or production paths changed. A valid test-only descendant becomes the proposal ref.
 
-Look-1 failure records `waiting_fix` and returns the same pane to the runner with feedback. Look-2 failure records `blocked`, closes the pane, and notifies the architect and operator. A pass records a numstat `pack`, sets `proposal`, closes the pane, and notifies the operator.
+Look-1 failure records `waiting_fix` and returns the same pane to the runner with feedback. Look-2 failure records `blocked`, returns the Backlog task to `To Do`, publishes a `run.blocked` event, closes the pane, and notifies the operator. QA infrastructure failure also returns the task to `To Do` unless a valid QA-passed proposal already exists. A pass records a numstat `pack`, sets `proposal`, closes the pane, and notifies the operator; active runs otherwise remain `In Progress`.
 
-The review extension polls every two seconds, at session start, after role selection, and after `agent_settled`. It offers only handoffs whose `architectSession` exactly matches the current session ID:
+The review extension polls every two seconds, at session start, after role selection, and after `agent_settled`. It offers only owned `proposal` handoffs and QA-passed `blocked` handoffs caused by landing failure. Final-QA and infrastructure failures are delivered as outcomes rather than interactive proposals:
 
-- **approve** appears only for a QA-passed proposal/commented handoff or a QA-passed failed landing;
-- **discuss** preserves the reviewed ref and verdict, stores an operator comment, returns the Backlog task to `To Do`, and steers the architect session;
-- **later** makes no persisted change; `review` can offer it again;
-- infrastructure/final-QA blocked handoffs can only be discussed or deferred.
+- **approve** starts locked landing;
+- **discuss** preserves the reviewed ref and verdict, stores an operator comment, and steers the architect session without changing the Backlog status;
+- **later** persists status `later`, suppressing repeat offers;
+- there is no manual `review` tool and `commented`/`later` states are not automatically reopened.
+
+<!-- openwiki: broken internal link [profiles-and-extensions.md#agent-messages-and-presence] heading anchor "agent-messages-and-presence" does not exist in "profiles-and-extensions.md". Fix the href or restore the target, then delete this comment. -->
+`bin/lib/run-events.mjs` addresses outcomes to `qq/review-flow/<architect-session>`. The review extension long-polls that recipient only while in the architect role. It validates product, producer, origin, recipient, schema, and session; injects `qq-run-landed` or `qq-run-blocked`; and acknowledges only after the event ID is visible in the Pi JSONL transcript. Pending persistence is retried without duplicate injection. A busy architect receives the outcome as steering; an idle architect receives a normal triggered turn. This shares Event Plane delivery guarantees with [agent messaging](profiles-and-extensions.md#agent-messages-and-presence), but uses dedicated run outcome kinds rather than `agent.message`.
 
 ## Landing invariants and failure paths
 
@@ -131,7 +134,7 @@ Approval resolves the shared Git directory and runs the land worker under `flock
 - main and delegated worktrees are clean, including untracked files;
 - `git merge-tree --write-tree HEAD ref` succeeds.
 
-It performs `git merge --no-ff --no-edit`, removes the worktree, deletes the merged branch, atomically records `landed`, and only then marks Backlog `Done`. A failure records `blockedReason` while preserving the QA verdict and ref, so a transient failed landing remains approvable. If the merge succeeded but cleanup failed, status is still `blocked`; operators must inspect the repository before retrying.
+If the proposal is not already an ancestor of `HEAD`, it performs `git merge --no-ff --no-edit`. It then resolves the recorded target branch's configured upstream and pushes `HEAD` to that exact remote ref **before** removing the worktree, deleting the branch, recording `landed`, and marking Backlog `Done`. A missing upstream, merge conflict, or push failure records `blockedReason` while preserving the QA verdict and ref. If a push retry follows a successful local merge, ancestry detection skips merge/preflight and retries the push; no cleanup or `Done` transition occurs before publication succeeds. Failures after publication may still leave partial cleanup, so inspect Git and the handoff before retrying.
 
 Delegate failures are compensating rather than transactional: after claim, the extension best-effort returns the task to `To Do`; after preparation it deletes the private state; launch failure closes a created pane, force-removes a created worktree and branch, and removes state. Cleanup errors are intentionally suppressed in these rollback paths, so Git, Herdr, Backlog, and the run directory should be inspected after a refusal. The outward error also redacts the generated note if a downstream error embeds it.
 
@@ -141,8 +144,8 @@ Delegate failures are compensating rather than transactional: after claim, the e
 - **Git and `flock`:** shared-directory admission/landing locks, worktrees, ancestry, clean-tree checks, merge preflight, merge, and cleanup.
 - **Herdr and brief-gate plugin:** operator pane, runs panes, agent replacement, prompts, notifications. Operational details belong in [Herdr and dashboard operations](../operations/herdr-and-dashboard.md).
 - **Execution policy and model registry:** profile-bound scribe and QA model selection; see [Profiles and extensions](profiles-and-extensions.md).
-- **Presence files:** final-QA rejection finds the owning architect pane through Event Plane presence; see [Event Plane](../services/event-plane.md).
-- **Injection seams:** board accepts injected command runner, admission/note/gate/run functions, environment and clock; review-flow accepts runner, worker launcher and environment; QA verdict accepts a writer; review library functions accept a command runner. Keep state transitions in the libraries so workers and extensions share one contract.
+- **Event Plane:** review and land workers persist dedicated blocked/landed outcomes for the owning architect session; see [Event Plane](../services/event-plane.md).
+- **Injection seams:** board accepts injected command runner, admission/note/gate/run functions, environment and clock; review-flow accepts runner, worker launcher, Event Plane client, sleep, and environment; QA verdict accepts a writer; review library functions accept a command runner and outcome emitter. Keep state transitions in the libraries so workers and extensions share one contract.
 
 ## Focused validation
 
@@ -154,4 +157,4 @@ node tests/test-brief-gate.mjs .
 node --experimental-strip-types tests/test-review-flow.mjs .
 ```
 
-These tests cover strict task/Herdr parsing, admission serialization and stale-lock recovery, transcript redaction, private artifact modes, exact gate placement/decision validation/close behavior, approve/cancel rollback, new-tab and existing-tab runner placement, pane environment, shell readiness before agent startup, prompt contents and startup ordering, clean descendant validation, two-look pane/session ordering, QA test-only enforcement, architect-session ownership, discuss/later behavior, dirty-main and merge-conflict blocking, retryable failed landings, cleanup, and landed messages. After cross-cutting changes, run `npm test`; Herdr live checks have external runtime prerequisites described in [Testing and change guide](../development/testing-and-change-guide.md).
+These tests cover strict task/Herdr parsing, admission serialization and stale-lock recovery, transcript redaction, private artifact modes, exact gate placement/decision validation/close behavior, approve/cancel rollback, runner prompt handshake and abort propagation, clean descendant validation, two-look pane/session ordering, QA test-only enforcement, task status ownership, persisted later behavior, Event Plane outcome validation/deduplication, dirty-main and merge-conflict blocking, upstream push ordering and retry after a completed local merge, cleanup, and landed/blocked messages. After cross-cutting changes, run `npm test`; Herdr live checks have external runtime prerequisites described in [Testing and change guide](../development/testing-and-change-guide.md).

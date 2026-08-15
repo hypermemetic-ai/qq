@@ -13,6 +13,8 @@ tags: [runtime, profiles, extensions, skills, pi]
 
 QQ activates inside this repository, in a repository linked by `bin/qq-methodology link`, or when a worker starts with a valid `QQ_AGENT_ROLE`. `bin/lib/roles.mjs` owns `ROLE_NAMES`, `DEFAULT_ROLE`, `validateRole()`, and `isActivatedRepository()`. The Git marker is read without inherited `GIT_DIR`, `GIT_WORK_TREE`, or `GIT_COMMON_DIR` overrides. Linking writes the common local Git configuration, so all worktrees share activation but clones do not.
 
+Linking also initializes or reuses `${HOME}/.local/state/qq/store/<project>` as the Backlog.md store, disables Backlog auto-commit, and makes the checkout's `backlog` a symlink to that store. A tracked Backlog file tree is refused; a tracked symlink is retargeted and committed. It merges Pi defaults `steeringMode=all`, `followUpMode=all`, and `tuiMode=fullscreen`, trusts the checkout and `${HOME}/.herdr/worktrees`, and preserves unrelated settings, model/auth files, packages, themes, and trust entries. `inspect` treats missing setup as invalid and reports missing Git identity or execution policy as warnings. `unlink` removes only the activation marker.
+
 ```mermaid
 flowchart TD
     Start["Pi session_start"] --> Forced{"QQ_AGENT_ROLE set"}
@@ -93,7 +95,7 @@ The private dashboard is only a consumer: `bin/qq-dashboard` supplies `QQ_PROFIL
 - **Surface:** `agent_messages` actions `list`, `send`, and `status`; `/agent-tasks`; role-selection and agent/tool lifecycle events.
 - **Flow:** `start()` derives project from `QQ_AGENT_PROJECT`, `.pi/agent-messages.json`, or cwd; role from the selected/forced/configured role or linked repository. `list` filters valid unexpired records by project, role, or exact task and excludes the caller. `send` requires a canonical target session ID, bounded content, and `default` or `immediate`, sends to `agents/<session-id>`, then returns the Event Plane event ID. `status` maps obligations to `queued`, `delivering`, `blocked`, `delivered`, `expired`, or `failed`, including failure reasons and a current recipient busy card when useful.
 - **State/schema:** `.pi/agent-messages.json` permits only `project` and `role`. Presence lives under `${XDG_STATE_HOME:-~/.local/state}/qq/event-plane/presence/` in `sha256(session_id).json`, with private mode and atomic writes. It expires after 45 seconds, renews every 15 seconds, and discovery ignores expired, unsafe, oversized, malformed, or unknown-role/busy records. The core service rejects unexpected entries in its fixed startup namespace, so deployments must separate extension presence from core service state or account for startup ordering; the live harness injects a service socket while using a separate XDG root for presence. `/agent-tasks` advertises up to 32 unique exact labels of at most 191 characters. Lifecycle hooks publish `idle`, `thinking`, or `tool`; cards display `thinking Ns` or `tool NAME Ns` only after five seconds. Canonical recipient IDs are Pi UUID session IDs; project, role, tasks, and pane are discovery metadata, never substitutes for the ID.
-- **Persistence/invariant:** `receiveOne()` validates `qq.agent-message/v2`; malformed payloads are blocked. Before injection it searches session JSONL for the event ID plus content hash. An in-memory injection-key set prevents duplicate injection while persistence is pending; absent receipt causes guarded retry, not acknowledgement, because successful `pi.sendMessage` alone is not durable evidence. The receiver long-polls with one endpoint token and sleeps 500 ms before reconnecting after failures. `immediate` publishes idempotent `agent.immediate-claim` request `immediate_<event-id>`; only the first claimant aborts a busy turn, and the message is delivered as steering. Shutdown clears dedup state and removes presence. Inject client, paths, clock, sleep, list function, and send function through `deps`.
+- **Persistence/invariant:** `receiveOne()` validates `qq.agent-message/v2`; malformed payloads are blocked. Before injection it searches session JSONL for the event ID plus content hash. An in-memory injection-key set prevents duplicate injection while persistence is pending; absent receipt causes guarded retry, not acknowledgement, because successful `pi.sendMessage` alone is not durable evidence. The receiver long-polls with one endpoint token and sleeps 500 ms before reconnecting after failures. `immediate` publishes idempotent `agent.immediate-claim` request `immediate_<event-id>`; only the first claimant aborts a busy turn. The receiver waits up to five seconds for Pi to become idle, then injects a normal triggered turn; if Pi remains busy, it retries instead of steering into the aborted turn. Shutdown clears dedup state and removes presence. Inject client, paths, clock, sleep, list function, and send function through `deps`.
 - **Validation:** `tests/test-agent-messages.mjs` covers invalid/expired presence and messages, normalization, status mapping, filters, cards, and refusals. `tests/test-agent-messages-live.sh` proves delayed transcript persistence is retried without duplicate injection, eventual acknowledgement/delivered status, and one immediate interruption/steer against the real service. Transport behavior is covered by `tests/test-event-plane.sh`.
 
 ### Operator staging — `extensions/operator-stage.ts`
@@ -137,9 +139,9 @@ The private dashboard is only a consumer: `bin/qq-dashboard` supplies `QQ_PROFIL
 
 ### Review and landing — `extensions/review-flow.ts`
 
-- **Surface:** delegated-run `done({ref})`; architect-only `review`; polling on session start and agent settled.
-- **Lifecycle:** `done` validates and records a committed ref through `prepareDone()`, launches detached `bin/qq-review-worker.mjs`, then shuts down the runner. Architect polling offers only handoffs whose `architectSession` matches the current session. A QA-passed `proposal` or `commented` handoff, and a QA-passed `blocked` handoff caused by failed landing, offers `approve`, `discuss`, or `later`; final-QA and infrastructure-blocked work cannot approve. Landing runs `bin/qq-land-worker.mjs` under `<git-common-dir>/qq-land.lock`, requires final `status: landed`, and injects `qq.run-landed/v1`. Discuss writes an operator comment, returns the Backlog task to To Do, and steers the architect session.
-- **State/seam:** `qq.run-handoff/v1` is read by `readHandoff()`. Inject command execution and review launcher. Keep landing, ownership, and polling behavior together when changing statuses.
+- **Surface:** delegated-run `done({ref})`; automatic architect proposal polling and Event Plane outcome reception. There is no manual `review` tool.
+- **Lifecycle:** `done` validates and records a committed ref through `prepareDone()`, launches detached `bin/qq-review-worker.mjs`, then shuts down the runner. Architect polling offers only owned proposals and retryable QA-passed landing failures. `later` persists and suppresses repeat offers; discuss stores a comment and steers without changing the board. Final QA failure returns the task to `To Do` and emits `qq.run-blocked/v1`. Landing runs `bin/qq-land-worker.mjs` under `<git-common-dir>/qq-land.lock`, merges when needed, pushes the target upstream, then cleans up and marks `Done`; the worker emits `qq.run-landed/v1`.
+- **State/seam:** `qq.run-handoff/v1` is read by `readHandoff()`; `bin/lib/run-events.mjs` owns run outcome addressing, payloads, guards, and parsing. Inject command execution, worker launcher, Event Plane client, sleep, and outcome emitter. Keep landing, ownership, polling, board status, and outcome delivery together when changing statuses.
 - **Validation:** `tests/test-review-flow.mjs`.
 
 ### QA verdict — `extensions/qa-result.ts`
@@ -183,6 +185,17 @@ tests/test-methodology.sh
 node --experimental-strip-types tests/test-execution-profiles.mjs .
 node --experimental-strip-types tests/test-agent-messages.mjs .
 node --experimental-strip-types tests/test-operator-stage.mjs .
+node --experimental-strip-types tests/test-continue.mjs .
+node --experimental-strip-types tests/test-session-scrub.mjs .
+node --experimental-strip-types tests/test-backlog-guard.mjs .
+node --experimental-strip-types tests/test-grok-paraphrase-guard.mjs .
+node --experimental-strip-types tests/test-delegation.mjs .
+node tests/test-brief-gate.mjs .
+node --experimental-strip-types tests/test-review-flow.mjs .
+```
+
+Use `tests/test-agent-messages-live.sh` only with the required live Event Plane. Run `npm test` for the full ordered suite after focused checks; it also includes Event Plane, Herdr, and OpenWiki boundaries described in [Architecture overview](../architecture/overview.md).
+sts/test-operator-stage.mjs .
 node --experimental-strip-types tests/test-continue.mjs .
 node --experimental-strip-types tests/test-session-scrub.mjs .
 node --experimental-strip-types tests/test-backlog-guard.mjs .
