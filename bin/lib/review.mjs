@@ -232,8 +232,7 @@ async function waitForAgentIdentityDrop(run, pane, timeoutMs) {
 
 export async function takePane(run, pane, name, args, timeoutMs = 30_000) {
   await waitForShell(run, pane);
-  const start = ["agent", "start", name, "--kind", "pi", "--pane", pane, "--timeout", String(timeoutMs)];
-  if (args.length) start.push("--", ...args);
+  const start = ["agent", "start", name, "--kind", "pi", "--pane", pane, "--timeout", String(timeoutMs), "--", "--approve", ...args];
   await herdr(run, start, `cannot start ${name} in runs pane`);
 }
 
