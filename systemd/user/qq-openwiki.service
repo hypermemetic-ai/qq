@@ -1,5 +1,5 @@
 [Unit]
-Description=Publish QQ OpenWiki branch and refresh registered legacy OpenWikis
+Description=Publish qq OpenWiki branch and refresh registered legacy OpenWikis
 
 [Service]
 Type=oneshot

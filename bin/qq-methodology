@@ -13,8 +13,8 @@ usage() {
   cat >&2 <<'EOF'
 usage: qq-methodology <link|unlink|inspect>
 
-  link     link the current Git repository to QQ
-  unlink   unlink the current Git repository from QQ
+  link     link the current Git repository to qq
+  unlink   unlink the current Git repository from qq
   inspect  report the current repository's fail-closed link state
 EOF
   exit 64
@@ -44,7 +44,7 @@ link_repository() {
   "$GIT_BIN" --git-dir="$common" config --local --no-includes \
     --replace-all "$KEY" true \
     || fail "could not write $KEY to the current repository's common local Git config"
-  printf 'QQ linked for this repository (%s=true). Start a fresh Pi session or run /reload.\n' "$KEY"
+  printf 'qq linked for this repository (%s=true). Start a fresh Pi session or run /reload.\n' "$KEY"
 }
 
 unlink_repository() {
@@ -57,7 +57,7 @@ unlink_repository() {
   if (( status != 0 && status != 5 )); then
     fail "could not remove $KEY from the current repository's common local Git config"
   fi
-  printf 'QQ unlinked for this repository. Start a fresh Pi session or run /reload.\n'
+  printf 'qq unlinked for this repository. Start a fresh Pi session or run /reload.\n'
 }
 
 inspect_repository() {
