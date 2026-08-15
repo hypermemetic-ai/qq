@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
+const OPENWIKI_MATERIALIZE = resolve(dirname(fileURLToPath(import.meta.url)), "../qq-openwiki-materialize");
 const TASK_ID = /^[A-Za-z]+-[1-9][0-9]*(?:\.[1-9][0-9]*)?$/;
 const SAFE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const BRIEF_GATE_PLUGIN = "qq.brief-gate";
@@ -261,6 +263,29 @@ export async function waitForAvailableShell(run, paneId, options = {}) {
   throw new Error(`runs pane ${paneId} never became an available shell: ${reason(last, "not a free shell")}`);
 }
 
+export async function removeWorktree(run, mainRoot, worktree, options = {}) {
+  const args = ["worktree", "remove"];
+  if (options.force) args.push("--force");
+  args.push(worktree);
+  try {
+    await checked(run, OPENWIKI_MATERIALIZE, ["thaw", worktree], { cwd: worktree, signal: options.signal }, "cannot prepare worktree cleanup");
+    return await checked(run, "git", args, { cwd: mainRoot, signal: options.signal }, "worktree cleanup failed");
+  } catch (error) {
+    try {
+      await checked(run, OPENWIKI_MATERIALIZE, ["freeze", worktree], { cwd: worktree }, "cannot restore worktree protection");
+    } catch (freezeError) {
+      try {
+        await lstat(worktree);
+      } catch (statError) {
+        if (statError?.code === "ENOENT") throw error;
+        throw new AggregateError([error, freezeError, statError], "worktree cleanup failed and its protection could not be verified");
+      }
+      throw new AggregateError([error, freezeError], "worktree cleanup failed and its protection could not be restored");
+    }
+    throw error;
+  }
+}
+
 export async function startRun(options) {
   const { run, cwd, env = process.env, task, architectSession, qaBinding, signal } = options;
   if (typeof run !== "function") throw new Error("run start requires a command runner");
@@ -286,6 +311,7 @@ export async function startRun(options) {
     await privateDirectory(stateDir);
     await checked(run, "git", ["worktree", "add", "-b", branch, worktree, baseRef], { cwd: mainRoot, signal }, "cannot create worktree");
     createdWorktree = true;
+    await checked(run, OPENWIKI_MATERIALIZE, ["freeze", worktree], { cwd: worktree, signal }, "cannot protect delegated OpenWiki materialization");
 
     const tabsResult = await checked(run, "herdr", ["tab", "list", "--workspace", workspace], { signal }, "cannot list Herdr tabs");
     const tabs = parseHerdr(tabsResult.stdout, "tab_list")?.tabs ?? [];
@@ -333,7 +359,7 @@ export async function startRun(options) {
   } catch (error) {
     if (createdPane && paneId) await run("herdr", ["pane", "close", paneId], {}).catch(() => {});
     if (createdWorktree && mainRoot) {
-      await run("git", ["worktree", "remove", "--force", worktree], { cwd: mainRoot }).catch(() => {});
+      await removeWorktree(run, mainRoot, worktree, { force: true }).catch(() => {});
       await run("git", ["branch", "-D", branch], { cwd: mainRoot }).catch(() => {});
     }
     await rm(stateDir, { recursive: true, force: true }).catch(() => {});

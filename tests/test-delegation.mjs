@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { access, lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFileSync, spawnSync } from "node:child_process";
+import { access, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -58,6 +59,54 @@ try {
     HERDR_WORKSPACE_ID: "w2T",
     HERDR_PANE_ID: "w2T:pA",
   };
+  const cleanupRepo = join(scratch, "cleanup-main");
+  const cleanupWorktree = join(scratch, "cleanup-worktree");
+  await mkdir(join(cleanupRepo, "openwiki", "guides"), { recursive: true });
+  await writeFile(join(cleanupRepo, "openwiki", "guides", "start.md"), "start here\n");
+  execFileSync("git", ["-C", cleanupRepo, "init", "-q", "-b", "main"]);
+  execFileSync("git", ["-C", cleanupRepo, "config", "user.name", "qq-test"]);
+  execFileSync("git", ["-C", cleanupRepo, "config", "user.email", "qq-test.invalid"]);
+  execFileSync("git", ["-C", cleanupRepo, "add", "."]);
+  execFileSync("git", ["-C", cleanupRepo, "commit", "-q", "-m", "initial"]);
+  execFileSync("git", ["-C", cleanupRepo, "worktree", "add", "-q", "-b", "qq/cleanup", cleanupWorktree]);
+  execFileSync(join(root, "bin", "qq-openwiki-materialize"), ["freeze", cleanupWorktree]);
+  const assertCleanupWorktreeFrozen = async () => {
+    assert.equal((await lstat(join(cleanupWorktree, "openwiki"))).mode & 0o777, 0o555);
+    assert.equal((await lstat(join(cleanupWorktree, "openwiki", "guides"))).mode & 0o777, 0o555);
+    assert.equal((await lstat(join(cleanupWorktree, "openwiki", "guides", "start.md"))).mode & 0o777, 0o444);
+  };
+  await assertCleanupWorktreeFrozen();
+  const filesystemRun = async (command, args, options = {}) => {
+    const result = spawnSync(command, args, { cwd: options.cwd, encoding: "utf8" });
+    return { code: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+  };
+  await writeFile(join(cleanupWorktree, "local.txt"), "keep the worktree registered\n");
+  await assert.rejects(lib.removeWorktree(filesystemRun, cleanupRepo, cleanupWorktree), /worktree cleanup failed/);
+  await access(cleanupWorktree);
+  assert.ok(execFileSync("git", ["-C", cleanupRepo, "worktree", "list", "--porcelain"], { encoding: "utf8" }).includes(`worktree ${cleanupWorktree}\n`));
+  await assertCleanupWorktreeFrozen();
+
+  const cancellation = new AbortController();
+  cancellation.abort();
+  const cancellationCalls = [];
+  const cancellationRun = async (command, args, options = {}) => {
+    cancellationCalls.push({ command, args, options });
+    if (command === "git" && args[0] === "worktree" && args[1] === "remove") throw new Error("cleanup cancelled");
+    return filesystemRun(command, args, options);
+  };
+  await assert.rejects(lib.removeWorktree(cancellationRun, cleanupRepo, cleanupWorktree, {
+    force: true, signal: cancellation.signal,
+  }), /cleanup cancelled/);
+  assert.deepEqual(cancellationCalls.filter(({ command }) => command.endsWith("/bin/qq-openwiki-materialize")).map(({ args }) => args[0]), ["thaw", "freeze"]);
+  assert.equal(cancellationCalls.at(-1).options.signal, undefined);
+  await access(cleanupWorktree);
+  await assertCleanupWorktreeFrozen();
+
+  await lib.removeWorktree(filesystemRun, cleanupRepo, cleanupWorktree, { force: true });
+  await assert.rejects(access(cleanupWorktree), { code: "ENOENT" });
+  assert.doesNotMatch(execFileSync("git", ["-C", cleanupRepo, "worktree", "list", "--porcelain"], { encoding: "utf8" }), /cleanup-worktree/);
+  execFileSync("git", ["-C", cleanupRepo, "branch", "-D", "qq/cleanup"]);
+
   const task = { id: "TASK-1", title: "One task", description: "Do the task.", implementationNotes: "Try the narrow seam." };
   const ticket = lib.formatTicket(task);
   const branch = [];
@@ -242,6 +291,12 @@ try {
   assert.equal(await readFile(state.notePath, "utf8"), `${exactNote}\n`);
   assert.equal(JSON.parse(await readFile(state.statePath, "utf8")).status, "running");
   assert.ok(spawnCalls.every(({ options }) => options.signal === startSignal));
+  const worktreeAddIndex = spawnCalls.findIndex(({ command, args }) => command === "git" && args[0] === "worktree" && args[1] === "add");
+  const materializeIndex = spawnCalls.findIndex(({ command, args }) => command.endsWith("/bin/qq-openwiki-materialize") && args[0] === "freeze");
+  const firstHerdrIndex = spawnCalls.findIndex(({ command }) => command === "herdr");
+  assert.ok(worktreeAddIndex < materializeIndex && materializeIndex < firstHerdrIndex);
+  assert.deepEqual(spawnCalls[materializeIndex].args, ["freeze", prepared.worktree]);
+  assert.equal(spawnCalls[materializeIndex].options.cwd, prepared.worktree);
   const create = spawnCalls.find(({ command, args }) => command === "herdr" && args[0] === "tab" && args[1] === "create");
   assert.deepEqual(create.args.slice(0, 6), ["tab", "create", "--workspace", "w2T", "--label", "runs"]);
   assert.ok(create.args.includes("QQ_AGENT_ROLE=runner"));
@@ -285,7 +340,9 @@ try {
   assert.ok(droppedOps.indexOf("herdr agent prompt") < droppedOps.indexOf("herdr pane close"));
   const droppedPrompt = droppedCalls.find(({ command, args }) => command === "herdr" && args[0] === "agent" && args[1] === "prompt");
   assert.deepEqual(droppedPrompt.args.slice(-5), ["--wait", "--until", "working", "--timeout", "5000"]);
-  assert.ok(droppedCalls.some(({ command, args }) => command === "git" && args[0] === "worktree" && args[1] === "remove"));
+  const droppedThawIndex = droppedCalls.findIndex(({ command, args }) => command.endsWith("/bin/qq-openwiki-materialize") && args[0] === "thaw");
+  const droppedRemoveIndex = droppedCalls.findIndex(({ command, args }) => command === "git" && args[0] === "worktree" && args[1] === "remove");
+  assert.ok(droppedThawIndex >= 0 && droppedThawIndex < droppedRemoveIndex);
   assert.ok(droppedCalls.some(({ command, args }) => command === "git" && args[0] === "branch" && args[1] === "-D"));
   await assert.rejects(access(droppedPreparation.stateDir), { code: "ENOENT" });
 
