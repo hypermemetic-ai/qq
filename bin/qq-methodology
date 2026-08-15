@@ -3,6 +3,8 @@ set -euo pipefail
 
 KEY='qq.methodology'
 GIT_BIN="${QQ_GIT_BIN:-git}"
+BACKLOG_BIN="${QQ_BACKLOG_BIN:-backlog}"
+NODE_BIN="${QQ_NODE_BIN:-node}"
 
 fail() {
   printf 'qq-methodology: %s\n' "$*" >&2
@@ -20,12 +22,20 @@ EOF
   exit 64
 }
 
-require_git() {
-  if [[ "$GIT_BIN" == */* ]]; then
-    [[ -x "$GIT_BIN" ]] || fail "Git executable is unavailable: $GIT_BIN"
+resolve_executable() {
+  local configured="$1" value
+  if [[ "$configured" == */* ]]; then
+    [[ -x "$configured" ]] || return 1
+    value="$(cd "$(dirname "$configured")" && pwd -P)/$(basename "$configured")"
   else
-    command -v "$GIT_BIN" >/dev/null 2>&1 || fail "Git executable is unavailable: $GIT_BIN"
+    value="$(command -v "$configured" 2>/dev/null)" || return 1
   fi
+  printf '%s\n' "$value"
+}
+
+require_git() {
+  resolve_executable "$GIT_BIN" >/dev/null \
+    || fail "Git executable is unavailable: $GIT_BIN"
 }
 
 common_git_dir() {
@@ -38,13 +48,244 @@ common_git_dir() {
   printf '%s\n' "$value"
 }
 
+repository_root() {
+  local value
+  require_git
+  if ! value="$($GIT_BIN -C "$PWD" rev-parse --path-format=absolute --show-toplevel 2>/dev/null)" \
+    || [[ -z "$value" || "$value" != /* || "$value" == *$'\n'* || ! -d "$value" ]]; then
+    return 1
+  fi
+  printf '%s\n' "$value"
+}
+
+project_name() {
+  local common="$1" root="$2" project_root project
+  if [[ "$(basename "$common")" == .git ]]; then
+    project_root="$(dirname "$common")"
+  else
+    project_root="$root"
+  fi
+  project="$(basename "$project_root")"
+  [[ -n "$project" && "$project" != . && "$project" != .. && "$project" != *$'\n'* ]] || return 1
+  printf '%s\n' "$project"
+}
+
+write_pi_defaults() {
+  local node="$1" root="$2"
+  local agent_dir="$HOME/.pi/agent"
+  local settings="$agent_dir/settings.json"
+  local trust="$agent_dir/trust.json"
+  local worktrees="$HOME/.herdr/worktrees"
+
+  "$node" - "$settings" "$trust" "$root" "$worktrees" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+
+const [settingsPath, trustPath, checkout, worktrees] = process.argv.slice(2);
+
+function readObject(file) {
+  if (!fs.existsSync(file)) return {};
+  const value = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${file} must contain a JSON object`);
+  }
+  return value;
+}
+
+function writeObject(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  let mode = 0o600;
+  try { mode = fs.statSync(file).mode & 0o777; } catch {}
+  const temporary = `${file}.${process.pid}.${Math.random().toString(16).slice(2)}.tmp`;
+  try {
+    fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode });
+    fs.renameSync(temporary, file);
+  } finally {
+    try { fs.unlinkSync(temporary); } catch {}
+  }
+}
+
+const settings = readObject(settingsPath);
+const trust = readObject(trustPath);
+settings.steeringMode = "all";
+settings.followUpMode = "all";
+settings.tuiMode = "fullscreen";
+trust[checkout] = true;
+trust[worktrees] = true;
+writeObject(settingsPath, settings);
+writeObject(trustPath, trust);
+NODE
+}
+
+initialize_store() {
+  local backlog="$1" project="$2" store="$3"
+  local parent temporary
+  parent="$(dirname "$store")"
+
+  if [[ -d "$store" && -f "$store/config.yml" ]]; then
+    return
+  fi
+  if [[ -e "$store" || -L "$store" ]]; then
+    if [[ ! -d "$store" ]]; then
+      fail "Backlog store path exists but is not a directory: $store"
+    fi
+    if [[ -n "$(find "$store" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+      fail "Backlog store exists but is not an initialized Backlog.md store: $store"
+    fi
+  fi
+
+  mkdir -p "$parent" || fail "could not create Backlog store parent: $parent"
+  temporary="$(mktemp -d "$parent/.${project}.init.XXXXXX")" \
+    || fail 'could not create a temporary Backlog store'
+  if ! (cd "$temporary" && "$backlog" init "$project" --defaults --no-git --integration-mode none >/dev/null); then
+    rm -rf "$temporary"
+    fail "Backlog.md could not initialize the store: $store"
+  fi
+  if [[ ! -f "$temporary/backlog/config.yml" ]]; then
+    rm -rf "$temporary"
+    fail 'Backlog.md initialization did not create backlog/config.yml'
+  fi
+  if [[ -d "$store" ]]; then
+    rmdir "$store" || {
+      rm -rf "$temporary"
+      fail "Backlog store became non-empty during initialization: $store"
+    }
+  fi
+  if ! mv "$temporary/backlog" "$store"; then
+    rm -rf "$temporary"
+    fail "could not install the Backlog store: $store"
+  fi
+  rm -rf "$temporary"
+}
+
+prepare_backlog() {
+  local backlog="$1" root="$2" project="$3" store="$4"
+  local link="$root/backlog" tracked
+  local tracked_symlink_pattern=$'^120000 [0-9a-f]+ 0\tbacklog$'
+
+  tracked="$($GIT_BIN -C "$root" ls-files --stage -- backlog)" \
+    || fail 'could not inspect the repository backlog path'
+  if [[ -n "$tracked" ]]; then
+    if (( $(printf '%s\n' "$tracked" | wc -l) != 1 )) \
+      || [[ ! "$tracked" =~ $tracked_symlink_pattern ]]; then
+      fail "backlog is a tracked file tree; move its history out of the Git repository before linking"
+    fi
+  fi
+
+  if [[ ! -L "$link" && ( -e "$link" || -d "$link" ) ]]; then
+    if [[ -d "$link" ]]; then
+      fail "backlog is a real directory inside the worktree; move it out of Git before linking"
+    fi
+    fail "backlog exists but is not a symlink: $link"
+  fi
+
+  initialize_store "$backlog" "$project" "$store"
+  if [[ -L "$link" ]]; then
+    rm "$link" || fail "could not replace the backlog symlink: $link"
+  fi
+  ln -s "$store" "$link" || fail "could not create the backlog symlink: $link"
+
+  if ! (cd "$root" && "$backlog" config set autoCommit false >/dev/null); then
+    fail "Backlog.md could not set auto_commit=false in $store/config.yml"
+  fi
+  grep -Eq '^[[:space:]]*auto_commit:[[:space:]]*false([[:space:]]*(#.*)?)?$' "$store/config.yml" \
+    || fail "Backlog store config does not contain auto_commit: false: $store/config.yml"
+
+  if [[ -n "$tracked" ]]; then
+    "$GIT_BIN" -C "$root" add -- backlog \
+      || fail 'could not stage the updated tracked backlog symlink'
+    if ! "$GIT_BIN" -C "$root" diff --cached --quiet -- backlog; then
+      "$GIT_BIN" -C "$root" commit --quiet --only \
+        -m 'Retarget backlog to the qq store' -- backlog \
+        || fail 'could not commit the updated tracked backlog symlink'
+    fi
+  fi
+}
+
+json_property_is() {
+  local node="$1" file="$2" property="$3" expected="$4"
+  "$node" - "$file" "$property" "$expected" >/dev/null 2>&1 <<'NODE'
+const fs = require("node:fs");
+const [file, property, expected] = process.argv.slice(2);
+const value = JSON.parse(fs.readFileSync(file, "utf8"));
+if (value === null || typeof value !== "object" || Array.isArray(value)) process.exit(1);
+if (value[property] !== JSON.parse(expected)) process.exit(1);
+NODE
+}
+
+append_inspection_errors() {
+  local node="$1" root="$2" store="$3"
+  local link="$root/backlog"
+  local settings="$HOME/.pi/agent/settings.json"
+  local trust="$HOME/.pi/agent/trust.json"
+  local worktrees="$HOME/.herdr/worktrees"
+
+  if [[ ! -L "$link" ]]; then
+    if [[ -d "$link" ]]; then
+      INSPECTION_ERRORS+=("backlog is a real directory inside the worktree")
+    else
+      INSPECTION_ERRORS+=("backlog symlink is missing: $link")
+    fi
+  elif [[ ! -e "$link" ]]; then
+    INSPECTION_ERRORS+=("backlog symlink is dangling: $link")
+  elif [[ "$(readlink -f "$link")" != "$(readlink -f "$store")" ]]; then
+    INSPECTION_ERRORS+=("backlog symlink does not point to the qq store: $store")
+  else
+    [[ -f "$store/config.yml" ]] \
+      || INSPECTION_ERRORS+=("Backlog store config is missing: $store/config.yml")
+    if [[ -f "$store/config.yml" ]] \
+      && ! grep -Eq '^[[:space:]]*auto_commit:[[:space:]]*false([[:space:]]*(#.*)?)?$' "$store/config.yml"; then
+      INSPECTION_ERRORS+=("Backlog store config must contain auto_commit: false")
+    fi
+  fi
+
+  if [[ -z "$node" ]]; then
+    INSPECTION_ERRORS+=("Node.js is unavailable, so Pi settings and trust cannot be validated")
+    return
+  fi
+  json_property_is "$node" "$settings" steeringMode '"all"' \
+    || INSPECTION_ERRORS+=("Pi setting steeringMode=all is missing")
+  json_property_is "$node" "$settings" followUpMode '"all"' \
+    || INSPECTION_ERRORS+=("Pi setting followUpMode=all is missing")
+  json_property_is "$node" "$settings" tuiMode '"fullscreen"' \
+    || INSPECTION_ERRORS+=("Pi setting tuiMode=fullscreen is missing")
+  json_property_is "$node" "$trust" "$root" true \
+    || INSPECTION_ERRORS+=("Pi trust is missing for the linked checkout: $root")
+  json_property_is "$node" "$trust" "$worktrees" true \
+    || INSPECTION_ERRORS+=("Pi trust is missing for the worktree parent: $worktrees")
+}
+
+append_inspection_warnings() {
+  local common="$1"
+  if [[ -z "$($GIT_BIN --git-dir="$common" config --get user.name 2>/dev/null || true)" ]]; then
+    INSPECTION_WARNINGS+=("Git user.name is unset; qq runners cannot commit")
+  fi
+  if [[ -z "$($GIT_BIN --git-dir="$common" config --get user.email 2>/dev/null || true)" ]]; then
+    INSPECTION_WARNINGS+=("Git user.email is unset; qq runners cannot commit")
+  fi
+  if [[ ! -f "${XDG_CONFIG_HOME:-$HOME/.config}/qq/execution-profiles.json" ]]; then
+    INSPECTION_WARNINGS+=("qq execution profiles are missing: ${XDG_CONFIG_HOME:-$HOME/.config}/qq/execution-profiles.json")
+  fi
+}
+
 link_repository() {
-  local common
+  local common root project store backlog node
   common="$(common_git_dir)" || fail 'the current directory is not inside a Git repository'
+  root="$(repository_root)" || fail 'could not determine the repository checkout root'
+  project="$(project_name "$common" "$root")" || fail 'could not determine a safe qq project name'
+  store="$HOME/.local/state/qq/store/$project"
+  backlog="$(resolve_executable "$BACKLOG_BIN")" \
+    || fail "Backlog.md executable is unavailable: $BACKLOG_BIN"
+  node="$(resolve_executable "$NODE_BIN")" \
+    || fail "Node.js executable is unavailable: $NODE_BIN"
+
+  prepare_backlog "$backlog" "$root" "$project" "$store"
+  write_pi_defaults "$node" "$root" \
+    || fail 'could not write the required Pi settings and trust entries'
   "$GIT_BIN" --git-dir="$common" config --local --no-includes \
     --replace-all "$KEY" true \
     || fail "could not write $KEY to the current repository's common local Git config"
-  printf 'qq linked for this repository (%s=true). Start a fresh Pi session or run /reload.\n' "$KEY"
+  printf 'qq linked for this repository (%s=true); Pi defaults, trust, and external Backlog store are ready. Start a fresh Pi session or run /reload.\n' "$KEY"
 }
 
 unlink_repository() {
@@ -61,7 +302,7 @@ unlink_repository() {
 }
 
 inspect_repository() {
-  local common output status
+  local common root project store output status node warning error
   local -a values=()
   if ! common="$(common_git_dir)"; then
     printf 'unlinked: current directory is not inside a Git repository\n'
@@ -85,13 +326,40 @@ inspect_repository() {
   mapfile -t values <<<"$output"
   if (( ${#values[@]} != 1 )); then
     printf 'unlinked (invalid): %s has multiple local values\n' "$KEY"
-  elif [[ "${values[0]}" == true ]]; then
-    printf 'linked: %s=true in the repository common local Git config\n' "$KEY"
+    return
   elif [[ "${values[0]}" == false ]]; then
     printf 'unlinked: %s=false in the repository common local Git config\n' "$KEY"
-  else
+    return
+  elif [[ "${values[0]}" != true ]]; then
     printf 'unlinked (invalid): %s is not a readable Git boolean\n' "$KEY"
+    return
   fi
+
+  if ! root="$(repository_root)"; then
+    printf 'unlinked (invalid): could not determine the repository checkout root\n'
+    return
+  fi
+  if ! project="$(project_name "$common" "$root")"; then
+    printf 'unlinked (invalid): could not determine a safe qq project name\n'
+    return
+  fi
+  store="$HOME/.local/state/qq/store/$project"
+  node="$(resolve_executable "$NODE_BIN" 2>/dev/null || true)"
+  INSPECTION_ERRORS=()
+  INSPECTION_WARNINGS=()
+  append_inspection_errors "$node" "$root" "$store"
+  append_inspection_warnings "$common"
+
+  if (( ${#INSPECTION_ERRORS[@]} == 0 )); then
+    printf 'linked: %s=true in the repository common local Git config; required Pi and Backlog state is present\n' "$KEY"
+  else
+    for error in "${INSPECTION_ERRORS[@]}"; do
+      printf 'unlinked (invalid): %s\n' "$error"
+    done
+  fi
+  for warning in "${INSPECTION_WARNINGS[@]}"; do
+    printf 'warning: %s\n' "$warning"
+  done
 }
 
 (( $# == 1 )) || usage
