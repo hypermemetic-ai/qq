@@ -131,9 +131,11 @@ export async function bootstrapRun(run, requestPath, options = {}) {
     try {
       outboxPath = await (options.persistBootstrapFailure ?? persistBootstrapFailure)(outcome, { env });
     } catch {
-      throw new Error(`${reason}; failure notification could not be persisted`);
+      reason = `${reason}; failure notification persistence failed`;
+      outcome.bootstrapFailureReason = reason;
+    } finally {
+      await rm(request.prepared.stateDir, { recursive: true, force: true }).catch(() => {});
     }
-    await rm(request.prepared.stateDir, { recursive: true, force: true }).catch(() => {});
 
     const send = options.sendRunEvent ?? sendRunEvent;
     const notify = options.notify ?? (async (taskId, failureReason) => run("herdr", [
@@ -143,7 +145,7 @@ export async function bootstrapRun(run, requestPath, options = {}) {
     await Promise.allSettled([
       retry(async () => {
         await send(outcome, RUN_BOOTSTRAP_FAILED_KIND, { env });
-        await unlink(outboxPath).catch((error) => { if (error?.code !== "ENOENT") throw error; });
+        if (outboxPath) await unlink(outboxPath).catch((error) => { if (error?.code !== "ENOENT") throw error; });
       }, sleep),
       notify(request.task.id, reason),
     ]);

@@ -557,6 +557,54 @@ try {
   assert.equal(failedGateClosed, true);
   await lib.discardRun(failedGate);
 
+  const persistenceTask = { id: "TASK-11", title: "Persistence rollback" };
+  const persistencePreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: persistenceTask, note: exactNote });
+  const persistenceRequest = await lib.prepareBootstrapRequest({
+    cwd: "/repo", env, task: persistenceTask, prepared: persistencePreparation, qaBinding: {},
+    architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a8",
+  });
+  let persistenceBoardRollback = false;
+  let persistenceFailureOutcome;
+  let persistenceFailureNotification;
+  const persistenceEnv = { ...env, TEST_API_TOKEN: "persistence-credential" };
+  await assert.rejects(bootstrap.bootstrapRun(async () => ({ code: 0, stdout: "", stderr: "" }), persistenceRequest.bootstrapPath, {
+    env: persistenceEnv,
+    async sleep() {},
+    async startRun() { throw new Error(`agent refused ${exactNote} persistence-credential`); },
+    async setBoardStatus(_run, cwd, id, status) {
+      assert.deepEqual({ cwd, id, status }, { cwd: "/repo", id: persistenceTask.id, status: "To Do" });
+      persistenceBoardRollback = true;
+    },
+    async persistBootstrapFailure() {
+      await access(persistencePreparation.stateDir);
+      throw new Error(`cannot persist ${exactNote}`);
+    },
+    async sendRunEvent(outcome, kind) {
+      assert.equal(kind, runEvents.RUN_BOOTSTRAP_FAILED_KIND);
+      await assert.rejects(access(persistencePreparation.stateDir), { code: "ENOENT" });
+      persistenceFailureOutcome = outcome;
+    },
+    async notify(taskId, reason) {
+      assert.equal(taskId, persistenceTask.id);
+      await assert.rejects(access(persistencePreparation.stateDir), { code: "ENOENT" });
+      persistenceFailureNotification = reason;
+    },
+  }), (error) => {
+    assert.match(error.message, /notification persistence failed/);
+    assert.doesNotMatch(error.message, new RegExp(exactNote));
+    assert.doesNotMatch(error.message, /persistence-credential/);
+    return true;
+  });
+  assert.equal(persistenceBoardRollback, true, "board rollback must survive failure-outbox persistence failure");
+  assert.match(persistenceFailureOutcome.bootstrapFailureReason, /notification persistence failed/);
+  assert.equal(persistenceFailureNotification, persistenceFailureOutcome.bootstrapFailureReason);
+  assert.doesNotMatch(JSON.stringify(persistenceFailureOutcome), new RegExp(exactNote));
+  assert.doesNotMatch(JSON.stringify(persistenceFailureOutcome), /persistence-credential/);
+  await Promise.all([
+    persistencePreparation.stateDir, persistenceRequest.bootstrapPath, persistencePreparation.ticketPath,
+    persistencePreparation.notePath, persistencePreparation.gatePath, persistencePreparation.statePath,
+  ].map((path) => assert.rejects(access(path), { code: "ENOENT" })));
+
   const workerTask = { id: "TASK-12", title: "Worker rollback" };
   const workerPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: workerTask, note: exactNote });
   const workerRequest = await lib.prepareBootstrapRequest({
