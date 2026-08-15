@@ -107,8 +107,16 @@ export async function landHandoff(run, statePath) {
     if (dirtyMainStatus.trim()) throw new Error(`main checkout clean-checkout invariant violation; dirty paths:\n${dirtyMainStatus}`);
     const worktreeStatus = await checked(run, "git", ["status", "--porcelain", "--untracked-files=all"], { cwd: state.worktree }, "cannot inspect delegated worktree");
     if (worktreeStatus.stdout.trim()) throw new Error("delegated worktree has uncommitted residue");
-    await checked(run, "git", ["merge-tree", "--write-tree", "HEAD", state.ref], { cwd: state.mainRoot }, "proposal no longer merges cleanly");
-    await checked(run, "git", ["merge", "--no-ff", "--no-edit", state.ref], { cwd: state.mainRoot }, "merge failed");
+    const merged = await run("git", ["merge-base", "--is-ancestor", state.ref, "HEAD"], { cwd: state.mainRoot });
+    if (merged?.code !== 0 && merged?.code !== 1) throw new Error(`cannot inspect whether proposal is already merged: ${reason(merged, "command failed")}`);
+    if (merged.code === 1) {
+      await checked(run, "git", ["merge-tree", "--write-tree", "HEAD", state.ref], { cwd: state.mainRoot }, "proposal no longer merges cleanly");
+      await checked(run, "git", ["merge", "--no-ff", "--no-edit", state.ref], { cwd: state.mainRoot }, "merge failed");
+    }
+    const upstream = await checked(run, "git", ["for-each-ref", "--count=1", "--format=%(upstream:remotename)%00%(upstream:remoteref)", `refs/heads/${state.baseBranch}`], { cwd: state.mainRoot }, "cannot inspect target branch upstream");
+    const [remote, remoteRef] = String(upstream.stdout ?? "").trimEnd().split("\0");
+    if (!remote || !remoteRef) throw new Error(`target branch ${state.baseBranch} has no upstream`);
+    await checked(run, "git", ["push", remote, `HEAD:${remoteRef}`], { cwd: state.mainRoot }, "cannot push target branch to its upstream");
     await checked(run, "git", ["worktree", "remove", state.worktree], { cwd: state.mainRoot }, "merged but worktree cleanup failed");
     await checked(run, "git", ["branch", "-d", state.branch], { cwd: state.mainRoot }, "merged but branch cleanup failed");
     state.status = "landed";
