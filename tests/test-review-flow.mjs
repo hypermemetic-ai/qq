@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const root = process.argv[2];
@@ -677,6 +677,15 @@ try {
   assert.equal(committedTests.state.qaVerdict.tests_modified, true);
   assert.deepEqual(committedTests.state.pack.files, [{ path: "tests/test-review-flow.mjs", added: 2, deleted: 1 }]);
   const qaStart = committedTests.calls.find(({ args }) => args[0] === "agent" && args[1] === "start");
+  assert.deepEqual(qaStart.args, [
+    "agent", "start", review.qaAgentName(committedTests.state),
+    "--kind", "pi", "--pane", "w2T:p9", "--timeout", "30000", "--", "--approve",
+    "--model", "openai-codex/gpt-5.6-sol", "--thinking", "xhigh",
+    "--system-prompt", join(scratch, "state", "qa-system-prompt-1.md"),
+    "--no-extensions", "--extension", resolve(root, "extensions", "qa-result.ts"),
+    "--no-skills", "--no-prompt-templates", "--no-context-files", "--tools", "read,bash,edit,write,qa_verdict",
+    "--session-dir", join(scratch, "state", "qa-session"), "--session-id", committedTests.state.qaSessionId,
+  ]);
   const qaTaskPrompt = committedTests.calls.find(({ args }) => args[0] === "agent" && args[1] === "prompt");
   assert.match(qaTaskPrompt.args[3], /outbound ticket and note/);
   assert.match(qaTaskPrompt.args[3], new RegExp(base.gatePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -730,8 +739,12 @@ try {
   assert.equal(started[0].args[6], "w2T:p9");
   assert.ok(!started[0].args.includes("--print"));
   assert.ok(!failedRewrite.calls.some(({ command, args }) => command === "pi" || args.includes("--print")));
-  assert.equal(started[1].args[2], review.runnerAgentName(failedRewrite.state));
-  assert.equal(started[1].args[6], "w2T:p9");
+  assert.deepEqual(started[1].args, [
+    "agent", "start", review.runnerAgentName(failedRewrite.state),
+    "--kind", "pi", "--pane", "w2T:p9", "--timeout", "30000", "--", "--approve",
+  ]);
+  assert.equal(failedRewrite.calls.some(({ args }) => args.some((arg) => /^(?:config|trust|--config(?:=|$)|--trust(?:=|$))/.test(String(arg)))), false,
+    "review launches must not persist Pi trust or config state");
   const qaStartAt = failedRewrite.calls.findIndex(({ args }) => args[0] === "agent" && args[1] === "start" && args[2] === review.qaAgentName(failedRewrite.state));
   const runnerStartAt = failedRewrite.calls.findIndex(({ args }) => args[0] === "agent" && args[1] === "start" && args[2] === review.runnerAgentName(failedRewrite.state));
   const evictDoneQa = failedRewrite.calls.findIndex(({ args }, index) => index > qaStartAt && args[0] === "agent" && args[1] === "send-keys");
