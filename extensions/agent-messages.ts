@@ -21,6 +21,8 @@ const LEASE_MS = 45_000;
 const RENEW_MS = 15_000;
 const RECEIVE_WAIT_MS = 30_000;
 const RECONNECT_MS = 500;
+const IMMEDIATE_IDLE_POLL_MS = 50;
+const IMMEDIATE_IDLE_TIMEOUT_MS = 5_000;
 const CARD_AFTER_MS = 5_000;
 const SESSION_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const SIMPLE = /^[a-z0-9][a-z0-9-]{0,62}$/;
@@ -312,6 +314,14 @@ export default function register(pi, deps = {}) {
     return result.idempotent !== true;
   }
 
+  async function waitUntilIdle(context) {
+    for (let waited = 0; waited < IMMEDIATE_IDLE_TIMEOUT_MS; waited += IMMEDIATE_IDLE_POLL_MS) {
+      if (context.isIdle?.() !== false) return true;
+      await sleep(IMMEDIATE_IDLE_POLL_MS);
+    }
+    return context.isIdle?.() !== false;
+  }
+
   async function receiveOne(delivery, localEpoch) {
     const message = parseMessage(delivery.record);
     if (!message) {
@@ -329,13 +339,24 @@ export default function register(pi, deps = {}) {
       return;
     }
     if (!active || localEpoch !== epoch || !currentContext) return;
+    const context = currentContext;
     injectedMessages.add(injectionKey);
-    if (message.delivery === "immediate" && currentContext.isIdle?.() === false && await claimImmediate(message)) {
-      try { currentContext.abort?.(); } catch {}
+    let waitedForImmediateIdle = false;
+    if (message.delivery === "immediate" && context.isIdle?.() === false) {
+      const claimed = await claimImmediate(message);
+      if (claimed) {
+        try { context.abort?.(); } catch {}
+      }
+      waitedForImmediateIdle = await waitUntilIdle(context);
+      if (!waitedForImmediateIdle) {
+        injectedMessages.delete(injectionKey);
+        await client.retry({ ...deliveryGuard(delivery), reason: "Pi did not become idle after immediate abort" });
+        return;
+      }
     }
-    const options = currentContext.isIdle?.() === false
-      ? { triggerTurn: true, deliverAs: "steer" }
-      : { triggerTurn: true };
+    const options = waitedForImmediateIdle || context.isIdle?.() !== false
+      ? { triggerTurn: true }
+      : { triggerTurn: true, deliverAs: "steer" };
     try {
       await (deps.sendMessage ?? pi.sendMessage.bind(pi))({
         customType: CUSTOM_TYPE,
