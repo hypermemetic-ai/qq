@@ -11,7 +11,6 @@ case "$mode" in
 esac
 
 herdr=${QQ_HERDR_TEST_BINARY:-$HOME/.local/lib/qq/herdr/bin/herdr}
-herdr_commit=${QQ_HERDR_TEST_COMMIT:-${herdr}.commit}
 live_config=${QQ_HERDR_LIVE_CONFIG:-$HOME/.config/herdr/config.toml}
 socket=${HERDR_SOCKET_PATH:-$HOME/.config/herdr/herdr.sock}
 q_mode_plugin="$root/plugins/q-mode"
@@ -19,11 +18,6 @@ q_mode_plugin="$root/plugins/q-mode"
 [[ -x $herdr ]] || { printf 'q mode UAT: Herdr is not executable: %s\n' "$herdr" >&2; exit 1; }
 [[ $("$herdr" --version) == "herdr $HERDR_UPSTREAM_VERSION" ]] || {
   printf 'q mode UAT: unexpected Herdr version\n' >&2
-  exit 1
-}
-[[ -f $herdr_commit && ! -L $herdr_commit \
-  && $(<"$herdr_commit") == "$HERDR_UPSTREAM_COMMIT" ]] || {
-  printf 'q mode UAT: installed Herdr commit is not %s\n' "$HERDR_UPSTREAM_COMMIT" >&2
   exit 1
 }
 HERDR_CONFIG_PATH="$root/herdr/config.toml" "$herdr" config check
@@ -53,7 +47,7 @@ assert any(
   mapfile -t server_pids < <(pgrep -f "${herdr} server")
   [[ ${#server_pids[@]} -eq 1 \
     && $(readlink -f "/proc/${server_pids[0]}/exe") == "$herdr" ]] || {
-    printf 'q mode UAT: the pinned Herdr binary does not own the live server\n' >&2
+    printf 'q mode UAT: the installed Herdr binary does not own the live server\n' >&2
     exit 1
   }
 fi

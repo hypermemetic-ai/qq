@@ -2,17 +2,11 @@
 set -euo pipefail
 export LC_ALL=C
 
-root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=/dev/null
-source "$root/qq-dictation.env"
-qq_dictation_commit=${qq_dictation_commit:?qq-dictation commit pin is required}
-
 install_dir=${qq_q_mode_install_dir:-${HOME:?HOME is required}/.local/opt/qq-dictation/Handy.AppDir}
 handy_bin=${qq_q_mode_handy_bin:-${HOME}/.local/bin/handy}
 runtime_dir=${qq_q_mode_runtime_dir:-${XDG_RUNTIME_DIR:-}}
 proc_root=${qq_q_mode_proc_root:-/proc}
 control_timeout=${qq_q_mode_control_timeout:-5s}
-commit_marker="$install_dir/qq-dictation-commit"
 ready_marker="$runtime_dir/qq-dictation-handy-ready"
 expected_executable="$install_dir/usr/bin/handy"
 
@@ -25,19 +19,7 @@ ready_pid=
 check_readiness() {
   [[ -n $runtime_dir ]] || { fail 'XDG_RUNTIME_DIR is unavailable'; return 1; }
   [[ -x $handy_bin ]] || { fail "handy launcher is not executable: $handy_bin"; return 1; }
-  [[ -f $commit_marker && ! -L $commit_marker ]] || {
-    fail "qq-dictation commit marker is unavailable: $commit_marker"
-    return 1
-  }
-  local installed_commit ready_content extra pid state actual_executable
-  installed_commit=$(<"$commit_marker") || {
-    fail 'qq-dictation commit marker is unreadable'
-    return 1
-  }
-  [[ $installed_commit == "$qq_dictation_commit" ]] || {
-    fail "qq-dictation is not pinned at $qq_dictation_commit"
-    return 1
-  }
+  local ready_content extra pid state actual_executable
   [[ -f $ready_marker && ! -L $ready_marker ]] || {
     fail 'the running handy instance has no readiness marker'
     return 1
@@ -66,7 +48,7 @@ check_readiness() {
   }
   actual_executable=$(readlink -f "$proc_root/$pid/exe" 2>/dev/null || true)
   [[ $actual_executable == "$expected_executable" ]] || {
-    fail 'the ready process is not the pinned qq-dictation executable'
+    fail 'the ready process is not the installed qq-dictation executable'
     return 1
   }
   ready_pid=$pid
@@ -104,8 +86,7 @@ fi
 case "$action" in
   check)
     check_readiness
-    printf 'q mode ready: qq-dictation %s (pid %s)\n' \
-      "$qq_dictation_commit" "$ready_pid"
+    printf 'q mode ready: Handy (pid %s)\n' "$ready_pid"
     ;;
   start-or-stop)
     pane_id=${HERDR_PANE_ID:-}

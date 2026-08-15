@@ -9,8 +9,7 @@ source "$downstream/upstream.env"
 [[ "$HERDR_UPSTREAM_URL" == https://github.com/hypermemetic-ai/herdr.git ]]
 [[ "$HERDR_UPSTREAM_REF" == refs/heads/master ]]
 [[ "$HERDR_LANDED_REPOSITORY" == /home/qqp/projects/herdr ]]
-[[ "$HERDR_UPSTREAM_COMMIT" == c9bce319a03752e86313aff4b0aa3fd541211e18 ]]
-[[ "$HERDR_OPERATOR_INPUT_COMMIT" == 60d7167c2658deb766681e8642cee9f4d5bc7c0d ]]
+[[ -n "$HERDR_OPERATOR_INPUT_COMMIT" ]]
 [[ "$HERDR_UPSTREAM_VERSION" == 0.8.0 ]]
 [[ -z ${HERDR_PATCHES+x} ]]
 [[ ! -e "$downstream/patches/0001-centered-pane-row.patch" ]]
@@ -29,9 +28,9 @@ grep -Fqx 'pane_borders = false' "$root/herdr/config.toml"
 grep -q '%h/.local/lib/qq/herdr/bin/herdr server' "$root/systemd/user/herdr.service"
 grep -q '^ExitType=cgroup$' "$root/systemd/user/herdr.service"
 grep -q '%h/.local/state/herdr/herdr.log' "$root/systemd/user/herdr.service"
-[[ -x "$root/bin/qq-herdr-build" ]]
+[[ ! -e "$root/bin/qq-herdr-build" ]]
 [[ -x "$root/bin/qq-herdr-activate" ]]
-[[ -x "$root/bin/qq-herdr-upgrade" ]]
+[[ ! -e "$root/bin/qq-herdr-upgrade" ]]
 [[ -x "$root/bin/qq-herdr-pane-add" ]]
 [[ -x "$root/bin/qq-herdr-smoke" ]]
 [[ -x "$root/bin/qq-herdr-launch" ]]
@@ -39,15 +38,8 @@ grep -q '%h/.local/state/herdr/herdr.log' "$root/systemd/user/herdr.service"
 [[ -x "$root/plugins/q-mode/q-mode.sh" ]]
 [[ -x "$root/tests/test-herdr-live.sh" ]]
 [[ -x "$root/tests/test-q-mode.sh" ]]
-grep -q 'integration status --outdated-only' "$root/bin/qq-herdr-build"
-grep -q 'HERDR_OPERATOR_INPUT_COMMIT' "$root/bin/qq-herdr-build"
 grep -q 'q-mode.sh" check' "$root/bin/qq-herdr-activate"
 grep -q 'plugin link' "$root/bin/qq-herdr-activate"
-grep -q 'refs/tags/qq-v' "$root/bin/qq-herdr-upgrade"
-if grep -Eq 'git .*apply|HERDR_PATCHES' "$root/bin/qq-herdr-build" "$root/bin/qq-herdr-upgrade"; then
-  echo 'retired qq Rust patch flow returned' >&2
-  exit 1
-fi
 grep -q -- 'ghostty --gtk-single-instance=true --title=herdr -e' "$root/bin/qq-herdr-launch"
 
 ghostty_config="$root/ghostty/config"
@@ -69,17 +61,18 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 contract_source=${QQ_HERDR_CONTRACT_SOURCE:-$HERDR_LANDED_REPOSITORY}
 if [[ -d $contract_source/.git ]] \
-  && git -C "$contract_source" cat-file -e "$HERDR_UPSTREAM_COMMIT^{commit}" 2>/dev/null; then
+  && git -C "$contract_source" cat-file -e "$HERDR_UPSTREAM_REF^{commit}" 2>/dev/null; then
   git clone -q --no-hardlinks --no-checkout "$contract_source" "$work/source"
 else
   git init -q "$work/source"
   git -C "$work/source" remote add origin "$HERDR_UPSTREAM_URL"
-  git -C "$work/source" fetch -q origin "$HERDR_UPSTREAM_REF"
+  git -C "$work/source" fetch -q origin \
+    "$HERDR_UPSTREAM_REF:$HERDR_UPSTREAM_REF"
 fi
-git -C "$work/source" cat-file -e "$HERDR_UPSTREAM_COMMIT^{commit}"
+herdr_tip=$(git -C "$work/source" rev-parse "$HERDR_UPSTREAM_REF^{commit}")
 git -C "$work/source" merge-base --is-ancestor \
-  "$HERDR_OPERATOR_INPUT_COMMIT" "$HERDR_UPSTREAM_COMMIT"
-git -C "$work/source" checkout -q --detach "$HERDR_UPSTREAM_COMMIT"
+  "$HERDR_OPERATOR_INPUT_COMMIT" "$herdr_tip"
+git -C "$work/source" checkout -q --detach "$herdr_tip"
 grep -Rqs --include='*.rs' 'pane_preferred_width' "$work/source/src"
 grep -Rqs --include='*.rs' 'balance_horizontal_row' "$work/source/src"
 grep -Rqs --include='*.rs' 'ResolvedOperatorInputConfig' "$work/source/src"
@@ -103,58 +96,5 @@ if QQ_HERDR_BIN="$mock/herdr" "$root/bin/qq-herdr-pane-add" --ratio 0.5 >/dev/nu
   echo 'qq-herdr-pane-add accepted a forbidden ratio' >&2
   exit 1
 fi
-
-build_root="$work/build-root"
-build_mock="$work/build-mock"
-build_source="$work/build-source"
-mkdir -p "$build_root/bin" "$build_root/herdr/downstream" "$build_mock" \
-  "$build_source/.git"
-cp "$root/bin/qq-herdr-build" "$build_root/bin/qq-herdr-build"
-cp "$downstream/upstream.env" "$build_root/herdr/downstream/upstream.env"
-cat > "$build_root/bin/qq-herdr-smoke" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-[[ -x $1 ]]
-[[ $("$1" --version) == 'herdr 0.8.0' ]]
-EOF
-cat > "$build_mock/git" <<'EOF'
-#!/usr/bin/env bash
-exit 0
-EOF
-cat > "$build_mock/zig" <<'EOF'
-#!/usr/bin/env bash
-[[ ${1:-} == version ]]
-printf '0.15.2\n'
-EOF
-cat > "$build_mock/cargo" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-case ${1:-} in
-  fmt)
-    ;;
-  test)
-    [[ ! -t 0 ]]
-    printf 'test\n' >> "$QQ_HERDR_CARGO_LOG"
-    ;;
-  build)
-    mkdir -p target/release
-    printf '#!/usr/bin/env bash\nprintf "herdr 0.8.0\\n"\n' > target/release/herdr
-    chmod +x target/release/herdr
-    ;;
-  *)
-    exit 64
-    ;;
-esac
-EOF
-chmod +x "$build_root/bin/qq-herdr-build" "$build_root/bin/qq-herdr-smoke" \
-  "$build_mock/git" "$build_mock/zig" "$build_mock/cargo"
-PATH="$build_mock:$PATH" \
-  XDG_CACHE_HOME="$work/build-cache" \
-  QQ_HERDR_SOURCE_DIR="$build_source" \
-  QQ_HERDR_BINARY_OUT="$work/build-output/herdr" \
-  QQ_HERDR_CARGO_LOG="$work/cargo.log" \
-  QQ_HERDR_RUN="$build_root/bin/qq-herdr-build" \
-  script -qfec "test -t 0 && exec \"\$QQ_HERDR_RUN\"" /dev/null >/dev/null
-[[ $(cat "$work/cargo.log") == $'test\ntest' ]]
 
 printf 'herdr downstream contract tests passed\n'

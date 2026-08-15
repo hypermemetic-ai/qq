@@ -6,7 +6,6 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 source "$root/herdr/downstream/upstream.env"
 new=${QQ_HERDR_NEW_BIN:-$HOME/.local/lib/qq/herdr/bin/herdr}
 old=${QQ_HERDR_OLD_BIN:-$new}
-new_commit=${QQ_HERDR_NEW_COMMIT:-${new}.commit}
 q_mode_plugin="$root/plugins/q-mode"
 sock=${HERDR_SOCKET_PATH:-$HOME/.config/herdr/herdr.sock}
 live_config=${QQ_HERDR_LIVE_CONFIG:-$HOME/.config/herdr/config.toml}
@@ -37,11 +36,6 @@ trap cleanup EXIT
 
 [[ $("$new" --version) == "herdr $HERDR_UPSTREAM_VERSION" ]] || {
   echo 'refusing handoff because the staged Herdr version is unexpected' >&2
-  exit 1
-}
-[[ -f $new_commit && ! -L $new_commit \
-  && $(<"$new_commit") == "$HERDR_UPSTREAM_COMMIT" ]] || {
-  echo 'refusing handoff because the staged Herdr commit is unproven' >&2
   exit 1
 }
 "$q_mode_plugin/q-mode.sh" check
