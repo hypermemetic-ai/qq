@@ -153,7 +153,7 @@ XDG_STATE_HOME="$TMP/state" \
 [[ -z "$(git -C "$REPO_WITHOUT_AGENTS" status --porcelain --untracked-files=all)" ]]
 
 SERVICE="$ROOT/systemd/user/qq-openwiki.service"
-grep -Fq 'ExecStart=%h/projects/qq/bin/qq-openwiki-dispatch' "$SERVICE"
+grep -Fq 'ExecStart=%h/projects/qq/bin/qq-openwiki-service' "$SERVICE"
 grep -Fq 'Environment="PATH=%h/.local/bin:' "$SERVICE"
 if grep -Fq 'ExecStopPost=' "$SERVICE"; then
   echo "service still mutates the main checkout after refresh" >&2

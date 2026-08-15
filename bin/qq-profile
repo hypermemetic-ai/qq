@@ -10,6 +10,7 @@ import {
   profileFor,
   profileListDocument,
   readExecutionPolicy,
+  SERVICE_NAMES,
   uniqueBindings,
   updateRoleDefault,
 } from "./lib/execution-profiles.mjs";
@@ -59,7 +60,7 @@ async function main() {
       return;
     }
     if (roleName) {
-      if (roleName === "scribe" || roleName === "qa") {
+      if (SERVICE_NAMES.includes(roleName)) {
         const profile = policy[roleName];
         console.log(`${roleName} (service)`);
         console.log(`   ${profile.provider}/${profile.model} · ${profile.effort}`);
@@ -70,7 +71,7 @@ async function main() {
       printRole(roleName, role);
     } else {
       for (const [name, role] of Object.entries(policy.roles)) printRole(name, role);
-      for (const name of ["scribe", "qa"]) {
+      for (const name of SERVICE_NAMES) {
         const profile = policy[name];
         console.log(`${name} (service)`);
         console.log(`   ${profile.provider}/${profile.model} · ${profile.effort}`);

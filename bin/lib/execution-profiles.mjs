@@ -9,6 +9,12 @@ import { ROLE_NAMES } from "./roles.mjs";
 export const POLICY_SCHEMA = "qq.execution-profiles/v1";
 export const PROFILE_LIST_SCHEMA = "qq.profile-list/v1";
 export const CONTEXT_WINDOW_CEILING = 200_000;
+export const SERVICE_NAMES = Object.freeze(["scribe", "qa", "openwiki"]);
+export const DEFAULT_OPENWIKI_PROFILE = Object.freeze({
+  provider: "openai-codex",
+  model: "gpt-5.6-sol",
+  effort: "medium",
+});
 export const GROK_PROVIDERS = new Set(["xai-auth"]);
 export const EFFORTS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const EFFORT_ORDER = Object.freeze([...EFFORTS]);
@@ -50,7 +56,7 @@ function validateProfile(value, label) {
 }
 
 export function validateExecutionPolicy(value) {
-  if (!exactKeys(value, ["schema", "contextWindowCeiling", "roles", "scribe", "qa"])) throw new Error("execution-profile policy has an invalid top-level shape");
+  if (!exactKeys(value, ["schema", "contextWindowCeiling", "roles", ...SERVICE_NAMES])) throw new Error("execution-profile policy has an invalid top-level shape");
   if (value.schema !== POLICY_SCHEMA) throw new Error(`execution-profile policy schema must be ${POLICY_SCHEMA}`);
   if (value.contextWindowCeiling !== CONTEXT_WINDOW_CEILING) throw new Error(`contextWindowCeiling must be ${CONTEXT_WINDOW_CEILING}`);
   if (value.roles === null || typeof value.roles !== "object" || Array.isArray(value.roles)
@@ -79,6 +85,7 @@ export function validateExecutionPolicy(value) {
     roles: Object.freeze(roles),
     scribe: validateProfile(value.scribe, "scribe"),
     qa: validateProfile(value.qa, "qa"),
+    openwiki: validateProfile(value.openwiki, "openwiki"),
   });
 }
 
@@ -100,11 +107,18 @@ export async function readExecutionPolicy(path = executionProfilesPath()) {
   let value;
   try { value = JSON.parse(source); }
   catch { throw new Error(`execution-profile policy is malformed at ${path}`); }
-  if (exactKeys(value, ["schema", "contextWindowCeiling", "roles", "compactor", "qa"])) {
+  let migrated = false;
+  if (exactKeys(value, ["schema", "contextWindowCeiling", "roles", "compactor", "qa"])
+    || exactKeys(value, ["schema", "contextWindowCeiling", "roles", "compactor", "qa", "openwiki"])) {
     value.scribe = value.compactor;
     delete value.compactor;
-    await writeExecutionPolicy(value, path);
+    migrated = true;
   }
+  if (exactKeys(value, ["schema", "contextWindowCeiling", "roles", "scribe", "qa"])) {
+    value.openwiki = { ...DEFAULT_OPENWIKI_PROFILE };
+    migrated = true;
+  }
+  if (migrated) await writeExecutionPolicy(value, path);
   return validateExecutionPolicy(value);
 }
 
@@ -159,7 +173,7 @@ export function profileListDocument(policy, roleName) {
   const roles = [];
   const services = [];
   for (const name of roleNames) {
-    if (name === "scribe" || name === "qa") {
+    if (SERVICE_NAMES.includes(name)) {
       services.push(listedProfile(name, policy[name]));
       continue;
     }
@@ -172,7 +186,7 @@ export function profileListDocument(policy, roleName) {
     });
   }
   if (roleName === undefined) {
-    for (const name of ["scribe", "qa"]) services.push(listedProfile(name, policy[name]));
+    for (const name of SERVICE_NAMES) services.push(listedProfile(name, policy[name]));
   }
   return { schema: PROFILE_LIST_SCHEMA, roles, services };
 }
@@ -194,8 +208,7 @@ export function uniqueBindings(policy) {
   for (const role of Object.values(policy.roles)) {
     for (const profile of Object.values(role.profiles)) add(profile);
   }
-  add(policy.scribe);
-  add(policy.qa);
+  for (const name of SERVICE_NAMES) add(policy[name]);
   return [...found.values()];
 }
 

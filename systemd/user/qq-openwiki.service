@@ -6,7 +6,6 @@ Type=oneshot
 TimeoutStartSec=6h
 WorkingDirectory=%h/projects/qq
 UMask=0077
-Environment=OPENWIKI_PROVIDER=openai-chatgpt
 Environment=QQ_OPENWIKI_PUBLISHED_REPO_KEY=qq
 Environment="PATH=%h/.local/bin:%h/.bun/bin:%h/.opencode/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-ExecStart=%h/projects/qq/bin/qq-openwiki-dispatch
+ExecStart=%h/projects/qq/bin/qq-openwiki-service

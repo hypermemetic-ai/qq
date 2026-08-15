@@ -428,7 +428,7 @@ if grep -Eiq 'timer|publish|merge|branch|must|do not' "$ROOT/AGENTS.md"; then
   exit 1
 fi
 grep -Fq 'Description=Refresh qq OpenWiki on main' "$ROOT/systemd/user/qq-openwiki.service"
-grep -Fq 'ExecStart=%h/projects/qq/bin/qq-openwiki-dispatch' "$ROOT/systemd/user/qq-openwiki.service"
+grep -Fq 'ExecStart=%h/projects/qq/bin/qq-openwiki-service' "$ROOT/systemd/user/qq-openwiki.service"
 if grep -Fq 'QQ_OPENWIKI_OUTPUT_ROOT=' "$ROOT/systemd/user/qq-openwiki.service"; then
   echo "service still declares machine-local publication state" >&2
   exit 1
