@@ -106,6 +106,66 @@ grep -Fxq published:qq "$STATE/finished"
 grep -Fxq legacy:fail "$STATE/finished"
 grep -Fxq legacy:qq-dictation "$STATE/finished"
 
+# The service dispatches qq publication before later legacy jobs. A tracked
+# absolute setup symlink in a legacy repository must not let those jobs write
+# back into live qq, including while their linked worktrees are cleaned up.
+BOUNDARY_PUBLISH="$TMP/boundary-publish"
+BOUNDARY_WRITER="$TMP/boundary-writer"
+BOUNDARY_MARKER="$TMP/boundary-published"
+BOUNDARY_TRACE="$TMP/boundary-legacy-jobs"
+BOUNDARY_WORKTREE="$TMP/boundary-worktree"
+printf 'live qq sentinel\n' >"$PROJECTS/qq/AGENTS.md"
+git -C "$PROJECTS/qq" add AGENTS.md
+git -C "$PROJECTS/qq" commit -q -m 'Add live sentinel'
+ln -s "$PROJECTS/qq/AGENTS.md" "$PROJECTS/qq-dictation/AGENTS.md"
+git -C "$PROJECTS/qq-dictation" add AGENTS.md
+git -C "$PROJECTS/qq-dictation" commit -q -m 'Add external instructions link'
+cat >"$BOUNDARY_PUBLISH" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$QQ_OPENWIKI_REPO_KEY" == qq ]]
+printf 'published\n' >"$QQ_TEST_BOUNDARY_MARKER"
+SH
+cat >"$BOUNDARY_WRITER" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ -e "$QQ_TEST_BOUNDARY_MARKER" ]]
+[[ "$PWD" != "$QQ_OPENWIKI_MAIN_ROOT" ]]
+printf 'legacy setup rewrite\n' >AGENTS.md
+printf '%s\n' "$QQ_OPENWIKI_REPO_KEY" >>"$QQ_TEST_BOUNDARY_TRACE"
+SH
+chmod +x "$BOUNDARY_PUBLISH" "$BOUNDARY_WRITER"
+cat >"$REGISTRY" <<'EOF'
+qq
+qq-newspaper
+qq-dictation
+EOF
+QQ_OPENWIKI_REGISTRY="$REGISTRY" \
+QQ_OPENWIKI_PROJECTS_ROOT="$PROJECTS" \
+QQ_OPENWIKI_REFRESH_BIN="$BOUNDARY_PUBLISH" \
+QQ_OPENWIKI_LEGACY_REFRESH_BIN="$ROOT/bin/qq-openwiki-refresh-legacy" \
+QQ_OPENWIKI_MAX_PARALLEL=1 \
+QQ_OPENWIKI_BIN="$BOUNDARY_WRITER" \
+QQ_OPENWIKI_WORKTREE="$BOUNDARY_WORKTREE" \
+QQ_OPENWIKI_BRANCH=qq/test-dispatch-boundary \
+QQ_TEST_BOUNDARY_MARKER="$BOUNDARY_MARKER" \
+QQ_TEST_BOUNDARY_TRACE="$BOUNDARY_TRACE" \
+  "$ROOT/bin/qq-openwiki-dispatch" >/dev/null
+printf '%s\n' qq-newspaper qq-dictation >"$TMP/expected-boundary-jobs"
+cmp -s "$TMP/expected-boundary-jobs" "$BOUNDARY_TRACE"
+[[ "$(<"$PROJECTS/qq/AGENTS.md")" == 'live qq sentinel' ]]
+[[ "$(readlink -- "$PROJECTS/qq-dictation/AGENTS.md")" == "$PROJECTS/qq/AGENTS.md" ]]
+[[ ! -e "$PROJECTS/qq-newspaper/AGENTS.md" ]]
+[[ ! -e "$BOUNDARY_WORKTREE" ]]
+for repo in qq-newspaper qq-dictation; do
+  if git -C "$PROJECTS/$repo" show-ref --verify --quiet refs/heads/qq/test-dispatch-boundary; then
+    echo "legacy refresh branch survived dispatch cleanup for $repo" >&2
+    exit 1
+  fi
+  [[ -z "$(git -C "$PROJECTS/$repo" status --porcelain --untracked-files=all)" ]]
+done
+[[ -z "$(git -C "$PROJECTS/qq" status --porcelain --untracked-files=all)" ]]
+
 DEFAULT_REGISTRY="$ROOT/config/openwiki-repositories"
 grep -Fxq qq "$DEFAULT_REGISTRY"
 grep -Fxq qq-newspaper "$DEFAULT_REGISTRY"
