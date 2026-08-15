@@ -257,6 +257,35 @@ try {
   assert.match(prompt.args[3], /# TASK-1 — One task/);
   assert.match(prompt.args[3], /## Architect notes \/ scratch/);
   assert.ok(prompt.args[3].endsWith(exactNote));
+  assert.equal(prompt.args.at(-1), "--wait");
+
+  const droppedTask = { id: "TASK-5", title: "Dropped prompt" };
+  const droppedPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: droppedTask, note: exactNote });
+  const droppedCalls = [];
+  let statusAtDroppedPrompt;
+  const droppedRun = async (command, args, options = {}) => {
+    droppedCalls.push({ command, args, options });
+    if (command === "herdr" && args[0] === "agent" && args[1] === "prompt") {
+      statusAtDroppedPrompt = JSON.parse(await readFile(droppedPreparation.statePath, "utf8")).status;
+      return args.includes("--wait")
+        ? { code: 1, stdout: "", stderr: "agent_prompt_stalled" }
+        : { code: 0, stdout: "", stderr: "" };
+    }
+    return spawnRun(command, args, options);
+  };
+  await assert.rejects(lib.startRun({
+    run: droppedRun, cwd: "/repo", env, task: droppedTask, prepared: droppedPreparation,
+    architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9", qaBinding: {},
+  }), /cannot send the ticket and note/);
+  assert.equal(statusAtDroppedPrompt, "starting");
+  const droppedOps = droppedCalls.map(({ command, args }) => `${command} ${args[0]} ${args[1]}`);
+  assert.ok(droppedOps.indexOf("herdr agent start") < droppedOps.indexOf("herdr agent prompt"));
+  assert.ok(droppedOps.indexOf("herdr agent prompt") < droppedOps.indexOf("herdr pane close"));
+  const droppedPrompt = droppedCalls.find(({ command, args }) => command === "herdr" && args[0] === "agent" && args[1] === "prompt");
+  assert.equal(droppedPrompt.args.at(-1), "--wait");
+  assert.ok(droppedCalls.some(({ command, args }) => command === "git" && args[0] === "worktree" && args[1] === "remove"));
+  assert.ok(droppedCalls.some(({ command, args }) => command === "git" && args[0] === "branch" && args[1] === "-D"));
+  await assert.rejects(access(droppedPreparation.stateDir), { code: "ENOENT" });
 
   const existingTask = { id: "TASK-4", title: "Reuse runs" };
   const existingPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: existingTask, note: exactNote });

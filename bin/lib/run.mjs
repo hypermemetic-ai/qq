@@ -323,7 +323,7 @@ export async function startRun(options) {
     await waitForAvailableShell(run, paneId);
     await checked(run, "herdr", ["agent", "start", `runner-${slug}-${nonce}`, "--kind", "pi", "--pane", paneId], {}, "cannot start runs runner");
     const prompt = `Work from the full Backlog ticket and delegate note below. The note is also at ${notePath}. Implement the task in this worktree, commit the result, then call done with ref HEAD. Do not merge.\n\n${runnerTicket.trimEnd()}\n\n---\n\n## Delegate note\n\n${runnerNote.trimEnd()}`;
-    const prompted = await run("herdr", ["agent", "prompt", paneId, prompt], {});
+    const prompted = await run("herdr", ["agent", "prompt", paneId, prompt, "--wait"], {});
     if (prompted?.code !== 0) throw new Error("cannot send the ticket and note to the runs runner");
     state.status = "running";
     state.updatedAt = new Date().toISOString();
