@@ -70,13 +70,39 @@ try {
   execFileSync("git", ["-C", cleanupRepo, "commit", "-q", "-m", "initial"]);
   execFileSync("git", ["-C", cleanupRepo, "worktree", "add", "-q", "-b", "qq/cleanup", cleanupWorktree]);
   execFileSync(join(root, "bin", "qq-openwiki-materialize"), ["freeze", cleanupWorktree]);
-  assert.equal((await lstat(join(cleanupWorktree, "openwiki", "guides"))).mode & 0o777, 0o555);
-  assert.equal((await lstat(join(cleanupWorktree, "openwiki", "guides", "start.md"))).mode & 0o777, 0o444);
+  const assertCleanupWorktreeFrozen = async () => {
+    assert.equal((await lstat(join(cleanupWorktree, "openwiki"))).mode & 0o777, 0o555);
+    assert.equal((await lstat(join(cleanupWorktree, "openwiki", "guides"))).mode & 0o777, 0o555);
+    assert.equal((await lstat(join(cleanupWorktree, "openwiki", "guides", "start.md"))).mode & 0o777, 0o444);
+  };
+  await assertCleanupWorktreeFrozen();
   const filesystemRun = async (command, args, options = {}) => {
     const result = spawnSync(command, args, { cwd: options.cwd, encoding: "utf8" });
     return { code: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
   };
-  await lib.removeWorktree(filesystemRun, cleanupRepo, cleanupWorktree);
+  await writeFile(join(cleanupWorktree, "local.txt"), "keep the worktree registered\n");
+  await assert.rejects(lib.removeWorktree(filesystemRun, cleanupRepo, cleanupWorktree), /worktree cleanup failed/);
+  await access(cleanupWorktree);
+  assert.ok(execFileSync("git", ["-C", cleanupRepo, "worktree", "list", "--porcelain"], { encoding: "utf8" }).includes(`worktree ${cleanupWorktree}\n`));
+  await assertCleanupWorktreeFrozen();
+
+  const cancellation = new AbortController();
+  cancellation.abort();
+  const cancellationCalls = [];
+  const cancellationRun = async (command, args, options = {}) => {
+    cancellationCalls.push({ command, args, options });
+    if (command === "git" && args[0] === "worktree" && args[1] === "remove") throw new Error("cleanup cancelled");
+    return filesystemRun(command, args, options);
+  };
+  await assert.rejects(lib.removeWorktree(cancellationRun, cleanupRepo, cleanupWorktree, {
+    force: true, signal: cancellation.signal,
+  }), /cleanup cancelled/);
+  assert.deepEqual(cancellationCalls.filter(({ command }) => command.endsWith("/bin/qq-openwiki-materialize")).map(({ args }) => args[0]), ["thaw", "freeze"]);
+  assert.equal(cancellationCalls.at(-1).options.signal, undefined);
+  await access(cleanupWorktree);
+  await assertCleanupWorktreeFrozen();
+
+  await lib.removeWorktree(filesystemRun, cleanupRepo, cleanupWorktree, { force: true });
   await assert.rejects(access(cleanupWorktree), { code: "ENOENT" });
   assert.doesNotMatch(execFileSync("git", ["-C", cleanupRepo, "worktree", "list", "--porcelain"], { encoding: "utf8" }), /cleanup-worktree/);
   execFileSync("git", ["-C", cleanupRepo, "branch", "-D", "qq/cleanup"]);

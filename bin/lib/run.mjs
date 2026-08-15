@@ -267,8 +267,23 @@ export async function removeWorktree(run, mainRoot, worktree, options = {}) {
   const args = ["worktree", "remove"];
   if (options.force) args.push("--force");
   args.push(worktree);
-  await checked(run, OPENWIKI_MATERIALIZE, ["thaw", worktree], { cwd: worktree, signal: options.signal }, "cannot prepare worktree cleanup");
-  return checked(run, "git", args, { cwd: mainRoot, signal: options.signal }, "worktree cleanup failed");
+  try {
+    await checked(run, OPENWIKI_MATERIALIZE, ["thaw", worktree], { cwd: worktree, signal: options.signal }, "cannot prepare worktree cleanup");
+    return await checked(run, "git", args, { cwd: mainRoot, signal: options.signal }, "worktree cleanup failed");
+  } catch (error) {
+    try {
+      await checked(run, OPENWIKI_MATERIALIZE, ["freeze", worktree], { cwd: worktree }, "cannot restore worktree protection");
+    } catch (freezeError) {
+      try {
+        await lstat(worktree);
+      } catch (statError) {
+        if (statError?.code === "ENOENT") throw error;
+        throw new AggregateError([error, freezeError, statError], "worktree cleanup failed and its protection could not be verified");
+      }
+      throw new AggregateError([error, freezeError], "worktree cleanup failed and its protection could not be restored");
+    }
+    throw error;
+  }
 }
 
 export async function startRun(options) {
