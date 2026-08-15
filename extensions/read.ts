@@ -121,7 +121,43 @@ export function fitOutline(document, displayPath, budget = TOKEN_BUDGET) {
   throw new Error("Could not render ast-outline output");
 }
 
-function previewFallback(displayPath, text) {
+function fitsPreviewBudget(text, budget) {
+  return estimateTokens(text) <= budget && Buffer.byteLength(text, "utf8") <= budget * 4;
+}
+
+function truncatePreview(text, budget) {
+  const cappedBudget = Math.max(0, Math.floor(budget));
+  if (fitsPreviewBudget(text, cappedBudget)) return text;
+
+  const marker = "\n[... preview truncated to fit byte/token budget ...]\n";
+  if (!fitsPreviewBudget(marker, cappedBudget)) {
+    let low = 0;
+    let high = text.length;
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2);
+      if (fitsPreviewBudget(text.slice(0, middle), cappedBudget)) low = middle;
+      else high = middle - 1;
+    }
+    return text.slice(0, low);
+  }
+
+  const candidate = (kept) => {
+    const headLength = Math.ceil(kept / 2);
+    const tailLength = Math.floor(kept / 2);
+    const tail = tailLength === 0 ? "" : text.slice(-tailLength);
+    return `${text.slice(0, headLength)}${marker}${tail}`;
+  };
+  let low = 0;
+  let high = text.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (fitsPreviewBudget(candidate(middle), cappedBudget)) low = middle;
+    else high = middle - 1;
+  }
+  return candidate(low);
+}
+
+function previewFallback(displayPath, text, budget) {
   const lines = text.split("\n");
   const head = lines.slice(0, HEAD_LINES);
   const tailStart = Math.max(head.length, lines.length - TAIL_LINES);
@@ -133,7 +169,7 @@ function previewFallback(displayPath, text) {
   ];
   if (omitted > 0) sections.push(`[... ${omitted} lines omitted ...]`);
   sections.push(...tail, "Use offset/limit or ranges to read specific source lines.");
-  return sections.join("\n");
+  return truncatePreview(sections.join("\n"), budget);
 }
 
 export default function registerRead(pi, deps = {}) {
@@ -178,12 +214,15 @@ export default function registerRead(pi, deps = {}) {
       const buffer = await readFile(absolutePath, signal);
       const mimeType = imageMimeType(buffer);
       if (mimeType) {
-        const nonVisionNote = ctx?.model && !ctx.model.input?.includes("image")
-          ? "\n[Current model does not support images. The image will be omitted from this request.]"
-          : "";
+        if (ctx?.model && !ctx.model.input?.includes("image")) {
+          return textResult(
+            `Read image file [${mimeType}]\n[Current model does not support images. The image will be omitted from this request.]`,
+            undefined,
+          );
+        }
         return {
           content: [
-            { type: "text", text: `Read image file [${mimeType}]${nonVisionNote}` },
+            { type: "text", text: `Read image file [${mimeType}]` },
             { type: "image", data: buffer.toString("base64"), mimeType },
           ],
           details: undefined,
@@ -205,7 +244,7 @@ export default function registerRead(pi, deps = {}) {
         return textResult(fitOutline(JSON.parse(execution.stdout), params.path, budget), undefined);
       } catch (error) {
         if (signal?.aborted || error?.name === "AbortError") throw error;
-        return textResult(previewFallback(params.path, text), undefined);
+        return textResult(previewFallback(params.path, text, budget), undefined);
       }
     },
   });

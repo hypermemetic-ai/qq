@@ -119,26 +119,59 @@ assert.match(shallowResult.content[0].text, /depth 0/);
 assert.match(shallowResult.content[0].text, /class LargeService \(20 children\) \[1:100\]/);
 assert.doesNotMatch(shallowResult.content[0].text, /methodWithLongName0/);
 
-const fallbackText = Array.from({ length: 40 }, (_, index) => `source line ${index + 1}`).join("\n");
+const fallbackText = Array.from({ length: 1_000 }, (_, index) => `source line ${index + 1}`).join("\n");
 for (const [name, execReply] of [
   ["missing CLI", () => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); }],
   ["parse failure", () => ({ code: 2, stdout: "", stderr: "parse failed" })],
   ["unknown language", () => ({ code: 0, stdout: JSON.stringify({ tool: "ast-outline", command: "outline", error: { notes: ["unsupported"] } }), stderr: "" })],
 ]) {
-  const fallback = harness({ text: fallbackText, tokenBudget: 1, execReply });
+  const fallback = harness({ text: fallbackText, tokenBudget: 200, execReply });
   const result = await fallback.tool.execute(name, { path: "large.unknown" }, undefined, undefined, { cwd: "/work" });
   assert.match(result.content[0].text, /AST outline unavailable/);
   assert.match(result.content[0].text, /source line 1/);
-  assert.match(result.content[0].text, /source line 40/);
-  assert.match(result.content[0].text, /10 lines omitted/);
+  assert.match(result.content[0].text, /source line 1000/);
+  assert.match(result.content[0].text, /970 lines omitted/);
   assert.match(result.content[0].text, /offset\/limit or ranges/);
 }
 
-const png = harness({ text: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0]) });
+const hugeFallbackBudget = 64;
+const hugeFallback = harness({
+  text: `HEAD-${"😀".repeat(20_000)}-TAIL`,
+  tokenBudget: hugeFallbackBudget,
+});
+const hugeFallbackResult = await hugeFallback.tool.execute(
+  "huge-line",
+  { path: "huge.unknown" },
+  undefined,
+  undefined,
+  { cwd: "/work" },
+);
+const hugeFallbackText = hugeFallbackResult.content[0].text;
+assert.ok(module.estimateTokens(hugeFallbackText) <= hugeFallbackBudget);
+assert.ok(Buffer.byteLength(hugeFallbackText, "utf8") <= hugeFallbackBudget * 4);
+assert.match(hugeFallbackText, /HEAD-/);
+assert.match(hugeFallbackText, /-TAIL/);
+assert.match(hugeFallbackText, /preview truncated to fit byte\/token budget/);
+
+const pngBytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0]);
+const png = harness({ text: pngBytes });
 const pngResult = await png.tool.execute("image", { path: "image.png" }, undefined, undefined, { cwd: "/work" });
 assert.equal(pngResult.content[0].text, "Read image file [image/png]");
 assert.equal(pngResult.content[1].type, "image");
 assert.equal(pngResult.content[1].mimeType, "image/png");
 assert.equal(png.calls.length, 0);
+
+const nonVisionPng = harness({ text: pngBytes });
+const nonVisionPngResult = await nonVisionPng.tool.execute(
+  "non-vision-image",
+  { path: "image.png" },
+  undefined,
+  undefined,
+  { cwd: "/work", model: { input: ["text"] } },
+);
+assert.deepEqual(nonVisionPngResult.content, [{
+  type: "text",
+  text: "Read image file [image/png]\n[Current model does not support images. The image will be omitted from this request.]",
+}]);
 
 console.log("test-read: pass");
