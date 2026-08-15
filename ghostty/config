@@ -1,4 +1,4 @@
-# Fullscreen 4K/TV terminal surface for the QQ Herdr cockpit.
+# Fullscreen 4K/TV terminal surface for the qq Herdr cockpit.
 # Keep the readable 2x MxPlus grid, but do not recreate the retired square
 # 480-point side padding or the right-edge masking shader.
 font-family = MxPlus IBM VGA 8x16

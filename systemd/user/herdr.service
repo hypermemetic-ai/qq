@@ -1,5 +1,5 @@
 [Unit]
-Description=QQ-pinned Herdr terminal workspace server
+Description=qq-pinned Herdr terminal workspace server
 After=network.target
 
 [Service]

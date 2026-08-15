@@ -148,7 +148,7 @@ SECOND_PUBLICATION="$(git -C "$REPO" rev-parse openwiki)"
 grep -Fxq 'dirty source' "$REPO/source.txt"
 [[ -z "$(git -C "$REPO" log --format=%H main -- openwiki)" ]]
 
-# Failed generation and non-QQ dispatch cannot alter publication.
+# Failed generation and non-qq dispatch cannot alter publication.
 cat >"$FAKE" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -168,7 +168,7 @@ if QQ_OPENWIKI_MAIN_ROOT="$REPO" \
   QQ_OPENWIKI_REPO_KEY=discuss \
   QQ_OPENWIKI_BIN="$FAKE" \
   "$ROOT/bin/qq-openwiki-refresh" >/dev/null 2>&1; then
-  echo "non-QQ repository unexpectedly used branch publication" >&2
+  echo "non-qq repository unexpectedly used branch publication" >&2
   exit 1
 fi
 
