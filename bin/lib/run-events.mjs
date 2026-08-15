@@ -7,8 +7,10 @@ import { stateHome } from "./run.mjs";
 export const RUN_EVENT_PRODUCT = "qq";
 export const RUN_LANDED_KIND = "run.landed";
 export const RUN_BLOCKED_KIND = "run.blocked";
+export const RUN_BOOTSTRAP_FAILED_KIND = "run.bootstrap-failed";
 export const RUN_LANDED_SCHEMA = "qq.run-landed/v1";
 export const RUN_BLOCKED_SCHEMA = "qq.run-blocked/v1";
+export const RUN_BOOTSTRAP_FAILED_SCHEMA = "qq.run-bootstrap-failed/v1";
 
 const SESSION_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 
@@ -58,12 +60,25 @@ export function runEventPayload(state, kind) {
       },
     };
   }
+  if (kind === RUN_BOOTSTRAP_FAILED_KIND) {
+    return {
+      schema: RUN_BOOTSTRAP_FAILED_SCHEMA,
+      ...common,
+      bootstrap: {
+        failed_at: state.bootstrapFailedAt,
+        reason: state.bootstrapFailureReason,
+        task_returned: state.bootstrapTaskReturned === true,
+      },
+    };
+  }
   throw new Error(`unsupported run outcome kind: ${kind}`);
 }
 
 export async function sendRunEvent(state, kind, options = {}) {
   const payload = runEventPayload(state, kind);
-  const producerId = kind === RUN_LANDED_KIND ? "qq/land-worker" : "qq/review-worker";
+  const producerId = kind === RUN_LANDED_KIND ? "qq/land-worker"
+    : kind === RUN_BOOTSTRAP_FAILED_KIND ? "qq/start-worker"
+    : "qq/review-worker";
   const requestHash = createHash("sha256").update(canonicalEventPlaneJson({ kind, payload })).digest("hex");
   const client = options.client ?? new EventPlaneClient(join(stateHome(options.env), "qq", "event-plane", "event-plane.sock"));
   return client.send({
@@ -88,6 +103,9 @@ export function parseRunEvent(delivery, sessionId) {
   }
   if (record.kind === RUN_BLOCKED_KIND && record.producer_id === "qq/review-worker" && record.origin_id === "qq/review-worker" && payload.schema === RUN_BLOCKED_SCHEMA) {
     return { kind: RUN_BLOCKED_KIND, payload, eventId: record.event_id };
+  }
+  if (record.kind === RUN_BOOTSTRAP_FAILED_KIND && record.producer_id === "qq/start-worker" && record.origin_id === "qq/start-worker" && payload.schema === RUN_BOOTSTRAP_FAILED_SCHEMA) {
+    return { kind: RUN_BOOTSTRAP_FAILED_KIND, payload, eventId: record.event_id };
   }
   return undefined;
 }

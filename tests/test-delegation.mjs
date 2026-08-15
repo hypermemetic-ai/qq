@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { access, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +8,9 @@ import { pathToFileURL } from "node:url";
 
 const root = process.argv[2];
 const lib = await import(pathToFileURL(join(root, "bin/lib/run.mjs")));
+const bootstrap = await import(pathToFileURL(join(root, "bin/lib/bootstrap.mjs")));
+const runEvents = await import(pathToFileURL(join(root, "bin/lib/run-events.mjs")));
+const reviewFlow = await import(pathToFileURL(join(root, "extensions/review-flow.ts")));
 const admission = await import(pathToFileURL(join(root, "bin/lib/admission.mjs")));
 const extension = await import(pathToFileURL(join(root, "extensions/board.ts")));
 
@@ -48,6 +52,15 @@ assert.equal(lib.paneHasAvailableShell({
 assert.equal(lib.paneHasAvailableShell({
   process_info: { shell_pid: 10, foreground_process_group_id: 10, foreground_processes: [{ pid: 10, name: "pi" }] },
 }), false);
+const promptRequests = [];
+await lib.submitAgentPrompt("w2T:p9", "private prompt", {
+  async request(method, params) {
+    promptRequests.push({ method, params });
+    return { id: "qq:test", result: { type: "agent_prompted", agent: { pane_id: params.target } } };
+  },
+});
+assert.deepEqual(promptRequests, [{ method: "agent.prompt", params: { target: "w2T:p9", text: "private prompt" } }]);
+assert.equal("wait" in promptRequests[0].params, false);
 
 const scratch = await mkdtemp(join(homedir(), "qq-delegation-test."));
 try {
@@ -188,6 +201,14 @@ try {
   assert.equal((await lstat(prepared.notePath)).mode & 0o077, 0);
   assert.equal((await lstat(prepared.gatePath)).mode & 0o077, 0);
   assert.equal(await admission.findExistingBrief({ taskId: task.id, project: "qq", env }), exactNote);
+  const preparedBootstrap = await lib.prepareBootstrapRequest({
+    cwd: "/repo", env, task, prepared, qaBinding: { model: "qa" },
+    architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9",
+  });
+  assert.equal((await lstat(preparedBootstrap.bootstrapPath)).mode & 0o077, 0);
+  assert.equal((await lib.readBootstrapRequest(preparedBootstrap.bootstrapPath)).marker, preparedBootstrap.marker);
+  assert.doesNotMatch(preparedBootstrap.marker, /PRIVATE|Do the task/);
+  await rm(preparedBootstrap.bootstrapPath);
 
   const lockOrder = [];
   let releaseFirstLock;
@@ -249,7 +270,17 @@ try {
   assert.ok(gateCalls.some(({ args }) => args[0] === "plugin" && args[1] === "pane" && args[2] === "close"));
   await assert.rejects(access(prepared.decisionPath), { code: "ENOENT" });
 
+  const proofPath = join(scratch, "runner-session.jsonl");
+  const agentInfo = (paneId, sessionPath, status = "working") => JSON.stringify({
+    id: "cli:agent:get",
+    result: { type: "agent_info", agent: {
+      agent: "pi", pane_id: paneId, agent_status: status,
+      agent_session: { agent: "pi", kind: "path", source: "herdr:pi", value: sessionPath },
+    } },
+  });
+  const userMessage = (text) => `${JSON.stringify({ type: "message", message: { role: "user", content: [{ type: "text", text }] } })}\n`;
   const spawnCalls = [];
+  const submittedPrompts = [];
   const spawnRun = async (command, args, options = {}) => {
     spawnCalls.push({ command, args, options });
     if (command === "git" && args[0] === "rev-parse" && args[1] === "--show-toplevel") return { code: 0, stdout: "/repo\n", stderr: "" };
@@ -257,6 +288,7 @@ try {
     if (command === "git" && args[0] === "symbolic-ref") return { code: 0, stdout: "main\n", stderr: "" };
     if (command === "herdr" && args[0] === "tab" && args[1] === "list") return { code: 0, stdout: JSON.stringify({ id: "cli:tab:list", result: { type: "tab_list", tabs: [] } }), stderr: "" };
     if (command === "herdr" && args[0] === "tab" && args[1] === "create") return { code: 0, stdout: JSON.stringify({ id: "cli:tab:create", result: { type: "tab_created", root_pane: { pane_id: "w2T:p9" }, tab: { tab_id: "w2T:t9" } } }), stderr: "" };
+    if (command === "herdr" && args[0] === "agent" && args[1] === "get") return { code: 0, stdout: agentInfo(args[2], proofPath), stderr: "" };
     if (command === "herdr" && args[0] === "pane" && args[1] === "process-info") {
       const ready = spawnCalls.filter((call) => call.command === "herdr" && call.args[0] === "pane" && call.args[1] === "process-info").length >= 2;
       return {
@@ -276,11 +308,18 @@ try {
     return { code: 0, stdout: "", stderr: "" };
   };
   const startSignal = new AbortController().signal;
+  let statusAtPrompt;
   const state = await lib.startRun({
     run: spawnRun, cwd: "/repo", env, task, prepared, signal: startSignal,
     architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9",
     qaBinding: { provider: "openai-codex", model: "gpt-5.6-sol", effort: "xhigh" },
+    async submitPrompt(paneId, prompt) {
+      statusAtPrompt = JSON.parse(await readFile(prepared.statePath, "utf8")).status;
+      submittedPrompts.push({ paneId, prompt });
+      await writeFile(proofPath, userMessage(prompt));
+    },
   });
+  assert.equal(statusAtPrompt, "starting");
   assert.equal(state.pane, "w2T:p9");
   assert.equal(state.status, "running");
   assert.equal(state.schema, "qq.run-handoff/v1");
@@ -288,6 +327,7 @@ try {
   assert.equal(state.transcriptPath, prepared.transcriptPath);
   assert.equal(state.notePath, prepared.notePath);
   assert.equal(state.gatePath, prepared.gatePath);
+  assert.equal(state.bootstrapProof.sessionPath, proofPath);
   assert.equal(await readFile(state.notePath, "utf8"), `${exactNote}\n`);
   assert.equal(JSON.parse(await readFile(state.statePath, "utf8")).status, "running");
   assert.ok(spawnCalls.every(({ options }) => options.signal === startSignal));
@@ -307,39 +347,44 @@ try {
   assert.equal(processInfo.length, 2);
   assert.ok(herdrOps.indexOf("pane process-info") > herdrOps.indexOf("pane rename"));
   assert.ok(herdrOps.lastIndexOf("pane process-info") < herdrOps.indexOf("agent start"));
+  assert.equal(herdrOps.includes("agent prompt"), false, "the private prompt must not be placed in CLI argv");
   const start = spawnCalls.find(({ command, args }) => command === "herdr" && args[0] === "agent" && args[1] === "start");
   assert.deepEqual(start.args.slice(0, 2), ["agent", "start"]);
-  const prompt = spawnCalls.find(({ command, args }) => command === "herdr" && args[0] === "agent" && args[1] === "prompt");
-  assert.match(prompt.args[3], /call done with ref HEAD/);
-  assert.match(prompt.args[3], /# TASK-1 — One task/);
-  assert.match(prompt.args[3], /## Architect notes \/ scratch/);
-  assert.ok(prompt.args[3].endsWith(exactNote));
-  assert.deepEqual(prompt.args.slice(-5), ["--wait", "--until", "working", "--timeout", "5000"]);
+  assert.equal(submittedPrompts.length, 1);
+  const prompt = submittedPrompts[0].prompt;
+  assert.match(prompt, /^\[qq-bootstrap:/);
+  assert.match(prompt, /call done with ref HEAD/);
+  assert.match(prompt, /# TASK-1 — One task/);
+  assert.match(prompt, /## Architect notes \/ scratch/);
+  assert.ok(prompt.endsWith(exactNote));
 
   const droppedTask = { id: "TASK-5", title: "Dropped prompt" };
   const droppedPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: droppedTask, note: exactNote });
   const droppedCalls = [];
   let statusAtDroppedPrompt;
+  let droppedSubmissions = 0;
   const droppedRun = async (command, args, options = {}) => {
     droppedCalls.push({ command, args, options });
-    if (command === "herdr" && args[0] === "agent" && args[1] === "prompt") {
-      statusAtDroppedPrompt = JSON.parse(await readFile(droppedPreparation.statePath, "utf8")).status;
-      return args.includes("--wait")
-        ? { code: 1, stdout: "", stderr: "agent_prompt_stalled" }
-        : { code: 0, stdout: "", stderr: "" };
-    }
     return spawnRun(command, args, options);
   };
   await assert.rejects(lib.startRun({
     run: droppedRun, cwd: "/repo", env, task: droppedTask, prepared: droppedPreparation,
     architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9", qaBinding: {},
-  }), /cannot send the ticket and note/);
+    async submitPrompt() {
+      droppedSubmissions += 1;
+      statusAtDroppedPrompt = JSON.parse(await readFile(droppedPreparation.statePath, "utf8")).status;
+      throw new Error(`agent_prompt_rejected: ${exactNote}`);
+    },
+  }), (error) => {
+    assert.match(error.message, /agent_prompt_rejected/);
+    assert.doesNotMatch(error.message, new RegExp(exactNote));
+    return true;
+  });
   assert.equal(statusAtDroppedPrompt, "starting");
+  assert.equal(droppedSubmissions, 1);
   const droppedOps = droppedCalls.map(({ command, args }) => `${command} ${args[0]} ${args[1]}`);
-  assert.ok(droppedOps.indexOf("herdr agent start") < droppedOps.indexOf("herdr agent prompt"));
-  assert.ok(droppedOps.indexOf("herdr agent prompt") < droppedOps.indexOf("herdr pane close"));
-  const droppedPrompt = droppedCalls.find(({ command, args }) => command === "herdr" && args[0] === "agent" && args[1] === "prompt");
-  assert.deepEqual(droppedPrompt.args.slice(-5), ["--wait", "--until", "working", "--timeout", "5000"]);
+  assert.ok(droppedOps.indexOf("herdr agent start") < droppedOps.indexOf("herdr pane close"));
+  assert.equal(droppedOps.includes("herdr agent prompt"), false);
   const droppedThawIndex = droppedCalls.findIndex(({ command, args }) => command.endsWith("/bin/qq-openwiki-materialize") && args[0] === "thaw");
   const droppedRemoveIndex = droppedCalls.findIndex(({ command, args }) => command === "git" && args[0] === "worktree" && args[1] === "remove");
   assert.ok(droppedThawIndex >= 0 && droppedThawIndex < droppedRemoveIndex);
@@ -381,11 +426,13 @@ try {
         stderr: "",
       };
     }
+    if (command === "herdr" && args[0] === "agent" && args[1] === "get") return { code: 0, stdout: agentInfo(args[2], proofPath), stderr: "" };
     return { code: 0, stdout: "", stderr: "" };
   };
   const existingState = await lib.startRun({
     run: existingRun, cwd: "/repo", env, task: existingTask, prepared: existingPreparation,
     architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9", qaBinding: {},
+    async submitPrompt(_paneId, prompt) { await writeFile(proofPath, userMessage(prompt)); },
   });
   assert.equal(existingState.pane, "w2T:p-new");
   assert.equal(existingCalls.some(({ command, args }) => command === "herdr" && args[0] === "tab" && args[1] === "create"), false);
@@ -394,6 +441,74 @@ try {
   assert.deepEqual(split.args.slice(0, 5), [
     "--pane", "w2T:p-right", "--cwd", existingPreparation.worktree, "--no-focus",
   ]);
+
+  const coldTask = { id: "TASK-10", title: "Cold runner" };
+  const coldPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: coldTask, note: exactNote });
+  const coldSessionPath = join(scratch, "cold-session.jsonl");
+  const coldCalls = [];
+  let coldPrompt;
+  let coldSubmissions = 0;
+  let coldClock = 0;
+  const coldRun = async (command, args, options = {}) => {
+    coldCalls.push({ command, args, options });
+    if (command === "herdr" && args[0] === "agent" && args[1] === "get") {
+      return { code: 0, stdout: agentInfo(args[2], coldSessionPath, "working"), stderr: "" };
+    }
+    return spawnRun(command, args, options);
+  };
+  const coldState = await lib.startRun({
+    run: coldRun, cwd: "/repo", env, task: coldTask, prepared: coldPreparation,
+    architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9", qaBinding: {},
+    verificationTimeoutMs: 30_000, verificationIntervalMs: 6_001,
+    now: () => coldClock,
+    async sleep(ms) {
+      assert.equal(JSON.parse(await readFile(coldPreparation.statePath, "utf8")).status, "starting");
+      coldClock += ms;
+      await writeFile(coldSessionPath, userMessage(coldPrompt));
+    },
+    async submitPrompt(_paneId, prompt) {
+      coldSubmissions += 1;
+      coldPrompt = prompt;
+      await writeFile(coldSessionPath, `${JSON.stringify({ type: "message", message: { role: "assistant", content: [{ type: "text", text: prompt }] } })}\n`);
+    },
+  });
+  assert.equal(coldSubmissions, 1);
+  assert.ok(coldClock > 5_000, "cold prompt proof should be allowed beyond Herdr's old five-second heuristic");
+  assert.equal(coldCalls.filter(({ command, args }) => command === "herdr" && args[0] === "agent" && args[1] === "get").length, 2);
+  assert.equal(coldState.status, "running");
+
+  const timeoutTask = { id: "TASK-11", title: "Unproved prompt" };
+  const timeoutPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: timeoutTask, note: exactNote });
+  const timeoutSessionPath = join(scratch, "timeout-session.jsonl");
+  const timeoutCalls = [];
+  let timeoutClock = 0;
+  let timeoutSubmissions = 0;
+  const timeoutRun = async (command, args, options = {}) => {
+    timeoutCalls.push({ command, args, options });
+    if (command === "herdr" && args[0] === "agent" && args[1] === "get") {
+      return { code: 0, stdout: agentInfo(args[2], timeoutSessionPath, "working"), stderr: "" };
+    }
+    return spawnRun(command, args, options);
+  };
+  await assert.rejects(lib.startRun({
+    run: timeoutRun, cwd: "/repo", env, task: timeoutTask, prepared: timeoutPreparation,
+    architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9", qaBinding: {},
+    verificationTimeoutMs: 30_000, verificationIntervalMs: 10_000,
+    now: () => timeoutClock,
+    async sleep(ms) {
+      assert.equal(JSON.parse(await readFile(timeoutPreparation.statePath, "utf8")).status, "starting");
+      timeoutClock += ms;
+    },
+    async submitPrompt(_paneId, prompt) {
+      timeoutSubmissions += 1;
+      await writeFile(timeoutSessionPath, `${JSON.stringify({ type: "message", message: { role: "assistant", content: [{ type: "text", text: prompt }] } })}\n`);
+    },
+  }), /not recorded within 30000ms/);
+  assert.equal(timeoutSubmissions, 1, "timed-out prompts must not be retried");
+  assert.equal(timeoutClock, 30_000);
+  assert.equal(timeoutCalls.some(({ command, args }) => command === "herdr" && args[0] === "pane" && args[1] === "close"), true);
+  assert.equal(timeoutCalls.some(({ command, args }) => command === "git" && args[0] === "worktree" && args[1] === "remove"), true);
+  await assert.rejects(access(timeoutPreparation.stateDir), { code: "ENOENT" });
 
   const cancelledPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: { id: "TASK-2", title: "Cancel" }, note: exactNote });
   await lib.discardRun(cancelledPreparation);
@@ -418,6 +533,72 @@ try {
   });
   assert.equal(failedGateClosed, true);
   await lib.discardRun(failedGate);
+
+  const workerTask = { id: "TASK-12", title: "Worker rollback" };
+  const workerPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: workerTask, note: exactNote });
+  const workerRequest = await lib.prepareBootstrapRequest({
+    cwd: "/repo", env, task: workerTask, prepared: workerPreparation, qaBinding: {},
+    architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9",
+  });
+  let boardAttempts = 0;
+  let eventAttempts = 0;
+  let notificationBody;
+  const failurePayloads = [];
+  const workerEnv = { ...env, TEST_API_TOKEN: "credential-secret" };
+  await assert.rejects(bootstrap.bootstrapRun(async () => ({ code: 0, stdout: "", stderr: "" }), workerRequest.bootstrapPath, {
+    env: workerEnv,
+    now: () => new Date("2026-08-15T20:00:00.000Z"),
+    async sleep() {},
+    async startRun(options) {
+      assert.equal(options.signal, undefined, "detached worker must not inherit the architect turn signal");
+      throw new Error(`agent refused ${exactNote} credential-secret`);
+    },
+    async setBoardStatus(_run, cwd, id, status) {
+      boardAttempts += 1;
+      assert.deepEqual({ cwd, id, status }, { cwd: "/repo", id: workerTask.id, status: "To Do" });
+      await assert.rejects(access(workerPreparation.stateDir), { code: "ENOENT" });
+      if (boardAttempts === 1) throw new Error("temporary board failure");
+    },
+    async sendRunEvent(outcome, kind) {
+      eventAttempts += 1;
+      assert.equal(kind, runEvents.RUN_BOOTSTRAP_FAILED_KIND);
+      await assert.rejects(access(workerPreparation.stateDir), { code: "ENOENT" });
+      const payload = runEvents.runEventPayload(outcome, kind);
+      failurePayloads.push(payload);
+      if (eventAttempts === 1) throw new Error("event response lost");
+    },
+    async notify(taskId, reason) {
+      await assert.rejects(access(workerPreparation.stateDir), { code: "ENOENT" });
+      assert.equal(taskId, workerTask.id);
+      assert.doesNotMatch(reason, new RegExp(exactNote));
+      assert.doesNotMatch(reason, /credential-secret/);
+      notificationBody = `${taskId}: bootstrap failed`;
+    },
+  }), (error) => {
+    assert.doesNotMatch(error.message, new RegExp(exactNote));
+    assert.doesNotMatch(error.message, /credential-secret/);
+    return true;
+  });
+  assert.equal(boardAttempts, 2, "idempotent board rollback should retry once");
+  assert.equal(eventAttempts, 2, "idempotent durable delivery should retry once");
+  assert.deepEqual(failurePayloads[0], failurePayloads[1]);
+  assert.equal(failurePayloads[1].bootstrap.task_returned, true);
+  assert.doesNotMatch(JSON.stringify(failurePayloads[1]), new RegExp(exactNote));
+  assert.doesNotMatch(JSON.stringify(failurePayloads[1]), /credential-secret/);
+  assert.equal(notificationBody, `${workerTask.id}: bootstrap failed`);
+  const failureDelivery = {
+    record: {
+      event_id: "evt_bootstrap", product_id: "qq", kind: runEvents.RUN_BOOTSTRAP_FAILED_KIND,
+      producer_id: "qq/start-worker", origin_id: "qq/start-worker",
+      recipient_id: runEvents.runEventRecipient(workerRequest.architectSession), envelope: { payload: failurePayloads[1] },
+    },
+  };
+  const parsedFailure = runEvents.parseRunEvent(failureDelivery, workerRequest.architectSession);
+  const failureMessage = reviewFlow.runOutcomeMessage(parsedFailure);
+  assert.equal(failureMessage.customType, "qq-run-bootstrap-failed");
+  assert.match(failureMessage.content, /TASK-12/);
+  assert.match(failureMessage.content, /returned to To Do/);
+  assert.equal(failureMessage.details.event_id, "evt_bootstrap");
 
   function delegateHarness({ run, ...deps }) {
     const registrations = [];
@@ -449,22 +630,60 @@ try {
     };
   }
 
+  const fakeChild = new EventEmitter();
+  fakeChild.pid = 4241;
+  fakeChild.kill = () => {};
+  fakeChild.disconnect = () => {};
+  fakeChild.unref = () => {};
+  let fakeSpawn;
+  let launchSettled = false;
+  const launchAccepted = extension.detachedBootstrapWorker("/private/bootstrap.json", env, {
+    timeoutMs: 1_000,
+    spawn(command, args, options) {
+      fakeSpawn = { command, args, options };
+      return fakeChild;
+    },
+  });
+  launchAccepted.then(() => { launchSettled = true; });
+  await new Promise((accept) => setImmediate(accept));
+  assert.equal(launchSettled, false, "a bare spawn must not be reported as an accepted worker");
+  assert.equal(fakeSpawn.options.detached, true);
+  assert.deepEqual(fakeSpawn.options.stdio, ["ignore", "ignore", "ignore", "ipc"]);
+  assert.equal(fakeSpawn.args.at(-1), "/private/bootstrap.json");
+  assert.doesNotMatch(JSON.stringify(fakeSpawn.args), new RegExp(exactNote));
+  fakeChild.emit("message", { type: "qq-bootstrap-accepted" });
+  assert.equal(await launchAccepted, 4241);
+
   const approvalOrder = [];
   const approvalStatuses = [];
   const approvalSignal = new AbortController().signal;
   const approvedPreparation = { taskId: task.id, stateDir: "/private/gate", notePath: "/private/gate/note.md", gatePath: "/private/gate/gate.md" };
+  let detachedWorkPending = true;
   const approvedTool = delegateHarness({
     run: backlogRun(approvalStatuses, approvalOrder),
     async makeNote() { approvalOrder.push("scribe"); assert.deepEqual(approvalStatuses, ["In Progress"]); return { note: exactNote, qaBinding: { model: "qa" } }; },
     async prepareRun(options) { approvalOrder.push("prepare"); assert.equal(options.note, exactNote); assert.deepEqual(approvalStatuses, ["In Progress"]); return approvedPreparation; },
     async awaitBriefGate(options) { approvalOrder.push("gate"); assert.equal(options.prepared, approvedPreparation); assert.equal(options.signal, approvalSignal); assert.deepEqual(approvalStatuses, ["In Progress"]); return "approved"; },
-    async startRun(options) { approvalOrder.push("start"); assert.equal(options.prepared, approvedPreparation); assert.equal(options.signal, approvalSignal); assert.deepEqual(approvalStatuses, ["In Progress"]); return { pane: "runner" }; },
+    async prepareBootstrapRequest(options) {
+      approvalOrder.push("bootstrap");
+      assert.equal(options.prepared, approvedPreparation);
+      assert.equal(options.signal, approvalSignal);
+      return { bootstrapPath: "/private/gate/bootstrap.json" };
+    },
+    launchBootstrap(path) {
+      approvalOrder.push("launch");
+      assert.equal(path, "/private/gate/bootstrap.json");
+      void new Promise(() => {}).finally(() => { detachedWorkPending = false; });
+      return 4242;
+    },
     async discardRun() { approvalOrder.push("discard"); },
   });
   const approved = await approvedTool.execute("approve", { id: task.id }, approvalSignal, undefined, ctx);
-  assert.deepEqual(approvalOrder, ["status:In Progress", "scribe", "prepare", "gate", "start"]);
+  assert.deepEqual(approvalOrder, ["status:In Progress", "scribe", "prepare", "gate", "bootstrap", "launch"]);
   assert.deepEqual(approvalStatuses, ["In Progress"]);
-  assert.equal(approved.content[0].text, `Approved ${task.id}; runner started.`);
+  assert.equal(detachedWorkPending, true, "delegate must not await detached bootstrap work");
+  assert.equal(approved.content[0].text, `Approved ${task.id}; runner starting.`);
+  assert.equal(approved.details.worker_pid, 4242);
   assert.equal(approved.content[0].text.includes("\n"), false);
   assert.doesNotMatch(JSON.stringify(approved), new RegExp(exactNote));
 
@@ -477,7 +696,7 @@ try {
     async prepareRun() { cancelOrder.push("prepare"); return approvedPreparation; },
     async awaitBriefGate() { cancelOrder.push("gate"); assert.deepEqual(cancelStatuses, ["In Progress"]); return "cancelled"; },
     async discardRun() { cancelOrder.push("discard"); },
-    async startRun() { cancelStarted = true; },
+    async launchBootstrap() { cancelStarted = true; },
   });
   const cancelled = await cancelledTool.execute("cancel", { id: task.id }, undefined, undefined, ctx);
   assert.deepEqual(cancelOrder, ["status:In Progress", "scribe", "prepare", "gate", "status:To Do", "discard"]);
@@ -508,7 +727,8 @@ try {
     async makeNote() { return { note: exactNote, qaBinding: {} }; },
     async prepareRun() { return approvedPreparation; },
     async awaitBriefGate() { return "approved"; },
-    async startRun() { throw new Error(`start failed: ${exactNote}`); },
+    async prepareBootstrapRequest() { return { bootstrapPath: "/private/gate/bootstrap.json" }; },
+    async launchBootstrap() { throw new Error(`start failed: ${exactNote}`); },
     async discardRun() { rollbackDiscarded = true; },
   });
   const rolledBack = await rollbackTool.execute("start-failure", { id: task.id }, undefined, undefined, ctx);
@@ -516,6 +736,46 @@ try {
   assert.doesNotMatch(JSON.stringify(rolledBack), new RegExp(exactNote));
   assert.deepEqual(rollbackStatuses, ["In Progress", "To Do"]);
   assert.equal(rollbackDiscarded, true);
+
+  const malformedBootstrapPath = join(scratch, "malformed-bootstrap.json");
+  await writeFile(malformedBootstrapPath, "not json\n", { mode: 0o600 });
+  const readFailureStatuses = [];
+  let readFailureDiscarded = false;
+  const readFailureTool = delegateHarness({
+    run: backlogRun(readFailureStatuses),
+    async makeNote() { return { note: exactNote, qaBinding: {} }; },
+    async prepareRun() { return approvedPreparation; },
+    async awaitBriefGate() { return "approved"; },
+    async prepareBootstrapRequest() { return { bootstrapPath: malformedBootstrapPath }; },
+    launchBootstrap(path) { return extension.detachedBootstrapWorker(path, env, { timeoutMs: 2_000 }); },
+    async discardRun() { readFailureDiscarded = true; },
+  });
+  const readFailure = await readFailureTool.execute("read-failure", { id: task.id }, undefined, undefined, ctx);
+  assert.match(readFailure.content[0].text, /could not read its private request/);
+  assert.deepEqual(readFailureStatuses, ["In Progress", "To Do"]);
+  assert.equal(readFailureDiscarded, true, "the delegating architect retains rollback ownership until request acceptance");
+
+  const abortStatuses = [];
+  let abortDiscarded = false;
+  let abortLaunched = false;
+  const abortController = new AbortController();
+  const abortTool = delegateHarness({
+    run: backlogRun(abortStatuses),
+    async makeNote() { return { note: exactNote, qaBinding: {} }; },
+    async prepareRun() { return approvedPreparation; },
+    async awaitBriefGate() { return "approved"; },
+    async prepareBootstrapRequest() {
+      abortController.abort(new Error("operator aborted"));
+      return { bootstrapPath: "/private/gate/bootstrap.json" };
+    },
+    launchBootstrap() { abortLaunched = true; },
+    async discardRun() { abortDiscarded = true; },
+  });
+  const aborted = await abortTool.execute("abort", { id: task.id }, abortController.signal, undefined, ctx);
+  assert.match(aborted.content[0].text, /operator aborted/);
+  assert.equal(abortLaunched, false);
+  assert.equal(abortDiscarded, true);
+  assert.deepEqual(abortStatuses, ["In Progress", "To Do"]);
 
   const noteFailureStatuses = [];
   const noteFailureTool = delegateHarness({
@@ -578,7 +838,11 @@ try {
         if (overrides.awaitBriefGate) return overrides.awaitBriefGate(gatePreparation);
         return "approved";
       },
-      async startRun({ task: admittedTask }) { calls.starts.push(admittedTask.id); },
+      async prepareBootstrapRequest({ task: admittedTask }) {
+        calls.starts.push(admittedTask.id);
+        return { bootstrapPath: `/private/${admittedTask.id}/bootstrap.json` };
+      },
+      launchBootstrap() { return 99; },
       async discardRun() {},
     });
     return { tool, calls };
@@ -610,7 +874,7 @@ try {
   const secondOverlap = overlap.tool.execute("overlap-2", { id: "TASK-7" }, undefined, undefined, ctx);
   releaseOverlapVet();
   const [firstOverlapResult, secondOverlapResult] = await Promise.all([firstOverlap, secondOverlap]);
-  assert.equal(firstOverlapResult.content[0].text, "Approved TASK-6; runner started.");
+  assert.equal(firstOverlapResult.content[0].text, "Approved TASK-6; runner starting.");
   assert.equal(secondOverlapResult.content[0].text, "Bounced TASK-7: extensions/board.ts is already claimed by TASK-6");
   assert.equal(secondOverlapResult.content[0].text.includes("\n"), false);
   assert.equal(overlapBoard.get("TASK-7").status, "To Do");
@@ -654,7 +918,7 @@ try {
   releaseClearVet();
   const clearResults = await Promise.all([firstClear, secondClear]);
   assert.deepEqual(clearResults.map((value) => value.content[0].text).sort(), [
-    "Approved TASK-8; runner started.", "Approved TASK-9; runner started.",
+    "Approved TASK-8; runner starting.", "Approved TASK-9; runner starting.",
   ]);
   assert.ok(clearEvents.indexOf("status:TASK-8:In Progress") < clearEvents.indexOf("second-vet-after-first-claim"));
   assert.deepEqual(clear.calls.notes.sort(), ["TASK-8", "TASK-9"]);

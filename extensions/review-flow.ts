@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { EventPlaneClient } from "../bin/lib/event-plane-client.ts";
 import { atomicPrivateJson, readHandoff, stateHome } from "../bin/lib/run.mjs";
 import { formatPack, isFailedLand, isQaPassedProposal, listProposals, prepareDone, projectFromCwd } from "../bin/lib/review.mjs";
-import { RUN_BLOCKED_KIND, parseRunEvent, runEventDeliveryGuard, runEventEndpoint, runEventRecipient } from "../bin/lib/run-events.mjs";
+import { RUN_BLOCKED_KIND, RUN_BOOTSTRAP_FAILED_KIND, parseRunEvent, runEventDeliveryGuard, runEventEndpoint, runEventRecipient } from "../bin/lib/run-events.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -25,8 +25,21 @@ function commandReason(execution, fallback) {
   return execution?.stderr?.trim() || execution?.stdout?.trim() || fallback;
 }
 
-function runOutcomeMessage(event) {
+export function runOutcomeMessage(event) {
   const payload = event.payload;
+  if (event.kind === RUN_BOOTSTRAP_FAILED_KIND) {
+    return {
+      customType: "qq-run-bootstrap-failed",
+      content: [
+        `Runner start failed for ${payload.task.id} — ${payload.task.title}`,
+        `At: ${payload.bootstrap.failed_at}`,
+        `Reason: ${payload.bootstrap.reason}`,
+        payload.bootstrap.task_returned ? "The task was returned to To Do." : "The task could not be returned automatically; operator action is required.",
+      ].join("\n"),
+      display: true,
+      details: { ...payload, event_id: event.eventId },
+    };
+  }
   if (event.kind === RUN_BLOCKED_KIND) {
     return {
       customType: "qq-run-blocked",
