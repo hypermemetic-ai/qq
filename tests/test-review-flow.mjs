@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -10,6 +10,14 @@ const runLib = await import(pathToFileURL(join(root, "bin/lib/run.mjs")));
 const runEvents = await import(pathToFileURL(join(root, "bin/lib/run-events.mjs")));
 const extension = await import(pathToFileURL(join(root, "extensions/review-flow.ts")));
 const qaResult = await import(pathToFileURL(join(root, "extensions/qa-result.ts")));
+
+async function waitFor(label, predicate) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.fail(`timed out waiting for ${label}`);
+}
 
 assert.deepEqual(review.parseNumstat("3\t1\tsrc/a.ts\n-\t-\tassets/x.bin\n"), [
   { path: "src/a.ts", added: 3, deleted: 1 },
@@ -249,6 +257,7 @@ try {
   const successfulLandEvents = new Map();
   const successfulLandMessages = [];
   const successfulLandNotifications = [];
+  const successfulLandSessionPath = join(scratch, "successful-land-session.jsonl");
   const acknowledgedRunEvents = [];
   const runEventNextCalls = [];
   let releaseRunEvent;
@@ -291,7 +300,10 @@ try {
     events: { on(name, fn) { successfulLandEvents.set(name, fn); } },
     on(name, fn) { successfulLandEvents.set(name, fn); },
     exec: successfulLandRun,
-    sendMessage(payload, options) { successfulLandMessages.push({ payload, options }); },
+    async sendMessage(payload, options) {
+      successfulLandMessages.push({ payload, options });
+      await writeFile(successfulLandSessionPath, `${JSON.stringify({ type: "custom_message", ...payload })}\n`);
+    },
   };
   extension.default(successfulLandPi, {
     env: successfulLandEnv, exec: successfulLandRun, eventClient: successfulLandEventClient,
@@ -300,7 +312,10 @@ try {
   const successfulLandCtx = {
     ...ctx,
     isIdle: () => !architectBusy,
-    sessionManager: { getSessionId() { return successfulLandState.architectSession; } },
+    sessionManager: {
+      getSessionId() { return successfulLandState.architectSession; },
+      getSessionFile() { return successfulLandSessionPath; },
+    },
     ui: {
       async select() { return "approve"; },
       async input() { throw new Error("successful land should not request input"); },
@@ -308,7 +323,7 @@ try {
     },
   };
   await successfulLandEvents.get("session_start")({}, successfulLandCtx);
-  await new Promise((resolve) => setImmediate(resolve));
+  await waitFor("persisted landed event acknowledgement", () => acknowledgedRunEvents.length === 1);
   assert.equal(JSON.parse(await readFile(successfulLandPath, "utf8")).status, "landed");
   assert.equal(runEventNextCalls[0].consumer_id, `qq/review-flow/${successfulLandState.architectSession}`);
   assert.equal(successfulLandMessages.length, 1);
@@ -339,23 +354,29 @@ try {
   const blockedPayload = runEvents.runEventPayload(blockedOutcome, runEvents.RUN_BLOCKED_KIND);
   const blockedMessages = [];
   const blockedEvents = new Map();
-  let blockedNext = true;
+  const blockedSessionPath = join(scratch, "blocked-event-session.jsonl");
+  const blockedRetries = [];
+  const blockedAcknowledgements = [];
+  const blockedReleases = [];
+  const blockedDelivery = {
+    record: {
+      event_id: "evt_run_blocked", product_id: "qq", kind: runEvents.RUN_BLOCKED_KIND,
+      producer_id: "qq/review-worker", origin_id: "qq/review-worker",
+      recipient_id: runEvents.runEventRecipient(base.architectSession), envelope: { payload: blockedPayload },
+    },
+    obligation: { obligation_id: "obl_run_blocked", consumer_type: "recipient", consumer_id: runEvents.runEventRecipient(base.architectSession), generation: 0 },
+    attempt_token: "try_run_blocked", endpoint_token: "endpoint_run_blocked",
+    guard: { expected_high_water: 0, expected_gap_token: "gap_run_blocked" },
+  };
+  let blockedNextCalls = 0;
   const blockedEventClient = {
     async next() {
-      if (!blockedNext) return new Promise(() => {});
-      blockedNext = false;
-      return { delivery: {
-        record: {
-          event_id: "evt_run_blocked", product_id: "qq", kind: runEvents.RUN_BLOCKED_KIND,
-          producer_id: "qq/review-worker", origin_id: "qq/review-worker",
-          recipient_id: runEvents.runEventRecipient(base.architectSession), envelope: { payload: blockedPayload },
-        },
-        obligation: { obligation_id: "obl_run_blocked", consumer_type: "recipient", consumer_id: runEvents.runEventRecipient(base.architectSession), generation: 0 },
-        attempt_token: "try_run_blocked", endpoint_token: "endpoint_run_blocked",
-        guard: { expected_high_water: 0, expected_gap_token: "gap_run_blocked" },
-      } };
+      blockedNextCalls += 1;
+      if (blockedNextCalls === 1) return { delivery: blockedDelivery };
+      return new Promise((resolve) => { blockedReleases.push(resolve); });
     },
-    async acknowledge() {},
+    async acknowledge(guard) { blockedAcknowledgements.push(guard); },
+    async retry(guard) { blockedRetries.push(guard); },
     async block() { throw new Error("a valid blocked outcome must not be blocked"); },
   };
   const blockedPi = {
@@ -366,13 +387,36 @@ try {
   };
   const blockedEventEnv = { ...listEnv, XDG_STATE_HOME: join(scratch, "blocked-event-xdg"), QQ_AGENT_ROLE: "architect" };
   extension.default(blockedPi, { env: blockedEventEnv, exec: architectRun, eventClient: blockedEventClient });
-  await blockedEvents.get("session_start")({}, ctx);
-  await new Promise((resolve) => setImmediate(resolve));
+  const blockedCtx = {
+    ...ctx,
+    sessionManager: {
+      getSessionId() { return base.architectSession; },
+      getSessionFile() { return blockedSessionPath; },
+    },
+  };
+  await blockedEvents.get("session_start")({}, blockedCtx);
+  await waitFor("initial blocked event retry", () => blockedRetries.length === 1);
   assert.equal(blockedMessages.length, 1);
   assert.equal(blockedMessages[0].payload.customType, "qq-run-blocked");
   assert.equal(blockedMessages[0].payload.details.schema, "qq.run-blocked/v1");
   assert.match(blockedMessages[0].payload.content, /QA blocked TASK-1 after look 2/);
   assert.deepEqual(blockedMessages[0].options, { triggerTurn: true });
+  assert.equal(blockedAcknowledgements.length, 0, "run event must not be acknowledged before Pi persists it");
+  assert.equal(blockedRetries.length, 1);
+
+  blockedReleases.shift()({ delivery: blockedDelivery });
+  await waitFor("redelivered blocked event retry", () => blockedRetries.length === 2);
+  assert.equal(blockedMessages.length, 1, "redelivery while persistence is pending must not trigger another turn");
+  assert.equal(blockedAcknowledgements.length, 0);
+  assert.equal(blockedRetries.length, 2);
+
+  await writeFile(blockedSessionPath, `${JSON.stringify({
+    type: "custom_message", customType: "qq-run-blocked", details: { event_id: "evt_run_blocked" },
+  })}\n`);
+  blockedReleases.shift()({ delivery: blockedDelivery });
+  await waitFor("persisted blocked event acknowledgement", () => blockedAcknowledgements.length === 1);
+  assert.equal(blockedMessages.length, 1);
+  assert.equal(blockedAcknowledgements.length, 1, "persisted run event should be acknowledged on redelivery");
   await blockedEvents.get("session_shutdown")();
 
   const failedLandXdg = join(scratch, "failed-land-xdg");

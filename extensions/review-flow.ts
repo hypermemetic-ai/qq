@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -69,6 +70,7 @@ export default function registerReviewFlow(pi, deps = {}) {
   let receiverEpoch = 0;
   let showing = false;
   const shown = new Set();
+  const injectedRunEvents = new Set();
 
   pi.registerTool({
     name: "done", label: "Done", promptSnippet: "Submit the delegated ref to independent qa and stop",
@@ -158,6 +160,20 @@ export default function registerReviewFlow(pi, deps = {}) {
     }
   }
 
+  async function runEventReceiptExists(eventId, customType) {
+    const path = currentContext?.sessionManager?.getSessionFile?.();
+    if (typeof path !== "string") return false;
+    const text = await readFile(path, "utf8").catch(() => "");
+    for (const line of text.split("\n")) {
+      if (!line) continue;
+      try {
+        const value = JSON.parse(line);
+        if (value?.type === "custom_message" && value.customType === customType && value.details?.event_id === eventId) return true;
+      } catch {}
+    }
+    return false;
+  }
+
   async function receiveRunEvent(delivery, sessionId, localEpoch) {
     const guard = runEventDeliveryGuard(delivery);
     const event = parseRunEvent(delivery, sessionId);
@@ -165,12 +181,33 @@ export default function registerReviewFlow(pi, deps = {}) {
       await eventClient.block({ ...guard, reason: "unsupported qq run outcome" });
       return;
     }
+    const message = runOutcomeMessage(event);
+    if (await runEventReceiptExists(event.eventId, message.customType)) {
+      await eventClient.acknowledge(guard);
+      injectedRunEvents.delete(event.eventId);
+      return;
+    }
+    if (injectedRunEvents.has(event.eventId)) {
+      await eventClient.retry({ ...guard, reason: "Pi session persistence not yet observable" });
+      return;
+    }
     if (!receiverActive || localEpoch !== receiverEpoch || !currentContext) return;
+    injectedRunEvents.add(event.eventId);
     const options = currentContext.isIdle?.() === false
       ? { triggerTurn: true, deliverAs: "steer" }
       : { triggerTurn: true };
-    await pi.sendMessage(runOutcomeMessage(event), options);
-    await eventClient.acknowledge(guard);
+    try {
+      await pi.sendMessage(message, options);
+    } catch (error) {
+      injectedRunEvents.delete(event.eventId);
+      throw error;
+    }
+    if (await runEventReceiptExists(event.eventId, message.customType)) {
+      await eventClient.acknowledge(guard);
+      injectedRunEvents.delete(event.eventId);
+    } else {
+      await eventClient.retry({ ...guard, reason: "Pi session persistence not yet observable" });
+    }
   }
 
   async function receiveRunEvents(sessionId, localEpoch) {
