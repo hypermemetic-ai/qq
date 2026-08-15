@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { contextWindowCeilingFor, profileFor, readExecutionPolicy } from "../bin/lib/execution-profiles.mjs";
+import { contextWindowCeilingFor, profileFor, readExecutionPolicy, SERVICE_NAMES } from "../bin/lib/execution-profiles.mjs";
 import { DEFAULT_ROLE, isActivatedRepository, ROLE_NAMES, validateRole } from "../bin/lib/roles.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -196,8 +196,7 @@ export default function registerExecutionProfiles(pi, deps = {}) {
     for (const [roleName, role] of Object.entries(policy.roles)) {
       for (const [name, profile] of Object.entries(role.profiles)) check(`${roleName} profile ${name}`, profile);
     }
-    check("scribe", policy.scribe);
-    check("qa", policy.qa);
+    for (const name of SERVICE_NAMES) check(name, policy[name]);
   }
 
   async function applyRoleProfile(roleName, profileName, ctx, notify = true) {

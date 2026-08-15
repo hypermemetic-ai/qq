@@ -16,6 +16,7 @@ function policy(defaultProfile = "grok-high") {
     contextWindowCeiling: 200000,
     scribe: { provider: "xai-auth", model: "grok-4.6", effort: "high" },
     qa: { provider: "openai-codex", model: "gpt-5.6-sol", effort: "xhigh" },
+    openwiki: { provider: "openai-codex", model: "gpt-5.6-sol", effort: "medium" },
     roles: {
       runner: {
         default: defaultProfile,
@@ -42,6 +43,7 @@ assert.throws(() => roles.validateRole("observer"), /unknown qq role/);
 assert.equal(lib.validateExecutionPolicy(policy()).roles.runner.default, "grok-high");
 assert.deepEqual(lib.validateExecutionPolicy(policy()).scribe, { provider: "xai-auth", model: "grok-4.6", effort: "high" });
 assert.deepEqual(lib.validateExecutionPolicy(policy()).qa, { provider: "openai-codex", model: "gpt-5.6-sol", effort: "xhigh" });
+assert.deepEqual(lib.validateExecutionPolicy(policy()).openwiki, { provider: "openai-codex", model: "gpt-5.6-sol", effort: "medium" });
 const publicXaiPolicy = policy();
 publicXaiPolicy.roles.runner.profiles["grok-high"].provider = "xai";
 assert.throws(() => lib.validateExecutionPolicy(publicXaiPolicy), /xai is disabled; use xai-auth/);
@@ -50,6 +52,8 @@ const { qa: _ignoredQa, ...withoutQa } = policy();
 assert.throws(() => lib.validateExecutionPolicy(withoutQa), /invalid top-level shape/);
 const { scribe: _ignored, ...withoutScribe } = policy();
 assert.throws(() => lib.validateExecutionPolicy(withoutScribe), /invalid top-level shape/);
+const { openwiki: _ignoredOpenWiki, ...withoutOpenWiki } = policy();
+assert.throws(() => lib.validateExecutionPolicy(withoutOpenWiki), /invalid top-level shape/);
 assert.throws(() => lib.validateExecutionPolicy({ ...policy(), roles: { ...policy().roles, observer: policy().roles.runner } }), /exactly: runner, architect/);
 assert.throws(() => lib.validateExecutionPolicy({ ...policy(), roles: { runner: policy().roles.runner, architect: policy().roles.architect, scribe: policy().roles.runner } }), /exactly: runner, architect/);
 assert.throws(() => lib.validateExecutionPolicy({ ...policy(), roles: { ...policy().roles, runner: { ...policy().roles.runner, default: "missing" } } }), /does not name/);
@@ -84,9 +88,19 @@ const expectedProfileList = {
   services: [
     { name: "scribe", provider: "xai-auth", model: "grok-4.6", effort: "high" },
     { name: "qa", provider: "openai-codex", model: "gpt-5.6-sol", effort: "xhigh" },
+    { name: "openwiki", provider: "openai-codex", model: "gpt-5.6-sol", effort: "medium" },
   ],
 };
 assert.deepEqual(lib.profileListDocument(lib.validateExecutionPolicy(policy())), expectedProfileList);
+assert.deepEqual(lib.profileListDocument(lib.validateExecutionPolicy(policy()), "openwiki"), {
+  schema: "qq.profile-list/v1",
+  roles: [],
+  services: [{ name: "openwiki", provider: "openai-codex", model: "gpt-5.6-sol", effort: "medium" }],
+});
+const distinctOpenWikiPolicy = policy();
+distinctOpenWikiPolicy.openwiki.model = "gpt-5.6-openwiki";
+assert.ok(lib.uniqueBindings(lib.validateExecutionPolicy(distinctOpenWikiPolicy))
+  .some(({ provider, model }) => provider === "openai-codex" && model === "gpt-5.6-openwiki"));
 assert.equal(lib.parseTokenCount("200K"), 200000);
 assert.equal(lib.parseTokenCount("1M"), 1_000_000);
 const parsed = lib.parseModelList("provider model context max-out thinking images\nopenai-codex gpt-5.6-sol 272K 128K yes yes\n");
@@ -111,14 +125,24 @@ try {
   assert.deepEqual(JSON.parse(profileListResult.stdout), expectedProfileList);
   assert.deepEqual(await lib.updateRoleDefault("runner", "qwen-deepseek-max", policyPath), { previous: "grok-high", current: "qwen-deepseek-max" });
   assert.equal((await lib.readExecutionPolicy(policyPath)).roles.runner.default, "qwen-deepseek-max");
+  const currentV1 = policy();
+  delete currentV1.openwiki;
+  await writeFile(policyPath, `${JSON.stringify(currentV1, null, 2)}\n`, { mode: 0o600 });
+  assert.deepEqual((await lib.readExecutionPolicy(policyPath)).openwiki, lib.DEFAULT_OPENWIKI_PROFILE);
+  let migrated = JSON.parse(await readFile(policyPath, "utf8"));
+  assert.deepEqual(migrated.openwiki, lib.DEFAULT_OPENWIKI_PROFILE);
   const legacy = policy();
   legacy.compactor = legacy.scribe;
   delete legacy.scribe;
+  delete legacy.openwiki;
   await writeFile(policyPath, `${JSON.stringify(legacy, null, 2)}\n`, { mode: 0o600 });
-  assert.deepEqual((await lib.readExecutionPolicy(policyPath)).scribe, legacy.compactor);
-  const migrated = JSON.parse(await readFile(policyPath, "utf8"));
+  const migratedLegacy = await lib.readExecutionPolicy(policyPath);
+  assert.deepEqual(migratedLegacy.scribe, legacy.compactor);
+  assert.deepEqual(migratedLegacy.openwiki, lib.DEFAULT_OPENWIKI_PROFILE);
+  migrated = JSON.parse(await readFile(policyPath, "utf8"));
   assert.equal(migrated.compactor, undefined);
   assert.deepEqual(migrated.scribe, legacy.compactor);
+  assert.deepEqual(migrated.openwiki, lib.DEFAULT_OPENWIKI_PROFILE);
   await lib.writeExecutionPolicy(policy(), policyPath);
 
   const modelsPath = join(temporary, "agent", "models.json");
@@ -266,6 +290,16 @@ try {
   }, "forced startup left the operator's pane mark unchanged");
   await handlers.get("session_shutdown")({ reason: "quit" }, ctx);
   ctx.cwd = root;
+
+  const unavailableOpenWiki = policy();
+  unavailableOpenWiki.openwiki.model = "gpt-5.6-openwiki";
+  await lib.writeExecutionPolicy(unavailableOpenWiki, policyPath);
+  extension.default(pi, { policyPath, env: { ...process.env, XDG_STATE_HOME: join(temporary, "state-openwiki") } });
+  await handlers.get("session_start")({ reason: "startup" }, ctx);
+  assert.deepEqual(await handlers.get("input")({}, ctx), { action: "handled" });
+  assert.ok(notifications.some(({ message }) => message.includes("openwiki model is unavailable")));
+  await handlers.get("session_shutdown")({ reason: "quit" }, ctx);
+  await lib.writeExecutionPolicy(policy(), policyPath);
 
   modelObjects.get("xai-auth/grok-4.6").contextWindow = 500000;
   extension.default(pi, { policyPath, env: { ...process.env, XDG_STATE_HOME: join(temporary, "state-2") } });
