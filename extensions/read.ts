@@ -43,18 +43,14 @@ function resolveFilePath(path, cwd) {
   return isAbsolute(value) ? value : resolve(cwd, value);
 }
 
-function imageMimeType(buffer) {
-  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return "image/png";
-  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return "image/jpeg";
-  const six = buffer.subarray(0, 6).toString("ascii");
-  if (six === "GIF87a" || six === "GIF89a") return "image/gif";
-  if (buffer.length >= 12 && buffer.subarray(0, 4).toString("ascii") === "RIFF" && buffer.subarray(8, 12).toString("ascii") === "WEBP") return "image/webp";
-  if (buffer.length >= 2 && buffer.subarray(0, 2).toString("ascii") === "BM") return "image/bmp";
-  return undefined;
-}
-
 function textResult(text, details) {
   return { content: [{ type: "text", text }], details };
+}
+
+function isBuiltInImageResult(result) {
+  if (result?.content?.some((item) => item?.type === "image")) return true;
+  const text = result?.content?.[0];
+  return text?.type === "text" && /^Read image file \[image\//.test(text.text);
 }
 
 function explicitSlice(text, offset, limit) {
@@ -175,6 +171,9 @@ function previewFallback(displayPath, text, budget) {
 export default function registerRead(pi, deps = {}) {
   const readFile = deps.readFile ?? ((path, signal) => fsReadFile(path, signal ? { signal } : undefined));
   const run = deps.exec ?? ((command, args, options) => pi.exec(command, args, options));
+  const createBuiltInRead = deps.createReadToolDefinition;
+  if (typeof createBuiltInRead !== "function") throw new Error("Pi's built-in read tool factory is required");
+  const builtInReads = new Map();
   const budget = deps.tokenBudget ?? TOKEN_BUDGET;
 
   pi.registerTool({
@@ -208,27 +207,19 @@ export default function registerRead(pi, deps = {}) {
         },
       },
     },
-    async execute(_id, params, signal, _onUpdate, ctx) {
+    async execute(id, params, signal, onUpdate, ctx) {
       if (signal?.aborted) throw new Error("Operation aborted");
-      const absolutePath = resolveFilePath(params.path, ctx?.cwd ?? process.cwd());
-      const buffer = await readFile(absolutePath, signal);
-      const mimeType = imageMimeType(buffer);
-      if (mimeType) {
-        if (ctx?.model && !ctx.model.input?.includes("image")) {
-          return textResult(
-            `Read image file [${mimeType}]\n[Current model does not support images. The image will be omitted from this request.]`,
-            undefined,
-          );
-        }
-        return {
-          content: [
-            { type: "text", text: `Read image file [${mimeType}]` },
-            { type: "image", data: buffer.toString("base64"), mimeType },
-          ],
-          details: undefined,
-        };
+      const cwd = ctx?.cwd ?? process.cwd();
+      let builtInRead = builtInReads.get(cwd);
+      if (!builtInRead) {
+        builtInRead = createBuiltInRead(cwd);
+        builtInReads.set(cwd, builtInRead);
       }
+      const builtInResult = await builtInRead.execute(id, params, signal, onUpdate, ctx);
+      if (isBuiltInImageResult(builtInResult)) return builtInResult;
 
+      const absolutePath = resolveFilePath(params.path, cwd);
+      const buffer = await readFile(absolutePath, signal);
       const text = buffer.toString("utf-8");
       if (params.ranges !== undefined) return textResult(rangeSlices(text, params.ranges), undefined);
       if (params.offset !== undefined || params.limit !== undefined) {

@@ -1,4 +1,5 @@
 // Fresh qq's global Pi extension entry point.
+import { createReadToolDefinition } from "@mariozechner/pi-coding-agent";
 import registerExecutionProfiles from "./execution-profiles.ts";
 import registerRead from "./read.ts";
 import registerAgentMessages from "./agent-messages.ts";
@@ -12,7 +13,7 @@ import registerReviewFlow from "./review-flow.ts";
 
 export default function registerQQ(pi) {
   registerExecutionProfiles(pi);
-  registerRead(pi);
+  registerRead(pi, { createReadToolDefinition });
   registerAgentMessages(pi);
   registerOperatorStage(pi);
   registerContinue(pi);
