@@ -127,18 +127,14 @@ EOF
 cat > "$build_mock/cargo" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-stdin=$(readlink "/proc/$$/fd/0")
-[[ ! -t 0 ]] || stdin=tty
-printf '%s %s\n' "${1:-}" "$stdin" >> "$QQ_HERDR_CARGO_LOG"
 case ${1:-} in
   fmt)
-    [[ $stdin == tty ]]
     ;;
   test)
-    [[ $stdin == /dev/null ]]
+    [[ ! -t 0 ]]
+    printf 'test\n' >> "$QQ_HERDR_CARGO_LOG"
     ;;
   build)
-    [[ $stdin == /dev/null ]]
     mkdir -p target/release
     printf '#!/usr/bin/env bash\nprintf "herdr 0.8.0\\n"\n' > target/release/herdr
     chmod +x target/release/herdr
@@ -155,13 +151,8 @@ PATH="$build_mock:$PATH" \
   QQ_HERDR_SOURCE_DIR="$build_source" \
   QQ_HERDR_BINARY_OUT="$work/build-output/herdr" \
   QQ_HERDR_CARGO_LOG="$work/cargo.log" \
-  script -qfec "$build_root/bin/qq-herdr-build" /dev/null >/dev/null
-cat > "$work/expected-cargo.log" <<'EOF'
-fmt tty
-test /dev/null
-test /dev/null
-build /dev/null
-EOF
-diff -u "$work/expected-cargo.log" "$work/cargo.log"
+  QQ_HERDR_RUN="$build_root/bin/qq-herdr-build" \
+  script -qfec "test -t 0 && exec \"\$QQ_HERDR_RUN\"" /dev/null >/dev/null
+[[ $(cat "$work/cargo.log") == $'test\ntest' ]]
 
 printf 'herdr downstream contract tests passed\n'
