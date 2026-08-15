@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
+const OPENWIKI_MATERIALIZE = resolve(dirname(fileURLToPath(import.meta.url)), "../qq-openwiki-materialize");
 const TASK_ID = /^[A-Za-z]+-[1-9][0-9]*(?:\.[1-9][0-9]*)?$/;
 const SAFE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const BRIEF_GATE_PLUGIN = "qq.brief-gate";
@@ -286,6 +288,7 @@ export async function startRun(options) {
     await privateDirectory(stateDir);
     await checked(run, "git", ["worktree", "add", "-b", branch, worktree, baseRef], { cwd: mainRoot, signal }, "cannot create worktree");
     createdWorktree = true;
+    await checked(run, OPENWIKI_MATERIALIZE, ["freeze", worktree], { cwd: worktree, signal }, "cannot protect delegated OpenWiki materialization");
 
     const tabsResult = await checked(run, "herdr", ["tab", "list", "--workspace", workspace], { signal }, "cannot list Herdr tabs");
     const tabs = parseHerdr(tabsResult.stdout, "tab_list")?.tabs ?? [];

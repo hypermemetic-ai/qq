@@ -8,6 +8,7 @@ import { RUN_BLOCKED_KIND, sendRunEvent } from "./run-events.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const BACKLOG = join(QQ_ROOT, "node_modules", ".bin", "backlog");
+const OPENWIKI_MATERIALIZE = join(QQ_ROOT, "bin", "qq-openwiki-materialize");
 
 function reason(result, fallback) {
   return result?.stderr?.trim() || result?.stdout?.trim() || fallback;
@@ -107,6 +108,10 @@ export async function landHandoff(run, statePath) {
     if (dirtyMainStatus.trim()) throw new Error(`main checkout clean-checkout invariant violation; dirty paths:\n${dirtyMainStatus}`);
     const worktreeStatus = await checked(run, "git", ["status", "--porcelain", "--untracked-files=all"], { cwd: state.worktree }, "cannot inspect delegated worktree");
     if (worktreeStatus.stdout.trim()) throw new Error("delegated worktree has uncommitted residue");
+    const proposalDiff = await checked(run, "git", ["diff", "--name-only", "--no-renames", "-z", `${state.baseRef}...${state.ref}`, "--"], { cwd: state.worktree }, "cannot inspect proposal paths");
+    const generatedPaths = parseChangedPaths(proposalDiff.stdout).filter((path) => path === "openwiki" || path.startsWith("openwiki/"));
+    if (generatedPaths.length) throw new Error(`delegated proposal changes generated OpenWiki paths: ${generatedPaths.join(", ")}`);
+    await checked(run, OPENWIKI_MATERIALIZE, ["freeze", state.mainRoot], { cwd: state.mainRoot }, "cannot protect main OpenWiki materialization");
     const merged = await run("git", ["merge-base", "--is-ancestor", state.ref, "HEAD"], { cwd: state.mainRoot });
     if (merged?.code !== 0 && merged?.code !== 1) throw new Error(`cannot inspect whether proposal is already merged: ${reason(merged, "command failed")}`);
     if (merged.code === 1) {

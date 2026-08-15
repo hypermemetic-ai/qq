@@ -58,6 +58,7 @@ try {
     if (command === "git" && args[0] === "rev-parse") return { code: 0, stdout: "refsha\n", stderr: "" };
     if (command === "git" && args[0] === "status") return { code: 0, stdout: "", stderr: "" };
     if (command === "git" && args[0] === "symbolic-ref") return { code: 0, stdout: "main\n", stderr: "" };
+    if (command === "git" && args[0] === "diff" && args.includes("--name-only")) return { code: 0, stdout: "src/a.ts\0", stderr: "" };
     if (command === "git" && args[0] === "diff") return { code: 0, stdout: "2\t1\tsrc/a.ts\n", stderr: "" };
     if (command === "git" && args[0] === "merge-base" && args.at(-1) === "HEAD") return { code: 1, stdout: "", stderr: "" };
     if (command === "git" && args[0] === "for-each-ref") return { code: 0, stdout: "origin\0refs/heads/main\n", stderr: "" };
@@ -102,6 +103,23 @@ try {
   assert.equal(dirtyMainCalls.some(({ command, args }) => command === "git" && ["merge-tree", "merge", "stash", "reset"].includes(args[0])), false);
   assert.deepEqual(boardStatuses(calls), []);
 
+  await runLib.atomicPrivateJson(statePath, prepared);
+  const generatedDiffCalls = [];
+  const generatedDiffRun = async (command, args, options = {}) => {
+    generatedDiffCalls.push({ command, args, options });
+    if (command === "git" && args[0] === "diff" && args.includes("--name-only")) {
+      return { code: 0, stdout: "src/a.ts\0openwiki/quickstart.md\0", stderr: "" };
+    }
+    return run(command, args, options);
+  };
+  await assert.rejects(
+    review.landHandoff(generatedDiffRun, statePath),
+    /delegated proposal changes generated OpenWiki paths: openwiki\/quickstart\.md/,
+  );
+  assert.equal(generatedDiffCalls.some(({ command, args }) => command === "git" && ["merge-tree", "merge", "push"].includes(args[0])), false);
+  assert.equal(generatedDiffCalls.some(({ command }) => command.endsWith("/bin/qq-openwiki-materialize")), false);
+
+  await runLib.atomicPrivateJson(statePath, prepared);
   await review.landHandoff(run, statePath);
   assert.equal(JSON.parse(await readFile(statePath, "utf8")).status, "landed");
   const operations = calls.filter(({ command }) => command === "git").map(({ args }) => args[0]);
@@ -113,6 +131,12 @@ try {
   assert.ok(operations.indexOf("merge") < operations.indexOf("push"));
   assert.ok(operations.indexOf("push") < operations.indexOf("worktree"));
   assert.ok(operations.indexOf("worktree") < operations.indexOf("branch"));
+  const materializeCall = calls.find(({ command, args }) => command.endsWith("/bin/qq-openwiki-materialize") && args[0] === "freeze");
+  assert.deepEqual(materializeCall?.args, ["freeze", mainRoot]);
+  assert.equal(materializeCall?.options.cwd, mainRoot);
+  const materializeCallIndex = calls.indexOf(materializeCall);
+  const mergeCallIndex = calls.findIndex(({ command, args }) => command === "git" && args[0] === "merge");
+  assert.ok(materializeCallIndex < mergeCallIndex);
   const pushCall = calls.find(({ command, args }) => command === "git" && args[0] === "push");
   assert.deepEqual(pushCall.args, ["push", "origin", "HEAD:refs/heads/main"]);
   assert.equal(pushCall.options.cwd, mainRoot);

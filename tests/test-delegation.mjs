@@ -242,6 +242,12 @@ try {
   assert.equal(await readFile(state.notePath, "utf8"), `${exactNote}\n`);
   assert.equal(JSON.parse(await readFile(state.statePath, "utf8")).status, "running");
   assert.ok(spawnCalls.every(({ options }) => options.signal === startSignal));
+  const worktreeAddIndex = spawnCalls.findIndex(({ command, args }) => command === "git" && args[0] === "worktree" && args[1] === "add");
+  const materializeIndex = spawnCalls.findIndex(({ command, args }) => command.endsWith("/bin/qq-openwiki-materialize") && args[0] === "freeze");
+  const firstHerdrIndex = spawnCalls.findIndex(({ command }) => command === "herdr");
+  assert.ok(worktreeAddIndex < materializeIndex && materializeIndex < firstHerdrIndex);
+  assert.deepEqual(spawnCalls[materializeIndex].args, ["freeze", prepared.worktree]);
+  assert.equal(spawnCalls[materializeIndex].options.cwd, prepared.worktree);
   const create = spawnCalls.find(({ command, args }) => command === "herdr" && args[0] === "tab" && args[1] === "create");
   assert.deepEqual(create.args.slice(0, 6), ["tab", "create", "--workspace", "w2T", "--label", "runs"]);
   assert.ok(create.args.includes("QQ_AGENT_ROLE=runner"));
