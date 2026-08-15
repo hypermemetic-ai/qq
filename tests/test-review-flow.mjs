@@ -301,7 +301,14 @@ try {
     exec: architectRun,
     sendMessage(payload, options) { messages.push({ payload, options }); },
   };
-  extension.default(architectPi, { env: { ...listEnv, QQ_AGENT_ROLE: "architect" }, exec: architectRun, eventClient: quietEventClient });
+  const bootstrapFailureRetries = [];
+  extension.default(architectPi, {
+    env: { ...listEnv, QQ_AGENT_ROLE: "architect" }, exec: architectRun, eventClient: quietEventClient,
+    async retryBootstrapFailureOutbox(sessionId, options) {
+      bootstrapFailureRetries.push({ sessionId, options });
+      return { attempted: 0, delivered: 0 };
+    },
+  });
   assert.equal(architectTools.some(({ name }) => name === "review"), false);
   const choices = [];
   const queued = ["later"];
@@ -317,10 +324,13 @@ try {
     },
   };
   await architectEvents.get("session_start")({}, ctx);
+  assert.equal(bootstrapFailureRetries[0].sessionId, base.architectSession, "architect startup must retry its bootstrap failure outbox");
+  assert.equal(bootstrapFailureRetries[0].options.client, quietEventClient);
   assert.deepEqual(choices.map((item) => item.options), [["approve", "discuss", "later"]]);
   assert.equal(choices[0].pack, "small fix\nsrc/a.ts +2/-1");
   assert.equal(JSON.parse(await readFile(laterPath, "utf8")).status, "later");
   await architectEvents.get("agent_settled")();
+  assert.equal(bootstrapFailureRetries.length, 2, "the architect's regular poll must retry its bootstrap failure outbox");
   assert.equal(choices.length, 1);
 
   const laterAgain = JSON.parse(await readFile(laterPath, "utf8"));

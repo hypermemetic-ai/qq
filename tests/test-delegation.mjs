@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { access, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -61,6 +61,20 @@ await lib.submitAgentPrompt("w2T:p9", "private prompt", {
 });
 assert.deepEqual(promptRequests, [{ method: "agent.prompt", params: { target: "w2T:p9", text: "private prompt" } }]);
 assert.equal("wait" in promptRequests[0].params, false);
+
+let stalledPollSignal;
+let stalledPollTimeout;
+let stalledWatchdog;
+await Promise.race([
+  assert.rejects(lib.verifyPromptAcceptance((_paneId, options) => {
+    stalledPollSignal = options.signal;
+    stalledPollTimeout = options.timeoutMs;
+    return new Promise(() => {});
+  }, "w2T:p-stalled", "[qq-bootstrap:stalled]", { timeoutMs: 20 }), /not recorded within 20ms/),
+  new Promise((_, reject) => { stalledWatchdog = setTimeout(() => reject(new Error("stalled agent inspection remained pending")), 500); }),
+]).finally(() => clearTimeout(stalledWatchdog));
+assert.equal(stalledPollSignal.aborted, true, "a stalled agent inspection must be cancelled at the verification deadline");
+assert.ok(stalledPollTimeout > 0 && stalledPollTimeout <= 20, "each inspection must be bounded by the remaining deadline");
 
 const scratch = await mkdtemp(join(homedir(), "qq-delegation-test."));
 try {
@@ -279,6 +293,7 @@ try {
     } },
   });
   const userMessage = (text) => `${JSON.stringify({ type: "message", message: { role: "user", content: [{ type: "text", text }] } })}\n`;
+  const inspectAgentAt = (sessionPath) => async (paneId) => JSON.parse(agentInfo(paneId, sessionPath));
   const spawnCalls = [];
   const submittedPrompts = [];
   const spawnRun = async (command, args, options = {}) => {
@@ -288,7 +303,6 @@ try {
     if (command === "git" && args[0] === "symbolic-ref") return { code: 0, stdout: "main\n", stderr: "" };
     if (command === "herdr" && args[0] === "tab" && args[1] === "list") return { code: 0, stdout: JSON.stringify({ id: "cli:tab:list", result: { type: "tab_list", tabs: [] } }), stderr: "" };
     if (command === "herdr" && args[0] === "tab" && args[1] === "create") return { code: 0, stdout: JSON.stringify({ id: "cli:tab:create", result: { type: "tab_created", root_pane: { pane_id: "w2T:p9" }, tab: { tab_id: "w2T:t9" } } }), stderr: "" };
-    if (command === "herdr" && args[0] === "agent" && args[1] === "get") return { code: 0, stdout: agentInfo(args[2], proofPath), stderr: "" };
     if (command === "herdr" && args[0] === "pane" && args[1] === "process-info") {
       const ready = spawnCalls.filter((call) => call.command === "herdr" && call.args[0] === "pane" && call.args[1] === "process-info").length >= 2;
       return {
@@ -313,6 +327,7 @@ try {
     run: spawnRun, cwd: "/repo", env, task, prepared, signal: startSignal,
     architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9",
     qaBinding: { provider: "openai-codex", model: "gpt-5.6-sol", effort: "xhigh" },
+    inspectAgent: inspectAgentAt(proofPath),
     async submitPrompt(paneId, prompt) {
       statusAtPrompt = JSON.parse(await readFile(prepared.statePath, "utf8")).status;
       submittedPrompts.push({ paneId, prompt });
@@ -348,6 +363,7 @@ try {
   assert.ok(herdrOps.indexOf("pane process-info") > herdrOps.indexOf("pane rename"));
   assert.ok(herdrOps.lastIndexOf("pane process-info") < herdrOps.indexOf("agent start"));
   assert.equal(herdrOps.includes("agent prompt"), false, "the private prompt must not be placed in CLI argv");
+  assert.equal(herdrOps.includes("agent get"), false, "prompt verification must not spawn a Herdr CLI poll");
   const start = spawnCalls.find(({ command, args }) => command === "herdr" && args[0] === "agent" && args[1] === "start");
   assert.deepEqual(start.args.slice(0, 2), ["agent", "start"]);
   assert.equal(submittedPrompts.length, 1);
@@ -426,12 +442,12 @@ try {
         stderr: "",
       };
     }
-    if (command === "herdr" && args[0] === "agent" && args[1] === "get") return { code: 0, stdout: agentInfo(args[2], proofPath), stderr: "" };
     return { code: 0, stdout: "", stderr: "" };
   };
   const existingState = await lib.startRun({
     run: existingRun, cwd: "/repo", env, task: existingTask, prepared: existingPreparation,
     architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9", qaBinding: {},
+    inspectAgent: inspectAgentAt(proofPath),
     async submitPrompt(_paneId, prompt) { await writeFile(proofPath, userMessage(prompt)); },
   });
   assert.equal(existingState.pane, "w2T:p-new");
@@ -448,6 +464,7 @@ try {
   const coldCalls = [];
   let coldPrompt;
   let coldSubmissions = 0;
+  let coldInspections = 0;
   let coldClock = 0;
   const coldRun = async (command, args, options = {}) => {
     coldCalls.push({ command, args, options });
@@ -459,6 +476,10 @@ try {
   const coldState = await lib.startRun({
     run: coldRun, cwd: "/repo", env, task: coldTask, prepared: coldPreparation,
     architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9", qaBinding: {},
+    async inspectAgent(paneId) {
+      coldInspections += 1;
+      return JSON.parse(agentInfo(paneId, coldSessionPath));
+    },
     verificationTimeoutMs: 30_000, verificationIntervalMs: 6_001,
     now: () => coldClock,
     async sleep(ms) {
@@ -474,7 +495,8 @@ try {
   });
   assert.equal(coldSubmissions, 1);
   assert.ok(coldClock > 5_000, "cold prompt proof should be allowed beyond Herdr's old five-second heuristic");
-  assert.equal(coldCalls.filter(({ command, args }) => command === "herdr" && args[0] === "agent" && args[1] === "get").length, 2);
+  assert.equal(coldInspections, 2);
+  assert.equal(coldCalls.some(({ command, args }) => command === "herdr" && args[0] === "agent" && args[1] === "get"), false);
   assert.equal(coldState.status, "running");
 
   const timeoutTask = { id: "TASK-11", title: "Unproved prompt" };
@@ -493,6 +515,7 @@ try {
   await assert.rejects(lib.startRun({
     run: timeoutRun, cwd: "/repo", env, task: timeoutTask, prepared: timeoutPreparation,
     architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9", qaBinding: {},
+    inspectAgent: inspectAgentAt(timeoutSessionPath),
     verificationTimeoutMs: 30_000, verificationIntervalMs: 10_000,
     now: () => timeoutClock,
     async sleep(ms) {
@@ -542,6 +565,7 @@ try {
   });
   let boardAttempts = 0;
   let eventAttempts = 0;
+  let outboxPersistedBeforeCleanup = false;
   let notificationBody;
   const failurePayloads = [];
   const workerEnv = { ...env, TEST_API_TOKEN: "credential-secret" };
@@ -556,16 +580,20 @@ try {
     async setBoardStatus(_run, cwd, id, status) {
       boardAttempts += 1;
       assert.deepEqual({ cwd, id, status }, { cwd: "/repo", id: workerTask.id, status: "To Do" });
-      await assert.rejects(access(workerPreparation.stateDir), { code: "ENOENT" });
+      await access(workerPreparation.stateDir);
       if (boardAttempts === 1) throw new Error("temporary board failure");
+    },
+    async persistBootstrapFailure(outcome, options) {
+      await access(workerPreparation.stateDir);
+      outboxPersistedBeforeCleanup = true;
+      return bootstrap.persistBootstrapFailure(outcome, options);
     },
     async sendRunEvent(outcome, kind) {
       eventAttempts += 1;
       assert.equal(kind, runEvents.RUN_BOOTSTRAP_FAILED_KIND);
       await assert.rejects(access(workerPreparation.stateDir), { code: "ENOENT" });
-      const payload = runEvents.runEventPayload(outcome, kind);
-      failurePayloads.push(payload);
-      if (eventAttempts === 1) throw new Error("event response lost");
+      failurePayloads.push(runEvents.runEventPayload(outcome, kind));
+      throw new Error("event plane unavailable");
     },
     async notify(taskId, reason) {
       await assert.rejects(access(workerPreparation.stateDir), { code: "ENOENT" });
@@ -580,12 +608,33 @@ try {
     return true;
   });
   assert.equal(boardAttempts, 2, "idempotent board rollback should retry once");
-  assert.equal(eventAttempts, 2, "idempotent durable delivery should retry once");
+  assert.equal(eventAttempts, 2, "bootstrap may attempt immediate idempotent delivery twice");
+  assert.equal(outboxPersistedBeforeCleanup, true);
   assert.deepEqual(failurePayloads[0], failurePayloads[1]);
   assert.equal(failurePayloads[1].bootstrap.task_returned, true);
   assert.doesNotMatch(JSON.stringify(failurePayloads[1]), new RegExp(exactNote));
   assert.doesNotMatch(JSON.stringify(failurePayloads[1]), /credential-secret/);
   assert.equal(notificationBody, `${workerTask.id}: bootstrap failed`);
+  const outboxRoot = bootstrap.bootstrapFailureOutboxRoot(workerEnv);
+  const pendingOutbox = await readdir(outboxRoot);
+  assert.equal(pendingOutbox.length, 1, "sustained event-plane unavailability must leave a durable failure outbox entry");
+  assert.equal((await lstat(outboxRoot)).mode & 0o077, 0);
+  assert.equal((await lstat(join(outboxRoot, pendingOutbox[0]))).mode & 0o077, 0);
+  let drainedEvents = 0;
+  assert.deepEqual(await bootstrap.retryBootstrapFailureOutbox("019ff7ad-2cba-75a9-adc2-c15a0a92d6aa", {
+    env: workerEnv,
+    async sendRunEvent() { drainedEvents += 1; },
+  }), { attempted: 0, delivered: 0 }, "another architect must not drain this failure");
+  assert.deepEqual(await bootstrap.retryBootstrapFailureOutbox(workerRequest.architectSession, {
+    env: workerEnv,
+    async sendRunEvent(outcome, kind) {
+      drainedEvents += 1;
+      failurePayloads.push(runEvents.runEventPayload(outcome, kind));
+    },
+  }), { attempted: 1, delivered: 1 });
+  assert.equal(drainedEvents, 1);
+  assert.deepEqual(failurePayloads[2], failurePayloads[1]);
+  assert.deepEqual(await readdir(outboxRoot), []);
   const failureDelivery = {
     record: {
       event_id: "evt_bootstrap", product_id: "qq", kind: runEvents.RUN_BOOTSTRAP_FAILED_KIND,

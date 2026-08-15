@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { retryBootstrapFailureOutbox } from "../bin/lib/bootstrap.mjs";
 import { EventPlaneClient } from "../bin/lib/event-plane-client.ts";
 import { atomicPrivateJson, readHandoff, stateHome } from "../bin/lib/run.mjs";
 import { formatPack, isFailedLand, isQaPassedProposal, listProposals, prepareDone, projectFromCwd } from "../bin/lib/review.mjs";
@@ -75,6 +76,7 @@ export default function registerReviewFlow(pi, deps = {}) {
   const run = deps.exec ?? ((command, args, options) => pi.exec(command, args, options));
   const launchReview = deps.launchReview ?? ((statePath) => detachedWorker(join(QQ_ROOT, "bin", "qq-review-worker.mjs"), statePath, { ...process.env, ...env }));
   const eventClient = deps.eventClient ?? new EventPlaneClient(join(stateHome(env), "qq", "event-plane", "event-plane.sock"));
+  const retryBootstrapFailures = deps.retryBootstrapFailureOutbox ?? retryBootstrapFailureOutbox;
   const sleep = deps.sleep ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
   let role = env.QQ_AGENT_ROLE || "runner";
   let currentContext;
@@ -82,6 +84,7 @@ export default function registerReviewFlow(pi, deps = {}) {
   let receiverActive = false;
   let receiverEpoch = 0;
   let showing = false;
+  let retryingBootstrapFailures = false;
   const shown = new Set();
   const injectedRunEvents = new Set();
 
@@ -165,6 +168,13 @@ export default function registerReviewFlow(pi, deps = {}) {
   async function poll() {
     const ctx = currentContext;
     if (!ctx || role !== "architect") return;
+    const sessionId = ctx.sessionManager?.getSessionId?.();
+    if (!retryingBootstrapFailures && typeof sessionId === "string" && sessionId.length > 0) {
+      retryingBootstrapFailures = true;
+      void retryBootstrapFailures(sessionId, { env, client: eventClient })
+        .catch(() => {})
+        .finally(() => { retryingBootstrapFailures = false; });
+    }
     const project = projectFromCwd(ctx.cwd, env);
     for (const state of await listProposals(project, env)) {
       if (!ownsHandoff(state, ctx) || (state.status === "blocked" && !isFailedLand(state))) continue;

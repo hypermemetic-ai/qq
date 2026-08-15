@@ -259,7 +259,7 @@ export async function sessionHasPromptMarker(path, marker) {
 }
 
 function agentSessionPath(response, paneId) {
-  const agent = parseHerdr(response, "agent_info")?.agent;
+  const agent = parseHerdr(typeof response === "string" ? response : JSON.stringify(response), "agent_info")?.agent;
   const session = agent?.agent_session;
   if (agent?.pane_id !== paneId || agent.agent !== "pi" || session?.agent !== "pi" ||
       session.kind !== "path" || session.source !== "herdr:pi" ||
@@ -267,30 +267,55 @@ function agentSessionPath(response, paneId) {
   return session.value;
 }
 
-export async function verifyPromptAcceptance(run, paneId, marker, options = {}) {
+export async function verifyPromptAcceptance(inspectAgent, paneId, marker, options = {}) {
   const timeoutMs = options.timeoutMs ?? PROMPT_PROOF_TIMEOUT_MS;
   const intervalMs = options.intervalMs ?? 100;
   const sleep = options.sleep ?? ((ms) => new Promise((accept) => setTimeout(accept, ms)));
   const now = options.now ?? Date.now;
   const deadline = now() + timeoutMs;
   let lastReason = "Herdr has not reported the Pi session";
-  do {
-    const found = await run("herdr", ["agent", "get", paneId], { signal: options.signal });
-    if (found?.code === 0) {
+  while (now() < deadline) {
+    throwIfAborted(options.signal);
+    const remaining = deadline - now();
+    const controller = new AbortController();
+    const pollSignal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
+    let timer;
+    const timedOut = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const error = new Error("Herdr agent inspection timed out");
+        controller.abort(error);
+        reject(error);
+      }, remaining);
+    });
+    let response;
+    try {
+      response = await Promise.race([
+        inspectAgent(paneId, { signal: pollSignal, timeoutMs: remaining }),
+        timedOut,
+      ]);
+    } catch (error) {
+      throwIfAborted(options.signal);
+      lastReason = error instanceof Error ? error.message : String(error);
+      if (controller.signal.aborted) break;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (response !== undefined) {
       try {
-        const path = agentSessionPath(found.stdout, paneId);
+        const source = typeof response?.stdout === "string" ? response.stdout : response;
+        const path = response?.code !== undefined && response.code !== 0 ? undefined : agentSessionPath(source, paneId);
         if (path && await sessionHasPromptMarker(path, marker)) return path;
-        lastReason = path ? "the marked user message is not recorded yet" : "Herdr has not reported the Pi session";
+        lastReason = path ? "the marked user message is not recorded yet"
+          : response?.code !== undefined && response.code !== 0 ? reason(response, "cannot inspect the runs runner")
+          : "Herdr has not reported the Pi session";
       } catch (error) {
         lastReason = error instanceof Error ? error.message : String(error);
       }
-    } else {
-      lastReason = reason(found, "cannot inspect the runs runner");
     }
-    const remaining = deadline - now();
-    if (remaining <= 0) break;
-    await sleep(Math.min(intervalMs, remaining));
-  } while (now() <= deadline);
+    const afterPoll = deadline - now();
+    if (afterPoll <= 0) break;
+    await sleep(Math.min(intervalMs, afterPoll));
+  }
   throw new Error(`runner prompt acceptance was not recorded within ${timeoutMs}ms: ${lastReason}`);
 }
 
@@ -525,7 +550,9 @@ export async function startRun(options) {
     await checked(run, "herdr", ["agent", "start", `runner-${slug}-${nonce}`, "--kind", "pi", "--pane", paneId], { signal }, "cannot start runs runner");
     prompt = `${marker}\n\nWork from the full Backlog ticket and delegate note below. The note is also at ${notePath}. Implement the task in this worktree, commit the result, then call done with ref HEAD. Do not merge.\n\n${runnerTicket.trimEnd()}\n\n---\n\n## Delegate note\n\n${runnerNote.trimEnd()}`;
     await (options.submitPrompt ?? submitAgentPrompt)(paneId, prompt, { env, signal });
-    const sessionPath = await verifyPromptAcceptance(run, paneId, marker, {
+    const inspectAgent = options.inspectAgent ?? ((target, requestOptions) =>
+      herdrApiRequest("agent.get", { target }, { env, ...requestOptions }));
+    const sessionPath = await verifyPromptAcceptance(inspectAgent, paneId, marker, {
       signal,
       timeoutMs: options.verificationTimeoutMs,
       intervalMs: options.verificationIntervalMs,
@@ -553,8 +580,10 @@ export async function startRun(options) {
         if (removed?.code !== 0) cleanupFailures.push(new Error("delegation branch cleanup failed"));
       } catch { cleanupFailures.push(new Error("delegation branch cleanup failed")); }
     }
-    try { await rm(stateDir, { recursive: true, force: true }); }
-    catch { cleanupFailures.push(new Error("runner state cleanup failed")); }
+    if (!options.preserveStateOnFailure) {
+      try { await rm(stateDir, { recursive: true, force: true }); }
+      catch { cleanupFailures.push(new Error("runner state cleanup failed")); }
+    }
     const safe = sanitizeBootstrapReason(error, {
       env,
       secrets: [runnerTicket, runnerTicket.trim(), runnerNote, runnerNote.trim(), prompt, ticketPath, notePath, gatePath, statePath],
