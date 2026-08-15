@@ -152,6 +152,41 @@ XDG_STATE_HOME="$TMP/state" \
 [[ ! -e "$REPO_WITHOUT_AGENTS/AGENTS.md" ]]
 [[ -z "$(git -C "$REPO_WITHOUT_AGENTS" status --porcelain --untracked-files=all)" ]]
 
+ANCESTOR_REPO="$TMP/repo-with-symlinked-ancestor"
+ANCESTOR_TARGET="$TMP/external-github"
+mkdir -p "$ANCESTOR_REPO" "$ANCESTOR_TARGET"
+printf 'external workflow sentinel\n' >"$ANCESTOR_TARGET/openwiki-update.yml"
+git -C "$ANCESTOR_REPO" init -q -b main
+git -C "$ANCESTOR_REPO" config user.name qq-test
+git -C "$ANCESTOR_REPO" config user.email qq-test.invalid
+ln -s "$ANCESTOR_TARGET" "$ANCESTOR_REPO/.github"
+git -C "$ANCESTOR_REPO" add .github
+git -C "$ANCESTOR_REPO" commit -q -m initial
+cat >"$FAKE" <<'SH'
+#!/usr/bin/env bash
+touch "$QQ_TEST_RAN"
+SH
+chmod +x "$FAKE"
+if QQ_OPENWIKI_MAIN_ROOT="$ANCESTOR_REPO" \
+  QQ_OPENWIKI_WORKTREE="$WORKTREE" \
+  QQ_OPENWIKI_BRANCH=qq/test-openwiki \
+  QQ_OPENWIKI_BIN="$FAKE" \
+  QQ_TEST_RAN="$TMP/ancestor-writer-ran" \
+  XDG_STATE_HOME="$TMP/state" \
+  "$ROOT/bin/qq-openwiki-refresh-legacy" >"$TMP/ancestor.out" 2>"$TMP/ancestor.err"; then
+  echo "symlinked setup ancestor unexpectedly accepted" >&2
+  exit 1
+fi
+grep -Fq 'OpenWiki setup path has a symlinked ancestor: .github' "$TMP/ancestor.err"
+[[ ! -e "$TMP/ancestor-writer-ran" ]]
+[[ "$(<"$ANCESTOR_TARGET/openwiki-update.yml")" == 'external workflow sentinel' ]]
+[[ ! -e "$WORKTREE" ]]
+if git -C "$ANCESTOR_REPO" show-ref --verify --quiet refs/heads/qq/test-openwiki; then
+  echo "failed ancestor check left a refresh branch" >&2
+  exit 1
+fi
+[[ -z "$(git -C "$ANCESTOR_REPO" status --porcelain --untracked-files=all)" ]]
+
 SERVICE="$ROOT/systemd/user/qq-openwiki.service"
 grep -Fq 'ExecStart=%h/projects/qq/bin/qq-openwiki-service' "$SERVICE"
 grep -Fq 'Environment="PATH=%h/.local/bin:' "$SERVICE"

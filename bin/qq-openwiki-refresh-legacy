@@ -69,6 +69,19 @@ fi
 
 git -C "$MAIN_ROOT" worktree add --quiet -b "$BRANCH" "$WORKTREE" "$MAIN_BRANCH"
 
+generated_root_files=(AGENTS.md CLAUDE.md .github/workflows/openwiki-update.yml)
+for generated_ancestor in .github .github/workflows; do
+  if [[ -L "$WORKTREE/$generated_ancestor" ]]; then
+    echo "OpenWiki setup path has a symlinked ancestor: $generated_ancestor" >&2
+    exit 1
+  fi
+done
+for generated_root_file in "${generated_root_files[@]}"; do
+  if [[ -L "$WORKTREE/$generated_root_file" ]]; then
+    rm -- "$WORKTREE/$generated_root_file"
+  fi
+done
+
 if [[ "$ACTION" == "auto" ]]; then
   if [[ -f "$WORKTREE/openwiki/.last-update.json" ]]; then ACTION=update; else ACTION=init; fi
 fi
@@ -80,7 +93,7 @@ node_options+="--require=$SHELL_ENV_PRELOAD"
   NODE_OPTIONS="$node_options" "$OPENWIKI_BIN" code "--$ACTION" --print "$PROMPT"
 )
 
-for generated_root_file in AGENTS.md CLAUDE.md .github/workflows/openwiki-update.yml; do
+for generated_root_file in "${generated_root_files[@]}"; do
   if git -C "$WORKTREE" ls-files --error-unmatch -- "$generated_root_file" >/dev/null 2>&1; then
     git -C "$WORKTREE" restore --source=HEAD --staged --worktree -- "$generated_root_file"
   else
