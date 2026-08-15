@@ -12,20 +12,28 @@ function harness(role, sessionId, pane, options = {}) {
   const handlers = new Map();
   const injectedMessages = new Set();
   const received = [];
+  const sequence = [];
   let aborted = 0;
+  let idle = options.idle ?? false;
   const eventHandlers = new Map();
   const sessionFile = options.sessionFile;
   const pi = {
     registerTool(tool) { this.tool = tool; },
     registerCommand(name, command) { this.command = { name, ...command }; },
     on(name, handler) { handlers.set(name, handler); },
-    async sendMessage(message, options) { received.push({ message, options }); },
+    async sendMessage(message, options) {
+      sequence.push({ operation: "sendMessage", idle });
+      received.push({ message, options });
+    },
     events: { on(name, handler) { eventHandlers.set(name, handler); } },
   };
   const ctx = {
     cwd: `${root}`,
-    isIdle: () => false,
-    abort: () => { aborted += 1; },
+    isIdle: () => idle,
+    abort: () => {
+      sequence.push({ operation: "abort" });
+      aborted += 1;
+    },
     sessionManager: { getSessionId: () => sessionId, getSessionFile: () => sessionFile },
     ui: { notify() {} },
   };
@@ -34,7 +42,11 @@ function harness(role, sessionId, pane, options = {}) {
     client: new EventPlaneClient(socket), assumePersisted: options.assumePersisted ?? false, injectedMessages,
     now: options.now,
   });
-  return { pi, ctx, handlers, eventHandlers, received, injectedMessages, get aborted() { return aborted; } };
+  return {
+    pi, ctx, handlers, eventHandlers, received, sequence, injectedMessages,
+    setIdle(value) { idle = value; },
+    get aborted() { return aborted; },
+  };
 }
 
 async function waitFor(label, predicate) {
@@ -96,10 +108,18 @@ await waitFor("default delivered", async () => {
 });
 await writeFile(runnerSessionFile, "");
 
+const immediateSequenceStart = runner.sequence.length;
 const sent = await sender.pi.tool.execute("send", { action: "send", to: runnerId, message: "review this now", delivery: "immediate" });
 assert.match(sent.details.message_id, /^evt_/);
 assert.equal(sent.content[0].text, `message sent: ${sent.details.message_id}`);
+await waitFor("immediate runner abort", () => runner.aborted === 1);
+assert.equal(runner.received.length, 1, "sendMessage must wait for the aborted turn to become idle");
+runner.setIdle(true);
 await waitFor("immediate runner delivery", () => runner.received.length === 2);
+assert.deepEqual(runner.sequence.slice(immediateSequenceStart), [
+  { operation: "abort" },
+  { operation: "sendMessage", idle: true },
+]);
 assert.equal(runner.injectedMessages.size, 1, "uncertain persistence must retain one dedup marker");
 await sleep(1_500);
 assert.equal(runner.received.length, 2, "an unacknowledged retry must not inject the same message twice in one process");
@@ -114,7 +134,7 @@ await writeFile(runnerSessionFile, `${JSON.stringify({
 })}\n`);
 await waitFor("dedup marker cleanup", () => runner.injectedMessages.size === 0);
 assert.equal(runner.aborted, 1);
-assert.equal(runner.received[1].options.deliverAs, "steer");
+assert.deepEqual(runner.received[1].options, { triggerTurn: true });
 assert.equal(injected.content, `[message ${sent.details.message_id} from ${senderSession} — qq / architect]\nreview this now`);
 let delivered;
 await waitFor("delivered status", async () => {
