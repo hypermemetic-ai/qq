@@ -233,6 +233,22 @@ if git -C "$tracked" config --local --get qq.methodology >/dev/null 2>&1; then
   fail 'link marked a repository with a tracked Backlog tree as linked'
 fi
 
+tracked_link="$TMP/tracked-link-repository"
+git init -q -b main "$tracked_link"
+git -C "$tracked_link" config user.name 'qq Methodology Test'
+git -C "$tracked_link" config user.email 'qq-methodology@example.invalid'
+ln -s /another-machine/qq-store "$tracked_link/backlog"
+git -C "$tracked_link" add backlog
+git -C "$tracked_link" commit -qm 'tracked backlog symlink'
+tracked_link_before=$(git -C "$tracked_link" rev-parse HEAD)
+(cd "$tracked_link" && "$RAIL" link >/dev/null)
+[[ "$(readlink "$tracked_link/backlog")" == "$HOME/.local/state/qq/store/tracked-link-repository" ]] \
+  || fail 'link did not retarget the tracked Backlog symlink to this machine store'
+[[ "$(git -C "$tracked_link" rev-parse HEAD)" != "$tracked_link_before" ]] \
+  || fail 'link did not commit the updated tracked Backlog symlink'
+[[ -z "$(git -C "$tracked_link" status --porcelain)" ]] \
+  || fail 'link left the tracked Backlog symlink dirty after committing it'
+
 non_git="$TMP/non-git"
 mkdir -p "$non_git"
 if (cd "$non_git" && "$RAIL" link >/dev/null 2>"$TMP/non-git.err"); then
