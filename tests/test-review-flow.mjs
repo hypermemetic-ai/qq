@@ -53,6 +53,8 @@ try {
     if (command === "git" && args[0] === "status") return { code: 0, stdout: "", stderr: "" };
     if (command === "git" && args[0] === "symbolic-ref") return { code: 0, stdout: "main\n", stderr: "" };
     if (command === "git" && args[0] === "diff") return { code: 0, stdout: "2\t1\tsrc/a.ts\n", stderr: "" };
+    if (command === "git" && args[0] === "merge-base" && args.at(-1) === "HEAD") return { code: 1, stdout: "", stderr: "" };
+    if (command === "git" && args[0] === "for-each-ref") return { code: 0, stdout: "origin\0refs/heads/main\n", stderr: "" };
     return { code: 0, stdout: "", stderr: "" };
   };
   const prepared = await review.prepareDone(run, worktree, statePath, "HEAD");
@@ -97,8 +99,15 @@ try {
   const operations = calls.filter(({ command }) => command === "git").map(({ args }) => args[0]);
   assert.ok(operations.includes("merge-tree"));
   assert.ok(operations.includes("merge"));
+  assert.ok(operations.includes("push"));
   assert.ok(operations.includes("worktree"));
   assert.ok(operations.includes("branch"));
+  assert.ok(operations.indexOf("merge") < operations.indexOf("push"));
+  assert.ok(operations.indexOf("push") < operations.indexOf("worktree"));
+  assert.ok(operations.indexOf("worktree") < operations.indexOf("branch"));
+  const pushCall = calls.find(({ command, args }) => command === "git" && args[0] === "push");
+  assert.deepEqual(pushCall.args, ["push", "origin", "HEAD:refs/heads/main"]);
+  assert.equal(pushCall.options.cwd, mainRoot);
   assert.ok(calls.some(({ args }) => args[0] === "task" && args[1] === "edit" && args[2] === "TASK-1" && args.includes("Done")));
 
   await runLib.atomicPrivateJson(statePath, prepared);
@@ -118,6 +127,61 @@ try {
   assert.equal(calls.filter(({ args }) => args[0] === "task" && args[1] === "edit" && args.includes("Done")).length, doneCallsBeforeFailure);
   await review.landHandoff(run, statePath);
   assert.equal(JSON.parse(await readFile(statePath, "utf8")).status, "landed");
+
+  await runLib.atomicPrivateJson(statePath, prepared);
+  let mergedLocally = false;
+  let pushAttempts = 0;
+  const publishCalls = [];
+  const pushRetryRun = async (command, args, options = {}) => {
+    publishCalls.push({ command, args, options });
+    if (command === "git" && args[0] === "merge-base" && args.at(-1) === "HEAD") return { code: mergedLocally ? 0 : 1, stdout: "", stderr: "" };
+    if (command === "git" && args[0] === "merge") {
+      mergedLocally = true;
+      return { code: 0, stdout: "", stderr: "" };
+    }
+    if (command === "git" && args[0] === "push") {
+      pushAttempts += 1;
+      return pushAttempts === 1
+        ? { code: 1, stdout: "", stderr: "remote rejected update" }
+        : { code: 0, stdout: "", stderr: "" };
+    }
+    return run(command, args, options);
+  };
+  const doneCallsBeforePushFailure = calls.filter(({ args }) => args[0] === "task" && args[1] === "edit" && args.includes("Done")).length;
+  await assert.rejects(review.landHandoff(pushRetryRun, statePath), /cannot push target branch to its upstream: remote rejected update/);
+  const failedPush = JSON.parse(await readFile(statePath, "utf8"));
+  assert.equal(failedPush.status, "blocked");
+  assert.equal(failedPush.blockedReason, "cannot push target branch to its upstream: remote rejected update");
+  assert.deepEqual(failedPush.qaVerdict, prepared.qaVerdict);
+  assert.equal(review.isQaPassedProposal(failedPush), true);
+  assert.equal(publishCalls.some(({ command, args }) => command === "git" && ["worktree", "branch"].includes(args[0])), false);
+  assert.equal(calls.filter(({ args }) => args[0] === "task" && args[1] === "edit" && args.includes("Done")).length, doneCallsBeforePushFailure);
+
+  const retryStart = publishCalls.length;
+  await review.landHandoff(pushRetryRun, statePath);
+  const retryCalls = publishCalls.slice(retryStart);
+  const retryGitOperations = retryCalls.filter(({ command }) => command === "git").map(({ args }) => args[0]);
+  assert.equal(retryGitOperations.includes("merge-tree"), false);
+  assert.equal(retryGitOperations.includes("merge"), false);
+  assert.equal(retryGitOperations.filter((operation) => operation === "push").length, 1);
+  assert.ok(retryGitOperations.indexOf("push") < retryGitOperations.indexOf("worktree"));
+  assert.ok(retryGitOperations.indexOf("worktree") < retryGitOperations.indexOf("branch"));
+  assert.equal(JSON.parse(await readFile(statePath, "utf8")).status, "landed");
+  assert.equal(calls.filter(({ args }) => args[0] === "task" && args[1] === "edit" && args.includes("Done")).length, doneCallsBeforePushFailure + 1);
+
+  await runLib.atomicPrivateJson(statePath, prepared);
+  const noUpstreamCalls = [];
+  const noUpstreamRun = async (command, args, options = {}) => {
+    noUpstreamCalls.push({ command, args, options });
+    if (command === "git" && args[0] === "for-each-ref") return { code: 0, stdout: "\0\n", stderr: "" };
+    return run(command, args, options);
+  };
+  await assert.rejects(review.landHandoff(noUpstreamRun, statePath), /target branch main has no upstream/);
+  const noUpstream = JSON.parse(await readFile(statePath, "utf8"));
+  assert.equal(noUpstream.status, "blocked");
+  assert.deepEqual(noUpstream.qaVerdict, prepared.qaVerdict);
+  assert.equal(noUpstreamCalls.some(({ command, args }) => command === "git" && args[0] === "merge"), true);
+  assert.equal(noUpstreamCalls.some(({ command, args }) => command === "git" && ["push", "worktree", "branch"].includes(args[0])), false);
 
   prepared.status = "running";
   prepared.look = 0;
