@@ -9,6 +9,8 @@ This is an isolated compatibility harness, not an operator-runtime cutover. It m
 | qq | local checkout | [`58701b91d41237001c5b0abdc78ec45ba3bc1211`](https://github.com/hypermemetic-ai/qq/commit/58701b91d41237001c5b0abdc78ec45ba3bc1211) | n/a |
 | pi2dsh | `pi2dsh@0.12.3` | [`7420aac0f6b5513e056c44c099527ddee0d705f0`](https://github.com/weijiafu14/pi2dsh/commit/7420aac0f6b5513e056c44c099527ddee0d705f0) | `sha512-GDvzm9m9QIlEvSd9g6txZ7emKMbYCU++qFwoLgaz+qMq6sO39oe6OL839IIaU5KGfm6yKEet97tUSL5GgZpukA==` |
 | DeepSeek Harness | `@deepseek-ai/dsh@0.1.0-rc.6` | [`47f943859bef60e4160492346772ded9b24f765a`](https://github.com/deepseek-ai/deepseek-harness/commit/47f943859bef60e4160492346772ded9b24f765a) | `sha512-brpZfED7ieRa2PQ5tUxMhHrM1pb2CmKFVM/f6yMULBDMicahk+Z2OsHgTwTDnoiZm23Ftu9rQz0NN4pflaoJcg==` |
+| DSH continuable service | `@deepseek-ai/dsh-subagent@0.1.0-rc.6` | same DSH revision | `sha512-vROmBDAlaFAzzSlTBOlvg/7fO55zxhUztnLtB3lKmN5RevrNQBjTsbeIMDQ8ow5ZplxEOnLU+sikFoA5JaoH8A==` |
+| DSH spawn provider | `@deepseek-ai/dsh-subagent-spawn-in-process@0.1.0-rc.6` | same DSH revision | `sha512-62mtUEr5megxVy6CwQCdZVq5MCSt+kMw74ns5m7PK0PlZTWcxQVBQHNdfkE9sX4Cageu7YTvciUJuH8amm6bsQ==` |
 
 `pins.json` is the machine-readable source of truth. The qq pin is the extension revision exercised by this evidence. `run.sh` refuses to run if `extensions/` differs from that revision, forcing a deliberate re-probe after extension changes.
 
@@ -29,7 +31,22 @@ This existing relay-contract entrypoint owns the composed proof:
 5. points DSH's real DeepSeek adapter at a deterministic localhost wire stub, using only a sentinel probe key, so queued input remains local while the real relay retry backoff elapses;
 6. sends through qq's installed-product client loader to both `agents/<exact DSH session id>` and `qq/review-flow/<exact DSH session id>`; mounted qq consumes both addresses against the same service;
 7. requires agent-message status to become delivered only after one pinned plugin-sourced DSH `user/message`, with relay attempt/failure counts proving retry without duplicate injection;
-8. requires run-outcome status to remain pending through at least one pre-persistence retry, with no duplicate injection, then become delivered only after the one bridged message is observable in durable DSH history.
+8. requires run-outcome status to remain pending through at least one pre-persistence retry, with no duplicate injection, then become delivered only after the one bridged message is observable in durable DSH history;
+9. invokes the compatibility-only native child proof described below, without joining it to the production relay path.
+
+### Native continuable-child seam
+
+Run the focused proof directly with:
+
+```bash
+compat/pi2dsh/run-subagent-proof.sh
+```
+
+It installs the exact pinned DSH rc.6 packages, creates the direct parent inside a disposable detached Git worktree, and calls the mounted `ctx.subagents.startContinuable()` with provider `spawn`. The returned `{ childId, messageId }` is recorded only as inbox acceptance. The proof waits until both the child Agent and Session have unregistered, then uses a cold `sessionPersistence.inspect()` read to require the same message id and private bootstrap content under the durable continuable descriptor.
+
+After the first host exits, a fresh DSH process resumes the exact persisted direct parent, verifies the child is cold, calls `ctx.subagents.followup()`, and applies the same cold-persistence check to the second accepted message. Host PIDs must differ, the child must inherit the disposable worktree, and the worktree is removed before success. The phase processes start with a cleared environment and use no Herdr, Pi session file, qq-relay, or alternate child-message transport. This is compatibility evidence only; production delegation is unchanged.
+
+Set `QQ_DSH_SUBAGENT_OUTPUT` to copy the combined JSON evidence, host logs, and localhost model requests. The composed relay entrypoint also copies these artifacts when `QQ_PI2DSH_OUTPUT` is set.
 
 Keep the temporary DSH profile for inspection or copy its generated artifacts while running the owning entrypoint:
 
@@ -76,7 +93,8 @@ The complete machine-readable record is [`evidence.json`](evidence.json). At thi
 - run-outcome production, recipient validation, and parsing accept bare canonical Pi UUIDs and that exact pinned DSH form; the real relay and mounted architect receiver preserve `session-<UUID>` throughout the address and payload;
 - agent-message acknowledgement uses `ctx.sessionManager.getEntries()` as its only persistence authority; the pinned runtime probe observes the real relay's retry and redelivery, one bridged plugin-sourced `user/message`, and acknowledgement only after that durable record appears;
 - review-flow acknowledgement also uses host-managed entries without a session-file fallback; regression tests prove Pi custom-message and DSH user-message projections, while the pinned runtime probe observes a pending retry, safe redelivery without duplicate injection, and delivery only after the run outcome is durable;
-- qq's load-time client resolver works under pi2dsh against the privately installed artifact after relay source deletion, and final agent-message status is delivered without changing the exact `session-<UUID>` identity.
+- qq's load-time client resolver works under pi2dsh against the privately installed artifact after relay source deletion, and final agent-message status is delivered without changing the exact `session-<UUID>` identity;
+- the exact rc.6 `dsh-subagent` service and in-process `spawn` provider accept a private bootstrap into a durable child Session under a parent whose workspace is a disposable worktree; a cold DSH persistence inspection, not the returned ids, proves the bootstrap durable, and a fresh host restores the exact direct parent and cold-resumes that child for a separately proven durable follow-up.
 
 The collision, model refusal, and session-id activation are runtime observations from the DSH boot, not static predictions.
 

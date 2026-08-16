@@ -8,7 +8,7 @@ const root = resolve(process.argv[2] ?? ".");
 const read = (path) => readFile(join(root, path), "utf8");
 const json = async (path) => JSON.parse(await read(path));
 
-const [pkg, pins, toolchain, toolchainLock, evidence, webEvidence, webQa, consoleEvidence, consoleReadme, consoleRender, consoleWorker, run, patch, relayProbe, relayContract, liveMessages, messages, review, scrub, runLib, runEvents] = await Promise.all([
+const [pkg, pins, toolchain, toolchainLock, evidence, webEvidence, webQa, consoleEvidence, consoleReadme, consoleRender, consoleWorker, run, patch, relayProbe, childRun, childPlugin, childPatch, childPackage, relayContract, liveMessages, messages, review, scrub, runLib, runEvents] = await Promise.all([
   json("package.json"),
   json("compat/pi2dsh/pins.json"),
   json("compat/pi2dsh/toolchain/package.json"),
@@ -23,6 +23,10 @@ const [pkg, pins, toolchain, toolchainLock, evidence, webEvidence, webQa, consol
   read("compat/pi2dsh/run.sh"),
   read("compat/pi2dsh/qq.patch.yml"),
   read("compat/pi2dsh/relay-probe.mjs"),
+  read("compat/pi2dsh/run-subagent-proof.sh"),
+  read("compat/pi2dsh/subagent-proof/plugin.mjs"),
+  read("compat/pi2dsh/subagent-proof/cordis.patch.yml"),
+  json("compat/pi2dsh/subagent-proof/package.json"),
   read("tests/test-qq-relay.sh"),
   read("tests/test-agent-messages-live.sh"),
   read("extensions/agent-messages.ts"),
@@ -41,6 +45,12 @@ for (const key of ["pi2dsh", "dsh"]) {
   assert.match(pins[key].integrity, /^sha512-/);
   assert.equal(toolchain.dependencies[pins[key].package], pins[key].version);
   assert.equal(toolchainLock.packages[`node_modules/${pins[key].package}`].integrity, pins[key].integrity);
+}
+for (const pin of [pins.dsh.continuableService, pins.dsh.spawnProvider]) {
+  assert.equal(pin.version, pins.dsh.version);
+  assert.match(pin.integrity, /^sha512-/);
+  assert.equal(toolchainLock.packages[`node_modules/${pin.package}`].version, pin.version);
+  assert.equal(toolchainLock.packages[`node_modules/${pin.package}`].integrity, pin.integrity);
 }
 assert.equal(toolchain.dependencies.typescript, pins.typescript.version);
 assert.equal(pins.webCandidate.status, "proof-only");
@@ -67,6 +77,26 @@ assert.match(run, /relay-proof\.json/);
 assert.match(run, /QQ_AGENT_ROLE=architect/);
 assert.doesNotMatch(run, /relay-stub|RECEIPT_PROBE|RELAY_PROBE/);
 assert.match(run, /llm-stub\.mjs/);
+assert.match(run, /run-subagent-proof\.sh/);
+assert.equal(childPackage.name, "@hypermemetic-ai/qq-dsh-subagent-proof");
+assert.equal(childPackage.dsh.bundle.patch, "./cordis.patch.yml");
+assert.match(childPatch, /name: '@hypermemetic-ai\/qq-dsh-subagent-proof'/);
+assert.match(childPatch, /inject: \[agentDefaultModel, agents, sessions, sessionPersistence, subagents\]/);
+assert.match(childPlugin, /subagents\.startContinuable\(/);
+assert.match(childPlugin, /provider: "spawn"/);
+assert.match(childPlugin, /subagents\.followup\(/);
+assert.match(childPlugin, /services\.agents\.get\(expected\.childId\)[\s\S]*services\.sessions\.get\(expected\.childId\)[\s\S]*persistence\.inspect\(expected\.childId\)/);
+assert.match(childPlugin, /event\.type === "user\/message" && event\.data\?\.id === messageId/);
+assert.match(childPlugin, /descriptor\.data\?\.mode === "continuable"/);
+assert.match(childPlugin, /descriptor\.data\?\.provider === "spawn"/);
+assert.match(childPlugin, /agents\.resume\([\s\S]*resumeSessionId: config\.parentSessionId/);
+assert.doesNotMatch(childPlugin, /qq-relay|herdr|PI_SESSION|getSessionFile/);
+assert.match(childRun, /env -i/);
+assert.match(childRun, /git -C "\$root" worktree add --detach/);
+assert.match(childRun, /git -C "\$root" worktree remove --force/);
+assert.match(childRun, /assert\.notEqual\(followup\.host_pid, start\.host_pid/);
+assert.match(childRun, /assert\.equal\(followup\.child_was_cold_before_followup, true\)/);
+assert.doesNotMatch(childRun, /qq-relay|herdr|PI_SESSION|getSessionFile/);
 assert.match(patch, /id: tool-fs\s+disabled: true/);
 assert.match(patch, /id: session-persistence-jsonl[\s\S]*compression: none/);
 assert.match(relayProbe, /bin\/lib\/qq-relay-client\.mjs/);
@@ -96,17 +126,21 @@ const probes = new Map(evidence.probes.map((probe) => [probe.id, probe]));
 for (const id of [
   "package-local-events", "before-agent-start", "tools", "commands", "model-selection",
   "thinking-effort", "shortcut", "session-tree", "shutdown", "project-trust",
-  "read-tool-collision", "session-id", "qq-relay-client", "herdr-launch", "herdr-delivery-proof",
+  "read-tool-collision", "session-id", "qq-relay-client", "native-child-prompt-acceptance", "herdr-launch", "herdr-delivery-proof",
   "agent-message-receipts", "run-outcome-addressing", "review-receipts", "session-scrub",
 ]) assert.ok(probes.has(id), `missing compatibility probe ${id}`);
 assert.equal(probes.get("session-id").verdict, "identity-translated");
 assert.match(probes.get("session-id").fact, /complete value unchanged as the live relay address/);
 assert.equal(probes.get("qq-relay-client").verdict, "installed-product-proven");
+assert.equal(probes.get("native-child-prompt-acceptance").verdict, "durable-bootstrap-and-cold-followup-proven");
+assert.match(probes.get("native-child-prompt-acceptance").fact, /cold sessionPersistence\.inspect/);
+assert.match(probes.get("native-child-prompt-acceptance").fact, /fresh host resumes the exact persisted direct parent/);
 assert.equal(probes.get("agent-message-receipts").verdict, "installed-transport-and-durable-entry-proven");
 assert.equal(probes.get("run-outcome-addressing").verdict, "installed-address-and-parse-proven");
 assert.match(probes.get("run-outcome-addressing").fact, /qq\/review-flow\/session-<UUID>/);
 assert.equal(probes.get("review-receipts").verdict, "installed-durable-entry-proven");
-assert.ok(evidence.conclusion.blockers.every((blocker) => !/qq-relay client boundary|review events/i.test(blocker)));
+assert.ok(evidence.conclusion.blockers.every((blocker) => !/qq-relay client boundary|review events|prompt-acceptance proof/i.test(blocker)));
+assert.ok(evidence.conclusion.blockers.some((blocker) => /production delegation integration/.test(blocker)));
 
 assert.equal(evidence.operator_surface.verdict, "pass-sequential-vertical-slice");
 assert.equal(evidence.operator_surface.model, "sequential-single-page-handoff");
