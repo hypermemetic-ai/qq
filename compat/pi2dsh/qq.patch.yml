@@ -1,0 +1,5 @@
+# qq intentionally replaces Pi's built-in read tool. DSH's headless bundle
+# registers its own read first, while pi2dsh 0.12.3 rejects that collision.
+# Disable only the native filesystem tool bundle in this isolated profile.
+- id: tool-fs
+  disabled: true
