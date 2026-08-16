@@ -3,7 +3,24 @@ set -euo pipefail
 
 SCRIPT_PATH=$(realpath -e -- "${BASH_SOURCE[0]}")
 ROOT=$(cd -- "$(dirname -- "$SCRIPT_PATH")/.." && pwd -P)
-DASHBOARD_BIN="$ROOT/node_modules/@hypermemetic-ai/qq-dashboard/bin/qq-dashboard"
+if [[ -n ${QQ_DASHBOARD_INSTALL_ROOT:-} ]]; then
+  [[ "$QQ_DASHBOARD_INSTALL_ROOT" == /* ]] || {
+    printf 'qq-dashboard: QQ_DASHBOARD_INSTALL_ROOT must be an absolute path\n' >&2
+    exit 1
+  }
+  install_root=$QQ_DASHBOARD_INSTALL_ROOT
+else
+  [[ -n ${HOME:-} && "$HOME" == /* ]] || {
+    printf 'qq-dashboard: HOME must be an absolute path\n' >&2
+    exit 1
+  }
+  install_root=$HOME/.local/lib/qq/dashboard
+fi
+DASHBOARD_BIN="$install_root/bin/qq-dashboard"
+[[ -x "$DASHBOARD_BIN" ]] || {
+  printf 'qq-dashboard: installed executable is unavailable: %s\n' "$DASHBOARD_BIN" >&2
+  exit 1
+}
 
 export QQ_PROFILE_BIN="$ROOT/bin/qq-profile"
 exec "$DASHBOARD_BIN" "$@"
