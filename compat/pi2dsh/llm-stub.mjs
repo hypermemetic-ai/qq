@@ -16,16 +16,21 @@ const server = createServer((request, response) => {
     requestNumber += 1;
     const body = Buffer.concat(chunks).toString("utf8");
     appendFileSync(requestsPath, `${JSON.stringify({ request: requestNumber, url: request.url, body: JSON.parse(body) })}\n`, { mode: 0o600 });
-    response.writeHead(200, { "content-type": "text/event-stream" });
-    const base = {
-      id: `chatcmpl-qq-pi2dsh-${requestNumber}`,
-      object: "chat.completion.chunk",
-      created: Math.floor(Date.now() / 1000),
-      model: "deepseek-v4-flash",
-    };
-    response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: "receipt probe step complete" }, finish_reason: null }] })}\n\n`);
-    response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`);
-    response.end("data: [DONE]\n\n");
+    // Keep the message-driven turn open across qq-relay's real retry backoff.
+    // This is timing control for the local model boundary, not relay tuning.
+    const responseDelayMs = requestNumber === 1 ? 750 : 3_500;
+    setTimeout(() => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      const base = {
+        id: `chatcmpl-qq-pi2dsh-${requestNumber}`,
+        object: "chat.completion.chunk",
+        created: Math.floor(Date.now() / 1000),
+        model: "deepseek-v4-flash",
+      };
+      response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: "receipt probe step complete" }, finish_reason: null }] })}\n\n`);
+      response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`);
+      response.end("data: [DONE]\n\n");
+    }, responseDelayMs);
   });
 });
 
