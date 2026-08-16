@@ -1,70 +1,146 @@
-# Pinned DSH Web operator-surface QA
+# Pinned DSH Web community-fix candidate QA
 
-This runbook evaluates only the stock official DSH Web UI pinned in [`pins.json`](pins.json). It does not install or compare community clients, change delegation, cut over the operator runtime, or remove Pi/Herdr. The recorded result is [`web-evidence.json`](web-evidence.json).
+This focused harness compares T-63.9's recorded stock-Web failures with one isolated candidate profile: pinned official [`@deepseek-ai/dsh@0.1.0-rc.6`](pins.json), exact `@0xsline/dsh-spotlight@0.0.2`, and exact `dsh-web-mobile-fix@1.0.2`. It does **not** change [`execution-profiles.json`](execution-profiles.json), install either plugin in an active operator profile, replace DSH session semantics, cut over the operator runtime, or remove Pi/Herdr. The result is [`web-evidence.json`](web-evidence.json).
 
-## Install and launch
+## Exact isolated composition
 
-Requirements are the same as the compatibility harness: Linux, Node.js 22.19 or newer, npm, and network access for the clean install.
+Install the compatibility toolchain, then let DSH create a disposable Web profile:
 
 ```bash
 npm ci --prefix compat/pi2dsh/toolchain --no-audit --no-fund
 
 qa_home=$(mktemp -d)
 export DSH_HOME="$qa_home/dsh-home"
-compat/pi2dsh/toolchain/node_modules/.bin/dsh web \
-  --host 127.0.0.1 --port 3080
+dsh=compat/pi2dsh/toolchain/node_modules/.bin/dsh
+
+"$dsh" plugin --profile web add \
+  '@0xsline/dsh-spotlight@0.0.2' \
+  'dsh-web-mobile-fix@1.0.2'
 ```
 
-The package version and integrity come from the existing exact toolchain lock and `pins.json`. Keep the bind on `127.0.0.1`: the browser can execute tools on the host.
+The artifact-only profile does not boot as published under this DSH pin: generated profiles set `autoInstallPeers: false`, and Spotlight imports `schemastery` while declaring both `cordis` and `schemastery` as peers. The observed boot stopped with `ERR_MODULE_NOT_FOUND` for `schemastery`. Complete the isolated proof composition with the exact versions in Spotlight's own source lock:
 
-In a clean browser profile, open `http://127.0.0.1:3080`, accept the testing notice, and choose **Configure later**. No model credential is needed for surface QA. Choosing a real workspace and submitting a probe is safe without a credential: the pinned runtime durably records the user turn and stops locally with `MISSING_CREDENTIAL` before model traffic.
+```bash
+"$dsh" plugin --profile web add \
+  'cordis@4.0.0-rc.7' \
+  'schemastery@3.18.0'
+"$dsh" plugin --profile web peers check
+```
 
-## Reproduce the QA matrix
+Check `$DSH_HOME/profiles/web/package.json` and `pnpm-lock.yaml`: the bundle list must append only `@0xsline/dsh-spotlight` and `dsh-web-mobile-fix`, and all four versions and the two candidate integrities must match [`pins.json`](pins.json). The unscoped peers are support dependencies, not profile bundle rows.
 
-Use browser developer tools or equivalent automation to confirm `window.innerWidth` and `window.innerHeight`.
+Launch only on loopback:
 
-1. At **1440x900**, add a disposable workspace, create a session, and inspect the sidebar, transcript, composer, Settings, and **Settings > Plugins**.
-2. In **Settings > General**, select **Dark**. Confirm `$DSH_HOME/settings.yaml` contains `ui-theme.preference: dark`. Press Tab once to focus **System**, press Enter, and confirm the preference changes to `system`.
-3. Close Settings with Escape. In the composer type `keyboard`, press Shift+Enter, type `probe`, and confirm the value has two lines. Press Enter and confirm the user bubble contains both lines. Without a key, `MISSING_CREDENTIAL` is the expected local result.
-4. At **390x844**, inspect the new-session and transcript views with the sidebar collapsed. Then open the sidebar, select the session, and open Settings. Capture both states; the pinned stock UI squeezes the transcript beside the 280px sidebar and keeps a two-column Settings dialog whose content column clips and wraps controls.
-5. Check the browser console, uncaught page errors, and failed network requests at both sizes. The observed run was clean apart from the intentional credential result rendered by the application.
+```bash
+"$dsh" web --host 127.0.0.1 --port 3081
+```
 
-The UI customization paths exercised by this run are:
+In a clean browser profile, open `http://127.0.0.1:3081`, accept the testing notice, and choose **Configure later**. No model credential is needed. A submitted probe is durably recorded and then fails locally with expected `MISSING_CREDENTIAL`, before model traffic.
 
-- live, persisted General settings (agent preset, permission mode, locale, theme, and busy-input behavior);
-- plugin configuration and inventory in **Settings > Plugins**;
-- the Web profile's user composition layer at `$DSH_HOME/profiles/web/cordis.patch.yml`;
-- official package composition with `dsh plugin --profile web add <package>` and disposable overlays with `--patch <path>`.
+## Before baseline
 
-Those Cordis seams can replace or add browser slot occupants, but they are development/configuration seams rather than an end-user layout editor.
+Do not broaden this experiment by rebuilding the stock screenshot suite. Reuse T-63.9's stock evidence, recorded in this file's predecessor at commit `67cb86b`:
 
-## Safe second-device access
+- keyboard form mechanics passed, but New Session, recent sessions, Search, Settings, and sidebar navigation had no efficient global route;
+- at exactly **390x844**, Settings retained a clipped fixed two-column layout and an open 280px sidebar squeezed the conversation;
+- stock session continuity passed through an actual loopback SSH local forward, and `0.0.0.0` was refused.
 
-Do not bypass the official all-interfaces refusal. Keep the server command above on loopback. From each authenticated operator device, create a local SSH forward to the DSH host:
+The candidate run below is the after comparison for only those failures.
+
+## Focused keyboard after-test
+
+Use a disposable workspace, create one session, and submit `keyboard`, Shift+Enter, `probe`, Enter. Confirm that the user bubble contains two lines and the expected local result is `MISSING_CREDENTIAL`. This rechecks the stock composer and persistence path rather than substituting plugin session behavior.
+
+At **1440x900**, use only the keyboard for each Spotlight case:
+
+1. Press Ctrl+K (Cmd+K on macOS); confirm the palette opens and the search field owns focus.
+2. Filter for **New conversation**, press Enter, and confirm a new stock Web session opens.
+3. Reopen the palette, filter for the persisted session title, press Enter, and confirm its transcript loads.
+4. Filter for **Search sessions**, press Enter, and confirm the palette closes, native Search expands, and its textbox owns focus.
+5. Filter for **Open installed plugin settings**, press Enter, and confirm native Settings opens on **Plugins**. Record that Spotlight has no direct **General** result; native navigation is still needed from Plugins.
+6. Filter for **Collapse sidebar**, press Enter, then reopen the palette and run **Open sidebar**. Confirm the stock layout state changes in each direction.
+7. Close the palette with Escape. Check console messages, uncaught page errors, and failed requests.
+
+The observed catalog also included the current recent session and native slash commands. That is runtime evidence for this pin, not a durable selector contract: Spotlight admits that part of action discovery follows the Web DOM and can drift after host UI changes.
+
+## Exact 390x844 after-test
+
+Set the viewport to exactly **390x844**, keep the persisted session selected, and first collapse the sidebar. Confirm that the candidate style exists:
+
+```js
+window.innerWidth === 390 &&
+window.innerHeight === 844 &&
+!!document.querySelector('style[data-plugin="dsh-web-mobile-fix"]')
+```
+
+Open the sidebar and inspect `[data-details-collapsed]`. The observed grid remained `56px 334px 0px`; the wide sidebar content was a 280px overlay, while the conversation column stayed 334px. This closes the stock squeeze failure. It does **not** match the package README's literal “full-screen sidebar” wording, so record the measured overlay behavior instead.
+
+Open **Settings > General** and inspect the modal and its scroll regions. The observed focused measurements were:
+
+- dialog: `390x844`, `flex-direction: column`, no document overflow;
+- content: 390px wide with equal client/scroll width (no horizontal content clipping);
+- General body: 704px client height and 754px scroll height, so the final row remained vertically reachable;
+- tab strip: one row with 366px client width and 429px scroll width, so **Agent presets** requires horizontal scrolling rather than clipping into a narrow content column.
+
+A reproducible console probe is:
+
+```js
+const dialog = document.querySelector(
+  '[role="dialog"][aria-modal="true"][aria-labelledby]'
+)
+const nav = dialog.querySelector(':scope > nav')
+const content = nav.nextElementSibling
+const tabs = nav.querySelector(':scope > div:last-child')
+const scrollBody = [...dialog.querySelectorAll('*')].find((node) =>
+  getComputedStyle(node).overflowY === 'auto' &&
+  node.scrollHeight > node.clientHeight &&
+  node.clientWidth === 390
+)
+;({
+  viewport: [innerWidth, innerHeight],
+  dialog: [dialog.clientWidth, dialog.clientHeight],
+  direction: getComputedStyle(dialog).flexDirection,
+  content: [content.clientWidth, content.scrollWidth],
+  body: [scrollBody.clientHeight, scrollBody.scrollHeight],
+  tabs: [tabs.clientWidth, tabs.scrollWidth],
+  document: [document.documentElement.scrollWidth,
+             document.documentElement.scrollHeight],
+})
+```
+
+No screenshot set is required. If visual evidence is needed during a rerun, keep only the open-sidebar and Settings states; the numeric checks are the reproducible record.
+
+## Continuity and security regression
+
+Keep the server on `127.0.0.1`. From a second authenticated operator context, use the same topology as T-63.9:
 
 ```bash
 ssh -N \
-  -L 127.0.0.1:13080:127.0.0.1:3080 \
+  -L 127.0.0.1:13081:127.0.0.1:3081 \
   operator@dsh-host
 ```
 
-Open `http://127.0.0.1:13080` on that device. A phone needs an SSH client that supports local port forwarding. The browser retains a loopback authority, DSH creates no non-loopback listener, and SSH supplies the authenticated transport. Grant the tunnel only to trusted operator accounts/devices because the page still carries host code-execution authority.
+Open `http://127.0.0.1:13081` in a second clean browser origin. The observed second client listed the first client's workspace/session and loaded its persisted two-line prompt plus `MISSING_CREDENTIAL`. This proves the existing transport/UI continuity on the QA host, not a physical-phone deployment. Both listeners remained loopback-only; SSH remained the authenticated transport.
 
-The observed continuity probe used a real `ssh -L` process and a second independent browser origin. The second client listed the first client's workspace and session and loaded its persisted multiline prompt. Both tunnel endpoints happened to be on the QA host, so this proves the transport/UI continuity but not a physical-phone deployment.
-
-Confirm the security boundary separately:
+After stopping the candidate server, confirm the stock refusal still runs with the candidate profile composed:
 
 ```bash
 set +e
-DSH_HOME=$(mktemp -d) \
-  compat/pi2dsh/toolchain/node_modules/.bin/dsh web \
-  --host 0.0.0.0 --port 0
-printf 'exit=%s\n' "$?"   # expected: 1
+"$dsh" web --host 0.0.0.0 --port 18081
+status=$?
 set -e
+printf 'exit=%s\n' "$status"   # expected: 1
+ss -ltn | grep ':18081'         # expected: no listener
 ```
 
-The pinned command must report that `0.0.0.0` is intentionally unsupported because it would expose remote code execution. A specific Tailnet/LAN IP is not a supported alternative in this pin: the Web server schema accepts only `127.0.0.1` or `0.0.0.0`.
+The plugins add no authentication. Never infer that a keyboard palette or narrow CSS layout makes LAN/Tailnet publication safe, and never pair this proof with a bind-bypass plugin.
 
-## Verdict: reject
+## Proof limits
 
-The pinned stock UI is polished on desktop, has real Cordis customization seams, preserves sessions across browser clients, and supports basic keyboard form/composer behavior. It does not meet this ticket's complete operator requirement: the phone Settings/sidebar states are not usable enough, efficient global keyboard navigation is absent, and remote devices need an external per-device tunnel. Keep Herdr/Pi unchanged and do not cut over on this evidence.
+`dsh-web-mobile-fix` is a reversible CSS style injection. This run proves only the measured Settings and sidebar layout changes. It does **not** prove touch behavior, soft keyboards, IME, approvals, questions, long transcripts, or a physical phone. Spotlight is a browser-local enhancement over stock services and visible controls; it does not add or replace a session protocol.
+
+Both projects were only days old at observation. The peer-install requirement, selector drift, the horizontally scrolling Settings tab row, and all prior qq/pi2dsh cutover blockers remain material.
+
+## Verdict: focused candidate pass, no adoption
+
+The exact candidate closed the focused T-63.9 keyboard-navigation categories and both measured 390x844 layout failures while preserving stock session persistence, two-client continuity, loopback-only binding, and authenticated SSH forwarding. This is sufficient to pass the selected experiment only. It does not approve adoption or cutover, does not change the active operator surface, and does not replace Herdr/Pi.

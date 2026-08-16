@@ -1,58 +1,165 @@
 {
-  "schema": "qq.dsh-web-evidence/v1",
+  "schema": "qq.dsh-web-evidence/v2",
   "observed_at": "2026-08-16",
   "pins_file": "compat/pi2dsh/pins.json",
   "instructions": "compat/pi2dsh/WEB_QA.md",
-  "scope": "stock official DSH Web UI only",
+  "scope": "focused before/after proof of the stock Web pin plus the proof-only community augmentation profile",
   "pin": {
     "package": "@deepseek-ai/dsh",
     "version": "0.1.0-rc.6",
     "revision": "47f943859bef60e4160492346772ded9b24f765a"
   },
+  "candidate": {
+    "status": "proof-only",
+    "artifacts": [
+      {
+        "package": "@0xsline/dsh-spotlight",
+        "version": "0.0.2",
+        "revision": "dd7ef5ed160aa1a624559de16eafd4ea9406d7ed",
+        "integrity": "sha512-xqJyEjLjFShNgliG1TCHJf0umTZzW12byg4YKAJ8r+SeZsJ+D733+lPmzHkX7mKu6rjF35d5e1iypesiEkaqTQ=="
+      },
+      {
+        "package": "dsh-web-mobile-fix",
+        "version": "1.0.2",
+        "revision": "015d905b5f9196b5d442878e5682d8aaa598aa3f",
+        "integrity": "sha512-AQQQDncGw4osPaRIER7AlhY9mWB7qfA+7MNeePWsGM83avhtBg7/kF64Nnf3K34s9+q+YNJQwre/0/tcus7EoQ=="
+      }
+    ],
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "@0xsline/dsh-spotlight",
+        "dsh-web-mobile-fix"
+      ],
+      "support_dependencies": {
+        "cordis": "4.0.0-rc.7",
+        "schemastery": "3.18.0"
+      },
+      "artifact_only_boot": {
+        "verdict": "fail",
+        "fact": "The DSH profile sets autoInstallPeers=false. Installing only the two candidate artifacts left Spotlight's declared cordis and schemastery peers absent, and boot stopped with ERR_MODULE_NOT_FOUND for schemastery."
+      },
+      "composed_boot": {
+        "verdict": "pass-with-explicit-peers",
+        "fact": "Adding the exact peer versions from Spotlight's own source lock produced a clean peer check and booted both candidate bundle rows. This peer step is an integration requirement, not an active-profile change."
+      }
+    }
+  },
   "runtime": {
-    "command": "dsh web --host 127.0.0.1 --port 0",
-    "observed_url": "http://127.0.0.1:37373",
+    "command": "dsh web --host 127.0.0.1 --port 3081",
+    "observed_url": "http://127.0.0.1:3081",
     "credentials_used": false,
+    "listener": "127.0.0.1:3081",
     "all_interfaces": {
-      "command": "dsh web --host 0.0.0.0 --port 0",
+      "command": "dsh web --host 0.0.0.0 --port 18081",
       "exit_code": 1,
       "listener_created": false,
       "verdict": "refused-as-designed"
     }
   },
-  "requirements": {
-    "customization": {
-      "verdict": "pass",
-      "fact": "General settings changed theme through the UI and persisted ui-theme.preference in $DSH_HOME/settings.yaml; the stock Plugins page exposes configuration and inventory, while profile composition is customizable through cordis.patch.yml and dsh plugin --profile web add."
-    },
+  "before": {
+    "source": "T-63.9 stock run recorded by commit 67cb86b",
+    "reused_without_rerun": true,
     "keyboard": {
       "verdict": "partial",
-      "fact": "Tab reached controls, Enter activated the focused theme choice and submitted the composer, Shift+Enter inserted a newline, and Escape closed Settings. The stock UI exposes no shortcut help or global bindings for New Session, Search, Settings, or sidebar navigation, so frequent operation still requires pointer use or long Tab traversal."
-    },
-    "desktop_1440x900": {
-      "verdict": "pass",
-      "fact": "The ready screen, Settings and Plugins, workspace/session sidebar, transcript, error state, and composer fit without document overflow; browser console, page-error, and failed-network QA was clean."
+      "fact": "Stock Tab, Enter, Shift+Enter, and Escape worked, but no efficient global binding reached New Session, recent sessions, Search, Settings, or sidebar navigation."
     },
     "phone_390x844": {
       "verdict": "fail",
-      "fact": "The collapsed-sidebar composer and transcript are operable, but the fixed two-column Settings dialog leaves a very narrow content column with clipped controls, and the open 280px sidebar squeezes the live transcript into the remaining width instead of protecting or replacing it."
+      "fact": "Stock Settings retained a clipped narrow content column in a fixed two-column dialog, and the open 280px sidebar squeezed the live conversation into the remaining width."
     },
     "multiple_clients": {
       "verdict": "partial",
-      "fact": "A second independent browser origin reached the loopback-only server through an actual SSH local forward, listed the first client's workspace/session, and loaded its persisted multiline prompt. The transport and continuity were proven on the QA host; a separate physical phone was not exercised."
+      "fact": "A second independent browser origin reached stock Web through an actual loopback SSH local forward and loaded the first client's persisted prompt; no physical phone was exercised."
     },
     "safe_remote_access": {
       "verdict": "pass-with-operator-tunnel",
-      "fact": "Keep DSH on 127.0.0.1 and create an authenticated per-device SSH local forward. Direct Tailnet-IP binding is not accepted by the pinned webserver schema, and 0.0.0.0 remains intentionally rejected."
+      "fact": "Stock Web stayed on 127.0.0.1, authenticated SSH supplied per-device transport, and 0.0.0.0 was refused."
+    }
+  },
+  "after": {
+    "keyboard": {
+      "verdict": "pass-for-focused-baseline",
+      "fact": "Ctrl+K opened Spotlight; keyboard-only filtering plus Enter created a new conversation, opened the persisted recent session, expanded native Search with focus in its textbox, opened Settings directly on Plugins, and collapsed or reopened the sidebar. Escape closed the palette.",
+      "viewport": [1440, 900],
+      "cases": {
+        "recent_session": "pass",
+        "new_session": "pass",
+        "search_sessions": "pass",
+        "settings_plugins": "pass",
+        "sidebar_collapse_and_open": "pass"
+      },
+      "limitations": [
+        "There is no direct General-settings result; the built-in Open installed plugin settings action opens Settings on Plugins and native Settings navigation remains necessary from there.",
+        "Spotlight discovers some visible controls through the current DOM, so selector drift can silently reduce the action catalog after host UI changes.",
+        "The shortcut and its preference are browser-origin-local and do not change DSH session semantics."
+      ]
+    },
+    "phone_390x844": {
+      "verdict": "pass-for-stock-failures-only",
+      "fact": "The exact T-63.9 failures closed at 390x844: Settings measured 390x844 with flex-direction column, a 390px content region with no horizontal overflow, and a vertically scrollable 704/754px General body; the open sidebar floated as a 280px overlay while the frame remained 56px + 334px + 0, so the conversation retained 334px instead of being squeezed beside 280px.",
+      "measurements": {
+        "viewport": [390, 844],
+        "document_scroll_extent": [390, 844],
+        "settings_dialog": [390, 844],
+        "settings_flex_direction": "column",
+        "settings_content_width": 390,
+        "settings_content_horizontal_overflow": false,
+        "settings_general_scroll": {
+          "client_height": 704,
+          "scroll_height": 754
+        },
+        "settings_tabs": {
+          "layout": "single-row-horizontal-scroll",
+          "client_width": 366,
+          "scroll_width": 429
+        },
+        "open_sidebar": {
+          "visible_width": 280,
+          "grid_columns": "56px 334px 0px",
+          "conversation_width": 334,
+          "mode": "overlay"
+        }
+      },
+      "limitations": [
+        "The four Settings tabs occupy one horizontal row but require horizontal scrolling to reveal the final tab at this width.",
+        "The sidebar is a 280px overlay rather than the package README's literal full-screen description.",
+        "This CSS layout proof does not prove touch targets, soft-keyboard behavior, IME, approvals, questions, long transcripts, or physical-phone deployment."
+      ]
+    },
+    "session_semantics": {
+      "verdict": "pass-unchanged",
+      "fact": "The stock Web host created and durably stored the multiline user turn, rendered the expected local MISSING_CREDENTIAL result, and exposed the same session to both clients. Neither candidate adds a session protocol or server data channel."
+    },
+    "multiple_clients": {
+      "verdict": "pass-for-existing-continuity-probe",
+      "fact": "A second clean browser origin at 127.0.0.1:13081 traversed an actual ssh -L 127.0.0.1:13081:127.0.0.1:3081 process, listed the first client's workspace and session, and loaded the persisted two-line prompt and MISSING_CREDENTIAL result. No physical phone was exercised."
+    },
+    "safe_remote_access": {
+      "verdict": "pass-with-operator-tunnel",
+      "fact": "The candidate server and SSH forward both listened only on 127.0.0.1. The candidate-composed 0.0.0.0 launch exited 1 before creating a listener with the stock remote-code-execution warning. The plugins added no authentication and justified no weaker topology."
+    },
+    "browser_diagnostics": {
+      "verdict": "pass",
+      "fact": "No console messages, uncaught page errors, or captured failed network requests were observed during the focused run."
     }
   },
   "conclusion": {
-    "verdict": "reject",
+    "verdict": "pass-focused-candidate",
     "replacement_for_herdr": false,
+    "adoption_or_cutover_approved": false,
+    "active_operator_surface_changed": false,
     "reasons": [
-      "the stock phone Settings and open-sidebar layouts are not operator-ready at 390x844",
-      "keyboard support covers form mechanics but not efficient global navigation",
-      "multi-device use requires an external per-device tunnel and no physical phone run was completed"
+      "Spotlight supplied keyboard-only routes for every T-63.9 global-navigation category exercised by this proof",
+      "the reversible mobile CSS closed the measured Settings-column and sidebar-squeeze failures at exactly 390x844",
+      "stock session persistence, two-client continuity, the loopback listener, and the authenticated SSH-forward topology remained unchanged"
+    ],
+    "remaining_risks": [
+      "the exact Spotlight artifact requires explicit peer installation in DSH's autoInstallPeers=false profile",
+      "both projects are days old and Spotlight's DOM-discovered actions can drift",
+      "the CSS overlay proves only the focused layout cases, not touch, IME, approvals, questions, long transcripts, or a physical phone",
+      "no model-backed qq/pi2dsh cutover blockers were retested or removed"
     ],
     "cutover_or_removal_performed": false
   }
