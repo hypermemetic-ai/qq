@@ -548,6 +548,33 @@ try {
   assert.equal(blockedAcknowledgements.length, 1, "persisted run event should be acknowledged on redelivery");
   await blockedEvents.get("session_shutdown")();
 
+  const freshReceiverEvents = new Map();
+  const freshReceiverMessages = [];
+  const freshReceiverAcknowledgements = [];
+  let freshReceiverNextCalls = 0;
+  const freshReceiverEventClient = {
+    async next() {
+      freshReceiverNextCalls += 1;
+      if (freshReceiverNextCalls === 1) return { delivery: blockedDelivery };
+      return new Promise(() => {});
+    },
+    async acknowledge(guard) { freshReceiverAcknowledgements.push(guard); },
+    async retry() { throw new Error("a fresh receiver must recover the durable receipt without retrying"); },
+    async block() { throw new Error("a durable run outcome must not be blocked"); },
+  };
+  const freshReceiverPi = {
+    registerTool() {},
+    events: { on(name, fn) { freshReceiverEvents.set(name, fn); } },
+    on(name, fn) { freshReceiverEvents.set(name, fn); },
+    sendMessage(payload, options) { freshReceiverMessages.push({ payload, options }); },
+  };
+  extension.default(freshReceiverPi, { env: blockedEventEnv, exec: architectRun, eventClient: freshReceiverEventClient });
+  await freshReceiverEvents.get("session_start")({}, blockedCtx);
+  await waitFor("fresh receiver durable receipt recovery", () => freshReceiverAcknowledgements.length === 1);
+  assert.deepEqual(freshReceiverAcknowledgements, [runEvents.runEventDeliveryGuard(blockedDelivery)]);
+  assert.equal(freshReceiverMessages.length, 0, "fresh receiver must acknowledge durable history without reinjecting the outcome");
+  await freshReceiverEvents.get("session_shutdown")();
+
   const failedLandXdg = join(scratch, "failed-land-xdg");
   const failedLandDir = join(failedLandXdg, "qq", "runs", "qq", "task-failed-land");
   const failedLandPath = join(failedLandDir, "handoff.json");
