@@ -9,7 +9,11 @@ const module = await import(pathToFileURL(join(root, "extensions/agent-messages.
 
 const first = "019ff7b9-2fcd-78cd-bc16-c770a9ccff11";
 const second = "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9";
+const dsh = "session-4b70f906-ce0a-4135-bc9e-b231db9b98b1";
 assert.equal(module.relayAgentId(first), `agents/${first}`);
+assert.equal(module.relayAgentId(dsh), `agents/${dsh}`, "the complete DSH session ID was not preserved as the relay address");
+assert.throws(() => module.relayAgentId(`session-${second}`), /canonical Pi or DSH/, "a non-v4 prefixed UUID was accepted as a DSH session ID");
+assert.throws(() => module.relayAgentId("session-not-a-uuid"), /canonical Pi or DSH/);
 assert.deepEqual(module.statePaths({ XDG_STATE_HOME: "/tmp/qq-state" }), {
   relayRoot: "/tmp/qq-state/qq-relay",
   socket: "/tmp/qq-state/qq-relay/qq-relay.sock",
@@ -28,6 +32,7 @@ const valid = {
   updated_at: now, expires_at: now + 30_000,
 };
 assert.deepEqual(module.validPresence(valid, now)?.tasks, ["A-90", "T-12"]);
+assert.equal(module.validPresence({ ...valid, session_id: dsh }, now)?.session_id, dsh);
 assert.deepEqual(module.normalizeTasks("T-12, T-18, T-12"), ["T-12", "T-18"]);
 assert.equal(module.validPresence({ ...valid, expires_at: now }, now), undefined);
 assert.equal(module.validPresence({ ...valid, role: "architect" }, now)?.role, "architect");
@@ -50,11 +55,12 @@ try {
 const record = {
   event_id: "evt_test", accepted_at: now, recipient_id: module.relayAgentId(first),
   envelope: { payload: { schema: "qq.agent-message/v2", message: {
-    from: second, project: "deciq", role: "runner", tasks: [], pane: null,
+    from: dsh, project: "deciq", role: "runner", tasks: [], pane: null,
     content: "hello", delivery: "immediate",
   } } },
 };
 assert.equal(module.parseMessage(record)?.delivery, "immediate");
+assert.equal(module.parseMessage(record)?.from, dsh, "the DSH sender identity was not preserved");
 assert.equal(module.parseMessage({ ...record, envelope: { payload: { ...record.envelope.payload, message: { ...record.envelope.payload.message, role: "observer" } } } }), undefined);
 assert.equal(module.parseMessage({ ...record, envelope: { payload: { ...record.envelope.payload, message: { ...record.envelope.payload.message, delivery: "urgent" } } } }), undefined);
 assert.equal(module.statusName({ obligations: [{ status: "pending" }] }), "queued");
