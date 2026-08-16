@@ -8,7 +8,7 @@ const root = resolve(process.argv[2] ?? ".");
 const read = (path) => readFile(join(root, path), "utf8");
 const json = async (path) => JSON.parse(await read(path));
 
-const [pkg, pins, toolchain, toolchainLock, evidence, webEvidence, webQa, run, patch, relayProbe, relayContract, liveMessages, messages, review, scrub, runLib, runEvents] = await Promise.all([
+const [pkg, pins, toolchain, toolchainLock, evidence, webEvidence, webQa, consoleEvidence, consoleReadme, consoleRender, consoleWorker, run, patch, relayProbe, relayContract, liveMessages, messages, review, scrub, runLib, runEvents] = await Promise.all([
   json("package.json"),
   json("compat/pi2dsh/pins.json"),
   json("compat/pi2dsh/toolchain/package.json"),
@@ -16,6 +16,10 @@ const [pkg, pins, toolchain, toolchainLock, evidence, webEvidence, webQa, run, p
   json("compat/pi2dsh/evidence.json"),
   json("compat/pi2dsh/web-evidence.json"),
   read("compat/pi2dsh/WEB_QA.md"),
+  json("dsh-console/evidence.json"),
+  read("dsh-console/README.md"),
+  read("dsh-console/src/render.mjs"),
+  read("dsh-console/assets/sw-v1.js"),
   read("compat/pi2dsh/run.sh"),
   read("compat/pi2dsh/qq.patch.yml"),
   read("compat/pi2dsh/relay-probe.mjs"),
@@ -104,7 +108,14 @@ assert.match(probes.get("run-outcome-addressing").fact, /qq\/review-flow\/sessio
 assert.equal(probes.get("review-receipts").verdict, "installed-durable-entry-proven");
 assert.ok(evidence.conclusion.blockers.every((blocker) => !/qq-relay client boundary|review events/i.test(blocker)));
 
-assert.equal(webEvidence.schema, "qq.dsh-web-evidence/v2");
+assert.equal(evidence.operator_surface.verdict, "pass-sequential-vertical-slice");
+assert.equal(evidence.operator_surface.model, "sequential-single-page-handoff");
+assert.equal(evidence.operator_surface.hypermedia.sse_activated, true);
+assert.equal(evidence.operator_surface.hypermedia.stable_owner_and_target, true);
+assert.equal(evidence.operator_surface.pwa.offline_commands, "rejected, never queued");
+assert.equal(evidence.operator_surface.cutover, false);
+
+assert.equal(webEvidence.schema, "qq.dsh-web-evidence/v3");
 assert.equal(webEvidence.observed_at, evidence.observed_at);
 assert.equal(webEvidence.pins_file, "compat/pi2dsh/pins.json");
 assert.deepEqual(webEvidence.pin, {
@@ -112,41 +123,51 @@ assert.deepEqual(webEvidence.pin, {
   version: pins.dsh.version,
   revision: pins.dsh.revision,
 });
-assert.deepEqual(webEvidence.candidate.artifacts, [
-  {
-    package: pins.webCandidate.spotlight.package,
-    version: pins.webCandidate.spotlight.version,
-    revision: pins.webCandidate.spotlight.revision,
-    integrity: pins.webCandidate.spotlight.integrity,
-  },
-  {
-    package: pins.webCandidate.mobileFix.package,
-    version: pins.webCandidate.mobileFix.version,
-    revision: pins.webCandidate.mobileFix.revision,
-    integrity: pins.webCandidate.mobileFix.integrity,
-  },
-]);
-assert.equal(webEvidence.candidate.profile.artifact_only_boot.verdict, "fail");
-assert.equal(webEvidence.candidate.profile.composed_boot.verdict, "pass-with-explicit-peers");
-assert.equal(webEvidence.runtime.all_interfaces.verdict, "refused-as-designed");
-assert.equal(webEvidence.runtime.all_interfaces.listener_created, false);
-assert.equal(webEvidence.before.phone_390x844.verdict, "fail");
-assert.equal(webEvidence.before.keyboard.verdict, "partial");
-assert.equal(webEvidence.after.phone_390x844.verdict, "pass-for-stock-failures-only");
-assert.equal(webEvidence.after.keyboard.verdict, "pass-for-focused-baseline");
-assert.equal(webEvidence.after.session_semantics.verdict, "pass-unchanged");
-assert.equal(webEvidence.after.safe_remote_access.verdict, "pass-with-operator-tunnel");
-assert.equal(webEvidence.conclusion.verdict, "pass-focused-candidate");
+assert.equal(webEvidence.scope, "qq-owned sequential single-page DSH console vertical slice");
+assert.equal(webEvidence.runtime.verdict, "pass");
+assert.equal(webEvidence.topology.one_active_page, "operator usage convention");
+assert.equal(webEvidence.topology.simultaneous_client_coordination, false);
+assert.equal(webEvidence.topology.controller_lease, false);
+assert.equal(webEvidence.hypermedia.sse_activated, true);
+assert.equal(webEvidence.hypermedia.owner_replaced, false);
+assert.equal(webEvidence.hypermedia.target_replaced, false);
+assert.equal(webEvidence.hypermedia.swap, "innerHTML");
+assert.equal(webEvidence.hypermedia.manual_htmx_process, false);
+assert.equal(webEvidence.browser_qa.two_swap_lifecycle.verdict, "pass");
+assert.equal(webEvidence.browser_qa.two_swap_lifecycle.owner_identity_stable, true);
+assert.equal(webEvidence.browser_qa.two_swap_lifecycle.target_identity_stable, true);
+assert.equal(webEvidence.browser_qa.two_swap_lifecycle.newly_inserted_interrupt_form_submitted, true);
+assert.equal(webEvidence.browser_qa.safe_rendering.script_executed, false);
+assert.equal(webEvidence.browser_qa.reconnect.connections_after, 2);
+assert.equal(webEvidence.browser_qa.reconnect.complete_snapshot_after_reconnect, true);
+assert.equal(webEvidence.browser_qa.session_selection.verdict, "pass");
+assert.equal(webEvidence.browser_qa.phone_390x844.horizontal_overflow, false);
+assert.equal(webEvidence.pwa.verdict, "pass-for-minimal-install-boundary");
+assert.equal(webEvidence.pwa.disconnected_shell.offline_post_rejected_by_network, true);
+assert.equal(webEvidence.pwa.disconnected_shell.offline_command_queued, false);
+assert.ok(webEvidence.pwa.cached_paths.every((path) => path.startsWith("/qq/assets/")));
+assert.equal(webEvidence.conclusion.verdict, "pass-sequential-vertical-slice");
 assert.equal(webEvidence.conclusion.replacement_for_herdr, false);
-assert.equal(webEvidence.conclusion.adoption_or_cutover_approved, false);
-assert.equal(webEvidence.conclusion.active_operator_surface_changed, false);
+assert.equal(webEvidence.conclusion.operator_cutover_approved, false);
 assert.equal(webEvidence.conclusion.cutover_or_removal_performed, false);
-assert.match(webQa, /@0xsline\/dsh-spotlight@0\.0\.2/);
-assert.match(webQa, /dsh-web-mobile-fix@1\.0\.2/);
-assert.match(webQa, /--host 127\.0\.0\.1/);
-assert.match(webQa, /ssh -N/);
-assert.match(webQa, /--host 0\.0\.0\.0/);
-assert.match(webQa, /## Verdict: focused candidate pass, no adoption/);
+
+assert.equal(consoleEvidence.schema, "qq.dsh-console-evidence/v2");
+assert.deepEqual(consoleEvidence.dsh_pin, webEvidence.pin);
+assert.equal(consoleEvidence.scope.model, webEvidence.topology.model);
+assert.equal(consoleEvidence.runtime_probe.verdict, "pass");
+assert.equal(consoleEvidence.hypermedia.sse_activated, true);
+assert.equal(consoleEvidence.pwa.offline_post_rejected, true);
+assert.match(webQa, /stable nodes/);
+assert.match(webQa, /newly inserted button/);
+assert.match(webQa, /official[- ]extension/);
+assert.match(webQa, /390×844/);
+assert.match(webQa, /No transcript is cached and no message can be sent offline/);
+assert.match(consoleReadme, /One active page at a time is an operator convention/);
+assert.match(consoleReadme, /Agent\.cancel\(\{ kind: "user" \}\)/);
+assert.match(consoleRender, /id="console-stream"[\s\S]*sse-connect/);
+assert.match(consoleRender, /id="session-panel"[\s\S]*sse-swap="session" hx-swap="innerHTML"/);
+assert.doesNotMatch(consoleRender, /hx-swap="outerHTML"|htmx\.process/);
+assert.doesNotMatch(consoleWorker, /session\/|\/prompt|\/events|\/interrupt|indexedDB|localStorage/i);
 
 // Herdr orchestration remains explicitly Pi-owned and proves prompt acceptance
 // by opening the path in Herdr's Pi session descriptor.

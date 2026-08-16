@@ -1,0 +1,406 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { createServer, request as httpRequest } from "node:http";
+import { readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { createConsoleHandler } from "../dsh-console/src/http-app.mjs";
+import { createDshSessionBackend } from "../dsh-console/src/session-backend.mjs";
+
+const root = resolve(process.argv[2] ?? ".");
+const primaryId = "session-63a11000-0000-4000-8000-000000000001";
+const secondaryId = "session-63a11000-0000-4000-8000-000000000002";
+const states = new Map([
+  [primaryId, { id: primaryId, events: [], createdAt: Date.UTC(2026, 7, 16, 12), turn: 0 }],
+  [secondaryId, { id: secondaryId, events: [], createdAt: Date.UTC(2026, 7, 15, 12), turn: 0 }],
+]);
+const liveAgents = new Map();
+const registrations = [];
+let flushes = 0;
+let resumes = 0;
+let creates = 0;
+
+function append(state, type, data, surfaceOp) {
+  state.events.push({
+    type,
+    seq: state.events.length,
+    time: Date.UTC(2026, 7, 16, 12, state.turn, state.events.length),
+    data,
+    ...(surfaceOp ? { surfaceOp } : {}),
+  });
+}
+
+function fakeAgent(state) {
+  let status = "idle";
+  let timer;
+  let settle;
+  let activity = Promise.resolve();
+  return {
+    session: { id: state.id, events: state.events },
+    get status() { return status; },
+    followup(message) {
+      assert.equal(status, "idle");
+      state.turn += 1;
+      status = "running";
+      append(state, "turn/start", { turn: state.turn });
+      append(state, "user/message", message, "append");
+      activity = new Promise((resolveActivity) => {
+        settle = resolveActivity;
+        const delay = message.content[0].text.includes("interrupt") ? 5_000 : 180;
+        timer = setTimeout(() => {
+          append(state, "assistant/message", {
+            turn: state.turn,
+            step: 1,
+            message: {
+              id: `assistant-${state.id}-${state.turn}`,
+              role: "assistant",
+              source: { kind: "model", provider: "local", model: "proof" },
+              content: [{ type: "text", text: `Durable reply ${state.turn}: ${message.content[0].text}` }],
+            },
+          }, "append");
+          append(state, "turn/end", { turn: state.turn, reason: { kind: "completed" } });
+          status = "idle";
+          settle = undefined;
+          resolveActivity();
+        }, delay);
+      });
+    },
+    cancel(cause) {
+      assert.deepEqual(cause, { kind: "user" });
+      if (status !== "running") return;
+      clearTimeout(timer);
+      append(state, "turn/end", { turn: state.turn, reason: { kind: "aborted", reason: cause } });
+      status = "idle";
+      const resolveActivity = settle;
+      settle = undefined;
+      resolveActivity?.();
+    },
+    whenIdle() { return activity; },
+  };
+}
+
+const fakeAgentContext = {
+  on(name) {
+    registrations.push(name);
+    return () => {};
+  },
+};
+const services = {
+  agents: {
+    get: (id) => liveAgents.get(id),
+    list: () => [...liveAgents.values()],
+    async resume(options) {
+      resumes += 1;
+      const state = states.get(options.resumeSessionId);
+      assert.ok(state, "only a persisted DSH identity may resume");
+      assert.equal(options.setup(fakeAgentContext), undefined);
+      const agent = fakeAgent(state);
+      liveAgents.set(state.id, agent);
+      return { agent };
+    },
+    async create(options) {
+      creates += 1;
+      const state = states.get(options.sessionId);
+      assert.ok(state);
+      const agent = fakeAgent(state);
+      liveAgents.set(state.id, agent);
+      return { agent };
+    },
+  },
+  sessions: {
+    async flush(session) {
+      assert.ok(states.has(session.id));
+      flushes += 1;
+    },
+  },
+  sessionPersistence: {
+    async list() {
+      return [...states.values()].map((state) => ({
+        id: state.id,
+        version: 0,
+        createdAt: state.createdAt,
+        cwd: root,
+      }));
+    },
+  },
+  agentDefaultModel: {
+    currentSelection() {
+      return { provider: "local", model: "proof", reasoningEffort: "medium" };
+    },
+  },
+  loader: { async await() {} },
+};
+const backend = createDshSessionBackend(
+  { get: (name) => services[name] },
+  { sessionId: primaryId, cwd: root },
+);
+const server = createServer(createConsoleHandler(backend, { ssePollMs: 20 }));
+await new Promise((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+const address = server.address();
+assert.ok(address && typeof address !== "string");
+
+function request(path, options = {}) {
+  return new Promise((resolveRequest, reject) => {
+    const req = httpRequest(
+      {
+        host: "127.0.0.1",
+        port: address.port,
+        path,
+        method: options.method ?? "GET",
+        agent: false,
+        headers: options.headers,
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => resolveRequest({
+          status: res.statusCode,
+          headers: res.headers,
+          body: Buffer.concat(chunks).toString("utf8"),
+        }));
+      },
+    );
+    req.on("error", reject);
+    req.end(options.body);
+  });
+}
+
+function post(sessionId, action, fields = {}, extraHeaders = {}, htmx = true) {
+  const body = new URLSearchParams(fields).toString();
+  return request(`/qq/session/${sessionId}/${action}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      "content-length": Buffer.byteLength(body),
+      ...(htmx ? { "hx-request": "true" } : {}),
+      ...extraHeaders,
+    },
+    body,
+  });
+}
+
+function openSse(sessionId) {
+  return new Promise((resolveOpen, rejectOpen) => {
+    const messages = [];
+    const waiters = new Set();
+    let pending = "";
+    let response;
+    const req = httpRequest({
+      host: "127.0.0.1",
+      port: address.port,
+      path: `/qq/session/${sessionId}/events`,
+      method: "GET",
+      agent: false,
+      headers: { accept: "text/event-stream" },
+    }, (res) => {
+      response = res;
+      assert.equal(res.statusCode, 200);
+      assert.match(String(res.headers["content-type"]), /^text\/event-stream/);
+      const notify = () => {
+        for (const waiter of [...waiters]) {
+          const found = messages.slice(waiter.after).find((message) => waiter.pattern.test(message));
+          if (!found) continue;
+          clearTimeout(waiter.timer);
+          waiters.delete(waiter);
+          waiter.resolve(found);
+        }
+      };
+      res.on("data", (chunk) => {
+        pending += chunk.toString("utf8").replaceAll("\r", "");
+        let boundary;
+        while ((boundary = pending.indexOf("\n\n")) >= 0) {
+          const block = pending.slice(0, boundary);
+          pending = pending.slice(boundary + 2);
+          if (!block.startsWith("event: session\n")) continue;
+          messages.push(block.split("\n").filter((line) => line.startsWith("data: ")).map((line) => line.slice(6)).join("\n"));
+          notify();
+        }
+      });
+      res.on("error", () => {});
+      resolveOpen({
+        checkpoint: () => messages.length,
+        waitFor(pattern, after = 0, timeoutMs = 2_000) {
+          const found = messages.slice(after).find((message) => pattern.test(message));
+          if (found) return Promise.resolve(found);
+          return new Promise((resolveWait, rejectWait) => {
+            const waiter = { pattern, after, resolve: resolveWait };
+            waiter.timer = setTimeout(() => {
+              waiters.delete(waiter);
+              rejectWait(new Error(`timed out waiting for SSE ${pattern}`));
+            }, timeoutMs);
+            waiters.add(waiter);
+          });
+        },
+        close() {
+          req.destroy();
+          response?.destroy();
+        },
+      });
+    });
+    req.on("error", (error) => {
+      if (error.code !== "ECONNRESET") rejectOpen(error);
+    });
+    req.end();
+  });
+}
+
+const streams = [];
+try {
+  // Stable htmx/SSE lifecycle: the owner and target wrap inner-only fragments.
+  const home = await request("/qq", { headers: { cookie: "proof-client=home" } });
+  assert.equal(home.status, 200);
+  assert.match(home.headers["cache-control"], /no-store/);
+  assert.match(home.body, /^<!doctype html>/);
+  assert.match(home.body, new RegExp(`id="console-stream"[^>]*hx-ext="sse"[^>]*sse-connect="/qq/session/${primaryId}/events"`));
+  assert.match(home.body, /id="session-panel"[^>]*hx-ext="sse"[^>]*sse-swap="session"[^>]*hx-swap="innerHTML"/);
+  assert.match(home.body, /htmx-2\.0\.10\.min\.js/);
+  assert.match(home.body, /htmx-ext-sse-2\.2\.4\.js/);
+  assert.match(home.body, /rel="manifest"/);
+  assert.match(home.body, /data-service-worker="\/qq\/sw-v1\.js"/);
+  assert.match(home.body, new RegExp(`/qq/session/${secondaryId}`));
+  assert.match(home.body, /This DSH session has no transcript yet/);
+
+  const stream = await openSse(primaryId);
+  streams.push(stream);
+  const initial = await stream.waitFor(/<form id="composer"/);
+  assert.doesNotMatch(initial, /<section id="session-panel"/);
+
+  // One browser receives two SSE inner swaps while its htmx send remains open.
+  let mark = stream.checkpoint();
+  const firstPostPromise = post(primaryId, "prompt", {
+    prompt: "home handoff <script>alert(1)</script>",
+  });
+  const running = await stream.waitFor(/<form id="interrupt-form"/, mark);
+  assert.match(running, /Running turn 1/);
+  assert.doesNotMatch(running, /<form id="composer"/);
+  mark = stream.checkpoint();
+  const completed = await stream.waitFor(/Durable reply 1/, mark);
+  assert.match(completed, /home handoff &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.doesNotMatch(completed, /<script>alert\(1\)<\/script>/);
+  assert.match(completed, /<form id="composer"/);
+  const firstPost = await firstPostPromise;
+  assert.equal(firstPost.status, 200);
+  assert.doesNotMatch(firstPost.body, /<!doctype html>|<section id="session-panel"/);
+
+  // The interrupt form is inserted by SSE and invokes DSH Agent.cancel({kind:user}).
+  mark = stream.checkpoint();
+  const longPostPromise = post(primaryId, "prompt", { prompt: "please interrupt this turn" });
+  await stream.waitFor(/<form id="interrupt-form"/, mark);
+  const interrupted = await post(primaryId, "interrupt");
+  assert.equal(interrupted.status, 200);
+  assert.match(interrupted.body, /Interrupt requested for the running DSH turn/);
+  assert.match(interrupted.body, /Last turn interrupted/);
+  const longPost = await longPostPromise;
+  assert.equal(longPost.status, 200);
+
+  // Laptop and phone are sequential new requests over one canonical durable id.
+  const laptop = await request(`/qq/session/${primaryId}`, { headers: { cookie: "proof-client=laptop" } });
+  assert.match(laptop.body, /home handoff/);
+  assert.match(laptop.body, /please interrupt this turn/);
+  const laptopPost = await post(primaryId, "prompt", { prompt: "laptop handoff" }, {}, false);
+  assert.equal(laptopPost.status, 303);
+  assert.equal(laptopPost.headers.location, `/qq/session/${primaryId}`);
+  const phone = await request(`/qq/session/${primaryId}`, {
+    headers: { cookie: "proof-client=phone", "user-agent": "proof-phone/390x844" },
+  });
+  assert.match(phone.body, /home handoff/);
+  assert.match(phone.body, /laptop handoff/);
+  const phonePost = await post(primaryId, "prompt", { prompt: "phone handoff" });
+  assert.equal(phonePost.status, 200);
+  const localAgain = await request(`/qq/session/${primaryId}`);
+  for (const text of ["home handoff", "laptop handoff", "phone handoff"]) {
+    assert.match(localAgain.body, new RegExp(text));
+  }
+
+  // Server-validated session selection loads another canonical DSH identity.
+  const selected = await request(`/qq/session/${secondaryId}`);
+  assert.equal(selected.status, 200);
+  assert.match(selected.body, new RegExp(`<code>${secondaryId}</code>`));
+  assert.match(selected.body, new RegExp(`href="/qq/session/${secondaryId}" aria-current="page"`));
+  const secondaryPost = await post(secondaryId, "prompt", { prompt: "selected durable session" });
+  assert.equal(secondaryPost.status, 200);
+  assert.match(secondaryPost.body, /selected durable session/);
+  const unknown = await request("/qq/session/session-63a11000-0000-4000-8000-000000000099");
+  assert.equal(unknown.status, 404);
+
+  // Mutations fail same-origin checks on the server; there is no browser lease.
+  const rejected = await post(primaryId, "prompt", { prompt: "rejected" }, {
+    origin: "https://attacker.invalid",
+    host: `127.0.0.1:${address.port}`,
+  });
+  assert.equal(rejected.status, 200, "htmx errors are safely rendered into the stable target");
+  assert.match(rejected.body, /Cross-origin form submission refused/);
+  assert.doesNotMatch(localAgain.body, /rejected/);
+
+  assert.equal(resumes, 2, "each selected persisted DSH session resumes once");
+  assert.equal(creates, 0, "navigation cannot invent a DSH session");
+  assert.ok(flushes >= 6, "accepted prompts and interruption cross DSH flush boundaries");
+  assert.deepEqual(
+    registrations,
+    ["system-prompt/assemble", "agent/request", "system-prompt/assemble", "agent/request"],
+  );
+
+  // Installable PWA boundary caches presentation only and leaves data network-only.
+  const manifestResponse = await request("/qq/assets/manifest-v1.webmanifest");
+  assert.equal(manifestResponse.status, 200);
+  assert.match(manifestResponse.headers["cache-control"], /no-store/);
+  const manifest = JSON.parse(manifestResponse.body);
+  assert.equal(manifest.display, "standalone");
+  assert.equal(manifest.id, "/qq/");
+  assert.equal(manifest.start_url, "/qq/");
+  assert.equal(manifest.scope, "/qq/");
+  assert.deepEqual(manifest.icons.map((icon) => icon.sizes), ["192x192", "512x512"]);
+
+  const worker = await request("/qq/sw-v1.js");
+  assert.equal(worker.status, 200);
+  assert.equal(worker.headers["service-worker-allowed"], "/qq/");
+  assert.match(worker.body, /request\.method !== "GET"/);
+  assert.match(worker.body, /request\.mode === "navigate"/);
+  assert.match(worker.body, /offline-v1\.html/);
+  assert.doesNotMatch(worker.body, /session\/|\/prompt|\/events|\/interrupt|backgroundsync|indexedDB|localStorage/i);
+  const offline = await request("/qq/assets/offline-v1.html");
+  assert.match(offline.body, /No transcript is cached and no message can be sent offline/);
+  const staticCss = await request("/qq/assets/console-v1.css");
+  assert.match(staticCss.headers["cache-control"], /immutable/);
+
+  // Vendored pins and negative architecture constraints are machine checked.
+  const [pins, consoleEvidence, dshPins, plugin, patch, browser, workerSource, renderSource] = await Promise.all([
+    readFile(join(root, "dsh-console/vendor-pins.json"), "utf8").then(JSON.parse),
+    readFile(join(root, "dsh-console/evidence.json"), "utf8").then(JSON.parse),
+    readFile(join(root, "compat/pi2dsh/pins.json"), "utf8").then(JSON.parse),
+    readFile(join(root, "dsh-console/src/plugin.mjs"), "utf8"),
+    readFile(join(root, "dsh-console/cordis.patch.yml"), "utf8"),
+    readFile(join(root, "dsh-console/assets/browser-v1.js"), "utf8"),
+    readFile(join(root, "dsh-console/assets/sw-v1.js"), "utf8"),
+    readFile(join(root, "dsh-console/src/render.mjs"), "utf8"),
+  ]);
+  assert.equal(pins.schema, "qq.dsh-console-vendor-pins/v1");
+  assert.equal(consoleEvidence.schema, "qq.dsh-console-evidence/v2");
+  assert.deepEqual(consoleEvidence.dsh_pin, {
+    package: dshPins.dsh.package,
+    version: dshPins.dsh.version,
+    revision: dshPins.dsh.revision,
+  });
+  assert.equal(consoleEvidence.scope.model, "sequential-single-page-handoff");
+  assert.equal(consoleEvidence.scope.controller_lease, false);
+  assert.equal(consoleEvidence.hypermedia.sse_activated, true);
+  assert.equal(consoleEvidence.pwa.network_only.includes("SSE"), true);
+  assert.equal(consoleEvidence.cutover_or_runtime_replacement_performed, false);
+  for (const artifact of pins.artifacts) {
+    const content = await readFile(join(root, "dsh-console", artifact.file));
+    assert.equal(createHash("sha256").update(content).digest("hex"), artifact.sha256);
+    assert.match(artifact.npmIntegrity, /^sha512-/);
+  }
+  assert.match(patch, /host: 127\.0\.0\.1/);
+  assert.match(plugin, /refusing a non-loopback web server/);
+  assert.doesNotMatch(`${plugin}\n${patch}`, /name:.*(?:dsh-web-app|api-proxy|client-connection)/);
+  assert.doesNotMatch(browser, /localStorage|sessionStorage|indexedDB|document\.cookie|EventSource|WebSocket|htmx\.process/);
+  assert.doesNotMatch(renderSource, /outerHTML|controller|observer|lease|take control/i);
+  assert.doesNotMatch(workerSource, /addEventListener\("(?:sync|periodicsync|push|notificationclick)"|indexedDB|localStorage/i);
+} finally {
+  for (const stream of streams) stream.close();
+  server.closeAllConnections?.();
+  await new Promise((resolveClose) => server.close(resolveClose));
+}
+
+console.log("test-dsh-console: pass");

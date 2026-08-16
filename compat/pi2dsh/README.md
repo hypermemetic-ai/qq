@@ -46,9 +46,20 @@ A fast, offline drift test covers the declared bundle and qq's non-ABI assumptio
 node tests/test-pi2dsh-compat.mjs .
 ```
 
-## Web UI candidate evaluation
+## qq-owned sequential Web console
 
-The focused [`WEB_QA.md`](WEB_QA.md) harness reuses the rejected stock-Web baseline and records one proof-only after-test in [`web-evidence.json`](web-evidence.json): exact `@0xsline/dsh-spotlight@0.0.2` plus `dsh-web-mobile-fix@1.0.2`. The candidate passed the selected experiment by supplying keyboard routes for the stock navigation gaps and closing the measured `390x844` Settings/sidebar failures. It still requires explicit Spotlight peers, carries DOM-selector drift and young-project risk, and proves no touch, IME, approval, long-transcript, or physical-phone behavior. Stock sessions, authenticated SSH-forward continuity, loopback-only binding, and the official `0.0.0.0` refusal remained unchanged. This is not adoption or cutover, and the Herdr/Pi runtime remains active.
+T-63.11 adds the isolated [`../../dsh-console`](../../dsh-console) vertical slice over the same exact DSH pin. It is server-rendered hypermedia, not stock DSH Web or a client-side session implementation. Run its deterministic and exact-profile proofs with:
+
+```bash
+node tests/test-dsh-console.mjs .
+tests/test-dsh-console-live.sh
+```
+
+The host binds only `127.0.0.1`. Home, laptop, and phone use one page at a time and select the same canonical DSH `session-<UUID>`; each reconstructs the ordered DSH event log after the prior page disconnects. One-page use is a convention, not a lease: there is no observer/controller mode, client presence, fanout coordination, shared browser state, or simultaneous-client enforcement.
+
+The page supplies DSH-backed session navigation, Send, live status/transcript updates, and Interrupt. Exact local htmx 2.0.10 plus official SSE extension 2.2.4 keep a stable SSE owner and target while swapping only target children. Focused real-browser QA in [`WEB_QA.md`](WEB_QA.md) proves two swaps, a newly inserted working htmx Interrupt form without `htmx.process`, official-extension reconnect, safe rendering, session selection, and the one-column `390×844` layout. [`web-evidence.json`](web-evidence.json) is the machine-readable record.
+
+The installable PWA caches only exact versioned presentation assets and a disconnected shell. Session pages, fragments, transcripts, SSE, Send, and Interrupt remain network-only; offline POST rejects and no command queue exists. A laptop or phone still needs a separately authenticated loopback tunnel. This slice is not a Herdr/Pi cutover, physical-device claim, offline DSH mode, or approval to weaken the bind boundary. T-63.10's community-plugin comparison remains requirements evidence rather than the implemented surface.
 
 ## Observed facts
 

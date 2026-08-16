@@ -23,6 +23,52 @@
     "expected_exit": "success after two local agent steps",
     "host_patch": "compat/pi2dsh/qq.patch.yml"
   },
+  "operator_surface": {
+    "ticket": "T-63.11",
+    "package": "@hypermemetic-ai/qq-dsh-console",
+    "source": "dsh-console/",
+    "evidence": "dsh-console/evidence.json",
+    "browser_evidence": "compat/pi2dsh/web-evidence.json",
+    "verdict": "pass-sequential-vertical-slice",
+    "model": "sequential-single-page-handoff",
+    "listener": "127.0.0.1",
+    "session_authority": "DSH session persistence and live Agent registry",
+    "controls": [
+      "session selection",
+      "Send",
+      "live htmx SSE status/transcript",
+      "Interrupt"
+    ],
+    "hypermedia": {
+      "htmx": "2.0.10",
+      "official_sse_extension": "2.2.4",
+      "sse_activated": true,
+      "stable_owner_and_target": true,
+      "swap": "innerHTML",
+      "manual_htmx_process": false
+    },
+    "pwa": {
+      "installable": true,
+      "cached": "versioned presentation assets and disconnected shell only",
+      "network_only": [
+        "session data",
+        "fragments",
+        "SSE",
+        "mutations"
+      ],
+      "offline_commands": "rejected, never queued"
+    },
+    "absent": [
+      "controller lease",
+      "observer mode",
+      "client presence",
+      "simultaneous-client coordination",
+      "fanout registry",
+      "second database",
+      "offline DSH state"
+    ],
+    "cutover": false
+  },
   "probes": [
     {
       "id": "package-local-events",

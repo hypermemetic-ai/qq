@@ -1,0 +1,222 @@
+export function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function safeType(value) {
+  return typeof value === "string" ? value : "unknown";
+}
+
+function contentBlocks(blocks) {
+  if (!Array.isArray(blocks) || blocks.length === 0) {
+    return '<p class="empty-content">No displayable content</p>';
+  }
+  return blocks
+    .map((block) => {
+      if (!block || typeof block !== "object") {
+        return '<p class="empty-content">Unsupported content</p>';
+      }
+      switch (block.type) {
+        case "text":
+          return `<div class="message-text">${escapeHtml(block.text ?? "")}</div>`;
+        case "reasoning":
+          return `<details class="reasoning"><summary>Reasoning</summary><div class="message-text">${escapeHtml(block.text ?? "")}</div></details>`;
+        case "tool-call":
+          return `<details class="tool"><summary>Tool: ${escapeHtml(block.name ?? "unknown")}</summary><pre>${escapeHtml(block.arguments ?? "")}</pre></details>`;
+        case "tool-result":
+          return `<details class="tool${block.isError ? " tool-error" : ""}" open><summary>Tool result${block.isError ? " — error" : ""}</summary>${contentBlocks(block.content)}</details>`;
+        case "image": {
+          const attachment = block.attachment ?? {};
+          const dimensions =
+            Number.isFinite(attachment.width) && Number.isFinite(attachment.height)
+              ? ` ${attachment.width}×${attachment.height}`
+              : "";
+          return `<p class="attachment">Image attachment${escapeHtml(dimensions)}</p>`;
+        }
+        default:
+          return `<p class="empty-content">Unsupported content: ${escapeHtml(safeType(block.type))}</p>`;
+      }
+    })
+    .join("");
+}
+
+function eventTime(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? "" : date.toISOString();
+}
+
+function eventMessage(event) {
+  if (event?.surfaceOp !== "append") return "";
+  const time = eventTime(event.time);
+  const timeElement = time
+    ? `<time datetime="${time}">${escapeHtml(time)}</time>`
+    : "";
+  if (event.type === "user/message") {
+    const source = event.data?.source;
+    const direct = source?.kind === "user";
+    const label = direct ? "You" : `Context · ${source?.plugin ?? source?.kind ?? "unknown"}`;
+    return `<article class="message ${direct ? "message-user" : "message-context"}" data-seq="${escapeHtml(event.seq)}">
+      <header><strong>${escapeHtml(label)}</strong>${timeElement}</header>
+      ${contentBlocks(event.data?.content)}
+    </article>`;
+  }
+  if (event.type === "assistant/message") {
+    return `<article class="message message-assistant" data-seq="${escapeHtml(event.seq)}">
+      <header><strong>Assistant</strong>${timeElement}</header>
+      ${contentBlocks(event.data?.message?.content)}
+    </article>`;
+  }
+  if (event.type === "tool/result") {
+    return `<article class="message message-tool" data-seq="${escapeHtml(event.seq)}">
+      <header><strong>Tool result</strong>${timeElement}</header>
+      ${contentBlocks(event.data?.message?.content)}
+    </article>`;
+  }
+  return "";
+}
+
+export function deriveStatus(events, agentStatus) {
+  let openTurn;
+  let lastEnd;
+  for (const event of events) {
+    if (event?.type === "turn/start") openTurn = event.data?.turn;
+    if (event?.type === "turn/end") {
+      if (openTurn === event.data?.turn) openTurn = undefined;
+      lastEnd = event.data?.reason;
+    }
+  }
+  if (agentStatus === "running" || (agentStatus === undefined && openTurn !== undefined)) {
+    return {
+      key: "running",
+      label: openTurn === undefined ? "Running" : `Running turn ${openTurn}`,
+    };
+  }
+  switch (lastEnd?.kind) {
+    case "completed":
+      return { key: "ready", label: "Ready" };
+    case "error":
+      return {
+        key: "error",
+        label: `Last turn failed${lastEnd.error?.code ? ` · ${lastEnd.error.code}` : ""}`,
+      };
+    case "aborted":
+      return { key: "stopped", label: "Last turn interrupted" };
+    case "interrupted":
+      return { key: "stopped", label: "Last turn recovered after interruption" };
+    case "blocked":
+      return { key: "stopped", label: "Last turn blocked" };
+    case "max-tokens":
+      return { key: "stopped", label: "Last turn reached its token limit" };
+    default:
+      return { key: "ready", label: "Ready · no turns yet" };
+  }
+}
+
+function sessionNavigation(snapshot, paths) {
+  const choices = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
+  return `<nav class="session-switcher" aria-label="Durable DSH sessions">
+    <p>Session</p>
+    <div class="session-links">
+      ${choices.map((session) => {
+        const current = session.id === snapshot.id;
+        const href = paths.session(session.id);
+        const created = Number.isFinite(session.createdAt) && session.createdAt > 0
+          ? eventTime(session.createdAt).slice(0, 10)
+          : "durable";
+        return `<a href="${escapeHtml(href)}"${current ? ' aria-current="page"' : ""} title="${escapeHtml(session.cwd ?? session.id)}"><span>${escapeHtml(session.id)}</span><small>${escapeHtml(created)}</small></a>`;
+      }).join("")}
+    </div>
+  </nav>`;
+}
+
+function composer(paths, running) {
+  if (running) {
+    return `<form id="interrupt-form" class="composer interrupt-composer" action="${escapeHtml(paths.interrupt)}" method="post"
+      hx-post="${escapeHtml(paths.interrupt)}"
+      hx-target="#session-panel"
+      hx-swap="innerHTML"
+      hx-disabled-elt="#interrupt-submit"
+      hx-indicator="#interrupt-working">
+      <p>The current DSH turn is still running.</p>
+      <div class="composer-actions">
+        <span id="interrupt-working" class="htmx-indicator" aria-live="polite">Interrupting DSH…</span>
+        <button id="interrupt-submit" class="button-danger" type="submit">Interrupt</button>
+      </div>
+    </form>`;
+  }
+  return `<form id="composer" class="composer" action="${escapeHtml(paths.prompt)}" method="post"
+      hx-post="${escapeHtml(paths.prompt)}"
+      hx-target="#session-panel"
+      hx-swap="innerHTML"
+      hx-push-url="${escapeHtml(paths.canonical)}"
+      hx-disabled-elt="#composer-submit"
+      hx-indicator="#working">
+      <label for="prompt">Message</label>
+      <textarea id="prompt" name="prompt" rows="3" maxlength="32768" required autocomplete="off" placeholder="Send a message to this DSH session"></textarea>
+      <div class="composer-actions">
+        <span id="working" class="htmx-indicator" aria-live="polite">Waiting for DSH…</span>
+        <span class="key-hint">Enter to send · Shift+Enter for a new line</span>
+        <button id="composer-submit" type="submit">Send</button>
+      </div>
+    </form>`;
+}
+
+/** Render only the stable SSE target's children. */
+export function renderSessionContent(snapshot, paths, notice = "") {
+  const events = Array.isArray(snapshot.events) ? snapshot.events : [];
+  const status = deriveStatus(events, snapshot.agentStatus);
+  const transcript = events.map(eventMessage).filter(Boolean).join("\n");
+  return `<div class="session-heading">
+      <div>
+        <p class="eyebrow">DSH durable session</p>
+        <h1 id="session-heading">Operator console</h1>
+        <code>${escapeHtml(snapshot.id)}</code>
+      </div>
+      <p class="status status-${escapeHtml(status.key)}" role="status"><span aria-hidden="true"></span>${escapeHtml(status.label)}</p>
+    </div>
+    ${sessionNavigation(snapshot, paths)}
+    ${notice ? `<p class="notice" role="alert">${escapeHtml(notice)}</p>` : ""}
+    <div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" hx-history="false">
+      ${transcript || '<p class="empty-transcript">This DSH session has no transcript yet.</p>'}
+    </div>
+    ${composer(paths, status.key === "running")}`;
+}
+
+export function renderPage(snapshot, paths, assetPaths, notice = "") {
+  const content = renderSessionContent(snapshot, paths, notice);
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0d1216">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="htmx-config" content='{"disableInheritance":true,"historyCacheSize":0}'>
+  <title>qq DSH console</title>
+  <link rel="manifest" href="${escapeHtml(assetPaths.manifest)}">
+  <link rel="icon" href="${escapeHtml(assetPaths.icon192)}" sizes="192x192">
+  <link rel="apple-touch-icon" href="${escapeHtml(assetPaths.icon192)}">
+  <link rel="stylesheet" href="${escapeHtml(assetPaths.css)}">
+  <script defer src="${escapeHtml(assetPaths.htmx)}"></script>
+  <script defer src="${escapeHtml(assetPaths.sse)}"></script>
+  <script defer src="${escapeHtml(assetPaths.browser)}" data-service-worker="${escapeHtml(assetPaths.serviceWorker)}"></script>
+</head>
+<body>
+  <header class="site-header">
+    <a href="${escapeHtml(paths.canonical)}" aria-label="Reload the selected DSH session">qq / DSH</a>
+    <span>Sequential handoff</span>
+  </header>
+  <main id="console-stream" hx-ext="sse" sse-connect="${escapeHtml(paths.events)}" hx-history="false">
+    <section id="session-panel" class="session-panel" aria-labelledby="session-heading"
+      hx-ext="sse" sse-swap="session" hx-swap="innerHTML">${content}</section>
+  </main>
+  <footer>DSH owns session identity, transcript order, turn status, and interruption. Browser view state is not shared.</footer>
+</body>
+</html>`;
+}

@@ -1,0 +1,25 @@
+{
+  "name": "@hypermemetic-ai/qq-dsh-console",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/plugin.mjs",
+  "exports": {
+    ".": "./src/plugin.mjs"
+  },
+  "files": [
+    "assets/",
+    "src/",
+    "vendor/",
+    "cordis.patch.yml",
+    "configure-profile.mjs",
+    "evidence.json",
+    "README.md",
+    "vendor-pins.json"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
