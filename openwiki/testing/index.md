@@ -1,3 +1,3 @@
 # Files
 
-- [Practical validation routing](validation.md) - How to choose and run qq test suites, including prerequisites, hermetic and live boundaries, focused subsystem commands, and known test gaps.
+- [Practical validation routing](validation.md) - Short routing guide for qq's focused local suites, linked-product semantic contracts, installed-artifact boundaries, live prerequisites, and aggregate npm test chain.

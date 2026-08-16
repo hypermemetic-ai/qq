@@ -1,15 +1,15 @@
 ---
 type: Agent messaging reference
 title: Presence and Cross-Session Delivery
-description: Operational contract for agent_messages and /agent-tasks, canonical session addressing, presence leases, configuration precedence, default and immediate delivery, deduplication, transcript receipts, retries, and tested failures.
+description: Operational contract for agent_messages and /agent-tasks over installed qq-relay, including session addressing, separate presence leases, default and immediate delivery, transcript receipts, retries, and focused validation.
 tags: [agents, messaging, presence, pi]
 ---
 
 # Presence and cross-session delivery
 
-`extensions/agent-messages.ts` adds machine-local discovery and durable cross-session messages to Pi. It stores ephemeral presence beside the Event Plane and sends `qq.agent-message/v2` envelopes through the journal described in [Durable event journal and protocol](service.md). It is registered by `extensions/index.ts`.
+`extensions/agent-messages.ts` adds machine-local discovery and durable cross-session messages to Pi. It stores ephemeral presence separately from relay state and sends `qq.agent-message/v2` envelopes through the installed client described in [qq-relay integration](service.md). It is registered by `extensions/index.ts`.
 
-This channel is not the run-outcome channel. Agent messages use product `agents`, kind `agent.message`, and recipient `agents/<canonical-session-id>`. Run outcomes use product `qq`, kinds `run.landed` or `run.blocked`, and recipient `qq/review-flow/<architect-session-id>` in `bin/lib/run-events.mjs`; review flow validates and injects them separately.
+This channel is not the run-outcome channel. Agent messages use product `agents`, kind `agent.message`, and recipient `agents/<canonical-session-id>`. Run outcomes use product `qq`, kinds `run.landed`, `run.blocked`, or `run.bootstrap-failed`, and recipient `qq/review-flow/<architect-session-id>` in `bin/lib/run-events.mjs`; review flow validates and injects them separately. Both use `RelayClient` loaded by `bin/lib/qq-relay-client.mjs`.
 
 ## Public surface
 
@@ -20,10 +20,10 @@ The tool accepts exactly the documented parameters and returns refusals as text 
 | Action | Inputs | Behavior |
 |---|---|---|
 | `list` | Optional `project`, `role`, exact `task` | Reads valid, unexpired presence records, applies filters, sorts deterministically, and excludes the current session. Project/role/task/pane are discovery metadata, never an address. Ask when multiple candidates remain. |
-| `send` | Canonical `to`, non-empty `message` up to 65,536 characters, optional `delivery` | Requires an active registered sender. Defaults delivery to `default`; accepts only `default` or `immediate`. Sends one durable Event Plane record and returns its `evt_...` message ID and current status. |
-| `status` | `message_id` | Reads Event Plane status and maps obligations to `queued`, `delivering`, `blocked`, `delivered`, `expired`, or `failed`. Blocked/expired/failed output includes reasons; queued/delivering may include a recipient activity card. |
+| `send` | Canonical `to`, non-empty `message` up to 65,536 characters, optional `delivery` | Requires an active registered sender. Defaults delivery to `default`; accepts only `default` or `immediate`. Sends one durable qq-relay record and returns its `evt_...` message ID and current status. |
+| `status` | `message_id` | Reads qq-relay status and maps obligations to `queued`, `delivering`, `blocked`, `delivered`, `expired`, or `failed`. Blocked/expired/failed output includes reasons; queued/delivering may include a recipient activity card. |
 
-A destination is only the complete canonical lowercase UUID supplied by Pi and returned by `list`, for example `019ff7ad-2cba-75a9-adc2-c15a0a92d6a9`. `planeAgentId(sessionId)` maps it to `agents/<session-id>`. Project, role, task, and pane must never be concatenated into the address.
+A destination is only the complete canonical lowercase UUID supplied by Pi and returned by `list`, for example `019ff7ad-2cba-75a9-adc2-c15a0a92d6a9`. `relayAgentId(sessionId)` maps it to `agents/<session-id>`. Project, role, task, and pane must never be concatenated into the address.
 
 ### `/agent-tasks`
 
@@ -46,7 +46,7 @@ Precedence is intentionally field-specific:
 
 ## Presence v2 and activity
 
-Presence lives under `$XDG_STATE_HOME/qq/event-plane/presence`, or `$HOME/.local/state/qq/event-plane/presence`. The directory must be a real, account-owned private directory. Each account-private `0600` JSON file is named by SHA-256 of the session ID and atomically replaced after file sync.
+Presence lives under `$XDG_STATE_HOME/qq/agent-messages/presence`, or `$HOME/.local/state/qq/agent-messages/presence`. Relay service state and its socket instead live under `${XDG_STATE_HOME:-$HOME/.local/state}/qq-relay/`; neither tree is nested in the other. The directory must be a real, account-owned private directory. Each account-private `0600` JSON file is named by SHA-256 of the session ID and atomically replaced after file sync.
 
 ```json
 {
@@ -97,14 +97,14 @@ A `send` record has this stable envelope:
 }
 ```
 
-`parseMessage` additionally requires a canonical sender and recipient, a valid project and real role, canonical task normalization, bounded pane/content, and delivery `default` or `immediate`. Invalid durable payloads are not silently acknowledged: the receiver calls Event Plane `block` with `unsupported agent message payload`.
+`parseMessage` additionally requires a canonical sender and recipient, a valid project and real role, canonical task normalization, bounded pane/content, and delivery `default` or `immediate`. Invalid durable payloads are not silently acknowledged: the receiver calls qq-relay `block` with `unsupported agent message payload`.
 
 ## Send-to-ack flow
 
 ```mermaid
 sequenceDiagram
     participant S as Sender Pi
-    participant EP as Event Plane
+    participant EP as qq-relay
     participant R as Recipient extension
     participant P as Recipient Pi
     participant T as Session transcript
@@ -137,7 +137,7 @@ If Pi is idle, the extension sends a displayed `qq-agent-message` custom message
 
 ### Immediate delivery and claim deduplication
 
-When Pi is busy, immediate mode publishes `agents/agent.immediate-claim` with request ID `immediate_<message-event-id>`, correlation ID equal to the message event, and payload containing the message event ID and content hash. Event Plane idempotency elects one claimant: only a non-idempotent claim calls `context.abort()`. The receiver polls every 50 ms for up to 5 seconds. If Pi does not become idle it retries the original obligation with reason `Pi did not become idle after immediate abort`; otherwise it injects as a normal triggered turn. An already-idle immediate message needs no claim or abort.
+When Pi is busy, immediate mode publishes `agents/agent.immediate-claim` with request ID `immediate_<message-event-id>`, correlation ID equal to the message event, and payload containing the message event ID and content hash. qq-relay idempotency elects one claimant: only a non-idempotent claim calls `context.abort()`. The receiver polls every 50 ms for up to 5 seconds. If Pi does not become idle it retries the original obligation with reason `Pi did not become idle after immediate abort`; otherwise it injects as a normal triggered turn. An already-idle immediate message needs no claim or abort.
 
 The claim is a coordination fact, not proof of delivery. It prevents repeated interruption across competing/restarted receivers; transcript persistence remains the acknowledgement boundary.
 
@@ -157,7 +157,7 @@ The injected custom message details include:
 
 Before injection, `receiptExists` scans the active JSONL session file for `type:"custom_message"`, `customType:"qq-agent-message"`, and the same event ID plus content hash. An existing receipt is safe to acknowledge without reinjection.
 
-After injection, the receiver acknowledges only if that receipt is observable (or the explicit test-only `assumePersisted` seam is enabled). Until then, a process-local set retains `<event-id>:<content-hash>` and calls Event Plane `retry` with `Pi session persistence not yet observable`. Redelivery in the same process sees the marker and retries without a duplicate injection. Once the transcript receipt appears, redelivery acknowledges and removes the marker. Thus “shown to Pi” is not “delivered”; durable transcript persistence is.
+After injection, the receiver acknowledges only if that receipt is observable (or the explicit test-only `assumePersisted` seam is enabled). Until then, a process-local set retains `<event-id>:<content-hash>` and calls qq-relay `retry` with `Pi session persistence not yet observable`. Redelivery in the same process sees the marker and retries without a duplicate injection. Once the transcript receipt appears, redelivery acknowledges and removes the marker. Thus “shown to Pi” is not “delivered”; durable transcript persistence is.
 
 ## State and failure semantics
 
@@ -177,29 +177,26 @@ stateDiagram-v2
     acknowledged --> receiving: continue loop
 ```
 
-*Extension lifecycle and the transcript receipt gate layered over Event Plane obligation state.*
+*Extension lifecycle and the transcript receipt gate layered over qq-relay obligation state.*
 
 Operational failures are explicit:
 
 - Unsafe presence directories fail writes; unsafe or malformed individual presence files are ignored during discovery.
-- Missing Event Plane socket makes send/status fail and the receiver reconnect; the extension does not start the service.
+- Missing installed qq-relay client makes extension import fail with its expected artifact path. A missing `${XDG_STATE_HOME:-$HOME/.local/state}/qq-relay/qq-relay.sock` makes send/status fail and the receiver reconnect; the extension does not start the service.
 - A missing role leaves an unlinked session inactive; `send` and `/agent-tasks` explain that registration is required.
 - Invalid recipient UUID, empty/oversized content, unsupported delivery, malformed config, invalid Pi session ID, and unreal roles are refused.
 - Unsupported received schema/content is blocked for diagnosis, not dropped.
-- Injection exceptions clear the in-memory marker and leave the durable obligation unacknowledged for Event Plane redelivery.
-- Endpoint, attempt, and receipt handling inherit the journal’s guarded retry, eight-failure blocking, one-hour addressed TTL, and crash redelivery semantics from [Durable event journal and protocol](service.md).
+- Injection exceptions clear the in-memory marker and leave the durable obligation unacknowledged for qq-relay redelivery.
+- Endpoint, attempt, and receipt handling inherit guarded retry and custody semantics from the installed product contract summarized in [qq-relay integration](service.md); exact retry, retention, and persistence behavior is product-owned and must be verified upstream.
 
 ## Focused validation
 
 ```bash
-# Pure schema, normalization, presence filtering, parsing, and status mapping
+# Installed qq-relay contract, loader, unit messaging, live delivery, and run outcomes
+tests/test-qq-relay.sh
+
+# Faster iteration only when QQ_RELAY_INSTALL_ROOT already names a valid artifact
 node --experimental-strip-types tests/test-agent-messages.mjs .
-
-# Real Event Plane plus two Pi harnesses, role-before-start ordering and receipts
-tests/test-agent-messages-live.sh
-
-# Event Plane guard, retry, crash, expiry, framing, and persistence substrate
-tests/test-event-plane.sh
 ```
 
 The unit test verifies canonical addressing, task deduplication, presence expiry/roles/activity, private presence filtering, message schema rejection, and status mapping. The live test proves that a pre-start `qq:role-selected` event seeds architect presence; task/pane and delayed activity appear in discovery; default delivery steers without aborting; immediate delivery aborts once and waits for idle; absent transcript persistence neither acknowledges nor reinjects; writing the matching receipt causes acknowledgement and `delivered`; and shutdown removes both sessions. Configuration precedence and malformed `.pi/agent-messages.json` are enforced in source but do not have dedicated assertions in these focused tests, so validate them directly when changing configuration logic.
