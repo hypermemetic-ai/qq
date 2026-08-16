@@ -6,11 +6,11 @@ This is an isolated compatibility harness, not an operator-runtime cutover. It m
 
 | Project | Package | Exact source revision | Package integrity |
 |---|---|---|---|
-| qq | local checkout | [`6ac5c0796ebe8f98682ee4b96f9900a7784c0890`](https://github.com/hypermemetic-ai/qq/commit/6ac5c0796ebe8f98682ee4b96f9900a7784c0890) | n/a |
+| qq | local checkout | [`520be1b51e7811b88cb832ebfe564af019e03410`](https://github.com/hypermemetic-ai/qq/commit/520be1b51e7811b88cb832ebfe564af019e03410) | n/a |
 | pi2dsh | `pi2dsh@0.12.3` | [`7420aac0f6b5513e056c44c099527ddee0d705f0`](https://github.com/weijiafu14/pi2dsh/commit/7420aac0f6b5513e056c44c099527ddee0d705f0) | `sha512-GDvzm9m9QIlEvSd9g6txZ7emKMbYCU++qFwoLgaz+qMq6sO39oe6OL839IIaU5KGfm6yKEet97tUSL5GgZpukA==` |
 | DeepSeek Harness | `@deepseek-ai/dsh@0.1.0-rc.6` | [`47f943859bef60e4160492346772ded9b24f765a`](https://github.com/deepseek-ai/deepseek-harness/commit/47f943859bef60e4160492346772ded9b24f765a) | `sha512-brpZfED7ieRa2PQ5tUxMhHrM1pb2CmKFVM/f6yMULBDMicahk+Z2OsHgTwTDnoiZm23Ftu9rQz0NN4pflaoJcg==` |
 
-`pins.json` is the machine-readable source of truth. The qq pin is the bundle baseline immediately before this harness was added. `run.sh` refuses to run if `extensions/` differs from that revision, forcing a deliberate re-probe after extension changes.
+`pins.json` is the machine-readable source of truth. The qq pin is the extension revision exercised by this evidence. `run.sh` refuses to run if `extensions/` differs from that revision, forcing a deliberate re-probe after extension changes.
 
 ## Run
 
@@ -25,9 +25,9 @@ The script:
 1. recreates the npm tool installation with `npm ci` from the committed transitive lock, then verifies the exact package versions, pi2dsh `gitHead`, and both top-level integrity hashes;
 2. runs `pi2dsh matrix --json` and `pi2dsh inspect <qq> --json`;
 3. creates a fresh `$DSH_HOME`, installs the pinned local pi2dsh package and the current qq checkout with DSH's plugin manager;
-4. supplies a load-only qq-relay client stub because that separately installed runtime is outside the extension ABI (no relay operation is claimed or exercised);
+4. supplies a capture-only qq-relay client stub because that separately installed runtime is outside the extension ABI (no relay operation is claimed compatible);
 5. boots the real DSH headless composition with no provider credentials;
-6. proves the qq bundle loaded as eight tools and three commands, checks expected warnings/blockers, and accepts only the intentional final `MISSING_CREDENTIAL` exit.
+6. proves agent messaging's `session_start` receiver addresses the relay as `agents/<exact DSH session id>`, proves the qq bundle loaded as eight tools and three commands, checks expected warnings/blockers, and accepts only the intentional final `MISSING_CREDENTIAL` exit.
 
 Keep the temporary profile for inspection or copy the generated artifacts:
 
@@ -36,7 +36,7 @@ QQ_PI2DSH_KEEP=1 compat/pi2dsh/run.sh
 QQ_PI2DSH_OUTPUT=/tmp/qq-pi2dsh-evidence compat/pi2dsh/run.sh
 ```
 
-The output directory receives `matrix.json`, `inspection.json`, DSH stdout/stderr, and the npm lockfile used to verify package integrity. No credentials are read or used.
+The output directory receives `matrix.json`, `inspection.json`, DSH stdout/stderr, the captured relay request, the DSH session id, and the npm lockfile used to verify package integrity. No credentials are read or used.
 
 A fast, offline drift test covers the declared bundle and qq's non-ABI assumptions:
 
@@ -55,10 +55,10 @@ The complete machine-readable record is [`evidence.json`](evidence.json). At thi
 - `ctx.shutdown` is absorbed, and project trust is unavailable/fails closed;
 - qq mounts only after the isolated DSH profile disables `tool-fs`, because qq intentionally replaces Pi's built-in `read` and pi2dsh rejects the native DSH collision;
 - qq execution-profile activation refuses the isolated DSH model directory because the required `xai-auth/grok-4.6` route is absent;
-- qq agent messaging rejects the DSH session id as non-canonical;
-- qq's separately installed relay client is a load-time dependency outside pi2dsh, so the harness uses a non-operational stub rather than pretending to prove it.
+- qq agent messaging accepts only the pinned headless host's exact `session-<randomUUID()>` identity form and preserves the complete value as the live relay receiver address;
+- qq's separately installed relay client is a load-time dependency outside pi2dsh, so the harness uses a capture-only, non-operational stub rather than pretending to prove relay compatibility.
 
-The collision, model refusal, and session-id failure are runtime observations from the DSH boot, not static predictions.
+The collision, model refusal, and session-id activation are runtime observations from the DSH boot, not static predictions.
 
 ## Cutover blockers
 

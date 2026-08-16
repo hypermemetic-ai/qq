@@ -24,7 +24,8 @@ const RECONNECT_MS = 500;
 const IMMEDIATE_IDLE_POLL_MS = 50;
 const IMMEDIATE_IDLE_TIMEOUT_MS = 5_000;
 const CARD_AFTER_MS = 5_000;
-const SESSION_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
+const PI_SESSION_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
+const DSH_SESSION_ID = /^session-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const SIMPLE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const TOOL_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,62}$/;
 const BUSY = new Set(["idle", "thinking", "tool"]);
@@ -100,8 +101,12 @@ async function readProjectConfig(cwd) {
   return value;
 }
 
+function validSessionId(value) {
+  return PI_SESSION_ID.test(value ?? "") || DSH_SESSION_ID.test(value ?? "");
+}
+
 function relayAgentId(sessionId) {
-  if (!SESSION_ID.test(sessionId ?? "")) throw new Error("session_id must be a canonical Pi session ID");
+  if (!validSessionId(sessionId)) throw new Error("session_id must be a canonical Pi or DSH session ID");
   return `${RELAY_PRODUCT}/${sessionId}`;
 }
 
@@ -109,7 +114,7 @@ function sessionIdFromRelayAgent(value) {
   const prefix = `${RELAY_PRODUCT}/`;
   if (typeof value !== "string" || !value.startsWith(prefix)) return undefined;
   const sessionId = value.slice(prefix.length);
-  return SESSION_ID.test(sessionId) ? sessionId : undefined;
+  return validSessionId(sessionId) ? sessionId : undefined;
 }
 
 function presencePath(directory, sessionId) {
@@ -139,7 +144,7 @@ async function atomicPrivateJson(path, value) {
 
 function validPresence(value, now = Date.now()) {
   if (!value || value.schema !== "qq.agent-presence/v2" || value.version !== 2) return undefined;
-  if (!SESSION_ID.test(value.session_id ?? "")) return undefined;
+  if (!validSessionId(value.session_id)) return undefined;
   if (!SIMPLE.test(value.project ?? "") || !ROLE_SET.has(value.role)) return undefined;
   let tasks;
   try { tasks = normalizeTasks(value.tasks); } catch { return undefined; }
@@ -199,7 +204,7 @@ function parseMessage(record) {
   const payload = record?.envelope?.payload;
   const message = payload?.message;
   if (payload?.schema !== MESSAGE_SCHEMA || typeof message !== "object" || message === null) return undefined;
-  if (!SESSION_ID.test(message.from ?? "") || !sessionIdFromRelayAgent(record.recipient_id)) return undefined;
+  if (!validSessionId(message.from) || !sessionIdFromRelayAgent(record.recipient_id)) return undefined;
   if (!SIMPLE.test(message.project ?? "") || !ROLE_SET.has(message.role)) return undefined;
   if (message.pane !== null && (typeof message.pane !== "string" || message.pane.length > 128 || message.pane.includes("\0"))) return undefined;
   if (typeof message.content !== "string" || message.content.length === 0 || message.content.length > 65_536) return undefined;
@@ -400,7 +405,7 @@ export default function register(pi, deps = {}) {
     const sessionId = ctx.sessionManager?.getSessionId?.();
     if (typeof sessionId !== "string" || sessionId === "") return;
     const project = projectFromCwd(ctx.cwd, env, config);
-    if (!SESSION_ID.test(sessionId)) throw new Error("Pi supplied a non-canonical session ID");
+    if (!validSessionId(sessionId)) throw new Error("host supplied a non-canonical session ID");
     current = { session_id: sessionId, project, role, pane: env.HERDR_PANE_ID || null };
     active = true;
     epoch += 1;
@@ -430,13 +435,13 @@ export default function register(pi, deps = {}) {
   pi.registerTool({
     name: "agent_messages",
     label: "Agent messages",
-    description: "List other live messaging sessions across projects, send one durable message, or inspect delivery status. The calling session is excluded from list. A recipient is identified only by its canonical Pi session_id. Project, role, optional tasks, and pane are discovery metadata: for example, 'the qq runner on T-12' means project qq, role runner, and task T-12. If multiple candidates remain, ask rather than guess. Copy the complete session_id unchanged. Use immediate delivery only when the recipient must see the message now; it interrupts their current run.",
+    description: "List other live messaging sessions across projects, send one durable message, or inspect delivery status. The calling session is excluded from list. A recipient is identified only by its canonical host session_id. Project, role, optional tasks, and pane are discovery metadata: for example, 'the qq runner on T-12' means project qq, role runner, and task T-12. If multiple candidates remain, ask rather than guess. Copy the complete session_id unchanged. Use immediate delivery only when the recipient must see the message now; it interrupts their current run.",
     parameters: {
       type: "object", additionalProperties: false,
       properties: {
         action: { type: "string", enum: ["list", "send", "status"] },
         project: { type: "string" }, role: { type: "string" }, task: { type: "string", description: "Optional exact task label used to filter list; a session may advertise multiple tasks." },
-        to: { type: "string", description: "Recipient's complete canonical Pi session_id returned by list, for example 019ff7b9-2fcd-78cd-bc16-c770a9ccff11. Copy it unchanged; project and role are not part of this ID." }, message: { type: "string" },
+        to: { type: "string", description: "Recipient's complete canonical host session_id returned by list, for example 019ff7b9-2fcd-78cd-bc16-c770a9ccff11 or session-4b70f906-ce0a-4135-bc9e-b231db9b98b1. Copy it unchanged; project and role are not part of this ID." }, message: { type: "string" },
         delivery: { type: "string", enum: ["default", "immediate"] },
         message_id: { type: "string" },
       },
@@ -454,7 +459,7 @@ export default function register(pi, deps = {}) {
         }
         if (params.action === "send") {
           if (!current) throw new Error("this session is not registered; set QQ_AGENT_ROLE before starting Pi");
-          if (!SESSION_ID.test(params.to ?? "")) throw new Error("send requires the complete session_id returned by list");
+          if (!validSessionId(params.to)) throw new Error("send requires the complete session_id returned by list");
           const content = bounded(params.message, "message", 65_536);
           const delivery = params.delivery ?? "default";
           if (!DELIVERY.has(delivery)) throw new Error("delivery must be default or immediate");

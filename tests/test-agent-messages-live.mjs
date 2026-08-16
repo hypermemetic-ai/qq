@@ -59,7 +59,7 @@ async function waitFor(label, predicate) {
 }
 
 const senderSession = "019ff7b9-2fcd-78cd-bc16-c770a9ccff11";
-const runnerSession = "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9";
+const runnerSession = "session-4b70f906-ce0a-4135-bc9e-b231db9b98b1";
 let clock = Date.now();
 const sender = harness(undefined, senderSession, "w1:p1", { now: () => clock });
 const runnerSessionFile = join(stateRoot, "runner.jsonl");
@@ -76,7 +76,7 @@ assert.equal(listing.details.agents.length, 1);
 const runnerId = listing.details.agents.find((agent) => agent.role === "runner").session_id;
 assert.equal(runnerId, runnerSession);
 assert.match(listing.content[0].text, /^live sessions:/);
-assert.match(listing.content[0].text, /- 019ff7ad-2cba-75a9-adc2-c15a0a92d6a9 — qq \/ runner/);
+assert.match(listing.content[0].text, /- session-4b70f906-ce0a-4135-bc9e-b231db9b98b1 — qq \/ runner/);
 assert.match(listing.content[0].text, /tasks: T-12, T-18/);
 assert.match(listing.content[0].text, /pane: w1:p2/);
 assert.doesNotMatch(listing.content[0].text, /thinking|tool bash/);
