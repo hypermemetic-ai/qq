@@ -1,15 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_PATH=$(realpath -e -- "${BASH_SOURCE[0]}")
-ROOT=$(cd -- "$(dirname -- "$SCRIPT_PATH")/.." && pwd -P)
-# shellcheck source=/dev/null
-source "$ROOT/qq-relay/upstream.env"
-SOURCE_ROOT=${QQ_RELAY_SOURCE:-${QQ_RELAY_LANDED_REPOSITORY:?qq-relay landed repository is not configured}}
-RELAY_BIN="$SOURCE_ROOT/bin/qq-relay"
+if [[ ${QQ_RELAY_INSTALL_ROOT+x} ]]; then
+  if [[ -z "$QQ_RELAY_INSTALL_ROOT" || "$QQ_RELAY_INSTALL_ROOT" != /* ]]; then
+    printf 'qq-relay: QQ_RELAY_INSTALL_ROOT must be an absolute path\n' >&2
+    exit 64
+  fi
+  install_root=$QQ_RELAY_INSTALL_ROOT
+else
+  if [[ -z ${HOME:-} || "$HOME" != /* ]]; then
+    printf 'qq-relay: HOME must be an absolute path when QQ_RELAY_INSTALL_ROOT is unset\n' >&2
+    exit 64
+  fi
+  install_root=$HOME/.local/lib/qq/relay
+fi
+relay_bin=$install_root/bin/qq-relay
 
-if [[ ! -x "$RELAY_BIN" ]]; then
-  printf 'qq-relay: linked source executable is unavailable: %s (set QQ_RELAY_SOURCE or restore the configured landed repository)\n' "$RELAY_BIN" >&2
+if [[ ! -x "$relay_bin" ]]; then
+  printf 'qq-relay: installed executable is unavailable: %s (install qq-relay at the configured root)\n' "$relay_bin" >&2
   exit 69
 fi
-exec "$RELAY_BIN" "$@"
+exec "$relay_bin" "$@"
