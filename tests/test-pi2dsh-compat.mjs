@@ -43,6 +43,7 @@ assert.match(patch, /id: tool-fs\s+disabled: true/);
 assert.match(relayStub, /outside the pi2dsh mount probe/);
 
 assert.equal(evidence.schema, "qq.pi2dsh-evidence/v1");
+assert.equal(evidence.observed_at, "2026-08-16");
 assert.equal(evidence.pins_file, "compat/pi2dsh/pins.json");
 assert.deepEqual(evidence.inspection, {
   verdict: "review",

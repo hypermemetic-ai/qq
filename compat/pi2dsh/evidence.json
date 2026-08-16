@@ -1,6 +1,6 @@
 {
   "schema": "qq.pi2dsh-evidence/v1",
-  "observed_at": "2026-09-13",
+  "observed_at": "2026-08-16",
   "pins_file": "compat/pi2dsh/pins.json",
   "command": "compat/pi2dsh/run.sh",
   "inspection": {
