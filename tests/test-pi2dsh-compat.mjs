@@ -8,7 +8,7 @@ const root = resolve(process.argv[2] ?? ".");
 const read = (path) => readFile(join(root, path), "utf8");
 const json = async (path) => JSON.parse(await read(path));
 
-const [pkg, pins, toolchain, toolchainLock, evidence, run, patch, relayProbe, relayContract, liveMessages, messages, review, scrub, runLib] = await Promise.all([
+const [pkg, pins, toolchain, toolchainLock, evidence, run, patch, relayProbe, relayContract, liveMessages, messages, review, scrub, runLib, runEvents] = await Promise.all([
   json("package.json"),
   json("compat/pi2dsh/pins.json"),
   json("compat/pi2dsh/toolchain/package.json"),
@@ -23,6 +23,7 @@ const [pkg, pins, toolchain, toolchainLock, evidence, run, patch, relayProbe, re
   read("extensions/review-flow.ts"),
   read("extensions/session-scrub.ts"),
   read("bin/lib/run.mjs"),
+  read("bin/lib/run-events.mjs"),
 ]);
 
 assert.deepEqual(pkg.pi, { extensions: ["extensions/index.ts"] });
@@ -44,6 +45,7 @@ assert.match(run, /QQ_PI2DSH_RELAY_STATE_HOME/);
 assert.match(run, /QQ_RELAY_INSTALL_ROOT="\$relay_install_root"/);
 assert.match(run, /relay-probe\.mjs/);
 assert.match(run, /relay-proof\.json/);
+assert.match(run, /QQ_AGENT_ROLE=architect/);
 assert.doesNotMatch(run, /relay-stub|RECEIPT_PROBE|RELAY_PROBE/);
 assert.match(run, /llm-stub\.mjs/);
 assert.match(patch, /id: tool-fs\s+disabled: true/);
@@ -51,6 +53,9 @@ assert.match(patch, /id: session-persistence-jsonl[\s\S]*compression: none/);
 assert.match(relayProbe, /bin\/lib\/qq-relay-client\.mjs/);
 assert.match(relayProbe, /client\.send\(/);
 assert.match(relayProbe, /client\.status\(/);
+assert.match(relayProbe, /bin\/lib\/run-events\.mjs/);
+assert.match(relayProbe, /sendRunEvent\(/);
+assert.match(relayProbe, /qq\/review-flow\/\$\{recipientSessionId\}/);
 assert.match(relayContract, /rm -rf -- "\$work\/source"[\s\S]*test-agent-messages-live\.sh/);
 assert.match(liveMessages, /qq-relay" serve --state-dir "\$relay_state_dir"/);
 assert.match(liveMessages, /QQ_PI2DSH_RELAY_STATE_HOME="\$relay_state_home" "\$ROOT\/compat\/pi2dsh\/run\.sh"/);
@@ -73,12 +78,14 @@ for (const id of [
   "package-local-events", "before-agent-start", "tools", "commands", "model-selection",
   "thinking-effort", "shortcut", "session-tree", "shutdown", "project-trust",
   "read-tool-collision", "session-id", "qq-relay-client", "herdr-launch", "herdr-delivery-proof",
-  "agent-message-receipts", "review-receipts", "session-scrub",
+  "agent-message-receipts", "run-outcome-addressing", "review-receipts", "session-scrub",
 ]) assert.ok(probes.has(id), `missing compatibility probe ${id}`);
 assert.equal(probes.get("session-id").verdict, "identity-translated");
 assert.match(probes.get("session-id").fact, /complete value unchanged as the live relay address/);
 assert.equal(probes.get("qq-relay-client").verdict, "installed-product-proven");
 assert.equal(probes.get("agent-message-receipts").verdict, "installed-transport-and-durable-entry-proven");
+assert.equal(probes.get("run-outcome-addressing").verdict, "installed-address-and-parse-proven");
+assert.match(probes.get("run-outcome-addressing").fact, /qq\/review-flow\/session-<UUID>/);
 assert.ok(evidence.conclusion.blockers.every((blocker) => !/qq-relay client boundary/i.test(blocker)));
 
 // Herdr orchestration remains explicitly Pi-owned and proves prompt acceptance
@@ -88,6 +95,10 @@ assert.match(runLib, /agent\.agent !== "pi"/);
 assert.match(runLib, /session\.source !== "herdr:pi"/);
 assert.match(runLib, /path\.endsWith\("\.jsonl"\)/);
 assert.match(runLib, /sessionHasPromptMarker\(path, marker\)/);
+
+// Run outcomes accept only canonical Pi UUIDs or pinned DSH session-UUIDs.
+assert.match(runEvents, /DSH_SESSION_ID = \/\^session-/);
+assert.match(runEvents, /review-flow\/\$\{sessionId\}/);
 
 // Agent-message acknowledgement has no session-file fallback; review receipts
 // remain explicitly outside this child ticket.

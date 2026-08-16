@@ -11,6 +11,13 @@ const runEvents = await import(pathToFileURL(join(root, "bin/lib/run-events.mjs"
 const extension = await import(pathToFileURL(join(root, "extensions/review-flow.ts")));
 const qaResult = await import(pathToFileURL(join(root, "extensions/qa-result.ts")));
 
+const piArchitectSession = "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9";
+const dshArchitectSession = "session-4b70f906-ce0a-4135-bc9e-b231db9b98b1";
+assert.equal(runEvents.runEventRecipient(piArchitectSession), `qq/review-flow/${piArchitectSession}`);
+assert.equal(runEvents.runEventRecipient(dshArchitectSession), `qq/review-flow/${dshArchitectSession}`, "the complete DSH session ID was not preserved as the run outcome address");
+assert.throws(() => runEvents.runEventRecipient(`session-${piArchitectSession}`), /canonical architect session ID/, "a non-v4 prefixed UUID was accepted as a DSH session ID");
+assert.throws(() => runEvents.runEventRecipient("session-not-a-uuid"), /canonical architect session ID/);
+
 async function waitFor(label, predicate) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (predicate()) return;
@@ -46,7 +53,7 @@ try {
     schema: "qq.run-handoff/v1", version: 1, id: "task-1-x", project: "qq",
     task: { id: "TASK-1", title: "One task" }, status: "running", look: 0,
     mainRoot, baseBranch: "main", baseRef: "base", branch: "qq/task-1-x", worktree,
-    pane: "w2T:p9", architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9",
+    pane: "w2T:p9", architectSession: dshArchitectSession,
     ticketPath: join(scratch, "ticket.md"), transcriptPath: join(scratch, "transcript.md"),
     notePath: join(scratch, "note.md"), gatePath: join(scratch, "gate.md"), statePath,
     qa: { provider: "openai-codex", model: "gpt-5.6-sol", effort: "xhigh" },

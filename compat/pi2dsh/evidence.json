@@ -121,10 +121,16 @@
       "fact": "The real relay records a pre-persistence retry and safe redelivery to agents/session-<UUID>. Pinned DSH persists exactly one plugin-sourced user/message, acknowledgement follows that durable record, and installed-relay status becomes delivered; lower-level coverage retains delayed persistence, no duplicate injection, restart recovery with empty memory, and no session-file fallback."
     },
     {
+      "id": "run-outcome-addressing",
+      "basis": "installed-relay-runtime-and-regression-tests",
+      "verdict": "installed-address-and-parse-proven",
+      "fact": "Run-outcome production, recipient validation, and parsing accept only bare canonical Pi UUIDs or the pinned DSH session-<UUID> form. The real relay preserves qq/review-flow/session-<UUID> in the record and obligation, mounted qq consumes it, and the payload and durable bridged message retain the complete architect identity."
+    },
+    {
       "id": "review-receipts",
       "basis": "qq-source-audit-and-pi2dsh-matrix",
       "verdict": "pi-jsonl-dependent",
-      "fact": "Review flow still parses getSessionFile() as Pi JSONL. pi2dsh returns its sidecar path while DSH messages live in the DSH durable log, so review receipt translation remains open."
+      "fact": "DSH run-outcome addressing reaches review flow, but receipt acknowledgement still parses getSessionFile() as Pi JSONL. pi2dsh returns its sidecar path while DSH messages live in the DSH durable log, so the real relay remains pending and review receipt translation remains open."
     },
     {
       "id": "session-scrub",

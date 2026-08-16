@@ -12,10 +12,13 @@ export const RUN_LANDED_SCHEMA = "qq.run-landed/v1";
 export const RUN_BLOCKED_SCHEMA = "qq.run-blocked/v1";
 export const RUN_BOOTSTRAP_FAILED_SCHEMA = "qq.run-bootstrap-failed/v1";
 
-const SESSION_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
+const PI_SESSION_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
+const DSH_SESSION_ID = /^session-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 
 export function runEventRecipient(sessionId) {
-  if (!SESSION_ID.test(sessionId ?? "")) throw new Error("run outcome requires a canonical architect session ID");
+  if (!PI_SESSION_ID.test(sessionId ?? "") && !DSH_SESSION_ID.test(sessionId ?? "")) {
+    throw new Error("run outcome requires a canonical architect session ID");
+  }
   return `${RUN_EVENT_PRODUCT}/review-flow/${sessionId}`;
 }
 
