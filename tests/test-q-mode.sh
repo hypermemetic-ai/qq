@@ -3,12 +3,34 @@ set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 plugin="$root/plugins/q-mode"
+relation="$plugin/qq-dictation.env"
+mapfile -t relation_lines <"$relation"
+relation_fields=()
+for line in "${relation_lines[@]}"; do
+  if [[ ! $line =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.+)$ ]]; then
+    printf 'invalid qq-dictation relation line: %s\n' "$line" >&2
+    exit 1
+  fi
+  field=${BASH_REMATCH[1]}
+  if [[ ${field,,} =~ (commit|floor|tag|version) ]]; then
+    printf 'forbidden qq-dictation relation field: %s\n' "$field" >&2
+    exit 1
+  fi
+  relation_fields+=("$field")
+done
+expected_relation_fields=(
+  qq_dictation_upstream_url
+  qq_dictation_upstream_ref
+  qq_dictation_landed_repository
+)
+[[ ${#relation_fields[@]} -eq ${#expected_relation_fields[@]} ]]
+[[ "${relation_fields[*]}" == "${expected_relation_fields[*]}" ]]
+
 # shellcheck source=/dev/null
-source "$plugin/qq-dictation.env"
+source "$relation"
 qq_dictation_upstream_url=${qq_dictation_upstream_url:?qq-dictation repository URL is required}
 qq_dictation_upstream_ref=${qq_dictation_upstream_ref:?qq-dictation branch ref is required}
 qq_dictation_landed_repository=${qq_dictation_landed_repository:?qq-dictation landed repository is required}
-qq_dictation_feature_commit=${qq_dictation_feature_commit:?qq-dictation feature floor is required}
 
 [[ $qq_dictation_upstream_url == git@github.com:qqp-dev/qq-dictation.git ]]
 [[ $qq_dictation_upstream_ref == refs/heads/main ]]
@@ -45,22 +67,80 @@ assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", manifest["min_herdr_version"])
 assert {item["id"] for item in manifest["actions"]} == {"start-or-stop", "cancel"}
 PY
 
+if grep -Fq 'qq-dictation-commit' "$plugin/q-mode.sh"; then
+  echo 'q mode reads installed qq-dictation provenance' >&2
+  exit 1
+fi
+
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 dictation_source="$work/dictation-source"
 contract_source=${QQ_DICTATION_CONTRACT_SOURCE:-$qq_dictation_landed_repository}
+git init -q "$dictation_source"
 if [[ -d $contract_source/.git ]] \
-  && git -C "$contract_source" cat-file -e "$qq_dictation_upstream_ref^{commit}" 2>/dev/null; then
-  git clone -q --no-hardlinks --no-checkout "$contract_source" "$dictation_source"
+  && git -C "$contract_source" rev-parse --verify -q \
+    "$qq_dictation_upstream_ref^{commit}" >/dev/null; then
+  source_repository=$contract_source
 else
-  git init -q "$dictation_source"
-  git -C "$dictation_source" remote add origin "$qq_dictation_upstream_url"
-  git -C "$dictation_source" fetch -q origin \
-    "$qq_dictation_upstream_ref:$qq_dictation_upstream_ref"
+  source_repository=$qq_dictation_upstream_url
 fi
-dictation_tip=$(git -C "$dictation_source" rev-parse "$qq_dictation_upstream_ref^{commit}")
-git -C "$dictation_source" merge-base --is-ancestor \
-  "$qq_dictation_feature_commit" "$dictation_tip"
+contract_tip_ref=refs/qq/contract-tip
+git -C "$dictation_source" fetch -q "$source_repository" \
+  "$qq_dictation_upstream_ref:$contract_tip_ref"
+dictation_tip=$(git -C "$dictation_source" rev-parse \
+  "$contract_tip_ref^{commit}")
+git -C "$dictation_source" checkout -q --detach "$dictation_tip"
+
+python3 - "$dictation_source/src-tauri/src/cli.rs" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+source = Path(sys.argv[1]).read_text()
+parser, tests = source.split("#[cfg(test)]", 1)
+
+def require(text, pattern, description):
+    if not re.search(pattern, text, re.DOTALL):
+        raise SystemExit(f"missing qq-dictation CLI evidence: {description}")
+
+require(
+    parser,
+    r'#\[arg\(long,\s*conflicts_with = "cancel"\)\]\s*pub toggle_transcription: bool,',
+    "toggle conflicts with cancel",
+)
+require(
+    parser,
+    r'#\[arg\(\s*long,\s*value_name = "PANE_ID",\s*requires = "toggle_transcription",\s*conflicts_with = "cancel"\s*\)\]\s*pub herdr_pane: Option<String>,',
+    "Herdr pane requires toggle and conflicts with cancel",
+)
+require(
+    parser,
+    r'#\[arg\(long,\s*conflicts_with = "toggle_transcription"\)\]\s*pub cancel: bool,',
+    "cancel conflicts with toggle",
+)
+require(
+    parser,
+    r'if parsed\.toggle_transcription \{.*?\.herdr_pane.*?\.map\(StartTarget::ExplicitPane\).*?\} else if parsed\.cancel \{\s*Ok\(RunningInstanceCommand::Cancel\)',
+    "parser classifies pane-bound toggles and targetless cancel",
+)
+require(
+    tests,
+    r'command\(&\["handy", "--toggle-transcription", "--herdr-pane", "w2H:p13",\]\).*?StartTarget::ExplicitPane\("w2H:p13"\.to_string\(\)\)',
+    "canonical pane-bound toggle parser test",
+)
+require(
+    tests,
+    r'fn rejects_missing_duplicate_or_orphaned_pane_arguments\(\).*?vec!\["handy", "--herdr-pane", "w2H:p13"\].*?vec!\["handy", "--toggle-transcription", "--herdr-pane"\].*?command\(&args\)\.is_err\(\)',
+    "strict pane argument parser tests",
+)
+require(
+    tests,
+    r'fn cancel_is_targetless_and_separate_from_start_or_stop\(\).*?command\(&\["handy", "--cancel"\]\).*?RunningInstanceCommand::Cancel.*?vec!\["handy", "--cancel", "--herdr-pane", "w2H:p13"\].*?command\(&args\)\.is_err\(\)',
+    "targetless cancel parser tests",
+)
+PY
+
+[[ -z $(git -C "$dictation_source" status --porcelain) ]]
 
 home="$work/home"
 install="$home/.local/opt/qq-dictation/Handy.AppDir"

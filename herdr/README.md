@@ -5,9 +5,11 @@ Herdr's Rust source, tests, build, and installation belong to the linked
 run `qq-methodology link` from the target checkout, then start a fresh Pi
 session or run `/reload`; use `qq-methodology inspect` to verify it.
 
-- `downstream/upstream.env` records the upstream URL and branch, linked landed
-  repository, accepted operator-input capability floor, and base version. It
-  does not pin a Herdr product commit.
+- `downstream/upstream.env` records only the upstream URL, branch ref, and
+  linked landed repository.
+- `tests/test-herdr-downstream.sh` resolves that branch tip and directly checks
+  the required preferred-width, balanced-row, and operator-input behavior in
+  Herdr's source, configuration model, and tests.
 - `config.toml` is the staged cockpit configuration, including q mode and the
   80-column preferred pane width.
 - `plugins/q-mode` owns readiness-gated, pane-bound qq-dictation controls.
@@ -19,15 +21,16 @@ session or run `/reload`; use `qq-methodology inspect` to verify it.
 
 ## Build and coordinated activation
 
-Use the Herdr repository's own checks, build, and install workflow. Its landed
-`master` tip must contain `HERDR_OPERATOR_INPUT_COMMIT`; that commit is a
-capability floor, not a product version. qq intentionally provides no Herdr
-build or upgrade wrapper.
+Use the Herdr repository's own checks, build, and install workflow. qq tests
+required behavior semantically at the current configured branch tip and
+intentionally provides no Herdr build or upgrade wrapper. Product-owned
+installed provenance, when present, is informational only; qq readiness and
+controls neither read nor compare it.
 
-qq-dictation likewise owns building and installing Handy. Its
-`qq-dictation-commit` marker records build provenance only; q mode does not
-compare it with a commit stored in qq. Before forwarding controls, q mode
-requires the readiness marker's PID and allowed state, a live process whose
+qq-dictation likewise owns building and installing Handy. Its installed
+`qq-dictation-commit` marker is informational build provenance only; q mode
+neither reads nor compares it. Before forwarding controls, q mode requires the
+readiness marker's PID and allowed state, a live process whose
 `/proc/<pid>/exe` is the installed Handy executable, and a bounded successful
 semantic Handy invocation.
 
