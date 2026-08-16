@@ -1,6 +1,6 @@
 # Community DSH operator surfaces
 
-Status: source audit only; observed 2026-08-16T21:20Z. No package was installed into the qq profile and no operator-runtime cutover is approved.
+Status: source audit plus one isolated focused runtime follow-up; observed 2026-08-16. No package was installed into the active qq profile and no operator-runtime cutover is approved.
 
 ## Scope and pinned boundary
 
@@ -14,7 +14,19 @@ Three pinned constraints determine the ranking:
 2. The pinned Web command explicitly refuses `--host 0.0.0.0` because that would expose remote code execution ([startup source](https://github.com/deepseek-ai/deepseek-harness/blob/47f943859bef60e4160492346772ded9b24f765a/packages/bundle/web-app/src/startup.ts#L55-L75)). Its Host/Origin fence is a reachability policy, **not authentication**, and privileged methods remain loopback-only ([connection contract](https://github.com/deepseek-ai/deepseek-harness/blob/47f943859bef60e4160492346772ded9b24f765a/packages/client/connection/README.md), [privileged check](https://github.com/deepseek-ai/deepseek-harness/blob/47f943859bef60e4160492346772ded9b24f765a/packages/client/connection/src/index.ts#L130-L169)). A plugin that merely overrides the bind row does not make Web safe to publish.
 3. The existing pi2dsh proof is a headless compatibility proof, not a TUI/browser proof. It already records qq's tool collision, missing model route, non-firing shortcut/tree events, absorbed shutdown, and Pi-specific cutover blockers ([local findings](README.md#observed-facts)). Every candidate still needs an isolated profile composition with pi2dsh; none removes those blockers.
 
-The completed T-63.9 handoff at commit `67cb86b` is an external comparison input (not yet merged when this survey was written): pinned stock Web passed desktop layout, Cordis/settings customization, loopback-only SSH-forward two-client continuity, and the all-interfaces refusal, but its replacement verdict was **REJECT**. Keyboard operation remained basic Tab/Enter/Shift+Enter/Escape with no efficient global command surface, while 390×844 failed because two-column Settings clipped and an open sidebar squeezed the transcript. No T-63.9 harness or evidence is copied here; after that ref lands, its owning `compat/pi2dsh/WEB_QA.md` and `web-evidence.json` supersede this handoff summary.
+The completed T-63.9 baseline at commit `67cb86b` is now the before comparison in [`WEB_QA.md`](WEB_QA.md) and [`web-evidence.json`](web-evidence.json): pinned stock Web passed desktop layout, Cordis/settings customization, loopback-only SSH-forward two-client continuity, and the all-interfaces refusal, but its replacement verdict was **REJECT**. Keyboard operation remained basic Tab/Enter/Shift+Enter/Escape with no efficient global command surface, while 390×844 failed because two-column Settings clipped and an open sidebar squeezed the transcript.
+
+## Focused Web augmentation follow-up
+
+T-63.10 ran only the selected rank-1 experiment in a disposable DSH Web profile: exact `@0xsline/dsh-spotlight@0.0.2` plus exact `dsh-web-mobile-fix@1.0.2`. Installing just those artifacts did not boot because DSH profile generation disables automatic peer installation and Spotlight imports undeclared-at-runtime `schemastery`; exact `cordis@4.0.0-rc.7` and `schemastery@3.18.0` from Spotlight's own source lock were therefore required as plain support dependencies.
+
+With that explicit peer composition, the candidate **passed the focused before/after experiment, not adoption**:
+
+- Ctrl+K plus filtering/Enter opened a new stock session, a persisted recent session, native Search with textbox focus, native Settings on Plugins, and both sidebar states. There is no direct General-settings result, and DOM-discovered actions retain selector-drift risk.
+- At exactly 390×844, Settings became a 390×844 column dialog with a 390px non-horizontally-clipped content region and vertically reachable General controls. Its four-tab row measured 366/429px and therefore scrolls horizontally. The 280px sidebar floated over a fixed `56px 334px 0px` grid, preserving a 334px conversation instead of squeezing it; this is an overlay, not the README's literal full-screen description.
+- A second clean browser origin traversed an actual loopback `ssh -L`, listed the first client's workspace/session, and loaded its persisted two-line prompt. The candidate-composed `0.0.0.0` launch still exited 1 without a listener. DSH remained the only session implementation.
+
+The CSS overlay still proves no touch, soft keyboard, IME, approval/question, long-transcript, or physical-phone behavior. Neither plugin adds authentication. The active [`execution-profiles.json`](execution-profiles.json) and operator surface were unchanged.
 
 ## Ranking
 
@@ -22,7 +34,7 @@ Ranked for the pinned qq/DSH composition and the concrete T-63.9 gaps, not for g
 
 | Rank | Candidate | Pin fit | Operator fit | Disposition |
 |---:|---|---|---|---|
-| 1 | [`dsh-spotlight`](https://github.com/0xsline/dsh-spotlight/tree/dd7ef5ed160aa1a624559de16eafd4ea9406d7ed) + [`dsh-web-mobile-fix`](https://github.com/AcidGr/dsh-web-mobile-fix/tree/015d905b5f9196b5d442878e5682d8aaa598aa3f) | Reversible Web client plugins; exact pin runtime unproved | Directly target the missing global keyboard surface and the two failed narrow-layout areas while inheriting stock session and loopback security boundaries | **Only stack that warrants the next focused runtime proof**, after the comparison gate |
+| 1 | [`dsh-spotlight`](https://github.com/0xsline/dsh-spotlight/tree/dd7ef5ed160aa1a624559de16eafd4ea9406d7ed) + [`dsh-web-mobile-fix`](https://github.com/AcidGr/dsh-web-mobile-fix/tree/015d905b5f9196b5d442878e5682d8aaa598aa3f) | Reversible Web client plugins; exact pin proof passed with explicit Spotlight peers | Closed the focused keyboard and narrow-layout baselines while inheriting stock session and loopback security boundaries | **Proof-only pass; no adoption** |
 | 2 | [`ccch1mneyyy/dsh-TUI`](https://github.com/ccch1mneyyy/dsh-TUI/tree/7dc694150123ae42903e9618427dea631711cb21) / npm `@deepseek-harness-tui/dsh-tui@0.7.3` | Direct Cordis/DSH services; published peers name rc.6 | Strongest documented keyboard, session, approval, theme, and extension surface, but phone access is transport-only | Best terminal-first alternative if rank 1 fails or Web is rejected categorically |
 | 3 | [`XMoon/dsh-pi-tui`](https://github.com/XMoon/dsh-pi-tui/tree/0ba964cc95046be949211777f11edad6d14675fe) / npm `@xmoon76/dsh-pi-tui@0.1.4` | Direct services; published peers name rc.6 | Strong keyboard/session coverage and the clearest cross-process corruption guard; phone access is transport-only | Keep as guarded TUI fallback |
 | 4 | [`openma-ai/deepseek-harness-tui`](https://github.com/openma-ai/deepseek-harness-tui/tree/90ce0e86d798399eb79c817b10465ff91aaacce8) / npm `@openma/deepseek-harness-tui@0.2.1` | Claims rc.6; wraps host services in an SDK-compatible bridge plus private `tui/*` methods | Good native TUI and useful protocol reference, but stock-SDK mode is materially narrower | Do not prove before ranks 1–3 |
@@ -80,7 +92,7 @@ Primary evidence: [README](https://github.com/0xsline/dsh-spotlight/blob/dd7ef5e
 - **Keyboard/mobile:** Configurable `Cmd+K`/`Ctrl+K`, fuzzy search, arrows/Enter/Escape. Its shortcut is browser-local. There is no touch/phone design.
 - **Customization/continuity:** The shortcut persists per browser origin; native and plugin actions are discovered rather than copied. Session and multi-client behavior are entirely the underlying Web runtime's behavior.
 - **Authentication/exposure:** None. It must not be used to justify non-loopback exposure.
-- **Maintenance/integration:** MIT, npm 0.0.2, active but new. DOM discovery can drift by its own admission. Its command palette directly targets T-63.9's missing efficient global shortcut, but only a pinned runtime proof can establish that its discovery selectors work. It is an enhancement, not an independent session surface.
+- **Maintenance/integration:** MIT, npm 0.0.2, active but new. DOM discovery can drift by its own admission. The pinned proof found working actions for the focused T-63.9 navigation categories, but no direct General-settings action, and DSH's `autoInstallPeers: false` profile required explicit `cordis` and `schemastery` support dependencies. It is an enhancement, not an independent session surface.
 
 #### dsh-web-mobile-fix
 
@@ -90,9 +102,9 @@ Primary evidence: [README](https://github.com/AcidGr/dsh-web-mobile-fix/blob/015
 - **Keyboard/mobile:** Fixes selected layouts at widths up to 700px: settings, sidebar, navigation, header, composer model label, and popups. It provides no evidence for mobile Enter/newline policy, IME, soft modifiers, approvals, long transcripts, or touch gestures.
 - **Customization/continuity:** Reversible style injection through the Web client plugin seam. Everything else, including continuity, is inherited from stock Web.
 - **Authentication/exposure:** None. A narrow layout does not make the server remotely reachable or safe.
-- **Maintenance/integration:** MIT, npm 1.0.2, active but new; selectors are version-sensitive. Its full-screen Settings/sidebar rules target the exact 390×844 failures in the T-63.9 handoff, but approvals, long transcripts, touch, and input still require runtime evidence.
+- **Maintenance/integration:** MIT, npm 1.0.2, active but new; selectors are version-sensitive. The pinned 390×844 proof closed the exact Settings-column and sidebar-squeeze failures, while measuring a 280px floating sidebar rather than a literal full-screen drawer. Approvals, questions, long transcripts, touch, IME, and soft-keyboard input remain unproved.
 
-Together these plugins are a thin augmentation stack, not a second session implementation. That is an advantage for continuity: they leave the stock DSH host, session store, and already-proven two-client path in place. They add no authentication, so the safe posture exists only while Web remains loopback-bound behind the same authenticated SSH forwarding boundary; they must never be paired with a LAN bind bypass.
+Together these plugins are a thin augmentation stack, not a second session implementation. The focused proof confirmed that they leave the stock DSH host, session store, and two-client path in place. They add no authentication, so the safe posture exists only while Web remains loopback-bound behind the same authenticated SSH forwarding boundary; they must never be paired with a LAN bind bypass.
 
 ### Blocked: dsh-remote-web-ui — best mobile concept, not pin-compatible
 
@@ -131,7 +143,7 @@ A phone proof through Guacamole or ttyd would prove transport/input only. It mus
 ## Recommendation and proof boundary
 
 1. **Keep the no-cutover decision.** Stock Web is rejected, community projects are only days old, and pi2dsh's orchestration blockers remain.
-2. **Queue one focused proof: Spotlight 0.0.2 plus mobile-fix 1.0.2.** This is the least-change candidate that addresses both concrete rejection reasons without replacing DSH session semantics or weakening the loopback bind. In an isolated rc.6 Web profile, pin both tarballs/integrities and test the palette's shortcut/discovery/actions plus 390×844 Settings, sidebar, transcript, composer, approvals/questions, and long-message behavior. Reuse the already-proven loopback/SSH-forward boundary; do not design or open a new tunnel.
+2. **Keep the completed Spotlight 0.0.2 plus mobile-fix 1.0.2 result proof-only.** It closed the focused keyboard and 390×844 baseline failures without replacing DSH session semantics or weakening the loopback/SSH-forward boundary. Do not adopt it until explicit peers, DOM drift, project maturity, and the unproved touch/IME/approval/question/long-transcript cases have a separate approval basis.
 3. **Use dsh-TUI 0.7.3 only as the terminal-first fallback.** If the augmentation proof fails or Web is rejected categorically, an isolated dsh-TUI + pi2dsh proof should cover profile boot, one model-backed turn, approval/question handling, queue/interrupt, terminal restore/resize, shared-history stop-and-resume, and absence of concurrent writes. Phone access remains a separately labeled transport proof.
 4. **Fallback again only on a concrete TUI failure.** Use dsh-pi-tui if dsh-TUI fails profile compatibility or if the writer guard becomes mandatory. Use openma only if direct SDK/process isolation becomes a requirement. Do not prove all three TUIs.
 5. **Do not runtime-test dsh-remote-web-ui at this pin.** Its missing host seams make a port/threat-review ticket a prerequisite. If phone access becomes urgent before that, SSH + tmux (or Guacamole + SSH + tmux for an HTML5 phone keyboard) is the safer transport-only path and must be labeled as such.

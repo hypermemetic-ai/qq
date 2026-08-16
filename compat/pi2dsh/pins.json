@@ -18,6 +18,27 @@
     "revision": "47f943859bef60e4160492346772ded9b24f765a",
     "integrity": "sha512-brpZfED7ieRa2PQ5tUxMhHrM1pb2CmKFVM/f6yMULBDMicahk+Z2OsHgTwTDnoiZm23Ftu9rQz0NN4pflaoJcg=="
   },
+  "webCandidate": {
+    "status": "proof-only",
+    "spotlight": {
+      "repository": "https://github.com/0xsline/dsh-spotlight.git",
+      "package": "@0xsline/dsh-spotlight",
+      "version": "0.0.2",
+      "revision": "dd7ef5ed160aa1a624559de16eafd4ea9406d7ed",
+      "integrity": "sha512-xqJyEjLjFShNgliG1TCHJf0umTZzW12byg4YKAJ8r+SeZsJ+D733+lPmzHkX7mKu6rjF35d5e1iypesiEkaqTQ=="
+    },
+    "mobileFix": {
+      "repository": "https://github.com/AcidGr/dsh-web-mobile-fix.git",
+      "package": "dsh-web-mobile-fix",
+      "version": "1.0.2",
+      "revision": "015d905b5f9196b5d442878e5682d8aaa598aa3f",
+      "integrity": "sha512-AQQQDncGw4osPaRIER7AlhY9mWB7qfA+7MNeePWsGM83avhtBg7/kF64Nnf3K34s9+q+YNJQwre/0/tcus7EoQ=="
+    },
+    "spotlightPeers": {
+      "cordis": "4.0.0-rc.7",
+      "schemastery": "3.18.0"
+    }
+  },
   "typescript": {
     "package": "typescript",
     "version": "5.9.3"

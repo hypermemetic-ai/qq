@@ -46,9 +46,9 @@ A fast, offline drift test covers the declared bundle and qq's non-ABI assumptio
 node tests/test-pi2dsh-compat.mjs .
 ```
 
-## Official Web UI evaluation
+## Web UI candidate evaluation
 
-The pinned stock `dsh web` operator-surface runbook is [`WEB_QA.md`](WEB_QA.md), with the small machine-readable result in [`web-evidence.json`](web-evidence.json). Its verdict is **reject**: desktop and the Cordis customization seams pass, but the `390x844` Settings/sidebar states and global keyboard efficiency do not meet the operator requirement. Safe second-client continuity works through an authenticated SSH local forward while DSH stays on `127.0.0.1`; the evidence does not bypass the official `0.0.0.0` refusal and does not change the Herdr/Pi runtime.
+The focused [`WEB_QA.md`](WEB_QA.md) harness reuses the rejected stock-Web baseline and records one proof-only after-test in [`web-evidence.json`](web-evidence.json): exact `@0xsline/dsh-spotlight@0.0.2` plus `dsh-web-mobile-fix@1.0.2`. The candidate passed the selected experiment by supplying keyboard routes for the stock navigation gaps and closing the measured `390x844` Settings/sidebar failures. It still requires explicit Spotlight peers, carries DOM-selector drift and young-project risk, and proves no touch, IME, approval, long-transcript, or physical-phone behavior. Stock sessions, authenticated SSH-forward continuity, loopback-only binding, and the official `0.0.0.0` refusal remained unchanged. This is not adoption or cutover, and the Herdr/Pi runtime remains active.
 
 ## Observed facts
 
