@@ -1,5 +1,5 @@
 // @ts-nocheck
-// Cross-project, machine-local agent messaging over the Event Plane.
+// Cross-project, machine-local agent messaging over qq-relay.
 
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
@@ -8,14 +8,14 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { EventPlaneClient } from "../bin/lib/event-plane-client.ts";
+import { RelayClient } from "../bin/lib/qq-relay-client.mjs";
 import { ROLE_SET, roleForRepository } from "../bin/lib/roles.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const MESSAGE_SCHEMA = "qq.agent-message/v2";
 const CUSTOM_TYPE = "qq-agent-message";
-const PLANE_PRODUCT = "agents";
+const RELAY_PRODUCT = "agents";
 const MESSAGE_KIND = "agent.message";
 const LEASE_MS = 45_000;
 const RENEW_MS = 15_000;
@@ -32,12 +32,16 @@ const DELIVERY = new Set(["default", "immediate"]);
 
 function stateHome(env = process.env) {
   const value = env.XDG_STATE_HOME;
-  return value ? resolve(value) : join(homedir(), ".local", "state");
+  return value ? resolve(value) : join(resolve(env.HOME || homedir()), ".local", "state");
 }
 
 function statePaths(env = process.env) {
-  const root = join(stateHome(env), "qq", "event-plane");
-  return { root, socket: join(root, "event-plane.sock"), presence: join(root, "presence") };
+  const relayRoot = join(stateHome(env), "qq-relay");
+  return {
+    relayRoot,
+    socket: join(relayRoot, "qq-relay.sock"),
+    presence: join(stateHome(env), "qq", "agent-messages", "presence"),
+  };
 }
 
 function slug(value, label) {
@@ -96,13 +100,13 @@ async function readProjectConfig(cwd) {
   return value;
 }
 
-function planeAgentId(sessionId) {
+function relayAgentId(sessionId) {
   if (!SESSION_ID.test(sessionId ?? "")) throw new Error("session_id must be a canonical Pi session ID");
-  return `${PLANE_PRODUCT}/${sessionId}`;
+  return `${RELAY_PRODUCT}/${sessionId}`;
 }
 
-function sessionIdFromPlaneAgent(value) {
-  const prefix = `${PLANE_PRODUCT}/`;
+function sessionIdFromRelayAgent(value) {
+  const prefix = `${RELAY_PRODUCT}/`;
   if (typeof value !== "string" || !value.startsWith(prefix)) return undefined;
   const sessionId = value.slice(prefix.length);
   return SESSION_ID.test(sessionId) ? sessionId : undefined;
@@ -195,7 +199,7 @@ function parseMessage(record) {
   const payload = record?.envelope?.payload;
   const message = payload?.message;
   if (payload?.schema !== MESSAGE_SCHEMA || typeof message !== "object" || message === null) return undefined;
-  if (!SESSION_ID.test(message.from ?? "") || !sessionIdFromPlaneAgent(record.recipient_id)) return undefined;
+  if (!SESSION_ID.test(message.from ?? "") || !sessionIdFromRelayAgent(record.recipient_id)) return undefined;
   if (!SIMPLE.test(message.project ?? "") || !ROLE_SET.has(message.role)) return undefined;
   if (message.pane !== null && (typeof message.pane !== "string" || message.pane.length > 128 || message.pane.includes("\0"))) return undefined;
   if (typeof message.content !== "string" || message.content.length === 0 || message.content.length > 65_536) return undefined;
@@ -231,12 +235,12 @@ function statusName(result) {
   return result?.terminal_failure ? "failed" : "queued";
 }
 
-export { listPresence, normalizeTasks, parseMessage, planeAgentId, presenceCard, statusName, validPresence };
+export { listPresence, normalizeTasks, parseMessage, presenceCard, relayAgentId, statePaths, statusName, validPresence };
 
 export default function register(pi, deps = {}) {
   const env = deps.env ?? process.env;
   const paths = deps.paths ?? statePaths(env);
-  const client = deps.client ?? new EventPlaneClient(paths.socket);
+  const client = deps.client ?? new RelayClient(paths.socket);
   const now = deps.now ?? (() => Date.now());
   const sleep = deps.sleep ?? ((milliseconds) => new Promise((done) => setTimeout(done, milliseconds)));
   const list = deps.listPresence ?? listPresence;
@@ -302,10 +306,10 @@ export default function register(pi, deps = {}) {
 
   async function claimImmediate(message) {
     const result = await client.publish({
-      producer_id: planeAgentId(message.from),
+      producer_id: relayAgentId(message.from),
       request_id: `immediate_${message.event_id}`,
-      origin_id: planeAgentId(message.from),
-      product_id: PLANE_PRODUCT,
+      origin_id: relayAgentId(message.from),
+      product_id: RELAY_PRODUCT,
       kind: "agent.immediate-claim",
       schema_version: 1,
       correlation_id: message.event_id,
@@ -380,7 +384,7 @@ export default function register(pi, deps = {}) {
     const endpoint = `agent-messages/${randomUUID()}`;
     while (active && localEpoch === epoch && current) {
       try {
-        const result = await client.next({ consumer_type: "recipient", consumer_id: planeAgentId(current.session_id), generation: 0, endpoint_token: endpoint, wait_ms: RECEIVE_WAIT_MS });
+        const result = await client.next({ consumer_type: "recipient", consumer_id: relayAgentId(current.session_id), generation: 0, endpoint_token: endpoint, wait_ms: RECEIVE_WAIT_MS });
         if (result?.delivery) await receiveOne(result.delivery, localEpoch);
       } catch {
         if (active && localEpoch === epoch) await sleep(RECONNECT_MS);
@@ -456,8 +460,8 @@ export default function register(pi, deps = {}) {
           if (!DELIVERY.has(delivery)) throw new Error("delivery must be default or immediate");
           const requestId = `msg_${randomUUID()}`;
           const result = await client.send({
-            producer_id: planeAgentId(current.session_id), request_id: requestId, origin_id: planeAgentId(current.session_id),
-            recipient_id: planeAgentId(params.to), product_id: PLANE_PRODUCT, kind: MESSAGE_KIND, schema_version: 1,
+            producer_id: relayAgentId(current.session_id), request_id: requestId, origin_id: relayAgentId(current.session_id),
+            recipient_id: relayAgentId(params.to), product_id: RELAY_PRODUCT, kind: MESSAGE_KIND, schema_version: 1,
             payload: { schema: MESSAGE_SCHEMA, message: { from: current.session_id, project: current.project, role: current.role, tasks, pane: current.pane, content, delivery } },
           });
           const messageId = result.record.event_id;
@@ -472,7 +476,7 @@ export default function register(pi, deps = {}) {
           const showReasons = ["blocked", "expired", "failed"].includes(state);
           let card = "";
           if (state === "queued" || state === "delivering") {
-            const recipientId = sessionIdFromPlaneAgent(result.record?.recipient_id);
+            const recipientId = sessionIdFromRelayAgent(result.record?.recipient_id);
             const recipient = recipientId
               ? (await list(paths.presence, {}, now())).find((agent) => agent.session_id === recipientId)
               : undefined;
