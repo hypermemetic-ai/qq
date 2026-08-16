@@ -128,9 +128,9 @@
     },
     {
       "id": "review-receipts",
-      "basis": "qq-source-audit-and-pi2dsh-matrix",
-      "verdict": "pi-jsonl-dependent",
-      "fact": "DSH run-outcome addressing reaches review flow, but receipt acknowledgement still parses getSessionFile() as Pi JSONL. pi2dsh returns its sidecar path while DSH messages live in the DSH durable log, so the real relay remains pending and review receipt translation remains open."
+      "basis": "installed-relay-runtime-and-regression-tests",
+      "verdict": "installed-durable-entry-proven",
+      "fact": "Review-flow acknowledgement uses ctx.sessionManager.getEntries() as its only persistence authority. Regression coverage proves the real Pi custom-message and pinned DSH user-message projections; the installed relay records a pre-persistence retry and safe redelivery, then becomes delivered only after the run outcome is observable in durable DSH history without duplicate injection."
     },
     {
       "id": "session-scrub",
@@ -144,7 +144,6 @@
     "native_translation_started": true,
     "blockers": [
       "DSH-native Herdr agent launch and prompt-acceptance proof",
-      "DSH durable receipt proof for review events",
       "DSH transcript and scrub semantics",
       "qq model-policy routes in the DSH model directory",
       "read-tool ownership without disabling the host filesystem bundle",

@@ -86,7 +86,8 @@ assert.equal(probes.get("qq-relay-client").verdict, "installed-product-proven");
 assert.equal(probes.get("agent-message-receipts").verdict, "installed-transport-and-durable-entry-proven");
 assert.equal(probes.get("run-outcome-addressing").verdict, "installed-address-and-parse-proven");
 assert.match(probes.get("run-outcome-addressing").fact, /qq\/review-flow\/session-<UUID>/);
-assert.ok(evidence.conclusion.blockers.every((blocker) => !/qq-relay client boundary/i.test(blocker)));
+assert.equal(probes.get("review-receipts").verdict, "installed-durable-entry-proven");
+assert.ok(evidence.conclusion.blockers.every((blocker) => !/qq-relay client boundary|review events/i.test(blocker)));
 
 // Herdr orchestration remains explicitly Pi-owned and proves prompt acceptance
 // by opening the path in Herdr's Pi session descriptor.
@@ -100,15 +101,15 @@ assert.match(runLib, /sessionHasPromptMarker\(path, marker\)/);
 assert.match(runEvents, /DSH_SESSION_ID = \/\^session-/);
 assert.match(runEvents, /review-flow\/\$\{sessionId\}/);
 
-// Agent-message acknowledgement has no session-file fallback; review receipts
-// remain explicitly outside this child ticket.
+// Agent-message and review-flow acknowledgement use only host-managed entries.
 assert.doesNotMatch(messages, /getSessionFile/);
 assert.match(messages, /sessionManager\?\.getEntries\?\.\(\)/);
 assert.doesNotMatch(messages, /JSON\.parse\(line\)/);
-assert.match(review, /sessionManager\?\.getSessionFile\?\.\(\)/);
-assert.match(review, /readFile\(path, "utf8"\)/);
-assert.match(review, /JSON\.parse\(line\)/);
-assert.match(review, /value\?\.type === "custom_message"/);
+assert.doesNotMatch(review, /getSessionFile/);
+assert.match(review, /sessionManager\?\.getEntries\?\.\(\)/);
+assert.doesNotMatch(review, /JSON\.parse\(line\)/);
+assert.match(review, /entry\?\.type === "custom_message"/);
+assert.match(review, /entry\?\.type === "message"/);
 
 // Scrubbing is tied to Pi's transcript root and Pi's /new event shape.
 assert.match(scrub, /"\.pi", "agent", "sessions"/);
