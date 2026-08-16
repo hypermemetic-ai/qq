@@ -25,7 +25,7 @@ flowchart TD
     Bundle --> Safety["safety and context"]
     Profiles --> Policy["execution-profiles.json"]
     Messaging --> EventPlane["Event Plane process"]
-    Workflow --> Workers["review and land workers"]
+    Workflow --> Workers["start, review, and land workers"]
     MethodCLI --> GitConfig["repository Git config"]
     MethodCLI --> BacklogStore["external Backlog store"]
     HerdrClient --> HerdrServer["external Herdr product"]
@@ -60,7 +60,7 @@ The order makes profile activation the composition root and installs qq's replac
 |---|---|---|
 | Pi session | Extension registration, role prompt replacement, tools, guards, role events | Installed Pi runtime and provider authentication |
 | Event Plane | Python service/client code, Unix socket protocol, SQLite schema and state directory | A separately started process; there is no local Event Plane systemd unit |
-| Review and landing | `qq-review-worker.mjs`, `qq-land-worker.mjs`, handoff and lock contracts | Child Git, Backlog, model, and Herdr commands |
+| Startup, review, and landing | `qq-start-worker.mjs`, `qq-review-worker.mjs`, `qq-land-worker.mjs`, bootstrap/handoff/outbox and lock contracts | Herdr socket and child Git, Backlog, model, and Herdr commands |
 | Herdr | Config, activation/smoke scripts, plugin adapters, `herdr.service` packaging | Rust source, tests, build, install, and product lifecycle in the linked Herdr repository |
 | Dashboard | Immutable dependency pin and two launch wrappers | Package implementation under `node_modules/@hypermemetic-ai/qq-dashboard` |
 | OpenWiki | Timer/service, dispatch, isolated writer/publication scripts, allowed generated paths | OpenWiki executable and model provider |
@@ -77,7 +77,7 @@ Herdr's service launches `%h/.local/lib/qq/herdr/bin/herdr server`, logs under `
 | `${XDG_STATE_HOME:-~/.local/state}/qq/pane-profiles/<pane>.json` | profile extension; owner-only pane-local role/profile selection |
 | `${XDG_STATE_HOME:-~/.local/state}/qq/event-plane/` | Event Plane; socket, lock, and `event-plane.sqlite3` |
 | `~/.local/state/qq/telemetry/` | Dashboard contract; preserve usage caches and cookie snapshot across installs and upgrades |
-| qq run/handoff state below the qq state home | Delegation/review libraries and workers; private JSON and worktree lifecycle |
+| qq run/handoff state and `qq/bootstrap-failures/` below the qq state home | Delegation/review libraries and workers; private bootstrap/handoff JSON, durable sanitized startup-failure outbox, and worktree lifecycle |
 | Repository `openwiki/` | OpenWiki automation is the sole generated-output writer; publication validates paths and modes and coordinates landing locks |
 
 Do not move external Backlog or telemetry state into the repository. Generated OpenWiki publication and its lock boundary are covered in [OpenWiki automation](../operations/openwiki-automation.md).
@@ -91,7 +91,7 @@ Do not move external Backlog or telemetry state into the repository. Generated O
 | Start or administer Event Plane | `bin/event-plane`, `bin/event-plane-admin` | Python service and bounded admin client; see [Event Plane service](../event-plane/service.md) |
 | Run the dashboard | `bin/qq-dashboard`, `bin/qq-dashboard-cookies` | Execute only pinned package binaries |
 | Activate or inspect Herdr integration | `bin/qq-herdr-activate`, `bin/qq-herdr-smoke` | Does not build Herdr |
-| Complete QA or landing | `bin/qq-review-worker.mjs`, `bin/qq-land-worker.mjs` | Consume a private handoff JSON path |
+| Start, review, or land a delegated run | `bin/qq-start-worker.mjs`, `bin/qq-review-worker.mjs`, `bin/qq-land-worker.mjs` | Internal workers consume private bootstrap or handoff JSON paths; they are not normal operator entrypoints |
 | Refresh generated wiki | `bin/qq-openwiki-service` | Reads the `openwiki` service profile then dispatches refreshes |
 | Load Pi extensions | `extensions/index.ts` | Default export `registerQQ(pi)` |
 | Invoke the host Pi installation | `bin/pi` | Host-local compatibility shim that hard-codes `/home/qqp/.local/bin/pi`; it is not a portable installer and has no focused local test |

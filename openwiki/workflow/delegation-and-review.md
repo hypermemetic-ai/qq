@@ -15,7 +15,7 @@ qq turns one Backlog ticket into an isolated, operator-approved run. The archite
 |---|---|---|
 | `sketch({title,note?})` | architect Pi session | Creates a Backlog task; optional text is appended as a timestamped take. |
 | `note({id,text})` | architect Pi session | Appends a timestamped implementation note. |
-| `delegate({id})` | architect Pi session in Herdr | Serializes admission, claims a `To Do` task, creates the private brief, asks the operator, and starts a runner. |
+| `delegate({id})` | architect Pi session in Herdr | Serializes admission, claims a `To Do` task, creates the private brief, asks the operator, and hands an owner-only bootstrap request to a detached start worker. It returns while the runner is still starting. |
 | `done({ref})` | delegated runner with `QQ_RUN_STATE` | Validates the committed ref, advances the QA look, starts `qq-review-worker.mjs`, then stops the runner. It never merges. |
 | proposal picker | owning architect session | Offers `approve`, `discuss`, or `later`; only `approve` invokes the land worker. |
 | `qa_verdict(...)` | isolated QA extension only | Writes exactly one structured pass/fail result and shuts QA down. |
@@ -31,6 +31,7 @@ sequenceDiagram
     participant V as Admission vet
     participant O as Operator gate
     participant H as Herdr
+    participant S as Start worker
     participant R as Runner
     participant Q as QA worker
     participant L as Land worker
@@ -45,8 +46,10 @@ sequenceDiagram
     B->>O: open focused right-side brief gate
     O-->>B: approve or cancel
     alt approved
-        B->>H: create worktree, runs pane, runner
-        H->>R: full ticket and delegate note
+        B->>S: hand off private bootstrap request
+        S->>H: create worktree, runs pane, runner
+        S->>R: submit private prompt through Herdr socket
+        S->>S: verify marker in Pi session JSONL
         R->>B: done with committed ref
         B->>Q: detached review worker in same pane
         alt look 1 fails
@@ -63,8 +66,12 @@ sequenceDiagram
             Q->>B: return task to To Do
             Q->>E: run.blocked
         end
-    else cancelled or setup fails
+    else cancelled
         B->>B: return task to To Do and discard artifacts
+    end
+    opt detached bootstrap fails
+        S->>B: return task to To Do
+        S->>E: durable run.bootstrap-failed outcome
     end
 ```
 
@@ -90,18 +97,22 @@ Cancellation returns the ticket to `To Do` and deletes the prepared directory. A
 
 ### 3. Start the isolated runner
 
-Approval creates branch `qq/<task-slug>-<nonce>` and a worktree below `${QQ_WORKTREE_ROOT:-~/.herdr/worktrees/<project>}` at the captured main `HEAD`. Generated OpenWiki materialization is frozen. qq creates or right-splits the literal `runs` tab without focus and injects:
+After approval, `delegate` writes an owner-only `qq.run-bootstrap/v1` request to `bootstrap.json` and spawns detached `bin/qq-start-worker.mjs`. The tool waits only for the worker's IPC acceptance and returns `status: starting`; the architect turn does not own or await the longer startup. If the worker rejects the private request or exits before accepting it, the tool still rolls the claim and prepared state back synchronously.
+
+The worker creates branch `qq/<task-slug>-<nonce>` and a worktree below `${QQ_WORKTREE_ROOT:-~/.herdr/worktrees/<project>}` at the captured main `HEAD`. Generated OpenWiki materialization is frozen. qq creates or right-splits the literal `runs` tab without focus and injects:
 
 - `QQ_AGENT_ROLE=runner`, `QQ_AGENT_PROJECT`, and `QQ_RUN_STATE`;
 - `QQ_RUN_ID` and the owning `QQ_ARCHITECT_SESSION`.
 
-After writing a `qq.run-handoff/v1` state with `status: starting`, qq waits until the pane contains only an available shell, starts the Pi runner, and sends the full ticket and note with a bounded wait for `working`. Only then does state become `running` (`source`). Setup failure closes the owned pane, force-removes the worktree, deletes the branch and private state, and lets `delegate` return the task.
+After writing a `qq.run-handoff/v1` state with `status: starting`, the worker waits until the pane contains only an available shell and launches Pi with `--approve`. It sends the full private ticket and note through Herdr's Unix-socket `agent.prompt` API rather than placing them in CLI arguments. Startup is complete only after `agent.get` identifies the pane's Pi session and the session JSONL contains the exact per-run bootstrap marker as a user-message line. The handoff then becomes `running` and records `bootstrapProof` with the marker, safe absolute session path, and acceptance time.
+
+A detached startup failure closes the owned pane, force-removes the worktree and branch, retries the Backlog transition to `To Do`, and removes private run state. Before cleanup it persists a sanitized owner-only failure record under `${XDG_STATE_HOME:-~/.local/state}/qq/bootstrap-failures/`; reasons redact private ticket/note text, sensitive environment values, control characters, and paths. It retries immediate `run.bootstrap-failed` delivery and also shows a Herdr notification. If Event Plane is unavailable, the owning architect's regular review poll retries only that session's outbox entry and removes it after delivery. This failure path is therefore separate from the synchronous `delegate` return.
 
 ### 4. Submit and review
 
 `done` refuses unless it runs in the handoff's real worktree, state is `running` or `waiting_fix`, fewer than two looks were used, `ref` resolves to a commit descending from `baseRef`, and the worktree is completely clean. It records the SHA, increments `look`, sets `reviewing`, starts a detached review worker, and shuts down the runner (`source`).
 
-QA takes over the same pane only after the old Herdr agent identity disappears and the shell is free. It receives a private file-backed system prompt, a persistent QA session ID, only `read,bash,edit,write,qa_verdict`, and no normal extensions, skills, templates, or context files. Look 2 resumes look 1's QA session.
+QA takes over the same pane only after the old Herdr agent identity disappears and the shell is free. Every Pi re-entry launched by `takePane`—QA and the runner restarted after a failed first look—passes `--approve` before session-specific arguments. QA receives a private file-backed system prompt, a persistent QA session ID, only `read,bash,edit,write,qa_verdict`, and no normal extensions, skills, templates, or context files. Look 2 resumes look 1's QA session.
 
 QA may commit test-only changes. Enforcement is independent of its claim:
 
@@ -128,10 +139,10 @@ stateDiagram-v2
     ToDo --> Bounced: admission conflict
     Bounced --> ToDo
     ToDo --> InProgress: clear and atomic claim
-    InProgress --> ToDo: gate cancel or startup failure
-    InProgress --> Starting: gate approved
-    Starting --> Running: runner prompt reaches working
-    Starting --> ToDo: setup rollback
+    InProgress --> ToDo: gate cancel or worker launch rejection
+    InProgress --> Starting: bootstrap worker accepts request
+    Starting --> Running: prompt marker recorded in Pi session
+    Starting --> ToDo: detached bootstrap rollback
     Running --> Reviewing1: done with clean descendant
     Reviewing1 --> WaitingFix: QA look 1 fails
     WaitingFix --> Reviewing2: done with clean updated ref
@@ -156,7 +167,9 @@ stateDiagram-v2
 
 | Artifact or invariant | Contract |
 |---|---|
-| `handoff.json` | Atomic `0600` `qq.run-handoff/v1`; canonical owner of paths, refs, pane, architect session, QA binding, look, status, verdict, pack, and failures. |
+| `bootstrap.json` | Atomic owner-only `qq.run-bootstrap/v1`; detached-worker request containing task identity, prepared paths, QA binding, architect session, and a non-secret prompt marker. Removed after successful startup. |
+| `handoff.json` | Atomic `0600` `qq.run-handoff/v1`; canonical owner of paths, refs, pane, architect session, QA binding, look, status, verdict, pack, failures, and prompt-acceptance proof. |
+| `qq/bootstrap-failures/*.json` | Owner-only `qq.bootstrap-failure-outbox/v1`; session-scoped sanitized startup failures retained only until Event Plane delivery succeeds. |
 | `qa-look-1.json`, `qa-look-2.json` | Atomic `0600` `qq.qa-verdict/v1`; one call per QA process with pass/fail, summary, feedback, and `tests_modified`. |
 | `qa-session/` | Private resumed QA context across the two looks. |
 | `qq-admit.lock` | Serializes conflict evidence and claim across worktrees; stale PID cleanup is guarded. |
@@ -168,29 +181,31 @@ stateDiagram-v2
 ## Failure handling
 
 - Malformed Backlog JSON, admission output, Herdr JSON, handoff, verdict, or gate decision fails closed.
-- Missing Herdr pane/workspace, unsafe private paths, detached main, unavailable model, unavailable shell, prompt timeout, or unclean refs prevents progression.
+- Missing Herdr pane/workspace, unsafe private paths or session JSONL, detached main, unavailable model, unavailable shell, socket/API failure, absent prompt marker at the bounded deadline, or unclean refs prevents progression.
+- Detached bootstrap failure retries board rollback and immediate outcome delivery once. Its durable outbox prevents Event Plane downtime from losing the failure, but a failure to persist that outbox is surfaced explicitly and never blocks private-state deletion.
 - Review infrastructure failure records `blocked` with `qa infrastructure failed`; unless QA had already passed, it returns the task to `To Do` and sends a Herdr notification.
 - Landing failure preserves the worktree and branch when cleanup cannot complete, records the exact reason, and is re-offered only for discussion. If thaw/remove fails, OpenWiki protection is restored or an aggregate failure exposes both faults.
-- Outcome delivery is durable but depends on a running Event Plane; send failure makes the worker fail rather than pretending the architect was informed.
+- Landing and QA-blocked outcome delivery depends on a running Event Plane; send failure makes those workers fail rather than pretending the architect was informed. Bootstrap failures additionally use the local outbox described above.
 
 ## Validation
 
 Run focused checks from the repository root:
 
 ```bash
-node tests/test-delegation.mjs "$PWD"
-node tests/test-review-flow.mjs "$PWD"
+node --experimental-strip-types tests/test-delegation.mjs "$PWD"
+node --experimental-strip-types tests/test-review-flow.mjs "$PWD"
 node tests/test-brief-gate.mjs "$PWD"
 ```
 
-These cover role refusal, transcript disclosure, admission locking/evidence and bounce paths, private artifacts, gate approval/cancellation, startup rollback, `done` ancestry/cleanliness, same-pane takeover, two-look continuity, test-only QA commits, proposal ownership/actions, landing order/locks/failures, board transitions, generated-path refusal, and run-event receipts. Use `npm test` for the sequential repository suite; see [Validation](../testing/validation.md).
+These cover role refusal, transcript disclosure, admission locking/evidence and bounce paths, private artifacts, gate approval/cancellation, detached worker acceptance, socket prompt transport, session-marker proof and timeout, sanitized startup rollback/outbox delivery, `--approve` launch arguments, `done` ancestry/cleanliness, same-pane takeover, two-look continuity, test-only QA commits, proposal ownership/actions, landing order/locks/failures, board transitions, generated-path refusal, and run-event receipts. Use `npm test` for the sequential repository suite; see [Validation](../testing/validation.md).
 
 ## Source anchors
 
 - Architect tools and orchestration: `extensions/board.ts`
 - Runner submission, proposal UI, and outcome receiver: `extensions/review-flow.ts`
 - Admission lock and evidence: `bin/lib/admission.mjs`
-- Private artifacts, gate, worktree, and runner start: `bin/lib/run.mjs`
+- Private artifacts, bootstrap request, Herdr socket transport, prompt proof, worktree, and runner start: `bin/lib/run.mjs`
+- Detached startup rollback and failure outbox: `bin/lib/bootstrap.mjs`, `bin/qq-start-worker.mjs`
 - QA and landing: `bin/lib/review.mjs`
-- Workers and outcomes: `bin/qq-review-worker.mjs`, `bin/qq-land-worker.mjs`, `bin/lib/run-events.mjs`
+- Workers and outcomes: `bin/qq-start-worker.mjs`, `bin/qq-review-worker.mjs`, `bin/qq-land-worker.mjs`, `bin/lib/run-events.mjs`
 - Tests: `tests/test-delegation.mjs`, `tests/test-review-flow.mjs`, `tests/test-brief-gate.mjs`
