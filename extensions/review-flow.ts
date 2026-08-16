@@ -5,7 +5,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { retryBootstrapFailureOutbox } from "../bin/lib/bootstrap.mjs";
-import { EventPlaneClient } from "../bin/lib/event-plane-client.ts";
+import { RelayClient } from "../bin/lib/qq-relay-client.mjs";
 import { atomicPrivateJson, readHandoff, stateHome } from "../bin/lib/run.mjs";
 import { formatPack, isFailedLand, isQaPassedProposal, listProposals, prepareDone, projectFromCwd } from "../bin/lib/review.mjs";
 import { RUN_BLOCKED_KIND, RUN_BOOTSTRAP_FAILED_KIND, parseRunEvent, runEventDeliveryGuard, runEventEndpoint, runEventRecipient } from "../bin/lib/run-events.mjs";
@@ -75,7 +75,7 @@ export default function registerReviewFlow(pi, deps = {}) {
   const env = deps.env ?? process.env;
   const run = deps.exec ?? ((command, args, options) => pi.exec(command, args, options));
   const launchReview = deps.launchReview ?? ((statePath) => detachedWorker(join(QQ_ROOT, "bin", "qq-review-worker.mjs"), statePath, { ...process.env, ...env }));
-  const eventClient = deps.eventClient ?? new EventPlaneClient(join(stateHome(env), "qq", "event-plane", "event-plane.sock"));
+  const eventClient = deps.eventClient ?? new RelayClient(join(stateHome(env), "qq-relay", "qq-relay.sock"));
   const retryBootstrapFailures = deps.retryBootstrapFailureOutbox ?? retryBootstrapFailureOutbox;
   const sleep = deps.sleep ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
   let role = env.QQ_AGENT_ROLE || "runner";

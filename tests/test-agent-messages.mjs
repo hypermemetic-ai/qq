@@ -9,7 +9,17 @@ const module = await import(pathToFileURL(join(root, "extensions/agent-messages.
 
 const first = "019ff7b9-2fcd-78cd-bc16-c770a9ccff11";
 const second = "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9";
-assert.equal(module.planeAgentId(first), `agents/${first}`);
+assert.equal(module.relayAgentId(first), `agents/${first}`);
+assert.deepEqual(module.statePaths({ XDG_STATE_HOME: "/tmp/qq-state" }), {
+  relayRoot: "/tmp/qq-state/qq-relay",
+  socket: "/tmp/qq-state/qq-relay/qq-relay.sock",
+  presence: "/tmp/qq-state/qq/agent-messages/presence",
+});
+assert.deepEqual(module.statePaths({ HOME: "/tmp/qq-home" }), {
+  relayRoot: "/tmp/qq-home/.local/state/qq-relay",
+  socket: "/tmp/qq-home/.local/state/qq-relay/qq-relay.sock",
+  presence: "/tmp/qq-home/.local/state/qq/agent-messages/presence",
+});
 
 const now = Date.now();
 const valid = {
@@ -38,7 +48,7 @@ try {
 } finally { await rm(directory, { recursive: true, force: true }); }
 
 const record = {
-  event_id: "evt_test", accepted_at: now, recipient_id: module.planeAgentId(first),
+  event_id: "evt_test", accepted_at: now, recipient_id: module.relayAgentId(first),
   envelope: { payload: { schema: "qq.agent-message/v2", message: {
     from: second, project: "deciq", role: "runner", tasks: [], pane: null,
     content: "hello", delivery: "immediate",

@@ -646,7 +646,7 @@ try {
       assert.equal(kind, runEvents.RUN_BOOTSTRAP_FAILED_KIND);
       await assert.rejects(access(workerPreparation.stateDir), { code: "ENOENT" });
       failurePayloads.push(runEvents.runEventPayload(outcome, kind));
-      throw new Error("event plane unavailable");
+      throw new Error("qq-relay unavailable");
     },
     async notify(taskId, reason) {
       await assert.rejects(access(workerPreparation.stateDir), { code: "ENOENT" });
@@ -670,7 +670,7 @@ try {
   assert.equal(notificationBody, `${workerTask.id}: bootstrap failed`);
   const outboxRoot = bootstrap.bootstrapFailureOutboxRoot(workerEnv);
   const pendingOutbox = await readdir(outboxRoot);
-  assert.equal(pendingOutbox.length, 1, "sustained event-plane unavailability must leave a durable failure outbox entry");
+  assert.equal(pendingOutbox.length, 1, "sustained qq-relay unavailability must leave a durable failure outbox entry");
   assert.equal((await lstat(outboxRoot)).mode & 0o077, 0);
   assert.equal((await lstat(join(outboxRoot, pendingOutbox[0]))).mode & 0o077, 0);
   let drainedEvents = 0;

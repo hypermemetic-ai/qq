@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 
 const [root, socket, stateRoot] = process.argv.slice(2);
 const extension = await import(pathToFileURL(`${root}/extensions/agent-messages.ts`));
-const { EventPlaneClient } = await import(pathToFileURL(`${root}/bin/lib/event-plane-client.ts`));
+const { RelayClient } = await import(pathToFileURL(`${root}/bin/lib/qq-relay-client.mjs`));
 
 function harness(role, sessionId, pane, options = {}) {
   const handlers = new Map();
@@ -39,7 +39,7 @@ function harness(role, sessionId, pane, options = {}) {
   };
   extension.default(pi, {
     env: { ...process.env, XDG_STATE_HOME: stateRoot, QQ_AGENT_PROJECT: "qq", QQ_AGENT_ROLE: role, HERDR_PANE_ID: pane },
-    client: new EventPlaneClient(socket), assumePersisted: options.assumePersisted ?? false, injectedMessages,
+    client: new RelayClient(socket), assumePersisted: options.assumePersisted ?? false, injectedMessages,
     now: options.now,
   });
   return {

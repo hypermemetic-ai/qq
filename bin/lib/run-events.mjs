@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { EventPlaneClient, canonicalEventPlaneJson } from "./event-plane-client.ts";
+import { RelayClient, canonicalRelayJson } from "./qq-relay-client.mjs";
 import { stateHome } from "./run.mjs";
 
 export const RUN_EVENT_PRODUCT = "qq";
@@ -79,8 +79,8 @@ export async function sendRunEvent(state, kind, options = {}) {
   const producerId = kind === RUN_LANDED_KIND ? "qq/land-worker"
     : kind === RUN_BOOTSTRAP_FAILED_KIND ? "qq/start-worker"
     : "qq/review-worker";
-  const requestHash = createHash("sha256").update(canonicalEventPlaneJson({ kind, payload })).digest("hex");
-  const client = options.client ?? new EventPlaneClient(join(stateHome(options.env), "qq", "event-plane", "event-plane.sock"));
+  const requestHash = createHash("sha256").update(canonicalRelayJson({ kind, payload })).digest("hex");
+  const client = options.client ?? new RelayClient(join(stateHome(options.env), "qq-relay", "qq-relay.sock"));
   return client.send({
     producer_id: producerId,
     request_id: `run_${requestHash}`,

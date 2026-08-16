@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH=$(realpath -e -- "${BASH_SOURCE[0]}")
+ROOT=$(cd -- "$(dirname -- "$SCRIPT_PATH")/.." && pwd -P)
+# shellcheck source=/dev/null
+source "$ROOT/qq-relay/upstream.env"
+SOURCE_ROOT=${QQ_RELAY_SOURCE:-${QQ_RELAY_LANDED_REPOSITORY:?qq-relay landed repository is not configured}}
+RELAY_BIN="$SOURCE_ROOT/bin/qq-relay"
+
+if [[ ! -x "$RELAY_BIN" ]]; then
+  printf 'qq-relay: linked source executable is unavailable: %s (set QQ_RELAY_SOURCE or restore the configured landed repository)\n' "$RELAY_BIN" >&2
+  exit 69
+fi
+exec "$RELAY_BIN" "$@"
