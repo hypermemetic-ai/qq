@@ -1,6 +1,6 @@
 # qq on DSH through pi2dsh
 
-This is an isolated compatibility harness, not an operator-runtime cutover. It mounts qq's single Pi bundle (`extensions/index.ts`) in a fresh DSH `headless` profile through pi2dsh, checks the pinned compatibility matrix, and advances only through a deterministic localhost model boundary. Agent messaging uses a privately installed qq-relay artifact and isolated real service. It does not rewrite qq or replace Herdr/Pi.
+This is an isolated compatibility harness, not an operator-runtime cutover. It mounts qq's single Pi bundle (`extensions/index.ts`) in a fresh DSH `headless` profile through pi2dsh, checks the pinned compatibility matrix, and advances only through a deterministic localhost model boundary. Agent messaging and run-outcome addressing use a privately installed qq-relay artifact and isolated real service. It does not rewrite qq or replace Herdr/Pi.
 
 ## Pinned baseline
 
@@ -27,8 +27,9 @@ This existing relay-contract entrypoint owns the composed proof:
 3. invokes `compat/pi2dsh/run.sh` inside that lifecycle; the harness refuses any standalone relay root or missing service socket;
 4. recreates the pinned pi2dsh/DSH tool installation, verifies package integrity and `gitHead`, runs the compatibility matrix and inspection, and mounts qq in a fresh `$DSH_HOME`;
 5. points DSH's real DeepSeek adapter at a deterministic localhost wire stub, using only a sentinel probe key, so queued input remains local while the real relay retry backoff elapses;
-6. sends through qq's installed-product client loader to `agents/<exact DSH session id>`; mounted qq performs receive, retry, redelivery, and acknowledgement against the same service;
-7. requires installed-relay status to become delivered only after one pinned plugin-sourced DSH `user/message`, with relay attempt/failure counts proving retry without duplicate injection.
+6. sends through qq's installed-product client loader to both `agents/<exact DSH session id>` and `qq/review-flow/<exact DSH session id>`; mounted qq consumes both addresses against the same service;
+7. requires agent-message status to become delivered only after one pinned plugin-sourced DSH `user/message`, with relay attempt/failure counts proving retry without duplicate injection;
+8. requires the run-outcome record, obligation, payload, and one durable bridged message to preserve the complete DSH architect identity, while status remains pending at the separately documented Pi-JSONL receipt blocker.
 
 Keep the temporary DSH profile for inspection or copy its generated artifacts while running the owning entrypoint:
 
@@ -57,8 +58,10 @@ The complete machine-readable record is [`evidence.json`](evidence.json). At thi
 - qq mounts only after the isolated DSH profile disables `tool-fs`, because qq intentionally replaces Pi's built-in `read` and pi2dsh rejects the native DSH collision;
 - qq execution-profile activation refuses the isolated DSH model directory because the required `xai-auth/grok-4.6` route is absent;
 - qq agent messaging accepts only the pinned headless host's exact `session-<randomUUID()>` identity form and preserves the complete value as the live relay receiver address;
+- run-outcome production, recipient validation, and parsing accept bare canonical Pi UUIDs and that exact pinned DSH form; the real relay and mounted architect receiver preserve `session-<UUID>` throughout the address and payload;
 - agent-message acknowledgement uses `ctx.sessionManager.getEntries()` as its only persistence authority; the pinned runtime probe observes the real relay's retry and redelivery, one bridged plugin-sourced `user/message`, and acknowledgement only after that durable record appears;
-- qq's load-time client resolver works under pi2dsh against the privately installed artifact after relay source deletion, and final real-service status is delivered without changing the exact `session-<UUID>` identity.
+- the DSH-addressed run outcome produces one durable bridged message but remains pending because review receipt acknowledgement still depends on Pi JSONL;
+- qq's load-time client resolver works under pi2dsh against the privately installed artifact after relay source deletion, and final agent-message status is delivered without changing the exact `session-<UUID>` identity.
 
 The collision, model refusal, and session-id activation are runtime observations from the DSH boot, not static predictions.
 

@@ -121,7 +121,7 @@ llm_endpoint=$(<"$scratch/llm-endpoint.txt")
   cd "$root"
   env -u XAI_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY \
     HOME="$scratch/home" XDG_CONFIG_HOME="$scratch/config" XDG_STATE_HOME="$relay_state_home" \
-    XDG_RUNTIME_DIR="$scratch/runtime" DSH_HOME="$DSH_HOME" QQ_AGENT_ROLE=runner \
+    XDG_RUNTIME_DIR="$scratch/runtime" DSH_HOME="$DSH_HOME" QQ_AGENT_ROLE=architect \
     DEEPSEEK_API_KEY=qq-pi2dsh-local-probe DEEPSEEK_BASE_URL="$llm_endpoint" \
     QQ_RELAY_INSTALL_ROOT="$relay_install_root" \
     "$dsh" --profile headless --patch "$here/qq.patch.yml" "qq compatibility mount probe"

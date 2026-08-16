@@ -612,9 +612,10 @@ try {
 
   const workerTask = { id: "TASK-12", title: "Worker rollback" };
   const workerPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: workerTask, note: exactNote });
+  const dshArchitectSession = "session-4b70f906-ce0a-4135-bc9e-b231db9b98b1";
   const workerRequest = await lib.prepareBootstrapRequest({
     cwd: "/repo", env, task: workerTask, prepared: workerPreparation, qaBinding: {},
-    architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9",
+    architectSession: dshArchitectSession,
   });
   let boardAttempts = 0;
   let eventAttempts = 0;
@@ -664,6 +665,7 @@ try {
   assert.equal(eventAttempts, 2, "bootstrap may attempt immediate idempotent delivery twice");
   assert.equal(outboxPersistedBeforeCleanup, true);
   assert.deepEqual(failurePayloads[0], failurePayloads[1]);
+  assert.equal(failurePayloads[1].architect_session, dshArchitectSession, "the bootstrap failure producer changed the DSH architect address");
   assert.equal(failurePayloads[1].bootstrap.task_returned, true);
   assert.doesNotMatch(JSON.stringify(failurePayloads[1]), new RegExp(exactNote));
   assert.doesNotMatch(JSON.stringify(failurePayloads[1]), /credential-secret/);
@@ -696,6 +698,7 @@ try {
     },
   };
   const parsedFailure = runEvents.parseRunEvent(failureDelivery, workerRequest.architectSession);
+  assert.equal(parsedFailure.payload.architect_session, dshArchitectSession, "the bootstrap failure parser changed the DSH architect address");
   const failureMessage = reviewFlow.runOutcomeMessage(parsedFailure);
   assert.equal(failureMessage.customType, "qq-run-bootstrap-failed");
   assert.match(failureMessage.content, /TASK-12/);
