@@ -1,0 +1,9 @@
+{
+  "name": "qq-pi2dsh-harness",
+  "private": true,
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.1.0-rc.6",
+    "pi2dsh": "0.12.3",
+    "typescript": "5.9.3"
+  }
+}

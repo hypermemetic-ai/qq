@@ -1,0 +1,140 @@
+{
+  "schema": "qq.pi2dsh-evidence/v1",
+  "observed_at": "2026-08-16",
+  "pins_file": "compat/pi2dsh/pins.json",
+  "command": "compat/pi2dsh/run.sh",
+  "inspection": {
+    "verdict": "review",
+    "extensions": [
+      "extensions/index.ts"
+    ],
+    "full": 66,
+    "partial": 57,
+    "unsupported": 0,
+    "fatal": 0
+  },
+  "runtime": {
+    "profile": "headless",
+    "network_credentials": false,
+    "mount": "loaded qq: 8 tools, 3 commands, 0 skill roots",
+    "expected_exit": "MISSING_CREDENTIAL",
+    "host_patch": "compat/pi2dsh/qq.patch.yml"
+  },
+  "probes": [
+    {
+      "id": "package-local-events",
+      "basis": "pi2dsh-matrix",
+      "verdict": "mapped-full",
+      "fact": "pi.events emit/on is preserved inside the mounted qq bundle."
+    },
+    {
+      "id": "before-agent-start",
+      "basis": "pi2dsh-matrix",
+      "verdict": "mapped-full",
+      "fact": "before_agent_start runs during DSH prompt assembly and can affect the same turn."
+    },
+    {
+      "id": "tools",
+      "basis": "runtime-and-pi2dsh-matrix",
+      "verdict": "mapped-partial",
+      "fact": "The bundle registers eight native DSH tools; unsupported JSON Schema constraints are dropped with warnings."
+    },
+    {
+      "id": "commands",
+      "basis": "runtime-and-pi2dsh-matrix",
+      "verdict": "mapped-partial",
+      "fact": "The bundle registers three DSH commands; headless interactive Pi UI calls still have host differences."
+    },
+    {
+      "id": "model-selection",
+      "basis": "runtime-and-pi2dsh-matrix",
+      "verdict": "mapped-but-qq-policy-blocked",
+      "fact": "setModel maps to a per-agent DSH request override, but qq startup refuses because its pinned xai-auth/grok-4.6 policy route is absent from the isolated DSH model directory."
+    },
+    {
+      "id": "thinking-effort",
+      "basis": "pi2dsh-matrix",
+      "verdict": "mapped-partial",
+      "fact": "setThinkingLevel maps to DSH reasoningEffort and getThinkingLevel reads the per-agent bridge value."
+    },
+    {
+      "id": "shortcut",
+      "basis": "pi2dsh-matrix",
+      "verdict": "non-firing",
+      "fact": "registerShortcut records qq's continue shortcut, but no DSH surface emits terminal key input."
+    },
+    {
+      "id": "session-tree",
+      "basis": "pi2dsh-matrix",
+      "verdict": "non-firing",
+      "fact": "qq's session_tree handler registers, but DSH never dispatches Pi session-tree navigation."
+    },
+    {
+      "id": "shutdown",
+      "basis": "pi2dsh-matrix",
+      "verdict": "absorbed",
+      "fact": "ctx.shutdown only records and reports the request; qq done therefore does not stop the DSH process."
+    },
+    {
+      "id": "project-trust",
+      "basis": "pi2dsh-matrix",
+      "verdict": "unavailable",
+      "fact": "project_trust is never consulted and isProjectTrusted fails closed to false."
+    },
+    {
+      "id": "read-tool-collision",
+      "basis": "runtime",
+      "verdict": "host-patch-required",
+      "fact": "qq replaces Pi's built-in read tool, but pi2dsh rejects the DSH headless tool-fs registration collision. The isolated profile disables tool-fs before mounting qq."
+    },
+    {
+      "id": "session-id",
+      "basis": "runtime",
+      "verdict": "blocked",
+      "fact": "qq agent messaging rejects DSH's session id as non-canonical, so its session_start handler does not activate."
+    },
+    {
+      "id": "qq-relay-client",
+      "basis": "runtime-boundary",
+      "verdict": "outside-extension-abi",
+      "fact": "qq imports a separately installed qq-relay client at extension load time. The isolated mount supplies a load-only stub and does not claim relay operations are compatible."
+    },
+    {
+      "id": "herdr-launch",
+      "basis": "qq-source-audit",
+      "verdict": "outside-extension-abi",
+      "fact": "Delegation and review launch Herdr with --kind pi; mounting qq in DSH does not change the spawned agent runtime."
+    },
+    {
+      "id": "herdr-delivery-proof",
+      "basis": "qq-source-audit",
+      "verdict": "pi-only",
+      "fact": "Runner prompt acceptance requires Herdr to report agent=pi, source=herdr:pi, an absolute .jsonl path, and then parses a Pi user-message record from that file."
+    },
+    {
+      "id": "relay-receipts",
+      "basis": "qq-source-audit-and-pi2dsh-matrix",
+      "verdict": "pi-jsonl-dependent",
+      "fact": "agent-messages and review-flow prove delivery by parsing getSessionFile() as Pi JSONL. pi2dsh returns its sidecar path while DSH messages live in the DSH durable log, so these receipt checks do not prove DSH persistence."
+    },
+    {
+      "id": "session-scrub",
+      "basis": "qq-source-audit-and-pi2dsh-matrix",
+      "verdict": "pi-session-dependent",
+      "fact": "session scrubbing only accepts files below ~/.pi/agent/sessions and depends on a Pi /new event; pi2dsh exposes a sidecar elsewhere and does not dispatch Pi tree switching."
+    }
+  ],
+  "conclusion": {
+    "operator_cutover": "blocked",
+    "native_translation_started": false,
+    "blockers": [
+      "DSH-native Herdr agent launch and prompt-acceptance proof",
+      "A pinned DSH-native qq-relay client boundary",
+      "DSH durable receipt proof for relay and review events",
+      "DSH session identity and transcript/scrub semantics",
+      "qq model-policy routes in the DSH model directory",
+      "read-tool ownership without disabling the host filesystem bundle",
+      "shutdown and non-firing shortcut/session-tree behavior"
+    ]
+  }
+}
