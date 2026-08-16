@@ -1,8 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_PATH=$(realpath -e -- "${BASH_SOURCE[0]}")
-ROOT=$(cd -- "$(dirname -- "$SCRIPT_PATH")/.." && pwd -P)
-DASHBOARD_COOKIES_BIN="$ROOT/node_modules/@hypermemetic-ai/qq-dashboard/bin/qq-dashboard-cookies"
+if [[ -n ${QQ_DASHBOARD_INSTALL_ROOT:-} ]]; then
+  [[ "$QQ_DASHBOARD_INSTALL_ROOT" == /* ]] || {
+    printf 'qq-dashboard-cookies: QQ_DASHBOARD_INSTALL_ROOT must be an absolute path\n' >&2
+    exit 1
+  }
+  install_root=$QQ_DASHBOARD_INSTALL_ROOT
+else
+  [[ -n ${HOME:-} && "$HOME" == /* ]] || {
+    printf 'qq-dashboard-cookies: HOME must be an absolute path\n' >&2
+    exit 1
+  }
+  install_root=$HOME/.local/lib/qq/dashboard
+fi
+DASHBOARD_COOKIES_BIN="$install_root/bin/qq-dashboard-cookies"
+[[ -x "$DASHBOARD_COOKIES_BIN" ]] || {
+  printf 'qq-dashboard-cookies: installed executable is unavailable: %s\n' \
+    "$DASHBOARD_COOKIES_BIN" >&2
+  exit 1
+}
 
 exec "$DASHBOARD_COOKIES_BIN" "$@"
