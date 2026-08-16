@@ -12,6 +12,22 @@ qq_revision=$(get_pin qq.revision)
 pi2dsh_version=$(get_pin pi2dsh.version)
 dsh_version=$(get_pin dsh.version)
 
+relay_state_home=${QQ_PI2DSH_RELAY_STATE_HOME:-}
+if [[ $relay_state_home != /* || ! -d $relay_state_home ]]; then
+  printf 'QQ_PI2DSH_RELAY_STATE_HOME must name the absolute private state root supplied by tests/test-agent-messages-live.sh\n' >&2
+  exit 1
+fi
+relay_socket="$relay_state_home/qq-relay/qq-relay.sock"
+if [[ ! -S $relay_socket ]]; then
+  printf 'installed qq-relay service socket is unavailable at %s\n' "$relay_socket" >&2
+  exit 1
+fi
+relay_install_root=${QQ_RELAY_INSTALL_ROOT:-}
+if [[ $relay_install_root != /* || ! -f $relay_install_root/client.mjs ]]; then
+  printf 'QQ_RELAY_INSTALL_ROOT must name the private installed qq-relay artifact\n' >&2
+  exit 1
+fi
+
 git -C "$root" cat-file -e "$qq_revision^{commit}"
 if ! git -C "$root" diff --quiet "$qq_revision" -- extensions; then
   printf 'qq Pi extension bundle differs from pinned revision %s; refresh the evidence and pin first\n' "$qq_revision" >&2
@@ -21,8 +37,13 @@ fi
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/qq-pi2dsh.XXXXXX")
 keep=${QQ_PI2DSH_KEEP:-0}
 llm_pid=
+dsh_pid=
 cleanup() {
   rc=$?
+  if [[ -n $dsh_pid ]]; then
+    kill "$dsh_pid" 2>/dev/null || true
+    wait "$dsh_pid" 2>/dev/null || true
+  fi
   if [[ -n $llm_pid ]]; then
     kill "$llm_pid" 2>/dev/null || true
     wait "$llm_pid" 2>/dev/null || true
@@ -96,19 +117,53 @@ if [[ ! -s $scratch/llm-endpoint.txt ]]; then
 fi
 llm_endpoint=$(<"$scratch/llm-endpoint.txt")
 
-set +e
 (
   cd "$root"
   env -u XAI_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY \
-    HOME="$scratch/home" XDG_CONFIG_HOME="$scratch/config" XDG_STATE_HOME="$scratch/state" \
+    HOME="$scratch/home" XDG_CONFIG_HOME="$scratch/config" XDG_STATE_HOME="$relay_state_home" \
     XDG_RUNTIME_DIR="$scratch/runtime" DSH_HOME="$DSH_HOME" QQ_AGENT_ROLE=runner \
     DEEPSEEK_API_KEY=qq-pi2dsh-local-probe DEEPSEEK_BASE_URL="$llm_endpoint" \
-    QQ_RELAY_INSTALL_ROOT="$here/relay-stub" QQ_PI2DSH_RELAY_PROBE="$scratch/relay-request.json" \
-    QQ_PI2DSH_RECEIPT_PROBE="$scratch/relay-receipts.jsonl" \
+    QQ_RELAY_INSTALL_ROOT="$relay_install_root" \
     "$dsh" --profile headless --patch "$here/qq.patch.yml" "qq compatibility mount probe"
-) >"$scratch/dsh.stdout.log" 2>"$scratch/dsh.stderr.log"
+) >"$scratch/dsh.stdout.log" 2>"$scratch/dsh.stderr.log" &
+dsh_pid=$!
+
+dsh_session=
+for _ in {1..400}; do
+  shopt -s nullglob
+  dsh_sessions=("$DSH_HOME"/sessions/*/session-*)
+  shopt -u nullglob
+  if [[ ${#dsh_sessions[@]} -gt 1 ]]; then
+    printf 'expected one DSH headless session; got %s\n' "${#dsh_sessions[@]}" >&2
+    exit 1
+  fi
+  if [[ ${#dsh_sessions[@]} -eq 1 ]]; then
+    dsh_session=${dsh_sessions[0]}
+    break
+  fi
+  kill -0 "$dsh_pid" 2>/dev/null || break
+  sleep 0.02
+done
+if [[ -z $dsh_session ]]; then
+  printf 'DSH did not create its isolated headless session\n' >&2
+  cat "$scratch/dsh.stdout.log" >&2
+  cat "$scratch/dsh.stderr.log" >&2
+  exit 1
+fi
+dsh_session_id=$(basename "$dsh_session")
+printf '%s\n' "$dsh_session_id" >"$scratch/dsh-session-id.txt"
+node "$here/relay-probe.mjs" \
+  "$root" "$relay_socket" "$dsh_session_id" "$scratch/relay-proof.json" || {
+    cat "$scratch/dsh.stdout.log" >&2
+    cat "$scratch/dsh.stderr.log" >&2
+    exit 1
+  }
+
+set +e
+wait "$dsh_pid"
 runtime_code=$?
 set -e
+dsh_pid=
 if [[ $runtime_code -ne 0 ]]; then
   printf 'expected the localhost-backed DSH probe to stop with exit 0; got %s\n' "$runtime_code" >&2
   cat "$scratch/dsh.stdout.log" >&2
@@ -116,15 +171,7 @@ if [[ $runtime_code -ne 0 ]]; then
   exit 1
 fi
 
-shopt -s nullglob
-dsh_sessions=("$DSH_HOME"/sessions/*/session-*)
-shopt -u nullglob
-if [[ ${#dsh_sessions[@]} -ne 1 ]]; then
-  printf 'expected exactly one DSH headless session; got %s\n' "${#dsh_sessions[@]}" >&2
-  exit 1
-fi
-basename "${dsh_sessions[0]}" >"$scratch/dsh-session-id.txt"
-dsh_session_log="${dsh_sessions[0]}/session.jsonl"
+dsh_session_log="$dsh_session/session.jsonl"
 if [[ ! -f $dsh_session_log ]]; then
   printf 'expected the isolated plaintext DSH session artifact at %s\n' "$dsh_session_log" >&2
   exit 1
@@ -133,16 +180,14 @@ fi
 node "$here/verify.mjs" \
   "$scratch/matrix.json" "$scratch/inspection.json" \
   "$scratch/dsh.stdout.log" "$scratch/dsh.stderr.log" \
-  "$scratch/relay-request.json" "$scratch/dsh-session-id.txt" \
-  "$scratch/relay-receipts.jsonl" "$dsh_session_log"
+  "$scratch/relay-proof.json" "$scratch/dsh-session-id.txt" "$dsh_session_log"
 
 if [[ -n ${QQ_PI2DSH_OUTPUT:-} ]]; then
   output=$(realpath -m "$QQ_PI2DSH_OUTPUT")
   mkdir -p "$output"
   cp "$scratch/matrix.json" "$scratch/inspection.json" \
     "$scratch/dsh.stdout.log" "$scratch/dsh.stderr.log" \
-    "$scratch/relay-request.json" "$scratch/relay-receipts.jsonl" \
-    "$scratch/dsh-session-id.txt" "$dsh_session_log" \
+    "$scratch/relay-proof.json" "$scratch/dsh-session-id.txt" "$dsh_session_log" \
     "$scratch/llm-requests.jsonl" "$scratch/tools/package-lock.json" "$output/"
   printf 'evidence copied to %s\n' "$output"
 fi

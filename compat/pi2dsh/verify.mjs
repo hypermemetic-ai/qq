@@ -2,19 +2,18 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [matrixPath, inspectionPath, stdoutPath, stderrPath, relayRequestPath, sessionIdPath, receiptProbePath, sessionLogPath] = process.argv.slice(2);
+const [matrixPath, inspectionPath, stdoutPath, stderrPath, relayProofPath, sessionIdPath, sessionLogPath] = process.argv.slice(2);
 if (!sessionLogPath) {
-  throw new Error("usage: verify.mjs <matrix.json> <inspection.json> <stdout.log> <stderr.log> <relay-request.json> <dsh-session-id.txt> <relay-receipts.jsonl> <session.jsonl>");
+  throw new Error("usage: verify.mjs <matrix.json> <inspection.json> <stdout.log> <stderr.log> <relay-proof.json> <dsh-session-id.txt> <session.jsonl>");
 }
 
-const [matrix, inspection, stdout, stderr, relayRequest, dshSessionId, receiptEvents, sessionEvents] = await Promise.all([
+const [matrix, inspection, stdout, stderr, relayProof, dshSessionId, sessionEvents] = await Promise.all([
   readFile(matrixPath, "utf8").then(JSON.parse),
   readFile(inspectionPath, "utf8").then(JSON.parse),
   readFile(stdoutPath, "utf8"),
   readFile(stderrPath, "utf8"),
-  readFile(relayRequestPath, "utf8").then(JSON.parse),
+  readFile(relayProofPath, "utf8").then(JSON.parse),
   readFile(sessionIdPath, "utf8").then((value) => value.trim()),
-  readFile(receiptProbePath, "utf8").then((value) => value.trim().split("\n").filter(Boolean).map(JSON.parse)),
   readFile(sessionLogPath, "utf8").then((value) => value.trim().split("\n").filter(Boolean).map(JSON.parse)),
 ]);
 
@@ -72,28 +71,45 @@ assert.doesNotMatch(stderr, /MISSING_CREDENTIAL/);
 assert.match(stdout, /receipt probe step complete/);
 
 assert.match(dshSessionId, /^session-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
-assert.equal(relayRequest.consumer_type, "recipient");
-assert.equal(relayRequest.consumer_id, `agents/${dshSessionId}`, "the DSH identity changed before becoming the live relay address");
-assert.equal(relayRequest.generation, 0);
-assert.match(relayRequest.endpoint_token, /^agent-messages\/[a-f0-9-]{36}$/);
-assert.equal(relayRequest.wait_ms, 30_000);
+assert.equal(relayProof.schema, "qq.pi2dsh-installed-relay-proof/v1");
+assert.equal(relayProof.protocol, "qq-relay/v1");
+assert.equal(relayProof.recipient_session_id, dshSessionId);
+assert.equal(relayProof.sender_session_id, "019ff7b9-2fcd-78cd-bc16-c770a9ccff11");
+assert.match(relayProof.event_id, /^evt_[a-f0-9]{32}$/);
+assert.equal(relayProof.initial_status.record.event_id, relayProof.event_id);
 
-const relayContent = "pi2dsh durable receipt probe";
-const receiptContent = `[message evt_pi2dsh_durable_receipt from 019ff7b9-2fcd-78cd-bc16-c770a9ccff11 — qq / architect — tasks: T-63.3]\n${relayContent}`;
-const durableReceipt = sessionEvents.find((event) => event.type === "user/message" && event.data?.source?.piCustomType === "qq-agent-message");
-assert.ok(durableReceipt, "the pinned DSH log has no qq agent-message receipt entry");
+const finalStatus = relayProof.final_status;
+assert.equal(finalStatus.terminal, true);
+assert.equal(finalStatus.terminal_failure, false);
+assert.equal(finalStatus.record.event_id, relayProof.event_id);
+assert.equal(finalStatus.record.producer_id, `agents/${relayProof.sender_session_id}`);
+assert.equal(finalStatus.record.origin_id, `agents/${relayProof.sender_session_id}`);
+assert.equal(finalStatus.record.recipient_id, `agents/${dshSessionId}`, "the DSH identity changed in relay status");
+assert.equal(finalStatus.record.envelope.payload.message.from, relayProof.sender_session_id);
+assert.equal(finalStatus.obligations.length, 1);
+const obligation = finalStatus.obligations[0];
+assert.equal(obligation.consumer_type, "recipient");
+assert.equal(obligation.consumer_id, `agents/${dshSessionId}`, "the DSH identity changed at the delivery boundary");
+assert.equal(obligation.generation, 0);
+assert.equal(obligation.status, "acknowledged");
+assert.ok(obligation.failure_count >= 1, "installed qq-relay never recorded the pre-persistence retry");
+assert.ok(obligation.attempt_count >= 2, "installed qq-relay never safely redelivered after retry");
+
+const relayContent = "installed qq-relay DSH receipt probe";
+const receiptContent = `[message ${relayProof.event_id} from ${relayProof.sender_session_id} — qq / architect — tasks: T-63.5]\n${relayContent}`;
+const durableReceipts = sessionEvents.filter((event) =>
+  event.type === "user/message"
+  && event.data?.source?.piCustomType === "qq-agent-message"
+  && event.data?.content?.[0]?.text === receiptContent
+);
+assert.equal(durableReceipts.length, 1, "relay redelivery did not produce exactly one durable DSH receipt");
+const durableReceipt = durableReceipts[0];
 assert.equal(durableReceipt.data.role, "user");
 assert.deepEqual(durableReceipt.data.source, {
   kind: "plugin", plugin: "pi2dsh:qq", piCustomType: "qq-agent-message",
 });
 assert.deepEqual(durableReceipt.data.content, [{ type: "text", text: receiptContent }]);
-
-assert.ok(receiptEvents.some((event) => event.operation === "retry"), "the capture stub never observed pre-persistence retry");
-const acknowledgements = receiptEvents.filter((event) => event.operation === "acknowledge");
-assert.equal(acknowledgements.length, 1, "the durable receipt did not produce exactly one relay acknowledgement");
-const acknowledgement = acknowledgements[0];
-assert.equal(acknowledgement.request.event_id, "evt_pi2dsh_durable_receipt");
-assert.ok(acknowledgement.observed_at >= durableReceipt.time, "relay acknowledgement preceded the matching DSH durable entry");
-assert.equal(receiptEvents.at(-1).operation, "acknowledge");
+assert.ok(finalStatus.record.accepted_at <= durableReceipt.time, "DSH receipt predates relay acceptance");
+assert.ok(obligation.terminal_at >= durableReceipt.time, "relay acknowledgement preceded the durable DSH entry");
 
 console.log("qq pi2dsh compatibility evidence verified");

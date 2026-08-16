@@ -8,7 +8,7 @@ const root = resolve(process.argv[2] ?? ".");
 const read = (path) => readFile(join(root, path), "utf8");
 const json = async (path) => JSON.parse(await read(path));
 
-const [pkg, pins, toolchain, toolchainLock, evidence, run, patch, relayStub, messages, review, scrub, runLib] = await Promise.all([
+const [pkg, pins, toolchain, toolchainLock, evidence, run, patch, relayProbe, relayContract, liveMessages, messages, review, scrub, runLib] = await Promise.all([
   json("package.json"),
   json("compat/pi2dsh/pins.json"),
   json("compat/pi2dsh/toolchain/package.json"),
@@ -16,7 +16,9 @@ const [pkg, pins, toolchain, toolchainLock, evidence, run, patch, relayStub, mes
   json("compat/pi2dsh/evidence.json"),
   read("compat/pi2dsh/run.sh"),
   read("compat/pi2dsh/qq.patch.yml"),
-  read("compat/pi2dsh/relay-stub/client.mjs"),
+  read("compat/pi2dsh/relay-probe.mjs"),
+  read("tests/test-qq-relay.sh"),
+  read("tests/test-agent-messages-live.sh"),
   read("extensions/agent-messages.ts"),
   read("extensions/review-flow.ts"),
   read("extensions/session-scrub.ts"),
@@ -38,14 +40,20 @@ assert.match(run, /npm ci --prefix/);
 assert.match(run, /diff --quiet "\$qq_revision" -- extensions/);
 assert.match(run, /plugin --profile headless add/);
 assert.match(run, /--patch "\$here\/qq\.patch\.yml"/);
-assert.match(run, /QQ_RELAY_INSTALL_ROOT="\$here\/relay-stub"/);
-assert.match(run, /QQ_PI2DSH_RELAY_PROBE="\$scratch\/relay-request\.json"/);
-assert.match(run, /QQ_PI2DSH_RECEIPT_PROBE="\$scratch\/relay-receipts\.jsonl"/);
+assert.match(run, /QQ_PI2DSH_RELAY_STATE_HOME/);
+assert.match(run, /QQ_RELAY_INSTALL_ROOT="\$relay_install_root"/);
+assert.match(run, /relay-probe\.mjs/);
+assert.match(run, /relay-proof\.json/);
+assert.doesNotMatch(run, /relay-stub|RECEIPT_PROBE|RELAY_PROBE/);
 assert.match(run, /llm-stub\.mjs/);
 assert.match(patch, /id: tool-fs\s+disabled: true/);
 assert.match(patch, /id: session-persistence-jsonl[\s\S]*compression: none/);
-assert.match(relayStub, /QQ_PI2DSH_RELAY_PROBE/);
-assert.match(relayStub, /outside the pi2dsh mount probe/);
+assert.match(relayProbe, /bin\/lib\/qq-relay-client\.mjs/);
+assert.match(relayProbe, /client\.send\(/);
+assert.match(relayProbe, /client\.status\(/);
+assert.match(relayContract, /rm -rf -- "\$work\/source"[\s\S]*test-agent-messages-live\.sh/);
+assert.match(liveMessages, /qq-relay" serve --state-dir "\$relay_state_dir"/);
+assert.match(liveMessages, /QQ_PI2DSH_RELAY_STATE_HOME="\$relay_state_home" "\$ROOT\/compat\/pi2dsh\/run\.sh"/);
 
 assert.equal(evidence.schema, "qq.pi2dsh-evidence/v1");
 assert.equal(evidence.observed_at, "2026-08-16");
@@ -69,6 +77,9 @@ for (const id of [
 ]) assert.ok(probes.has(id), `missing compatibility probe ${id}`);
 assert.equal(probes.get("session-id").verdict, "identity-translated");
 assert.match(probes.get("session-id").fact, /complete value unchanged as the live relay address/);
+assert.equal(probes.get("qq-relay-client").verdict, "installed-product-proven");
+assert.equal(probes.get("agent-message-receipts").verdict, "installed-transport-and-durable-entry-proven");
+assert.ok(evidence.conclusion.blockers.every((blocker) => !/qq-relay client boundary/i.test(blocker)));
 
 // Herdr orchestration remains explicitly Pi-owned and proves prompt acceptance
 // by opening the path in Herdr's Pi session descriptor.

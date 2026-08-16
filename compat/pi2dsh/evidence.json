@@ -2,7 +2,7 @@
   "schema": "qq.pi2dsh-evidence/v1",
   "observed_at": "2026-08-16",
   "pins_file": "compat/pi2dsh/pins.json",
-  "command": "compat/pi2dsh/run.sh",
+  "command": "tests/test-qq-relay.sh",
   "inspection": {
     "verdict": "review",
     "extensions": [
@@ -18,6 +18,7 @@
     "network_credentials": false,
     "external_model_network": false,
     "model_backend": "deterministic localhost DeepSeek-wire stub",
+    "relay_backend": "privately installed qq-relay artifact and isolated real service after source deletion",
     "mount": "loaded qq: 8 tools, 3 commands, 0 skill roots",
     "expected_exit": "success after two local agent steps",
     "host_patch": "compat/pi2dsh/qq.patch.yml"
@@ -97,9 +98,9 @@
     },
     {
       "id": "qq-relay-client",
-      "basis": "runtime-boundary",
-      "verdict": "outside-extension-abi",
-      "fact": "qq imports a separately installed qq-relay client at extension load time. The isolated mount supplies a capture-only stub to drive and record the receipt boundary; it does not claim the installed relay transport is compatible."
+      "basis": "installed-product-runtime-boundary",
+      "verdict": "installed-product-proven",
+      "fact": "After the configured branch is privately installed and its source checkout is deleted, pinned pi2dsh mounts qq against only that installed client and the existing isolated real-service lifecycle. No product history floor is used."
     },
     {
       "id": "herdr-launch",
@@ -115,9 +116,9 @@
     },
     {
       "id": "agent-message-receipts",
-      "basis": "runtime-and-regression-tests",
-      "verdict": "durable-entry-translated",
-      "fact": "Agent messaging uses the host session manager's append-only entries as its sole persistence authority. Under pinned pi2dsh, the capture stub observes retries before the bridged plugin-sourced DSH user/message and exactly one acknowledgement after that record becomes observable."
+      "basis": "installed-relay-runtime-and-regression-tests",
+      "verdict": "installed-transport-and-durable-entry-proven",
+      "fact": "The real relay records a pre-persistence retry and safe redelivery to agents/session-<UUID>. Pinned DSH persists exactly one plugin-sourced user/message, acknowledgement follows that durable record, and installed-relay status becomes delivered; lower-level coverage retains delayed persistence, no duplicate injection, restart recovery with empty memory, and no session-file fallback."
     },
     {
       "id": "review-receipts",
@@ -137,7 +138,6 @@
     "native_translation_started": true,
     "blockers": [
       "DSH-native Herdr agent launch and prompt-acceptance proof",
-      "A pinned DSH-native qq-relay client boundary",
       "DSH durable receipt proof for review events",
       "DSH transcript and scrub semantics",
       "qq model-policy routes in the DSH model directory",
