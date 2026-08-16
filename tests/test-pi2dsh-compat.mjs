@@ -8,12 +8,14 @@ const root = resolve(process.argv[2] ?? ".");
 const read = (path) => readFile(join(root, path), "utf8");
 const json = async (path) => JSON.parse(await read(path));
 
-const [pkg, pins, toolchain, toolchainLock, evidence, run, patch, relayProbe, relayContract, liveMessages, messages, review, scrub, runLib, runEvents] = await Promise.all([
+const [pkg, pins, toolchain, toolchainLock, evidence, webEvidence, webQa, run, patch, relayProbe, relayContract, liveMessages, messages, review, scrub, runLib, runEvents] = await Promise.all([
   json("package.json"),
   json("compat/pi2dsh/pins.json"),
   json("compat/pi2dsh/toolchain/package.json"),
   json("compat/pi2dsh/toolchain/package-lock.json"),
   json("compat/pi2dsh/evidence.json"),
+  json("compat/pi2dsh/web-evidence.json"),
+  read("compat/pi2dsh/WEB_QA.md"),
   read("compat/pi2dsh/run.sh"),
   read("compat/pi2dsh/qq.patch.yml"),
   read("compat/pi2dsh/relay-probe.mjs"),
@@ -88,6 +90,28 @@ assert.equal(probes.get("run-outcome-addressing").verdict, "installed-address-an
 assert.match(probes.get("run-outcome-addressing").fact, /qq\/review-flow\/session-<UUID>/);
 assert.equal(probes.get("review-receipts").verdict, "installed-durable-entry-proven");
 assert.ok(evidence.conclusion.blockers.every((blocker) => !/qq-relay client boundary|review events/i.test(blocker)));
+
+assert.equal(webEvidence.schema, "qq.dsh-web-evidence/v1");
+assert.equal(webEvidence.observed_at, evidence.observed_at);
+assert.equal(webEvidence.pins_file, "compat/pi2dsh/pins.json");
+assert.deepEqual(webEvidence.pin, {
+  package: pins.dsh.package,
+  version: pins.dsh.version,
+  revision: pins.dsh.revision,
+});
+assert.equal(webEvidence.runtime.all_interfaces.verdict, "refused-as-designed");
+assert.equal(webEvidence.runtime.all_interfaces.listener_created, false);
+assert.equal(webEvidence.requirements.desktop_1440x900.verdict, "pass");
+assert.equal(webEvidence.requirements.phone_390x844.verdict, "fail");
+assert.equal(webEvidence.requirements.keyboard.verdict, "partial");
+assert.equal(webEvidence.requirements.safe_remote_access.verdict, "pass-with-operator-tunnel");
+assert.equal(webEvidence.conclusion.verdict, "reject");
+assert.equal(webEvidence.conclusion.replacement_for_herdr, false);
+assert.equal(webEvidence.conclusion.cutover_or_removal_performed, false);
+assert.match(webQa, /--host 127\.0\.0\.1/);
+assert.match(webQa, /ssh -N/);
+assert.match(webQa, /--host 0\.0\.0\.0/);
+assert.match(webQa, /## Verdict: reject/);
 
 // Herdr orchestration remains explicitly Pi-owned and proves prompt acceptance
 // by opening the path in Herdr's Pi session descriptor.
