@@ -1,0 +1,25 @@
+# qq-owned HTML console over the DSH base bundle. This is not stock DSH Web:
+# there is no api-proxy, React client roster, WebSocket, or frontend fallback.
+
+- id: system-prompt
+  config:
+    persona: >-
+      You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
+
+- id: hmr
+  disabled: true
+
+- insert:
+    - id: qq-console-webserver
+      name: '@deepseek-ai/dsh-host-webserver'
+      config:
+        host: 127.0.0.1
+        port: !!js Number(process.env.QQ_DSH_CONSOLE_PORT ?? 3082)
+
+    - id: qq-console
+      name: '@hypermemetic-ai/qq-dsh-console'
+      inject: [agentDefaultModel, agents, sessions, sessionPersistence, webServer]
+      config:
+        sessionId: !!js process.env.QQ_DSH_SESSION_ID
+        cwd: !!js process.cwd()
+        basePath: /qq

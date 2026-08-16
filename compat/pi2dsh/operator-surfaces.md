@@ -1,6 +1,18 @@
 # Community DSH operator surfaces
 
-Status: source audit plus one isolated focused runtime follow-up; observed 2026-08-16. No package was installed into the active qq profile and no operator-runtime cutover is approved.
+Status: source audit, community requirements evidence, and one qq-owned sequential vertical slice; observed 2026-08-16. No package was installed into the active qq profile and no operator-runtime cutover is approved.
+
+## T-63.11 implemented sequential slice
+
+The selected first slice is now qq-owned [`../../dsh-console`](../../dsh-console), not a community Web plugin and not stock DSH Web. One loopback DSH/Cordis host serves one operator page in use at a time. Home, laptop, and phone connect sequentially and select the same canonical DSH `session-<UUID>`; the ordered event log and DSH persistence reconstruct the transcript after each disconnect and host restart.
+
+The topology simplification is a usage convention. The implementation adds no controller lease, observer mode, presence, client cookie, fanout coordination, simultaneous-writer enforcement, shared draft, synchronized scroll/dialog state, or second database. Each active page's SSE request independently re-reads its selected DSH Agent/Session. Session selection, Send, live status/transcript, and Interrupt remain DSH-backed server controls.
+
+Exact local htmx 2.0.10 and official SSE extension 2.2.4 are active. `#console-stream` owns the EventSource and `#session-panel` is its stable target; SSE and mutation responses replace only target children. Real Chromium proof retained both node identities through two Send swaps and the subsequent Interrupt flow, submitted an Interrupt form newly inserted by SSE without `htmx.process`, and reconnected after forced stream closure. The same proof selected a second canonical session, escaped executable markup, and measured no horizontal overflow at 390×844.
+
+The restored minimal PWA is installable but never authoritative: its cache contains exact versioned presentation assets plus the disconnected shell only. Session pages, fragments, transcript data, SSE, Send, and Interrupt remain network-only. With the host stopped, navigation showed **DSH is unavailable** and offline POST rejected rather than queuing. See [`WEB_QA.md`](WEB_QA.md), [`web-evidence.json`](web-evidence.json), and [`../../dsh-console/evidence.json`](../../dsh-console/evidence.json).
+
+This passes the sequential vertical-slice proof only. Loopback forwarding still needs independent authentication, no physical phone is claimed, and existing qq/pi2dsh cutover blockers remain.
 
 ## Scope and pinned boundary
 
@@ -142,11 +154,12 @@ A phone proof through Guacamole or ttyd would prove transport/input only. It mus
 
 ## Recommendation and proof boundary
 
-1. **Keep the no-cutover decision.** Stock Web is rejected, community projects are only days old, and pi2dsh's orchestration blockers remain.
-2. **Keep the completed Spotlight 0.0.2 plus mobile-fix 1.0.2 result proof-only.** It closed the focused keyboard and 390×844 baseline failures without replacing DSH session semantics or weakening the loopback/SSH-forward boundary. Do not adopt it until explicit peers, DOM drift, project maturity, and the unproved touch/IME/approval/question/long-transcript cases have a separate approval basis.
-3. **Use dsh-TUI 0.7.3 only as the terminal-first fallback.** If the augmentation proof fails or Web is rejected categorically, an isolated dsh-TUI + pi2dsh proof should cover profile boot, one model-backed turn, approval/question handling, queue/interrupt, terminal restore/resize, shared-history stop-and-resume, and absence of concurrent writes. Phone access remains a separately labeled transport proof.
-4. **Fallback again only on a concrete TUI failure.** Use dsh-pi-tui if dsh-TUI fails profile compatibility or if the writer guard becomes mandatory. Use openma only if direct SDK/process isolation becomes a requirement. Do not prove all three TUIs.
-5. **Do not runtime-test dsh-remote-web-ui at this pin.** Its missing host seams make a port/threat-review ticket a prerequisite. If phone access becomes urgent before that, SSH + tmux (or Guacamole + SSH + tmux for an HTML5 phone keyboard) is the safer transport-only path and must be labeled as such.
-6. **Never enable the LAN bypass plugins in an operator profile.** They defeat the pinned safety posture without complete authentication.
+1. **Use the qq-owned console only for the proven sequential slice.** Keep one active page as an operator convention; retain canonical DSH session identity, server-rendered controls, stable htmx/SSE inner swaps, loopback binding, and the fail-closed PWA cache boundary. Do not add a lease, observer/fanout subsystem, or offline command path.
+2. **Keep the no-cutover decision.** The new slice proves session selection, Send, live SSE/reconnect, Interrupt, sequential reconstruction, responsive layout, and installability; it does not remove pi2dsh's orchestration blockers or replace Herdr/Pi.
+3. **Keep Spotlight 0.0.2 plus mobile-fix 1.0.2 as T-63.10 requirements evidence only.** The qq-owned page does not install those packages and avoids their peer, maturity, and selector-drift risks.
+4. **Use dsh-TUI 0.7.3 only as a terminal-first fallback.** A future proof would still need profile boot, one model-backed turn, approval/question handling, queue/interrupt, terminal restore/resize, shared-history stop-and-resume, and absence of concurrent writes. Phone access remains a separately labeled transport proof.
+5. **Fallback again only on a concrete TUI failure.** Use dsh-pi-tui if dsh-TUI fails profile compatibility or if its writer guard becomes mandatory. Use openma only if direct SDK/process isolation becomes a requirement. Do not prove all three TUIs.
+6. **Do not runtime-test dsh-remote-web-ui at this pin.** Its missing host seams make a port/threat-review ticket a prerequisite. If broader phone access becomes urgent, SSH + tmux (or Guacamole + SSH + tmux for an HTML5 phone keyboard) remains a separately labeled transport option.
+7. **Never enable the LAN bypass plugins in an operator profile.** They defeat the pinned safety posture without complete authentication.
 
-This recommendation selects a focused proof, not replacement, cutover, tunnel design, or implementation approval.
+This recommendation approves the isolated sequential proof boundary, not runtime replacement, cutover, simultaneous collaboration, tunnel design, offline DSH, or physical-device deployment.
