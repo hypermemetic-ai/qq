@@ -1,0 +1,59 @@
+{
+  "schema": "qq.dsh-web-evidence/v1",
+  "observed_at": "2026-08-16",
+  "pins_file": "compat/pi2dsh/pins.json",
+  "instructions": "compat/pi2dsh/WEB_QA.md",
+  "scope": "stock official DSH Web UI only",
+  "pin": {
+    "package": "@deepseek-ai/dsh",
+    "version": "0.1.0-rc.6",
+    "revision": "47f943859bef60e4160492346772ded9b24f765a"
+  },
+  "runtime": {
+    "command": "dsh web --host 127.0.0.1 --port 0",
+    "observed_url": "http://127.0.0.1:37373",
+    "credentials_used": false,
+    "all_interfaces": {
+      "command": "dsh web --host 0.0.0.0 --port 0",
+      "exit_code": 1,
+      "listener_created": false,
+      "verdict": "refused-as-designed"
+    }
+  },
+  "requirements": {
+    "customization": {
+      "verdict": "pass",
+      "fact": "General settings changed theme through the UI and persisted ui-theme.preference in $DSH_HOME/settings.yaml; the stock Plugins page exposes configuration and inventory, while profile composition is customizable through cordis.patch.yml and dsh plugin --profile web add."
+    },
+    "keyboard": {
+      "verdict": "partial",
+      "fact": "Tab reached controls, Enter activated the focused theme choice and submitted the composer, Shift+Enter inserted a newline, and Escape closed Settings. The stock UI exposes no shortcut help or global bindings for New Session, Search, Settings, or sidebar navigation, so frequent operation still requires pointer use or long Tab traversal."
+    },
+    "desktop_1440x900": {
+      "verdict": "pass",
+      "fact": "The ready screen, Settings and Plugins, workspace/session sidebar, transcript, error state, and composer fit without document overflow; browser console, page-error, and failed-network QA was clean."
+    },
+    "phone_390x844": {
+      "verdict": "fail",
+      "fact": "The collapsed-sidebar composer and transcript are operable, but the fixed two-column Settings dialog leaves a very narrow content column with clipped controls, and the open 280px sidebar squeezes the live transcript into the remaining width instead of protecting or replacing it."
+    },
+    "multiple_clients": {
+      "verdict": "partial",
+      "fact": "A second independent browser origin reached the loopback-only server through an actual SSH local forward, listed the first client's workspace/session, and loaded its persisted multiline prompt. The transport and continuity were proven on the QA host; a separate physical phone was not exercised."
+    },
+    "safe_remote_access": {
+      "verdict": "pass-with-operator-tunnel",
+      "fact": "Keep DSH on 127.0.0.1 and create an authenticated per-device SSH local forward. Direct Tailnet-IP binding is not accepted by the pinned webserver schema, and 0.0.0.0 remains intentionally rejected."
+    }
+  },
+  "conclusion": {
+    "verdict": "reject",
+    "replacement_for_herdr": false,
+    "reasons": [
+      "the stock phone Settings and open-sidebar layouts are not operator-ready at 390x844",
+      "keyboard support covers form mechanics but not efficient global navigation",
+      "multi-device use requires an external per-device tunnel and no physical phone run was completed"
+    ],
+    "cutover_or_removal_performed": false
+  }
+}

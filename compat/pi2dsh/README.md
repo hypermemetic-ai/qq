@@ -46,6 +46,10 @@ A fast, offline drift test covers the declared bundle and qq's non-ABI assumptio
 node tests/test-pi2dsh-compat.mjs .
 ```
 
+## Official Web UI evaluation
+
+The pinned stock `dsh web` operator-surface runbook is [`WEB_QA.md`](WEB_QA.md), with the small machine-readable result in [`web-evidence.json`](web-evidence.json). Its verdict is **reject**: desktop and the Cordis customization seams pass, but the `390x844` Settings/sidebar states and global keyboard efficiency do not meet the operator requirement. Safe second-client continuity works through an authenticated SSH local forward while DSH stays on `127.0.0.1`; the evidence does not bypass the official `0.0.0.0` refusal and does not change the Herdr/Pi runtime.
+
 ## Observed facts
 
 The complete machine-readable record is [`evidence.json`](evidence.json). At this baseline:
