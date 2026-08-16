@@ -2,18 +2,20 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [matrixPath, inspectionPath, stdoutPath, stderrPath, relayRequestPath, sessionIdPath] = process.argv.slice(2);
-if (!sessionIdPath) {
-  throw new Error("usage: verify.mjs <matrix.json> <inspection.json> <stdout.log> <stderr.log> <relay-request.json> <dsh-session-id.txt>");
+const [matrixPath, inspectionPath, stdoutPath, stderrPath, relayRequestPath, sessionIdPath, receiptProbePath, sessionLogPath] = process.argv.slice(2);
+if (!sessionLogPath) {
+  throw new Error("usage: verify.mjs <matrix.json> <inspection.json> <stdout.log> <stderr.log> <relay-request.json> <dsh-session-id.txt> <relay-receipts.jsonl> <session.jsonl>");
 }
 
-const [matrix, inspection, stdout, stderr, relayRequest, dshSessionId] = await Promise.all([
+const [matrix, inspection, stdout, stderr, relayRequest, dshSessionId, receiptEvents, sessionEvents] = await Promise.all([
   readFile(matrixPath, "utf8").then(JSON.parse),
   readFile(inspectionPath, "utf8").then(JSON.parse),
   readFile(stdoutPath, "utf8"),
   readFile(stderrPath, "utf8"),
   readFile(relayRequestPath, "utf8").then(JSON.parse),
   readFile(sessionIdPath, "utf8").then((value) => value.trim()),
+  readFile(receiptProbePath, "utf8").then((value) => value.trim().split("\n").filter(Boolean).map(JSON.parse)),
+  readFile(sessionLogPath, "utf8").then((value) => value.trim().split("\n").filter(Boolean).map(JSON.parse)),
 ]);
 
 function rule(group, name, level, detail) {
@@ -66,7 +68,8 @@ assert.doesNotMatch(stderr, /extension entry failed|every Pi extension entry fai
 assert.match(stderr, /constraint is not enforced by DSH and was dropped/);
 assert.match(stderr, /qq startup refused: runner profile grok-high model is unavailable: xai-auth\/grok-4\.6/);
 assert.doesNotMatch(stderr, /session_start handler failed/);
-assert.match(stderr, /MISSING_CREDENTIAL/);
+assert.doesNotMatch(stderr, /MISSING_CREDENTIAL/);
+assert.match(stdout, /receipt probe step complete/);
 
 assert.match(dshSessionId, /^session-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
 assert.equal(relayRequest.consumer_type, "recipient");
@@ -74,5 +77,23 @@ assert.equal(relayRequest.consumer_id, `agents/${dshSessionId}`, "the DSH identi
 assert.equal(relayRequest.generation, 0);
 assert.match(relayRequest.endpoint_token, /^agent-messages\/[a-f0-9-]{36}$/);
 assert.equal(relayRequest.wait_ms, 30_000);
+
+const relayContent = "pi2dsh durable receipt probe";
+const receiptContent = `[message evt_pi2dsh_durable_receipt from 019ff7b9-2fcd-78cd-bc16-c770a9ccff11 — qq / architect — tasks: T-63.3]\n${relayContent}`;
+const durableReceipt = sessionEvents.find((event) => event.type === "user/message" && event.data?.source?.piCustomType === "qq-agent-message");
+assert.ok(durableReceipt, "the pinned DSH log has no qq agent-message receipt entry");
+assert.equal(durableReceipt.data.role, "user");
+assert.deepEqual(durableReceipt.data.source, {
+  kind: "plugin", plugin: "pi2dsh:qq", piCustomType: "qq-agent-message",
+});
+assert.deepEqual(durableReceipt.data.content, [{ type: "text", text: receiptContent }]);
+
+assert.ok(receiptEvents.some((event) => event.operation === "retry"), "the capture stub never observed pre-persistence retry");
+const acknowledgements = receiptEvents.filter((event) => event.operation === "acknowledge");
+assert.equal(acknowledgements.length, 1, "the durable receipt did not produce exactly one relay acknowledgement");
+const acknowledgement = acknowledgements[0];
+assert.equal(acknowledgement.request.event_id, "evt_pi2dsh_durable_receipt");
+assert.ok(acknowledgement.observed_at >= durableReceipt.time, "relay acknowledgement preceded the matching DSH durable entry");
+assert.equal(receiptEvents.at(-1).operation, "acknowledge");
 
 console.log("qq pi2dsh compatibility evidence verified");

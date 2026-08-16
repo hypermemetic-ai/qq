@@ -16,8 +16,10 @@
   "runtime": {
     "profile": "headless",
     "network_credentials": false,
+    "external_model_network": false,
+    "model_backend": "deterministic localhost DeepSeek-wire stub",
     "mount": "loaded qq: 8 tools, 3 commands, 0 skill roots",
-    "expected_exit": "MISSING_CREDENTIAL",
+    "expected_exit": "success after two local agent steps",
     "host_patch": "compat/pi2dsh/qq.patch.yml"
   },
   "probes": [
@@ -97,7 +99,7 @@
       "id": "qq-relay-client",
       "basis": "runtime-boundary",
       "verdict": "outside-extension-abi",
-      "fact": "qq imports a separately installed qq-relay client at extension load time. The isolated mount supplies a capture-only stub to observe the receiver address and does not claim relay operations are compatible."
+      "fact": "qq imports a separately installed qq-relay client at extension load time. The isolated mount supplies a capture-only stub to drive and record the receipt boundary; it does not claim the installed relay transport is compatible."
     },
     {
       "id": "herdr-launch",
@@ -112,10 +114,16 @@
       "fact": "Runner prompt acceptance requires Herdr to report agent=pi, source=herdr:pi, an absolute .jsonl path, and then parses a Pi user-message record from that file."
     },
     {
-      "id": "relay-receipts",
+      "id": "agent-message-receipts",
+      "basis": "runtime-and-regression-tests",
+      "verdict": "durable-entry-translated",
+      "fact": "Agent messaging uses the host session manager's append-only entries as its sole persistence authority. Under pinned pi2dsh, the capture stub observes retries before the bridged plugin-sourced DSH user/message and exactly one acknowledgement after that record becomes observable."
+    },
+    {
+      "id": "review-receipts",
       "basis": "qq-source-audit-and-pi2dsh-matrix",
       "verdict": "pi-jsonl-dependent",
-      "fact": "agent-messages and review-flow prove delivery by parsing getSessionFile() as Pi JSONL. pi2dsh returns its sidecar path while DSH messages live in the DSH durable log, so these receipt checks do not prove DSH persistence."
+      "fact": "Review flow still parses getSessionFile() as Pi JSONL. pi2dsh returns its sidecar path while DSH messages live in the DSH durable log, so review receipt translation remains open."
     },
     {
       "id": "session-scrub",
@@ -130,7 +138,7 @@
     "blockers": [
       "DSH-native Herdr agent launch and prompt-acceptance proof",
       "A pinned DSH-native qq-relay client boundary",
-      "DSH durable receipt proof for relay and review events",
+      "DSH durable receipt proof for review events",
       "DSH transcript and scrub semantics",
       "qq model-policy routes in the DSH model directory",
       "read-tool ownership without disabling the host filesystem bundle",
