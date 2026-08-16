@@ -3,3 +3,10 @@
 # Disable only the native filesystem tool bundle in this isolated profile.
 - id: tool-fs
   disabled: true
+
+# Keep this isolated evidence artifact as plaintext so verify.mjs can inspect
+# the durable DSH record without adding compression-codec logic to the probe.
+- id: session-persistence-jsonl
+  config:
+    root: !!js dshHomePath('sessions')
+    compression: none

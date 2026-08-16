@@ -40,7 +40,10 @@ assert.match(run, /plugin --profile headless add/);
 assert.match(run, /--patch "\$here\/qq\.patch\.yml"/);
 assert.match(run, /QQ_RELAY_INSTALL_ROOT="\$here\/relay-stub"/);
 assert.match(run, /QQ_PI2DSH_RELAY_PROBE="\$scratch\/relay-request\.json"/);
+assert.match(run, /QQ_PI2DSH_RECEIPT_PROBE="\$scratch\/relay-receipts\.jsonl"/);
+assert.match(run, /llm-stub\.mjs/);
 assert.match(patch, /id: tool-fs\s+disabled: true/);
+assert.match(patch, /id: session-persistence-jsonl[\s\S]*compression: none/);
 assert.match(relayStub, /QQ_PI2DSH_RELAY_PROBE/);
 assert.match(relayStub, /outside the pi2dsh mount probe/);
 
@@ -62,7 +65,7 @@ for (const id of [
   "package-local-events", "before-agent-start", "tools", "commands", "model-selection",
   "thinking-effort", "shortcut", "session-tree", "shutdown", "project-trust",
   "read-tool-collision", "session-id", "qq-relay-client", "herdr-launch", "herdr-delivery-proof",
-  "relay-receipts", "session-scrub",
+  "agent-message-receipts", "review-receipts", "session-scrub",
 ]) assert.ok(probes.has(id), `missing compatibility probe ${id}`);
 assert.equal(probes.get("session-id").verdict, "identity-translated");
 assert.match(probes.get("session-id").fact, /complete value unchanged as the live relay address/);
@@ -75,14 +78,14 @@ assert.match(runLib, /session\.source !== "herdr:pi"/);
 assert.match(runLib, /path\.endsWith\("\.jsonl"\)/);
 assert.match(runLib, /sessionHasPromptMarker\(path, marker\)/);
 
-// Relay and review acknowledgement read Pi JSONL directly instead of asking
-// the host's durable-session API.
-for (const source of [messages, review]) {
-  assert.match(source, /sessionManager\?\.getSessionFile\?\.\(\)/);
-  assert.match(source, /readFile\(path, "utf8"\)/);
-  assert.match(source, /JSON\.parse\(line\)/);
-}
-assert.match(messages, /value\?\.type === "custom_message"/);
+// Agent-message acknowledgement has no session-file fallback; review receipts
+// remain explicitly outside this child ticket.
+assert.doesNotMatch(messages, /getSessionFile/);
+assert.match(messages, /sessionManager\?\.getEntries\?\.\(\)/);
+assert.doesNotMatch(messages, /JSON\.parse\(line\)/);
+assert.match(review, /sessionManager\?\.getSessionFile\?\.\(\)/);
+assert.match(review, /readFile\(path, "utf8"\)/);
+assert.match(review, /JSON\.parse\(line\)/);
 assert.match(review, /value\?\.type === "custom_message"/);
 
 // Scrubbing is tied to Pi's transcript root and Pi's /new event shape.

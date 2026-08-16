@@ -215,6 +215,35 @@ function parseMessage(record) {
   return { ...message, tasks, event_id: record.event_id, accepted_at: record.accepted_at, content_hash: sha256(message.content) };
 }
 
+function receiptDetails(message) {
+  return {
+    schema: MESSAGE_SCHEMA,
+    event_id: message.event_id,
+    content_hash: message.content_hash,
+    from: message.from,
+    delivery: message.delivery,
+  };
+}
+
+function injectedMessageContent(message) {
+  return `[message ${message.event_id} from ${message.from} — ${message.project} / ${message.role}${message.tasks.length ? ` — tasks: ${message.tasks.join(", ")}` : ""}]\n${message.content}`;
+}
+
+function receiptEntryMatches(entry, message) {
+  if (entry?.type === "custom_message") {
+    return entry.customType === CUSTOM_TYPE
+      && entry.details?.event_id === message.event_id
+      && entry.details?.content_hash === message.content_hash;
+  }
+  const blocks = entry?.message?.content;
+  return entry?.type === "message"
+    && entry.message?.role === "user"
+    && Array.isArray(blocks)
+    && blocks.length === 1
+    && blocks[0]?.type === "text"
+    && blocks[0]?.text === injectedMessageContent(message);
+}
+
 function deliveryGuard(delivery) {
   return {
     obligation_id: delivery.obligation.obligation_id,
@@ -295,18 +324,11 @@ export default function register(pi, deps = {}) {
     await unlink(presencePath(paths.presence, current.session_id)).catch(() => {});
   }
 
-  async function receiptExists(eventId, contentHash) {
-    const path = currentContext?.sessionManager?.getSessionFile?.();
-    if (typeof path !== "string") return false;
-    const text = await readFile(path, "utf8").catch(() => "");
-    for (const line of text.split("\n")) {
-      if (!line) continue;
-      try {
-        const value = JSON.parse(line);
-        if (value?.type === "custom_message" && value.customType === CUSTOM_TYPE && value.details?.event_id === eventId && value.details?.content_hash === contentHash) return true;
-      } catch {}
-    }
-    return false;
+  function receiptExists(message) {
+    let entries;
+    try { entries = currentContext?.sessionManager?.getEntries?.(); }
+    catch { return false; }
+    return Array.isArray(entries) && entries.some((entry) => receiptEntryMatches(entry, message));
   }
 
   async function claimImmediate(message) {
@@ -338,13 +360,13 @@ export default function register(pi, deps = {}) {
       return;
     }
     const injectionKey = `${message.event_id}:${message.content_hash}`;
-    if (await receiptExists(message.event_id, message.content_hash)) {
+    if (receiptExists(message)) {
       await client.acknowledge(deliveryGuard(delivery));
       injectedMessages.delete(injectionKey);
       return;
     }
     if (injectedMessages.has(injectionKey)) {
-      await client.retry({ ...deliveryGuard(delivery), reason: "Pi session persistence not yet observable" });
+      await client.retry({ ...deliveryGuard(delivery), reason: "durable session entry not yet observable" });
       return;
     }
     if (!active || localEpoch !== epoch || !currentContext) return;
@@ -369,19 +391,19 @@ export default function register(pi, deps = {}) {
     try {
       await (deps.sendMessage ?? pi.sendMessage.bind(pi))({
         customType: CUSTOM_TYPE,
-        content: `[message ${message.event_id} from ${message.from} — ${message.project} / ${message.role}${message.tasks.length ? ` — tasks: ${message.tasks.join(", ")}` : ""}]\n${message.content}`,
+        content: injectedMessageContent(message),
         display: true,
-        details: { schema: MESSAGE_SCHEMA, event_id: message.event_id, content_hash: message.content_hash, from: message.from, delivery: message.delivery },
+        details: receiptDetails(message),
       }, options);
     } catch (error) {
       injectedMessages.delete(injectionKey);
       throw error;
     }
-    if (deps.assumePersisted === true || await receiptExists(message.event_id, message.content_hash)) {
+    if (receiptExists(message)) {
       await client.acknowledge(deliveryGuard(delivery));
       injectedMessages.delete(injectionKey);
     } else {
-      await client.retry({ ...deliveryGuard(delivery), reason: "Pi session persistence not yet observable" });
+      await client.retry({ ...deliveryGuard(delivery), reason: "durable session entry not yet observable" });
     }
   }
 

@@ -2,7 +2,7 @@
   "schema": "qq.pi2dsh-pins/v1",
   "qq": {
     "repository": "https://github.com/hypermemetic-ai/qq.git",
-    "revision": "520be1b51e7811b88cb832ebfe564af019e03410"
+    "revision": "2b4b9898605144530cf385a60eca30d86bb23178"
   },
   "pi2dsh": {
     "repository": "https://github.com/weijiafu14/pi2dsh.git",
