@@ -1,12 +1,12 @@
 # qq on DSH through pi2dsh
 
-This is an isolated compatibility harness, not an operator-runtime cutover. It mounts qq's single Pi bundle (`extensions/index.ts`) in a fresh DSH `headless` profile through pi2dsh, checks the pinned compatibility matrix, and advances only through a deterministic localhost model boundary. Agent messaging and run-outcome addressing use a privately installed qq-relay artifact and isolated real service. It does not rewrite qq or replace Herdr/Pi.
+This is an isolated compatibility harness, not an operator-runtime cutover. It mounts qq's single Pi bundle (`extensions/index.ts`) in a fresh DSH `headless` profile through pi2dsh, checks the pinned compatibility matrix, and advances only through a deterministic localhost model boundary. Agent messaging and run-outcome delivery use a privately installed qq-relay artifact and isolated real service. It does not rewrite qq or replace Herdr/Pi.
 
 ## Pinned baseline
 
 | Project | Package | Exact source revision | Package integrity |
 |---|---|---|---|
-| qq | local checkout | [`2b4b9898605144530cf385a60eca30d86bb23178`](https://github.com/hypermemetic-ai/qq/commit/2b4b9898605144530cf385a60eca30d86bb23178) | n/a |
+| qq | local checkout | [`58701b91d41237001c5b0abdc78ec45ba3bc1211`](https://github.com/hypermemetic-ai/qq/commit/58701b91d41237001c5b0abdc78ec45ba3bc1211) | n/a |
 | pi2dsh | `pi2dsh@0.12.3` | [`7420aac0f6b5513e056c44c099527ddee0d705f0`](https://github.com/weijiafu14/pi2dsh/commit/7420aac0f6b5513e056c44c099527ddee0d705f0) | `sha512-GDvzm9m9QIlEvSd9g6txZ7emKMbYCU++qFwoLgaz+qMq6sO39oe6OL839IIaU5KGfm6yKEet97tUSL5GgZpukA==` |
 | DeepSeek Harness | `@deepseek-ai/dsh@0.1.0-rc.6` | [`47f943859bef60e4160492346772ded9b24f765a`](https://github.com/deepseek-ai/deepseek-harness/commit/47f943859bef60e4160492346772ded9b24f765a) | `sha512-brpZfED7ieRa2PQ5tUxMhHrM1pb2CmKFVM/f6yMULBDMicahk+Z2OsHgTwTDnoiZm23Ftu9rQz0NN4pflaoJcg==` |
 
@@ -29,7 +29,7 @@ This existing relay-contract entrypoint owns the composed proof:
 5. points DSH's real DeepSeek adapter at a deterministic localhost wire stub, using only a sentinel probe key, so queued input remains local while the real relay retry backoff elapses;
 6. sends through qq's installed-product client loader to both `agents/<exact DSH session id>` and `qq/review-flow/<exact DSH session id>`; mounted qq consumes both addresses against the same service;
 7. requires agent-message status to become delivered only after one pinned plugin-sourced DSH `user/message`, with relay attempt/failure counts proving retry without duplicate injection;
-8. requires the run-outcome record, obligation, payload, and one durable bridged message to preserve the complete DSH architect identity, while status remains pending at the separately documented Pi-JSONL receipt blocker.
+8. requires run-outcome status to remain pending through at least one pre-persistence retry, with no duplicate injection, then become delivered only after the one bridged message is observable in durable DSH history.
 
 Keep the temporary DSH profile for inspection or copy its generated artifacts while running the owning entrypoint:
 
@@ -60,7 +60,7 @@ The complete machine-readable record is [`evidence.json`](evidence.json). At thi
 - qq agent messaging accepts only the pinned headless host's exact `session-<randomUUID()>` identity form and preserves the complete value as the live relay receiver address;
 - run-outcome production, recipient validation, and parsing accept bare canonical Pi UUIDs and that exact pinned DSH form; the real relay and mounted architect receiver preserve `session-<UUID>` throughout the address and payload;
 - agent-message acknowledgement uses `ctx.sessionManager.getEntries()` as its only persistence authority; the pinned runtime probe observes the real relay's retry and redelivery, one bridged plugin-sourced `user/message`, and acknowledgement only after that durable record appears;
-- the DSH-addressed run outcome produces one durable bridged message but remains pending because review receipt acknowledgement still depends on Pi JSONL;
+- review-flow acknowledgement also uses host-managed entries without a session-file fallback; regression tests prove Pi custom-message and DSH user-message projections, while the pinned runtime probe observes a pending retry, safe redelivery without duplicate injection, and delivery only after the run outcome is durable;
 - qq's load-time client resolver works under pi2dsh against the privately installed artifact after relay source deletion, and final agent-message status is delivered without changing the exact `session-<UUID>` identity.
 
 The collision, model refusal, and session-id activation are runtime observations from the DSH boot, not static predictions.
@@ -71,7 +71,6 @@ Mount compatibility does not make the orchestration DSH-native:
 
 - delegation and review still issue `herdr agent start ... --kind pi`;
 - runner acceptance requires Herdr's `herdr:pi` session descriptor and reads a Pi `.jsonl` user-message record;
-- review receipts still parse `ctx.sessionManager.getSessionFile()` as Pi JSONL, while pi2dsh exposes a sidecar and DSH stores messages in its own durable log;
 - session scrub accepts only `~/.pi/agent/sessions` files and depends on Pi `/new` behavior;
 - absorbed shutdown and non-firing shortcut/tree events change qq workflow behavior.
 

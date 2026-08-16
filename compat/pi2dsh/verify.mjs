@@ -71,7 +71,7 @@ assert.doesNotMatch(stderr, /MISSING_CREDENTIAL/);
 assert.match(stdout, /receipt probe step complete/);
 
 assert.match(dshSessionId, /^session-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
-assert.equal(relayProof.schema, "qq.pi2dsh-installed-relay-proof/v2");
+assert.equal(relayProof.schema, "qq.pi2dsh-installed-relay-proof/v3");
 assert.equal(relayProof.protocol, "qq-relay/v1");
 assert.equal(relayProof.recipient_session_id, dshSessionId);
 assert.equal(relayProof.sender_session_id, "019ff7b9-2fcd-78cd-bc16-c770a9ccff11");
@@ -115,8 +115,9 @@ assert.ok(obligation.terminal_at >= durableReceipt.time, "relay acknowledgement 
 assert.equal(relayProof.run_event_kind, "run.landed");
 assert.match(relayProof.run_event_id, /^evt_[a-f0-9]{32}$/);
 assert.equal(relayProof.run_event_initial_status.record.event_id, relayProof.run_event_id);
+assert.equal(relayProof.run_event_initial_status.terminal, false, "the run outcome was not initially pending");
 const runFinalStatus = relayProof.run_event_final_status;
-assert.equal(runFinalStatus.terminal, false, "the untranslated DSH review receipt unexpectedly became terminal");
+assert.equal(runFinalStatus.terminal, true, "the durable DSH review receipt did not become terminal");
 assert.equal(runFinalStatus.terminal_failure, false);
 assert.equal(runFinalStatus.record.event_id, relayProof.run_event_id);
 assert.equal(runFinalStatus.record.producer_id, "qq/land-worker");
@@ -128,8 +129,9 @@ const runObligation = runFinalStatus.obligations[0];
 assert.equal(runObligation.consumer_type, "recipient");
 assert.equal(runObligation.consumer_id, `qq/review-flow/${dshSessionId}`, "the DSH architect identity changed at the run outcome delivery boundary");
 assert.equal(runObligation.generation, 0);
-assert.ok(runObligation.failure_count >= 1, "mounted qq did not retry the untranslated DSH review receipt");
-assert.ok(runObligation.attempt_count >= 1, "mounted qq did not consume the DSH-addressed run outcome");
+assert.equal(runObligation.status, "acknowledged");
+assert.ok(runObligation.failure_count >= 1, "mounted qq did not retry before the DSH review receipt became durable");
+assert.ok(runObligation.attempt_count >= 2, "mounted qq did not safely redeliver the DSH-addressed run outcome");
 
 const runReceiptContent = [
   "Landed T-63.6 — DSH run outcome addressing",
@@ -149,5 +151,6 @@ assert.deepEqual(durableRunReceipts[0].data.source, {
   kind: "plugin", plugin: "pi2dsh:qq", piCustomType: "qq-run-landed",
 });
 assert.ok(runFinalStatus.record.accepted_at <= durableRunReceipts[0].time, "DSH run outcome receipt predates relay acceptance");
+assert.ok(runObligation.terminal_at >= durableRunReceipts[0].time, "run-outcome acknowledgement preceded the durable DSH entry");
 
 console.log("qq pi2dsh compatibility evidence verified");

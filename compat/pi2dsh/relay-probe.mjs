@@ -52,9 +52,9 @@ const runAccepted = await sendRunEvent(runState, RUN_LANDED_KIND, { client });
 const initialStatus = await client.status({ event_id: accepted.record.event_id, wait_ms: 0 });
 const runInitialStatus = await client.status({ event_id: runAccepted.record.event_id, wait_ms: 0 });
 const finalStatus = await client.status({ event_id: accepted.record.event_id, wait_ms: 15_000 });
-const runFinalStatus = await client.status({ event_id: runAccepted.record.event_id, wait_ms: 1_000 });
+const runFinalStatus = await client.status({ event_id: runAccepted.record.event_id, wait_ms: 15_000 });
 const proof = {
-  schema: "qq.pi2dsh-installed-relay-proof/v2",
+  schema: "qq.pi2dsh-installed-relay-proof/v3",
   protocol: QQ_RELAY_PROTOCOL,
   sender_session_id: senderSessionId,
   recipient_session_id: recipientSessionId,
@@ -71,4 +71,7 @@ const proof = {
 await writeFile(outputPath, `${JSON.stringify(proof, null, 2)}\n`, { mode: 0o600 });
 if (!finalStatus.terminal || finalStatus.terminal_failure) {
   throw new Error(`installed qq-relay delivery did not succeed: ${JSON.stringify(finalStatus)}`);
+}
+if (!runFinalStatus.terminal || runFinalStatus.terminal_failure) {
+  throw new Error(`installed qq-relay run-outcome delivery did not succeed: ${JSON.stringify(runFinalStatus)}`);
 }
