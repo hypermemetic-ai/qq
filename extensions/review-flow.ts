@@ -1,6 +1,5 @@
 // @ts-nocheck
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -182,18 +181,24 @@ export default function registerReviewFlow(pi, deps = {}) {
     }
   }
 
-  async function runEventReceiptExists(eventId, customType) {
-    const path = currentContext?.sessionManager?.getSessionFile?.();
-    if (typeof path !== "string") return false;
-    const text = await readFile(path, "utf8").catch(() => "");
-    for (const line of text.split("\n")) {
-      if (!line) continue;
-      try {
-        const value = JSON.parse(line);
-        if (value?.type === "custom_message" && value.customType === customType && value.details?.event_id === eventId) return true;
-      } catch {}
-    }
-    return false;
+  function runEventReceiptExists(message) {
+    let entries;
+    try { entries = currentContext?.sessionManager?.getEntries?.(); }
+    catch { return false; }
+    if (!Array.isArray(entries)) return false;
+    return entries.some((entry) => {
+      if (entry?.type === "custom_message") {
+        return entry.customType === message.customType
+          && entry.details?.event_id === message.details?.event_id;
+      }
+      const blocks = entry?.message?.content;
+      return entry?.type === "message"
+        && entry.message?.role === "user"
+        && Array.isArray(blocks)
+        && blocks.length === 1
+        && blocks[0]?.type === "text"
+        && blocks[0]?.text === message.content;
+    });
   }
 
   async function receiveRunEvent(delivery, sessionId, localEpoch) {
@@ -204,13 +209,13 @@ export default function registerReviewFlow(pi, deps = {}) {
       return;
     }
     const message = runOutcomeMessage(event);
-    if (await runEventReceiptExists(event.eventId, message.customType)) {
+    if (runEventReceiptExists(message)) {
       await eventClient.acknowledge(guard);
       injectedRunEvents.delete(event.eventId);
       return;
     }
     if (injectedRunEvents.has(event.eventId)) {
-      await eventClient.retry({ ...guard, reason: "Pi session persistence not yet observable" });
+      await eventClient.retry({ ...guard, reason: "durable session entry not yet observable" });
       return;
     }
     if (!receiverActive || localEpoch !== receiverEpoch || !currentContext) return;
@@ -224,11 +229,11 @@ export default function registerReviewFlow(pi, deps = {}) {
       injectedRunEvents.delete(event.eventId);
       throw error;
     }
-    if (await runEventReceiptExists(event.eventId, message.customType)) {
+    if (runEventReceiptExists(message)) {
       await eventClient.acknowledge(guard);
       injectedRunEvents.delete(event.eventId);
     } else {
-      await eventClient.retry({ ...guard, reason: "Pi session persistence not yet observable" });
+      await eventClient.retry({ ...guard, reason: "durable session entry not yet observable" });
     }
   }
 

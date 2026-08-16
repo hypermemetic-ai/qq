@@ -383,7 +383,7 @@ try {
   const successfulLandEvents = new Map();
   const successfulLandMessages = [];
   const successfulLandNotifications = [];
-  const successfulLandSessionPath = join(scratch, "successful-land-session.jsonl");
+  const successfulLandEntries = [];
   const acknowledgedRunEvents = [];
   const runEventNextCalls = [];
   let releaseRunEvent;
@@ -428,7 +428,7 @@ try {
     exec: successfulLandRun,
     async sendMessage(payload, options) {
       successfulLandMessages.push({ payload, options });
-      await writeFile(successfulLandSessionPath, `${JSON.stringify({ type: "custom_message", ...payload })}\n`);
+      successfulLandEntries.push({ type: "custom_message", ...payload });
     },
   };
   extension.default(successfulLandPi, {
@@ -440,7 +440,8 @@ try {
     isIdle: () => !architectBusy,
     sessionManager: {
       getSessionId() { return successfulLandState.architectSession; },
-      getSessionFile() { return successfulLandSessionPath; },
+      getEntries() { return successfulLandEntries; },
+      getSessionFile() { throw new Error("review receipts must not read Pi session files"); },
     },
     ui: {
       async select() { return "approve"; },
@@ -480,7 +481,7 @@ try {
   const blockedPayload = runEvents.runEventPayload(blockedOutcome, runEvents.RUN_BLOCKED_KIND);
   const blockedMessages = [];
   const blockedEvents = new Map();
-  const blockedSessionPath = join(scratch, "blocked-event-session.jsonl");
+  const blockedEntries = [];
   const blockedRetries = [];
   const blockedAcknowledgements = [];
   const blockedReleases = [];
@@ -517,7 +518,8 @@ try {
     ...ctx,
     sessionManager: {
       getSessionId() { return base.architectSession; },
-      getSessionFile() { return blockedSessionPath; },
+      getEntries() { return blockedEntries; },
+      getSessionFile() { throw new Error("review receipts must not read Pi session files"); },
     },
   };
   await blockedEvents.get("session_start")({}, blockedCtx);
@@ -527,7 +529,7 @@ try {
   assert.equal(blockedMessages[0].payload.details.schema, "qq.run-blocked/v1");
   assert.match(blockedMessages[0].payload.content, /QA blocked TASK-1 after look 2/);
   assert.deepEqual(blockedMessages[0].options, { triggerTurn: true });
-  assert.equal(blockedAcknowledgements.length, 0, "run event must not be acknowledged before Pi persists it");
+  assert.equal(blockedAcknowledgements.length, 0, "run event must not be acknowledged before the host exposes a durable entry");
   assert.equal(blockedRetries.length, 1);
 
   blockedReleases.shift()({ delivery: blockedDelivery });
@@ -536,11 +538,12 @@ try {
   assert.equal(blockedAcknowledgements.length, 0);
   assert.equal(blockedRetries.length, 2);
 
-  await writeFile(blockedSessionPath, `${JSON.stringify({
-    type: "custom_message", customType: "qq-run-blocked", details: { event_id: "evt_run_blocked" },
-  })}\n`);
+  blockedEntries.push({
+    type: "message",
+    message: { role: "user", content: [{ type: "text", text: blockedMessages[0].payload.content }] },
+  });
   blockedReleases.shift()({ delivery: blockedDelivery });
-  await waitFor("persisted blocked event acknowledgement", () => blockedAcknowledgements.length === 1);
+  await waitFor("durable DSH blocked event acknowledgement", () => blockedAcknowledgements.length === 1);
   assert.equal(blockedMessages.length, 1);
   assert.equal(blockedAcknowledgements.length, 1, "persisted run event should be acknowledged on redelivery");
   await blockedEvents.get("session_shutdown")();
