@@ -84,7 +84,7 @@ set +e
   env -u DEEPSEEK_API_KEY -u XAI_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY \
     HOME="$scratch/home" XDG_CONFIG_HOME="$scratch/config" XDG_STATE_HOME="$scratch/state" \
     XDG_RUNTIME_DIR="$scratch/runtime" DSH_HOME="$DSH_HOME" QQ_AGENT_ROLE=runner \
-    QQ_RELAY_INSTALL_ROOT="$here/relay-stub" \
+    QQ_RELAY_INSTALL_ROOT="$here/relay-stub" QQ_PI2DSH_RELAY_PROBE="$scratch/relay-request.json" \
     "$dsh" --profile headless --patch "$here/qq.patch.yml" "qq compatibility mount probe"
 ) >"$scratch/dsh.stdout.log" 2>"$scratch/dsh.stderr.log"
 runtime_code=$?
@@ -96,15 +96,26 @@ if [[ $runtime_code -ne 1 ]]; then
   exit 1
 fi
 
+shopt -s nullglob
+dsh_sessions=("$DSH_HOME"/sessions/*/session-*)
+shopt -u nullglob
+if [[ ${#dsh_sessions[@]} -ne 1 ]]; then
+  printf 'expected exactly one DSH headless session; got %s\n' "${#dsh_sessions[@]}" >&2
+  exit 1
+fi
+basename "${dsh_sessions[0]}" >"$scratch/dsh-session-id.txt"
+
 node "$here/verify.mjs" \
   "$scratch/matrix.json" "$scratch/inspection.json" \
-  "$scratch/dsh.stdout.log" "$scratch/dsh.stderr.log"
+  "$scratch/dsh.stdout.log" "$scratch/dsh.stderr.log" \
+  "$scratch/relay-request.json" "$scratch/dsh-session-id.txt"
 
 if [[ -n ${QQ_PI2DSH_OUTPUT:-} ]]; then
   output=$(realpath -m "$QQ_PI2DSH_OUTPUT")
   mkdir -p "$output"
   cp "$scratch/matrix.json" "$scratch/inspection.json" \
     "$scratch/dsh.stdout.log" "$scratch/dsh.stderr.log" \
+    "$scratch/relay-request.json" "$scratch/dsh-session-id.txt" \
     "$scratch/tools/package-lock.json" "$output/"
   printf 'evidence copied to %s\n' "$output"
 fi

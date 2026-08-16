@@ -90,14 +90,14 @@
     {
       "id": "session-id",
       "basis": "runtime",
-      "verdict": "blocked",
-      "fact": "qq agent messaging rejects DSH's session id as non-canonical, so its session_start handler does not activate."
+      "verdict": "identity-translated",
+      "fact": "qq agent messaging accepts the pinned headless host's exact session-<randomUUID()> identity; its session_start receiver uses the complete value unchanged as the live relay address."
     },
     {
       "id": "qq-relay-client",
       "basis": "runtime-boundary",
       "verdict": "outside-extension-abi",
-      "fact": "qq imports a separately installed qq-relay client at extension load time. The isolated mount supplies a load-only stub and does not claim relay operations are compatible."
+      "fact": "qq imports a separately installed qq-relay client at extension load time. The isolated mount supplies a capture-only stub to observe the receiver address and does not claim relay operations are compatible."
     },
     {
       "id": "herdr-launch",
@@ -126,12 +126,12 @@
   ],
   "conclusion": {
     "operator_cutover": "blocked",
-    "native_translation_started": false,
+    "native_translation_started": true,
     "blockers": [
       "DSH-native Herdr agent launch and prompt-acceptance proof",
       "A pinned DSH-native qq-relay client boundary",
       "DSH durable receipt proof for relay and review events",
-      "DSH session identity and transcript/scrub semantics",
+      "DSH transcript and scrub semantics",
       "qq model-policy routes in the DSH model directory",
       "read-tool ownership without disabling the host filesystem bundle",
       "shutdown and non-firing shortcut/session-tree behavior"

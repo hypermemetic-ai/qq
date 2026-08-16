@@ -39,7 +39,9 @@ assert.match(run, /diff --quiet "\$qq_revision" -- extensions/);
 assert.match(run, /plugin --profile headless add/);
 assert.match(run, /--patch "\$here\/qq\.patch\.yml"/);
 assert.match(run, /QQ_RELAY_INSTALL_ROOT="\$here\/relay-stub"/);
+assert.match(run, /QQ_PI2DSH_RELAY_PROBE="\$scratch\/relay-request\.json"/);
 assert.match(patch, /id: tool-fs\s+disabled: true/);
+assert.match(relayStub, /QQ_PI2DSH_RELAY_PROBE/);
 assert.match(relayStub, /outside the pi2dsh mount probe/);
 
 assert.equal(evidence.schema, "qq.pi2dsh-evidence/v1");
@@ -54,7 +56,7 @@ assert.deepEqual(evidence.inspection, {
   fatal: 0,
 });
 assert.equal(evidence.conclusion.operator_cutover, "blocked");
-assert.equal(evidence.conclusion.native_translation_started, false);
+assert.equal(evidence.conclusion.native_translation_started, true);
 const probes = new Map(evidence.probes.map((probe) => [probe.id, probe]));
 for (const id of [
   "package-local-events", "before-agent-start", "tools", "commands", "model-selection",
@@ -62,6 +64,8 @@ for (const id of [
   "read-tool-collision", "session-id", "qq-relay-client", "herdr-launch", "herdr-delivery-proof",
   "relay-receipts", "session-scrub",
 ]) assert.ok(probes.has(id), `missing compatibility probe ${id}`);
+assert.equal(probes.get("session-id").verdict, "identity-translated");
+assert.match(probes.get("session-id").fact, /complete value unchanged as the live relay address/);
 
 // Herdr orchestration remains explicitly Pi-owned and proves prompt acceptance
 // by opening the path in Herdr's Pi session descriptor.
