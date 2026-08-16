@@ -7,7 +7,7 @@ tags: [herdr, operator, panes, dictation]
 
 # Herdr operator workflows
 
-Herdr is qq's terminal cockpit and human-control boundary. qq owns configuration, adapters, plugins, activation safeguards, and contract tests; Herdr's Rust implementation, build, installation, and product tests belong to the linked `/home/qqp/projects/herdr` repository. `herdr/downstream/upstream.env` identifies upstream `master`, the linked landed repository, and a minimum operator-input capability commit—not a pinned product version (`boundary`).
+Herdr is qq's terminal cockpit and human-control boundary. qq owns configuration, adapters, plugins, activation safeguards, and contract tests; Herdr's Rust implementation, build, installation, and product tests belong to the linked `/home/qqp/projects/herdr` repository. `herdr/downstream/upstream.env` records only upstream `master` and the landed repository—no commit, tag, version, or capability floor. qq validates required behavior semantically at the configured branch tip.
 
 For repository activation and Pi roles, see [Profiles and activation](../runtime/profiles-and-activation.md). Delegation's use of panes and approval is canonical in [Delegation and review](../workflow/delegation-and-review.md). Durable notifications are described in [Agent messaging](../event-plane/agent-messaging.md).
 
@@ -136,7 +136,7 @@ stateDiagram-v2
 
 It then runs bounded `handy --toggle-transcription --herdr-pane <id>`. Space therefore starts, stops, and submits dictation to the pane that was focused when the action fired. A successful helper exit proves only that the control reached the existing Handy instance, not that transcription completed.
 
-Delete calls targetless `--cancel` and stays in q mode. Escape and Enter leave q mode and invoke the same cancel through `on_exit`; neither submits. Cancellation is idempotent: absent or invalid readiness means nothing is running to cancel, so the adapter exits without cold-starting Handy. Timed-out helper processes are terminated. `qq-dictation-commit` is build provenance only and is not checked for readiness (`plugin guide`, `adapter`).
+Delete calls targetless `--cancel` and stays in q mode. Escape and Enter leave q mode and invoke the same cancel through `on_exit`; neither submits. Cancellation is idempotent: absent or invalid readiness means nothing is running to cancel, so the adapter exits without cold-starting Handy. Timed-out helper processes are terminated. The product-owned `qq-dictation-commit` marker is informational build provenance only; q-mode neither reads nor compares it (`plugin guide`, `adapter`).
 
 ## Artifacts and invariants
 
@@ -148,8 +148,8 @@ Delete calls targetless `--cancel` and stays in q mode. Escape and Enter leave q
 | `~/.config/systemd/user/herdr.service` | Future server owner after activation; live handoff is refused while it is active. |
 | `~/.local/state/herdr/herdr.log` | Service stdout/stderr. |
 | Herdr socket | Defaults to `~/.config/herdr/herdr.sock`; activation snapshots through its public API. |
-| plugin manifests | `qq.brief-gate` v0.1.0 supports Linux with Herdr ≥ 0.7.5; `qq.q-mode` v0.1.0 supports Linux with Herdr ≥ 0.8.0. These semantic-version floors differ from the downstream capability commit, and tests check manifest/action shape but do not lock the exact floor values. |
-| q-mode manifest and env | Plugin identity/actions plus linked qq-dictation repository and capability floor; no product commit pin. |
+| plugin manifests | `qq.brief-gate` v0.1.0 supports Linux with Herdr ≥ 0.7.5; `qq.q-mode` v0.1.0 supports Linux with Herdr ≥ 0.8.0. These are plugin compatibility declarations; downstream relation metadata contains no product-history floor, and tests check manifest/action shape without locking exact floor values. |
+| q-mode manifest and env | Plugin identity/actions plus qq-dictation upstream branch and landed repository only; no product-history fields. |
 | Handy readiness marker | Runtime PID/state claim validated against liveness and executable identity before every non-cancel control. |
 | pane targeting | qq general splits go right; dictation receives one exact focused pane ID; staged commands never receive agent-generated Enter. |
 | live handoff | Workspace, tab, pane, and shell-process identities must remain equal across snapshots. |
@@ -178,7 +178,7 @@ bash tests/test-q-mode.sh
 bash tests/test-herdr-downstream.sh
 ```
 
-These prove command construction and non-execution, teardown failures, gate approval/cancellation and resize behavior, q-mode config/actions/readiness/pane validation/timeouts, the fixed right-split adapter, systemd/launch contracts, and that the recorded Herdr capability floor is an ancestor of linked upstream. `test-herdr-downstream.sh` may clone/fetch the linked external repository.
+These prove command construction and non-execution, teardown failures, gate approval/cancellation and resize behavior, q-mode config/actions/readiness/pane validation/timeouts, the fixed right-split adapter, and systemd/launch contracts. The q-mode and Herdr downstream suites fetch the configured branch tip and inspect exact source and test evidence for required behavior; they reject product-history fields in relation metadata and may cross the network boundary.
 
 Installed/live checks:
 

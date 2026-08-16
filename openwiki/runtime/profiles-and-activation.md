@@ -105,29 +105,20 @@ An unactivated repository receives no qq profile or prompt behavior, and `/profi
 
 ## Dashboard boundary
 
-qq pins `@hypermemetic-ai/qq-dashboard` to immutable commit `3eb1309535459089930984f5fd4e31a2661d5edf` in both `package.json` and `package-lock.json`.
+qq-dashboard owns its source, checks, installer, upgrades, UI, and cookie semantics. `dashboard/upstream.env` records only its public `refs/heads/main` source relation and landed repository; qq stores no product commit, tag, version, or capability floor, and the dashboard is no longer an npm dependency.
 
-- `bin/qq-dashboard` executes only `node_modules/@hypermemetic-ai/qq-dashboard/bin/qq-dashboard` and exports the exact injection `QQ_PROFILE_BIN="$ROOT/bin/qq-profile"`.
-- `bin/qq-dashboard-cookies` executes only the installed package's `bin/qq-dashboard-cookies`.
-- The package reads profile policy only through `qq-profile list --json`; qq retains schema and validation ownership.
-- Preserve `~/.local/state/qq/telemetry/` during installation and upgrades. It contains package-owned non-secret usage caches and the Qwen cookie snapshot; qq's extraction contract does not migrate or delete it.
+- `bin/qq-dashboard` executes only `${QQ_DASHBOARD_INSTALL_ROOT:-$HOME/.local/lib/qq/dashboard}/bin/qq-dashboard` and overwrites inherited `QQ_PROFILE_BIN` with this repository's exact `bin/qq-profile` path.
+- `bin/qq-dashboard-cookies` resolves the same installed root and executes only its cookie CLI.
+- An explicit `QQ_DASHBOARD_INSTALL_ROOT` and fallback `HOME` must be absolute. Missing executables fail closed; wrappers never use landed source, `PATH`, or npm fallback.
+- The product reads profile policy only through `qq-profile list --json`; qq retains schema and validation ownership.
+- Preserve `~/.local/state/qq/telemetry/` during installation and upgrades. It contains package-owned non-secret usage caches and the mode-`0600` Qwen cookie snapshot.
 
-The checked-in wrapper contract exposes `bin/qq-dashboard [--once]` and `bin/qq-dashboard-cookies refresh|status|validate`. qq guarantees exact pinned-package dispatch, argument pass-through, profile executable injection, and telemetry preservation. The meaning of `--once` and cookie operations belongs to the external package.
-
-The dashboard implementation, tests, cookie semantics, and UI are external. Local evidence and tests cover only the pin, wrappers, profile JSON contract, and documented state boundary.
-
-### Upgrade procedure
-
-1. Validate a tagged dashboard release in the dashboard repository.
-2. Replace the dependency with that release's exact commit in `package.json`.
-3. Regenerate and commit `package-lock.json`; confirm both files resolve the same commit.
-4. Install dependencies and preserve `~/.local/state/qq/telemetry/`.
-5. From a checkout with **no sibling dashboard checkout**, run both installed launcher help paths and exercise `qq-profile list --json`. The wrappers must never search `PATH` or a sibling repository.
+The checked-in wrapper contract remains `bin/qq-dashboard [--once]` and `bin/qq-dashboard-cookies refresh|status|validate`; the meaning of those operations belongs upstream. Follow `dashboard/README.md` and the product README to test and install from a clean landed `main` checkout. The narrow consumer check is `tests/test-dashboard.sh`: it fetches the configured branch tip, checks semantic public surfaces, installs to a private temporary root, removes source, and runs both qq wrappers against only the artifact. It crosses the network boundary but does not touch the operator's install or telemetry state.
 
 ## Extension points and invariants
 
 - To add an interactive role, update `ROLE_NAMES`, role prompts, exact policy validation, profile UI, and every role-event consumer together.
-- To add a service, update `SERVICE_NAMES`, exact top-level validation and returned policy object, profile-list output, runtime model validation, migration/default logic if applicable, CLI consumers, and its composition consumer; it must not silently become a `/profile` role.
+- To add a service, update `SERVICE_NAMES`, exact top-level validation and returned policy object, profile-list output, runtime model validation, migration/default logic if applicable, CLI consumers, and its composition consumer; it must not silently become a `/profile` role. Because the installed dashboard consumes `qq-profile list --json`, run `tests/test-dashboard.sh` when that shipped JSON surface changes.
 - A new provider normally needs no registry entry: valid binding syntax plus Pi model-registry support is enough. If it has provider-specific restrictions or context policy, update `validateProfile`, `GROK_PROVIDERS` (or a generalized ceiling map), `contextWindowCeilingFor`, `installContextCeiling`, runtime `validateModelContext`, CLI diagnostics, and focused policy/context tests together.
 - Changing the ceiling requires `CONTEXT_WINDOW_CEILING`, exact policy validation, model override installation/removal behavior, runtime refusal text, and tests to remain consistent.
 - Keep the policy and profile-list schema identifiers stable or introduce an explicit migration/version.
@@ -143,6 +134,8 @@ node --experimental-strip-types tests/test-execution-profiles.mjs .
 bin/qq-methodology inspect
 bin/qq-profile list --json
 bin/qq-profile context inspect
+# Conditional: dashboard installed-artifact or profile-consumer boundary
+tests/test-dashboard.sh
 ```
 
 `test-methodology.sh` covers clone/worktree marker scope, idempotent stores, symlink refusal and retargeting, trust/settings preservation, invalid inspection, and unlink. `test-execution-profiles.mjs` covers exact schemas, migrations, JSON output, private writes, context overrides, startup selection, role prompt replacement, events, pane isolation/restoration, forced-role precedence, and fail-closed input. The full sequential suite is `npm test`; see [practical test routing](../testing/validation.md).

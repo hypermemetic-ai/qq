@@ -7,7 +7,7 @@ tags: [architecture, runtime, ownership]
 
 # System topology and ownership
 
-qq is a private ESM package and an operator-controlled orchestration layer around Pi. It owns policy, extensions, shell and Node entrypoints, workers, and local state contracts. It does not own the Herdr Rust implementation or the pinned dashboard implementation.
+qq is a private ESM package and an operator-controlled orchestration layer around Pi. It owns policy, extensions, shell and Node entrypoints, workers, and local state contracts. It does not own the Herdr, qq-relay, or dashboard product implementations.
 
 ## Component topology
 
@@ -24,12 +24,12 @@ flowchart TD
     Bundle --> Workflow["board and review"]
     Bundle --> Safety["safety and context"]
     Profiles --> Policy["execution-profiles.json"]
-    Messaging --> EventPlane["Event Plane process"]
+    Messaging --> Relay["installed qq-relay service"]
     Workflow --> Workers["start, review, and land workers"]
     MethodCLI --> GitConfig["repository Git config"]
     MethodCLI --> BacklogStore["external Backlog store"]
     HerdrClient --> HerdrServer["external Herdr product"]
-    DashboardWrapper --> DashboardPackage["pinned dashboard package"]
+    DashboardWrapper --> DashboardPackage["installed dashboard artifact"]
     DashboardPackage --> ProfileCLI
     Timer["systemd timer"] --> OpenWikiService["OpenWiki service"]
     OpenWikiService --> Generated["openwiki output"]
@@ -59,10 +59,10 @@ The order makes profile activation the composition root and installs qq's replac
 | Boundary | qq-owned responsibility | External or independent side |
 |---|---|---|
 | Pi session | Extension registration, role prompt replacement, tools, guards, role events | Installed Pi runtime and provider authentication |
-| Event Plane | Python service/client code, Unix socket protocol, SQLite schema and state directory | A separately started process; there is no local Event Plane systemd unit |
-| Startup, review, and landing | `qq-start-worker.mjs`, `qq-review-worker.mjs`, `qq-land-worker.mjs`, bootstrap/handoff/outbox and lock contracts | Herdr socket and child Git, Backlog, model, and Herdr commands |
+| qq-relay | Installed executable/client resolution and message/run-outcome consumer contracts | Protocol, persistence, installation, service lifecycle, and product checks in the linked qq-relay repository |
+| Startup, review, and landing | `qq-start-worker.mjs`, `qq-review-worker.mjs`, `qq-land-worker.mjs`, bootstrap/handoff/outbox and lock contracts | Herdr socket and child Git, Backlog, model, Herdr commands, and installed qq-relay delivery |
 | Herdr | Config, activation/smoke scripts, plugin adapters, `herdr.service` packaging | Rust source, tests, build, install, and product lifecycle in the linked Herdr repository |
-| Dashboard | Immutable dependency pin and two launch wrappers | Package implementation under `node_modules/@hypermemetic-ai/qq-dashboard` |
+| Dashboard | Two installed-artifact launch wrappers and the `qq-profile list --json` contract | Source, tests, installation, upgrades, and cookie semantics in the linked dashboard repository |
 | OpenWiki | Timer/service, dispatch, isolated writer/publication scripts, allowed generated paths | OpenWiki executable and model provider |
 
 Herdr's service launches `%h/.local/lib/qq/herdr/bin/herdr server`, logs under `%h/.local/state/herdr/`, and uses `ExitType=cgroup` so a live handoff can retain the replacement process. Operational details belong in [Herdr operator workflows](../herdr/operator-workflows.md).
@@ -75,7 +75,8 @@ Herdr's service launches `%h/.local/lib/qq/herdr/bin/herdr server`, logs under `
 | `~/.config/qq/execution-profiles.json` | qq profile policy; owner-only, non-symlink regular file with schema `qq.execution-profiles/v1` |
 | `~/.local/state/qq/store/<project>/` and checkout `backlog` symlink | `qq-methodology` and Backlog.md; data is outside Git and `auto_commit` is false |
 | `${XDG_STATE_HOME:-~/.local/state}/qq/pane-profiles/<pane>.json` | profile extension; owner-only pane-local role/profile selection |
-| `${XDG_STATE_HOME:-~/.local/state}/qq/event-plane/` | Event Plane; socket, lock, and `event-plane.sqlite3` |
+| `${XDG_STATE_HOME:-~/.local/state}/qq-relay/` | qq-relay-owned service state and `qq-relay.sock`; qq consumers connect but do not manage it |
+| `${XDG_STATE_HOME:-~/.local/state}/qq/agent-messages/presence/` | Agent-messaging extension; ephemeral private presence leases, separate from relay state |
 | `~/.local/state/qq/telemetry/` | Dashboard contract; preserve usage caches and cookie snapshot across installs and upgrades |
 | qq run/handoff state and `qq/bootstrap-failures/` below the qq state home | Delegation/review libraries and workers; private bootstrap/handoff JSON, durable sanitized startup-failure outbox, and worktree lifecycle |
 | Repository `openwiki/` | OpenWiki automation is the sole generated-output writer; publication validates paths and modes and coordinates landing locks |
@@ -88,8 +89,8 @@ Do not move external Backlog or telemetry state into the repository. Generated O
 |---|---|---|
 | Link, inspect, or unlink a checkout | `bin/qq-methodology` | Writes the common Git marker and prepares Pi trust/settings and Backlog state |
 | Inspect or change profile policy | `bin/qq-profile` | `/profile` is the session and pane selector; CLI `default` is durable |
-| Start or administer Event Plane | `bin/event-plane`, `bin/event-plane-admin` | Python service and bounded admin client; see [Event Plane service](../event-plane/service.md) |
-| Run the dashboard | `bin/qq-dashboard`, `bin/qq-dashboard-cookies` | Execute only pinned package binaries |
+| Invoke the installed relay CLI | `bin/qq-relay` | Resolves only `${QQ_RELAY_INSTALL_ROOT:-$HOME/.local/lib/qq/relay}/bin/qq-relay`; product lifecycle belongs upstream; see [qq-relay integration](../event-plane/service.md) |
+| Run the dashboard | `bin/qq-dashboard`, `bin/qq-dashboard-cookies` | Execute only binaries under `${QQ_DASHBOARD_INSTALL_ROOT:-$HOME/.local/lib/qq/dashboard}` |
 | Activate or inspect Herdr integration | `bin/qq-herdr-activate`, `bin/qq-herdr-smoke` | Does not build Herdr |
 | Start, review, or land a delegated run | `bin/qq-start-worker.mjs`, `bin/qq-review-worker.mjs`, `bin/qq-land-worker.mjs` | Internal workers consume private bootstrap or handoff JSON paths; they are not normal operator entrypoints |
 | Refresh generated wiki | `bin/qq-openwiki-service` | Reads the `openwiki` service profile then dispatches refreshes |
@@ -103,8 +104,8 @@ Do not move external Backlog or telemetry state into the repository. Generated O
 - Treat `qq:role-selected` as the role-coupling seam and preserve its `{ role, profile }` payload.
 - Add executable adapters under `bin/` with explicit process and state ownership; do not blur external product ownership.
 - Generated files remain confined to `openwiki/`; automation must not create or modify sibling repository content.
-- Package upgrades require matching `package.json` and `package-lock.json` changes.
+- Linked-product adapters must resolve only explicit installed roots; never execute landed source, search `PATH`, or reintroduce product code as an npm dependency.
 
 ## Validation
 
-Run the complete sequential ownership chain with `npm test`. For narrow checks, route activation/profile changes to `tests/test-methodology.sh` and `tests/test-execution-profiles.mjs`; Event Plane, workflow, Herdr, safety, and OpenWiki changes have their corresponding tests in `tests/`. See [practical test routing](../testing/validation.md). A composition review should also compare the registration list above directly with `extensions/index.ts` and verify every new `bin/` entry has one canonical owner page.
+Run the complete sequential ownership chain with `npm test`. For narrow checks, route activation/profile changes to `tests/test-methodology.sh` and `tests/test-execution-profiles.mjs`; qq-relay, dashboard, Herdr, safety, and OpenWiki changes have their corresponding tests in `tests/`. See [practical test routing](../testing/validation.md). A composition review should also compare the registration list above directly with `extensions/index.ts` and verify every new `bin/` entry has one canonical owner page.

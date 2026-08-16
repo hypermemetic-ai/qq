@@ -7,7 +7,7 @@ tags: [workflow, delegation, qa, landing]
 
 # Delegation and review lifecycle
 
-qq turns one Backlog ticket into an isolated, operator-approved run. The architect owns admission and landing; the runner owns implementation; an isolated QA session owns the verdict and may add only test changes. For role activation, see [Profiles and activation](../runtime/profiles-and-activation.md); for pane behavior, see [Operator workflows](../herdr/operator-workflows.md); for durable outcome delivery, see [Agent messaging](../event-plane/agent-messaging.md) and [Event Plane](../event-plane/service.md).
+qq turns one Backlog ticket into an isolated, operator-approved run. The architect owns admission and landing; the runner owns implementation; an isolated QA session owns the verdict and may add only test changes. For role activation, see [Profiles and activation](../runtime/profiles-and-activation.md); for pane behavior, see [Operator workflows](../herdr/operator-workflows.md); for durable outcome delivery, see [Agent messaging](../event-plane/agent-messaging.md) and [qq-relay integration](../event-plane/service.md).
 
 ## Entrypoints and ownership
 
@@ -35,7 +35,7 @@ sequenceDiagram
     participant R as Runner
     participant Q as QA worker
     participant L as Land worker
-    participant E as Event Plane
+    participant E as qq-relay
 
     A->>B: delegate task id
     B->>B: acquire qq-admit.lock
@@ -106,7 +106,7 @@ The worker creates branch `qq/<task-slug>-<nonce>` and a worktree below `${QQ_WO
 
 After writing a `qq.run-handoff/v1` state with `status: starting`, the worker waits until the pane contains only an available shell and launches Pi with `--approve`. It sends the full private ticket and note through Herdr's Unix-socket `agent.prompt` API rather than placing them in CLI arguments. Startup is complete only after `agent.get` identifies the pane's Pi session and the session JSONL contains the exact per-run bootstrap marker as a user-message line. The handoff then becomes `running` and records `bootstrapProof` with the marker, safe absolute session path, and acceptance time.
 
-A detached startup failure closes the owned pane, force-removes the worktree and branch, retries the Backlog transition to `To Do`, and removes private run state. Before cleanup it persists a sanitized owner-only failure record under `${XDG_STATE_HOME:-~/.local/state}/qq/bootstrap-failures/`; reasons redact private ticket/note text, sensitive environment values, control characters, and paths. It retries immediate `run.bootstrap-failed` delivery and also shows a Herdr notification. If Event Plane is unavailable, the owning architect's regular review poll retries only that session's outbox entry and removes it after delivery. This failure path is therefore separate from the synchronous `delegate` return.
+A detached startup failure closes the owned pane, force-removes the worktree and branch, retries the Backlog transition to `To Do`, and removes private run state. Before cleanup it persists a sanitized owner-only failure record under `${XDG_STATE_HOME:-~/.local/state}/qq/bootstrap-failures/`; reasons redact private ticket/note text, sensitive environment values, control characters, and paths. It retries immediate `run.bootstrap-failed` delivery and also shows a Herdr notification. If qq-relay is unavailable, the owning architect's regular review poll retries only that session's outbox entry and removes it after delivery. This failure path is therefore separate from the synchronous `delegate` return.
 
 ### 4. Submit and review
 
@@ -169,7 +169,7 @@ stateDiagram-v2
 |---|---|
 | `bootstrap.json` | Atomic owner-only `qq.run-bootstrap/v1`; detached-worker request containing task identity, prepared paths, QA binding, architect session, and a non-secret prompt marker. Removed after successful startup. |
 | `handoff.json` | Atomic `0600` `qq.run-handoff/v1`; canonical owner of paths, refs, pane, architect session, QA binding, look, status, verdict, pack, failures, and prompt-acceptance proof. |
-| `qq/bootstrap-failures/*.json` | Owner-only `qq.bootstrap-failure-outbox/v1`; session-scoped sanitized startup failures retained only until Event Plane delivery succeeds. |
+| `qq/bootstrap-failures/*.json` | Owner-only `qq.bootstrap-failure-outbox/v1`; session-scoped sanitized startup failures retained only until qq-relay delivery succeeds. |
 | `qa-look-1.json`, `qa-look-2.json` | Atomic `0600` `qq.qa-verdict/v1`; one call per QA process with pass/fail, summary, feedback, and `tests_modified`. |
 | `qa-session/` | Private resumed QA context across the two looks. |
 | `qq-admit.lock` | Serializes conflict evidence and claim across worktrees; stale PID cleanup is guarded. |
@@ -182,19 +182,21 @@ stateDiagram-v2
 
 - Malformed Backlog JSON, admission output, Herdr JSON, handoff, verdict, or gate decision fails closed.
 - Missing Herdr pane/workspace, unsafe private paths or session JSONL, detached main, unavailable model, unavailable shell, socket/API failure, absent prompt marker at the bounded deadline, or unclean refs prevents progression.
-- Detached bootstrap failure retries board rollback and immediate outcome delivery once. Its durable outbox prevents Event Plane downtime from losing the failure, but a failure to persist that outbox is surfaced explicitly and never blocks private-state deletion.
+- Detached bootstrap failure retries board rollback and immediate outcome delivery once. Its durable outbox prevents qq-relay downtime from losing the failure, but a failure to persist that outbox is surfaced explicitly and never blocks private-state deletion.
 - Review infrastructure failure records `blocked` with `qa infrastructure failed`; unless QA had already passed, it returns the task to `To Do` and sends a Herdr notification.
 - Landing failure preserves the worktree and branch when cleanup cannot complete, records the exact reason, and is re-offered only for discussion. If thaw/remove fails, OpenWiki protection is restored or an aggregate failure exposes both faults.
-- Landing and QA-blocked outcome delivery depends on a running Event Plane; send failure makes those workers fail rather than pretending the architect was informed. Bootstrap failures additionally use the local outbox described above.
+- Landing and QA-blocked outcome delivery depends on a running qq-relay service and its installed client; send failure makes those workers fail rather than pretending the architect was informed. Bootstrap failures additionally use the local outbox described above.
 
 ## Validation
 
-Run focused checks from the repository root:
+Run focused checks from the repository root. The direct delegation and review imports require `QQ_RELAY_INSTALL_ROOT` to name a valid installed artifact; `tests/test-qq-relay.sh` creates that fixture and runs both automatically.
 
 ```bash
 node --experimental-strip-types tests/test-delegation.mjs "$PWD"
 node --experimental-strip-types tests/test-review-flow.mjs "$PWD"
 node tests/test-brief-gate.mjs "$PWD"
+# Use this instead when validating the installed relay boundary
+tests/test-qq-relay.sh
 ```
 
 These cover role refusal, transcript disclosure, admission locking/evidence and bounce paths, private artifacts, gate approval/cancellation, detached worker acceptance, socket prompt transport, session-marker proof and timeout, sanitized startup rollback/outbox delivery, `--approve` launch arguments, `done` ancestry/cleanliness, same-pane takeover, two-look continuity, test-only QA commits, proposal ownership/actions, landing order/locks/failures, board transitions, generated-path refusal, and run-event receipts. Use `npm test` for the sequential repository suite; see [Validation](../testing/validation.md).
