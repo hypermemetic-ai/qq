@@ -64,7 +64,7 @@ The automation owns committed paths below `openwiki/`. Normal agents should trea
 - It uses a persistent state location of `$XDG_STATE_HOME/qq/openwiki/<key>/worktree`, but creates a fresh linked worktree and temporary branch for each run and removes both on exit.
 - Its non-blocking per-repository lock is `.git/qq-openwiki.lock`, distinct from the `qq` refresh lock.
 - It preloads `qq-openwiki-shell-env.cjs`, which repairs shell spawns that pass an empty environment by preserving only `PATH`, `HOME`, `TMPDIR`, `LANG`, and `LC_ALL` when present.
-- It explicitly restores or removes generated `AGENTS.md`, `CLAUDE.md`, and `.github/workflows/openwiki-update.yml`, then accepts changes only below `openwiki/`.
+- Before generation it rejects symlinked `.github` or `.github/workflows` ancestors and unlinks symlinked `AGENTS.md`, `CLAUDE.md`, or `.github/workflows/openwiki-update.yml` inside the disposable worktree. After generation it restores tracked setup files or removes untracked ones, then accepts changes only below `openwiki/`. This prevents a generator setup rewrite from following a tracked absolute symlink into another live repository.
 - It takes the shared blocking `qq-land.lock`, rechecks clean `main`, verifies a trial merge, and merges locally with `--no-ff`. Unlike the `qq` publisher, this script does not push and does not apply read-only materialization.
 
 Both local routes choose `init` when `.last-update.json` is absent and `update` when it exists; `QQ_OPENWIKI_ACTION` can force `auto`, `init`, or `update`. Both refuse dirty or wrong-branch main checkouts and preserve an unchanged run as a no-op.
@@ -83,7 +83,7 @@ This route does **not** use the local execution profile, registry, filesystem mo
 | Missing, empty, malformed, or unavailable registry entry | Fix `config/openwiki-repositories` or the project checkout; dispatch stops before launches complete. |
 | “refresh is already running” | Another same-repository writer holds the non-blocking refresh lock; no action is normally needed. |
 | Dirty or wrong-branch `main` | Preserve the operator change, return to clean configured `main`, then rerun. Nothing is stashed. |
-| Non-generated path, special entry, or executable generated blob | Treat as unsafe generator output; publication is rejected before live mutation. |
+| Non-generated path, special entry, executable generated blob, or symlinked legacy setup ancestor | Treat as unsafe generator/output topology; publication is rejected before the generator can mutate an external target. |
 | Main changed or merge no longer clean | Regenerate from current `main`; do not force the writer commit. |
 | Push failure after merge | Inspect local `main` and upstream before retrying; the local merge may already exist. |
 | One dispatched repository fails | Other started jobs still finish; service exits non-zero after aggregation. |
@@ -102,7 +102,7 @@ node --experimental-strip-types tests/test-delegation.mjs .
 node --experimental-strip-types tests/test-review-flow.mjs .
 ```
 
-The four OpenWiki suites use temporary repositories and fake generators. They cover profile mapping, schedule shape, registry routing and bounded parallelism, no-op/update behavior, path and mode rejection, lock ordering, race preservation, merge conflicts, cleanup, push behavior, and legacy root-file suppression. Delegation/review tests cover read-only materialization and rejection of generated-path proposals. See [practical validation](../testing/validation.md) for prerequisites and live-test boundaries.
+The four OpenWiki suites use temporary repositories and fake generators. They cover profile mapping, schedule shape, registry routing and bounded parallelism, no-op/update behavior, path and mode rejection, lock ordering, race preservation, merge conflicts, cleanup, push behavior, legacy root-file suppression, symlinked setup-ancestor rejection, and containment when a legacy repository tracks an absolute setup-file symlink into live `qq`. Delegation/review tests cover read-only materialization and rejection of generated-path proposals. See [practical validation](../testing/validation.md) for prerequisites and live-test boundaries.
 
 ## Evidence
 

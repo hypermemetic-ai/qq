@@ -7,7 +7,7 @@ tags: [quickstart, architecture, navigation]
 
 # qq OpenWiki quickstart
 
-qq is an operator-controlled Pi and Herdr orchestration runtime. Its main workflow claims a Backlog task, asks the operator to approve a private brief, starts a runner in an isolated Git worktree, performs up to two independent QA looks, and lands only an approved, clean proposal. A machine-local Event Plane provides durable agent messages and run outcomes.
+qq is an operator-controlled Pi and Herdr orchestration runtime. Its main workflow claims a Backlog task, asks the operator to approve a private brief, hands startup to a detached worker, verifies that the runner's private prompt reached its Pi transcript in an isolated Git worktree, performs up to two independent QA looks, and lands only an approved, clean proposal. A machine-local Event Plane provides durable agent messages and run outcomes, including startup failures.
 
 ## Start here
 
@@ -29,7 +29,9 @@ flowchart TD
     Link["Link repository and validate profiles"] --> Architect["Architect selects Backlog task"]
     Architect --> Admit["Admission lock and conflict vet"]
     Admit --> Gate["Operator approves private brief"]
-    Gate --> Runner["Runner works in isolated worktree"]
+    Gate --> Bootstrap["Detached worker starts runner"]
+    Bootstrap --> Proof["Prompt marker appears in Pi transcript"]
+    Proof --> Runner["Runner works in isolated worktree"]
     Runner --> QA["QA look with structured verdict"]
     QA --> Fix{"First look fails"}
     Fix -->|Yes| Runner
@@ -60,7 +62,7 @@ flowchart TD
 | Change intent | Read first | Owning source / symbols | Focused tests | Minimal validation |
 |---|---|---|---|---|
 | Change activation, roles, models, prompts, or dashboard profile API | [Profiles and activation](runtime/profiles-and-activation.md) | `bin/qq-methodology`; `bin/lib/execution-profiles.mjs`; `extensions/execution-profiles.ts`; `bin/qq-profile` | `test-methodology.sh`, `test-execution-profiles.mjs` | `bin/qq-profile list --json` plus owning test |
-| Change task admission, worktree startup, QA, or landing | [Delegation and review](workflow/delegation-and-review.md) | `extensions/board.ts`; `bin/lib/admission.mjs`; `bin/lib/run.mjs`; `bin/lib/review.mjs`; `extensions/review-flow.ts` | `test-delegation.mjs`, `test-brief-gate.mjs`, `test-review-flow.mjs` | Run the narrow owning Node test |
+| Change task admission, detached bootstrap, prompt proof, worktree startup, QA, or landing | [Delegation and review](workflow/delegation-and-review.md) | `extensions/board.ts`; `bin/lib/admission.mjs`; `bin/lib/run.mjs`; `bin/lib/bootstrap.mjs`; `bin/qq-start-worker.mjs`; `bin/lib/review.mjs`; `extensions/review-flow.ts` | `test-delegation.mjs`, `test-brief-gate.mjs`, `test-review-flow.mjs` | Run the narrow owning Node test |
 | Change Event Plane protocol, schema, delivery, replay, or retention | [Event Plane](event-plane/service.md) | `RequestHandler`, `EventPlane.dispatch`, `Store` in `bin/lib/event_plane_service.py`; both clients | `tests/event_plane_test.py` | `tests/test-event-plane.sh` |
 | Change presence or agent message delivery | [Agent messaging](event-plane/agent-messaging.md) | `extensions/agent-messages.ts`; `EventPlaneClient` | agent-message unit and live suites | Unit suite, then `test-agent-messages-live.sh` |
 | Change Herdr layout, activation, approval, staging, or dictation | [Herdr workflows](herdr/operator-workflows.md) | `herdr/config.toml`; `ghostty/config`; `bin/qq-herdr-*`; `extensions/operator-stage.ts`; `plugins/` | operator, brief-gate, q-mode, Herdr downstream/live tests | Run the narrow contract test; live smoke only when installed |
@@ -74,7 +76,7 @@ flowchart TD
 1. **Backlog data is external and CLI-owned.** Do not edit managed Backlog Markdown directly.
 2. **Generated `openwiki/` is automation-owned.** Delegated proposals touching it are rejected; publication alone thaws the live tree.
 3. **Role changes are cross-cutting.** `qq:role-selected` affects messaging, architect tools, review behavior, and fallback status.
-4. **Delivery is not acknowledgement.** Agent messages and run outcomes acknowledge only after the matching Pi transcript receipt is observable.
+4. **Delivery is not acknowledgement.** Agent messages and run outcomes acknowledge only after the matching Pi transcript receipt is observable. Runner startup likewise becomes `running` only after its exact prompt marker is visible in the Pi session JSONL.
 5. **Runner, QA, and landing are separate authorities.** QA may append test-only commits; only the operator-approved land worker merges and pushes.
 6. **Herdr and dashboard implementations are external.** qq owns their adapters, pins, state boundaries, and contract checks—not their full product internals.
 
