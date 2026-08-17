@@ -1,0 +1,16 @@
+{
+  "name": "@hypermemetic-ai/qq",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Presentation-neutral Cordis service over DSH Agents and sessions.",
+  "main": "src/plugin.mjs",
+  "exports": {
+    ".": "./src/plugin.mjs",
+    "./session": "./src/session.mjs"
+  },
+  "files": [
+    "src/",
+    "README.md"
+  ]
+}

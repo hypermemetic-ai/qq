@@ -4,9 +4,9 @@ import { createHash } from "node:crypto";
 import { createServer, request as httpRequest } from "node:http";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { createConsoleHandler } from "../dsh-console/src/http-app.mjs";
-import { createDshSessionBackend } from "../dsh-console/src/session-backend.mjs";
-import { renderMarkdownText, renderMessageText } from "../dsh-console/src/markdown.mjs";
+import { createConsoleHandler } from "../qq-ui/src/http-app.mjs";
+import { createQqService } from "../qq/src/session.mjs";
+import { renderMarkdownText, renderMessageText } from "../qq-ui/src/markdown.mjs";
 
 const root = resolve(process.argv[2] ?? ".");
 const primaryId = "session-63a11000-0000-4000-8000-000000000001";
@@ -138,7 +138,7 @@ const services = {
   },
   loader: { async await() {} },
 };
-const backend = createDshSessionBackend(
+const backend = createQqService(
   { get: (name) => services[name] },
   {
     sessionId: primaryId,
@@ -578,17 +578,22 @@ try {
   assert.match(italicFont.headers["cache-control"], /immutable/);
 
   // Vendored pins and negative architecture constraints are machine checked.
-  const [pins, consoleEvidence, dshPins, plugin, patch, workbench, modelCompat, browser, workerSource, renderSource] = await Promise.all([
-    readFile(join(root, "dsh-console/vendor-pins.json"), "utf8").then(JSON.parse),
+  const [pins, consoleEvidence, dshPins, qqPlugin, uiPlugin, qqSession, qqPkg, uiPkg, consolePkg, patch, workbench, modelCompat, browser, workerSource, renderSource] = await Promise.all([
+    readFile(join(root, "qq-ui/vendor-pins.json"), "utf8").then(JSON.parse),
     readFile(join(root, "dsh-console/evidence.json"), "utf8").then(JSON.parse),
     readFile(join(root, "compat/pi2dsh/pins.json"), "utf8").then(JSON.parse),
-    readFile(join(root, "dsh-console/src/plugin.mjs"), "utf8"),
+    readFile(join(root, "qq/src/plugin.mjs"), "utf8"),
+    readFile(join(root, "qq-ui/src/plugin.mjs"), "utf8"),
+    readFile(join(root, "qq/src/session.mjs"), "utf8"),
+    readFile(join(root, "qq/package.json"), "utf8").then(JSON.parse),
+    readFile(join(root, "qq-ui/package.json"), "utf8").then(JSON.parse),
+    readFile(join(root, "dsh-console/package.json"), "utf8").then(JSON.parse),
     readFile(join(root, "dsh-console/cordis.patch.yml"), "utf8"),
     readFile(join(root, "bin/qq-dsh-workbench"), "utf8"),
     readFile(join(root, "compat/pi2dsh/toolchain/qq-dsh-model-compat.mjs"), "utf8"),
-    readFile(join(root, "dsh-console/assets/browser-v4.js"), "utf8"),
-    readFile(join(root, "dsh-console/assets/sw-v9.js"), "utf8"),
-    readFile(join(root, "dsh-console/src/render.mjs"), "utf8"),
+    readFile(join(root, "qq-ui/assets/browser-v4.js"), "utf8"),
+    readFile(join(root, "qq-ui/assets/sw-v9.js"), "utf8"),
+    readFile(join(root, "qq-ui/src/render.mjs"), "utf8"),
   ]);
   assert.equal(pins.schema, "qq.dsh-console-vendor-pins/v1");
   assert.equal(consoleEvidence.schema, "qq.dsh-console-evidence/v2");
@@ -603,7 +608,7 @@ try {
   assert.equal(consoleEvidence.pwa.network_only.includes("SSE"), true);
   assert.equal(consoleEvidence.cutover_or_runtime_replacement_performed, false);
   for (const artifact of pins.artifacts) {
-    const content = await readFile(join(root, "dsh-console", artifact.file));
+    const content = await readFile(join(root, "qq-ui", artifact.file));
     assert.equal(createHash("sha256").update(content).digest("hex"), artifact.sha256);
     assert.match(artifact.npmIntegrity, /^sha512-/);
   }
@@ -614,11 +619,24 @@ try {
   assert.match(patch, /apiKeyEnv: QWEN_TOKEN_PLAN_API_KEY/);
   assert.match(workbench, /--import.*qq-dsh-model-compat\.mjs/);
   assert.match(modelCompat, /QWEN_TOKEN_PLAN_MODELS\[model\][\s\S]*supportsDeveloperRole: false/);
-  assert.match(plugin, /refusing a non-loopback web server/);
+  assert.equal(qqPkg.name, "@hypermemetic-ai/qq");
+  assert.equal(uiPkg.name, "@hypermemetic-ai/qq-ui");
+  assert.equal(consolePkg.name, "@hypermemetic-ai/qq-dsh-console");
+  assert.equal(uiPkg.dependencies["@hypermemetic-ai/qq"], "file:../qq");
+  assert.equal(qqPkg.dependencies?.["@hypermemetic-ai/qq-ui"], undefined);
+  assert.match(patch, /name: '@hypermemetic-ai\/qq'/);
+  assert.match(patch, /name: '@hypermemetic-ai\/qq-ui'/);
+  assert.match(patch, /inject: \[qq, webServer\]/);
+  assert.match(uiPlugin, /refusing a non-loopback web server/);
+  assert.match(uiPlugin, /inject = \["qq", "webServer"\]/);
+  assert.match(qqPlugin, /provide = "qq"/);
+  assert.match(qqPlugin, /inject = \["agents", "sessions", "sessionPersistence"\]/);
+  assert.doesNotMatch(qqSession, /<!doctype html>|htmx|text\/css|EventSource/);
+  assert.doesNotMatch(uiPlugin, /agents\.create|sessionPersistence|followup|Agent\.cancel/);
   assert.match(workbench, /state_root.*qq\/dsh-workbench/);
   assert.match(workbench, /qq-console\.session/);
-  assert.doesNotMatch(`${plugin}\n${patch}\n${workbench}`, /qq\.patch\.yml|name:.*pi2dsh|plugin.*pi2dsh|auth\.json/);
-  assert.doesNotMatch(`${plugin}\n${patch}`, /name:.*(?:dsh-web-app|api-proxy|client-connection)/);
+  assert.doesNotMatch(`${qqPlugin}\n${uiPlugin}\n${patch}\n${workbench}`, /qq\.patch\.yml|name:.*pi2dsh|plugin.*pi2dsh|auth\.json/);
+  assert.doesNotMatch(`${qqPlugin}\n${uiPlugin}\n${patch}`, /name:.*(?:dsh-web-app|api-proxy|client-connection)/);
   assert.match(browser, /transcript\.scrollTop = transcript\.scrollHeight/);
   assert.match(browser, /input\.style\.height = `\$\{input\.scrollHeight \+ input\.offsetHeight - input\.clientHeight\}px`/);
   assert.doesNotMatch(browser, /localStorage|sessionStorage|indexedDB|document\.cookie|EventSource|WebSocket|htmx\.process/);

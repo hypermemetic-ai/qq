@@ -10,7 +10,7 @@ One active page at a time is an operator convention, not an enforcement protocol
 
 ## DSH authority and controls
 
-The bundle composes `@deepseek-ai/dsh-base@0.1.0-rc.6`, one loopback-only `@deepseek-ai/dsh-host-webserver`, and this plugin. It does not compose stock `dsh-web-app`, the Host API proxy, WebSockets, a client-side router, or a second database.
+The bundle composes `@deepseek-ai/dsh-base@0.1.0-rc.6`, one loopback-only `@deepseek-ai/dsh-host-webserver`, the presentation-neutral [`@hypermemetic-ai/qq`](../qq) service, and the server-rendered [`@hypermemetic-ai/qq-ui`](../qq-ui) plugin in the same DSH/Cordis host process. It does not compose stock `dsh-web-app`, the Host API proxy, WebSockets, a client-side router, a second Node server, or a second database.
 
 DSH owns every authoritative value:
 
@@ -26,7 +26,7 @@ A pinned rc.6 cancellation can become live-idle before its still-open durable tu
 
 ## Stable htmx/SSE lifecycle
 
-Exact local `htmx.org@2.0.10` and the official `htmx-ext-sse@2.2.4` are pinned by npm integrity and file hash in [`vendor-pins.json`](vendor-pins.json); no CDN is used.
+Exact local `htmx.org@2.0.10` and the official `htmx-ext-sse@2.2.4` are pinned by npm integrity and file hash in [`../qq-ui/vendor-pins.json`](../qq-ui/vendor-pins.json); no CDN is used.
 
 The complete page owns two stable nodes:
 
@@ -107,6 +107,7 @@ Use only one page at a time. Never expose the workbench through an all-interface
 
 ```bash
 node tests/test-dsh-console.mjs .
+node tests/test-qq-ui-fiber.mjs .
 tests/test-dsh-console-live.sh
 QWEN_TOKEN_PLAN_API_KEY='...' tests/test-dsh-workbench-real.sh
 ```

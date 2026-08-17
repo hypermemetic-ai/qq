@@ -1,5 +1,6 @@
 # qq-owned HTML console over the DSH base bundle. This is not stock DSH Web:
 # there is no api-proxy, React client roster, WebSocket, or frontend fallback.
+# The bundle composes two same-host plugins: qq (logic) and qq-ui (presentation).
 
 - id: system-prompt
   config:
@@ -46,13 +47,18 @@
         host: 127.0.0.1
         port: !!js Number(process.env.QQ_DSH_CONSOLE_PORT ?? 3082)
 
-    - id: qq-console
-      name: '@hypermemetic-ai/qq-dsh-console'
-      inject: [agents, sessions, sessionPersistence, webServer]
+    - id: qq
+      name: '@hypermemetic-ai/qq'
+      inject: [agents, sessions, sessionPersistence]
       config:
         sessionId: !!js process.env.QQ_DSH_SESSION_ID
         cwd: !!js process.cwd()
-        basePath: /qq
         provider: !!js process.env.QQ_DSH_PROVIDER ?? 'qwen-token-plan'
         model: !!js process.env.QQ_DSH_MODEL ?? 'deepseek-v4-pro-0813'
         reasoningEffort: !!js process.env.QQ_DSH_REASONING_EFFORT
+
+    - id: qq-ui
+      name: '@hypermemetic-ai/qq-ui'
+      inject: [qq, webServer]
+      config:
+        basePath: /qq

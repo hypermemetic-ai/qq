@@ -52,18 +52,29 @@ fi
 
 profile_manifest="$DSH_HOME/profiles/qq-console/package.json"
 console_package="$root/dsh-console"
-if ! node - "$profile_manifest" "$console_package" <<'NODE'
-const [manifestPath, packagePath] = process.argv.slice(2);
+qq_package="$root/qq"
+qq_ui_package="$root/qq-ui"
+if ! node - "$profile_manifest" "$console_package" "$qq_package" "$qq_ui_package" <<'NODE'
+const [manifestPath, consolePath, qqPath, uiPath] = process.argv.slice(2);
 try {
   const manifest = require(manifestPath);
-  const expected = `link:${packagePath}`;
-  process.exit(manifest.dependencies?.["@hypermemetic-ai/qq-dsh-console"] === expected ? 0 : 1);
+  const deps = manifest.dependencies ?? {};
+  const linked = (name, path) => deps[name] === `link:${path}` || deps[name] === `file:${path}`;
+  process.exit(
+    linked("@hypermemetic-ai/qq-dsh-console", consolePath) &&
+    linked("@hypermemetic-ai/qq", qqPath) &&
+    linked("@hypermemetic-ai/qq-ui", uiPath)
+      ? 0
+      : 1,
+  );
 } catch {
   process.exit(1);
 }
 NODE
 then
   printf 'qq-dsh-workbench: preparing persistent DSH profile\n' >&2
+  "$dsh" plugin --profile qq-console add "$qq_package"
+  "$dsh" plugin --profile qq-console add "$qq_ui_package"
   "$dsh" plugin --profile qq-console add "$console_package"
 fi
 node "$root/dsh-console/configure-profile.mjs" "$profile_manifest" >/dev/null

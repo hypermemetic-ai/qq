@@ -86,7 +86,7 @@ export function resolveAsset(name, liveAssets = false) {
 function normalizeBasePath(value) {
   const path = String(value ?? "/qq");
   if (!path.startsWith("/") || path.endsWith("/") || path.includes("?") || path.includes("#")) {
-    throw new Error("qq-dsh-console: basePath must be an absolute path without a trailing slash");
+    throw new Error("qq-ui: basePath must be an absolute path without a trailing slash");
   }
   return path;
 }
@@ -94,7 +94,7 @@ function normalizeBasePath(value) {
 function positiveInteger(value, fallback, name) {
   if (value === undefined) return fallback;
   if (!Number.isSafeInteger(value) || value < 1) {
-    throw new Error(`qq-dsh-console: ${name} must be a positive integer`);
+    throw new Error(`qq-ui: ${name} must be a positive integer`);
   }
   return value;
 }
@@ -174,21 +174,6 @@ function sseEvent(name, data) {
   return `event: ${name}\n${lines.map((line) => `data: ${line}`).join("\n")}\n\n`;
 }
 
-function snapshotFingerprint(snapshot) {
-  const events = Array.isArray(snapshot.events) ? snapshot.events : [];
-  const last = events.at(-1);
-  const sessions = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
-  return JSON.stringify([
-    snapshot.id,
-    snapshot.agentStatus,
-    events.length,
-    last?.seq,
-    last?.type,
-    last?.data?.reason?.kind,
-    sessions.map((session) => [session.id, session.createdAt]),
-  ]);
-}
-
 function errorStatus(error) {
   return Number.isInteger(error?.status) ? error.status : 503;
 }
@@ -197,17 +182,21 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Build one HTTP handler over the DSH-owned session catalog and event logs. */
+function isQqService(backend) {
+  return Boolean(
+    backend &&
+    typeof backend.read === "function" &&
+    typeof backend.list === "function" &&
+    typeof backend.create === "function" &&
+    typeof backend.prompt === "function" &&
+    typeof backend.interrupt === "function",
+  );
+}
+
+/** Build one HTTP handler over the qq session service. */
 export function createConsoleHandler(backend, options = {}) {
-  if (
-    !backend ||
-    typeof backend.read !== "function" ||
-    typeof backend.list !== "function" ||
-    typeof backend.create !== "function" ||
-    typeof backend.prompt !== "function" ||
-    typeof backend.interrupt !== "function"
-  ) {
-    throw new Error("qq-dsh-console: a DSH session backend is required");
+  if (!isQqService(backend)) {
+    throw new Error("qq-ui: a qq session service is required");
   }
   const basePath = normalizeBasePath(options.basePath);
   const ssePollMs = positiveInteger(options.ssePollMs, DEFAULT_SSE_POLL_MS, "ssePollMs");
@@ -225,6 +214,7 @@ export function createConsoleHandler(backend, options = {}) {
     manifest: `${assetsPrefix}manifest-v3.webmanifest`,
     serviceWorker: `${basePath}/sw-v9.js`,
   });
+  const streams = new Set();
 
   async function view(sessionId) {
     const snapshot = await backend.read(sessionId);
@@ -233,6 +223,13 @@ export function createConsoleHandler(backend, options = {}) {
       available.unshift({ id: snapshot.id, createdAt: 0 });
     }
     return { ...snapshot, sessions: available };
+  }
+
+  function watch(sessionId, listener, extra = {}) {
+    if (typeof backend.observe !== "function") {
+      throw new Error("qq-ui: qq service observe() is required");
+    }
+    return backend.observe(sessionId, listener, { intervalMs: ssePollMs, ...extra });
   }
 
   function navigationResponse(req, res, location, head = false) {
@@ -279,11 +276,11 @@ export function createConsoleHandler(backend, options = {}) {
     );
   }
 
-  return async function consoleHandler(req, res) {
+  async function consoleHandler(req, res) {
     const head = req.method === "HEAD";
     let url;
     try {
-      url = new URL(req.url ?? basePath, "http://qq-dsh-console.invalid");
+      url = new URL(req.url ?? basePath, "http://qq-ui.invalid");
     } catch {
       text(res, 400, "Malformed request URL", head);
       return;
@@ -432,40 +429,42 @@ export function createConsoleHandler(backend, options = {}) {
       });
       res.flushHeaders?.();
       let closed = false;
-      let timer;
-      let fingerprint = snapshotFingerprint(snapshot);
-      const initialRender = await loadRender();
-      res.write(sseEvent("session", initialRender.renderSessionContent(snapshot, paths)));
-
+      let keepalive;
+      let stop;
       const close = () => {
+        if (closed) return;
         closed = true;
-        clearTimeout(timer);
+        clearInterval(keepalive);
+        try { stop?.(); } catch {}
+        streams.delete(res);
+        if (!res.writableEnded && !res.destroyed) {
+          try { res.end(); } catch {}
+        }
       };
+      streams.add(res);
       req.once("close", close);
       res.once("close", close);
-
-      const poll = async () => {
-        if (closed || res.destroyed || res.writableEnded) return;
-        try {
-          const next = await view(selected.sessionId);
-          const nextFingerprint = snapshotFingerprint(next);
-          if (nextFingerprint !== fingerprint) {
-            fingerprint = nextFingerprint;
-            const { renderSessionContent } = await loadRender();
-            res.write(sseEvent("session", renderSessionContent(next, paths)));
-          } else {
-            res.write(": keepalive\n\n");
-          }
-        } catch (error) {
-          res.write(sseEvent("console-error", errorMessage(error)));
-          res.end();
+      stop = watch(selected.sessionId, async (error, next) => {
+        if (closed || res.destroyed || res.writableEnded) {
+          close();
           return;
         }
-        timer = setTimeout(poll, ssePollMs);
-        timer.unref?.();
-      };
-      timer = setTimeout(poll, ssePollMs);
-      timer.unref?.();
+        if (error) {
+          res.write(sseEvent("console-error", errorMessage(error)));
+          close();
+          return;
+        }
+        const { renderSessionContent } = await loadRender();
+        res.write(sseEvent("session", renderSessionContent(next, paths)));
+      });
+      keepalive = setInterval(() => {
+        if (closed || res.destroyed || res.writableEnded) {
+          close();
+          return;
+        }
+        res.write(": keepalive\n\n");
+      }, ssePollMs);
+      keepalive.unref?.();
       return;
     }
 
@@ -534,7 +533,15 @@ export function createConsoleHandler(backend, options = {}) {
     }
 
     text(res, 404, "Not found", head);
+  }
+
+  consoleHandler.dispose = () => {
+    for (const stream of [...streams]) {
+      try { stream.destroy(); } catch {}
+    }
+    streams.clear();
   };
+  return consoleHandler;
 }
 
 export const internals = Object.freeze({
@@ -549,6 +556,5 @@ export const internals = Object.freeze({
   resolveAsset,
   routes,
   sameOrigin,
-  snapshotFingerprint,
   sseEvent,
 });

@@ -2,7 +2,8 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { writeFile } from "node:fs/promises";
-import { createConsoleHandler } from "../dsh-console/src/http-app.mjs";
+import { attachObserve } from "../qq/src/session.mjs";
+import { createConsoleHandler } from "../qq-ui/src/http-app.mjs";
 
 const args = process.argv.slice(2).filter((arg) => arg !== "--live");
 const endpointFile = args[0];
@@ -104,7 +105,7 @@ const backend = {
     return true;
   },
 };
-const consoleHandler = createConsoleHandler(backend, { ssePollMs: 30, liveAssets });
+const consoleHandler = createConsoleHandler(attachObserve(backend, { intervalMs: 30 }), { ssePollMs: 30, liveAssets });
 
 const server = createServer((req, res) => {
   if (req.url === "/__proof/state") {
