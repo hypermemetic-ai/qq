@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 const SESSION_ID = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const DEFAULT_OBSERVE_MS = 100;
 
 function freeze(value) {
   if (value && typeof value === "object" && !Object.isFrozen(value)) {
@@ -73,24 +74,98 @@ async function waitForIdle(agent, currentAgent = () => agent) {
   }
 }
 
+/** Compact change token for one catalog + session snapshot. */
+export function snapshotFingerprint(snapshot) {
+  const events = Array.isArray(snapshot?.events) ? snapshot.events : [];
+  const last = events.at(-1);
+  const sessions = Array.isArray(snapshot?.sessions) ? snapshot.sessions : [];
+  return JSON.stringify([
+    snapshot?.id,
+    snapshot?.agentStatus,
+    events.length,
+    last?.seq,
+    last?.type,
+    last?.data?.reason?.kind,
+    sessions.map((session) => [session.id, session.createdAt]),
+  ]);
+}
+
 /**
- * Adapt the configured DSH Agent/Session services to the HTML surface. DSH's
- * registry and persistence remain the only session catalog, transcript, status,
- * and cancellation authorities. The map only deduplicates in-process resume;
- * it contains no browser/client state.
+ * Notify `listener(error, snapshot)` on the first snapshot and later changes.
+ * Returns a disposer. Presentation-neutral: no HTML or transport.
  */
-export function createDshSessionBackend(ctx, config) {
+export function observeSnapshot(load, listener, options = {}) {
+  if (typeof load !== "function" || typeof listener !== "function") {
+    throw new Error("qq: observe requires load and listener functions");
+  }
+  const intervalMs = options.intervalMs ?? DEFAULT_OBSERVE_MS;
+  if (!Number.isSafeInteger(intervalMs) || intervalMs < 1) {
+    throw new Error("qq: observe intervalMs must be a positive integer");
+  }
+  let cancelled = false;
+  let timer;
+  let fingerprint = options.fingerprint;
+  const tick = async () => {
+    if (cancelled) return;
+    try {
+      const snapshot = await load();
+      const next = snapshotFingerprint(snapshot);
+      if (next !== fingerprint) {
+        fingerprint = next;
+        try { listener(null, snapshot); } catch {}
+      }
+    } catch (error) {
+      try { listener(error); } catch {}
+    }
+    if (cancelled) return;
+    timer = setTimeout(tick, intervalMs);
+    timer.unref?.();
+  };
+  void tick();
+  return () => {
+    cancelled = true;
+    clearTimeout(timer);
+  };
+}
+
+/** Add `observe()` over a list/read backend. Used by fixtures and tests. */
+export function attachObserve(backend, options = {}) {
+  if (!backend || typeof backend.read !== "function" || typeof backend.list !== "function") {
+    throw new Error("qq: attachObserve requires list and read");
+  }
+  if (typeof backend.observe === "function") return backend;
+  return Object.freeze({
+    ...backend,
+    observe(sessionId, listener, extra = {}) {
+      return observeSnapshot(async () => {
+        const snapshot = await backend.read(sessionId);
+        const available = await backend.list();
+        if (!available.some((session) => session.id === snapshot.id)) {
+          available.unshift({ id: snapshot.id, createdAt: 0 });
+        }
+        return { ...snapshot, sessions: available };
+      }, listener, { ...options, ...extra });
+    },
+  });
+}
+
+/**
+ * Adapt configured DSH Agent/Session services to a presentation-neutral API.
+ * DSH remains the only session catalog, transcript, status, and cancellation
+ * authority. The map only deduplicates in-process resume.
+ */
+export function createQqService(ctx, config) {
   const defaultSessionId = String(config.sessionId ?? "");
   if (!SESSION_ID.test(defaultSessionId)) {
-    throw new Error("qq-dsh-console: sessionId must be session-<UUID>");
+    throw new Error("qq: sessionId must be session-<UUID>");
   }
   if (typeof config.cwd !== "string" || !config.cwd.startsWith("/")) {
-    throw new Error("qq-dsh-console: cwd must be an absolute path");
+    throw new Error("qq: cwd must be an absolute path");
   }
   const provider = String(config.provider ?? "");
   const model = String(config.model ?? "");
   if (!provider || !model) {
-    throw new Error("qq-dsh-console: provider and model must be selected explicitly");
+    throw new Error("qq: provider and model must be selected explicitly");
   }
   const selectedModel = Object.freeze({
     provider,
@@ -102,7 +177,7 @@ export function createDshSessionBackend(ctx, config) {
   const sessions = ctx.get("sessions");
   const persistence = ctx.get("sessionPersistence");
   if (!agents || !sessions || !persistence) {
-    throw new Error("qq-dsh-console: required DSH services are unavailable");
+    throw new Error("qq: required DSH services are unavailable");
   }
 
   const agentPromises = new Map();
@@ -188,9 +263,28 @@ export function createDshSessionBackend(ctx, config) {
     );
   }
 
+  async function read(sessionId) {
+    const agent = await agentForSession(sessionId);
+    return {
+      id: agent.session.id,
+      events: agent.session.events,
+      agentStatus: agent.status,
+    };
+  }
+
+  async function view(sessionId) {
+    const snapshot = await read(sessionId);
+    const available = await list();
+    if (!available.some((session) => session.id === snapshot.id)) {
+      available.unshift({ id: snapshot.id, createdAt: 0 });
+    }
+    return { ...snapshot, sessions: available };
+  }
+
   return Object.freeze({
     defaultSessionId,
     list,
+    read,
     async create() {
       await ctx.get("loader")?.await();
       const sessionId = `session-${randomUUID()}`;
@@ -205,14 +299,6 @@ export function createDshSessionBackend(ctx, config) {
       // even a brand-new empty session durable before the browser opens it.
       await sessions.flush(handle.agent.session);
       return { id: handle.agent.session.id };
-    },
-    async read(sessionId) {
-      const agent = await agentForSession(sessionId);
-      return {
-        id: agent.session.id,
-        events: agent.session.events,
-        agentStatus: agent.status,
-      };
     },
     async prompt(sessionId, text) {
       const agent = await agentForSession(sessionId);
@@ -230,7 +316,17 @@ export function createDshSessionBackend(ctx, config) {
       }
       return wasRunning;
     },
+    observe(sessionId, listener, options = {}) {
+      return observeSnapshot(() => view(sessionId), listener, options);
+    },
   });
 }
 
-export const internals = Object.freeze({ SESSION_ID, httpError, selectionSetup, userMessage, waitForIdle });
+export const internals = Object.freeze({
+  DEFAULT_OBSERVE_MS,
+  SESSION_ID,
+  httpError,
+  selectionSetup,
+  userMessage,
+  waitForIdle,
+});

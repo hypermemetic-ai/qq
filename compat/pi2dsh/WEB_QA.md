@@ -145,7 +145,7 @@ Reload the selected canonical session URL. The observed controlled page rendered
 
 ## Security/topology checks
 
-- [`cordis.patch.yml`](../../dsh-console/cordis.patch.yml) binds `127.0.0.1`; [`plugin.mjs`](../../dsh-console/src/plugin.mjs) refuses any other host.
+- [`cordis.patch.yml`](../../dsh-console/cordis.patch.yml) binds `127.0.0.1`; [`plugin.mjs`](../../qq-ui/src/plugin.mjs) refuses any other host.
 - Every data/SSE/fragment/mutation response is `no-store`; static immutable caching is restricted to versioned presentation assets.
 - Mutations enforce same-origin request metadata, and all server-rendered data is escaped.
 - Remote laptop/phone use requires separately authenticated loopback forwarding. The plugin adds no authentication and must not be LAN-bound.

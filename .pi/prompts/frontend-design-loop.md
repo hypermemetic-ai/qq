@@ -1,8 +1,8 @@
 ---
-description: Iterate dsh-console HTML/CSS from a live-asset fixture with desktop and phone shots
+description: Iterate qq-ui HTML/CSS from a live-asset fixture with desktop and phone shots
 argument-hint: "[defect]"
 ---
-Freeform runner loop for `dsh-console` presentation. The operator named this defect: ${@:-the operator will name it next}.
+Freeform runner loop for `qq-ui` presentation. The operator named this defect: ${@:-the operator will name it next}.
 
 There is no token file, rubric, or design contract. The design-loop tools do the structural grind. You do the CSS/HTML edits.
 
@@ -26,9 +26,9 @@ Shots land under `$XDG_STATE_HOME/qq/frontend-design-loop/shots/<label>/`.
 
 ## Patch only these
 
-- `dsh-console/src/render.mjs`
-- `dsh-console/assets/console.css`
-- maybe a tiny `dsh-console/assets/browser-*.js`
+- `qq-ui/src/render.mjs`
+- `qq-ui/assets/console.css`
+- maybe a tiny `qq-ui/assets/browser-*.js`
 
 Do not touch SSE owner/target (`#console-stream`, `#session-panel`), PWA cache, DSH APIs, or live host just to make the UI look better. Use the fixture, not live DSH.
 

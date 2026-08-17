@@ -8,7 +8,8 @@ import { pathToFileURL } from "node:url";
 
 const root = process.argv[2];
 const lib = await import(pathToFileURL(join(root, "bin/lib/frontend-design-loop.mjs")));
-const httpApp = await import(pathToFileURL(join(root, "dsh-console/src/http-app.mjs")));
+const httpApp = await import(pathToFileURL(join(root, "qq-ui/src/http-app.mjs")));
+const qqSession = await import(pathToFileURL(join(root, "qq/src/session.mjs")));
 const extension = await import(pathToFileURL(join(root, "extensions/frontend-design-loop.ts")));
 const indexSource = await readFile(join(root, "extensions/index.ts"), "utf8");
 const template = await readFile(join(root, ".pi/prompts/frontend-design-loop.md"), "utf8");
@@ -52,10 +53,11 @@ const backend = {
   async interrupt() { return false; },
 };
 
-const liveServer = createServer(httpApp.createConsoleHandler(backend, { liveAssets: true, ssePollMs: 20 }));
+const observed = qqSession.attachObserve(backend, { intervalMs: 20 });
+const liveServer = createServer(httpApp.createConsoleHandler(observed, { liveAssets: true, ssePollMs: 20 }));
 await new Promise((resolveListen) => liveServer.listen(0, "127.0.0.1", resolveListen));
 const livePort = liveServer.address().port;
-const cssPath = join(root, "dsh-console/assets/console.css");
+const cssPath = join(root, "qq-ui/assets/console.css");
 const originalCss = await readFile(cssPath);
 try {
   const first = await fetch(`http://127.0.0.1:${livePort}/qq/assets/console-v8.css`);
@@ -71,7 +73,7 @@ try {
   await new Promise((resolveClose) => liveServer.close(resolveClose));
 }
 
-const bakedServer = createServer(httpApp.createConsoleHandler(backend, { ssePollMs: 20 }));
+const bakedServer = createServer(httpApp.createConsoleHandler(observed, { ssePollMs: 20 }));
 await new Promise((resolveListen) => bakedServer.listen(0, "127.0.0.1", resolveListen));
 try {
   const baked = await fetch(`http://127.0.0.1:${bakedServer.address().port}/qq/assets/console-v8.css`);
