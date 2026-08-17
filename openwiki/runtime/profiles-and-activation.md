@@ -83,6 +83,14 @@ The directory is owner-controlled mode `0700`; files are written through a synce
 
 Manual Pi model or thinking-level changes are allowed but status becomes `<role>:custom` unless provider, model, and effort exactly match a declared profile. `/profile` emits `qq:role-selected`, updates status, and persists only after model and effort application succeeds.
 
+## DSH per-session ownership
+
+Pi/Herdr keeps the environment and pane behavior above. A canonical DSH parent (`session-<v4 UUID>`) or explicitly claimed continuable child (bare v4 UUID) instead resolves role, profile, and run-state ownership through `createQqSessionContext` in `bin/lib/session-context.mjs`. `extensions/index.ts` creates one boundary and shares it with execution profiles, board tools, and review flow.
+
+Each DSH session record lives at `${XDG_STATE_HOME:-~/.local/state}/qq/session-contexts/<session-id>.json` with schema `qq.session-context/v1` and exact fields `schema`, `sessionId`, `role`, `profile`, and `runState`. The directory must be owner-controlled, non-symlink mode `0700`; files are atomically written as `0600`. `runState` is an absolute path or `null`. Invalid IDs, ownership, modes, keys, roles, profiles, or paths fail closed.
+
+This boundary matters because a DSH host may run an architect parent and runner child in one process. Profiles resolve the active session on each turn; `sketch`, `note`, and `delegate` check that session's role; `done` reads that session's run-state path; review events ignore role-selection events for another active DSH session. A fresh host can restore the same records after continuation, while plain Pi UUIDs remain on the historical environment fallback. See the pinned [DSH compatibility proof](dsh-compatibility.md).
+
 ## Session startup, prompts, and refusal
 
 On `session_start`, `extensions/execution-profiles.ts`:
@@ -131,6 +139,7 @@ The checked-in wrapper contract remains `bin/qq-dashboard [--once]` and `bin/qq-
 ```text
 tests/test-methodology.sh
 node --experimental-strip-types tests/test-execution-profiles.mjs .
+node --experimental-strip-types tests/test-session-context.mjs .
 bin/qq-methodology inspect
 bin/qq-profile list --json
 bin/qq-profile context inspect
@@ -138,4 +147,4 @@ bin/qq-profile context inspect
 tests/test-dashboard.sh
 ```
 
-`test-methodology.sh` covers clone/worktree marker scope, idempotent stores, symlink refusal and retargeting, trust/settings preservation, invalid inspection, and unlink. `test-execution-profiles.mjs` covers exact schemas, migrations, JSON output, private writes, context overrides, startup selection, role prompt replacement, events, pane isolation/restoration, forced-role precedence, and fail-closed input. The full sequential suite is `npm test`; see [practical test routing](../testing/validation.md).
+`test-methodology.sh` covers clone/worktree marker scope, idempotent stores, symlink refusal and retargeting, trust/settings preservation, invalid inspection, and unlink. `test-execution-profiles.mjs` covers exact schemas, migrations, JSON output, private writes, context overrides, startup selection, role prompt replacement, events, pane isolation/restoration, forced-role precedence, and fail-closed input. `test-session-context.mjs` covers Pi fallback, private DSH records, parent/child isolation, continuation, per-turn prompt selection, architect-tool gating, `done` run-state ownership, and symlink-safe extension loading. The full sequential suite is `npm test`; see [practical test routing](../testing/validation.md).

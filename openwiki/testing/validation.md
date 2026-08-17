@@ -17,6 +17,10 @@ Run the narrowest owner while iterating. Use `npm test` only for cross-cutting o
 | qq-relay adapter and consumers | `tests/test-qq-relay.sh` | Fetches qq-relay branch tip, installs privately, deletes source, then tests launcher/client, messaging, delegation, and review |
 | Dashboard adapter and profile contract | `tests/test-dashboard.sh` | Fetches dashboard branch tip, installs privately, deletes source, and runs wrappers without touching operator state |
 | Execution profiles | `node --experimental-strip-types tests/test-execution-profiles.mjs .` | Hermetic mocks and temporary files |
+| Pi/DSH session ownership | `node --experimental-strip-types tests/test-session-context.mjs .` | Private-record security, parent/child isolation, continuation, profiles, board, and review |
+| pi2dsh compatibility drift | `node tests/test-pi2dsh-compat.mjs .` | Fast offline pin, harness, receipt, and source-contract checks |
+| DSH sequential console | `node tests/test-dsh-console.mjs .` | Fast HTTP, SSE, session, rendering, security, and PWA checks |
+| DSH console live | `tests/test-dsh-console-live.sh` | Conditional exact-pinned DSH/Cordis and browser proof; installs isolated toolchain |
 | Safety/context extension | `node --experimental-strip-types tests/test-<extension>.mjs .` | Choose `read`, `continue`, `session-scrub`, `backlog-guard`, or `grok-paraphrase-guard` |
 | Operator stage and brief gate | `node --experimental-strip-types tests/test-operator-stage.mjs .`; `node tests/test-brief-gate.mjs .` | Mocked Herdr contract |
 | q mode | `tests/test-q-mode.sh` | Fetches configured qq-dictation branch tip when landed source is unavailable; checks semantic parser/test evidence and local adapter behavior |
@@ -39,9 +43,9 @@ Herdr and qq-dictation now use the same semantic branch-tip approach instead of 
 
 ## Aggregate order and prerequisites
 
-`npm test` currently runs methodology, qq-relay, dashboard, execution profiles, safety/context extensions, operator stage, brief gate, q mode, Herdr downstream/live, and four OpenWiki suites. Delegation, review-flow, and agent-messaging checks run inside `tests/test-qq-relay.sh` because importing those consumers requires the installed relay client.
+`npm test` currently starts with the fast and live DSH console suites, then runs methodology, qq-relay (including the composed live pi2dsh proof), dashboard, the fast pi2dsh drift check, execution profiles, session context, safety/context extensions, operator stage, brief gate, q mode, Herdr downstream/live, and four OpenWiki suites. Delegation, review-flow, and agent-messaging checks run inside `tests/test-qq-relay.sh` because importing those consumers requires the installed relay client.
 
-Baseline requirements are Bash, Node.js with `--experimental-strip-types`, Python 3, Git, standard Unix tools, writable `$HOME`, and network access for linked-product branch-tip fetches. `test-herdr-live.sh` additionally needs `$HOME/.local/lib/qq/herdr/bin/herdr` or `QQ_HERDR_TEST_BINARY`.
+Baseline requirements are Linux, Bash, Node.js 22.19 or newer with `--experimental-strip-types`, npm, Python 3, Git, standard Unix tools, writable `$HOME`, and network access for linked-product and exact DSH package fetches. `test-herdr-live.sh` additionally needs `$HOME/.local/lib/qq/herdr/bin/herdr` or `QQ_HERDR_TEST_BINARY`.
 
 When a prerequisite is unavailable, run the unaffected focused suites and report the omitted boundary; do not describe that as a passing `npm test`. For an unclear shell assertion, rerun only that suite with `bash -x`.
 
@@ -49,5 +53,6 @@ When a prerequisite is unavailable, run the unaffected focused suites and report
 
 - Linked-product contract suites are consumer integration evidence, not complete qq-relay, dashboard, Herdr, or qq-dictation product test suites.
 - OpenWiki tests use a fake generator and do not validate provider quality, secrets, GitHub PR creation, Mermaid rendering in the installed package, or OKF retrieval quality.
-- Most Pi extension checks use mocks. The relay suite includes live local messaging against a privately installed relay, but it does not cover every interactive Pi lifecycle.
+- Most Pi extension checks use mocks. The relay suite includes live local messaging against a privately installed relay and pinned DSH host, but it does not cover every interactive Pi lifecycle or authorize a DSH production cutover.
+- The DSH console live suite proves an exact isolated host and controlled browser; it does not prove physical devices, authentication, simultaneous clients, or offline DSH operation.
 - Repository skill prose has no focused local suite; see [model-visible skills](../runtime/skills.md).

@@ -12,7 +12,9 @@ qq is an operator-controlled Pi and Herdr orchestration runtime. Its main workfl
 ## Start here
 
 - [System topology and ownership](architecture/overview.md): processes, extension composition, external boundaries, state, and entrypoints.
-- [Repository activation and execution policy](runtime/profiles-and-activation.md): `qq-methodology`, roles, profiles, prompts, context ceilings, and dashboard wrappers.
+- [Repository activation and execution policy](runtime/profiles-and-activation.md): `qq-methodology`, roles, profiles, prompts, context ceilings, pane state, and DSH session ownership.
+- [DSH host compatibility](runtime/dsh-compatibility.md): pinned pi2dsh mounting, relay receipts, native continuable-child evidence, and cutover blockers.
+- [DSH sequential web console](runtime/dsh-console.md): loopback-only server-rendered session control, SSE, PWA limits, and validation.
 - [Delegation and review lifecycle](workflow/delegation-and-review.md): `sketch`, `note`, `delegate`, `done`, QA, proposals, landing, and rollback.
 - [qq-relay integration](event-plane/service.md): installed artifact resolution, consumer boundaries, source relation, and contract validation.
 - [Agent messaging](event-plane/agent-messaging.md): `agent_messages`, `/agent-tasks`, presence, default/immediate delivery, and transcript receipts.
@@ -48,7 +50,8 @@ flowchart TD
 | Surface | Purpose | Canonical page |
 |---|---|---|
 | `qq-methodology link|inspect|unlink` | Repository activation, external Backlog store, Pi settings/trust | [Profiles and activation](runtime/profiles-and-activation.md) |
-| `qq-profile`, `/profile` | Durable defaults and pane-local role/model/effort selection | [Profiles and activation](runtime/profiles-and-activation.md) |
+| `qq-profile`, `/profile` | Durable defaults and pane- or DSH-session-local role/model/effort selection | [Profiles and activation](runtime/profiles-and-activation.md) |
+| `/qq` DSH console | Sequential session navigation, Send, Interrupt, and live transcript snapshots | [DSH console](runtime/dsh-console.md) |
 | `sketch`, `note`, `delegate` | Architect task and delegation tools | [Delegation and review](workflow/delegation-and-review.md) |
 | `done`, isolated `qa_verdict` | Runner submission and structured QA result | [Delegation and review](workflow/delegation-and-review.md) |
 | `agent_messages`, `/agent-tasks` | Session discovery and durable cross-agent delivery | [Agent messaging](event-plane/agent-messaging.md) |
@@ -61,7 +64,9 @@ flowchart TD
 
 | Change intent | Read first | Owning source / symbols | Focused tests | Minimal validation |
 |---|---|---|---|---|
-| Change activation, roles, models, prompts, or dashboard profile API | [Profiles and activation](runtime/profiles-and-activation.md) | `bin/qq-methodology`; `bin/lib/execution-profiles.mjs`; `extensions/execution-profiles.ts`; `bin/qq-profile` | `test-methodology.sh`, `test-execution-profiles.mjs` | `bin/qq-profile list --json` plus owning test |
+| Change activation, roles, models, prompts, pane state, or dashboard profile API | [Profiles and activation](runtime/profiles-and-activation.md) | `bin/qq-methodology`; `bin/lib/execution-profiles.mjs`; `bin/lib/session-context.mjs`; `extensions/execution-profiles.ts`; `bin/qq-profile` | `test-methodology.sh`, `test-execution-profiles.mjs`, `test-session-context.mjs` | Run the narrow owning Node test |
+| Change pi2dsh mounting, DSH session identity, host receipt projection, or native child proof | [DSH compatibility](runtime/dsh-compatibility.md) | `compat/pi2dsh/run.sh`; `verify.mjs`; `run-subagent-proof.sh`; `bin/lib/session-context.mjs` | `test-pi2dsh-compat.mjs`, `test-session-context.mjs` | `node tests/test-pi2dsh-compat.mjs .` |
+| Change DSH console sessions, HTTP/SSE behavior, Send/Interrupt, security, or PWA assets | [DSH console](runtime/dsh-console.md) | `dsh-console/src/plugin.mjs`; `createConsoleHandler`; `createDshSessionBackend`; `renderPage` | `test-dsh-console.mjs`, conditional `test-dsh-console-live.sh` | `node tests/test-dsh-console.mjs .` |
 | Change task admission, detached bootstrap, prompt proof, worktree startup, QA, or landing | [Delegation and review](workflow/delegation-and-review.md) | `extensions/board.ts`; `bin/lib/admission.mjs`; `bin/lib/run.mjs`; `bin/lib/bootstrap.mjs`; `bin/qq-start-worker.mjs`; `bin/lib/review.mjs`; `extensions/review-flow.ts` | `test-delegation.mjs`, `test-brief-gate.mjs`, `test-review-flow.mjs` | Run the narrow owning Node test |
 | Change qq-relay resolution or its consumer boundary | [qq-relay integration](event-plane/service.md) | `bin/qq-relay`; `qqRelayInstallRoot`; `qqRelayClientPath`; `RelayClient` loader | `test-qq-relay.sh`, `test-qq-relay-client.mjs` | `tests/test-qq-relay.sh` |
 | Change presence or agent message delivery | [Agent messaging](event-plane/agent-messaging.md) | `extensions/agent-messages.ts`; `RelayClient`; `statePaths`; `relayAgentId` | agent-message unit and installed-relay contract suites | `tests/test-qq-relay.sh` |
@@ -77,13 +82,13 @@ flowchart TD
 1. **Backlog data is external and CLI-owned.** Do not edit managed Backlog Markdown directly.
 2. **Generated `openwiki/` is automation-owned.** Delegated proposals touching it are rejected; publication alone thaws the live tree.
 3. **Role changes are cross-cutting.** `qq:role-selected` affects messaging, architect tools, review behavior, and fallback status.
-4. **Delivery is not acknowledgement.** Agent messages and run outcomes acknowledge only after the matching Pi transcript receipt is observable. Runner startup likewise becomes `running` only after its exact prompt marker is visible in the Pi session JSONL.
+4. **Delivery is not acknowledgement.** Agent messages and run outcomes acknowledge only after the matching host-managed Pi or DSH entry is observable. Production runner startup likewise becomes `running` only after its exact prompt marker is visible in the Pi session JSONL.
 5. **Runner, QA, and landing are separate authorities.** QA may append test-only commits; only the operator-approved land worker merges and pushes.
 6. **Herdr and dashboard implementations are external.** qq owns their adapters, pins, state boundaries, and contract checks—not their full product internals.
 
 ## Durable state cautions
 
-Important machine-local roots include `~/.config/qq/execution-profiles.json`, `~/.local/state/qq/store/`, `~/.local/state/qq-relay/`, `~/.local/state/qq/agent-messages/`, `~/.local/state/qq/runs/`, `~/.local/state/qq/telemetry/`, and `~/.herdr/worktrees/`. Preserve owner-only permissions, symlink checks, and atomic-write behavior. Do not migrate, delete, or commit these roots as part of an unrelated code change.
+Important machine-local roots include `~/.config/qq/execution-profiles.json`, `~/.local/state/qq/store/`, `~/.local/state/qq/session-contexts/`, `~/.local/state/qq-relay/`, `~/.local/state/qq/agent-messages/`, `~/.local/state/qq/runs/`, `~/.local/state/qq/telemetry/`, and `~/.herdr/worktrees/`. Preserve owner-only permissions, symlink checks, and atomic-write behavior. Do not migrate, delete, or commit these roots as part of an unrelated code change.
 
 ## Backlog
 

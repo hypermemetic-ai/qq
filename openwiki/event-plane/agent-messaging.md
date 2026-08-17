@@ -23,7 +23,7 @@ The tool accepts exactly the documented parameters and returns refusals as text 
 | `send` | Canonical `to`, non-empty `message` up to 65,536 characters, optional `delivery` | Requires an active registered sender. Defaults delivery to `default`; accepts only `default` or `immediate`. Sends one durable qq-relay record and returns its `evt_...` message ID and current status. |
 | `status` | `message_id` | Reads qq-relay status and maps obligations to `queued`, `delivering`, `blocked`, `delivered`, `expired`, or `failed`. Blocked/expired/failed output includes reasons; queued/delivering may include a recipient activity card. |
 
-A destination is only the complete canonical lowercase UUID supplied by Pi and returned by `list`, for example `019ff7ad-2cba-75a9-adc2-c15a0a92d6a9`. `relayAgentId(sessionId)` maps it to `agents/<session-id>`. Project, role, task, and pane must never be concatenated into the address.
+A destination is only the complete canonical host ID returned by `list`: a Pi UUID such as `019ff7ad-2cba-75a9-adc2-c15a0a92d6a9`, or a pinned DSH top-level ID such as `session-4b70f906-ce0a-4135-bc9e-b231db9b98b1`. `relayAgentId(sessionId)` maps it unchanged to `agents/<session-id>`. Project, role, task, and pane must never be concatenated into the address.
 
 ### `/agent-tasks`
 
@@ -121,8 +121,8 @@ sequenceDiagram
         R->>P: abort only when claim is new
         R->>P: wait for idle then sendMessage
     end
-    P->>T: persist custom message receipt
-    R->>T: find event ID and content hash
+    P->>T: persist host-managed message entry
+    R->>T: find matching Pi or DSH projection
     R->>EP: acknowledge full delivery guard
     EP-->>S: status delivered
 ```
@@ -141,7 +141,7 @@ When Pi is busy, immediate mode publishes `agents/agent.immediate-claim` with re
 
 The claim is a coordination fact, not proof of delivery. It prevents repeated interruption across competing/restarted receivers; transcript persistence remains the acknowledgement boundary.
 
-### Persistence receipt and in-process deduplication
+### Durable host receipt and in-process deduplication
 
 The injected custom message details include:
 
@@ -155,9 +155,9 @@ The injected custom message details include:
 }
 ```
 
-Before injection, `receiptExists` scans the active JSONL session file for `type:"custom_message"`, `customType:"qq-agent-message"`, and the same event ID plus content hash. An existing receipt is safe to acknowledge without reinjection.
+Before and after injection, `receiptExists` reads only `ctx.sessionManager.getEntries()`. It accepts either Pi's `custom_message` projection with matching custom type, event ID, and content hash, or DSH's exact single-block user-message projection whose text equals the injected visible content. It does not read a Pi session file and has no fallback path.
 
-After injection, the receiver acknowledges only if that receipt is observable (or the explicit test-only `assumePersisted` seam is enabled). Until then, a process-local set retains `<event-id>:<content-hash>` and calls qq-relay `retry` with `Pi session persistence not yet observable`. Redelivery in the same process sees the marker and retries without a duplicate injection. Once the transcript receipt appears, redelivery acknowledges and removes the marker. Thus “shown to Pi” is not “delivered”; durable transcript persistence is.
+The receiver acknowledges only after that host-managed durable entry is observable. Until then, a process-local set retains `<event-id>:<content-hash>` and calls qq-relay `retry` with `durable session entry not yet observable`. Redelivery in the same process retries without duplicate injection; once the entry appears it acknowledges and removes the marker. Thus “shown to the host” is not “delivered.” This shared receipt boundary is exercised by the [DSH compatibility harness](../runtime/dsh-compatibility.md).
 
 ## State and failure semantics
 
@@ -199,4 +199,4 @@ tests/test-qq-relay.sh
 node --experimental-strip-types tests/test-agent-messages.mjs .
 ```
 
-The unit test verifies canonical addressing, task deduplication, presence expiry/roles/activity, private presence filtering, message schema rejection, and status mapping. The live test proves that a pre-start `qq:role-selected` event seeds architect presence; task/pane and delayed activity appear in discovery; default delivery steers without aborting; immediate delivery aborts once and waits for idle; absent transcript persistence neither acknowledges nor reinjects; writing the matching receipt causes acknowledgement and `delivered`; and shutdown removes both sessions. Configuration precedence and malformed `.pi/agent-messages.json` are enforced in source but do not have dedicated assertions in these focused tests, so validate them directly when changing configuration logic.
+The unit test verifies canonical addressing, task deduplication, presence expiry/roles/activity, private presence filtering, message schema rejection, and status mapping. The live tests prove Pi and `session-<UUID>` DSH activation, exact address preservation, durable-entry receipt ordering, and that a pre-start `qq:role-selected` event seeds architect presence; task/pane and delayed activity appear in discovery; default delivery steers without aborting; immediate delivery aborts once and waits for idle; absent transcript persistence neither acknowledges nor reinjects; writing the matching receipt causes acknowledgement and `delivered`; and shutdown removes both sessions. Configuration precedence and malformed `.pi/agent-messages.json` are enforced in source but do not have dedicated assertions in these focused tests, so validate them directly when changing configuration logic.

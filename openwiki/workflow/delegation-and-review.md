@@ -129,7 +129,7 @@ A pass writes an operator pack containing the normalized QA summary and `git dif
 
 `approve` runs `qq-land-worker.mjs` under `<git-common-dir>/qq-land.lock`. Landing requires a QA-passed proposal, the original named base branch, clean main and delegated worktrees, and no changed `openwiki/` paths. It freezes main OpenWiki output, verifies a clean merge with `merge-tree`, makes a `--no-ff` merge unless already merged, discovers the branch upstream, pushes `HEAD` to it, removes the worktree, deletes the merged branch, then records `landed`. Only afterward is Backlog moved to `Done` (`source`). A failure records `blockedReason` and leaves the board `In Progress`; cleanup is not falsely reported as success.
 
-The land worker emits idempotent `run.landed`; final QA failure emits `run.blocked`. The owning architect receiver validates producer, recipient, schema, and session, persists a custom transcript message, then acknowledges. It retries until transcript persistence is observable and blocks unsupported outcomes (`source`, `receiver`).
+The land worker emits idempotent `run.landed`; final QA failure emits `run.blocked`. Recipients may be canonical Pi UUIDs or pinned DSH `session-<UUID>` identities. The owning architect receiver validates producer, recipient, schema, and session, injects a custom outcome, then acknowledges only when `sessionManager.getEntries()` exposes the matching Pi custom-message or exact DSH user-message projection. It has no session-file fallback, retries without reinjection until the durable entry is observable, and blocks unsupported outcomes. See [DSH compatibility](../runtime/dsh-compatibility.md).
 
 ## State machine
 
