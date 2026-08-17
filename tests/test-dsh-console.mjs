@@ -428,11 +428,13 @@ try {
   ]);
 
   // Installable PWA boundary caches presentation only and leaves data network-only.
-  const manifestResponse = await request("/qq/assets/manifest-v2.webmanifest");
+  const manifestResponse = await request("/qq/assets/manifest-v3.webmanifest");
   assert.equal(manifestResponse.status, 200);
   assert.match(manifestResponse.headers["cache-control"], /no-store/);
   const manifest = JSON.parse(manifestResponse.body);
   assert.equal(manifest.display, "standalone");
+  assert.equal(manifest.name, "qq");
+  assert.equal(manifest.short_name, "qq");
   assert.equal(manifest.id, "/qq/");
   assert.equal(manifest.start_url, "/qq/");
   assert.equal(manifest.scope, "/qq/");

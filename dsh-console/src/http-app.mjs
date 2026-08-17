@@ -203,7 +203,7 @@ export function createConsoleHandler(backend, options = {}) {
     browser: `${assetsPrefix}browser-v3.js`,
     icon192: `${assetsPrefix}icon-v2-192.png`,
     icon512: `${assetsPrefix}icon-v2-512.png`,
-    manifest: `${assetsPrefix}manifest-v2.webmanifest`,
+    manifest: `${assetsPrefix}manifest-v3.webmanifest`,
     serviceWorker: `${basePath}/sw-v7.js`,
   });
 
@@ -298,11 +298,11 @@ export function createConsoleHandler(backend, options = {}) {
         return;
       }
       const name = url.pathname.slice(assetsPrefix.length);
-      if (name === "manifest-v2.webmanifest") {
+      if (name === "manifest-v3.webmanifest") {
         const manifest = JSON.stringify({
           id: `${basePath}/`,
-          name: "qq DSH console",
-          short_name: "qq DSH",
+          name: "qq",
+          short_name: "qq",
           description: "A network-only operator surface for durable DSH sessions.",
           start_url: `${basePath}/`,
           scope: `${basePath}/`,

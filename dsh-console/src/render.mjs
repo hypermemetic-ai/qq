@@ -236,9 +236,11 @@ export function renderPage(snapshot, paths, assetPaths, notice = "") {
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0d1216">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="qq">
+  <meta name="application-name" content="qq">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="htmx-config" content='{"disableInheritance":true,"historyCacheSize":0}'>
-  <title>qq DSH console</title>
+  <title>qq</title>
   <link rel="manifest" href="${escapeHtml(assetPaths.manifest)}">
   <link rel="icon" href="${escapeHtml(assetPaths.icon192)}" sizes="192x192">
   <link rel="apple-touch-icon" href="${escapeHtml(assetPaths.icon192)}">
