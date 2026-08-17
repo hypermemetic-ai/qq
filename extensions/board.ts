@@ -6,6 +6,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { readExecutionPolicy } from "../bin/lib/execution-profiles.mjs";
+import { createQqSessionContext } from "../bin/lib/session-context.mjs";
 import { collectLiveWorktreeDiffs, findExistingBrief, withAdmissionLock } from "../bin/lib/admission.mjs";
 import { awaitBriefGate, discardRun, formatNoteTake, formatTicket, prepareBootstrapRequest, prepareRun } from "../bin/lib/run.mjs";
 
@@ -283,15 +284,15 @@ export default function registerBoard(pi, deps = {}) {
   const env = deps.env ?? process.env;
   const run = deps.exec ?? ((command, args, options) => pi.exec(command, args, options));
   const now = deps.now ?? (() => new Date());
-  let role = env.QQ_AGENT_ROLE || "runner";
-  pi.events.on("qq:role-selected", (selection) => { if (selection?.role) role = selection.role; });
+  const sessionContext = deps.sessionContext ?? createQqSessionContext({ env });
+  pi.events.on("qq:role-selected", (selection) => { sessionContext.observeSelection(selection); });
 
   pi.registerTool({
     name: "sketch", label: "Sketch", promptSnippet: "Create one small board sketch",
     description: "Create a task on this repository's board. Architect sessions only.",
     parameters: { type: "object", additionalProperties: false, required: ["title"], properties: { title: { type: "string", minLength: 1 }, note: { type: "string" } } },
     async execute(_id, params, signal, _update, ctx) {
-      if (role !== "architect") return result("sketch is available only in an architect session.");
+      if (sessionContext.resolve(ctx).role !== "architect") return result("sketch is available only in an architect session.");
       const args = ["task", "create", params.title, "--plain"];
       if (params.note) args.push("--notes", formatNoteTake(params.note, now()));
       const execution = await run(BACKLOG, args, { cwd: ctx.cwd, signal });
@@ -306,7 +307,7 @@ export default function registerBoard(pi, deps = {}) {
     description: "Append implementation notes to an existing task. Architect sessions only.",
     parameters: { type: "object", additionalProperties: false, required: ["id", "text"], properties: { id: { type: "string" }, text: { type: "string", minLength: 1 } } },
     async execute(_id, params, signal, _update, ctx) {
-      if (role !== "architect") return result("note is available only in an architect session.");
+      if (sessionContext.resolve(ctx).role !== "architect") return result("note is available only in an architect session.");
       const execution = await run(BACKLOG, ["task", "edit", params.id, "--append-notes", formatNoteTake(params.text, now()), "--plain"], { cwd: ctx.cwd, signal });
       if (execution?.code !== 0) return result(`note refused: ${commandReason(execution, "Backlog failed")}`);
       return result(`Noted ${params.id}.`, { task_id: params.id });
@@ -318,7 +319,7 @@ export default function registerBoard(pi, deps = {}) {
     description: "Vet one To Do ticket against active work, bounce conflicts in chat, or claim it; then prepare its note, wait for approval or cancellation in an operator-owned Glow pane, and start an isolated messaging-enabled runner if approved. Architect sessions only.",
     parameters: { type: "object", additionalProperties: false, required: ["id"], properties: { id: { type: "string" } } },
     async execute(_id, params, signal, _update, ctx) {
-      if (role !== "architect") return result("delegate is available only in an architect session.");
+      if (sessionContext.resolve(ctx).role !== "architect") return result("delegate is available only in an architect session.");
       let claimedTask;
       let prepared;
       let outboundNote;

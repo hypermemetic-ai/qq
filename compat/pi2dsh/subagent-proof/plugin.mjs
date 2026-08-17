@@ -5,6 +5,8 @@ const LABEL = "qq private bootstrap acceptance";
 const BOOTSTRAP_PROMPT = "qq private child bootstrap prompt";
 const FOLLOWUP_PROMPT = "qq cold-resume child follow-up";
 const PARENT_ANCHOR = "qq durable direct-parent anchor";
+const ARCHITECT_PROFILE = "dsh-architect-proof";
+const RUNNER_PROFILE = "dsh-runner-proof";
 const WAIT_MS = 30_000;
 
 export const name = "qq-dsh-subagent-proof";
@@ -123,7 +125,34 @@ async function waitForColdPersistence(services, expected) {
   }, `timed out waiting for cold durable child ${expected.childId}`);
 }
 
-async function parentForPhase(services, config) {
+function contextProbeSetup(boundary, expected, observed) {
+  return (agentCtx) => {
+    const capture = () => {
+      const resolved = boundary.resolve();
+      assert(resolved.sessionId === expected.sessionId, "active DSH session identity changed");
+      assert(resolved.role === expected.role, "active DSH role changed");
+      assert(resolved.profile === expected.profile, "active DSH profile changed");
+      assert(resolved.runState === expected.runState, "active DSH run state changed");
+      observed.context = resolved;
+    };
+    agentCtx.on("system-prompt/assemble", async (_assembly, _context, next) => {
+      capture();
+      return next();
+    });
+    agentCtx.on("agent/request", async (_payload, next) => {
+      capture();
+      return next();
+    });
+  };
+}
+
+function combinedSetup(...setups) {
+  return (agentCtx) => {
+    for (const setup of setups) setup(agentCtx);
+  };
+}
+
+async function parentForPhase(services, config, contextSetup) {
   const persisted = (await services.persistence.list()).some(
     (header) => header.id === config.parentSessionId,
   );
@@ -140,7 +169,7 @@ async function parentForPhase(services, config) {
   const selection = services.defaultModel.currentSelection();
   const options = {
     agentOptions: { provider: selection.provider, model: selection.model },
-    setup: selectionSetup({ current: selection }),
+    setup: combinedSetup(selectionSetup({ current: selection }), contextSetup),
   };
   const handle = persisted
     ? await services.agents.resume({
@@ -177,6 +206,7 @@ function evidence(config, parentResumed, accepted, cold, extra = {}) {
     durable_parent_session_id: cold.inspection.meta.parentSession,
     durable_child_cwd: cold.inspection.meta.cwd,
     alternate_messaging_layer: false,
+    qq_context_schema: "qq.session-context/v1",
     ...extra,
   };
 }
@@ -196,9 +226,58 @@ async function run(ctx, config, exit) {
   };
   assert(Object.values(services).every(Boolean), "required pinned DSH service is unavailable");
   assert(services.subagents.list().includes("spawn"), "spawn provider is not mounted");
+  assert(typeof config.contextModule === "string" && config.contextModule.startsWith("/"), "qq context module path must be absolute");
+  assert(typeof config.runnerState === "string" && config.runnerState.startsWith("/"), "runner state path must be absolute");
 
-  const parentState = await parentForPhase(services, config);
+  const { createQqSessionContext } = await import(config.contextModule);
+  const boundary = createQqSessionContext({
+    env: process.env,
+    activeDshSession: () => services.agents.currentInitiator()?.session.id,
+  });
+  const expectedParent = {
+    sessionId: config.parentSessionId,
+    role: "architect",
+    profile: ARCHITECT_PROFILE,
+    runState: null,
+  };
+  const parentBefore = boundary.resolveSession(config.parentSessionId);
+  if (config.phase === "start") {
+    assert(parentBefore.source === "pi-environment", "new parent unexpectedly had durable qq context");
+    boundary.claim(config.parentSessionId, expectedParent);
+  } else {
+    assert(parentBefore.source === "dsh-session", "resumed parent lost durable qq context");
+  }
+
+  const parentObserved = {};
+  const childObserved = {};
+  let childContextRestored = false;
+  services.subagents.registerContinuableSetup((childCtx) => {
+    const expectedChild = {
+      sessionId: childCtx.agent.session.id,
+      role: "runner",
+      profile: RUNNER_PROFILE,
+      runState: config.runnerState,
+    };
+    const before = boundary.resolveSession(expectedChild.sessionId);
+    if (config.phase === "start") {
+      assert(before.source === "pi-environment", "new child unexpectedly had durable qq context");
+      boundary.claim(expectedChild.sessionId, expectedChild);
+    } else {
+      assert(before.source === "dsh-session", "cold-resumed child lost durable qq context");
+      childContextRestored = true;
+    }
+    contextProbeSetup(boundary, expectedChild, childObserved)(childCtx);
+    return () => {};
+  });
+
+  const parentState = await parentForPhase(
+    services,
+    config,
+    contextProbeSetup(boundary, expectedParent, parentObserved),
+  );
   const parent = parentState.handle.agent;
+  const activeParentContext = services.agents.withInitiator(parent, () => boundary.resolve());
+  assert(activeParentContext.source === "dsh-session", "active parent did not resolve session-owned qq context");
   let result;
 
   if (config.phase === "start") {
@@ -230,9 +309,17 @@ async function run(ctx, config, exit) {
       messageId: accepted.messageId,
       prompt: BOOTSTRAP_PROMPT,
     });
+    assert(parentObserved.context, "parent request did not resolve qq context");
+    assert(childObserved.context, "child request did not resolve qq context");
     result = evidence(config, parentState.resumed, accepted, cold, {
       prompt_kind: "bootstrap",
       child_was_live_after_acceptance: childWasLiveAfterAcceptance,
+      parent_context: activeParentContext,
+      child_context: childObserved.context,
+      context_isolation: activeParentContext.role !== childObserved.context.role
+        && activeParentContext.profile !== childObserved.context.profile
+        && activeParentContext.runState !== childObserved.context.runState,
+      context_survived_continuation: false,
     });
   } else {
     assert(/^[0-9a-f-]{36}$/i.test(config.childSessionId), "follow-up phase needs the durable child id");
@@ -268,11 +355,19 @@ async function run(ctx, config, exit) {
       messageId,
       prompt: FOLLOWUP_PROMPT,
     });
+    assert(childContextRestored, "child continuation did not restore durable qq context");
+    assert(childObserved.context, "continued child request did not resolve qq context");
     result = evidence(config, parentState.resumed, accepted, cold, {
       prompt_kind: "cold-followup",
       child_was_cold_before_followup: true,
       child_was_live_after_acceptance: childWasLiveAfterAcceptance,
       bootstrap_still_durable: true,
+      parent_context: activeParentContext,
+      child_context: childObserved.context,
+      context_isolation: activeParentContext.role !== childObserved.context.role
+        && activeParentContext.profile !== childObserved.context.profile
+        && activeParentContext.runState !== childObserved.context.runState,
+      context_survived_continuation: true,
     });
   }
 

@@ -1,5 +1,6 @@
 // Fresh qq's global Pi extension entry point.
 import { createReadToolDefinition } from "@mariozechner/pi-coding-agent";
+import { createQqSessionContext } from "../bin/lib/session-context.mjs";
 import registerExecutionProfiles from "./execution-profiles.ts";
 import registerRead from "./read.ts";
 import registerAgentMessages from "./agent-messages.ts";
@@ -28,7 +29,8 @@ async function detectImageMimeType(path) {
 }
 
 export default function registerQQ(pi) {
-  registerExecutionProfiles(pi);
+  const sessionContext = createQqSessionContext();
+  registerExecutionProfiles(pi, { sessionContext });
   registerRead(pi, { createReadToolDefinition, detectImageMimeType });
   registerAgentMessages(pi);
   registerOperatorStage(pi);
@@ -36,6 +38,6 @@ export default function registerQQ(pi) {
   registerSessionScrub(pi);
   registerBacklogGuard(pi);
   registerGrokParaphraseGuard(pi);
-  registerBoard(pi);
-  registerReviewFlow(pi);
+  registerBoard(pi, { sessionContext });
+  registerReviewFlow(pi, { sessionContext });
 }
