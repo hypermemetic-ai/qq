@@ -270,9 +270,11 @@ try {
   assert.match(home.body, /htmx-2\.0\.10\.min\.js/);
   assert.match(home.body, /htmx-ext-sse-2\.2\.4\.js/);
   assert.match(home.body, /rel="manifest"/);
-  assert.match(home.body, /data-service-worker="\/qq\/sw-v4\.js"/);
+  assert.match(home.body, /data-service-worker="\/qq\/sw-v5\.js"/);
   assert.match(home.body, new RegExp(`<option value="${secondaryId}"`));
   assert.match(home.body, /This DSH session has no transcript yet/);
+  assert.match(home.body, /<details class="session-menu">[\s\S]*<summary aria-label="Show session controls">/);
+  assert.doesNotMatch(home.body, /<details class="session-menu" open/);
   assert.match(home.body, /aria-label="Session controls"/);
   assert.match(home.body, /<select id="session-choice"[^>]*>[\s\S]*Current/);
   assert.match(home.body, /aria-label="Start a new durable DSH session"/);
@@ -427,16 +429,19 @@ try {
   assert.equal(manifest.scope, "/qq/");
   assert.deepEqual(manifest.icons.map((icon) => icon.sizes), ["192x192", "512x512"]);
 
-  const worker = await request("/qq/sw-v4.js");
+  const worker = await request("/qq/sw-v5.js");
   assert.equal(worker.status, 200);
   assert.equal(worker.headers["service-worker-allowed"], "/qq/");
   assert.match(worker.body, /request\.method !== "GET"/);
   assert.match(worker.body, /request\.mode === "navigate"/);
-  assert.match(worker.body, /offline-v3\.html/);
+  assert.match(worker.body, /console-v4\.css/);
+  assert.match(worker.body, /offline-v4\.html/);
+  assert.match(worker.body, /self\.skipWaiting\(\)/);
+  assert.match(worker.body, /name\.startsWith\(CACHE_PREFIX\) && name !== CACHE_NAME/);
   assert.doesNotMatch(worker.body, /session\/|\/prompt|\/events|\/interrupt|backgroundsync|indexedDB|localStorage/i);
-  const offline = await request("/qq/assets/offline-v3.html");
+  const offline = await request("/qq/assets/offline-v4.html");
   assert.match(offline.body, /No transcript is cached and no message can be sent offline/);
-  const staticCss = await request("/qq/assets/console-v3.css");
+  const staticCss = await request("/qq/assets/console-v4.css");
   assert.match(staticCss.headers["cache-control"], /immutable/);
 
   // Vendored pins and negative architecture constraints are machine checked.
@@ -449,7 +454,7 @@ try {
     readFile(join(root, "bin/qq-dsh-workbench"), "utf8"),
     readFile(join(root, "compat/pi2dsh/toolchain/qq-dsh-model-compat.mjs"), "utf8"),
     readFile(join(root, "dsh-console/assets/browser-v3.js"), "utf8"),
-    readFile(join(root, "dsh-console/assets/sw-v4.js"), "utf8"),
+    readFile(join(root, "dsh-console/assets/sw-v5.js"), "utf8"),
     readFile(join(root, "dsh-console/src/render.mjs"), "utf8"),
   ]);
   assert.equal(pins.schema, "qq.dsh-console-vendor-pins/v1");

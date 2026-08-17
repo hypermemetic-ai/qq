@@ -19,7 +19,7 @@ const [pkg, pins, toolchain, toolchainLock, evidence, webEvidence, webQa, consol
   json("dsh-console/evidence.json"),
   read("dsh-console/README.md"),
   read("dsh-console/src/render.mjs"),
-  read("dsh-console/assets/sw-v4.js"),
+  read("dsh-console/assets/sw-v5.js"),
   read("compat/pi2dsh/run.sh"),
   read("compat/pi2dsh/qq.patch.yml"),
   read("compat/pi2dsh/relay-probe.mjs"),
@@ -225,7 +225,7 @@ assert.equal(consoleEvidence.pwa.offline_post_rejected, true);
 assert.match(webQa, /stable nodes/);
 assert.match(webQa, /newly inserted button/);
 assert.match(webQa, /official[- ]extension/);
-assert.match(webQa, /390×844/);
+assert.match(webQa, /412×915/);
 assert.match(webQa, /No transcript is cached and no message can be sent offline/);
 assert.match(consoleReadme, /One active page at a time is an operator convention/);
 assert.match(consoleReadme, /Agent\.cancel\(\{ kind: "user" \}\)/);

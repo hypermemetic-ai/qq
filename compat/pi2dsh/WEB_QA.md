@@ -83,33 +83,38 @@ curl -fsS "$origin/__proof/state"
 
 reports `connects: 2` and one current stream. The observed browser received another complete `session` event after reconnect (`messages: 5`). There is no custom `EventSource` or reconnect implementation in qq's browser script.
 
-### Session selection and narrow layout
+### Session selection and Pixel 10-sized layout
 
-1. Select the option ending in `000000000022` and activate **Open**.
+1. Activate **Sessions**, then select the option ending in `000000000022` and activate **Open**.
 2. Confirm the canonical URL and heading code use that exact id, its empty transcript does not contain the first session's prompt, and its option is selected.
 3. Activate **New session** and confirm a fresh canonical `session-<UUID>` URL opens with an empty transcript and appears in the selector.
-4. Set the viewport to exactly **390×844**.
-5. Confirm the page exposes the session selector, Open, New session, status, transcript, and the inline composer controls without horizontal document overflow.
+4. Set the viewport to the Pixel 10-sized **412×915**.
+5. Confirm only one top bar is visible by default, the session selector/Open/New session controls are hidden until **Sessions** is activated, and the disclosed controls plus inline composer have no horizontal document overflow.
+6. Reduce the viewport to **412×520** to represent keyboard-reduced height and confirm the panel and composer still end at the viewport bottom.
 
 Outcome checks:
 
 ```js
 ({
-  viewport: [innerWidth, innerHeight],                  // [390, 844]
+  viewport: [innerWidth, innerHeight],                  // [412, 915]
   horizontalOverflow:
     document.documentElement.scrollWidth > innerWidth,  // false
   panelFits:
     document.querySelector('#session-panel').getBoundingClientRect().width === innerWidth, // true
-  sessionControlsVisible:
-    [...document.querySelectorAll('#session-choice, .session-controls button')]
-      .every((control) => control.getClientRects().length > 0), // true
+  oneDefaultTopBar:
+    getComputedStyle(document.querySelector('.site-header')).display === 'none' &&
+      !document.querySelector('.session-menu').open, // true
+  sessionControlsVisibleAfterTap:
+    document.querySelector('.session-menu').open &&
+      [...document.querySelectorAll('#session-choice, .session-controls button')]
+        .every((control) => control.getClientRects().length > 0), // true
   sendIsInline:
     Math.abs(document.querySelector('#prompt').getBoundingClientRect().bottom -
       document.querySelector('#composer-submit').getBoundingClientRect().bottom) < 1, // true
 })
 ```
 
-This is a real responsive browser viewport, not a physical-phone, touch, soft-keyboard, or IME claim.
+The observed 412×915 document and panel were exactly 412px wide with no overflow; the composer ended at y=915. At 412×520, only the consolidated heading bar remained above the transcript and the composer ended at y=520. This is a real responsive browser viewport, not a physical-phone, touch, soft-keyboard, or IME claim.
 
 ## Installability and offline fail-closed behavior
 
@@ -118,14 +123,16 @@ Wait for `navigator.serviceWorker.ready`. Confirm the manifest has `display: "st
 ```text
 /qq/assets/htmx-2.0.10.min.js
 /qq/assets/htmx-ext-sse-2.2.4.js
-/qq/assets/console-v3.css
+/qq/assets/console-v4.css
 /qq/assets/browser-v3.js
 /qq/assets/icon-v1-192.png
 /qq/assets/icon-v1-512.png
-/qq/assets/offline-v3.html
+/qq/assets/offline-v4.html
 ```
 
 No manifest, service worker, page, transcript, fragment, SSE URL, or mutation URL is cached.
+
+For the existing-cache upgrade, the accepted surface first controlled a canonical page with `sw-v4.js`, `console-v3.css`, and cache `qq-dsh-console-static-v4`. The server was then replaced at the same origin and the existing **Open** session action performed an ordinary navigation without a manual reload or hard refresh. That navigation immediately rendered `console-v4.css` and the one-bar phone chrome even while the old worker controlled the request. The new worker's install-time `skipWaiting()` then activated `sw-v5.js`, claimed the page, removed the v4 cache, and left only `qq-dsh-console-static-v5`.
 
 Stop the fixture while leaving the controlled page open:
 
