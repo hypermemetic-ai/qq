@@ -45,8 +45,8 @@ All event content, session metadata, notices, and status text are HTML-escaped. 
 
 The manifest, standalone display metadata, 192/512 icons, and versioned service worker establish the smallest install boundary. They do **not** make DSH offline:
 
-- the cache allowlist contains exact versioned htmx/SSE/CSS/font/browser/icon assets and `offline-v5.html` only;
-- navigations always try the network and fall back only to the disconnected shell;
+- the cache allowlist contains exact versioned htmx/SSE/CSS/font/browser/icon assets, `reconnect-v1.js`, and `offline-v6.html` only;
+- navigations retry the live host briefly, then fall back only to the disconnected shell, which probes again when the network returns;
 - session documents, fragments, SSE, the manifest, service worker, and every mutation remain network-only;
 - non-GET requests are not intercepted;
 - there is no cached transcript, offline send/queue, background sync, push, IndexedDB, local storage, or session storage.

@@ -29,8 +29,7 @@ html { height: 100%; }
 body {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  height: 100vh;
-  height: 100dvh;
+  height: 100%;
   margin: 0;
   overflow: hidden;
   background:
@@ -476,8 +475,14 @@ body > footer {
 .offline-message a { color: #72d7c0; }
 
 @media (max-width: 42rem) {
+  html, body {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
   body { grid-template-rows: minmax(0, 1fr); }
-  main { width: 100%; }
+  main { width: 100%; min-height: 0; }
   .site-header, body > footer { display: none; }
   .session-panel { border: 0; border-radius: 0; }
   .session-heading {
@@ -532,7 +537,7 @@ body > footer {
   .message time { display: none; }
   .message-text { line-height: 1.45; }
   .composer {
-    padding: .45rem max(.65rem, env(safe-area-inset-right)) env(safe-area-inset-bottom, 0px) max(.65rem, env(safe-area-inset-left));
+    padding: .45rem max(.65rem, env(safe-area-inset-right)) max(.45rem, env(safe-area-inset-bottom)) max(.65rem, env(safe-area-inset-left));
   }
   .composer label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .composer-row { gap: .5rem; }

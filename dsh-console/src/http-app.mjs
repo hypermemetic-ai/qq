@@ -23,7 +23,7 @@ const bundledAssets = Object.freeze({
     type: "text/javascript; charset=utf-8",
     body: readFileSync(new URL("vendor/htmx-ext-sse-2.2.4.js", root)),
   },
-  "console-v5.css": {
+  "console-v6.css": {
     type: "text/css; charset=utf-8",
     body: readFileSync(new URL("assets/console.css", root)),
   },
@@ -39,25 +39,29 @@ const bundledAssets = Object.freeze({
     type: "text/javascript; charset=utf-8",
     body: readFileSync(new URL("assets/browser-v3.js", root)),
   },
+  "reconnect-v1.js": {
+    type: "text/javascript; charset=utf-8",
+    body: readFileSync(new URL("assets/reconnect-v1.js", root)),
+  },
   "icon-v1.svg": {
     type: "image/svg+xml",
     body: readFileSync(new URL("assets/icon-v1.svg", root)),
   },
-  "icon-v1-192.png": {
+  "icon-v2-192.png": {
     type: "image/png",
-    body: readFileSync(new URL("assets/icon-v1-192.png", root)),
+    body: readFileSync(new URL("assets/icon-v2-192.png", root)),
   },
-  "icon-v1-512.png": {
+  "icon-v2-512.png": {
     type: "image/png",
-    body: readFileSync(new URL("assets/icon-v1-512.png", root)),
+    body: readFileSync(new URL("assets/icon-v2-512.png", root)),
   },
-  "offline-v5.html": {
+  "offline-v6.html": {
     type: "text/html; charset=utf-8",
-    body: readFileSync(new URL("assets/offline-v5.html", root)),
+    body: readFileSync(new URL("assets/offline-v6.html", root)),
   },
-  "sw-v6.js": {
+  "sw-v7.js": {
     type: "text/javascript; charset=utf-8",
-    body: readFileSync(new URL("assets/sw-v6.js", root)),
+    body: readFileSync(new URL("assets/sw-v7.js", root)),
   },
 });
 
@@ -195,12 +199,12 @@ export function createConsoleHandler(backend, options = {}) {
   const assetPaths = Object.freeze({
     htmx: `${assetsPrefix}htmx-2.0.10.min.js`,
     sse: `${assetsPrefix}htmx-ext-sse-2.2.4.js`,
-    css: `${assetsPrefix}console-v5.css`,
+    css: `${assetsPrefix}console-v6.css`,
     browser: `${assetsPrefix}browser-v3.js`,
-    icon192: `${assetsPrefix}icon-v1-192.png`,
-    icon512: `${assetsPrefix}icon-v1-512.png`,
-    manifest: `${assetsPrefix}manifest-v1.webmanifest`,
-    serviceWorker: `${basePath}/sw-v6.js`,
+    icon192: `${assetsPrefix}icon-v2-192.png`,
+    icon512: `${assetsPrefix}icon-v2-512.png`,
+    manifest: `${assetsPrefix}manifest-v2.webmanifest`,
+    serviceWorker: `${basePath}/sw-v7.js`,
   });
 
   async function view(sessionId) {
@@ -273,7 +277,7 @@ export function createConsoleHandler(backend, options = {}) {
         write(res, 405, { Allow: "GET, HEAD", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
         return;
       }
-      const asset = bundledAssets["sw-v6.js"];
+      const asset = bundledAssets["sw-v7.js"];
       write(
         res,
         200,
@@ -294,7 +298,7 @@ export function createConsoleHandler(backend, options = {}) {
         return;
       }
       const name = url.pathname.slice(assetsPrefix.length);
-      if (name === "manifest-v1.webmanifest") {
+      if (name === "manifest-v2.webmanifest") {
         const manifest = JSON.stringify({
           id: `${basePath}/`,
           name: "qq DSH console",
@@ -306,15 +310,15 @@ export function createConsoleHandler(backend, options = {}) {
           background_color: "#090c10",
           theme_color: "#0d1216",
           icons: [
-            { src: assetPaths.icon192, sizes: "192x192", type: "image/png", purpose: "any maskable" },
-            { src: assetPaths.icon512, sizes: "512x512", type: "image/png", purpose: "any maskable" },
+            { src: assetPaths.icon192, sizes: "192x192", type: "image/png", purpose: "any" },
+            { src: assetPaths.icon512, sizes: "512x512", type: "image/png", purpose: "any" },
           ],
         });
         write(res, 200, { "Content-Type": "application/manifest+json; charset=utf-8" }, manifest, head);
         return;
       }
       const asset = bundledAssets[name];
-      if (!asset || name.includes("/") || name === "sw-v6.js") {
+      if (!asset || name.includes("/") || name === "sw-v7.js") {
         text(res, 404, "Not found", head);
         return;
       }
