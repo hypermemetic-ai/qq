@@ -466,7 +466,7 @@ try {
   assert.match(staticCss.body, /geist-latin-wght-normal-5\.3\.0\.woff2/);
   assert.match(staticCss.body, /geist-latin-wght-italic-5\.3\.0\.woff2/);
   assert.match(staticCss.body, /\.message \{\s*width: 100%;/);
-  assert.match(staticCss.body, /\.composer textarea \{[\s\S]*overflow-y: auto;[\s\S]*resize: none;/);
+  assert.match(staticCss.body, /\.composer textarea \{[\s\S]*max-height: 12rem;[\s\S]*overflow-y: auto;[\s\S]*resize: none;/);
   assert.doesNotMatch(staticCss.body, /align-self:\s*flex-end/);
   assert.doesNotMatch(staticCss.body, /min\(88%/);
   const normalFont = await request("/qq/assets/geist-latin-wght-normal-5.3.0.woff2");
