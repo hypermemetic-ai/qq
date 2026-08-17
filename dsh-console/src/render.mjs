@@ -1,17 +1,12 @@
-export function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
+import { escapeHtml, renderMarkdownText, renderMessageText } from "./markdown.mjs";
+
+export { escapeHtml };
 
 function safeType(value) {
   return typeof value === "string" ? value : "unknown";
 }
 
-function contentBlocks(blocks) {
+function contentBlocks(blocks, { markdown = false } = {}) {
   if (!Array.isArray(blocks) || blocks.length === 0) {
     return '<p class="empty-content">No displayable content</p>';
   }
@@ -22,9 +17,9 @@ function contentBlocks(blocks) {
       }
       switch (block.type) {
         case "text":
-          return `<div class="message-text">${escapeHtml(block.text ?? "")}</div>`;
+          return markdown ? renderMarkdownText(block.text ?? "") : renderMessageText(block.text ?? "");
         case "reasoning":
-          return `<details class="reasoning"><summary>Reasoning</summary><div class="message-text">${escapeHtml(block.text ?? "")}</div></details>`;
+          return `<details class="reasoning"><summary>Reasoning</summary>${renderMessageText(block.text ?? "")}</details>`;
         case "tool-call":
           return `<details class="tool"><summary>Tool: ${escapeHtml(block.name ?? "unknown")}</summary><pre>${escapeHtml(block.arguments ?? "")}</pre></details>`;
         case "tool-result":
@@ -73,7 +68,7 @@ function eventMessage(event) {
   if (event.type === "assistant/message") {
     const accessibleLabel = time ? `Assistant message at ${time}` : "Assistant message";
     return `<article class="message message-assistant" data-seq="${escapeHtml(event.seq)}" aria-label="${escapeHtml(accessibleLabel)}">
-      ${contentBlocks(event.data?.message?.content)}
+      ${contentBlocks(event.data?.message?.content, { markdown: true })}
     </article>`;
   }
   if (event.type === "tool/result") {

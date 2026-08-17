@@ -6,6 +6,7 @@ import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createConsoleHandler } from "../dsh-console/src/http-app.mjs";
 import { createDshSessionBackend } from "../dsh-console/src/session-backend.mjs";
+import { renderMarkdownText, renderMessageText } from "../dsh-console/src/markdown.mjs";
 
 const root = resolve(process.argv[2] ?? ".");
 const primaryId = "session-63a11000-0000-4000-8000-000000000001";
@@ -257,6 +258,68 @@ function openSse(sessionId) {
   });
 }
 
+{
+  const literal = renderMessageText("# line1\n`line2`");
+  assert.match(literal, /class="message-text"/);
+  assert.doesNotMatch(literal, /message-markdown|<h1>|<code>/);
+  assert.match(literal, /# line1\n`line2`/);
+
+  const markdown = renderMarkdownText([
+    "**Working directory**",
+    "",
+    "Paragraph with *emphasis*, ~~deleted~~, `inline`, and [safe](https://example.com).",
+    "",
+    "<script>alert(1)</script>",
+    "",
+    "[script](javascript:alert(1)) [relative](/settings) [mail](mailto:dev@example.com)",
+    "",
+    "![diagram](https://example.com/secure.png)",
+    "",
+    "```js",
+    "const answer = 42",
+    "```",
+  ].join("\n"));
+  assert.match(markdown, /class="message-text message-markdown"/);
+  assert.match(markdown, /<strong>Working directory<\/strong>/);
+  assert.match(markdown, /<em>emphasis<\/em>/);
+  assert.match(markdown, /<del>deleted<\/del>/);
+  assert.match(markdown, /<code>inline<\/code>/);
+  assert.match(markdown, /<a href="https:\/\/example.com" target="_blank" rel="noopener noreferrer">safe<\/a>/);
+  assert.match(markdown, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.doesNotMatch(markdown, /<script>/);
+  assert.match(markdown, /<p>script relative <a href="mailto:dev@example.com">mail<\/a><\/p>/);
+  assert.doesNotMatch(markdown, /javascript:alert|<img |href="\/settings"/);
+  assert.match(markdown, /<p>diagram<\/p>/);
+  assert.match(markdown, /<pre><code class="language-js">const answer = 42<\/code><\/pre>/);
+
+  const started = Date.now();
+  const emptyHeading = renderMarkdownText("# ");
+  assert.ok(Date.now() - started < 250);
+  assert.match(emptyHeading, /<p># <\/p>/);
+  assert.doesNotMatch(emptyHeading, /<h1>/);
+  for (const line of ["## ", "#\t", "   # "]) {
+    const html = renderMarkdownText(line);
+    assert.match(html, /<p>/);
+    assert.doesNotMatch(html, /<h[1-6]>/);
+  }
+
+  const blocks = renderMarkdownText([
+    "# Heading",
+    "",
+    "> quoted *text*",
+    "",
+    "- bullet",
+    "1. numbered",
+    "",
+    "---",
+  ].join("\n"));
+  assert.match(blocks, /<h1>Heading<\/h1>/);
+  assert.match(blocks, /<blockquote><p>quoted <em>text<\/em><\/p><\/blockquote>/);
+  assert.match(blocks, /<ul><li>bullet<\/li><\/ul>/);
+  assert.match(blocks, /<ol><li>numbered<\/li><\/ol>/);
+  assert.match(blocks, /<hr>/);
+}
+
 const streams = [];
 try {
   // Stable htmx/SSE lifecycle: the owner and target wrap inner-only fragments.
@@ -275,9 +338,9 @@ try {
   assert.match(home.body, /htmx-2\.0\.10\.min\.js/);
   assert.match(home.body, /htmx-ext-sse-2\.2\.4\.js/);
   assert.match(home.body, /rel="manifest"/);
-  assert.match(home.body, /console-v7\.css/);
+  assert.match(home.body, /console-v8\.css/);
   assert.match(home.body, /browser-v4\.js/);
-  assert.match(home.body, /data-service-worker="\/qq\/sw-v8\.js"/);
+  assert.match(home.body, /data-service-worker="\/qq\/sw-v9\.js"/);
   assert.match(home.body, new RegExp(`<option value="${secondaryId}"`));
   assert.match(home.body, /This DSH session has no transcript yet/);
   assert.match(home.body, /<details class="session-menu">[\s\S]*<summary aria-label="Show session controls">/);
@@ -306,7 +369,9 @@ try {
   assert.match(completed, /home handoff &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.doesNotMatch(completed, /<script>alert\(1\)<\/script>/);
   assert.match(completed, /class="message message-user"[^>]*aria-label="Your message at /);
+  assert.match(completed, /<article class="message message-user"[^>]*>\s*<div class="message-text">home handoff/);
   assert.match(completed, /class="message message-assistant"[^>]*aria-label="Assistant message at /);
+  assert.match(completed, /<article class="message message-assistant"[^>]*>\s*<div class="message-text message-markdown">/);
   assert.doesNotMatch(completed, /<header>/);
   assert.match(completed, /<form id="composer"/);
   const firstPost = await firstPostPromise;
@@ -411,6 +476,40 @@ try {
   assert.match(compactFailure.body, /<code>INVALID_REQUEST<\/code>/);
   assert.doesNotMatch(compactFailure.body, /provider secret|&lt;unsafe&gt;/);
 
+  append(states.get(primaryId), "user/message", {
+    id: "user-markdown-literal",
+    role: "user",
+    source: { kind: "user" },
+    content: [{ type: "text", text: "**Working directory** <b>raw</b>" }],
+  }, "append");
+  append(states.get(primaryId), "assistant/message", {
+    turn: states.get(primaryId).turn,
+    step: 2,
+    message: {
+      id: "assistant-markdown-safe",
+      role: "assistant",
+      source: { kind: "model", provider: "local", model: "proof" },
+      content: [{
+        type: "text",
+        text: [
+          "**Working directory**",
+          "",
+          "See [docs](https://example.com) and [bad](javascript:alert(1)).",
+          "",
+          "<img src=x onerror=alert(1)>",
+        ].join("\n"),
+      }],
+    },
+  }, "append");
+  const markdownPage = await request(`/qq/session/${primaryId}`);
+  assert.match(markdownPage.body, /<article class="message message-user"[^>]*>\s*<div class="message-text">\*\*Working directory\*\* &lt;b&gt;raw&lt;\/b&gt;<\/div>/);
+  assert.match(markdownPage.body, /<article class="message message-assistant"[^>]*>\s*<div class="message-text message-markdown">/);
+  assert.match(markdownPage.body, /<strong>Working directory<\/strong>/);
+  assert.match(markdownPage.body, /<a href="https:\/\/example.com" target="_blank" rel="noopener noreferrer">docs<\/a>/);
+  assert.match(markdownPage.body, /See <a href="https:\/\/example.com" target="_blank" rel="noopener noreferrer">docs<\/a> and bad\./);
+  assert.match(markdownPage.body, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.doesNotMatch(markdownPage.body, /<img src=x|<script>|javascript:alert/);
+
   assert.equal(resumes, 2, "each selected persisted DSH session resumes once");
   assert.equal(creates, 1, "only the explicit New session action creates an identity");
   assert.ok(flushes >= 7, "creation, accepted prompts, and interruption cross DSH flush boundaries");
@@ -441,31 +540,33 @@ try {
   assert.equal(manifest.scope, "/qq/");
   assert.deepEqual(manifest.icons.map((icon) => icon.sizes), ["192x192", "512x512"]);
 
-  const worker = await request("/qq/sw-v8.js");
+  const worker = await request("/qq/sw-v9.js");
   assert.equal(worker.status, 200);
   assert.equal(worker.headers["service-worker-allowed"], "/qq/");
   assert.match(worker.body, /request\.method !== "GET"/);
   assert.match(worker.body, /request\.mode === "navigate"/);
-  assert.match(worker.body, /console-v7\.css/);
+  assert.match(worker.body, /console-v8\.css/);
   assert.match(worker.body, /browser-v4\.js/);
   assert.match(worker.body, /reconnect-v1\.js/);
   assert.match(worker.body, /geist-latin-wght-normal-5\.3\.0\.woff2/);
   assert.match(worker.body, /geist-latin-wght-italic-5\.3\.0\.woff2/);
-  assert.match(worker.body, /offline-v7\.html/);
+  assert.match(worker.body, /offline-v8\.html/);
   assert.match(worker.body, /self\.skipWaiting\(\)/);
   assert.match(worker.body, /name\.startsWith\(CACHE_PREFIX\) && name !== CACHE_NAME/);
   assert.doesNotMatch(worker.body, /session\/|\/prompt|\/events|\/interrupt|backgroundsync|indexedDB|localStorage/i);
-  const offline = await request("/qq/assets/offline-v7.html");
+  const offline = await request("/qq/assets/offline-v8.html");
   assert.match(offline.body, /No transcript is cached and no message can be sent offline/);
-  assert.match(offline.body, /console-v7\.css/);
+  assert.match(offline.body, /console-v8\.css/);
   assert.match(offline.body, /reconnect-v1\.js/);
-  const staticCss = await request("/qq/assets/console-v7.css");
+  const staticCss = await request("/qq/assets/console-v8.css");
   assert.match(staticCss.headers["cache-control"], /immutable/);
   assert.match(staticCss.body, /@font-face/);
   assert.match(staticCss.body, /font-family: "Geist UI"/);
   assert.match(staticCss.body, /geist-latin-wght-normal-5\.3\.0\.woff2/);
   assert.match(staticCss.body, /geist-latin-wght-italic-5\.3\.0\.woff2/);
   assert.match(staticCss.body, /\.message \{\s*width: 100%;/);
+  assert.match(staticCss.body, /\.message-markdown/);
+  assert.match(staticCss.body, /\.message-markdown a \{/);
   assert.match(staticCss.body, /\.composer textarea \{[\s\S]*max-height: 12rem;[\s\S]*overflow-y: auto;[\s\S]*resize: none;/);
   assert.doesNotMatch(staticCss.body, /align-self:\s*flex-end/);
   assert.doesNotMatch(staticCss.body, /min\(88%/);
@@ -486,7 +587,7 @@ try {
     readFile(join(root, "bin/qq-dsh-workbench"), "utf8"),
     readFile(join(root, "compat/pi2dsh/toolchain/qq-dsh-model-compat.mjs"), "utf8"),
     readFile(join(root, "dsh-console/assets/browser-v4.js"), "utf8"),
-    readFile(join(root, "dsh-console/assets/sw-v8.js"), "utf8"),
+    readFile(join(root, "dsh-console/assets/sw-v9.js"), "utf8"),
     readFile(join(root, "dsh-console/src/render.mjs"), "utf8"),
   ]);
   assert.equal(pins.schema, "qq.dsh-console-vendor-pins/v1");

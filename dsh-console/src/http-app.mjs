@@ -23,7 +23,7 @@ const bundledAssets = Object.freeze({
     type: "text/javascript; charset=utf-8",
     body: readFileSync(new URL("vendor/htmx-ext-sse-2.2.4.js", root)),
   },
-  "console-v7.css": {
+  "console-v8.css": {
     type: "text/css; charset=utf-8",
     body: readFileSync(new URL("assets/console.css", root)),
   },
@@ -55,18 +55,18 @@ const bundledAssets = Object.freeze({
     type: "image/png",
     body: readFileSync(new URL("assets/icon-v2-512.png", root)),
   },
-  "offline-v7.html": {
+  "offline-v8.html": {
     type: "text/html; charset=utf-8",
-    body: readFileSync(new URL("assets/offline-v7.html", root)),
+    body: readFileSync(new URL("assets/offline-v8.html", root)),
   },
-  "sw-v8.js": {
+  "sw-v9.js": {
     type: "text/javascript; charset=utf-8",
-    body: readFileSync(new URL("assets/sw-v8.js", root)),
+    body: readFileSync(new URL("assets/sw-v9.js", root)),
   },
 });
 
 const LIVE_ASSET_FILES = Object.freeze({
-  "console-v7.css": "assets/console.css",
+  "console-v8.css": "assets/console.css",
   "browser-v4.js": "assets/browser-v4.js",
 });
 const RENDER_FILE = fileURLToPath(new URL("./render.mjs", import.meta.url));
@@ -218,12 +218,12 @@ export function createConsoleHandler(backend, options = {}) {
   const assetPaths = Object.freeze({
     htmx: `${assetsPrefix}htmx-2.0.10.min.js`,
     sse: `${assetsPrefix}htmx-ext-sse-2.2.4.js`,
-    css: `${assetsPrefix}console-v7.css`,
+    css: `${assetsPrefix}console-v8.css`,
     browser: `${assetsPrefix}browser-v4.js`,
     icon192: `${assetsPrefix}icon-v2-192.png`,
     icon512: `${assetsPrefix}icon-v2-512.png`,
     manifest: `${assetsPrefix}manifest-v3.webmanifest`,
-    serviceWorker: `${basePath}/sw-v8.js`,
+    serviceWorker: `${basePath}/sw-v9.js`,
   });
 
   async function view(sessionId) {
@@ -305,7 +305,7 @@ export function createConsoleHandler(backend, options = {}) {
         write(res, 405, { Allow: "GET, HEAD", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
         return;
       }
-      const asset = bundledAssets["sw-v8.js"];
+      const asset = bundledAssets["sw-v9.js"];
       write(
         res,
         200,
@@ -346,7 +346,7 @@ export function createConsoleHandler(backend, options = {}) {
         return;
       }
       const asset = resolveAsset(name, liveAssets);
-      if (!asset || name.includes("/") || name === "sw-v8.js") {
+      if (!asset || name.includes("/") || name === "sw-v9.js") {
         text(res, 404, "Not found", head);
         return;
       }

@@ -39,13 +39,13 @@ Neither node is replaced. SSE and htmx mutation responses contain only the targe
 
 Global htmx inheritance is disabled, history caching is zero, and transcript-bearing DOM has `hx-history="false"`. A request to `/qq` permanently redirects to the service-worker-controlled `/qq/` scope; complete documents remain directly navigable there and at every selected canonical session URL. Ordinary forms receive a `303`; htmx receives safe inner fragments.
 
-All event content, session metadata, notices, and status text are HTML-escaped. A strict self-only CSP, same-origin mutation checks, no-store data responses, and loopback-only plugin startup are enforced server-side. Browser JavaScript only supplies Enter/Shift+Enter behavior, composer growth, focus, and service-worker registration; it contains no session store, EventSource implementation, command queue, or client authority.
+User input, tool data, notices, and status text stay HTML-escaped literals. Assistant prose is rendered through an allowlisted Markdown path that still escapes raw HTML and unwraps unsafe or relative links. A strict self-only CSP, same-origin mutation checks, no-store data responses, and loopback-only plugin startup are enforced server-side. Browser JavaScript only supplies Enter/Shift+Enter behavior, composer growth, focus, and service-worker registration; it contains no session store, EventSource implementation, command queue, or client authority.
 
 ## Minimal installable PWA
 
 The manifest, standalone display metadata, 192/512 icons, and versioned service worker establish the smallest install boundary. They do **not** make DSH offline:
 
-- the cache allowlist contains exact versioned htmx/SSE/CSS/font/browser/icon assets, `reconnect-v1.js`, and `offline-v7.html` only;
+- the cache allowlist contains exact versioned htmx/SSE/CSS/font/browser/icon assets, `reconnect-v1.js`, and `offline-v8.html` only;
 - navigations retry the live host briefly, then fall back only to the disconnected shell, which probes again when the network returns;
 - session documents, fragments, SSE, the manifest, service worker, and every mutation remain network-only;
 - non-GET requests are not intercepted;
