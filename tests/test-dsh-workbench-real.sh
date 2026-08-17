@@ -37,7 +37,7 @@ QQ_DSH_MODEL=deepseek-v4-pro-0813 \
 pid=$!
 
 for _ in {1..600}; do
-  if curl -fsS --max-time 2 "$origin/qq" >"$work/startup.html" 2>/dev/null; then
+  if curl -fsS --max-time 2 "$origin/qq/" >"$work/startup.html" 2>/dev/null; then
     break
   fi
   if ! kill -0 "$pid" 2>/dev/null; then

@@ -260,10 +260,14 @@ function openSse(sessionId) {
 const streams = [];
 try {
   // Stable htmx/SSE lifecycle: the owner and target wrap inner-only fragments.
-  const home = await request("/qq", { headers: { cookie: "proof-client=home" } });
+  const shortcut = await request("/qq", { headers: { cookie: "proof-client=home" } });
+  assert.equal(shortcut.status, 308);
+  assert.equal(shortcut.headers.location, "/qq/");
+  const home = await request(shortcut.headers.location, { headers: { cookie: "proof-client=home" } });
   assert.equal(home.status, 200);
   assert.match(home.headers["cache-control"], /no-store/);
   assert.match(home.headers["content-security-policy"], /font-src 'self'/);
+  assert.match(home.headers["content-security-policy"], /manifest-src 'self'/);
   assert.match(home.body, /^<!doctype html>/);
   assert.match(home.body, /interactive-widget=resizes-content/);
   assert.match(home.body, new RegExp(`id="console-stream"[^>]*hx-ext="sse"[^>]*sse-connect="/qq/session/${primaryId}/events"`));
@@ -271,8 +275,8 @@ try {
   assert.match(home.body, /htmx-2\.0\.10\.min\.js/);
   assert.match(home.body, /htmx-ext-sse-2\.2\.4\.js/);
   assert.match(home.body, /rel="manifest"/);
-  assert.match(home.body, /console-v5\.css/);
-  assert.match(home.body, /data-service-worker="\/qq\/sw-v6\.js"/);
+  assert.match(home.body, /console-v6\.css/);
+  assert.match(home.body, /data-service-worker="\/qq\/sw-v7\.js"/);
   assert.match(home.body, new RegExp(`<option value="${secondaryId}"`));
   assert.match(home.body, /This DSH session has no transcript yet/);
   assert.match(home.body, /<details class="session-menu">[\s\S]*<summary aria-label="Show session controls">/);
@@ -424,7 +428,7 @@ try {
   ]);
 
   // Installable PWA boundary caches presentation only and leaves data network-only.
-  const manifestResponse = await request("/qq/assets/manifest-v1.webmanifest");
+  const manifestResponse = await request("/qq/assets/manifest-v2.webmanifest");
   assert.equal(manifestResponse.status, 200);
   assert.match(manifestResponse.headers["cache-control"], /no-store/);
   const manifest = JSON.parse(manifestResponse.body);
@@ -434,22 +438,24 @@ try {
   assert.equal(manifest.scope, "/qq/");
   assert.deepEqual(manifest.icons.map((icon) => icon.sizes), ["192x192", "512x512"]);
 
-  const worker = await request("/qq/sw-v6.js");
+  const worker = await request("/qq/sw-v7.js");
   assert.equal(worker.status, 200);
   assert.equal(worker.headers["service-worker-allowed"], "/qq/");
   assert.match(worker.body, /request\.method !== "GET"/);
   assert.match(worker.body, /request\.mode === "navigate"/);
-  assert.match(worker.body, /console-v5\.css/);
+  assert.match(worker.body, /console-v6\.css/);
+  assert.match(worker.body, /reconnect-v1\.js/);
   assert.match(worker.body, /geist-latin-wght-normal-5\.3\.0\.woff2/);
   assert.match(worker.body, /geist-latin-wght-italic-5\.3\.0\.woff2/);
-  assert.match(worker.body, /offline-v5\.html/);
+  assert.match(worker.body, /offline-v6\.html/);
   assert.match(worker.body, /self\.skipWaiting\(\)/);
   assert.match(worker.body, /name\.startsWith\(CACHE_PREFIX\) && name !== CACHE_NAME/);
   assert.doesNotMatch(worker.body, /session\/|\/prompt|\/events|\/interrupt|backgroundsync|indexedDB|localStorage/i);
-  const offline = await request("/qq/assets/offline-v5.html");
+  const offline = await request("/qq/assets/offline-v6.html");
   assert.match(offline.body, /No transcript is cached and no message can be sent offline/);
-  assert.match(offline.body, /console-v5\.css/);
-  const staticCss = await request("/qq/assets/console-v5.css");
+  assert.match(offline.body, /console-v6\.css/);
+  assert.match(offline.body, /reconnect-v1\.js/);
+  const staticCss = await request("/qq/assets/console-v6.css");
   assert.match(staticCss.headers["cache-control"], /immutable/);
   assert.match(staticCss.body, /@font-face/);
   assert.match(staticCss.body, /font-family: "Geist UI"/);
@@ -472,7 +478,7 @@ try {
     readFile(join(root, "bin/qq-dsh-workbench"), "utf8"),
     readFile(join(root, "compat/pi2dsh/toolchain/qq-dsh-model-compat.mjs"), "utf8"),
     readFile(join(root, "dsh-console/assets/browser-v3.js"), "utf8"),
-    readFile(join(root, "dsh-console/assets/sw-v6.js"), "utf8"),
+    readFile(join(root, "dsh-console/assets/sw-v7.js"), "utf8"),
     readFile(join(root, "dsh-console/src/render.mjs"), "utf8"),
   ]);
   assert.equal(pins.schema, "qq.dsh-console-vendor-pins/v1");
