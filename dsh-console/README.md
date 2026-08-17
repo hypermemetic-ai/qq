@@ -37,7 +37,7 @@ The complete page owns two stable nodes:
 
 Neither node is replaced. SSE and htmx mutation responses contain only the target's children and use `innerHTML` swaps. htmx itself processes forms introduced by those swaps. There is no `htmx.process()` workaround. A running update replaces the composer with an htmx Interrupt form; a settled update inserts a fresh htmx Send form. The official extension owns EventSource creation and reconnect, and every new connection receives a complete current server-rendered snapshot.
 
-Global htmx inheritance is disabled, history caching is zero, and transcript-bearing DOM has `hx-history="false"`. A request to `/qq` permanently redirects to the service-worker-controlled `/qq/` scope; complete documents remain directly navigable there and at every selected canonical session URL. Ordinary forms receive a `303`; htmx receives safe inner fragments.
+Global htmx inheritance is disabled, history caching is zero, and transcript-bearing DOM has `hx-history="false"`. Complete documents remain directly navigable at `/qq`, `/qq/`, and every selected canonical session URL. Ordinary forms receive a `303`; htmx receives safe inner fragments.
 
 All event content, session metadata, notices, and status text are HTML-escaped. A strict self-only CSP, same-origin mutation checks, no-store data responses, and loopback-only plugin startup are enforced server-side. Browser JavaScript only supplies Enter/Shift+Enter behavior, focus, and service-worker registration; it contains no session store, EventSource implementation, command queue, or client authority.
 

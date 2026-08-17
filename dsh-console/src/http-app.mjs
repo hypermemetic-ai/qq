@@ -257,17 +257,6 @@ export function createConsoleHandler(backend, options = {}) {
       return;
     }
 
-    if (url.pathname === basePath && (req.method === "GET" || head)) {
-      write(
-        res,
-        308,
-        { Location: `${basePath}/${url.search}`, "Content-Type": "text/plain; charset=utf-8" },
-        "Permanent redirect\n",
-        head,
-      );
-      return;
-    }
-
     if (url.pathname === assetPaths.serviceWorker) {
       if (req.method !== "GET" && !head) {
         write(res, 405, { Allow: "GET, HEAD", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
@@ -364,7 +353,7 @@ export function createConsoleHandler(backend, options = {}) {
     }
 
     const selected = parseSessionRoute(basePath, url.pathname);
-    const rootPage = url.pathname === `${basePath}/`;
+    const rootPage = url.pathname === basePath || url.pathname === `${basePath}/`;
     if ((rootPage || selected?.action === "page") && (req.method === "GET" || head)) {
       const sessionId = rootPage ? backend.defaultSessionId : selected.sessionId;
       try {

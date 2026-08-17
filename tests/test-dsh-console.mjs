@@ -260,10 +260,7 @@ function openSse(sessionId) {
 const streams = [];
 try {
   // Stable htmx/SSE lifecycle: the owner and target wrap inner-only fragments.
-  const shortcut = await request("/qq", { headers: { cookie: "proof-client=home" } });
-  assert.equal(shortcut.status, 308);
-  assert.equal(shortcut.headers.location, "/qq/");
-  const home = await request(shortcut.headers.location, { headers: { cookie: "proof-client=home" } });
+  const home = await request("/qq", { headers: { cookie: "proof-client=home" } });
   assert.equal(home.status, 200);
   assert.match(home.headers["cache-control"], /no-store/);
   assert.match(home.headers["content-security-policy"], /font-src 'self'/);
