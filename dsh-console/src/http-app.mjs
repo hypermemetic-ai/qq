@@ -6,7 +6,7 @@ const MAX_FORM_BYTES = 524_288;
 const DEFAULT_SSE_POLL_MS = 100;
 const SECURITY_HEADERS = Object.freeze({
   "Cache-Control": "no-store",
-  "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+  "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
   "Cross-Origin-Opener-Policy": "same-origin",
   "Referrer-Policy": "no-referrer",
   "X-Content-Type-Options": "nosniff",
@@ -23,9 +23,17 @@ const bundledAssets = Object.freeze({
     type: "text/javascript; charset=utf-8",
     body: readFileSync(new URL("vendor/htmx-ext-sse-2.2.4.js", root)),
   },
-  "console-v4.css": {
+  "console-v5.css": {
     type: "text/css; charset=utf-8",
     body: readFileSync(new URL("assets/console.css", root)),
+  },
+  "geist-latin-wght-normal-5.3.0.woff2": {
+    type: "font/woff2",
+    body: readFileSync(new URL("assets/geist-latin-wght-normal-5.3.0.woff2", root)),
+  },
+  "geist-latin-wght-italic-5.3.0.woff2": {
+    type: "font/woff2",
+    body: readFileSync(new URL("assets/geist-latin-wght-italic-5.3.0.woff2", root)),
   },
   "browser-v3.js": {
     type: "text/javascript; charset=utf-8",
@@ -43,13 +51,13 @@ const bundledAssets = Object.freeze({
     type: "image/png",
     body: readFileSync(new URL("assets/icon-v1-512.png", root)),
   },
-  "offline-v4.html": {
+  "offline-v5.html": {
     type: "text/html; charset=utf-8",
-    body: readFileSync(new URL("assets/offline-v4.html", root)),
+    body: readFileSync(new URL("assets/offline-v5.html", root)),
   },
-  "sw-v5.js": {
+  "sw-v6.js": {
     type: "text/javascript; charset=utf-8",
-    body: readFileSync(new URL("assets/sw-v5.js", root)),
+    body: readFileSync(new URL("assets/sw-v6.js", root)),
   },
 });
 
@@ -187,12 +195,12 @@ export function createConsoleHandler(backend, options = {}) {
   const assetPaths = Object.freeze({
     htmx: `${assetsPrefix}htmx-2.0.10.min.js`,
     sse: `${assetsPrefix}htmx-ext-sse-2.2.4.js`,
-    css: `${assetsPrefix}console-v4.css`,
+    css: `${assetsPrefix}console-v5.css`,
     browser: `${assetsPrefix}browser-v3.js`,
     icon192: `${assetsPrefix}icon-v1-192.png`,
     icon512: `${assetsPrefix}icon-v1-512.png`,
     manifest: `${assetsPrefix}manifest-v1.webmanifest`,
-    serviceWorker: `${basePath}/sw-v5.js`,
+    serviceWorker: `${basePath}/sw-v6.js`,
   });
 
   async function view(sessionId) {
@@ -249,12 +257,23 @@ export function createConsoleHandler(backend, options = {}) {
       return;
     }
 
+    if (url.pathname === basePath && (req.method === "GET" || head)) {
+      write(
+        res,
+        308,
+        { Location: `${basePath}/${url.search}`, "Content-Type": "text/plain; charset=utf-8" },
+        "Permanent redirect\n",
+        head,
+      );
+      return;
+    }
+
     if (url.pathname === assetPaths.serviceWorker) {
       if (req.method !== "GET" && !head) {
         write(res, 405, { Allow: "GET, HEAD", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
         return;
       }
-      const asset = bundledAssets["sw-v5.js"];
+      const asset = bundledAssets["sw-v6.js"];
       write(
         res,
         200,
@@ -295,7 +314,7 @@ export function createConsoleHandler(backend, options = {}) {
         return;
       }
       const asset = bundledAssets[name];
-      if (!asset || name.includes("/") || name === "sw-v5.js") {
+      if (!asset || name.includes("/") || name === "sw-v6.js") {
         text(res, 404, "Not found", head);
         return;
       }
@@ -345,7 +364,7 @@ export function createConsoleHandler(backend, options = {}) {
     }
 
     const selected = parseSessionRoute(basePath, url.pathname);
-    const rootPage = url.pathname === basePath || url.pathname === `${basePath}/`;
+    const rootPage = url.pathname === `${basePath}/`;
     if ((rootPage || selected?.action === "page") && (req.method === "GET" || head)) {
       const sessionId = rootPage ? backend.defaultSessionId : selected.sessionId;
       try {

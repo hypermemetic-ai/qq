@@ -109,7 +109,7 @@ start_host() {
   dsh_pid=$!
 
   for _ in {1..300}; do
-    if curl -fsS --max-time 2 "$origin/qq" >"$work/startup.html" 2>/dev/null; then
+    if curl -fsS --max-time 2 "$origin/qq/" >"$work/startup.html" 2>/dev/null; then
       return
     fi
     if ! kill -0 "$dsh_pid" 2>/dev/null; then

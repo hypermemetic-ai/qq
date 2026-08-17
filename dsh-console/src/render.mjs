@@ -58,21 +58,21 @@ function eventMessage(event) {
   if (event.type === "user/message") {
     const source = event.data?.source;
     const direct = source?.kind === "user";
-    const label = direct ? "You" : `Context · ${source?.plugin ?? source?.kind ?? "unknown"}`;
     if (!direct) {
+      const label = `Context · ${source?.plugin ?? source?.kind ?? "unknown"}`;
       return `<details class="message message-context" data-seq="${escapeHtml(event.seq)}">
         <summary><strong>${escapeHtml(label)}</strong>${timeElement}</summary>
         <div class="message-body">${contentBlocks(event.data?.content)}</div>
       </details>`;
     }
-    return `<article class="message message-user" data-seq="${escapeHtml(event.seq)}">
-      <header><strong>${escapeHtml(label)}</strong>${timeElement}</header>
+    const accessibleLabel = time ? `Your message at ${time}` : "Your message";
+    return `<article class="message message-user" data-seq="${escapeHtml(event.seq)}" aria-label="${escapeHtml(accessibleLabel)}">
       ${contentBlocks(event.data?.content)}
     </article>`;
   }
   if (event.type === "assistant/message") {
-    return `<article class="message message-assistant" data-seq="${escapeHtml(event.seq)}">
-      <header><strong>Assistant</strong>${timeElement}</header>
+    const accessibleLabel = time ? `Assistant message at ${time}` : "Assistant message";
+    return `<article class="message message-assistant" data-seq="${escapeHtml(event.seq)}" aria-label="${escapeHtml(accessibleLabel)}">
       ${contentBlocks(event.data?.message?.content)}
     </article>`;
   }
