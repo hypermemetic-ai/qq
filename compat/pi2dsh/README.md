@@ -12,7 +12,7 @@ This is an isolated compatibility harness, not an operator-runtime cutover. It m
 | DSH continuable service | `@deepseek-ai/dsh-subagent@0.1.0-rc.6` | same DSH revision | `sha512-vROmBDAlaFAzzSlTBOlvg/7fO55zxhUztnLtB3lKmN5RevrNQBjTsbeIMDQ8ow5ZplxEOnLU+sikFoA5JaoH8A==` |
 | DSH spawn provider | `@deepseek-ai/dsh-subagent-spawn-in-process@0.1.0-rc.6` | same DSH revision | `sha512-62mtUEr5megxVy6CwQCdZVq5MCSt+kMw74ns5m7PK0PlZTWcxQVBQHNdfkE9sX4Cageu7YTvciUJuH8amm6bsQ==` |
 
-`pins.json` is the machine-readable source of truth. The qq pin is the extension revision exercised by this evidence. `run.sh` refuses to run if `extensions/` differs from that revision, forcing a deliberate re-probe after extension changes.
+`pins.json` is the machine-readable source of truth. The qq pin is the extension revision exercised by this evidence. `run.sh` refuses to run if `extensions/` or its imported session-context boundary differs from that revision, forcing a deliberate re-probe after context or extension changes.
 
 ## Run
 

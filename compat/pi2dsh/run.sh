@@ -29,8 +29,8 @@ if [[ $relay_install_root != /* || ! -f $relay_install_root/client.mjs ]]; then
 fi
 
 git -C "$root" cat-file -e "$qq_revision^{commit}"
-if ! git -C "$root" diff --quiet "$qq_revision" -- extensions; then
-  printf 'qq Pi extension bundle differs from pinned revision %s; refresh the evidence and pin first\n' "$qq_revision" >&2
+if ! git -C "$root" diff --quiet "$qq_revision" -- extensions bin/lib/session-context.mjs; then
+  printf 'qq Pi extension bundle or session-context boundary differs from pinned revision %s; refresh the evidence and pin first\n' "$qq_revision" >&2
   exit 1
 fi
 
