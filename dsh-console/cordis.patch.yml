@@ -36,6 +36,7 @@
               max: max
             compat:
               thinkingFormat: qwen
+              supportsDeveloperRole: false
               supportsReasoningEffort: true
 
 - insert:

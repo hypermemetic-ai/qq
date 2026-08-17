@@ -255,14 +255,17 @@ try {
   assert.equal(home.status, 200);
   assert.match(home.headers["cache-control"], /no-store/);
   assert.match(home.body, /^<!doctype html>/);
+  assert.match(home.body, /interactive-widget=resizes-content/);
   assert.match(home.body, new RegExp(`id="console-stream"[^>]*hx-ext="sse"[^>]*sse-connect="/qq/session/${primaryId}/events"`));
   assert.match(home.body, /id="session-panel"[^>]*hx-ext="sse"[^>]*sse-swap="session"[^>]*hx-swap="innerHTML"/);
   assert.match(home.body, /htmx-2\.0\.10\.min\.js/);
   assert.match(home.body, /htmx-ext-sse-2\.2\.4\.js/);
   assert.match(home.body, /rel="manifest"/);
-  assert.match(home.body, /data-service-worker="\/qq\/sw-v1\.js"/);
+  assert.match(home.body, /data-service-worker="\/qq\/sw-v3\.js"/);
   assert.match(home.body, new RegExp(`/qq/session/${secondaryId}`));
   assert.match(home.body, /This DSH session has no transcript yet/);
+  assert.match(home.body, /<details class="session-switcher">[\s\S]*Choose a durable DSH session/);
+  assert.match(home.body, /<textarea id="prompt"[^>]*rows="2"[^>]*enterkeyhint="send"/);
 
   const stream = await openSse(primaryId);
   streams.push(stream);
@@ -336,6 +339,29 @@ try {
   assert.match(rejected.body, /Cross-origin form submission refused/);
   assert.doesNotMatch(localAgain.body, /rejected/);
 
+  // Verbose runtime context and tool rows disclose on demand rather than
+  // displacing the live conversation and composer. Durable provider failures
+  // get an actionable, escaped summary without exposing raw diagnostics.
+  append(states.get(primaryId), "user/message", {
+    id: "context-mobile-proof",
+    role: "user",
+    source: { kind: "plugin", plugin: "agent-instructions" },
+    content: [{ type: "text", text: "A very long instruction snapshot" }],
+  }, "append");
+  append(states.get(primaryId), "turn/end", {
+    turn: states.get(primaryId).turn,
+    reason: {
+      kind: "error",
+      error: { code: "INVALID_REQUEST", message: "provider secret <unsafe>" },
+    },
+  });
+  const compactFailure = await request(`/qq/session/${primaryId}`);
+  assert.match(compactFailure.body, /<details class="message message-context"[^>]*>[\s\S]*<summary>/);
+  assert.doesNotMatch(compactFailure.body, /<details class="message message-context"[^>]* open/);
+  assert.match(compactFailure.body, /The selected model route rejected this request/);
+  assert.match(compactFailure.body, /<code>INVALID_REQUEST<\/code>/);
+  assert.doesNotMatch(compactFailure.body, /provider secret|&lt;unsafe&gt;/);
+
   assert.equal(resumes, 2, "each selected persisted DSH session resumes once");
   assert.equal(creates, 0, "navigation cannot invent a DSH session");
   assert.ok(flushes >= 6, "accepted prompts and interruption cross DSH flush boundaries");
@@ -359,28 +385,29 @@ try {
   assert.equal(manifest.scope, "/qq/");
   assert.deepEqual(manifest.icons.map((icon) => icon.sizes), ["192x192", "512x512"]);
 
-  const worker = await request("/qq/sw-v1.js");
+  const worker = await request("/qq/sw-v3.js");
   assert.equal(worker.status, 200);
   assert.equal(worker.headers["service-worker-allowed"], "/qq/");
   assert.match(worker.body, /request\.method !== "GET"/);
   assert.match(worker.body, /request\.mode === "navigate"/);
-  assert.match(worker.body, /offline-v1\.html/);
+  assert.match(worker.body, /offline-v2\.html/);
   assert.doesNotMatch(worker.body, /session\/|\/prompt|\/events|\/interrupt|backgroundsync|indexedDB|localStorage/i);
-  const offline = await request("/qq/assets/offline-v1.html");
+  const offline = await request("/qq/assets/offline-v2.html");
   assert.match(offline.body, /No transcript is cached and no message can be sent offline/);
-  const staticCss = await request("/qq/assets/console-v1.css");
+  const staticCss = await request("/qq/assets/console-v2.css");
   assert.match(staticCss.headers["cache-control"], /immutable/);
 
   // Vendored pins and negative architecture constraints are machine checked.
-  const [pins, consoleEvidence, dshPins, plugin, patch, workbench, browser, workerSource, renderSource] = await Promise.all([
+  const [pins, consoleEvidence, dshPins, plugin, patch, workbench, modelCompat, browser, workerSource, renderSource] = await Promise.all([
     readFile(join(root, "dsh-console/vendor-pins.json"), "utf8").then(JSON.parse),
     readFile(join(root, "dsh-console/evidence.json"), "utf8").then(JSON.parse),
     readFile(join(root, "compat/pi2dsh/pins.json"), "utf8").then(JSON.parse),
     readFile(join(root, "dsh-console/src/plugin.mjs"), "utf8"),
     readFile(join(root, "dsh-console/cordis.patch.yml"), "utf8"),
     readFile(join(root, "bin/qq-dsh-workbench"), "utf8"),
-    readFile(join(root, "dsh-console/assets/browser-v1.js"), "utf8"),
-    readFile(join(root, "dsh-console/assets/sw-v1.js"), "utf8"),
+    readFile(join(root, "compat/pi2dsh/toolchain/qq-dsh-model-compat.mjs"), "utf8"),
+    readFile(join(root, "dsh-console/assets/browser-v3.js"), "utf8"),
+    readFile(join(root, "dsh-console/assets/sw-v3.js"), "utf8"),
     readFile(join(root, "dsh-console/src/render.mjs"), "utf8"),
   ]);
   assert.equal(pins.schema, "qq.dsh-console-vendor-pins/v1");
@@ -403,13 +430,16 @@ try {
   assert.match(patch, /host: 127\.0\.0\.1/);
   assert.match(patch, /provider:.*qwen-token-plan/);
   assert.match(patch, /model:.*deepseek-v4-pro-0813/);
-  assert.match(patch, /id: deepseek-v4-pro-0813[\s\S]*thinkingFormat: qwen/);
+  assert.match(patch, /id: deepseek-v4-pro-0813[\s\S]*supportsDeveloperRole: false/);
   assert.match(patch, /apiKeyEnv: QWEN_TOKEN_PLAN_API_KEY/);
+  assert.match(workbench, /--import.*qq-dsh-model-compat\.mjs/);
+  assert.match(modelCompat, /QWEN_TOKEN_PLAN_MODELS\[model\][\s\S]*supportsDeveloperRole: false/);
   assert.match(plugin, /refusing a non-loopback web server/);
   assert.match(workbench, /state_root.*qq\/dsh-workbench/);
   assert.match(workbench, /qq-console\.session/);
   assert.doesNotMatch(`${plugin}\n${patch}\n${workbench}`, /qq\.patch\.yml|name:.*pi2dsh|plugin.*pi2dsh|auth\.json/);
   assert.doesNotMatch(`${plugin}\n${patch}`, /name:.*(?:dsh-web-app|api-proxy|client-connection)/);
+  assert.match(browser, /transcript\.scrollTop = transcript\.scrollHeight/);
   assert.doesNotMatch(browser, /localStorage|sessionStorage|indexedDB|document\.cookie|EventSource|WebSocket|htmx\.process/);
   assert.doesNotMatch(renderSource, /outerHTML|controller|observer|lease|take control/i);
   assert.doesNotMatch(workerSource, /addEventListener\("(?:sync|periodicsync|push|notificationclick)"|indexedDB|localStorage/i);

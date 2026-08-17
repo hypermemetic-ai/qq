@@ -17,6 +17,16 @@ const server = createServer((request, response) => {
     const body = Buffer.concat(chunks).toString("utf8");
     appendFileSync(requestsPath, `${JSON.stringify({ request: requestNumber, url: request.url, body: JSON.parse(body) })}\n`, { mode: 0o600 });
     const parsed = JSON.parse(body);
+    if (
+      process.env.QQ_LLM_STUB_REJECT_DEVELOPER === "1" &&
+      parsed.messages?.some((message) => message?.role === "developer")
+    ) {
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        error: { code: "invalid_request_error", message: "developer role is unsupported" },
+      }));
+      return;
+    }
     const qaSurface = parsed.tools?.some((tool) => tool?.function?.name === "qa_verdict") === true;
     const qaVerdictRecorded = parsed.messages?.some((message) => message?.role === "tool" && String(message?.tool_call_id).startsWith("call_qq_native_qa_")) === true;
     const textOf = (content) => Array.isArray(content)

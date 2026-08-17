@@ -44,7 +44,7 @@ All event content, session metadata, notices, and status text are HTML-escaped. 
 
 The manifest, standalone display metadata, 192/512 icons, and versioned service worker establish the smallest install boundary. They do **not** make DSH offline:
 
-- the cache allowlist contains exact versioned htmx/SSE/CSS/browser/icon assets and `offline-v1.html` only;
+- the cache allowlist contains exact versioned htmx/SSE/CSS/browser/icon assets and `offline-v2.html` only;
 - navigations always try the network and fall back only to the disconnected shell;
 - session documents, fragments, SSE, the manifest, service worker, and every mutation remain network-only;
 - non-GET requests are not intercepted;
@@ -65,7 +65,7 @@ Open `http://127.0.0.1:3082/qq`. On first use the script installs the locked too
 
 The first start records a canonical session identity in `$DSH_HOME/qq-console.session`. Killing the process and running the same command resumes that session from DSH's own session log. The session list can reopen any other persisted DSH session. `QQ_DSH_SESSION_ID=session-<UUID>` selects an existing identity or establishes the saved identity on a fresh home.
 
-The workbench explicitly selects `qwen-token-plan/deepseek-v4-pro-0813`. That exact Pro revision is present in the operator's current token-plan catalog but is newer than rc.6's installed pi-ai catalog. The console profile therefore declares only its current non-secret model metadata (name, capacities, text input, Qwen thinking format, and `high`/`max` efforts) through rc.6's public `models` configuration. The provider still inherits the pinned `qwen-token-plan` endpoint and OpenAI-completions protocol and resolves only the existing `QWEN_TOKEN_PLAN_API_KEY` credential reference; this is neither an alias nor an adapter, and no key is stored in this repository. DSH also accepts the key in an owner-only `$DSH_HOME/.credentials.yaml`:
+The workbench explicitly selects `qwen-token-plan/deepseek-v4-pro-0813`. That exact Pro revision is present in the operator's current token-plan catalog but is newer than rc.6's installed pi-ai catalog. The console profile therefore declares its current non-secret model metadata (name, capacities, text input, Qwen thinking format, `high`/`max` efforts, and no `developer` role) through rc.6's public `models` configuration. A launch-only Node preload seeds the dated route from the installed `deepseek-v4-pro` catalog entry before DSH resolves that profile; this preserves the exact outbound model id while carrying the token-plan route's `supportsDeveloperRole: false` compatibility into rc.6's pi-ai adapter. System instructions consequently travel as `system`, not the provider-rejected `developer` role. The provider still inherits the pinned `qwen-token-plan` endpoint and OpenAI-completions protocol and resolves only the existing `QWEN_TOKEN_PLAN_API_KEY` credential reference; this is neither a model substitution nor a credential adapter, and no key is stored in this repository. DSH also accepts the key in an owner-only `$DSH_HOME/.credentials.yaml`:
 
 ```yaml
 QWEN_TOKEN_PLAN_API_KEY: your-key
@@ -110,7 +110,9 @@ tests/test-dsh-console-live.sh
 QWEN_TOKEN_PLAN_API_KEY='...' tests/test-dsh-workbench-real.sh
 ```
 
-The fast test exercises session selection, send, two live SSE states, dynamically inserted interrupt, safe rendering, normal/htmx forms, sequential home/laptop/phone reconstruction, PWA allowlisting, explicit model selection, and negative architecture checks. The deterministic live test starts through `bin/qq-dsh-workbench`, creates two canonical sessions, selects between them, sends and interrupts through the real Agent/Session APIs, restarts on the launcher's saved session, verifies ordered reconstruction from DSH artifacts, and executes native DSH read/write/edit/grep/bash tools in the qq repository. The credential-gated smoke makes one real request to exact `qwen-token-plan/deepseek-v4-pro-0813`.
+The fast test exercises session selection, send, two live SSE states, dynamically inserted interrupt, safe rendering, collapsed verbose context, normal/htmx forms, sequential home/laptop/phone reconstruction, PWA allowlisting, explicit model selection, and negative architecture checks. The deterministic live test starts through `bin/qq-dsh-workbench`, makes its provider stub reject any `developer` role, verifies an instruction-bearing turn arrives with `system`, creates two canonical sessions, sends and interrupts through the real Agent/Session APIs, restarts on the launcher's saved session, verifies ordered reconstruction from DSH artifacts, and executes native DSH read/write/edit/grep/bash tools in the qq repository. The credential-gated smoke makes one real request to exact `qwen-token-plan/deepseek-v4-pro-0813`.
+
+On phone widths the page is a viewport-bounded app shell: heading and session disclosure stay compact, transcript history scrolls independently with context/tool rows collapsed, and the composer remains in the active viewport. The same hierarchy is retained when the viewport shrinks for an on-screen keyboard; the prompt and 44px Send target remain immediately usable without scrolling the document.
 
 [`../compat/pi2dsh/WEB_QA.md`](../compat/pi2dsh/WEB_QA.md) records the real-browser proof: two SSE swaps preserve both node identities, the newly inserted Interrupt form works without manual processing, forced stream closure reconnects through the official extension, `390×844` has no horizontal overflow, unsafe text stays inert, and the controlled PWA fails closed after the host stops.
 

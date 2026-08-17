@@ -88,4 +88,4 @@ export QQ_DSH_SESSION_ID=$session_id
 
 printf 'qq-dsh-workbench: %s/%s · %s\n' "$QQ_DSH_PROVIDER" "$QQ_DSH_MODEL" "$QQ_DSH_SESSION_ID" >&2
 printf 'qq-dsh-workbench: state %s · http://127.0.0.1:%s/qq\n' "$DSH_HOME" "$QQ_DSH_CONSOLE_PORT" >&2
-exec "$dsh" --profile qq-console "$@"
+exec node --import "$toolchain/qq-dsh-model-compat.mjs" "$dsh" --profile qq-console "$@"

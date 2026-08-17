@@ -59,7 +59,13 @@ function eventMessage(event) {
     const source = event.data?.source;
     const direct = source?.kind === "user";
     const label = direct ? "You" : `Context · ${source?.plugin ?? source?.kind ?? "unknown"}`;
-    return `<article class="message ${direct ? "message-user" : "message-context"}" data-seq="${escapeHtml(event.seq)}">
+    if (!direct) {
+      return `<details class="message message-context" data-seq="${escapeHtml(event.seq)}">
+        <summary><strong>${escapeHtml(label)}</strong>${timeElement}</summary>
+        <div class="message-body">${contentBlocks(event.data?.content)}</div>
+      </details>`;
+    }
+    return `<article class="message message-user" data-seq="${escapeHtml(event.seq)}">
       <header><strong>${escapeHtml(label)}</strong>${timeElement}</header>
       ${contentBlocks(event.data?.content)}
     </article>`;
@@ -71,12 +77,30 @@ function eventMessage(event) {
     </article>`;
   }
   if (event.type === "tool/result") {
-    return `<article class="message message-tool" data-seq="${escapeHtml(event.seq)}">
-      <header><strong>Tool result</strong>${timeElement}</header>
-      ${contentBlocks(event.data?.message?.content)}
-    </article>`;
+    return `<details class="message message-tool" data-seq="${escapeHtml(event.seq)}">
+      <summary><strong>Tool result</strong>${timeElement}</summary>
+      <div class="message-body">${contentBlocks(event.data?.message?.content)}</div>
+    </details>`;
   }
   return "";
+}
+
+function safeTurnFailure(code) {
+  switch (code) {
+    case "INVALID_REQUEST":
+      return "The selected model route rejected this request. Check the message or route compatibility, then try again.";
+    case "INVALID_CREDENTIAL":
+    case "MISSING_CREDENTIAL":
+    case "AUTH":
+      return "The selected model route could not authenticate. Check the workbench credential, then try again.";
+    case "QUOTA_EXCEEDED":
+    case "RATE_LIMIT":
+      return "The selected model route is temporarily rate-limited or out of quota. Wait, then try again.";
+    case "CONTEXT_WINDOW_EXCEEDED":
+      return "This session is too large for the selected model route. Compact the session before trying again.";
+    default:
+      return "DSH could not complete the last turn. You can revise the message and try again; host logs retain the diagnostic.";
+  }
 }
 
 export function deriveStatus(events, agentStatus) {
@@ -98,11 +122,15 @@ export function deriveStatus(events, agentStatus) {
   switch (lastEnd?.kind) {
     case "completed":
       return { key: "ready", label: "Ready" };
-    case "error":
+    case "error": {
+      const code = typeof lastEnd.error?.code === "string" ? lastEnd.error.code : "";
       return {
         key: "error",
-        label: `Last turn failed${lastEnd.error?.code ? ` · ${lastEnd.error.code}` : ""}`,
+        label: "Last turn failed",
+        detail: safeTurnFailure(code),
+        ...(code ? { code } : {}),
       };
+    }
     case "aborted":
       return { key: "stopped", label: "Last turn interrupted" };
     case "interrupted":
@@ -118,9 +146,11 @@ export function deriveStatus(events, agentStatus) {
 
 function sessionNavigation(snapshot, paths) {
   const choices = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
-  return `<nav class="session-switcher" aria-label="Durable DSH sessions">
-    <p>Session</p>
-    <div class="session-links">
+  return `<details class="session-switcher">
+    <summary aria-label="Choose a durable DSH session">
+      <span>Session</span><code>${escapeHtml(snapshot.id)}</code><small>${choices.length}</small>
+    </summary>
+    <nav class="session-links" aria-label="Durable DSH sessions">
       ${choices.map((session) => {
         const current = session.id === snapshot.id;
         const href = paths.session(session.id);
@@ -129,8 +159,8 @@ function sessionNavigation(snapshot, paths) {
           : "durable";
         return `<a href="${escapeHtml(href)}"${current ? ' aria-current="page"' : ""} title="${escapeHtml(session.cwd ?? session.id)}"><span>${escapeHtml(session.id)}</span><small>${escapeHtml(created)}</small></a>`;
       }).join("")}
-    </div>
-  </nav>`;
+    </nav>
+  </details>`;
 }
 
 function composer(paths, running) {
@@ -156,7 +186,7 @@ function composer(paths, running) {
       hx-disabled-elt="#composer-submit"
       hx-indicator="#working">
       <label for="prompt">Message</label>
-      <textarea id="prompt" name="prompt" rows="3" maxlength="32768" required autocomplete="off" placeholder="Send a message to this DSH session"></textarea>
+      <textarea id="prompt" name="prompt" rows="2" maxlength="32768" required autocomplete="off" enterkeyhint="send" placeholder="Message this DSH session"></textarea>
       <div class="composer-actions">
         <span id="working" class="htmx-indicator" aria-live="polite">Waiting for DSH…</span>
         <span class="key-hint">Enter to send · Shift+Enter for a new line</span>
@@ -179,6 +209,7 @@ export function renderSessionContent(snapshot, paths, notice = "") {
       <p class="status status-${escapeHtml(status.key)}" role="status"><span aria-hidden="true"></span>${escapeHtml(status.label)}</p>
     </div>
     ${sessionNavigation(snapshot, paths)}
+    ${status.detail ? `<p class="notice turn-error" role="alert"><strong>${escapeHtml(status.label)}</strong><span>${escapeHtml(status.detail)}</span>${status.code ? `<code>${escapeHtml(status.code)}</code>` : ""}</p>` : ""}
     ${notice ? `<p class="notice" role="alert">${escapeHtml(notice)}</p>` : ""}
     <div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" hx-history="false">
       ${transcript || '<p class="empty-transcript">This DSH session has no transcript yet.</p>'}
@@ -192,7 +223,7 @@ export function renderPage(snapshot, paths, assetPaths, notice = "") {
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0d1216">
   <meta name="apple-mobile-web-app-capable" content="yes">
