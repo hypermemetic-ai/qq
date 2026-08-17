@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 const OPENWIKI_MATERIALIZE = resolve(dirname(fileURLToPath(import.meta.url)), "../qq-openwiki-materialize");
 const TASK_ID = /^[A-Za-z]+-[1-9][0-9]*(?:\.[1-9][0-9]*)?$/;
 const SAFE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+const PROFILE_BINDING = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,190}$/;
+const PROFILE_EFFORTS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const BRIEF_GATE_PLUGIN = "qq.brief-gate";
 const BRIEF_GATE_ENTRYPOINT = "review";
 const BRIEF_GATE_MARKER = "QQ_BRIEF_GATE_DECIDED";
@@ -94,7 +96,9 @@ export async function prepareRun(options) {
   const { cwd, env = process.env, task, note } = options;
   const project = projectSlug(options.project || basename(resolve(cwd)));
   const workspace = env.HERDR_WORKSPACE_ID;
-  if (typeof workspace !== "string" || workspace === "") throw new Error("delegate requires a Herdr workspace");
+  if (options.runtime !== "dsh" && (typeof workspace !== "string" || workspace === "")) {
+    throw new Error("delegate requires a Herdr workspace");
+  }
   if (typeof note !== "string" || note.trim() === "") throw new Error("delegate requires a non-empty note");
   const slug = taskSlug(task.id);
   const nonce = randomUUID().slice(0, 8);
@@ -158,6 +162,7 @@ export async function prepareBootstrapRequest(options) {
     id: `${prepared.slug}-${prepared.nonce}`,
     cwd: resolve(options.cwd), project: prepared.project,
     task: { id: task.id, title: task.title }, architectSession, qaBinding,
+    ...(options.runnerProfile ? { runnerProfile: { ...options.runnerProfile } } : {}),
     marker: `[qq-bootstrap:${prepared.slug}-${prepared.nonce}:${randomUUID()}]`,
     prepared: { ...prepared, bootstrapPath }, createdAt: new Date().toISOString(),
   };
@@ -181,6 +186,13 @@ export async function readBootstrapRequest(path) {
       resolve(value.prepared?.bootstrapPath || "") !== resolve(path)) {
     throw new Error("runner bootstrap request is malformed");
   }
+  if (value.runnerProfile !== undefined && (
+    typeof value.runnerProfile?.name !== "string" || !SAFE.test(value.runnerProfile.name) ||
+    typeof value.runnerProfile.provider !== "string" || !PROFILE_BINDING.test(value.runnerProfile.provider) ||
+    typeof value.runnerProfile.model !== "string" || !PROFILE_BINDING.test(value.runnerProfile.model) ||
+    typeof value.runnerProfile.effort !== "string" || !PROFILE_EFFORTS.has(value.runnerProfile.effort) ||
+    Object.keys(value.runnerProfile).sort().join(",") !== "effort,model,name,provider"
+  )) throw new Error("runner bootstrap request is malformed");
   return value;
 }
 
@@ -481,6 +493,43 @@ export async function removeWorktree(run, mainRoot, worktree, options = {}) {
   }
 }
 
+export async function cleanupRunWorkspace(run, workspace, options = {}) {
+  const failures = [];
+  try { await removeWorktree(run, workspace.mainRoot, workspace.worktree, { force: true, signal: options.signal }); }
+  catch { failures.push(new Error("worktree cleanup failed")); }
+  try {
+    const removed = await run("git", ["branch", "-D", workspace.branch], { cwd: workspace.mainRoot, signal: options.signal });
+    if (removed?.code !== 0) failures.push(new Error("delegation branch cleanup failed"));
+  } catch { failures.push(new Error("delegation branch cleanup failed")); }
+  if (failures.length) throw new AggregateError(failures, failures.map((failure) => failure.message).join("; "));
+}
+
+export async function createRunWorkspace(run, cwd, prepared, options = {}) {
+  const { env = process.env, signal } = options;
+  const mainRoot = (await checked(run, "git", ["rev-parse", "--show-toplevel"], { cwd, signal }, "cannot identify repository")).stdout.trim();
+  const baseRef = (await checked(run, "git", ["rev-parse", "HEAD"], { cwd: mainRoot, signal }, "cannot identify base ref")).stdout.trim();
+  const baseBranch = (await checked(run, "git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: mainRoot, signal }, "delegate requires a named base branch")).stdout.trim();
+  const workspace = { mainRoot, baseRef, baseBranch, branch: prepared.branch, worktree: prepared.worktree };
+  await privateDirectory(worktreeRoot(prepared.project, env));
+  await privateDirectory(prepared.stateDir);
+  await checked(run, "git", ["worktree", "add", "-b", prepared.branch, prepared.worktree, baseRef], { cwd: mainRoot, signal }, "cannot create worktree");
+  try {
+    await checked(run, OPENWIKI_MATERIALIZE, ["freeze", prepared.worktree], { cwd: prepared.worktree, signal }, "cannot protect delegated OpenWiki materialization");
+    return workspace;
+  } catch (error) {
+    try { await cleanupRunWorkspace(run, workspace); }
+    catch (cleanupError) { throw new AggregateError([error, cleanupError], "cannot create protected worktree and cleanup failed"); }
+    throw error;
+  }
+}
+
+export function formatRunnerPrompt(marker, ticket, note, options = {}) {
+  const instruction = options.runtime === "dsh"
+    ? "Implement the task in this worktree and commit the result. Native completion and review are not wired in this launch seam; stop after committing and do not call done. Do not merge."
+    : "Implement the task in this worktree, commit the result, then call done with ref HEAD. Do not merge.";
+  return `${marker}\n\nWork from the full Backlog ticket and delegate note below. The note is also at ${options.notePath}. ${instruction}\n\n${ticket.trimEnd()}\n\n---\n\n## Delegate note\n\n${note.trimEnd()}`;
+}
+
 export async function startRun(options) {
   const { run, cwd, env = process.env, task, architectSession, qaBinding, signal } = options;
   if (typeof run !== "function") throw new Error("run start requires a command runner");
@@ -503,14 +552,9 @@ export async function startRun(options) {
   try {
     runnerTicket = await readFile(ticketPath, "utf8");
     runnerNote = await readFile(notePath, "utf8");
-    mainRoot = (await checked(run, "git", ["rev-parse", "--show-toplevel"], { cwd, signal }, "cannot identify repository")).stdout.trim();
-    baseRef = (await checked(run, "git", ["rev-parse", "HEAD"], { cwd: mainRoot, signal }, "cannot identify base ref")).stdout.trim();
-    baseBranch = (await checked(run, "git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: mainRoot, signal }, "delegate requires a named base branch")).stdout.trim();
-    await privateDirectory(worktreeRoot(project, env));
-    await privateDirectory(stateDir);
-    await checked(run, "git", ["worktree", "add", "-b", branch, worktree, baseRef], { cwd: mainRoot, signal }, "cannot create worktree");
+    const runWorkspace = await createRunWorkspace(run, cwd, prepared, { env, signal });
+    ({ mainRoot, baseRef, baseBranch } = runWorkspace);
     createdWorktree = true;
-    await checked(run, OPENWIKI_MATERIALIZE, ["freeze", worktree], { cwd: worktree, signal }, "cannot protect delegated OpenWiki materialization");
 
     const tabsResult = await checked(run, "herdr", ["tab", "list", "--workspace", workspace], { signal }, "cannot list Herdr tabs");
     const tabs = parseHerdr(tabsResult.stdout, "tab_list")?.tabs ?? [];
@@ -548,7 +592,7 @@ export async function startRun(options) {
     await atomicPrivateJson(statePath, state);
     await waitForAvailableShell(run, paneId, { signal });
     await checked(run, "herdr", ["agent", "start", `runner-${slug}-${nonce}`, "--kind", "pi", "--pane", paneId, "--", "--approve"], { signal }, "cannot start runs runner");
-    prompt = `${marker}\n\nWork from the full Backlog ticket and delegate note below. The note is also at ${notePath}. Implement the task in this worktree, commit the result, then call done with ref HEAD. Do not merge.\n\n${runnerTicket.trimEnd()}\n\n---\n\n## Delegate note\n\n${runnerNote.trimEnd()}`;
+    prompt = formatRunnerPrompt(marker, runnerTicket, runnerNote, { notePath, runtime: "pi-herdr" });
     await (options.submitPrompt ?? submitAgentPrompt)(paneId, prompt, { env, signal });
     const inspectAgent = options.inspectAgent ?? ((target, requestOptions) =>
       herdrApiRequest("agent.get", { target }, { env, ...requestOptions }));
@@ -573,12 +617,10 @@ export async function startRun(options) {
       } catch { cleanupFailures.push(new Error("runs pane cleanup failed")); }
     }
     if (createdWorktree && mainRoot) {
-      try { await removeWorktree(run, mainRoot, worktree, { force: true }); }
-      catch { cleanupFailures.push(new Error("worktree cleanup failed")); }
-      try {
-        const removed = await run("git", ["branch", "-D", branch], { cwd: mainRoot });
-        if (removed?.code !== 0) cleanupFailures.push(new Error("delegation branch cleanup failed"));
-      } catch { cleanupFailures.push(new Error("delegation branch cleanup failed")); }
+      try { await cleanupRunWorkspace(run, { mainRoot, worktree, branch }); }
+      catch (cleanupError) {
+        for (const failure of cleanupError?.errors ?? [cleanupError]) cleanupFailures.push(failure);
+      }
     }
     if (!options.preserveStateOnFailure) {
       try { await rm(stateDir, { recursive: true, force: true }); }

@@ -87,6 +87,7 @@ grep -Fq "$work/default-home/.local/lib/qq/relay/bin/qq-relay" "$work/default-cl
 node --experimental-strip-types "$root/tests/test-agent-messages.mjs" "$root"
 "$root/tests/test-agent-messages-live.sh"
 node --experimental-strip-types "$root/tests/test-delegation.mjs" "$root"
+"$root/compat/pi2dsh/run-native-delegation-proof.sh"
 node --experimental-strip-types "$root/tests/test-review-flow.mjs" "$root"
 
 printf 'test-qq-relay: pass\n'

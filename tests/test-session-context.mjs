@@ -21,6 +21,7 @@ const parentId = "session-4b70f906-ce0a-4135-bc9e-b231db9b98b1";
 // Continuable children use DSH's canonical bare-v4 SessionId form, while the
 // top-level host identity is session-<v4>.
 const childId = "621eeb4e-3796-4d58-92d2-9a45e4f133b0";
+const exclusiveId = "c24ee08f-0824-4dfa-b123-d2f04bcec9d7";
 const piId = "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9";
 const temporary = await mkdtemp(join(homedir(), "qq-session-context-test."));
 
@@ -65,6 +66,12 @@ try {
     profile: "dsh-architect",
     runState: null,
   });
+  const exclusiveContext = { role: "runner", profile: "dsh-runner", runState: childRunState };
+  boundary.claimExclusive(exclusiveId, exclusiveContext);
+  assert.throws(() => boundary.claimExclusive(exclusiveId, exclusiveContext), /already claimed/);
+  assert.throws(() => boundary.release(exclusiveId, { ...exclusiveContext, profile: "wrong" }), /changed before release/);
+  assert.equal(boundary.release(exclusiveId, exclusiveContext), true);
+  assert.equal(boundary.release(exclusiveId, exclusiveContext), false);
   boundary.claim(childId, {
     role: "runner",
     profile: "dsh-runner",

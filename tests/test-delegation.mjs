@@ -9,6 +9,8 @@ import { pathToFileURL } from "node:url";
 const root = process.argv[2];
 const lib = await import(pathToFileURL(join(root, "bin/lib/run.mjs")));
 const bootstrap = await import(pathToFileURL(join(root, "bin/lib/bootstrap.mjs")));
+const dshRun = await import(pathToFileURL(join(root, "bin/lib/dsh-run.mjs")));
+const sessionContexts = await import(pathToFileURL(join(root, "bin/lib/session-context.mjs")));
 const runEvents = await import(pathToFileURL(join(root, "bin/lib/run-events.mjs")));
 const reviewFlow = await import(pathToFileURL(join(root, "extensions/review-flow.ts")));
 const admission = await import(pathToFileURL(join(root, "bin/lib/admission.mjs")));
@@ -538,6 +540,253 @@ try {
   assert.equal(timeoutCalls.some(({ command, args }) => command === "git" && args[0] === "worktree" && args[1] === "remove"), true);
   await assert.rejects(access(timeoutPreparation.stateDir), { code: "ENOENT" });
 
+  const nativeTask = { id: "TASK-14", title: "Native runner" };
+  const nativePreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: nativeTask, note: exactNote });
+  const nativeArchitect = "session-4b70f906-ce0a-4135-bc9e-b231db9b98b1";
+  const nativeChild = "621eeb4e-3796-4d58-92d2-9a45e4f133b0";
+  const nativeMessage = "1f69c7ed-19bb-4c42-9745-cf17d24d55d1";
+  const nativeProfile = {
+    name: "dsh-runner", provider: "deepseek-official", model: "deepseek-v4-flash", effort: "high",
+  };
+  let nativeInitiator;
+  const nativeBoundary = sessionContexts.createQqSessionContext({
+    env,
+    activeDshSession: () => nativeInitiator?.session?.id,
+  });
+  nativeBoundary.claimExclusive(nativeArchitect, {
+    role: "architect", profile: "dsh-architect", runState: null,
+  });
+  const nativeAgents = new Map();
+  const architectAgent = { session: { id: nativeArchitect } };
+  nativeAgents.set(nativeArchitect, architectAgent);
+  nativeInitiator = architectAgent;
+  let parentMessage;
+  let childPrompt;
+  let childStarts = 0;
+  let nativeChildFlushes = 0;
+  let nativeChildInspections = 0;
+  let nativeStartClock = 0;
+  let nativeSetup;
+  let retainedParent;
+  const nativeCommands = [];
+  const nativeCommandRun = async (command, args, options = {}) => {
+    nativeCommands.push({ command, args, options });
+    if (command === "git" && args[0] === "rev-parse" && args[1] === "--show-toplevel") return { code: 0, stdout: "/repo\n", stderr: "" };
+    if (command === "git" && args[0] === "rev-parse" && args[1] === "HEAD") return { code: 0, stdout: "native-base\n", stderr: "" };
+    if (command === "git" && args[0] === "symbolic-ref") return { code: 0, stdout: "main\n", stderr: "" };
+    return { code: 0, stdout: "", stderr: "" };
+  };
+  const nativeServices = {
+    agents: {
+      currentInitiator: () => nativeInitiator,
+      get: (id) => nativeAgents.get(id),
+      async create(options) {
+        const parent = {
+          session: { id: options.sessionId, header: { cwd: options.meta.cwd } },
+          async whenIdle() {},
+          followup(message) { parentMessage = message; },
+        };
+        options.setup?.({ on() {} });
+        nativeAgents.set(options.sessionId, parent);
+        return {
+          agent: parent,
+          async dispose() { nativeAgents.delete(options.sessionId); },
+        };
+      },
+      async withInitiator(agent, operation) {
+        const previous = nativeInitiator;
+        nativeInitiator = agent;
+        try { return await operation(); } finally { nativeInitiator = previous; }
+      },
+    },
+    sessions: {
+      get(id) { return nativeAgents.get(id)?.session; },
+      async flush(session) {
+        if (session.id !== nativeChild) return;
+        assert.equal(nativeAgents.get(nativeChild)?.session, session);
+        assert.equal(nativeChildInspections, 1, "the accepted marker must be observed before the live durability barrier");
+        nativeChildFlushes += 1;
+        return true;
+      },
+    },
+    persistence: {
+      async inspect(id) {
+        if (id !== nativeChild) return {
+          meta: { id },
+          events: parentMessage ? [{ type: "user/message", data: parentMessage }] : [],
+        };
+        assert.equal(JSON.parse(await readFile(nativePreparation.statePath, "utf8")).status, "starting");
+        assert.equal(nativeChildFlushes, nativeChildInspections, "the marker is re-inspected only after the live durability barrier");
+        assert.ok(nativeAgents.has(nativeChild), "persistence must be inspected before the accepted child settles");
+        nativeChildInspections += 1;
+        return {
+          meta: { id, parentSession: retainedParent?.parentId ?? [...nativeAgents.keys()].find((key) => key.startsWith("session-") && key !== nativeArchitect), cwd: nativePreparation.worktree, origin: "subagent" },
+          events: [
+            { type: "subagent/descriptor", data: { version: 2, mode: "continuable", provider: "spawn", label: "qq delegated runner" } },
+            { type: "user/message", data: { id: nativeMessage, role: "user", content: [{ type: "text", text: childPrompt }] } },
+          ],
+        };
+      },
+    },
+    subagents: {
+      registerContinuableSetup(setup) { nativeSetup = setup; return () => { nativeSetup = undefined; }; },
+      async startContinuable(spec) {
+        childStarts += 1;
+        assert.equal(spec.provider, "spawn");
+        assert.equal(spec.label, "qq delegated runner");
+        childPrompt = spec.request.prompt[0].text;
+        const child = {
+          session: { id: nativeChild, header: { parentSession: spec.request.parent.session.id } },
+        };
+        nativeAgents.set(nativeChild, child);
+        nativeSetup({ agent: child, on() {} });
+        return { childId: nativeChild, messageId: nativeMessage };
+      },
+      async drainContinuableDescendants() {},
+    },
+  };
+  const nativeState = await dshRun.startDshRun({
+    run: nativeCommandRun, cwd: "/repo", env, task: nativeTask, prepared: nativePreparation,
+    architectSession: nativeArchitect, qaBinding: { model: "qa" }, marker: "[qq-bootstrap:task-14-native]",
+    runnerProfile: nativeProfile, services: nativeServices, sessionContext: nativeBoundary,
+    verificationTimeoutMs: 20, verificationIntervalMs: 10, now: () => nativeStartClock,
+    async sleep(ms) { nativeStartClock += ms; },
+    retainParent(owned) { retainedParent = owned; },
+  });
+  assert.equal(nativeState.runtime, "dsh");
+  assert.equal(nativeState.status, "running");
+  assert.equal(nativeState.callerSession, nativeArchitect);
+  assert.equal(nativeState.bootstrapParentSession, retainedParent.parentId);
+  assert.equal(nativeState.runnerSession, nativeChild);
+  assert.equal(nativeState.bootstrapProof.messageId, nativeMessage);
+  assert.equal(nativeState.bootstrapProof.persistence, "sessionPersistence.inspect");
+  assert.equal(childStarts, 1);
+  assert.equal(nativeChildFlushes, 1);
+  assert.equal(nativeChildInspections, 2);
+  assert.equal(nativeStartClock, 0);
+  assert.ok(nativeAgents.has(nativeChild), "the accepted runner remains live after prompt verification");
+  assert.match(childPrompt, /^\[qq-bootstrap:task-14-native\]/);
+  assert.match(childPrompt, /# TASK-14 — Native runner/);
+  assert.match(childPrompt, /do not call done/);
+  assert.doesNotMatch(childPrompt, /call done with ref HEAD/);
+  assert.equal(nativeCommands.some(({ command }) => command === "herdr" || command === "pi"), false);
+  assert.deepEqual(nativeBoundary.resolveSession(nativeChild), {
+    schema: "qq.session-context/v1", sessionId: nativeChild, role: "runner", profile: "dsh-runner",
+    runState: nativePreparation.statePath, source: "dsh-session",
+  });
+  assert.equal((await lstat(nativePreparation.statePath)).mode & 0o077, 0);
+
+  let absentClock = 0;
+  let absentInspections = 0;
+  await assert.rejects(dshRun.verifyDshPromptAcceptance({
+    agents: { get: () => undefined },
+    sessions: { get: () => undefined },
+    persistence: { async inspect() { absentInspections += 1; return { meta: { id: nativeChild }, events: [] }; } },
+  }, {
+    childId: nativeChild, parentId: retainedParent.parentId, worktree: nativePreparation.worktree,
+    messageId: nativeMessage, marker: "[qq-bootstrap:task-14-native]",
+  }, {
+    timeoutMs: 20, intervalMs: 10, now: () => absentClock,
+    async sleep(ms) { absentClock += ms; },
+  }), /not durable within 20ms/);
+  assert.equal(absentInspections, 2);
+
+  const absentTask = { id: "TASK-15", title: "Absent native persistence" };
+  const absentPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: absentTask, note: exactNote });
+  const absentChild = "c24ee08f-0824-4dfa-b123-d2f04bcec9d7";
+  let absentSetup;
+  let absentParentId;
+  let absentStarts = 0;
+  let absentStartClock = 0;
+  const absentServices = {
+    ...nativeServices,
+    persistence: {
+      async inspect(id) {
+        if (id !== absentChild) return {
+          meta: { id }, events: parentMessage ? [{ type: "user/message", data: parentMessage }] : [],
+        };
+        assert.equal(JSON.parse(await readFile(absentPreparation.statePath, "utf8")).status, "starting");
+        return {
+          meta: { id, parentSession: absentParentId, cwd: absentPreparation.worktree, origin: "subagent" },
+          events: [{ type: "subagent/descriptor", data: {
+            version: 2, mode: "continuable", provider: "spawn", label: "qq delegated runner",
+          } }],
+        };
+      },
+    },
+    subagents: {
+      registerContinuableSetup(setup) { absentSetup = setup; return () => { absentSetup = undefined; }; },
+      async startContinuable(spec) {
+        absentStarts += 1;
+        absentParentId = spec.request.parent.session.id;
+        absentSetup({
+          agent: { session: { id: absentChild, header: { parentSession: absentParentId } } },
+          on() {},
+        });
+        return { childId: absentChild, messageId: "802a1a1d-f0c6-49cf-96f5-bc5cf8977720" };
+      },
+      async drainContinuableDescendants() {},
+    },
+  };
+  const absentCommandIndex = nativeCommands.length;
+  await assert.rejects(dshRun.startDshRun({
+    run: nativeCommandRun, cwd: "/repo", env, task: absentTask, prepared: absentPreparation,
+    architectSession: nativeArchitect, qaBinding: {}, marker: "[qq-bootstrap:task-15-absent]",
+    runnerProfile: nativeProfile, services: absentServices, sessionContext: nativeBoundary,
+    verificationTimeoutMs: 20, verificationIntervalMs: 10, now: () => absentStartClock,
+    async sleep(ms) { absentStartClock += ms; },
+  }), (error) => {
+    assert.match(error.message, /not durable within 20ms/);
+    assert.doesNotMatch(error.message, new RegExp(exactNote));
+    return true;
+  });
+  assert.equal(absentStarts, 1, "durability failure must not reinject the private prompt");
+  assert.equal(absentStartClock, 20);
+  assert.equal(nativeBoundary.resolveSession(absentChild).source, "pi-environment");
+  await assert.rejects(access(absentPreparation.stateDir), { code: "ENOENT" });
+  const absentCommands = nativeCommands.slice(absentCommandIndex);
+  assert.equal(absentCommands.some(({ command, args }) => command === "git" && args[0] === "worktree" && args[1] === "remove"), true);
+  assert.equal(absentCommands.some(({ command, args }) => command === "git" && args[0] === "branch" && args[1] === "-D"), true);
+
+  const refusedTask = { id: "TASK-16", title: "Refused native model" };
+  const refusedPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: refusedTask, note: exactNote });
+  const refusedServices = {
+    ...nativeServices,
+    agents: {
+      ...nativeServices.agents,
+      async create() { throw new Error(`raw model refusal ${exactNote}`); },
+    },
+  };
+  await assert.rejects(dshRun.startDshRun({
+    run: nativeCommandRun, cwd: "/repo", env, task: refusedTask, prepared: refusedPreparation,
+    architectSession: nativeArchitect, qaBinding: {}, marker: "[qq-bootstrap:task-16-refused]",
+    runnerProfile: nativeProfile, services: refusedServices, sessionContext: nativeBoundary,
+  }), (error) => {
+    assert.match(error.message, /bootstrap parent was refused/);
+    assert.doesNotMatch(error.message, new RegExp(exactNote));
+    assert.doesNotMatch(error.message, /raw model refusal/);
+    return true;
+  });
+  await assert.rejects(access(refusedPreparation.stateDir), { code: "ENOENT" });
+
+  await assert.rejects(dshRun.startDshRun({
+    run: async () => assert.fail("wrong architect must fail before workspace creation"),
+    cwd: "/repo", env, task: nativeTask, prepared: nativePreparation,
+    architectSession: "session-a5dd905c-fe41-4d3e-bda6-52f227c40267", qaBinding: {},
+    marker: "[qq-bootstrap:wrong-architect]", runnerProfile: nativeProfile,
+    services: nativeServices, sessionContext: nativeBoundary,
+  }), /exact owned architect session/);
+
+  const cancelledNative = new AbortController();
+  cancelledNative.abort();
+  await assert.rejects(dshRun.verifyDshPromptAcceptance({
+    agents: { get: () => undefined }, sessions: { get: () => undefined },
+    persistence: { async inspect() { assert.fail("cancelled verification must not inspect"); } },
+  }, {
+    childId: nativeChild, parentId: retainedParent.parentId, worktree: nativePreparation.worktree,
+    messageId: nativeMessage, marker: "[qq-bootstrap:task-14-native]",
+  }, { signal: cancelledNative.signal }), /cancelled/);
+
   const cancelledPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: { id: "TASK-2", title: "Cancel" }, note: exactNote });
   await lib.discardRun(cancelledPreparation);
   await assert.rejects(access(cancelledPreparation.stateDir), { code: "ENOENT" });
@@ -792,6 +1041,81 @@ try {
   assert.equal(approved.content[0].text.includes("\n"), false);
   assert.doesNotMatch(JSON.stringify(approved), new RegExp(exactNote));
 
+  const nativeArchitectSession = "session-4b70f906-ce0a-4135-bc9e-b231db9b98b1";
+  const nativeSessionContext = {
+    observeSelection() {},
+    resolve() {
+      return {
+        schema: "qq.session-context/v1", sessionId: nativeArchitectSession,
+        role: "architect", profile: "dsh-architect", runState: null, source: "dsh-session",
+      };
+    },
+  };
+  const nativeOrder = [];
+  let piFallbackLaunched = false;
+  const nativeTool = delegateHarness({
+    sessionContext: nativeSessionContext,
+    run: backlogRun([], nativeOrder),
+    async makeNote() { nativeOrder.push("scribe"); return { note: exactNote, qaBinding: { model: "qa" } }; },
+    async prepareRun() { nativeOrder.push("prepare"); return approvedPreparation; },
+    async awaitBriefGate() { nativeOrder.push("gate"); return "approved"; },
+    async readExecutionPolicy() {
+      nativeOrder.push("profile");
+      return {
+        roles: { runner: { default: "dsh-runner", profiles: {
+          "dsh-runner": { provider: "deepseek-official", model: "deepseek-v4-flash", effort: "high" },
+        } } },
+      };
+    },
+    async prepareBootstrapRequest(options) {
+      nativeOrder.push("bootstrap");
+      assert.deepEqual(options.runnerProfile, {
+        name: "dsh-runner", provider: "deepseek-official", model: "deepseek-v4-flash", effort: "high",
+      });
+      assert.equal(options.architectSession, nativeArchitectSession);
+      return { bootstrapPath: "/private/gate/bootstrap.json" };
+    },
+    async launchNativeBootstrap(path, options) {
+      nativeOrder.push("native-launch");
+      assert.equal(path, "/private/gate/bootstrap.json");
+      assert.equal(options.architectSession, nativeArchitectSession);
+      return {
+        bootstrapParentSession: "session-1bfba388-5ac3-492a-a578-a4e05a32d790",
+        runnerSession: "621eeb4e-3796-4d58-92d2-9a45e4f133b0",
+      };
+    },
+    launchBootstrap() { piFallbackLaunched = true; },
+  });
+  const nativeCtx = { ...ctx, sessionManager: { getSessionId: () => nativeArchitectSession } };
+  const nativeApproved = await nativeTool.execute("native-approve", { id: task.id }, undefined, undefined, nativeCtx);
+  assert.deepEqual(nativeOrder, ["status:In Progress", "scribe", "prepare", "gate", "profile", "bootstrap", "native-launch"]);
+  assert.equal(piFallbackLaunched, false);
+  assert.equal(nativeApproved.content[0].text, `Approved ${task.id}; native runner started.`);
+  assert.equal(nativeApproved.details.status, "running");
+  assert.equal(nativeApproved.details.runner_session, "621eeb4e-3796-4d58-92d2-9a45e4f133b0");
+  assert.doesNotMatch(JSON.stringify(nativeApproved), new RegExp(exactNote));
+
+  const unavailableStatuses = [];
+  let unavailableDiscarded = false;
+  const unavailableNativeTool = delegateHarness({
+    sessionContext: nativeSessionContext,
+    run: backlogRun(unavailableStatuses),
+    async makeNote() { return { note: exactNote, qaBinding: {} }; },
+    async prepareRun() { return approvedPreparation; },
+    async awaitBriefGate() { return "approved"; },
+    async readExecutionPolicy() {
+      return { roles: { runner: { default: "dsh-runner", profiles: {
+        "dsh-runner": { provider: "deepseek-official", model: "deepseek-v4-flash", effort: "high" },
+      } } } };
+    },
+    async prepareBootstrapRequest() { return { bootstrapPath: "/private/gate/bootstrap.json" }; },
+    async discardRun() { unavailableDiscarded = true; },
+  });
+  const unavailableNative = await unavailableNativeTool.execute("native-unavailable", { id: task.id }, undefined, undefined, nativeCtx);
+  assert.match(unavailableNative.content[0].text, /native DSH launch adapter is unavailable/);
+  assert.deepEqual(unavailableStatuses, ["In Progress", "To Do"]);
+  assert.equal(unavailableDiscarded, true);
+
   const cancelOrder = [];
   const cancelStatuses = [];
   let cancelStarted = false;
@@ -856,7 +1180,7 @@ try {
     async discardRun() { readFailureDiscarded = true; },
   });
   const readFailure = await readFailureTool.execute("read-failure", { id: task.id }, undefined, undefined, ctx);
-  assert.match(readFailure.content[0].text, /could not read its private request/);
+  assert.match(readFailure.content[0].text, /could not read its private request|exited before accepting its request/);
   assert.deepEqual(readFailureStatuses, ["In Progress", "To Do"]);
   assert.equal(readFailureDiscarded, true, "the delegating architect retains rollback ownership until request acceptance");
 

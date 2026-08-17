@@ -8,7 +8,7 @@ const root = resolve(process.argv[2] ?? ".");
 const read = (path) => readFile(join(root, path), "utf8");
 const json = async (path) => JSON.parse(await read(path));
 
-const [pkg, pins, toolchain, toolchainLock, evidence, webEvidence, webQa, consoleEvidence, consoleReadme, consoleRender, consoleWorker, run, patch, relayProbe, childRun, childPlugin, childPatch, childPackage, relayContract, liveMessages, messages, review, scrub, runLib, runEvents, sessionContext] = await Promise.all([
+const [pkg, pins, toolchain, toolchainLock, evidence, webEvidence, webQa, consoleEvidence, consoleReadme, consoleRender, consoleWorker, run, patch, relayProbe, childRun, childPlugin, childPatch, childPackage, nativeRun, nativeAdapter, nativeAdapterPatch, nativeAdapterPackage, nativeProof, nativeProofPatch, nativeProofPackage, relayContract, liveMessages, messages, review, scrub, runLib, runEvents, sessionContext, dshRunLib] = await Promise.all([
   json("package.json"),
   json("compat/pi2dsh/pins.json"),
   json("compat/pi2dsh/toolchain/package.json"),
@@ -27,6 +27,13 @@ const [pkg, pins, toolchain, toolchainLock, evidence, webEvidence, webQa, consol
   read("compat/pi2dsh/subagent-proof/plugin.mjs"),
   read("compat/pi2dsh/subagent-proof/cordis.patch.yml"),
   json("compat/pi2dsh/subagent-proof/package.json"),
+  read("compat/pi2dsh/run-native-delegation-proof.sh"),
+  read("dsh-native-launch/plugin.mjs"),
+  read("dsh-native-launch/cordis.patch.yml"),
+  json("dsh-native-launch/package.json"),
+  read("compat/pi2dsh/native-delegation-proof/plugin.mjs"),
+  read("compat/pi2dsh/native-delegation-proof/cordis.patch.yml"),
+  json("compat/pi2dsh/native-delegation-proof/package.json"),
   read("tests/test-qq-relay.sh"),
   read("tests/test-agent-messages-live.sh"),
   read("extensions/agent-messages.ts"),
@@ -35,6 +42,7 @@ const [pkg, pins, toolchain, toolchainLock, evidence, webEvidence, webQa, consol
   read("bin/lib/run.mjs"),
   read("bin/lib/run-events.mjs"),
   read("bin/lib/session-context.mjs"),
+  read("bin/lib/dsh-run.mjs"),
 ]);
 
 assert.deepEqual(pkg.pi, { extensions: ["extensions/index.ts"] });
@@ -127,13 +135,16 @@ const probes = new Map(evidence.probes.map((probe) => [probe.id, probe]));
 for (const id of [
   "package-local-events", "before-agent-start", "tools", "commands", "model-selection",
   "thinking-effort", "shortcut", "session-tree", "shutdown", "project-trust",
-  "read-tool-collision", "session-id", "qq-relay-client", "native-child-prompt-acceptance", "herdr-launch", "herdr-delivery-proof",
-  "agent-message-receipts", "run-outcome-addressing", "review-receipts", "session-scrub",
+  "read-tool-collision", "session-id", "qq-relay-client", "native-child-prompt-acceptance", "qq-session-context",
+  "approved-native-delegation-launch", "herdr-launch", "herdr-delivery-proof", "agent-message-receipts", "run-outcome-addressing", "review-receipts", "session-scrub",
 ]) assert.ok(probes.has(id), `missing compatibility probe ${id}`);
 assert.equal(probes.get("session-id").verdict, "identity-translated");
 assert.match(probes.get("session-id").fact, /complete value unchanged as the live relay address/);
 assert.equal(probes.get("qq-relay-client").verdict, "installed-product-proven");
 assert.equal(probes.get("native-child-prompt-acceptance").verdict, "durable-bootstrap-and-cold-followup-proven");
+assert.equal(probes.get("approved-native-delegation-launch").verdict, "post-approval-native-launch-proven");
+assert.match(probes.get("approved-native-delegation-launch").fact, /flushing any live child Session.*sessionPersistence\.inspect.*without waiting for child settlement/);
+assert.match(probes.get("approved-native-delegation-launch").fact, /fresh DSH host/);
 assert.match(probes.get("native-child-prompt-acceptance").fact, /cold sessionPersistence\.inspect/);
 assert.match(probes.get("native-child-prompt-acceptance").fact, /fresh host resumes the exact persisted direct parent/);
 assert.equal(probes.get("agent-message-receipts").verdict, "installed-transport-and-durable-entry-proven");
@@ -141,7 +152,8 @@ assert.equal(probes.get("run-outcome-addressing").verdict, "installed-address-an
 assert.match(probes.get("run-outcome-addressing").fact, /qq\/review-flow\/session-<UUID>/);
 assert.equal(probes.get("review-receipts").verdict, "installed-durable-entry-proven");
 assert.ok(evidence.conclusion.blockers.every((blocker) => !/qq-relay client boundary|review events|prompt-acceptance proof/i.test(blocker)));
-assert.ok(evidence.conclusion.blockers.some((blocker) => /production delegation integration/.test(blocker)));
+assert.ok(evidence.conclusion.blockers.some((blocker) => /native runner completion into review and QA/.test(blocker)));
+assert.ok(evidence.conclusion.blockers.every((blocker) => !/production delegation integration/.test(blocker)));
 
 assert.equal(evidence.operator_surface.verdict, "pass-sequential-vertical-slice");
 assert.equal(evidence.operator_surface.model, "sequential-single-page-handoff");
@@ -218,6 +230,30 @@ assert.match(sessionContext, /activeDshSession\?\.\(\)/);
 assert.match(sessionContext, /QQ_RUN_STATE \|\| null/);
 assert.match(childPlugin, /agents\.currentInitiator\(\)\?\.session\.id/);
 assert.match(childRun, /context_survived_continuation/);
+assert.equal(nativeAdapterPackage.name, "@hypermemetic-ai/qq-dsh-native-launch");
+assert.equal(nativeAdapterPackage.dsh.bundle.patch, "./cordis.patch.yml");
+assert.match(nativeAdapterPatch, /inject: \[agents, sessions, sessionPersistence, subagents\]/);
+assert.match(nativeAdapter, /registerNativeLaunchAdapter\(adapter\)/);
+assert.match(nativeAdapter, /bootstrapRun\(run, requestPath/);
+assert.match(nativeAdapter, /startDshRun\(/);
+assert.doesNotMatch(nativeAdapter, /herdr|agent\.prompt|qq-relay/);
+assert.match(dshRunLib, /subagents\.startContinuable\(/);
+assert.match(dshRunLib, /provider: "spawn"/);
+assert.match(dshRunLib, /sessions\.flush\(liveSession\)[\s\S]*persistence\.inspect\(expected\.childId/);
+assert.match(dshRunLib, /event\.data\?\.id === messageId/);
+assert.match(dshRunLib, /sessionContext\.claimExclusive\(childId/);
+assert.match(dshRunLib, /runtime: "dsh"/);
+assert.doesNotMatch(dshRunLib, /herdr|agent\.prompt|qq-relay/);
+assert.equal(nativeProofPackage.name, "@hypermemetic-ai/qq-dsh-native-delegation-proof");
+assert.match(nativeProofPatch, /inject: \[agentDefaultModel, agents, sessions, sessionPersistence, subagents\]/);
+assert.match(nativeProof, /registerBoard\(/);
+assert.match(nativeProof, /awaitBriefGate\(\) \{ return "approved"; \}/);
+assert.match(nativeProof, /bootstrap_injections: exactMessages\.length/);
+assert.match(nativeProof, /agents\.resume\(/);
+assert.match(nativeRun, /plugin --profile qq-native-delegation-proof add "\$dsh_native"/);
+assert.match(nativeRun, /run_phase start[\s\S]*run_phase fresh/);
+assert.match(nativeRun, /main checkout/);
+assert.match(relayContract, /run-native-delegation-proof\.sh/);
 assert.ok(evidence.probes.some((item) => item.id === "qq-session-context"));
 
 // Run outcomes accept only canonical Pi UUIDs or pinned DSH session-UUIDs.

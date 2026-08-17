@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { constants, chmodSync, closeSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { constants, chmodSync, closeSync, fstatSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
@@ -106,30 +106,43 @@ function readOwnedContext(root, sessionId) {
   }
 }
 
-function writeOwnedContext(root, sessionId, value) {
+function syncDirectory(root) {
+  const directory = openSync(root, constants.O_RDONLY);
+  try { fsyncSync(directory); } finally { closeSync(directory); }
+}
+
+function writeOwnedContext(root, sessionId, value, options = {}) {
   safeRoot(root, true);
   const record = snapshotContext(sessionId, value);
   const temporary = join(root, `.${sessionId}.${process.pid}.${randomUUID()}.tmp`);
   let handle;
-  let exists = false;
+  let temporaryExists = false;
   try {
     handle = openSync(
       temporary,
       constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
       0o600,
     );
-    exists = true;
+    temporaryExists = true;
     writeFileSync(handle, `${JSON.stringify(record)}\n`, "utf8");
     fsyncSync(handle);
     closeSync(handle);
     handle = undefined;
-    renameSync(temporary, contextPath(root, sessionId));
-    exists = false;
-    const directory = openSync(root, constants.O_RDONLY);
-    try { fsyncSync(directory); } finally { closeSync(directory); }
+    if (options.exclusive) {
+      try { linkSync(temporary, contextPath(root, sessionId)); }
+      catch (error) {
+        if (error?.code === "EEXIST") throw new Error(`qq session context for ${sessionId} is already claimed`);
+        throw error;
+      }
+      unlinkSync(temporary);
+    } else {
+      renameSync(temporary, contextPath(root, sessionId));
+    }
+    temporaryExists = false;
+    syncDirectory(root);
   } finally {
     if (handle !== undefined) closeSync(handle);
-    if (exists) {
+    if (temporaryExists) {
       try { unlinkSync(temporary); } catch {}
     }
   }
@@ -190,6 +203,25 @@ export function createQqSessionContext(options = {}) {
     return writeOwnedContext(root, assertSessionId(sessionId), value);
   }
 
+  function claimExclusive(sessionId, value) {
+    return writeOwnedContext(root, assertSessionId(sessionId), value, { exclusive: true });
+  }
+
+  function release(sessionId, expected) {
+    const id = assertSessionId(sessionId);
+    const current = readOwnedContext(root, id);
+    if (!current) return false;
+    if (expected !== undefined) {
+      const snapshot = snapshotContext(id, expected);
+      if (JSON.stringify(current) !== JSON.stringify(snapshot)) {
+        throw new Error(`qq session context for ${id} changed before release`);
+      }
+    }
+    unlinkSync(contextPath(root, id));
+    syncDirectory(root);
+    return true;
+  }
+
   function update(hostContext, patch) {
     const sessionId = activeSessionId(hostContext);
     if (sessionId) {
@@ -224,8 +256,10 @@ export function createQqSessionContext(options = {}) {
   return Object.freeze({
     activeSessionId,
     claim,
+    claimExclusive,
     contextPath: (sessionId) => contextPath(root, assertSessionId(sessionId)),
     observeSelection,
+    release,
     resetFallback,
     resolve: resolveContext,
     resolveSession,

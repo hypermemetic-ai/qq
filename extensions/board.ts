@@ -5,7 +5,8 @@ import { readFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { readExecutionPolicy } from "../bin/lib/execution-profiles.mjs";
+import { profileFor, readExecutionPolicy } from "../bin/lib/execution-profiles.mjs";
+import { launchNativeBootstrap } from "../bin/lib/native-launch.mjs";
 import { createQqSessionContext } from "../bin/lib/session-context.mjs";
 import { collectLiveWorktreeDiffs, findExistingBrief, withAdmissionLock } from "../bin/lib/admission.mjs";
 import { awaitBriefGate, discardRun, formatNoteTake, formatTicket, prepareBootstrapRequest, prepareRun } from "../bin/lib/run.mjs";
@@ -319,7 +320,8 @@ export default function registerBoard(pi, deps = {}) {
     description: "Vet one To Do ticket against active work, bounce conflicts in chat, or claim it; then prepare its note, wait for approval or cancellation in an operator-owned Glow pane, and start an isolated messaging-enabled runner if approved. Architect sessions only.",
     parameters: { type: "object", additionalProperties: false, required: ["id"], properties: { id: { type: "string" } } },
     async execute(_id, params, signal, _update, ctx) {
-      if (sessionContext.resolve(ctx).role !== "architect") return result("delegate is available only in an architect session.");
+      const callerContext = sessionContext.resolve(ctx);
+      if (callerContext.role !== "architect") return result("delegate is available only in an architect session.");
       let claimedTask;
       let prepared;
       let outboundNote;
@@ -340,7 +342,10 @@ export default function registerBoard(pi, deps = {}) {
 
         const { note, transcript, qaBinding } = await (deps.makeNote ?? makeNote)(operationCtx, task, deps);
         outboundNote = note;
-        prepared = await (deps.prepareRun ?? prepareRun)({ cwd: ctx.cwd, env, project, task, note, transcript });
+        prepared = await (deps.prepareRun ?? prepareRun)({
+          cwd: ctx.cwd, env, project, task, note, transcript,
+          runtime: callerContext.source === "dsh-session" ? "dsh" : "pi-herdr",
+        });
         const decision = await (deps.withGlowTurn ?? withGlowTurn)(admission.commonDir || project, () => (deps.awaitBriefGate ?? awaitBriefGate)({
           run, env, prepared, signal: operationSignal,
           pluginRoot: deps.briefGatePluginPath ?? join(QQ_ROOT, "plugins", "brief-gate"),
@@ -354,11 +359,30 @@ export default function registerBoard(pi, deps = {}) {
           return result(`Cancelled ${task.id}; runner not started.`, { status: "cancelled", task_id: task.id });
         }
 
+        let runnerProfile;
+        if (callerContext.source === "dsh-session") {
+          const policy = await (deps.readExecutionPolicy ?? readExecutionPolicy)(deps.policyPath);
+          const selected = profileFor(policy, "runner");
+          runnerProfile = { name: selected.name, ...selected.profile };
+        }
         const bootstrap = await (deps.prepareBootstrapRequest ?? prepareBootstrapRequest)({
           cwd: ctx.cwd, env, task, prepared, qaBinding, project, signal: operationSignal,
-          architectSession: ctx.sessionManager.getSessionId(),
+          architectSession: ctx.sessionManager.getSessionId(), runnerProfile,
         });
         if (operationSignal?.aborted) throw operationSignal.reason ?? new Error("delegation was cancelled");
+        if (callerContext.source === "dsh-session") {
+          const state = await (deps.launchNativeBootstrap ?? launchNativeBootstrap)(bootstrap.bootstrapPath, {
+            architectSession: callerContext.sessionId,
+            signal: operationSignal,
+          });
+          claimedTask = undefined;
+          prepared = undefined;
+          return result(`Approved ${task.id}; native runner started.`, {
+            status: "running", task_id: task.id,
+            bootstrap_parent_session: state.bootstrapParentSession,
+            runner_session: state.runnerSession,
+          });
+        }
         const workerPid = await (deps.launchBootstrap ?? ((path) => detachedBootstrapWorker(path, env)))(bootstrap.bootstrapPath);
         claimedTask = undefined;
         prepared = undefined;
