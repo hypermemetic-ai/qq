@@ -16,6 +16,7 @@ DSH owns every authoritative value:
 
 - the server lists only DSH persistence headers and live DSH agents;
 - canonical `/qq/session/<session-UUID>` navigation can resume an existing DSH identity but cannot invent an arbitrary one;
+- New session invokes DSH's pinned `agents.create()` factory with a fresh shared `session-<UUID>` identity, then crosses `sessions.flush()` before opening its canonical URL;
 - transcript rows are rendered from ordered append-origin `user/message`, `assistant/message`, and `tool/result` events;
 - status comes from the live DSH Agent plus durable turn boundaries;
 - Send invokes `Agent.followup()`, waits for DSH quiescence, and flushes the DSH Session;
@@ -44,7 +45,7 @@ All event content, session metadata, notices, and status text are HTML-escaped. 
 
 The manifest, standalone display metadata, 192/512 icons, and versioned service worker establish the smallest install boundary. They do **not** make DSH offline:
 
-- the cache allowlist contains exact versioned htmx/SSE/CSS/browser/icon assets and `offline-v2.html` only;
+- the cache allowlist contains exact versioned htmx/SSE/CSS/browser/icon assets and `offline-v3.html` only;
 - navigations always try the network and fall back only to the disconnected shell;
 - session documents, fragments, SSE, the manifest, service worker, and every mutation remain network-only;
 - non-GET requests are not intercepted;
@@ -63,7 +64,7 @@ bin/qq-dsh-workbench
 
 Open `http://127.0.0.1:3082/qq`. On first use the script installs the locked toolchain and prepares the console-only DSH profile. Later starts reuse both. Its default state is persistent at `${XDG_STATE_HOME:-$HOME/.local/state}/qq/dsh-workbench`; `QQ_DSH_HOME` or the standard `DSH_HOME` can select another persistent location.
 
-The first start records a canonical session identity in `$DSH_HOME/qq-console.session`. Killing the process and running the same command resumes that session from DSH's own session log. The session list can reopen any other persisted DSH session. `QQ_DSH_SESSION_ID=session-<UUID>` selects an existing identity or establishes the saved identity on a fresh home.
+The first start records a canonical session identity in `$DSH_HOME/qq-console.session`. Killing the process and running the same command resumes that session from DSH's own session log. The always-visible session control can reopen any persisted DSH session, and **New session** creates and opens a fresh durable identity without changing the configured default. `QQ_DSH_SESSION_ID=session-<UUID>` selects an existing identity or establishes the saved identity on a fresh home.
 
 The workbench explicitly selects `qwen-token-plan/deepseek-v4-pro-0813`. That exact Pro revision is present in the operator's current token-plan catalog but is newer than rc.6's installed pi-ai catalog. The console profile therefore declares its current non-secret model metadata (name, capacities, text input, Qwen thinking format, `high`/`max` efforts, and no `developer` role) through rc.6's public `models` configuration. A launch-only Node preload seeds the dated route from the installed `deepseek-v4-pro` catalog entry before DSH resolves that profile; this preserves the exact outbound model id while carrying the token-plan route's `supportsDeveloperRole: false` compatibility into rc.6's pi-ai adapter. System instructions consequently travel as `system`, not the provider-rejected `developer` role. The provider still inherits the pinned `qwen-token-plan` endpoint and OpenAI-completions protocol and resolves only the existing `QWEN_TOKEN_PLAN_API_KEY` credential reference; this is neither a model substitution nor a credential adapter, and no key is stored in this repository. DSH also accepts the key in an owner-only `$DSH_HOME/.credentials.yaml`:
 
@@ -110,9 +111,9 @@ tests/test-dsh-console-live.sh
 QWEN_TOKEN_PLAN_API_KEY='...' tests/test-dsh-workbench-real.sh
 ```
 
-The fast test exercises session selection, send, two live SSE states, dynamically inserted interrupt, safe rendering, collapsed verbose context, normal/htmx forms, sequential home/laptop/phone reconstruction, PWA allowlisting, explicit model selection, and negative architecture checks. The deterministic live test starts through `bin/qq-dsh-workbench`, makes its provider stub reject any `developer` role, verifies an instruction-bearing turn arrives with `system`, creates two canonical sessions, sends and interrupts through the real Agent/Session APIs, restarts on the launcher's saved session, verifies ordered reconstruction from DSH artifacts, and executes native DSH read/write/edit/grep/bash tools in the qq repository. The credential-gated smoke makes one real request to exact `qwen-token-plan/deepseek-v4-pro-0813`.
+The fast test exercises session selection, send, two live SSE states, dynamically inserted interrupt, safe rendering, collapsed verbose context, normal/htmx forms, sequential home/laptop/phone reconstruction, PWA allowlisting, explicit model selection, and negative architecture checks. The deterministic live test starts through `bin/qq-dsh-workbench`, makes its provider stub reject any `developer` role, verifies an instruction-bearing turn arrives with `system`, creates and flushes a fresh empty session through the in-page action, reopens it after restart, sends and interrupts through the real Agent/Session APIs, verifies ordered reconstruction from DSH artifacts, and executes native DSH read/write/edit/grep/bash tools in the qq repository. The credential-gated smoke makes one real request to exact `qwen-token-plan/deepseek-v4-pro-0813`.
 
-On phone widths the page is a viewport-bounded app shell: heading and session disclosure stay compact, transcript history scrolls independently with context/tool rows collapsed, and the composer remains in the active viewport. The same hierarchy is retained when the viewport shrinks for an on-screen keyboard; the prompt and 44px Send target remain immediately usable without scrolling the document.
+On phone widths the page is a viewport-bounded app shell: heading and always-visible session controls stay compact, transcript history scrolls independently with context/tool rows collapsed, and the inline Send control keeps the composer in the active viewport. The same hierarchy is retained when the viewport shrinks for an on-screen keyboard; the one-row prompt and 44px Send target remain immediately usable without scrolling the document.
 
 [`../compat/pi2dsh/WEB_QA.md`](../compat/pi2dsh/WEB_QA.md) records the real-browser proof: two SSE swaps preserve both node identities, the newly inserted Interrupt form works without manual processing, forced stream closure reconnects through the official extension, `390×844` has no horizontal overflow, unsafe text stays inert, and the controlled PWA fails closed after the host stops.
 

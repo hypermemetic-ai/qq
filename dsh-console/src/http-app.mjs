@@ -23,7 +23,7 @@ const bundledAssets = Object.freeze({
     type: "text/javascript; charset=utf-8",
     body: readFileSync(new URL("vendor/htmx-ext-sse-2.2.4.js", root)),
   },
-  "console-v2.css": {
+  "console-v3.css": {
     type: "text/css; charset=utf-8",
     body: readFileSync(new URL("assets/console.css", root)),
   },
@@ -43,13 +43,13 @@ const bundledAssets = Object.freeze({
     type: "image/png",
     body: readFileSync(new URL("assets/icon-v1-512.png", root)),
   },
-  "offline-v2.html": {
+  "offline-v3.html": {
     type: "text/html; charset=utf-8",
-    body: readFileSync(new URL("assets/offline-v2.html", root)),
+    body: readFileSync(new URL("assets/offline-v3.html", root)),
   },
-  "sw-v3.js": {
+  "sw-v4.js": {
     type: "text/javascript; charset=utf-8",
-    body: readFileSync(new URL("assets/sw-v3.js", root)),
+    body: readFileSync(new URL("assets/sw-v4.js", root)),
   },
 });
 
@@ -103,7 +103,9 @@ function sameOrigin(req) {
   const site = req.headers["sec-fetch-site"];
   if (site && site !== "same-origin" && site !== "none") return false;
   const origin = req.headers.origin;
-  if (!origin) return true;
+  // A no-referrer document navigation can serialize a legitimate POST Origin
+  // as `null`; Sec-Fetch-Site remains the browser-controlled same-site proof.
+  if (!origin || origin === "null") return !site || site === "same-origin" || site === "none";
   try {
     return new URL(origin).host === req.headers.host;
   } catch {
@@ -118,7 +120,8 @@ function routes(basePath, sessionId) {
     events: `${canonical}/events`,
     interrupt: `${canonical}/interrupt`,
     prompt: `${canonical}/prompt`,
-    session: (id) => `${basePath}/session/${encodeURIComponent(id)}`,
+    createSession: `${basePath}/sessions`,
+    switchSession: `${basePath}/sessions/open`,
   });
 }
 
@@ -170,6 +173,7 @@ export function createConsoleHandler(backend, options = {}) {
     !backend ||
     typeof backend.read !== "function" ||
     typeof backend.list !== "function" ||
+    typeof backend.create !== "function" ||
     typeof backend.prompt !== "function" ||
     typeof backend.interrupt !== "function"
   ) {
@@ -178,15 +182,17 @@ export function createConsoleHandler(backend, options = {}) {
   const basePath = normalizeBasePath(options.basePath);
   const ssePollMs = positiveInteger(options.ssePollMs, DEFAULT_SSE_POLL_MS, "ssePollMs");
   const assetsPrefix = `${basePath}/assets/`;
+  const sessionsPath = `${basePath}/sessions`;
+  const switchSessionPath = `${sessionsPath}/open`;
   const assetPaths = Object.freeze({
     htmx: `${assetsPrefix}htmx-2.0.10.min.js`,
     sse: `${assetsPrefix}htmx-ext-sse-2.2.4.js`,
-    css: `${assetsPrefix}console-v2.css`,
+    css: `${assetsPrefix}console-v3.css`,
     browser: `${assetsPrefix}browser-v3.js`,
     icon192: `${assetsPrefix}icon-v1-192.png`,
     icon512: `${assetsPrefix}icon-v1-512.png`,
     manifest: `${assetsPrefix}manifest-v1.webmanifest`,
-    serviceWorker: `${basePath}/sw-v3.js`,
+    serviceWorker: `${basePath}/sw-v4.js`,
   });
 
   async function view(sessionId) {
@@ -196,6 +202,26 @@ export function createConsoleHandler(backend, options = {}) {
       available.unshift({ id: snapshot.id, createdAt: 0 });
     }
     return { ...snapshot, sessions: available };
+  }
+
+  function navigationResponse(req, res, location, head = false) {
+    if (String(req.headers["hx-request"] ?? "").toLowerCase() === "true") {
+      write(
+        res,
+        200,
+        { "HX-Redirect": location, "Content-Type": "text/plain; charset=utf-8" },
+        "Open session\n",
+        head,
+      );
+      return;
+    }
+    write(
+      res,
+      303,
+      { Location: location, "Content-Type": "text/plain; charset=utf-8" },
+      "See other\n",
+      head,
+    );
   }
 
   async function mutationResponse(req, res, sessionId, notice = "") {
@@ -228,7 +254,7 @@ export function createConsoleHandler(backend, options = {}) {
         write(res, 405, { Allow: "GET, HEAD", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
         return;
       }
-      const asset = bundledAssets["sw-v3.js"];
+      const asset = bundledAssets["sw-v4.js"];
       write(
         res,
         200,
@@ -269,7 +295,7 @@ export function createConsoleHandler(backend, options = {}) {
         return;
       }
       const asset = bundledAssets[name];
-      if (!asset || name.includes("/") || name === "sw-v3.js") {
+      if (!asset || name.includes("/") || name === "sw-v4.js") {
         text(res, 404, "Not found", head);
         return;
       }
@@ -284,6 +310,37 @@ export function createConsoleHandler(backend, options = {}) {
         asset.body,
         head,
       );
+      return;
+    }
+
+    if (url.pathname === switchSessionPath && (req.method === "GET" || head)) {
+      try {
+        const sessionId = String(url.searchParams.get("session") ?? "");
+        const snapshot = await backend.read(sessionId);
+        navigationResponse(req, res, routes(basePath, snapshot.id).canonical, head);
+      } catch (error) {
+        text(res, errorStatus(error), `DSH session unavailable: ${errorMessage(error)}`, head);
+      }
+      return;
+    }
+
+    if (url.pathname === sessionsPath) {
+      if (req.method !== "POST") {
+        write(res, 405, { Allow: "POST", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
+        return;
+      }
+      try {
+        if (!sameOrigin(req)) {
+          const error = new Error("Cross-origin form submission refused");
+          error.status = 403;
+          throw error;
+        }
+        await readForm(req);
+        const created = await backend.create();
+        navigationResponse(req, res, routes(basePath, created.id).canonical);
+      } catch (error) {
+        text(res, errorStatus(error), errorMessage(error));
+      }
       return;
     }
 

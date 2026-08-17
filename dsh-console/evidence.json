@@ -1,6 +1,6 @@
 {
   "schema": "qq.dsh-console-evidence/v2",
-  "observed_at": "2026-08-16",
+  "observed_at": "2026-08-17",
   "dsh_pin": {
     "package": "@deepseek-ai/dsh",
     "version": "0.1.0-rc.6",
@@ -24,14 +24,15 @@
     "steps": [
       "Booted the local qq bundle over exact dsh-base without stock dsh-web-app",
       "Sent from a home context while the active SSE stream rendered running and settled inner fragments",
-      "Restarted the DSH/Cordis host and materialized a second canonical DSH session",
-      "Restarted on the first id, listed and selected the second DSH session, and reconstructed both transcripts",
+      "Created a fresh empty session through the in-page DSH factory action and flushed it before canonical navigation",
+      "Restarted on the first id, reopened the new empty persisted identity through the visible selector, and then sent its first turn",
       "Submitted a laptop turn and invoked Agent.cancel through the SSE-inserted Interrupt control",
       "Closed the laptop stream before opening a 390x844-labeled phone context and sending its turn",
       "Restarted again and proved home-before-laptop-before-phone ordering in the primary DSH transcript"
     ],
     "durable_reconstruction": true,
     "session_selection": true,
+    "session_creation": true,
     "send": true,
     "live_sse": true,
     "interrupt": true
@@ -45,7 +46,8 @@
       "The SSE owner and target retained object identity across four messages in the Send plus Interrupt flow",
       "An Interrupt form inserted by SSE submitted successfully without htmx.process",
       "Forced closure reconnected from one to two total SSE connections and delivered a complete fifth message",
-      "The exact 390x844 viewport had a 390px document and panel with no horizontal overflow",
+      "The exact 390x844 viewport exposed the session selector, Open, New session, prompt, and inline Send with no horizontal overflow",
+      "A 390x520 reduced-height viewport kept the main surface full-height and the composer at its bottom edge",
       "Literal script markup rendered as text and did not execute",
       "The manifest, service worker, disconnected shell, and offline POST refusal passed"
     ],

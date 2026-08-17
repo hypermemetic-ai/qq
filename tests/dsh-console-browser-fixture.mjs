@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { writeFile } from "node:fs/promises";
 import { createConsoleHandler } from "../dsh-console/src/http-app.mjs";
@@ -31,6 +32,18 @@ const backend = {
   defaultSessionId: primaryId,
   async list() {
     return [...states.values()].map(({ id, createdAt }) => ({ id, createdAt, cwd: "/proof" }));
+  },
+  async create() {
+    const id = `session-${randomUUID()}`;
+    states.set(id, {
+      id,
+      createdAt: Date.now(),
+      events: [],
+      turn: 0,
+      status: "idle",
+    });
+    flushes += 1;
+    return { id };
   },
   async read(id) {
     const state = states.get(id);

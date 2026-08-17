@@ -170,8 +170,10 @@ export function createDshSessionBackend(ctx, config) {
       if (!SESSION_ID.test(agent?.session?.id) || byId.has(agent.session.id)) continue;
       byId.set(agent.session.id, {
         id: agent.session.id,
-        createdAt: agent.session.id === defaultSessionId ? defaultCreatedAt : 0,
-        cwd: agent.session.id === defaultSessionId ? config.cwd : undefined,
+        createdAt: agent.session.header?.createdAt ??
+          (agent.session.id === defaultSessionId ? defaultCreatedAt : 0),
+        cwd: agent.session.header?.cwd ??
+          (agent.session.id === defaultSessionId ? config.cwd : undefined),
       });
     }
     if (!byId.has(defaultSessionId)) {
@@ -189,6 +191,21 @@ export function createDshSessionBackend(ctx, config) {
   return Object.freeze({
     defaultSessionId,
     list,
+    async create() {
+      await ctx.get("loader")?.await();
+      const sessionId = `session-${randomUUID()}`;
+      const setup = selectionSetup({ current: selectedModel });
+      const handle = await agents.create({
+        sessionId,
+        meta: { cwd: config.cwd },
+        agentOptions: { provider: selectedModel.provider, model: selectedModel.model },
+        setup,
+      });
+      // DSH's creation event establishes the header; its flush boundary makes
+      // even a brand-new empty session durable before the browser opens it.
+      await sessions.flush(handle.agent.session);
+      return { id: handle.agent.session.id };
+    },
     async read(sessionId) {
       const agent = await agentForSession(sessionId);
       return {

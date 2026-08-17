@@ -103,8 +103,17 @@ const services = {
     async create(options) {
       creates += 1;
       modelSelections.push(options.agentOptions);
-      const state = states.get(options.sessionId);
-      assert.ok(state);
+      let state = states.get(options.sessionId);
+      if (!state) {
+        state = {
+          id: options.sessionId,
+          events: [],
+          createdAt: Date.UTC(2026, 7, 16, 13),
+          turn: 0,
+        };
+        states.set(options.sessionId, state);
+      }
+      assert.equal(options.setup(fakeAgentContext), undefined);
       const agent = fakeAgent(state);
       liveAgents.set(state.id, agent);
       return { agent };
@@ -261,11 +270,14 @@ try {
   assert.match(home.body, /htmx-2\.0\.10\.min\.js/);
   assert.match(home.body, /htmx-ext-sse-2\.2\.4\.js/);
   assert.match(home.body, /rel="manifest"/);
-  assert.match(home.body, /data-service-worker="\/qq\/sw-v3\.js"/);
-  assert.match(home.body, new RegExp(`/qq/session/${secondaryId}`));
+  assert.match(home.body, /data-service-worker="\/qq\/sw-v4\.js"/);
+  assert.match(home.body, new RegExp(`<option value="${secondaryId}"`));
   assert.match(home.body, /This DSH session has no transcript yet/);
-  assert.match(home.body, /<details class="session-switcher">[\s\S]*Choose a durable DSH session/);
-  assert.match(home.body, /<textarea id="prompt"[^>]*rows="2"[^>]*enterkeyhint="send"/);
+  assert.match(home.body, /aria-label="Session controls"/);
+  assert.match(home.body, /<select id="session-choice"[^>]*>[\s\S]*Current/);
+  assert.match(home.body, /aria-label="Start a new durable DSH session"/);
+  assert.match(home.body, /<textarea id="prompt"[^>]*rows="1"[^>]*enterkeyhint="send"/);
+  assert.match(home.body, /<button id="composer-submit"[^>]*>Send<\/button>/);
 
   const stream = await openSse(primaryId);
   streams.push(stream);
@@ -312,23 +324,48 @@ try {
   });
   assert.match(phone.body, /home handoff/);
   assert.match(phone.body, /laptop handoff/);
-  const phonePost = await post(primaryId, "prompt", { prompt: "phone handoff" });
+  const phonePost = await post(
+    primaryId,
+    "prompt",
+    { prompt: "phone handoff" },
+    { origin: "null", "sec-fetch-site": "same-origin" },
+  );
   assert.equal(phonePost.status, 200);
   const localAgain = await request(`/qq/session/${primaryId}`);
   for (const text of ["home handoff", "laptop handoff", "phone handoff"]) {
     assert.match(localAgain.body, new RegExp(text));
   }
 
-  // Server-validated session selection loads another canonical DSH identity.
-  const selected = await request(`/qq/session/${secondaryId}`);
+  // The visible switcher validates a choice and opens its canonical identity.
+  const switched = await request(`/qq/sessions/open?session=${encodeURIComponent(secondaryId)}`);
+  assert.equal(switched.status, 303);
+  assert.equal(switched.headers.location, `/qq/session/${secondaryId}`);
+  const selected = await request(switched.headers.location);
   assert.equal(selected.status, 200);
   assert.match(selected.body, new RegExp(`<code>${secondaryId}</code>`));
-  assert.match(selected.body, new RegExp(`href="/qq/session/${secondaryId}" aria-current="page"`));
+  assert.match(selected.body, new RegExp(`<option value="${secondaryId}" selected>Current`));
   const secondaryPost = await post(secondaryId, "prompt", { prompt: "selected durable session" });
   assert.equal(secondaryPost.status, 200);
   assert.match(secondaryPost.body, /selected durable session/);
   const unknown = await request("/qq/session/session-63a11000-0000-4000-8000-000000000099");
   assert.equal(unknown.status, 404);
+
+  // New session crosses DSH creation and flush before canonical navigation.
+  const createdResponse = await request("/qq/sessions", {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      "content-length": "0",
+    },
+    body: "",
+  });
+  assert.equal(createdResponse.status, 303);
+  assert.match(createdResponse.headers.location, /^\/qq\/session\/session-[0-9a-f-]{36}$/);
+  const freshId = createdResponse.headers.location.split("/").at(-1);
+  const fresh = await request(createdResponse.headers.location);
+  assert.equal(fresh.status, 200);
+  assert.match(fresh.body, new RegExp(`<option value="${freshId}" selected>Current`));
+  assert.match(fresh.body, /This DSH session has no transcript yet/);
 
   // Mutations fail same-origin checks on the server; there is no browser lease.
   const rejected = await post(primaryId, "prompt", { prompt: "rejected" }, {
@@ -363,13 +400,18 @@ try {
   assert.doesNotMatch(compactFailure.body, /provider secret|&lt;unsafe&gt;/);
 
   assert.equal(resumes, 2, "each selected persisted DSH session resumes once");
-  assert.equal(creates, 0, "navigation cannot invent a DSH session");
-  assert.ok(flushes >= 6, "accepted prompts and interruption cross DSH flush boundaries");
+  assert.equal(creates, 1, "only the explicit New session action creates an identity");
+  assert.ok(flushes >= 7, "creation, accepted prompts, and interruption cross DSH flush boundaries");
   assert.deepEqual(
     registrations,
-    ["system-prompt/assemble", "agent/request", "system-prompt/assemble", "agent/request"],
+    [
+      "system-prompt/assemble", "agent/request",
+      "system-prompt/assemble", "agent/request",
+      "system-prompt/assemble", "agent/request",
+    ],
   );
   assert.deepEqual(modelSelections, [
+    { provider: "qwen-token-plan", model: "deepseek-v4-pro-0813" },
     { provider: "qwen-token-plan", model: "deepseek-v4-pro-0813" },
     { provider: "qwen-token-plan", model: "deepseek-v4-pro-0813" },
   ]);
@@ -385,16 +427,16 @@ try {
   assert.equal(manifest.scope, "/qq/");
   assert.deepEqual(manifest.icons.map((icon) => icon.sizes), ["192x192", "512x512"]);
 
-  const worker = await request("/qq/sw-v3.js");
+  const worker = await request("/qq/sw-v4.js");
   assert.equal(worker.status, 200);
   assert.equal(worker.headers["service-worker-allowed"], "/qq/");
   assert.match(worker.body, /request\.method !== "GET"/);
   assert.match(worker.body, /request\.mode === "navigate"/);
-  assert.match(worker.body, /offline-v2\.html/);
+  assert.match(worker.body, /offline-v3\.html/);
   assert.doesNotMatch(worker.body, /session\/|\/prompt|\/events|\/interrupt|backgroundsync|indexedDB|localStorage/i);
-  const offline = await request("/qq/assets/offline-v2.html");
+  const offline = await request("/qq/assets/offline-v3.html");
   assert.match(offline.body, /No transcript is cached and no message can be sent offline/);
-  const staticCss = await request("/qq/assets/console-v2.css");
+  const staticCss = await request("/qq/assets/console-v3.css");
   assert.match(staticCss.headers["cache-control"], /immutable/);
 
   // Vendored pins and negative architecture constraints are machine checked.
@@ -407,7 +449,7 @@ try {
     readFile(join(root, "bin/qq-dsh-workbench"), "utf8"),
     readFile(join(root, "compat/pi2dsh/toolchain/qq-dsh-model-compat.mjs"), "utf8"),
     readFile(join(root, "dsh-console/assets/browser-v3.js"), "utf8"),
-    readFile(join(root, "dsh-console/assets/sw-v3.js"), "utf8"),
+    readFile(join(root, "dsh-console/assets/sw-v4.js"), "utf8"),
     readFile(join(root, "dsh-console/src/render.mjs"), "utf8"),
   ]);
   assert.equal(pins.schema, "qq.dsh-console-vendor-pins/v1");
