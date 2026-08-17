@@ -182,6 +182,15 @@ node "$here/verify.mjs" \
   "$scratch/dsh.stdout.log" "$scratch/dsh.stderr.log" \
   "$scratch/relay-proof.json" "$scratch/dsh-session-id.txt" "$dsh_session_log"
 
+# Keep the native child proof isolated from the production relay path above.
+# Its two DSH hosts communicate with the child only through ctx.subagents.
+if [[ -n ${QQ_PI2DSH_OUTPUT:-} ]]; then
+  QQ_DSH_SUBAGENT_OUTPUT="$(realpath -m "$QQ_PI2DSH_OUTPUT")" \
+    "$here/run-subagent-proof.sh"
+else
+  "$here/run-subagent-proof.sh"
+fi
+
 if [[ -n ${QQ_PI2DSH_OUTPUT:-} ]]; then
   output=$(realpath -m "$QQ_PI2DSH_OUTPUT")
   mkdir -p "$output"

@@ -149,6 +149,12 @@
       "fact": "After the configured branch is privately installed and its source checkout is deleted, pinned pi2dsh mounts qq against only that installed client and the existing isolated real-service lifecycle. No product history floor is used."
     },
     {
+      "id": "native-child-prompt-acceptance",
+      "basis": "exact-pinned-dsh-runtime-and-cold-persistence-inspection",
+      "verdict": "durable-bootstrap-and-cold-followup-proven",
+      "fact": "Two isolated host processes use @deepseek-ai/dsh-subagent rc.6 with the mounted spawn provider and one parent created in a disposable Git worktree. The first { childId, messageId } is treated only as inbox acceptance; after the child Agent and Session unregister, a cold sessionPersistence.inspect proves that exact bootstrap id and content durable under the spawn continuable descriptor. A fresh host resumes the exact persisted direct parent, observes the child cold, follows up through ctx.subagents, and proves the second accepted id durable through the same cold DSH persistence boundary. The temporary worktree is removed and main is unchanged."
+    },
+    {
       "id": "herdr-launch",
       "basis": "qq-source-audit",
       "verdict": "outside-extension-abi",
@@ -189,7 +195,7 @@
     "operator_cutover": "blocked",
     "native_translation_started": true,
     "blockers": [
-      "DSH-native Herdr agent launch and prompt-acceptance proof",
+      "production delegation integration for the proven DSH-native child path",
       "DSH transcript and scrub semantics",
       "qq model-policy routes in the DSH model directory",
       "read-tool ownership without disabling the host filesystem bundle",

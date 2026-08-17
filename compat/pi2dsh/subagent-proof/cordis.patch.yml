@@ -1,0 +1,20 @@
+# Compatibility-only driver for the pinned DSH continuation service. It calls
+# ctx.subagents directly; no relay or alternate child-message transport exists.
+- id: hmr
+  disabled: true
+
+- id: session-persistence-jsonl
+  config:
+    root: !!js dshHomePath('sessions')
+    compression: none
+    writeBatchMaxDelayMs: 20
+
+- insert:
+    - id: qq-subagent-proof
+      name: '@hypermemetic-ai/qq-dsh-subagent-proof'
+      inject: [agentDefaultModel, agents, sessions, sessionPersistence, subagents]
+      config:
+        phase: !!js process.env.QQ_DSH_SUBAGENT_PHASE
+        parentSessionId: !!js process.env.QQ_DSH_SUBAGENT_PARENT_ID
+        childSessionId: !!js process.env.QQ_DSH_SUBAGENT_CHILD_ID
+        cwd: !!js process.cwd()
