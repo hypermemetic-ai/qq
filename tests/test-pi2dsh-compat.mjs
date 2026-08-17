@@ -19,7 +19,7 @@ const [pkg, pins, toolchain, toolchainLock, evidence, webEvidence, webQa, consol
   json("dsh-console/evidence.json"),
   read("dsh-console/README.md"),
   read("dsh-console/src/render.mjs"),
-  read("dsh-console/assets/sw-v7.js"),
+  read("dsh-console/assets/sw-v8.js"),
   read("compat/pi2dsh/run.sh"),
   read("compat/pi2dsh/qq.patch.yml"),
   read("compat/pi2dsh/relay-probe.mjs"),

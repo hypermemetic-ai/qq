@@ -275,8 +275,9 @@ try {
   assert.match(home.body, /htmx-2\.0\.10\.min\.js/);
   assert.match(home.body, /htmx-ext-sse-2\.2\.4\.js/);
   assert.match(home.body, /rel="manifest"/);
-  assert.match(home.body, /console-v6\.css/);
-  assert.match(home.body, /data-service-worker="\/qq\/sw-v7\.js"/);
+  assert.match(home.body, /console-v7\.css/);
+  assert.match(home.body, /browser-v4\.js/);
+  assert.match(home.body, /data-service-worker="\/qq\/sw-v8\.js"/);
   assert.match(home.body, new RegExp(`<option value="${secondaryId}"`));
   assert.match(home.body, /This DSH session has no transcript yet/);
   assert.match(home.body, /<details class="session-menu">[\s\S]*<summary aria-label="Show session controls">/);
@@ -440,29 +441,34 @@ try {
   assert.equal(manifest.scope, "/qq/");
   assert.deepEqual(manifest.icons.map((icon) => icon.sizes), ["192x192", "512x512"]);
 
-  const worker = await request("/qq/sw-v7.js");
+  const worker = await request("/qq/sw-v8.js");
   assert.equal(worker.status, 200);
   assert.equal(worker.headers["service-worker-allowed"], "/qq/");
   assert.match(worker.body, /request\.method !== "GET"/);
   assert.match(worker.body, /request\.mode === "navigate"/);
-  assert.match(worker.body, /console-v6\.css/);
+  assert.match(worker.body, /console-v7\.css/);
+  assert.match(worker.body, /browser-v4\.js/);
   assert.match(worker.body, /reconnect-v1\.js/);
   assert.match(worker.body, /geist-latin-wght-normal-5\.3\.0\.woff2/);
   assert.match(worker.body, /geist-latin-wght-italic-5\.3\.0\.woff2/);
-  assert.match(worker.body, /offline-v6\.html/);
+  assert.match(worker.body, /offline-v7\.html/);
   assert.match(worker.body, /self\.skipWaiting\(\)/);
   assert.match(worker.body, /name\.startsWith\(CACHE_PREFIX\) && name !== CACHE_NAME/);
   assert.doesNotMatch(worker.body, /session\/|\/prompt|\/events|\/interrupt|backgroundsync|indexedDB|localStorage/i);
-  const offline = await request("/qq/assets/offline-v6.html");
+  const offline = await request("/qq/assets/offline-v7.html");
   assert.match(offline.body, /No transcript is cached and no message can be sent offline/);
-  assert.match(offline.body, /console-v6\.css/);
+  assert.match(offline.body, /console-v7\.css/);
   assert.match(offline.body, /reconnect-v1\.js/);
-  const staticCss = await request("/qq/assets/console-v6.css");
+  const staticCss = await request("/qq/assets/console-v7.css");
   assert.match(staticCss.headers["cache-control"], /immutable/);
   assert.match(staticCss.body, /@font-face/);
   assert.match(staticCss.body, /font-family: "Geist UI"/);
   assert.match(staticCss.body, /geist-latin-wght-normal-5\.3\.0\.woff2/);
   assert.match(staticCss.body, /geist-latin-wght-italic-5\.3\.0\.woff2/);
+  assert.match(staticCss.body, /\.message \{\s*width: 100%;/);
+  assert.match(staticCss.body, /\.composer textarea \{[\s\S]*overflow-y: auto;[\s\S]*resize: none;/);
+  assert.doesNotMatch(staticCss.body, /align-self:\s*flex-end/);
+  assert.doesNotMatch(staticCss.body, /min\(88%/);
   const normalFont = await request("/qq/assets/geist-latin-wght-normal-5.3.0.woff2");
   assert.equal(normalFont.headers["content-type"], "font/woff2");
   assert.match(normalFont.headers["cache-control"], /immutable/);
@@ -479,8 +485,8 @@ try {
     readFile(join(root, "dsh-console/cordis.patch.yml"), "utf8"),
     readFile(join(root, "bin/qq-dsh-workbench"), "utf8"),
     readFile(join(root, "compat/pi2dsh/toolchain/qq-dsh-model-compat.mjs"), "utf8"),
-    readFile(join(root, "dsh-console/assets/browser-v3.js"), "utf8"),
-    readFile(join(root, "dsh-console/assets/sw-v7.js"), "utf8"),
+    readFile(join(root, "dsh-console/assets/browser-v4.js"), "utf8"),
+    readFile(join(root, "dsh-console/assets/sw-v8.js"), "utf8"),
     readFile(join(root, "dsh-console/src/render.mjs"), "utf8"),
   ]);
   assert.equal(pins.schema, "qq.dsh-console-vendor-pins/v1");
@@ -513,6 +519,7 @@ try {
   assert.doesNotMatch(`${plugin}\n${patch}\n${workbench}`, /qq\.patch\.yml|name:.*pi2dsh|plugin.*pi2dsh|auth\.json/);
   assert.doesNotMatch(`${plugin}\n${patch}`, /name:.*(?:dsh-web-app|api-proxy|client-connection)/);
   assert.match(browser, /transcript\.scrollTop = transcript\.scrollHeight/);
+  assert.match(browser, /input\.style\.height = `\$\{input\.scrollHeight \+ input\.offsetHeight - input\.clientHeight\}px`/);
   assert.doesNotMatch(browser, /localStorage|sessionStorage|indexedDB|document\.cookie|EventSource|WebSocket|htmx\.process/);
   assert.doesNotMatch(renderSource, /outerHTML|controller|observer|lease|take control/i);
   assert.doesNotMatch(workerSource, /addEventListener\("(?:sync|periodicsync|push|notificationclick)"|indexedDB|localStorage/i);

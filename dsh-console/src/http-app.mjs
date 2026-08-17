@@ -23,7 +23,7 @@ const bundledAssets = Object.freeze({
     type: "text/javascript; charset=utf-8",
     body: readFileSync(new URL("vendor/htmx-ext-sse-2.2.4.js", root)),
   },
-  "console-v6.css": {
+  "console-v7.css": {
     type: "text/css; charset=utf-8",
     body: readFileSync(new URL("assets/console.css", root)),
   },
@@ -35,9 +35,9 @@ const bundledAssets = Object.freeze({
     type: "font/woff2",
     body: readFileSync(new URL("assets/geist-latin-wght-italic-5.3.0.woff2", root)),
   },
-  "browser-v3.js": {
+  "browser-v4.js": {
     type: "text/javascript; charset=utf-8",
-    body: readFileSync(new URL("assets/browser-v3.js", root)),
+    body: readFileSync(new URL("assets/browser-v4.js", root)),
   },
   "reconnect-v1.js": {
     type: "text/javascript; charset=utf-8",
@@ -55,13 +55,13 @@ const bundledAssets = Object.freeze({
     type: "image/png",
     body: readFileSync(new URL("assets/icon-v2-512.png", root)),
   },
-  "offline-v6.html": {
+  "offline-v7.html": {
     type: "text/html; charset=utf-8",
-    body: readFileSync(new URL("assets/offline-v6.html", root)),
+    body: readFileSync(new URL("assets/offline-v7.html", root)),
   },
-  "sw-v7.js": {
+  "sw-v8.js": {
     type: "text/javascript; charset=utf-8",
-    body: readFileSync(new URL("assets/sw-v7.js", root)),
+    body: readFileSync(new URL("assets/sw-v8.js", root)),
   },
 });
 
@@ -199,12 +199,12 @@ export function createConsoleHandler(backend, options = {}) {
   const assetPaths = Object.freeze({
     htmx: `${assetsPrefix}htmx-2.0.10.min.js`,
     sse: `${assetsPrefix}htmx-ext-sse-2.2.4.js`,
-    css: `${assetsPrefix}console-v6.css`,
-    browser: `${assetsPrefix}browser-v3.js`,
+    css: `${assetsPrefix}console-v7.css`,
+    browser: `${assetsPrefix}browser-v4.js`,
     icon192: `${assetsPrefix}icon-v2-192.png`,
     icon512: `${assetsPrefix}icon-v2-512.png`,
     manifest: `${assetsPrefix}manifest-v3.webmanifest`,
-    serviceWorker: `${basePath}/sw-v7.js`,
+    serviceWorker: `${basePath}/sw-v8.js`,
   });
 
   async function view(sessionId) {
@@ -277,7 +277,7 @@ export function createConsoleHandler(backend, options = {}) {
         write(res, 405, { Allow: "GET, HEAD", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
         return;
       }
-      const asset = bundledAssets["sw-v7.js"];
+      const asset = bundledAssets["sw-v8.js"];
       write(
         res,
         200,
@@ -318,7 +318,7 @@ export function createConsoleHandler(backend, options = {}) {
         return;
       }
       const asset = bundledAssets[name];
-      if (!asset || name.includes("/") || name === "sw-v7.js") {
+      if (!asset || name.includes("/") || name === "sw-v8.js") {
         text(res, 404, "Not found", head);
         return;
       }
