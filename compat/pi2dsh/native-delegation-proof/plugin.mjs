@@ -82,7 +82,15 @@ async function start(ctx, config, boundary) {
       };
     },
     async makeNote() {
-      return { note: "Exact private native delegation proof note.", transcript: "Injected approved-gate proof.", qaBinding: { provider: "proof", model: "proof", effort: "high" } };
+      return {
+        note: "Exact private native delegation proof note.",
+        transcript: "Injected approved-gate proof.",
+        qaBinding: {
+          provider: selection.provider,
+          model: selection.model,
+          effort: selection.reasoningEffort ?? "high",
+        },
+      };
     },
     async withGlowTurn(_key, action) { return action(); },
     async awaitBriefGate() { return "approved"; },

@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { DSH_RUN_APPROVAL_SCHEMA, atomicPrivateJson, parseHerdr, readHandoff, removeWorktree, runsRoot, waitForAvailableShell } from "./run.mjs";
+import { DSH_RUN_APPROVAL_SCHEMA, DSH_RUN_SUBMISSION_SCHEMA, atomicPrivateJson, parseHerdr, readHandoff, removeWorktree, runsRoot, waitForAvailableShell } from "./run.mjs";
 import { RUN_BLOCKED_KIND, sendRunEvent } from "./run-events.mjs";
 import { DSH_CHILD_SESSION_ID, DSH_SESSION_ID } from "./session-context.mjs";
 
@@ -11,7 +11,7 @@ const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const BACKLOG = join(QQ_ROOT, "node_modules", ".bin", "backlog");
 const OPENWIKI_MATERIALIZE = join(QQ_ROOT, "bin", "qq-openwiki-materialize");
 
-export const DSH_RUN_SUBMISSION_SCHEMA = "qq.dsh-run-submission/v1";
+export { DSH_RUN_SUBMISSION_SCHEMA } from "./run.mjs";
 
 function reason(result, fallback) {
   return result?.stderr?.trim() || result?.stdout?.trim() || fallback;

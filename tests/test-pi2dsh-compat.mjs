@@ -8,7 +8,7 @@ const root = resolve(process.argv[2] ?? ".");
 const read = (path) => readFile(join(root, path), "utf8");
 const json = async (path) => JSON.parse(await read(path));
 
-const [pkg, pins, toolchain, toolchainLock, evidence, webEvidence, webQa, consoleEvidence, consoleReadme, consoleRender, consoleWorker, run, patch, relayProbe, childRun, childPlugin, childPatch, childPackage, nativeRun, nativeAdapter, nativeAdapterPatch, nativeAdapterPackage, nativeProof, nativeProofPatch, nativeProofPackage, relayContract, liveMessages, messages, review, scrub, runLib, runEvents, sessionContext, dshRunLib] = await Promise.all([
+const [pkg, pins, toolchain, toolchainLock, evidence, webEvidence, webQa, consoleEvidence, consoleReadme, consoleRender, consoleWorker, run, patch, relayProbe, childRun, childPlugin, childPatch, childPackage, nativeRun, nativeAdapter, nativeAdapterPatch, nativeAdapterPackage, nativeProof, nativeProofPatch, nativeProofPackage, nativeQaProof, nativeQaProofPatch, nativeQaProofPackage, qaVerdict, qaResult, relayContract, liveMessages, messages, review, scrub, runLib, runEvents, sessionContext, dshRunLib] = await Promise.all([
   json("package.json"),
   json("compat/pi2dsh/pins.json"),
   json("compat/pi2dsh/toolchain/package.json"),
@@ -34,6 +34,11 @@ const [pkg, pins, toolchain, toolchainLock, evidence, webEvidence, webQa, consol
   read("compat/pi2dsh/native-delegation-proof/plugin.mjs"),
   read("compat/pi2dsh/native-delegation-proof/cordis.patch.yml"),
   json("compat/pi2dsh/native-delegation-proof/package.json"),
+  read("compat/pi2dsh/native-qa-proof/plugin.mjs"),
+  read("compat/pi2dsh/native-qa-proof/cordis.patch.yml"),
+  json("compat/pi2dsh/native-qa-proof/package.json"),
+  read("bin/lib/qa-verdict.mjs"),
+  read("extensions/qa-result.ts"),
   read("tests/test-qq-relay.sh"),
   read("tests/test-agent-messages-live.sh"),
   read("extensions/agent-messages.ts"),
@@ -136,7 +141,7 @@ for (const id of [
   "package-local-events", "before-agent-start", "tools", "commands", "model-selection",
   "thinking-effort", "shortcut", "session-tree", "shutdown", "project-trust",
   "read-tool-collision", "session-id", "qq-relay-client", "native-child-prompt-acceptance", "qq-session-context",
-  "approved-native-delegation-launch", "native-runner-submission", "herdr-launch", "herdr-delivery-proof", "agent-message-receipts", "run-outcome-addressing", "review-receipts", "session-scrub",
+  "approved-native-delegation-launch", "native-runner-submission", "independent-native-qa", "herdr-launch", "herdr-delivery-proof", "agent-message-receipts", "run-outcome-addressing", "review-receipts", "session-scrub",
 ]) assert.ok(probes.has(id), `missing compatibility probe ${id}`);
 assert.equal(probes.get("session-id").verdict, "identity-translated");
 assert.match(probes.get("session-id").fact, /complete value unchanged as the live relay address/);
@@ -149,6 +154,9 @@ assert.equal(probes.get("native-runner-submission").verdict, "durable-awaiting-n
 assert.match(probes.get("native-runner-submission").fact, /status submitted.*runtime dsh.*look 0/);
 assert.match(probes.get("native-runner-submission").fact, /does not launch a review worker/);
 assert.match(probes.get("native-runner-submission").fact, /same installed DSH profile/);
+assert.equal(probes.get("independent-native-qa").verdict, "creation-time-five-tool-and-cold-verdict-proven");
+assert.match(probes.get("independent-native-qa").fact, /read, bash, edit, write, and qa_verdict/);
+assert.match(probes.get("independent-native-qa").fact, /submitted handoff remains byte-for-byte unchanged/);
 assert.match(probes.get("native-child-prompt-acceptance").fact, /cold sessionPersistence\.inspect/);
 assert.match(probes.get("native-child-prompt-acceptance").fact, /fresh host resumes the exact persisted direct parent/);
 assert.equal(probes.get("agent-message-receipts").verdict, "installed-transport-and-durable-entry-proven");
@@ -156,7 +164,7 @@ assert.equal(probes.get("run-outcome-addressing").verdict, "installed-address-an
 assert.match(probes.get("run-outcome-addressing").fact, /qq\/review-flow\/session-<UUID>/);
 assert.equal(probes.get("review-receipts").verdict, "installed-durable-entry-proven");
 assert.ok(evidence.conclusion.blockers.every((blocker) => !/qq-relay client boundary|review events|prompt-acceptance proof/i.test(blocker)));
-assert.ok(evidence.conclusion.blockers.some((blocker) => /native QA composition, look continuity, proposal, and landing/.test(blocker)));
+assert.ok(evidence.conclusion.blockers.some((blocker) => /production native review-state integration, look continuity, proposal, and landing/.test(blocker)));
 assert.ok(evidence.conclusion.blockers.every((blocker) => !/production delegation integration/.test(blocker)));
 
 assert.equal(evidence.operator_surface.verdict, "pass-sequential-vertical-slice");
@@ -259,10 +267,36 @@ assert.match(nativeProof, /hostStops === 0/);
 assert.match(nativeProof, /bootstrap_injections: exactMessages\.length/);
 assert.match(nativeProof, /agents\.resume\(/);
 assert.match(nativeRun, /plugin --profile qq-native-delegation-proof add "\$dsh_native"/);
-assert.match(nativeRun, /run_phase start[\s\S]*run_phase fresh/);
+assert.match(nativeRun, /run_phase start[\s\S]*run_phase fresh[\s\S]*run_phase qa[\s\S]*run_phase qa-fresh/);
+assert.match(nativeRun, /plugin --profile qq-native-qa-proof add "\$qa_proof_plugin"/);
 assert.match(nativeRun, /done_requested, true/);
 assert.match(nativeRun, /clean_shared_ref_reconstructed, true/);
+assert.match(nativeRun, /visible_tools[\s\S]*qa_verdict/);
+assert.match(nativeRun, /state\.qaVerdict, undefined/);
 assert.match(nativeRun, /main checkout/);
+assert.equal(nativeQaProofPackage.name, "@hypermemetic-ai/qq-dsh-native-qa-proof");
+assert.equal(nativeQaProofPackage.dsh.bundle.patch, "./cordis.patch.yml");
+assert.match(nativeQaProofPatch, /inject: \[agentDefaultModel, agents, sessions, sessionPersistence, systemPrompt, tools\]/);
+assert.match(nativeQaProof, /ctx\.agents\.create\(/);
+assert.match(nativeQaProof, /ctx\.agents\.resume\(/);
+assert.match(nativeQaProof, /agentCtx\.tools\.presentAs\("native"\)/);
+assert.match(nativeQaProof, /agentCtx\.tools\.restrict\(\{ allow: options\.inheritedTools \}\)/);
+assert.match(nativeQaProof, /agentCtx\.tools\.register\(qaTool\(options\)\)/);
+assert.match(nativeQaProof, /complete: true/);
+assert.match(nativeQaProof, /QA_VERDICT_ARGUMENT_SCHEMA/);
+assert.match(nativeQaProof, /writeQaVerdict\(verdictPath, verdict\)/);
+assert.match(nativeQaProof, /validateSubmittedHandoff/);
+assert.match(nativeQaProof, /verifySubmittedRepository/);
+assert.match(nativeQaProof, /status === "submitted" && state\.look === 0/);
+assert.match(nativeQaProof, /status", "--porcelain", "--untracked-files=all"/);
+assert.match(nativeQaProof, /--git-common-dir/);
+assert.match(nativeQaProof, /submission\.continuation\?\.architectSession/);
+assert.doesNotMatch(nativeQaProof, /(?:^|\W)state\.(?:status|look|qaVerdict)\s*=(?!=)|landHandoff|setBoardStatus|sendRunEvent/);
+assert.match(qaVerdict, /qq\.qa-verdict\/v1/);
+assert.match(qaVerdict, /constants\.O_EXCL/);
+assert.match(qaVerdict, /await link\(temporary, path\)/);
+assert.match(qaResult, /createQaVerdict, QA_VERDICT_ARGUMENT_SCHEMA, writeQaVerdict/);
+assert.doesNotMatch(qaResult, /async function writePrivate/);
 assert.match(relayContract, /run-native-delegation-proof\.sh/);
 assert.ok(evidence.probes.some((item) => item.id === "qq-session-context"));
 
