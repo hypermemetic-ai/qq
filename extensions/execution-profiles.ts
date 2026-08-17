@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { contextWindowCeilingFor, profileFor, readExecutionPolicy, SERVICE_NAMES } from "../bin/lib/execution-profiles.mjs";
 import { DEFAULT_ROLE, isActivatedRepository, ROLE_NAMES, validateRole } from "../bin/lib/roles.mjs";
+import { createQqSessionContext } from "../bin/lib/session-context.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PANE_ID = /^w[A-Za-z0-9]+:p[A-Za-z0-9]+$/;
@@ -163,13 +164,16 @@ function composeSystemPrompt(rolePrompt, options = {}) {
 
 export default function registerExecutionProfiles(pi, deps = {}) {
   const env = deps.env ?? process.env;
+  const sessionContext = deps.sessionContext ?? createQqSessionContext({ env });
   let activated = false;
   let startupError;
   let policy;
   let prompts = {};
-  let currentRole = DEFAULT_ROLE;
-  let activeProfileName;
   let currentContext;
+
+  function activeSelection(ctx = currentContext) {
+    return sessionContext.resolve(ctx);
+  }
 
   function resolveDeclaredProfile(roleName, provider, model, effort) {
     if (!policy?.roles[roleName]) return undefined;
@@ -208,11 +212,14 @@ export default function registerExecutionProfiles(pi, deps = {}) {
     pi.setThinkingLevel(selected.profile.effort);
     const actualEffort = pi.getThinkingLevel();
     if (actualEffort !== selected.profile.effort) throw new Error(`profile effort ${selected.profile.effort} is unsupported by ${selected.profile.provider}/${selected.profile.model}; Pi selected ${actualEffort}`);
-    currentRole = roleName;
-    activeProfileName = selected.name;
-    ctx.ui.setStatus?.("qq-profile", `${currentRole}:${selected.name}`);
-    pi.events.emit("qq:role-selected", { role: currentRole, profile: selected.name });
-    if (notify) ctx.ui.notify(`${currentRole}: ${selected.name} — ${selected.profile.provider}/${selected.profile.model} · ${selected.profile.effort}`, "info");
+    const contextSelection = sessionContext.update(ctx, { role: roleName, profile: selected.name });
+    ctx.ui.setStatus?.("qq-profile", `${roleName}:${selected.name}`);
+    pi.events.emit("qq:role-selected", {
+      ...(contextSelection.sessionId ? { sessionId: contextSelection.sessionId } : {}),
+      role: roleName,
+      profile: selected.name,
+    });
+    if (notify) ctx.ui.notify(`${roleName}: ${selected.name} — ${selected.profile.provider}/${selected.profile.model} · ${selected.profile.effort}`, "info");
     return selected;
   }
 
@@ -224,7 +231,8 @@ export default function registerExecutionProfiles(pi, deps = {}) {
     if (names.length === 1) return names[0];
     const labels = names.map((candidate) => {
       const profile = role.profiles[candidate];
-      const markers = [roleName === currentRole && candidate === activeProfileName ? "current" : "", candidate === role.default ? "default" : ""].filter(Boolean).join(", ");
+      const active = activeSelection(ctx);
+      const markers = [roleName === active.role && candidate === active.profile ? "current" : "", candidate === role.default ? "default" : ""].filter(Boolean).join(", ");
       return `${candidate}${markers ? ` (${markers})` : ""} — ${profile.provider}/${profile.model} · ${profile.effort}`;
     });
     const chosen = await ctx.ui.select(`${roleName} execution profile (this Herdr pane)`, labels);
@@ -235,9 +243,8 @@ export default function registerExecutionProfiles(pi, deps = {}) {
     currentContext = ctx;
     startupError = undefined;
     const forcedRole = env.QQ_AGENT_ROLE === undefined ? undefined : validateRole(env.QQ_AGENT_ROLE);
-    activated = forcedRole !== undefined || isActivatedRepository(ctx.cwd, QQ_ROOT, env);
-    currentRole = forcedRole ?? DEFAULT_ROLE;
-    activeProfileName = undefined;
+    const owned = activeSelection(ctx);
+    activated = owned.source === "dsh-session" || forcedRole !== undefined || isActivatedRepository(ctx.cwd, QQ_ROOT, env);
     if (!activated) return;
     try {
       const policyPromise = readExecutionPolicy(deps.policyPath);
@@ -248,11 +255,12 @@ export default function registerExecutionProfiles(pi, deps = {}) {
       policy = await policyPromise;
       prompts = Object.fromEntries(promptEntries);
       validateRuntimeProfiles(ctx);
-      const restored = forcedRole === undefined ? await readPaneProfile(env, deps, policy) : undefined;
-      currentRole = forcedRole ?? restored?.role ?? DEFAULT_ROLE;
+      const dshOwned = owned.source === "dsh-session";
+      const restored = !dshOwned && forcedRole === undefined ? await readPaneProfile(env, deps, policy) : undefined;
+      const roleName = dshOwned ? owned.role : forcedRole ?? restored?.role ?? DEFAULT_ROLE;
       await applyRoleProfile(
-        currentRole,
-        restored?.profile ?? policy.roles[currentRole].default,
+        roleName,
+        dshOwned ? owned.profile : restored?.profile ?? policy.roles[roleName].default,
         ctx,
         false,
       );
@@ -265,12 +273,11 @@ export default function registerExecutionProfiles(pi, deps = {}) {
 
   async function stop() {
     currentContext?.ui?.setStatus?.("qq-profile", undefined);
+    if (!sessionContext.activeSessionId(currentContext)) sessionContext.resetFallback();
     activated = false;
     startupError = undefined;
     policy = undefined;
     prompts = {};
-    currentRole = DEFAULT_ROLE;
-    activeProfileName = undefined;
     currentContext = undefined;
   }
 
@@ -283,6 +290,7 @@ export default function registerExecutionProfiles(pi, deps = {}) {
       if (parts.length > 2) { ctx.ui.notify("Usage: /profile [role] [profile]", "warning"); return; }
       let roleName = parts[0];
       if (!roleName) {
+        const currentRole = activeSelection(ctx).role;
         const labels = ROLE_NAMES.map((role) => `${role}${role === currentRole ? " (current)" : ""}`);
         const chosen = await ctx.ui.select("qq role (this Herdr pane)", labels);
         if (!chosen) return;
@@ -293,7 +301,7 @@ export default function registerExecutionProfiles(pi, deps = {}) {
         const profileName = await chooseProfile(roleName, ctx, parts[1]);
         if (profileName) {
           const selected = await applyRoleProfile(roleName, profileName, ctx);
-          await writePaneProfile(env, deps, roleName, selected.name);
+          if (!sessionContext.activeSessionId(ctx)) await writePaneProfile(env, deps, roleName, selected.name);
         }
       } catch (error) {
         ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
@@ -308,20 +316,25 @@ export default function registerExecutionProfiles(pi, deps = {}) {
     currentContext?.ui?.notify?.(`qq startup refused: ${startupError}`, "error");
     return { action: "handled" };
   });
-  pi.on("before_agent_start", async (event) => {
-    const prompt = prompts[currentRole];
+  pi.on("before_agent_start", async (event, ctx) => {
+    const role = activeSelection(ctx).role;
+    const prompt = prompts[role];
     if (!activated || startupError || !prompt) return;
     return { systemPrompt: composeSystemPrompt(prompt, event.systemPromptOptions) };
   });
   pi.on("model_select", async (event, ctx) => {
     if (!activated || !policy || startupError) return;
-    activeProfileName = resolveDeclaredProfile(currentRole, event.model.provider, event.model.id, pi.getThinkingLevel());
-    ctx.ui.setStatus?.("qq-profile", `${currentRole}:${activeProfileName ?? "custom"}`);
+    const current = activeSelection(ctx);
+    const profile = resolveDeclaredProfile(current.role, event.model.provider, event.model.id, pi.getThinkingLevel()) ?? "custom";
+    sessionContext.update(ctx, { profile });
+    ctx.ui.setStatus?.("qq-profile", `${current.role}:${profile}`);
   });
   pi.on("thinking_level_select", async (_event, ctx) => {
     if (!activated || !policy || startupError) return;
+    const current = activeSelection(ctx);
     const model = ctx.model;
-    activeProfileName = model ? resolveDeclaredProfile(currentRole, model.provider, model.id, pi.getThinkingLevel()) : undefined;
-    ctx.ui.setStatus?.("qq-profile", `${currentRole}:${activeProfileName ?? "custom"}`);
+    const profile = model ? resolveDeclaredProfile(current.role, model.provider, model.id, pi.getThinkingLevel()) ?? "custom" : "custom";
+    sessionContext.update(ctx, { profile });
+    ctx.ui.setStatus?.("qq-profile", `${current.role}:${profile}`);
   });
 }

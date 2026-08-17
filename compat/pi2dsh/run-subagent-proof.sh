@@ -96,6 +96,8 @@ run_phase() {
       QQ_DSH_SUBAGENT_PHASE="$phase" \
       QQ_DSH_SUBAGENT_PARENT_ID="$parent_id" \
       QQ_DSH_SUBAGENT_CHILD_ID="$child_id" \
+      QQ_DSH_SUBAGENT_CONTEXT_MODULE="$root/bin/lib/session-context.mjs" \
+      QQ_DSH_SUBAGENT_RUN_STATE="$work/runner-handoff.json" \
       "$dsh" --profile qq-subagent-proof
   ) >"$stdout" 2>"$stderr" || {
     cat "$stdout" >&2
@@ -143,6 +145,8 @@ const start = JSON.parse(fs.readFileSync(startPath, "utf8"));
 const followup = JSON.parse(fs.readFileSync(followupPath, "utf8"));
 assert.equal(start.schema, "qq.dsh-child-prompt-proof/v1");
 assert.equal(followup.schema, start.schema);
+assert.equal(start.qq_context_schema, "qq.session-context/v1");
+assert.equal(followup.qq_context_schema, start.qq_context_schema);
 assert.equal(start.phase, "start");
 assert.equal(followup.phase, "followup");
 assert.equal(start.parent_resumed, false);
@@ -167,6 +171,30 @@ assert.equal(start.durable_parent_session_id, start.parent_session_id);
 assert.equal(followup.durable_parent_session_id, start.parent_session_id);
 assert.equal(start.durable_child_cwd, followup.durable_child_cwd);
 assert.ok(start.durable_child_cwd.startsWith("/"));
+assert.equal(start.context_isolation, true);
+assert.equal(followup.context_isolation, true);
+assert.equal(start.context_survived_continuation, false);
+assert.equal(followup.context_survived_continuation, true);
+assert.equal(start.parent_context.sessionId, start.parent_session_id);
+assert.equal(followup.parent_context.sessionId, start.parent_session_id);
+assert.equal(start.child_context.sessionId, start.child_session_id);
+assert.equal(followup.child_context.sessionId, start.child_session_id);
+assert.equal(start.parent_context.role, "architect");
+assert.equal(followup.parent_context.role, "architect");
+assert.equal(start.parent_context.profile, "dsh-architect-proof");
+assert.equal(followup.parent_context.profile, "dsh-architect-proof");
+assert.equal(start.parent_context.runState, null);
+assert.equal(followup.parent_context.runState, null);
+assert.equal(start.child_context.role, "runner");
+assert.equal(followup.child_context.role, "runner");
+assert.equal(start.child_context.profile, "dsh-runner-proof");
+assert.equal(followup.child_context.profile, "dsh-runner-proof");
+assert.ok(start.child_context.runState.startsWith("/"));
+assert.equal(followup.child_context.runState, start.child_context.runState);
+assert.equal(start.parent_context.source, "dsh-session");
+assert.equal(followup.parent_context.source, "dsh-session");
+assert.equal(start.child_context.source, "dsh-session");
+assert.equal(followup.child_context.source, "dsh-session");
 const evidence = {
   schema: "qq.dsh-child-prompt-live-evidence/v1",
   pins: {
@@ -182,6 +210,10 @@ const evidence = {
     inherited_environment_cleared: true,
     external_model_network: false,
     production_delegate_path_changed: false,
+    qq_context_key: "canonical DSH session identity",
+    qq_context_process_global_map: false,
+    architect_runner_context_isolated: true,
+    runner_context_restored_on_cold_continuation: true,
   },
 };
 fs.writeFileSync(outputPath, `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });

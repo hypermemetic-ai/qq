@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { retryBootstrapFailureOutbox } from "../bin/lib/bootstrap.mjs";
 import { RelayClient } from "../bin/lib/qq-relay-client.mjs";
 import { atomicPrivateJson, readHandoff, stateHome } from "../bin/lib/run.mjs";
+import { createQqSessionContext } from "../bin/lib/session-context.mjs";
 import { formatPack, isFailedLand, isQaPassedProposal, listProposals, prepareDone, projectFromCwd } from "../bin/lib/review.mjs";
 import { RUN_BLOCKED_KIND, RUN_BOOTSTRAP_FAILED_KIND, parseRunEvent, runEventDeliveryGuard, runEventEndpoint, runEventRecipient } from "../bin/lib/run-events.mjs";
 
@@ -76,8 +77,9 @@ export default function registerReviewFlow(pi, deps = {}) {
   const launchReview = deps.launchReview ?? ((statePath) => detachedWorker(join(QQ_ROOT, "bin", "qq-review-worker.mjs"), statePath, { ...process.env, ...env }));
   const eventClient = deps.eventClient ?? new RelayClient(join(stateHome(env), "qq-relay", "qq-relay.sock"));
   const retryBootstrapFailures = deps.retryBootstrapFailureOutbox ?? retryBootstrapFailureOutbox;
+  const finishRun = deps.prepareDone ?? prepareDone;
   const sleep = deps.sleep ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
-  let role = env.QQ_AGENT_ROLE || "runner";
+  const sessionContext = deps.sessionContext ?? createQqSessionContext({ env });
   let currentContext;
   let timer;
   let receiverActive = false;
@@ -92,10 +94,11 @@ export default function registerReviewFlow(pi, deps = {}) {
     description: "Final runner call for delegated work. Validates a clean committed ref, hands this pane to the pinned two-look qa service, and stops this run. It never merges.",
     parameters: { type: "object", additionalProperties: false, required: ["ref"], properties: { ref: { type: "string", minLength: 1 } } },
     async execute(_id, params, signal, _update, ctx) {
-      const statePath = env.QQ_RUN_STATE;
-      if (role !== "runner" || !statePath) return result("done is available only to a delegated runs runner.", { status: "refused" });
+      const qqContext = sessionContext.resolve(ctx);
+      const statePath = qqContext.runState;
+      if (qqContext.role !== "runner" || !statePath) return result("done is available only to a delegated runs runner.", { status: "refused" });
       try {
-        const state = await prepareDone(run, ctx.cwd, statePath, params.ref);
+        const state = await finishRun(run, ctx.cwd, statePath, params.ref);
         const pid = await launchReview(statePath);
         const message = `Submitted ${state.task.id} to qa look ${state.look}. The runner is finished; stop now.`;
         setTimeout(() => { try { ctx.shutdown?.(); } catch { try { ctx.abort?.(); } catch {} } }, 25).unref?.();
@@ -127,7 +130,7 @@ export default function registerReviewFlow(pi, deps = {}) {
 
   async function offer(state, ctx) {
     const key = offerKey(state);
-    if (showing || role !== "architect" || !ctx.hasUI || !ownsHandoff(state, ctx)) return;
+    if (showing || sessionContext.resolve(ctx).role !== "architect" || !ctx.hasUI || !ownsHandoff(state, ctx)) return;
     if (shown.has(key) || ctx.isIdle?.() === false) return;
     showing = true;
     shown.add(key);
@@ -166,7 +169,7 @@ export default function registerReviewFlow(pi, deps = {}) {
 
   async function poll() {
     const ctx = currentContext;
-    if (!ctx || role !== "architect") return;
+    if (!ctx || sessionContext.resolve(ctx).role !== "architect") return;
     const sessionId = ctx.sessionManager?.getSessionId?.();
     if (!retryingBootstrapFailures && typeof sessionId === "string" && sessionId.length > 0) {
       retryingBootstrapFailures = true;
@@ -256,7 +259,7 @@ export default function registerReviewFlow(pi, deps = {}) {
   }
 
   function startRunEventReceiver() {
-    if (receiverActive || role !== "architect" || !currentContext) return;
+    if (receiverActive || !currentContext || sessionContext.resolve(currentContext).role !== "architect") return;
     const sessionId = currentContext.sessionManager?.getSessionId?.();
     if (typeof sessionId !== "string" || sessionId.length === 0) return;
     receiverActive = true;
@@ -271,8 +274,10 @@ export default function registerReviewFlow(pi, deps = {}) {
 
   pi.events.on("qq:role-selected", (selection) => {
     if (!selection?.role) return;
-    role = selection.role;
-    if (role === "architect") {
+    sessionContext.observeSelection(selection);
+    const currentSessionId = currentContext ? sessionContext.activeSessionId(currentContext) : undefined;
+    if (selection.sessionId && currentSessionId && selection.sessionId !== currentSessionId) return;
+    if (selection.role === "architect") {
       startRunEventReceiver();
       void poll();
     } else {

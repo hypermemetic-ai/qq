@@ -8,7 +8,7 @@ const root = resolve(process.argv[2] ?? ".");
 const read = (path) => readFile(join(root, path), "utf8");
 const json = async (path) => JSON.parse(await read(path));
 
-const [pkg, pins, toolchain, toolchainLock, evidence, webEvidence, webQa, consoleEvidence, consoleReadme, consoleRender, consoleWorker, run, patch, relayProbe, childRun, childPlugin, childPatch, childPackage, relayContract, liveMessages, messages, review, scrub, runLib, runEvents] = await Promise.all([
+const [pkg, pins, toolchain, toolchainLock, evidence, webEvidence, webQa, consoleEvidence, consoleReadme, consoleRender, consoleWorker, run, patch, relayProbe, childRun, childPlugin, childPatch, childPackage, relayContract, liveMessages, messages, review, scrub, runLib, runEvents, sessionContext] = await Promise.all([
   json("package.json"),
   json("compat/pi2dsh/pins.json"),
   json("compat/pi2dsh/toolchain/package.json"),
@@ -34,6 +34,7 @@ const [pkg, pins, toolchain, toolchainLock, evidence, webEvidence, webQa, consol
   read("extensions/session-scrub.ts"),
   read("bin/lib/run.mjs"),
   read("bin/lib/run-events.mjs"),
+  read("bin/lib/session-context.mjs"),
 ]);
 
 assert.deepEqual(pkg.pi, { extensions: ["extensions/index.ts"] });
@@ -67,7 +68,7 @@ for (const [name, version] of Object.entries(pins.webCandidate.spotlightPeers)) 
   assert.equal(toolchainLock.packages[`node_modules/${name}`].version, version);
 }
 assert.match(run, /npm ci --prefix/);
-assert.match(run, /diff --quiet "\$qq_revision" -- extensions/);
+assert.match(run, /diff --quiet "\$qq_revision" -- extensions bin\/lib\/session-context\.mjs/);
 assert.match(run, /plugin --profile headless add/);
 assert.match(run, /--patch "\$here\/qq\.patch\.yml"/);
 assert.match(run, /QQ_PI2DSH_RELAY_STATE_HOME/);
@@ -211,6 +212,14 @@ assert.match(runLib, /session\.source !== "herdr:pi"/);
 assert.match(runLib, /path\.endsWith\("\.jsonl"\)/);
 assert.match(runLib, /sessionHasPromptMarker\(path, marker\)/);
 
+// Qq context is session-owned for DSH while Pi retains its environment fallback.
+assert.match(sessionContext, /qq\.session-context\/v1/);
+assert.match(sessionContext, /activeDshSession\?\.\(\)/);
+assert.match(sessionContext, /QQ_RUN_STATE \|\| null/);
+assert.match(childPlugin, /agents\.currentInitiator\(\)\?\.session\.id/);
+assert.match(childRun, /context_survived_continuation/);
+assert.ok(evidence.probes.some((item) => item.id === "qq-session-context"));
+
 // Run outcomes accept only canonical Pi UUIDs or pinned DSH session-UUIDs.
 assert.match(runEvents, /DSH_SESSION_ID = \/\^session-/);
 assert.match(runEvents, /review-flow\/\$\{sessionId\}/);
@@ -231,6 +240,6 @@ assert.match(scrub, /event\?\.reason !== "new"/);
 assert.match(scrub, /previousSessionFile/);
 
 execFileSync("git", ["cat-file", "-e", `${pins.qq.revision}^{commit}`], { cwd: root, stdio: "ignore" });
-execFileSync("git", ["diff", "--quiet", pins.qq.revision, "--", "extensions"], { cwd: root, stdio: "ignore" });
+execFileSync("git", ["diff", "--quiet", pins.qq.revision, "--", "extensions", "bin/lib/session-context.mjs"], { cwd: root, stdio: "ignore" });
 
 console.log("pi2dsh compatibility baseline test passed");
