@@ -58,6 +58,11 @@ try {
     notePath: join(scratch, "note.md"), gatePath: join(scratch, "gate.md"), statePath,
     qa: { provider: "openai-codex", model: "gpt-5.6-sol", effort: "xhigh" },
   };
+  await runLib.atomicPrivateJson(statePath, { ...base, runtime: "dsh", pane: undefined });
+  await assert.rejects(
+    review.prepareDone(async () => assert.fail("native done must stop before command execution"), worktree, statePath, "HEAD"),
+    /native DSH runner completion is not wired to review yet/,
+  );
   await runLib.atomicPrivateJson(statePath, base);
   const calls = [];
   const run = async (command, args, options = {}) => {

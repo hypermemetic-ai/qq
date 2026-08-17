@@ -1,0 +1,5 @@
+# Explicit opt-in adapter for the approved DSH delegation launch seam.
+- insert:
+    - id: qq-dsh-native-launch
+      name: '@hypermemetic-ai/qq-dsh-native-launch'
+      inject: [agents, sessions, sessionPersistence, subagents]

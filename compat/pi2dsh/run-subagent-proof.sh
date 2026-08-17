@@ -91,6 +91,7 @@ run_phase() {
       XDG_RUNTIME_DIR="$work/runtime" \
       DSH_HOME="$DSH_HOME" \
       DSH_TELEMETRY_MODE=DISABLED \
+      CHOKIDAR_USEPOLLING=1 \
       DEEPSEEK_API_KEY=qq-dsh-child-local-probe \
       DEEPSEEK_BASE_URL="$llm_endpoint" \
       QQ_DSH_SUBAGENT_PHASE="$phase" \

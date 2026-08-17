@@ -97,16 +97,17 @@ The complete machine-readable record is [`evidence.json`](evidence.json). At thi
 - review-flow acknowledgement also uses host-managed entries without a session-file fallback; regression tests prove Pi custom-message and DSH user-message projections, while the pinned runtime probe observes a pending retry, safe redelivery without duplicate injection, and delivery only after the run outcome is durable;
 - qq's load-time client resolver works under pi2dsh against the privately installed artifact after relay source deletion, and final agent-message status is delivered without changing the exact `session-<UUID>` identity;
 - the exact rc.6 `dsh-subagent` service and in-process `spawn` provider accept a private bootstrap into a durable child Session under a parent whose workspace is a disposable worktree; a cold DSH persistence inspection, not the returned ids, proves the bootstrap durable, and a fresh host restores the exact direct parent and cold-resumes that child for a separately proven durable follow-up;
-- qq's private session-context records and DSH's explicit `agents.currentInitiator()` boundary resolve that parent as architect with no run state and the continuable child as a distinct runner/profile/run-state context in both hosts; Pi/Herdr retain environment and pane-profile fallback.
+- qq's private session-context records and DSH's explicit `agents.currentInitiator()` boundary resolve that parent as architect with no run state and the continuable child as a distinct runner/profile/run-state context in both hosts; Pi/Herdr retain environment and pane-profile fallback;
+- an explicitly installed qq Cordis adapter now joins those proofs only after production board admission/note/gate approval: it reuses the isolated worktree lifecycle, creates a durable host-owned parent there, starts one `spawn` continuable runner, and records running only after flushing any live child Session and confirming the returned message id and marker in persistence without waiting for settlement; a fresh host reconstructs both identities and contexts without a pane or Pi session path;
+- Pi/Herdr delegation remains the complete fallback. Missing native capability for an owned DSH architect fails closed, and native `done` is deliberately refused until review/QA receives its own observed seam.
 
 The collision, model refusal, and session-id activation are runtime observations from the DSH boot, not static predictions.
 
 ## Cutover blockers
 
-Mount compatibility does not make the orchestration DSH-native:
+The approved DSH launch seam is native, but the rest of orchestration is not:
 
-- delegation and review still issue `herdr agent start ... --kind pi`;
-- runner acceptance requires Herdr's `herdr:pi` session descriptor and reads a Pi `.jsonl` user-message record;
+- native runner completion does not enter review or QA; Pi/Herdr `done`, two-look QA, and landing remain unchanged;
 - session scrub accepts only `~/.pi/agent/sessions` files and depends on Pi `/new` behavior;
 - absorbed shutdown and non-firing shortcut/tree events change qq workflow behavior.
 

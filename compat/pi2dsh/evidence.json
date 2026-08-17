@@ -161,16 +161,22 @@
       "fact": "The qq-owned context boundary keys private durable records by DSH's canonical parent session-<UUID> and continuable-child bare UUID identities. In each host, agents.currentInitiator resolves the architect parent to its own role/profile with no run state and the runner child to a distinct role/profile/run-state path during actual requests. A fresh host restores both records before cold child continuation; no process-global context map or inherited QQ_RUN_STATE supplies either identity. Pi and Herdr continue to use environment and pane-profile fallback."
     },
     {
+      "id": "approved-native-delegation-launch",
+      "basis": "exact-installed-profile-production-dispatch-and-fresh-host-proof",
+      "verdict": "post-approval-native-launch-proven",
+      "fact": "An explicitly composed qq DSH launch adapter drives the production board dispatch after an injected approved gate. It reuses qq's branch/worktree/OpenWiki protection, creates a host-owned bootstrap parent in that worktree, claims the exact runner profile and run-state context before startContinuable(spawn), and marks the runtime-discriminated handoff running only after flushing any live child Session and sessionPersistence.inspect confirms the returned message id and bootstrap marker without waiting for child settlement. A fresh DSH host reconstructs both recorded identities and contexts, observes one bootstrap injection, and resumes the exact parent. The proof asks the child not to call the deliberately unwired native done path and removes its disposable worktree/repository/state."
+    },
+    {
       "id": "herdr-launch",
-      "basis": "qq-source-audit",
-      "verdict": "outside-extension-abi",
-      "fact": "Delegation and review launch Herdr with --kind pi; mounting qq in DSH does not change the spawned agent runtime."
+      "basis": "qq-source-audit-and-regression-tests",
+      "verdict": "complete-pi-fallback",
+      "fact": "A Pi/Herdr architect still uses the unchanged detached start worker, runs pane, --kind pi agent, socket prompt submission, and Pi-session acceptance proof. Only an owned canonical DSH architect in an explicitly composed adapter profile selects native launch; missing capability fails closed."
     },
     {
       "id": "herdr-delivery-proof",
-      "basis": "qq-source-audit",
-      "verdict": "pi-only",
-      "fact": "Runner prompt acceptance requires Herdr to report agent=pi, source=herdr:pi, an absolute .jsonl path, and then parses a Pi user-message record from that file."
+      "basis": "qq-source-audit-and-regression-tests",
+      "verdict": "runtime-discriminated",
+      "fact": "Pi fallback still requires Herdr to report agent=pi, source=herdr:pi, an absolute .jsonl path, and a Pi user-message marker. Native launch fabricates no pane or Pi path and separately requires the returned DSH message id plus marker after a live Session durability flush or cold sessionPersistence.inspect."
     },
     {
       "id": "agent-message-receipts",
@@ -201,7 +207,7 @@
     "operator_cutover": "blocked",
     "native_translation_started": true,
     "blockers": [
-      "production delegation integration for the proven DSH-native child path",
+      "native runner completion into review and QA",
       "DSH transcript and scrub semantics",
       "qq model-policy routes in the DSH model directory",
       "read-tool ownership without disabling the host filesystem bundle",

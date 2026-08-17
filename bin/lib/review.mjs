@@ -38,6 +38,7 @@ export function formatPack(pack) {
 
 export async function prepareDone(run, cwd, statePath, ref) {
   const state = await readHandoff(statePath);
+  if (state.runtime === "dsh") throw new Error("native DSH runner completion is not wired to review yet");
   const actual = await realpath(cwd);
   const expected = await realpath(state.worktree);
   if (actual !== expected) throw new Error("done must run from its delegated worktree");
