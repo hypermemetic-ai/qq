@@ -480,9 +480,13 @@ export async function waitForAvailableShell(run, paneId, options = {}) {
   const signal = options.signal;
   const deadline = now() + timeoutMs;
   let last;
+  let readyShellPid;
   while (now() < deadline) {
     last = await run("herdr", ["pane", "process-info", "--pane", paneId], { signal });
-    if (last?.code === 0 && paneHasAvailableShell(parseHerdr(last.stdout, "pane_process_info"))) return last;
+    const value = last?.code === 0 ? parseHerdr(last.stdout, "pane_process_info") : undefined;
+    const shellPid = paneHasAvailableShell(value) ? (value?.process_info ?? value)?.shell_pid : undefined;
+    if (shellPid !== undefined && shellPid === readyShellPid) return last;
+    readyShellPid = shellPid;
     await sleep(intervalMs);
   }
   throw new Error(`runs pane ${paneId} never became an available shell: ${reason(last, "not a free shell")}`);

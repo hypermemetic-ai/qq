@@ -54,6 +54,34 @@ assert.equal(lib.paneHasAvailableShell({
 assert.equal(lib.paneHasAvailableShell({
   process_info: { shell_pid: 10, foreground_process_group_id: 10, foreground_processes: [{ pid: 10, name: "pi" }] },
 }), false);
+let shellChecks = 0;
+let shellClock = 0;
+const stableShell = await lib.waitForAvailableShell(async () => {
+  shellChecks += 1;
+  const shellPid = shellChecks === 1 ? 10 : 11;
+  return {
+    code: 0,
+    stdout: JSON.stringify({
+      id: "cli:pane:process-info",
+      result: {
+        type: "pane_process_info",
+        process_info: {
+          shell_pid: shellPid,
+          foreground_process_group_id: shellPid,
+          foreground_processes: [{ pid: shellPid, name: "bash" }],
+        },
+      },
+    }),
+  };
+}, "w2T:p9", {
+  timeoutMs: 200,
+  intervalMs: 50,
+  now: () => shellClock,
+  async sleep(milliseconds) { shellClock += milliseconds; },
+});
+assert.equal(stableShell.code, 0);
+assert.equal(shellChecks, 3, "a free shell must keep the same identity across two observations");
+assert.equal(shellClock, 100);
 const promptRequests = [];
 await lib.submitAgentPrompt("w2T:p9", "private prompt", {
   async request(method, params) {
