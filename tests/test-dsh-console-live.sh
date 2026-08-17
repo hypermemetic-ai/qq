@@ -37,8 +37,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-node "$root/compat/pi2dsh/llm-stub.mjs" \
-  "$work/llm-endpoint" "$work/llm-requests.jsonl" &
+QQ_LLM_STUB_REJECT_DEVELOPER=1 \
+  node "$root/compat/pi2dsh/llm-stub.mjs" \
+    "$work/llm-endpoint" "$work/llm-requests.jsonl" &
 llm_pid=$!
 for _ in {1..100}; do
   [[ -s $work/llm-endpoint ]] && break
@@ -293,6 +294,19 @@ grep -Fq 'QQ_DSH_NATIVE_TOOL_PROBE_COMPLETE' "$work/workbench-tools.post.html"
 node - "$work/llm-requests.jsonl" <<'NODE'
 const { readFileSync } = require("node:fs");
 const requests = readFileSync(process.argv[2], "utf8").trim().split("\n").map(JSON.parse);
+for (const { body } of requests) {
+  if (body.messages?.some(({ role }) => role === "developer")) {
+    throw new Error("qwen-token-plan request used its rejected developer role");
+  }
+}
+const instructionTurn = requests.find(({ body }) => body.messages?.some(
+  ({ role, content }) => role === "user" && JSON.stringify(content).includes("home durable handoff"),
+));
+if (!instructionTurn) throw new Error("missing instruction-bearing workbench turn");
+const system = instructionTurn.body.messages?.find(({ role }) => role === "system");
+if (!JSON.stringify(system?.content).includes("coding agent")) {
+  throw new Error("workbench instructions did not reach the compatible system role");
+}
 const probe = requests.filter(({ body }) => body.messages?.some(
   ({ role, content }) => role === "user" && JSON.stringify(content).includes("QQ_DSH_NATIVE_TOOL_PROBE"),
 ));

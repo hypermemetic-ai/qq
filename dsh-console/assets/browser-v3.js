@@ -3,7 +3,13 @@
 
   const ownScript = document.currentScript;
   const composer = () => document.querySelector("#prompt");
-  const focusComposer = () => {
+  const showLatest = () => {
+    const transcript = document.querySelector("#transcript");
+    if (transcript) transcript.scrollTop = transcript.scrollHeight;
+  };
+  const prepareSession = () => {
+    showLatest();
+    requestAnimationFrame(showLatest);
     if (window.matchMedia("(pointer: fine)").matches) composer()?.focus();
   };
 
@@ -15,14 +21,24 @@
     input.form?.requestSubmit();
   });
 
-  document.addEventListener("htmx:afterSwap", (event) => {
-    if (event.detail?.target?.id === "session-panel") focusComposer();
-  });
+  for (const eventName of ["htmx:afterSwap", "htmx:afterSettle", "htmx:sseMessage"]) {
+    document.addEventListener(eventName, (event) => {
+      if (
+        eventName === "htmx:sseMessage" ||
+        event.detail?.target?.id === "session-panel" ||
+        event.target?.id === "session-panel"
+      ) {
+        prepareSession();
+      }
+    });
+  }
+
+  window.addEventListener("load", showLatest, { once: true });
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", focusComposer, { once: true });
+    document.addEventListener("DOMContentLoaded", prepareSession, { once: true });
   } else {
-    focusComposer();
+    prepareSession();
   }
 
   const serviceWorker = ownScript?.dataset.serviceWorker;
