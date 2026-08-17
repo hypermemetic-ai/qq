@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+cd "$root"
+
+: "${HOME:?qq-dsh-workbench: HOME is required}"
+state_root=${XDG_STATE_HOME:-"$HOME/.local/state"}
+export DSH_HOME=${QQ_DSH_HOME:-${DSH_HOME:-"$state_root/qq/dsh-workbench"}}
+export DSH_TELEMETRY_DISABLED=${DSH_TELEMETRY_DISABLED:-1}
+export QQ_DSH_CONSOLE_PORT=${QQ_DSH_CONSOLE_PORT:-3082}
+export QQ_DSH_PROVIDER=${QQ_DSH_PROVIDER:-qwen-token-plan}
+export QQ_DSH_MODEL=${QQ_DSH_MODEL:-deepseek-v4-pro-0813}
+
+mkdir -p -- "$DSH_HOME"
+chmod 700 "$DSH_HOME"
+
+has_qwen_credential_file() {
+  local file=$1
+  local kind=$2
+  [[ -f $file ]] || return 1
+  if [[ $kind == yaml ]]; then
+    grep -Eq '^[[:space:]]*QWEN_TOKEN_PLAN_API_KEY[[:space:]]*:[[:space:]]*[^[:space:]]' "$file"
+  else
+    grep -Eq '^[[:space:]]*(export[[:space:]]+)?QWEN_TOKEN_PLAN_API_KEY[[:space:]]*=' "$file"
+  fi
+}
+
+if [[ $QQ_DSH_PROVIDER == qwen-token-plan ]] &&
+  [[ -z ${QWEN_TOKEN_PLAN_API_KEY:-} ]] &&
+  ! has_qwen_credential_file "$DSH_HOME/.credentials.yaml" yaml &&
+  ! has_qwen_credential_file "$root/.env" env &&
+  ! has_qwen_credential_file "$DSH_HOME/.env" env; then
+  cat >&2 <<EOF
+qq-dsh-workbench: qwen-token-plan requires QWEN_TOKEN_PLAN_API_KEY.
+Export it before starting, or store it under that name in:
+  $DSH_HOME/.credentials.yaml  (chmod 600)
+
+The launcher uses DSH rc.6's public credential-reference seam. It does not read
+or copy Pi credentials. qq's Grok route is not usable here because rc.6 has no
+supported xai-auth OAuth refresh/proxy transport path.
+EOF
+  exit 2
+fi
+
+toolchain="$root/compat/pi2dsh/toolchain"
+dsh="$toolchain/node_modules/.bin/dsh"
+if [[ ! -x $dsh ]]; then
+  printf 'qq-dsh-workbench: installing pinned DSH toolchain\n' >&2
+  npm ci --prefix "$toolchain" --no-audit --no-fund
+fi
+
+profile_manifest="$DSH_HOME/profiles/qq-console/package.json"
+console_package="$root/dsh-console"
+if ! node - "$profile_manifest" "$console_package" <<'NODE'
+const [manifestPath, packagePath] = process.argv.slice(2);
+try {
+  const manifest = require(manifestPath);
+  const expected = `link:${packagePath}`;
+  process.exit(manifest.dependencies?.["@hypermemetic-ai/qq-dsh-console"] === expected ? 0 : 1);
+} catch {
+  process.exit(1);
+}
+NODE
+then
+  printf 'qq-dsh-workbench: preparing persistent DSH profile\n' >&2
+  "$dsh" plugin --profile qq-console add "$console_package"
+fi
+node "$root/dsh-console/configure-profile.mjs" "$profile_manifest" >/dev/null
+
+session_file="$DSH_HOME/qq-console.session"
+if [[ -n ${QQ_DSH_SESSION_ID:-} ]]; then
+  session_id=$QQ_DSH_SESSION_ID
+elif [[ -f $session_file ]]; then
+  session_id=$(<"$session_file")
+else
+  session_id="session-$(node -e 'console.log(crypto.randomUUID())')"
+fi
+if [[ ! $session_id =~ ^session-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$ ]]; then
+  printf 'qq-dsh-workbench: invalid session id in QQ_DSH_SESSION_ID or %s\n' "$session_file" >&2
+  exit 2
+fi
+if [[ ! -f $session_file ]]; then
+  umask 077
+  printf '%s\n' "$session_id" >"$session_file"
+fi
+export QQ_DSH_SESSION_ID=$session_id
+
+printf 'qq-dsh-workbench: %s/%s · %s\n' "$QQ_DSH_PROVIDER" "$QQ_DSH_MODEL" "$QQ_DSH_SESSION_ID" >&2
+printf 'qq-dsh-workbench: state %s · http://127.0.0.1:%s/qq\n' "$DSH_HOME" "$QQ_DSH_CONSOLE_PORT" >&2
+exec "$dsh" --profile qq-console "$@"

@@ -16,6 +16,7 @@ const states = new Map([
 ]);
 const liveAgents = new Map();
 const registrations = [];
+const modelSelections = [];
 let flushes = 0;
 let resumes = 0;
 let creates = 0;
@@ -91,6 +92,7 @@ const services = {
     list: () => [...liveAgents.values()],
     async resume(options) {
       resumes += 1;
+      modelSelections.push(options.agentOptions);
       const state = states.get(options.resumeSessionId);
       assert.ok(state, "only a persisted DSH identity may resume");
       assert.equal(options.setup(fakeAgentContext), undefined);
@@ -100,6 +102,7 @@ const services = {
     },
     async create(options) {
       creates += 1;
+      modelSelections.push(options.agentOptions);
       const state = states.get(options.sessionId);
       assert.ok(state);
       const agent = fakeAgent(state);
@@ -123,16 +126,17 @@ const services = {
       }));
     },
   },
-  agentDefaultModel: {
-    currentSelection() {
-      return { provider: "local", model: "proof", reasoningEffort: "medium" };
-    },
-  },
   loader: { async await() {} },
 };
 const backend = createDshSessionBackend(
   { get: (name) => services[name] },
-  { sessionId: primaryId, cwd: root },
+  {
+    sessionId: primaryId,
+    cwd: root,
+    provider: "qwen-token-plan",
+    model: "deepseek-v4-pro-0813",
+    reasoningEffort: "max",
+  },
 );
 const server = createServer(createConsoleHandler(backend, { ssePollMs: 20 }));
 await new Promise((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
@@ -339,6 +343,10 @@ try {
     registrations,
     ["system-prompt/assemble", "agent/request", "system-prompt/assemble", "agent/request"],
   );
+  assert.deepEqual(modelSelections, [
+    { provider: "qwen-token-plan", model: "deepseek-v4-pro-0813" },
+    { provider: "qwen-token-plan", model: "deepseek-v4-pro-0813" },
+  ]);
 
   // Installable PWA boundary caches presentation only and leaves data network-only.
   const manifestResponse = await request("/qq/assets/manifest-v1.webmanifest");
@@ -364,12 +372,13 @@ try {
   assert.match(staticCss.headers["cache-control"], /immutable/);
 
   // Vendored pins and negative architecture constraints are machine checked.
-  const [pins, consoleEvidence, dshPins, plugin, patch, browser, workerSource, renderSource] = await Promise.all([
+  const [pins, consoleEvidence, dshPins, plugin, patch, workbench, browser, workerSource, renderSource] = await Promise.all([
     readFile(join(root, "dsh-console/vendor-pins.json"), "utf8").then(JSON.parse),
     readFile(join(root, "dsh-console/evidence.json"), "utf8").then(JSON.parse),
     readFile(join(root, "compat/pi2dsh/pins.json"), "utf8").then(JSON.parse),
     readFile(join(root, "dsh-console/src/plugin.mjs"), "utf8"),
     readFile(join(root, "dsh-console/cordis.patch.yml"), "utf8"),
+    readFile(join(root, "bin/qq-dsh-workbench"), "utf8"),
     readFile(join(root, "dsh-console/assets/browser-v1.js"), "utf8"),
     readFile(join(root, "dsh-console/assets/sw-v1.js"), "utf8"),
     readFile(join(root, "dsh-console/src/render.mjs"), "utf8"),
@@ -392,7 +401,14 @@ try {
     assert.match(artifact.npmIntegrity, /^sha512-/);
   }
   assert.match(patch, /host: 127\.0\.0\.1/);
+  assert.match(patch, /provider:.*qwen-token-plan/);
+  assert.match(patch, /model:.*deepseek-v4-pro-0813/);
+  assert.match(patch, /id: deepseek-v4-pro-0813[\s\S]*thinkingFormat: qwen/);
+  assert.match(patch, /apiKeyEnv: QWEN_TOKEN_PLAN_API_KEY/);
   assert.match(plugin, /refusing a non-loopback web server/);
+  assert.match(workbench, /state_root.*qq\/dsh-workbench/);
+  assert.match(workbench, /qq-console\.session/);
+  assert.doesNotMatch(`${plugin}\n${patch}\n${workbench}`, /qq\.patch\.yml|name:.*pi2dsh|plugin.*pi2dsh|auth\.json/);
   assert.doesNotMatch(`${plugin}\n${patch}`, /name:.*(?:dsh-web-app|api-proxy|client-connection)/);
   assert.doesNotMatch(browser, /localStorage|sessionStorage|indexedDB|document\.cookie|EventSource|WebSocket|htmx\.process/);
   assert.doesNotMatch(renderSource, /outerHTML|controller|observer|lease|take control/i);
