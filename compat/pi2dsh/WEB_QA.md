@@ -85,25 +85,27 @@ reports `connects: 2` and one current stream. The observed browser received anot
 
 ### Session selection and narrow layout
 
-1. Select the link ending in `000000000022`.
-2. Confirm the canonical URL and heading code use that exact id, its empty transcript does not contain the first session's prompt, and its link has `aria-current="page"`.
-3. Set the viewport to exactly **390×844**.
-4. Confirm the page exposes both session links, status, transcript, composer, and Send in one responsive column.
+1. Select the option ending in `000000000022` and activate **Open**.
+2. Confirm the canonical URL and heading code use that exact id, its empty transcript does not contain the first session's prompt, and its option is selected.
+3. Activate **New session** and confirm a fresh canonical `session-<UUID>` URL opens with an empty transcript and appears in the selector.
+4. Set the viewport to exactly **390×844**.
+5. Confirm the page exposes the session selector, Open, New session, status, transcript, and the inline composer controls without horizontal document overflow.
 
-Observed measurements:
+Outcome checks:
 
 ```js
 ({
-  viewport: [innerWidth, innerHeight],                 // [390, 844]
-  document: [document.documentElement.scrollWidth,
-             document.documentElement.scrollHeight], // [390, 876]
+  viewport: [innerWidth, innerHeight],                  // [390, 844]
   horizontalOverflow:
-    document.documentElement.scrollWidth > innerWidth, // false
-  panelWidth:
-    document.querySelector('#session-panel').getBoundingClientRect().width, // 390
-  sessionColumns:
-    getComputedStyle(document.querySelector('.session-links')).gridTemplateColumns,
-                                                    // "358px"
+    document.documentElement.scrollWidth > innerWidth,  // false
+  panelFits:
+    document.querySelector('#session-panel').getBoundingClientRect().width === innerWidth, // true
+  sessionControlsVisible:
+    [...document.querySelectorAll('#session-choice, .session-controls button')]
+      .every((control) => control.getClientRects().length > 0), // true
+  sendIsInline:
+    Math.abs(document.querySelector('#prompt').getBoundingClientRect().bottom -
+      document.querySelector('#composer-submit').getBoundingClientRect().bottom) < 1, // true
 })
 ```
 
@@ -116,11 +118,11 @@ Wait for `navigator.serviceWorker.ready`. Confirm the manifest has `display: "st
 ```text
 /qq/assets/htmx-2.0.10.min.js
 /qq/assets/htmx-ext-sse-2.2.4.js
-/qq/assets/console-v1.css
-/qq/assets/browser-v1.js
+/qq/assets/console-v3.css
+/qq/assets/browser-v3.js
 /qq/assets/icon-v1-192.png
 /qq/assets/icon-v1-512.png
-/qq/assets/offline-v1.html
+/qq/assets/offline-v3.html
 ```
 
 No manifest, service worker, page, transcript, fragment, SSE URL, or mutation URL is cached.

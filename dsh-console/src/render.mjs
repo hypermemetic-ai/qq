@@ -146,21 +146,25 @@ export function deriveStatus(events, agentStatus) {
 
 function sessionNavigation(snapshot, paths) {
   const choices = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
-  return `<details class="session-switcher">
-    <summary aria-label="Choose a durable DSH session">
-      <span>Session</span><code>${escapeHtml(snapshot.id)}</code><small>${choices.length}</small>
-    </summary>
-    <nav class="session-links" aria-label="Durable DSH sessions">
-      ${choices.map((session) => {
-        const current = session.id === snapshot.id;
-        const href = paths.session(session.id);
-        const created = Number.isFinite(session.createdAt) && session.createdAt > 0
-          ? eventTime(session.createdAt).slice(0, 10)
-          : "durable";
-        return `<a href="${escapeHtml(href)}"${current ? ' aria-current="page"' : ""} title="${escapeHtml(session.cwd ?? session.id)}"><span>${escapeHtml(session.id)}</span><small>${escapeHtml(created)}</small></a>`;
-      }).join("")}
-    </nav>
-  </details>`;
+  return `<div class="session-controls" role="group" aria-label="Session controls">
+    <form class="session-picker" action="${escapeHtml(paths.switchSession)}" method="get">
+      <label for="session-choice">Session <span>${choices.length} durable</span></label>
+      <select id="session-choice" name="session" required>
+        ${choices.map((session) => {
+          const current = session.id === snapshot.id;
+          const created = Number.isFinite(session.createdAt) && session.createdAt > 0
+            ? eventTime(session.createdAt).slice(0, 10)
+            : "durable";
+          const label = `${current ? "Current · " : ""}${created} · ${session.id}`;
+          return `<option value="${escapeHtml(session.id)}"${current ? " selected" : ""}>${escapeHtml(label)}</option>`;
+        }).join("")}
+      </select>
+      <button type="submit">Open</button>
+    </form>
+    <form class="new-session" action="${escapeHtml(paths.createSession)}" method="post">
+      <button type="submit" aria-label="Start a new durable DSH session">New <span>session</span></button>
+    </form>
+  </div>`;
 }
 
 function composer(paths, running) {
@@ -186,11 +190,13 @@ function composer(paths, running) {
       hx-disabled-elt="#composer-submit"
       hx-indicator="#working">
       <label for="prompt">Message</label>
-      <textarea id="prompt" name="prompt" rows="2" maxlength="32768" required autocomplete="off" enterkeyhint="send" placeholder="Message this DSH session"></textarea>
-      <div class="composer-actions">
+      <div class="composer-row">
+        <textarea id="prompt" name="prompt" rows="1" maxlength="32768" required autocomplete="off" enterkeyhint="send" placeholder="Message this DSH session"></textarea>
+        <button id="composer-submit" type="submit">Send</button>
+      </div>
+      <div class="composer-meta">
         <span id="working" class="htmx-indicator" aria-live="polite">Waiting for DSH…</span>
         <span class="key-hint">Enter to send · Shift+Enter for a new line</span>
-        <button id="composer-submit" type="submit">Send</button>
       </div>
     </form>`;
 }

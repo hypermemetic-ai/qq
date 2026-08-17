@@ -50,6 +50,17 @@ for _ in {1..600}; do
 done
 grep -Fq "$session_id" "$work/startup.html"
 
+# Exercise pinned DSH creation without spending a second model turn.
+curl -fsS --max-time 30 -D "$work/new-session.headers" \
+  -H "Origin: $origin" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data '' "$origin/qq/sessions" >"$work/new-session.post.html"
+new_session_path=$(awk 'tolower($1) == "location:" { gsub("\\r", "", $2); print $2 }' "$work/new-session.headers" | tail -1)
+[[ $new_session_path =~ ^/qq/session/session-[0-9a-f-]{36}$ ]]
+curl -fsS --max-time 10 "$origin$new_session_path" >"$work/new-session.html"
+grep -Fq 'This DSH session has no transcript yet.' "$work/new-session.html"
+grep -Fq "$session_id" "$work/new-session.html"
+
 curl -fsS --max-time 300 \
   -H "Origin: $origin" \
   -H 'HX-Request: true' \

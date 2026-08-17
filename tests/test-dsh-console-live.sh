@@ -76,7 +76,7 @@ YAML
 export DSH_HOME="$work/dsh-home"
 
 primary_id=session-63a11000-0000-4000-8000-000000000011
-secondary_id=session-63a11000-0000-4000-8000-000000000012
+secondary_id=
 session_id=$primary_id
 port=$(node -e '
   const server = require("node:net").createServer()
@@ -212,6 +212,21 @@ post_interrupt() {
     --data '' "$origin$(canonical "$id")/interrupt" >"$work/$client.post.html"
 }
 
+create_session() {
+  local client=$1
+  curl -fsS --max-time 30 -D "$work/$client.headers" \
+    -H "Origin: $origin" \
+    -H 'Content-Type: application/x-www-form-urlencoded' \
+    --data '' "$origin/qq/sessions" >"$work/$client.post.html"
+  local location
+  location=$(awk 'tolower($1) == "location:" { gsub("\\r", "", $2); print $2 }' "$work/$client.headers" | tail -1)
+  [[ $location =~ ^/qq/session/session-[0-9a-f-]{36}$ ]] || {
+    echo "test-dsh-console-live: new session did not return a canonical location" >&2
+    return 1
+  }
+  printf '%s\n' "${location##*/}"
+}
+
 # Home: one real page owns one SSE stream; send produces running and completed swaps.
 session_id=$primary_id
 start_host
@@ -226,13 +241,12 @@ wait "$post_pid"
 post_pid=
 ! grep -Fq '<section id="session-panel"' "$work/home.post.html"
 grep -Fq '<form id="composer"' "$work/home.post.html"
-stop_host
 
-# Materialize a second canonical DSH session through the same configured backend.
-session_id=$secondary_id
-start_host
-post_prompt selector-setup "$secondary_id" 'secondary durable session' normal
-grep -Eq '^HTTP/[0-9.]+ 303' "$work/selector-setup.headers"
+# The in-page action creates and flushes a fresh DSH identity before opening it.
+secondary_id=$(create_session selector-setup)
+curl -fsS --max-time 5 "$origin$(canonical "$secondary_id")" >"$work/new-session.html"
+grep -Fq "$secondary_id" "$work/new-session.html"
+grep -Fq 'This DSH session has no transcript yet.' "$work/new-session.html"
 stop_host
 
 # Laptop: restart on the primary id, select the second session, then interrupt live work.
@@ -240,9 +254,13 @@ session_id=$primary_id
 start_host
 open_stream laptop "$primary_id" proof-laptop
 grep -Fq 'home durable handoff' "$work/laptop.page.html"
-grep -Fq "/qq/session/$secondary_id" "$work/laptop.page.html"
+grep -Fq "$secondary_id" "$work/laptop.page.html"
 curl -fsS --max-time 5 "$origin$(canonical "$secondary_id")" >"$work/laptop-selected.html"
-grep -Fq '<code>session-63a11000-0000-4000-8000-000000000012</code>' "$work/laptop-selected.html"
+grep -Fq "<code>$secondary_id</code>" "$work/laptop-selected.html"
+grep -Fq 'This DSH session has no transcript yet.' "$work/laptop-selected.html"
+post_prompt selector-setup "$secondary_id" 'secondary durable session' normal
+grep -Eq '^HTTP/[0-9.]+ 303' "$work/selector-setup.headers"
+curl -fsS --max-time 5 "$origin$(canonical "$secondary_id")" >"$work/laptop-selected.html"
 grep -Fq 'secondary durable session' "$work/laptop-selected.html"
 post_prompt laptop-turn "$primary_id" 'laptop interrupt handoff' htmx &
 post_pid=$!

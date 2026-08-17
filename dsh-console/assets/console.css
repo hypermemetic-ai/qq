@@ -22,7 +22,7 @@ body {
     #090c10;
 }
 
-button, textarea { font: inherit; }
+button, textarea, select { font: inherit; }
 
 a { color: inherit; }
 
@@ -120,75 +120,75 @@ code {
 .status-running { color: #f7ce74; border-color: #514526; background: #201c10; }
 .status-error, .status-stopped { color: #ffaaa4; border-color: #59302e; background: #231413; }
 
-.session-switcher {
+.session-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   flex: none;
+  align-items: center;
+  gap: .65rem;
+  padding: .65rem 1.5rem;
   border-bottom: 1px solid #253039;
   background: #0c1115;
 }
 
-.session-switcher > summary {
+.session-picker {
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr) auto;
-  min-height: 2.8rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-width: 0;
   align-items: center;
-  gap: .75rem;
-  padding: .55rem 1.5rem;
-  color: #8e9aa4;
-  cursor: pointer;
-  font-size: .72rem;
-  font-weight: 750;
-  letter-spacing: .08em;
-  list-style: none;
-  text-transform: uppercase;
+  gap: .55rem;
 }
 
-.session-switcher > summary::-webkit-details-marker { display: none; }
-.session-switcher > summary::before { content: "›"; color: #70d8c1; }
-.session-switcher[open] > summary::before { transform: rotate(90deg); }
-.session-switcher > summary code {
+.session-picker label {
+  color: #aeb9c2;
+  font-size: .75rem;
+  font-weight: 750;
+}
+
+.session-picker label span {
+  margin-left: .2rem;
+  color: #72808a;
+  font-size: .68rem;
+  font-weight: 500;
+}
+
+.session-picker select {
+  width: 100%;
+  max-width: 34rem;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  height: 2.5rem;
+  padding: 0 .65rem;
+  border: 1px solid #34414b;
+  border-radius: .55rem;
+  outline: 0;
+  background: #10171c;
+  color: #dce4e9;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .72rem;
+}
+
+.session-picker select:focus {
+  border-color: #67cdb6;
+  box-shadow: 0 0 0 3px rgba(103, 205, 182, .13);
+}
+
+.session-controls button {
+  min-height: 2.5rem;
+  padding: .45rem .75rem;
+  border: 1px solid #34414b;
+  border-radius: .55rem;
+  background: #151d23;
+  color: #dce4e9;
+  font-weight: 750;
+  cursor: pointer;
   white-space: nowrap;
 }
-.session-switcher > summary small { color: #72808a; }
 
-.session-links {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
-  gap: .5rem;
-  padding: 0 1.5rem .8rem;
-}
-
-.session-links a {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: .75rem;
-  padding: .55rem .7rem;
-  border: 1px solid #2b3740;
-  border-radius: .55rem;
-  color: #aeb9c2;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: .7rem;
-  text-decoration: none;
-}
-
-.session-links a[aria-current="page"] {
+.new-session button {
   border-color: #4b9e8b;
   background: #12231f;
   color: #dffbf3;
 }
-
-.session-links a span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.session-links small { color: #72808a; }
 
 .notice {
   flex: none;
@@ -326,12 +326,20 @@ code {
 
 .interrupt-composer .composer-actions { margin-top: 0; }
 
+.composer-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: .65rem;
+}
+
 .composer textarea {
   display: block;
   width: 100%;
-  min-height: 4.3rem;
+  min-height: 3.15rem;
+  max-height: 12rem;
   resize: vertical;
-  padding: .8rem .9rem;
+  padding: .72rem .85rem;
   border: 1px solid #34414b;
   border-radius: .65rem;
   outline: 0;
@@ -352,6 +360,13 @@ code {
   margin-top: .7rem;
 }
 
+.composer-meta {
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  margin-top: .4rem;
+}
+
 .key-hint, #working {
   color: #788590;
   font-size: .73rem;
@@ -359,9 +374,8 @@ code {
 
 #working { color: #f7ce74; }
 
-.composer-actions button {
-  min-height: 2.75rem;
-  margin-left: auto;
+.composer button {
+  min-height: 3.15rem;
   padding: .52rem 1.1rem;
   border: 1px solid #72d7c0;
   border-radius: .55rem;
@@ -370,6 +384,8 @@ code {
   font-weight: 800;
   cursor: pointer;
 }
+
+.composer-actions button { margin-left: auto; }
 
 .composer-actions button.button-danger {
   border-color: #ff8d86;
@@ -432,12 +448,14 @@ body > footer {
     font-size: .68rem;
     text-overflow: ellipsis;
   }
-  .session-switcher > summary {
-    min-height: 2.75rem;
-    padding: .45rem .85rem;
+  .session-controls {
+    gap: .5rem;
+    padding: .5rem .85rem;
   }
-  .session-links { padding: 0 .85rem .7rem; }
-  .session-links a { min-height: 2.75rem; }
+  .session-picker { gap: .4rem; }
+  .session-picker label span { display: none; }
+  .session-picker select { height: 2.75rem; padding-inline: .5rem; }
+  .session-controls button { min-height: 2.75rem; padding-inline: .65rem; }
   .notice {
     margin: .5rem .85rem 0;
     padding: .55rem .65rem;
@@ -458,19 +476,30 @@ body > footer {
     padding: .65rem max(.85rem, env(safe-area-inset-right)) max(.65rem, env(safe-area-inset-bottom)) max(.85rem, env(safe-area-inset-left));
   }
   .composer label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  .composer textarea { min-height: 3.2rem; max-height: 8rem; padding: .65rem .75rem; resize: none; }
+  .composer-row { gap: .5rem; }
+  .composer textarea { min-height: 2.75rem; max-height: 8rem; padding: .6rem .7rem; resize: none; }
+  .composer button { min-height: 2.75rem; padding-inline: .9rem; }
   .composer-actions { margin-top: .5rem; }
+  .composer-meta { margin-top: .3rem; }
   .interrupt-composer { align-items: center; }
   .interrupt-composer .composer-actions { justify-content: flex-end; }
   .key-hint { display: none; }
 }
 
+@media (max-width: 23rem) {
+  .new-session button span { display: none; }
+}
+
 @media (max-height: 36rem) and (max-width: 42rem) {
+  body { grid-template-rows: minmax(0, 1fr); }
   .site-header { display: none; }
   .session-heading { padding-block: .45rem; }
   .session-heading code { display: none; }
-  .session-switcher > summary { min-height: 2.5rem; }
+  .session-controls { padding-block: .4rem; }
+  .session-picker select,
+  .session-controls button { min-height: 2.75rem; height: 2.75rem; }
   .notice { font-size: .74rem; }
-  .composer { padding-top: .5rem; }
-  .composer textarea { min-height: 2.8rem; }
+  .composer { padding-top: .45rem; }
+  .composer textarea,
+  .composer button { min-height: 2.75rem; }
 }
