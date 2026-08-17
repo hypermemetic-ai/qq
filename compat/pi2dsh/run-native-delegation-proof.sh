@@ -176,18 +176,34 @@ assert.equal(start.architect_session, fresh.architect_session);
 assert.equal(start.bootstrap_parent_session, fresh.bootstrap_parent_session);
 assert.equal(start.runner_session, fresh.runner_session);
 assert.equal(start.accepted_message_id, fresh.accepted_message_id);
-assert.equal(start.status, 'running');
-assert.equal(fresh.status, 'running');
+assert.equal(start.ref, fresh.ref);
+assert.equal(start.status, 'submitted');
+assert.equal(fresh.status, 'submitted');
+assert.equal(start.look, 0);
+assert.equal(fresh.look, 0);
 assert.equal(start.isolated_worktree, true);
-assert.equal(start.done_requested, false);
+assert.equal(start.done_requested, true);
+assert.equal(start.approval_recorded, true);
+assert.equal(start.review_launched, false);
+assert.equal(start.host_stopped, false);
+assert.equal(start.child_live_after_submission, true);
+assert.equal(fresh.awaiting, 'native-review');
 assert.equal(fresh.bootstrap_injections, 1);
 assert.equal(fresh.parent_resumed, true);
 assert.equal(fresh.child_cold, true);
 assert.equal(fresh.context_reconstructed, true);
+assert.equal(fresh.clean_shared_ref_reconstructed, true);
 assert.equal(state.runtime, 'dsh');
+assert.equal(state.status, 'submitted');
+assert.equal(state.look, 0);
+assert.equal(state.ref, start.ref);
 assert.equal(state.pane, undefined);
 assert.equal(state.bootstrapParentSession, start.bootstrap_parent_session);
 assert.equal(state.runnerSession, start.runner_session);
+assert.equal(state.submission.runtime, 'dsh');
+assert.equal(state.submission.awaiting, 'native-review');
+assert.equal(state.submission.continuation.runnerSession, start.runner_session);
+assert.equal(state.submission.continuation.worktree, state.worktree);
 NODE
 
 if [[ $(git -C "$main" rev-parse main) != "$main_ref" || $(git -C "$main" status --porcelain=v1 --untracked-files=all) != "$main_status" ]]; then

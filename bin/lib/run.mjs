@@ -14,6 +14,7 @@ const BRIEF_GATE_PLUGIN = "qq.brief-gate";
 const BRIEF_GATE_ENTRYPOINT = "review";
 const BRIEF_GATE_MARKER = "QQ_BRIEF_GATE_DECIDED";
 const BOOTSTRAP_SCHEMA = "qq.run-bootstrap/v1";
+export const DSH_RUN_APPROVAL_SCHEMA = "qq.dsh-run-approval/v1";
 const PROMPT_PROOF_TIMEOUT_MS = 30_000;
 const HERDR_RESPONSE_LIMIT = 1024 * 1024;
 const PANE_SHELLS = new Set([
@@ -157,14 +158,22 @@ export async function prepareBootstrapRequest(options) {
   if (!prepared?.stateDir || prepared.taskId !== task?.id) throw new Error("bootstrap request belongs to another task");
   throwIfAborted(signal);
   const bootstrapPath = prepared.bootstrapPath || join(prepared.stateDir, "bootstrap.json");
+  const createdAt = new Date().toISOString();
   const request = {
     schema: BOOTSTRAP_SCHEMA, version: 1,
     id: `${prepared.slug}-${prepared.nonce}`,
     cwd: resolve(options.cwd), project: prepared.project,
     task: { id: task.id, title: task.title }, architectSession, qaBinding,
-    ...(options.runnerProfile ? { runnerProfile: { ...options.runnerProfile } } : {}),
+    ...(options.runnerProfile ? {
+      runnerProfile: { ...options.runnerProfile },
+      approval: {
+        schema: DSH_RUN_APPROVAL_SCHEMA, runtime: "dsh", status: "approved",
+        runId: `${prepared.slug}-${prepared.nonce}`, taskId: task.id,
+        architectSession, approvedAt: createdAt,
+      },
+    } : {}),
     marker: `[qq-bootstrap:${prepared.slug}-${prepared.nonce}:${randomUUID()}]`,
-    prepared: { ...prepared, bootstrapPath }, createdAt: new Date().toISOString(),
+    prepared: { ...prepared, bootstrapPath }, createdAt,
   };
   await atomicPrivateJson(bootstrapPath, request);
   throwIfAborted(signal);
@@ -193,6 +202,14 @@ export async function readBootstrapRequest(path) {
     typeof value.runnerProfile.effort !== "string" || !PROFILE_EFFORTS.has(value.runnerProfile.effort) ||
     Object.keys(value.runnerProfile).sort().join(",") !== "effort,model,name,provider"
   )) throw new Error("runner bootstrap request is malformed");
+  const approval = value.approval;
+  if ((value.runnerProfile === undefined) !== (approval === undefined) || (approval !== undefined && (
+    approval?.schema !== DSH_RUN_APPROVAL_SCHEMA || approval.runtime !== "dsh" || approval.status !== "approved" ||
+    approval.runId !== value.id || approval.taskId !== value.task.id ||
+    approval.architectSession !== value.architectSession || typeof approval.approvedAt !== "string" ||
+    Number.isNaN(Date.parse(approval.approvedAt)) ||
+    Object.keys(approval).sort().join(",") !== "approvedAt,architectSession,runId,runtime,schema,status,taskId"
+  ))) throw new Error("runner bootstrap request is malformed");
   return value;
 }
 
@@ -524,9 +541,7 @@ export async function createRunWorkspace(run, cwd, prepared, options = {}) {
 }
 
 export function formatRunnerPrompt(marker, ticket, note, options = {}) {
-  const instruction = options.runtime === "dsh"
-    ? "Implement the task in this worktree and commit the result. Native completion and review are not wired in this launch seam; stop after committing and do not call done. Do not merge."
-    : "Implement the task in this worktree, commit the result, then call done with ref HEAD. Do not merge.";
+  const instruction = "Implement the task in this worktree, commit the result, then call done with ref HEAD. Do not merge.";
   return `${marker}\n\nWork from the full Backlog ticket and delegate note below. The note is also at ${options.notePath}. ${instruction}\n\n${ticket.trimEnd()}\n\n---\n\n## Delegate note\n\n${note.trimEnd()}`;
 }
 

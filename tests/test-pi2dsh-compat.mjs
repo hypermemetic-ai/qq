@@ -136,7 +136,7 @@ for (const id of [
   "package-local-events", "before-agent-start", "tools", "commands", "model-selection",
   "thinking-effort", "shortcut", "session-tree", "shutdown", "project-trust",
   "read-tool-collision", "session-id", "qq-relay-client", "native-child-prompt-acceptance", "qq-session-context",
-  "approved-native-delegation-launch", "herdr-launch", "herdr-delivery-proof", "agent-message-receipts", "run-outcome-addressing", "review-receipts", "session-scrub",
+  "approved-native-delegation-launch", "native-runner-submission", "herdr-launch", "herdr-delivery-proof", "agent-message-receipts", "run-outcome-addressing", "review-receipts", "session-scrub",
 ]) assert.ok(probes.has(id), `missing compatibility probe ${id}`);
 assert.equal(probes.get("session-id").verdict, "identity-translated");
 assert.match(probes.get("session-id").fact, /complete value unchanged as the live relay address/);
@@ -145,6 +145,10 @@ assert.equal(probes.get("native-child-prompt-acceptance").verdict, "durable-boot
 assert.equal(probes.get("approved-native-delegation-launch").verdict, "post-approval-native-launch-proven");
 assert.match(probes.get("approved-native-delegation-launch").fact, /flushing any live child Session.*sessionPersistence\.inspect.*without waiting for child settlement/);
 assert.match(probes.get("approved-native-delegation-launch").fact, /fresh DSH host/);
+assert.equal(probes.get("native-runner-submission").verdict, "durable-awaiting-native-review-proven");
+assert.match(probes.get("native-runner-submission").fact, /status submitted.*runtime dsh.*look 0/);
+assert.match(probes.get("native-runner-submission").fact, /does not launch a review worker/);
+assert.match(probes.get("native-runner-submission").fact, /same installed DSH profile/);
 assert.match(probes.get("native-child-prompt-acceptance").fact, /cold sessionPersistence\.inspect/);
 assert.match(probes.get("native-child-prompt-acceptance").fact, /fresh host resumes the exact persisted direct parent/);
 assert.equal(probes.get("agent-message-receipts").verdict, "installed-transport-and-durable-entry-proven");
@@ -152,7 +156,7 @@ assert.equal(probes.get("run-outcome-addressing").verdict, "installed-address-an
 assert.match(probes.get("run-outcome-addressing").fact, /qq\/review-flow\/session-<UUID>/);
 assert.equal(probes.get("review-receipts").verdict, "installed-durable-entry-proven");
 assert.ok(evidence.conclusion.blockers.every((blocker) => !/qq-relay client boundary|review events|prompt-acceptance proof/i.test(blocker)));
-assert.ok(evidence.conclusion.blockers.some((blocker) => /native runner completion into review and QA/.test(blocker)));
+assert.ok(evidence.conclusion.blockers.some((blocker) => /native QA composition, look continuity, proposal, and landing/.test(blocker)));
 assert.ok(evidence.conclusion.blockers.every((blocker) => !/production delegation integration/.test(blocker)));
 
 assert.equal(evidence.operator_surface.verdict, "pass-sequential-vertical-slice");
@@ -247,11 +251,17 @@ assert.doesNotMatch(dshRunLib, /herdr|agent\.prompt|qq-relay/);
 assert.equal(nativeProofPackage.name, "@hypermemetic-ai/qq-dsh-native-delegation-proof");
 assert.match(nativeProofPatch, /inject: \[agentDefaultModel, agents, sessions, sessionPersistence, subagents\]/);
 assert.match(nativeProof, /registerBoard\(/);
+assert.match(nativeProof, /registerReviewFlow\(/);
 assert.match(nativeProof, /awaitBriefGate\(\) \{ return "approved"; \}/);
+assert.match(nativeProof, /done\.execute\(/);
+assert.match(nativeProof, /reviewLaunches === 0/);
+assert.match(nativeProof, /hostStops === 0/);
 assert.match(nativeProof, /bootstrap_injections: exactMessages\.length/);
 assert.match(nativeProof, /agents\.resume\(/);
 assert.match(nativeRun, /plugin --profile qq-native-delegation-proof add "\$dsh_native"/);
 assert.match(nativeRun, /run_phase start[\s\S]*run_phase fresh/);
+assert.match(nativeRun, /done_requested, true/);
+assert.match(nativeRun, /clean_shared_ref_reconstructed, true/);
 assert.match(nativeRun, /main checkout/);
 assert.match(relayContract, /run-native-delegation-proof\.sh/);
 assert.ok(evidence.probes.some((item) => item.id === "qq-session-context"));

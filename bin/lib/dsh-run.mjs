@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile, rm } from "node:fs/promises";
 
 import {
+  DSH_RUN_APPROVAL_SCHEMA,
   atomicPrivateJson,
   cleanupRunWorkspace,
   createRunWorkspace,
@@ -141,6 +142,13 @@ export async function startDshRun(options) {
       callerContext.source !== "dsh-session" || callerContext.role !== "architect") {
     throw new NativeRunError("native DSH launch requires the exact owned architect session");
   }
+  const approval = options.approval;
+  if (!approval || approval.schema !== DSH_RUN_APPROVAL_SCHEMA || approval.runtime !== "dsh" ||
+      approval.status !== "approved" || approval.runId !== `${prepared.slug}-${prepared.nonce}` ||
+      approval.taskId !== task?.id || approval.architectSession !== architectSession ||
+      typeof approval.approvedAt !== "string" || Number.isNaN(Date.parse(approval.approvedAt))) {
+    throw new NativeRunError("native DSH launch requires a durable approved gate record");
+  }
   const profile = options.runnerProfile;
   if (!profile || typeof profile.name !== "string" || typeof profile.provider !== "string" ||
       typeof profile.model !== "string" || typeof profile.effort !== "string") {
@@ -198,7 +206,7 @@ export async function startDshRun(options) {
       ...workspace, architectSession, callerSession: architectSession,
       bootstrapParentSession: parentId, runnerSession: null,
       ticketPath, transcriptPath, notePath, gatePath, statePath, qa: qaBinding,
-      runnerProfile: { ...profile }, createdAt, updatedAt: createdAt,
+      approval: { ...approval }, runnerProfile: { ...profile }, createdAt, updatedAt: createdAt,
     };
     await atomicPrivateJson(statePath, state);
 

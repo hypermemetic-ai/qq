@@ -90,7 +90,7 @@ export async function bootstrapRun(run, requestPath, options = {}) {
       run, cwd: request.cwd, env: options.env ?? process.env,
       task: request.task, prepared: request.prepared, qaBinding: request.qaBinding,
       project: request.project, architectSession: request.architectSession, marker: request.marker,
-      runnerProfile: request.runnerProfile, signal: options.signal,
+      runnerProfile: request.runnerProfile, approval: request.approval, signal: options.signal,
       preserveStateOnFailure: true,
     });
     await unlink(requestPath).catch(() => {});

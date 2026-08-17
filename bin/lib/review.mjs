@@ -3,12 +3,15 @@ import { mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { atomicPrivateJson, parseHerdr, readHandoff, removeWorktree, runsRoot, waitForAvailableShell } from "./run.mjs";
+import { DSH_RUN_APPROVAL_SCHEMA, atomicPrivateJson, parseHerdr, readHandoff, removeWorktree, runsRoot, waitForAvailableShell } from "./run.mjs";
 import { RUN_BLOCKED_KIND, sendRunEvent } from "./run-events.mjs";
+import { DSH_CHILD_SESSION_ID, DSH_SESSION_ID } from "./session-context.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const BACKLOG = join(QQ_ROOT, "node_modules", ".bin", "backlog");
 const OPENWIKI_MATERIALIZE = join(QQ_ROOT, "bin", "qq-openwiki-materialize");
+
+export const DSH_RUN_SUBMISSION_SCHEMA = "qq.dsh-run-submission/v1";
 
 function reason(result, fallback) {
   return result?.stderr?.trim() || result?.stdout?.trim() || fallback;
@@ -36,23 +39,66 @@ export function formatPack(pack) {
   return [pack.summary, ...(pack.files ?? []).map((file) => `${file.path} +${file.added ?? "?"}/-${file.deleted ?? "?"}`)].join("\n");
 }
 
-export async function prepareDone(run, cwd, statePath, ref) {
+export async function prepareDone(run, cwd, statePath, ref, options = {}) {
   const state = await readHandoff(statePath);
-  if (state.runtime === "dsh") throw new Error("native DSH runner completion is not wired to review yet");
+  if (state.runtime === "dsh") {
+    const approval = state.approval;
+    if (approval?.schema !== DSH_RUN_APPROVAL_SCHEMA || approval.runtime !== "dsh" ||
+        approval.status !== "approved" || approval.runId !== state.id || approval.taskId !== state.task?.id ||
+        approval.architectSession !== state.architectSession ||
+        typeof approval.approvedAt !== "string" || Number.isNaN(Date.parse(approval.approvedAt))) {
+      throw new Error("native DSH handoff has no durable approved gate record");
+    }
+    const caller = options.callerContext;
+    if (caller?.source !== "dsh-session" || caller.role !== "runner" ||
+        caller.sessionId !== state.runnerSession || caller.runState !== statePath ||
+        caller.profile !== state.runnerProfile?.name ||
+        !DSH_CHILD_SESSION_ID.test(state.runnerSession ?? "") ||
+        !DSH_SESSION_ID.test(state.bootstrapParentSession ?? "") ||
+        !DSH_SESSION_ID.test(state.architectSession ?? "") ||
+        state.callerSession !== state.architectSession || state.statePath !== statePath) {
+      throw new Error("done requires the exact owned native DSH runner session");
+    }
+    if (state.look !== 0) throw new Error("native DSH submission cannot follow a consumed QA look");
+  }
   const actual = await realpath(cwd);
   const expected = await realpath(state.worktree);
   if (actual !== expected) throw new Error("done must run from its delegated worktree");
-  if (state.status !== "running" && state.status !== "waiting_fix") throw new Error(`handoff is ${state.status}, not ready for done`);
-  if (state.look >= 2) throw new Error("qa already used both looks");
+  if (state.status !== "running" && (state.runtime === "dsh" || state.status !== "waiting_fix")) {
+    throw new Error(`handoff is ${state.status}, not ready for done`);
+  }
+  if (state.runtime !== "dsh" && state.look >= 2) throw new Error("qa already used both looks");
   const revision = await checked(run, "git", ["rev-parse", "--verify", `${ref}^{commit}`], { cwd }, "ref is not a commit");
   const sha = revision.stdout.trim();
+  if (state.runtime === "dsh") {
+    const shared = await checked(run, "git", ["rev-parse", "--verify", `${sha}^{commit}`], { cwd: state.mainRoot }, "ref is not shared with the delegated repository");
+    if (shared.stdout.trim() !== sha) throw new Error("ref is not shared with the delegated repository");
+  }
   await checked(run, "git", ["merge-base", "--is-ancestor", state.baseRef, sha], { cwd }, "ref does not descend from the delegated base");
   const status = await checked(run, "git", ["status", "--porcelain", "--untracked-files=all"], { cwd }, "cannot inspect worktree");
   if (status.stdout.trim()) throw new Error("worktree is not clean; commit or remove every change before done");
-  state.look += 1;
-  state.ref = sha;
-  state.status = "reviewing";
-  state.updatedAt = new Date().toISOString();
+  if (state.runtime === "dsh") {
+    const submittedAt = new Date().toISOString();
+    state.ref = sha;
+    state.status = "submitted";
+    state.submission = {
+      schema: DSH_RUN_SUBMISSION_SCHEMA, runtime: "dsh", ref: sha,
+      awaiting: "native-review", submittedAt,
+      continuation: {
+        architectSession: state.architectSession,
+        bootstrapParentSession: state.bootstrapParentSession,
+        runnerSession: state.runnerSession,
+        runState: state.statePath,
+        worktree: state.worktree,
+      },
+    };
+    state.updatedAt = submittedAt;
+  } else {
+    state.look += 1;
+    state.ref = sha;
+    state.status = "reviewing";
+    state.updatedAt = new Date().toISOString();
+  }
   await atomicPrivateJson(statePath, state);
   return state;
 }

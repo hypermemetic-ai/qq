@@ -548,6 +548,21 @@ try {
   const nativeProfile = {
     name: "dsh-runner", provider: "deepseek-official", model: "deepseek-v4-flash", effort: "high",
   };
+  const nativeBootstrap = await lib.prepareBootstrapRequest({
+    cwd: "/repo", env, task: nativeTask, prepared: nativePreparation, qaBinding: { model: "qa" },
+    architectSession: nativeArchitect, runnerProfile: nativeProfile,
+  });
+  const nativeApproval = nativeBootstrap.approval;
+  assert.deepEqual((await lib.readBootstrapRequest(nativeBootstrap.bootstrapPath)).approval, nativeApproval);
+  assert.deepEqual(nativeApproval, {
+    schema: lib.DSH_RUN_APPROVAL_SCHEMA, runtime: "dsh", status: "approved",
+    runId: `${nativePreparation.slug}-${nativePreparation.nonce}`, taskId: nativeTask.id,
+    architectSession: nativeArchitect, approvedAt: nativeBootstrap.createdAt,
+  });
+  const approvalFor = (preparedRun, approvedTask) => ({
+    ...nativeApproval, runId: `${preparedRun.slug}-${preparedRun.nonce}`, taskId: approvedTask.id,
+  });
+  await rm(nativeBootstrap.bootstrapPath);
   let nativeInitiator;
   const nativeBoundary = sessionContexts.createQqSessionContext({
     env,
@@ -645,10 +660,19 @@ try {
       async drainContinuableDescendants() {},
     },
   };
+  const commandsBeforeUnapprovedLaunch = nativeCommands.length;
+  await assert.rejects(dshRun.startDshRun({
+    run: async () => assert.fail("unapproved native launch must fail before workspace creation"),
+    cwd: "/repo", env, task: nativeTask, prepared: nativePreparation,
+    architectSession: nativeArchitect, qaBinding: { model: "qa" }, marker: "[qq-bootstrap:unapproved-native]",
+    runnerProfile: nativeProfile, services: nativeServices, sessionContext: nativeBoundary,
+  }), /durable approved gate record/);
+  assert.equal(nativeCommands.length, commandsBeforeUnapprovedLaunch);
+
   const nativeState = await dshRun.startDshRun({
     run: nativeCommandRun, cwd: "/repo", env, task: nativeTask, prepared: nativePreparation,
     architectSession: nativeArchitect, qaBinding: { model: "qa" }, marker: "[qq-bootstrap:task-14-native]",
-    runnerProfile: nativeProfile, services: nativeServices, sessionContext: nativeBoundary,
+    runnerProfile: nativeProfile, approval: nativeApproval, services: nativeServices, sessionContext: nativeBoundary,
     verificationTimeoutMs: 20, verificationIntervalMs: 10, now: () => nativeStartClock,
     async sleep(ms) { nativeStartClock += ms; },
     retainParent(owned) { retainedParent = owned; },
@@ -660,6 +684,7 @@ try {
   assert.equal(nativeState.runnerSession, nativeChild);
   assert.equal(nativeState.bootstrapProof.messageId, nativeMessage);
   assert.equal(nativeState.bootstrapProof.persistence, "sessionPersistence.inspect");
+  assert.deepEqual(nativeState.approval, nativeApproval);
   assert.equal(childStarts, 1);
   assert.equal(nativeChildFlushes, 1);
   assert.equal(nativeChildInspections, 2);
@@ -667,8 +692,8 @@ try {
   assert.ok(nativeAgents.has(nativeChild), "the accepted runner remains live after prompt verification");
   assert.match(childPrompt, /^\[qq-bootstrap:task-14-native\]/);
   assert.match(childPrompt, /# TASK-14 — Native runner/);
-  assert.match(childPrompt, /do not call done/);
-  assert.doesNotMatch(childPrompt, /call done with ref HEAD/);
+  assert.match(childPrompt, /call done with ref HEAD/);
+  assert.doesNotMatch(childPrompt, /do not call done/);
   assert.equal(nativeCommands.some(({ command }) => command === "herdr" || command === "pi"), false);
   assert.deepEqual(nativeBoundary.resolveSession(nativeChild), {
     schema: "qq.session-context/v1", sessionId: nativeChild, role: "runner", profile: "dsh-runner",
@@ -732,7 +757,7 @@ try {
   await assert.rejects(dshRun.startDshRun({
     run: nativeCommandRun, cwd: "/repo", env, task: absentTask, prepared: absentPreparation,
     architectSession: nativeArchitect, qaBinding: {}, marker: "[qq-bootstrap:task-15-absent]",
-    runnerProfile: nativeProfile, services: absentServices, sessionContext: nativeBoundary,
+    runnerProfile: nativeProfile, approval: approvalFor(absentPreparation, absentTask), services: absentServices, sessionContext: nativeBoundary,
     verificationTimeoutMs: 20, verificationIntervalMs: 10, now: () => absentStartClock,
     async sleep(ms) { absentStartClock += ms; },
   }), (error) => {
@@ -760,7 +785,7 @@ try {
   await assert.rejects(dshRun.startDshRun({
     run: nativeCommandRun, cwd: "/repo", env, task: refusedTask, prepared: refusedPreparation,
     architectSession: nativeArchitect, qaBinding: {}, marker: "[qq-bootstrap:task-16-refused]",
-    runnerProfile: nativeProfile, services: refusedServices, sessionContext: nativeBoundary,
+    runnerProfile: nativeProfile, approval: approvalFor(refusedPreparation, refusedTask), services: refusedServices, sessionContext: nativeBoundary,
   }), (error) => {
     assert.match(error.message, /bootstrap parent was refused/);
     assert.doesNotMatch(error.message, new RegExp(exactNote));
