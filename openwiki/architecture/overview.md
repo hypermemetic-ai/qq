@@ -7,7 +7,7 @@ tags: [architecture, runtime, ownership]
 
 # System topology and ownership
 
-qq is a private ESM package and an operator-controlled orchestration layer around Pi. It owns policy, extensions, shell and Node entrypoints, workers, local state contracts, and an isolated DSH web-console proof. It does not own the Herdr, qq-relay, dashboard, pi2dsh, or DSH product implementations. The [DSH compatibility harness](../runtime/dsh-compatibility.md) is evidence, not a production runtime cutover.
+qq is a private ESM package and operator-controlled orchestration layer around Pi/Herdr with incremental DSH adoption. It owns policy, extensions, workers, state contracts, a daily DSH coding workbench, and native DSH runner launch through submission. It does not own the Herdr, qq-relay, dashboard, pi2dsh, or DSH product implementations. [DSH compatibility](../runtime/dsh-compatibility.md) records the remaining review/landing cutover boundary.
 
 ## Component topology
 
@@ -33,7 +33,9 @@ flowchart TD
     DashboardWrapper --> DashboardPackage["installed dashboard artifact"]
     DashboardPackage --> ProfileCLI
     DshHost["pinned DSH host"] --> Bundle
-    DshConsole["qq DSH console"] --> DshHost
+    Bundle --> NativeAdapter["native launch adapter"]
+    NativeAdapter --> NativeRunner["continuable DSH runner"]
+    DshConsole["qq DSH workbench"] --> DshHost
     Timer["systemd timer"] --> OpenWikiService["OpenWiki service"]
     OpenWikiService --> Generated["openwiki output"]
 ```
@@ -63,7 +65,7 @@ The order makes profile activation the composition root and installs qq's replac
 |---|---|---|
 | Pi session | Extension registration, role prompt replacement, tools, guards, role events | Installed Pi runtime and provider authentication |
 | qq-relay | Installed executable/client resolution and message/run-outcome consumer contracts | Protocol, persistence, installation, service lifecycle, and product checks in the linked qq-relay repository |
-| Startup, review, and landing | `qq-start-worker.mjs`, `qq-review-worker.mjs`, `qq-land-worker.mjs`, bootstrap/handoff/outbox and lock contracts | Herdr socket and child Git, Backlog, model, Herdr commands, and installed qq-relay delivery |
+| Startup, review, and landing | Pi workers plus native DSH adapter/runner, runtime-discriminated bootstrap/handoff contracts, QA verdict schema, and locks | DSH continuable/persistence services or Herdr socket, child Git, Backlog, model, and installed qq-relay delivery |
 | Herdr | Config, activation/smoke scripts, plugin adapters, `herdr.service` packaging | Rust source, tests, build, install, and product lifecycle in the linked Herdr repository |
 | Dashboard | Two installed-artifact launch wrappers and the `qq-profile list --json` contract | Source, tests, installation, upgrades, and cookie semantics in the linked dashboard repository |
 | OpenWiki | Timer/service, dispatch, isolated writer/publication scripts, allowed generated paths | OpenWiki executable and model provider |
@@ -78,7 +80,8 @@ Herdr's service launches `%h/.local/lib/qq/herdr/bin/herdr server`, logs under `
 | `~/.config/qq/execution-profiles.json` | qq profile policy; owner-only, non-symlink regular file with schema `qq.execution-profiles/v1` |
 | `~/.local/state/qq/store/<project>/` and checkout `backlog` symlink | `qq-methodology` and Backlog.md; data is outside Git and `auto_commit` is false |
 | `${XDG_STATE_HOME:-~/.local/state}/qq/pane-profiles/<pane>.json` | profile extension; owner-only pane-local role/profile selection for Pi/Herdr |
-| `${XDG_STATE_HOME:-~/.local/state}/qq/session-contexts/<session>.json` | shared host boundary; owner-only DSH role/profile/run ownership, one exact record per canonical parent or claimed child session |
+| `${XDG_STATE_HOME:-~/.local/state}/qq/session-contexts/<session>.json` | shared host boundary; owner-only DSH role/profile/run ownership, exclusively claimed for native bootstrap parent and runner identities |
+| `${XDG_STATE_HOME:-~/.local/state}/qq/dsh-workbench/` | daily workbench default DSH home; persistent profile, sessions, and saved default session identity; credentials, if file-backed, remain owner-only |
 | `${XDG_STATE_HOME:-~/.local/state}/qq-relay/` | qq-relay-owned service state and `qq-relay.sock`; qq consumers connect but do not manage it |
 | `${XDG_STATE_HOME:-~/.local/state}/qq/agent-messages/presence/` | Agent-messaging extension; ephemeral private presence leases, separate from relay state |
 | `~/.local/state/qq/telemetry/` | Dashboard contract; preserve usage caches and cookie snapshot across installs and upgrades |
@@ -99,7 +102,7 @@ Do not move external Backlog or telemetry state into the repository. Generated O
 | Start, review, or land a delegated run | `bin/qq-start-worker.mjs`, `bin/qq-review-worker.mjs`, `bin/qq-land-worker.mjs` | Internal workers consume private bootstrap or handoff JSON paths; they are not normal operator entrypoints |
 | Refresh generated wiki | `bin/qq-openwiki-service` | Reads the `openwiki` service profile then dispatches refreshes |
 | Exercise the pinned DSH host | `compat/pi2dsh/run.sh` | Compatibility-only harness; see [DSH compatibility](../runtime/dsh-compatibility.md) |
-| Run the DSH web-console proof | DSH profile configured by `dsh-console/configure-profile.mjs` | Loopback-only, sequential use; see [DSH console](../runtime/dsh-console.md) |
+| Start the daily DSH coding workbench | `bin/qq-dsh-workbench` | Persistent DSH home, explicit model, loopback-only sequential use; see [DSH workbench](../runtime/dsh-console.md) |
 | Load Pi extensions | `extensions/index.ts` | Default export `registerQQ(pi)` |
 | Invoke the host Pi installation | `bin/pi` | Host-local compatibility shim that hard-codes `/home/qqp/.local/bin/pi`; it is not a portable installer and has no focused local test |
 
