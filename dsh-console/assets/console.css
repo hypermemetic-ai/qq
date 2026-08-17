@@ -296,7 +296,7 @@ code {
 }
 
 .message {
-  width: min(88%, 48rem);
+  width: 100%;
   padding: .85rem 1rem;
   border: 1px solid #29343e;
   border-radius: .8rem;
@@ -304,7 +304,6 @@ code {
 }
 
 .message-user {
-  align-self: flex-end;
   border-color: #285044;
   background: #11231e;
 }
@@ -399,7 +398,8 @@ code {
   width: 100%;
   min-height: 3.15rem;
   max-height: 12rem;
-  resize: vertical;
+  overflow-y: auto;
+  resize: none;
   padding: .72rem .85rem;
   border: 1px solid #34414b;
   border-radius: .65rem;
@@ -533,7 +533,7 @@ body > footer {
     padding: .65rem max(.65rem, env(safe-area-inset-right)) .5rem max(.65rem, env(safe-area-inset-left));
     scrollbar-gutter: auto;
   }
-  .message { width: 100%; padding: .7rem .75rem; }
+  .message { padding: .7rem .75rem; }
   .message time { display: none; }
   .message-text { line-height: 1.45; }
   .composer {
@@ -541,7 +541,7 @@ body > footer {
   }
   .composer label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .composer-row { gap: .5rem; }
-  .composer textarea { min-height: 2.75rem; max-height: 8rem; padding: .6rem .7rem; resize: none; }
+  .composer textarea { min-height: 2.75rem; max-height: 8rem; padding: .6rem .7rem; }
   .composer button { min-height: 2.75rem; padding-inline: .9rem; }
   .composer-actions { margin-top: .35rem; }
   .composer:not(.htmx-request) .composer-meta { display: none; }
