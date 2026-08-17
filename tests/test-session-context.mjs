@@ -9,6 +9,13 @@ const contextLib = await import(pathToFileURL(join(root, "bin/lib/session-contex
 const profilesExtension = await import(pathToFileURL(join(root, "extensions/execution-profiles.ts")));
 const boardExtension = await import(pathToFileURL(join(root, "extensions/board.ts")));
 const reviewExtension = await import(pathToFileURL(join(root, "extensions/review-flow.ts")));
+const extensionEntrypoint = await readFile(join(root, "extensions/index.ts"), "utf8");
+
+// Pi commonly loads qq through ~/.pi/agent/extensions/qq -> <repo>/extensions.
+// A direct ../bin import from that entrypoint resolves outside the symlink
+// target before Pi can canonicalize extension-local modules.
+assert.doesNotMatch(extensionEntrypoint, /from ["']\.\.\/bin\/lib\/session-context\.mjs["']/);
+assert.equal(profilesExtension.createQqSessionContext, contextLib.createQqSessionContext);
 
 const parentId = "session-4b70f906-ce0a-4135-bc9e-b231db9b98b1";
 // Continuable children use DSH's canonical bare-v4 SessionId form, while the

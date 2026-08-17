@@ -10,6 +10,10 @@ import { contextWindowCeilingFor, profileFor, readExecutionPolicy, SERVICE_NAMES
 import { DEFAULT_ROLE, isActivatedRepository, ROLE_NAMES, validateRole } from "../bin/lib/roles.mjs";
 import { createQqSessionContext } from "../bin/lib/session-context.mjs";
 
+// Re-export through an extension-local module so Pi installations that expose
+// qq as a symlinked extension never resolve a direct ../bin import from index.ts.
+export { createQqSessionContext };
+
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PANE_ID = /^w[A-Za-z0-9]+:p[A-Za-z0-9]+$/;
 const PANE_PROFILE_KEYS = ["paneId", "profile", "role", "version"];

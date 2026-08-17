@@ -1,7 +1,6 @@
 // Fresh qq's global Pi extension entry point.
 import { createReadToolDefinition } from "@mariozechner/pi-coding-agent";
-import { createQqSessionContext } from "../bin/lib/session-context.mjs";
-import registerExecutionProfiles from "./execution-profiles.ts";
+import registerExecutionProfiles, { createQqSessionContext } from "./execution-profiles.ts";
 import registerRead from "./read.ts";
 import registerAgentMessages from "./agent-messages.ts";
 import registerOperatorStage from "./operator-stage.ts";
