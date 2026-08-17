@@ -6,7 +6,7 @@ const MAX_FORM_BYTES = 524_288;
 const DEFAULT_SSE_POLL_MS = 100;
 const SECURITY_HEADERS = Object.freeze({
   "Cache-Control": "no-store",
-  "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+  "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
   "Cross-Origin-Opener-Policy": "same-origin",
   "Referrer-Policy": "no-referrer",
   "X-Content-Type-Options": "nosniff",
@@ -257,6 +257,17 @@ export function createConsoleHandler(backend, options = {}) {
       return;
     }
 
+    if (url.pathname === basePath && (req.method === "GET" || head)) {
+      write(
+        res,
+        308,
+        { Location: `${basePath}/${url.search}`, "Content-Type": "text/plain; charset=utf-8" },
+        "Permanent redirect\n",
+        head,
+      );
+      return;
+    }
+
     if (url.pathname === assetPaths.serviceWorker) {
       if (req.method !== "GET" && !head) {
         write(res, 405, { Allow: "GET, HEAD", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
@@ -353,7 +364,7 @@ export function createConsoleHandler(backend, options = {}) {
     }
 
     const selected = parseSessionRoute(basePath, url.pathname);
-    const rootPage = url.pathname === basePath || url.pathname === `${basePath}/`;
+    const rootPage = url.pathname === `${basePath}/`;
     if ((rootPage || selected?.action === "page") && (req.method === "GET" || head)) {
       const sessionId = rootPage ? backend.defaultSessionId : selected.sessionId;
       try {

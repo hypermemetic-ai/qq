@@ -260,10 +260,14 @@ function openSse(sessionId) {
 const streams = [];
 try {
   // Stable htmx/SSE lifecycle: the owner and target wrap inner-only fragments.
-  const home = await request("/qq", { headers: { cookie: "proof-client=home" } });
+  const shortcut = await request("/qq", { headers: { cookie: "proof-client=home" } });
+  assert.equal(shortcut.status, 308);
+  assert.equal(shortcut.headers.location, "/qq/");
+  const home = await request(shortcut.headers.location, { headers: { cookie: "proof-client=home" } });
   assert.equal(home.status, 200);
   assert.match(home.headers["cache-control"], /no-store/);
   assert.match(home.headers["content-security-policy"], /font-src 'self'/);
+  assert.match(home.headers["content-security-policy"], /manifest-src 'self'/);
   assert.match(home.body, /^<!doctype html>/);
   assert.match(home.body, /interactive-widget=resizes-content/);
   assert.match(home.body, new RegExp(`id="console-stream"[^>]*hx-ext="sse"[^>]*sse-connect="/qq/session/${primaryId}/events"`));
