@@ -7,7 +7,7 @@ tags: [workflow, delegation, qa, landing]
 
 # Delegation and review lifecycle
 
-qq turns one Backlog ticket into an isolated, operator-approved run. The architect owns admission and landing; the runner owns implementation; an isolated QA session owns the verdict and may add only test changes. For role activation, see [Profiles and activation](../runtime/profiles-and-activation.md); for pane behavior, see [Operator workflows](../herdr/operator-workflows.md); for durable outcome delivery, see [Agent messaging](../event-plane/agent-messaging.md) and [qq-relay integration](../event-plane/service.md).
+qq turns one Backlog ticket into an isolated, operator-approved run. Pi/Herdr remains the complete path through two-look QA and landing. An owned DSH architect can now launch a native continuable runner and accept a clean committed submission, but production native review and landing stop at `awaiting: native-review`; see [DSH compatibility](../runtime/dsh-compatibility.md). For role activation, see [Profiles and activation](../runtime/profiles-and-activation.md); for pane behavior, see [Operator workflows](../herdr/operator-workflows.md); for durable outcomes, see [Agent messaging](../event-plane/agent-messaging.md).
 
 ## Entrypoints and ownership
 
@@ -15,8 +15,8 @@ qq turns one Backlog ticket into an isolated, operator-approved run. The archite
 |---|---|---|
 | `sketch({title,note?})` | architect Pi session | Creates a Backlog task; optional text is appended as a timestamped take. |
 | `note({id,text})` | architect Pi session | Appends a timestamped implementation note. |
-| `delegate({id})` | architect Pi session in Herdr | Serializes admission, claims a `To Do` task, creates the private brief, asks the operator, and hands an owner-only bootstrap request to a detached start worker. It returns while the runner is still starting. |
-| `done({ref})` | delegated runner with `QQ_RUN_STATE` | Validates the committed ref, advances the QA look, starts `qq-review-worker.mjs`, then stops the runner. It never merges. |
+| `delegate({id})` | architect Pi/Herdr or owned DSH session | Serializes admission, claims a `To Do` task, creates the private brief, and asks the operator. Pi/Herdr hands bootstrap to a detached worker; DSH synchronously invokes its uniquely owned native adapter and returns only after durable prompt acceptance. |
+| `done({ref})` | delegated runner with owned run context | Validates the committed ref. Pi/Herdr advances the QA look and starts `qq-review-worker.mjs`; DSH records a look-zero native submission awaiting review. It never merges. |
 | proposal picker | owning architect session | Offers `approve`, `discuss`, or `later`; only `approve` invokes the land worker. |
 | `qa_verdict(...)` | isolated QA extension only | Writes exactly one structured pass/fail result and shuts QA down. |
 
@@ -45,7 +45,7 @@ sequenceDiagram
     B->>B: write private ticket, transcript, note, gate
     B->>O: open focused right-side brief gate
     O-->>B: approve or cancel
-    alt approved
+    alt approved Pi or Herdr path
         B->>S: hand off private bootstrap request
         S->>H: create worktree, runs pane, runner
         S->>R: submit private prompt through Herdr socket
@@ -66,6 +66,12 @@ sequenceDiagram
             Q->>B: return task to To Do
             Q->>E: run.blocked
         end
+    else approved DSH path
+        B->>H: native adapter creates worktree and child
+        H->>H: prove exact prompt in DSH persistence
+        H-->>A: runner is running
+        R->>B: done with clean committed ref
+        B-->>A: submitted awaiting native review
     else cancelled
         B->>B: return task to To Do and discard artifacts
     end
@@ -97,20 +103,20 @@ Cancellation returns the ticket to `To Do` and deletes the prepared directory. A
 
 ### 3. Start the isolated runner
 
-After approval, `delegate` writes an owner-only `qq.run-bootstrap/v1` request to `bootstrap.json` and spawns detached `bin/qq-start-worker.mjs`. The tool waits only for the worker's IPC acceptance and returns `status: starting`; the architect turn does not own or await the longer startup. If the worker rejects the private request or exits before accepting it, the tool still rolls the claim and prepared state back synchronously.
+After approval, `delegate` writes an owner-only `qq.run-bootstrap/v1` request to `bootstrap.json`. In Pi/Herdr it spawns detached `bin/qq-start-worker.mjs`; the tool waits only for IPC acceptance and returns `status: starting`. In an owned DSH architect session, the request also carries the explicit runner profile and `qq.dsh-run-approval/v1` gate record, then `launchNativeBootstrap` selects exactly one adapter. `startDshRun` creates the protected worktree, a durable bootstrap parent, and one continuable runner; it returns `status: running` only after the exact accepted prompt marker is visible through DSH persistence. Missing or ambiguous capability fails closed.
 
 The worker creates branch `qq/<task-slug>-<nonce>` and a worktree below `${QQ_WORKTREE_ROOT:-~/.herdr/worktrees/<project>}` at the captured main `HEAD`. Generated OpenWiki materialization is frozen. qq creates or right-splits the literal `runs` tab without focus and injects:
 
 - `QQ_AGENT_ROLE=runner`, `QQ_AGENT_PROJECT`, and `QQ_RUN_STATE`;
 - `QQ_RUN_ID` and the owning `QQ_ARCHITECT_SESSION`.
 
-After writing a `qq.run-handoff/v1` state with `status: starting`, the worker waits until the pane contains only an available shell and launches Pi with `--approve`. It sends the full private ticket and note through Herdr's Unix-socket `agent.prompt` API rather than placing them in CLI arguments. Startup is complete only after `agent.get` identifies the pane's Pi session and the session JSONL contains the exact per-run bootstrap marker as a user-message line. The handoff then becomes `running` and records `bootstrapProof` with the marker, safe absolute session path, and acceptance time.
+For Pi/Herdr, after writing a `qq.run-handoff/v1` state with `status: starting`, the worker requires the same available shell PID on two consecutive polls before launching Pi with `--approve`. It sends the private ticket and note through Herdr's Unix-socket `agent.prompt` API. Startup is complete only after `agent.get` identifies the pane's Pi session and its JSONL contains the exact bootstrap marker. The DSH branch instead records parent/runner identities and proves the marker/message ID with `sessionPersistence.inspect()`; it never uses a pane or Pi session path.
 
 A detached startup failure closes the owned pane, force-removes the worktree and branch, retries the Backlog transition to `To Do`, and removes private run state. Before cleanup it persists a sanitized owner-only failure record under `${XDG_STATE_HOME:-~/.local/state}/qq/bootstrap-failures/`; reasons redact private ticket/note text, sensitive environment values, control characters, and paths. It retries immediate `run.bootstrap-failed` delivery and also shows a Herdr notification. If qq-relay is unavailable, the owning architect's regular review poll retries only that session's outbox entry and removes it after delivery. This failure path is therefore separate from the synchronous `delegate` return.
 
 ### 4. Submit and review
 
-`done` refuses unless it runs in the handoff's real worktree, state is `running` or `waiting_fix`, fewer than two looks were used, `ref` resolves to a commit descending from `baseRef`, and the worktree is completely clean. It records the SHA, increments `look`, sets `reviewing`, starts a detached review worker, and shuts down the runner (`source`).
+`done` always requires the handoff's real worktree, a clean commit descending from `baseRef`, and runtime-specific ownership. Pi/Herdr accepts `running` or `waiting_fix`, increments `look`, sets `reviewing`, starts a detached review worker, and shuts down the runner. DSH accepts only the exact claimed runner in `running` at look zero, verifies the approved gate and that the commit is shared with the main repository, then records `qq.dsh-run-submission/v1` with `status: submitted` and `awaiting: native-review`. It starts no QA worker and does not stop the shared host.
 
 QA takes over the same pane only after the old Herdr agent identity disappears and the shell is free. Every Pi re-entry launched by `takePane`—QA and the runner restarted after a failed first look—passes `--approve` before session-specific arguments. QA receives a private file-backed system prompt, a persistent QA session ID, only `read,bash,edit,write,qa_verdict`, and no normal extensions, skills, templates, or context files. Look 2 resumes look 1's QA session.
 
@@ -141,9 +147,11 @@ stateDiagram-v2
     ToDo --> InProgress: clear and atomic claim
     InProgress --> ToDo: gate cancel or worker launch rejection
     InProgress --> Starting: bootstrap worker accepts request
-    Starting --> Running: prompt marker recorded in Pi session
-    Starting --> ToDo: detached bootstrap rollback
-    Running --> Reviewing1: done with clean descendant
+    Starting --> Running: exact prompt acceptance becomes durable
+    Starting --> ToDo: bootstrap rollback
+    Running --> SubmittedNative: native DSH done at look zero
+    SubmittedNative --> [*]: awaiting native review integration
+    Running --> Reviewing1: Pi done with clean descendant
     Reviewing1 --> WaitingFix: QA look 1 fails
     WaitingFix --> Reviewing2: done with clean updated ref
     Reviewing1 --> Proposal: QA passes
@@ -161,14 +169,14 @@ stateDiagram-v2
     Landed --> Done: board update
 ```
 
-*The state diagram distinguishes handoff state from Backlog state and preserves the two-look limit.*
+*The state diagram distinguishes the incomplete native-submission branch from Pi/Herdr's complete two-look and landing branch.*
 
 ## Artifact and invariant reference
 
 | Artifact or invariant | Contract |
 |---|---|
 | `bootstrap.json` | Atomic owner-only `qq.run-bootstrap/v1`; detached-worker request containing task identity, prepared paths, QA binding, architect session, and a non-secret prompt marker. Removed after successful startup. |
-| `handoff.json` | Atomic `0600` `qq.run-handoff/v1`; canonical owner of paths, refs, pane, architect session, QA binding, look, status, verdict, pack, failures, and prompt-acceptance proof. |
+| `handoff.json` | Atomic `0600` `qq.run-handoff/v1`; runtime-discriminated owner of paths, refs, sessions or pane, architect, QA binding, look/status, and prompt proof. Native DSH submissions retain continuation identities at look zero. |
 | `qq/bootstrap-failures/*.json` | Owner-only `qq.bootstrap-failure-outbox/v1`; session-scoped sanitized startup failures retained only until qq-relay delivery succeeds. |
 | `qa-look-1.json`, `qa-look-2.json` | Atomic `0600` `qq.qa-verdict/v1`; one call per QA process with pass/fail, summary, feedback, and `tests_modified`. |
 | `qa-session/` | Private resumed QA context across the two looks. |
@@ -199,15 +207,16 @@ node tests/test-brief-gate.mjs "$PWD"
 tests/test-qq-relay.sh
 ```
 
-These cover role refusal, transcript disclosure, admission locking/evidence and bounce paths, private artifacts, gate approval/cancellation, detached worker acceptance, socket prompt transport, session-marker proof and timeout, sanitized startup rollback/outbox delivery, `--approve` launch arguments, `done` ancestry/cleanliness, same-pane takeover, two-look continuity, test-only QA commits, proposal ownership/actions, landing order/locks/failures, board transitions, generated-path refusal, and run-event receipts. Use `npm test` for the sequential repository suite; see [Validation](../testing/validation.md).
+These cover role refusal, admission and private artifacts, gate approval/cancellation, Pi/Herdr startup and stable-shell readiness, native DSH adapter ownership/profile binding/durable marker acceptance, runtime-specific `done` ownership and ancestry, two-look Pi QA, proposals, landing, board transitions, and run-event receipts. Add `node tests/test-native-qa-proof.mjs .` for the shared verdict writer and isolated native QA boundary. Use `npm test` only for the sequential repository suite; see [Validation](../testing/validation.md).
 
 ## Source anchors
 
 - Architect tools and orchestration: `extensions/board.ts`
 - Runner submission, proposal UI, and outcome receiver: `extensions/review-flow.ts`
 - Admission lock and evidence: `bin/lib/admission.mjs`
-- Private artifacts, bootstrap request, Herdr socket transport, prompt proof, worktree, and runner start: `bin/lib/run.mjs`
-- Detached startup rollback and failure outbox: `bin/lib/bootstrap.mjs`, `bin/qq-start-worker.mjs`
-- QA and landing: `bin/lib/review.mjs`
+- Private artifacts, runtime-discriminated bootstrap request, worktree, and Pi runner start: `bin/lib/run.mjs`
+- Native DSH adapter and runner: `bin/lib/native-launch.mjs`, `bin/lib/dsh-run.mjs`, `dsh-native-launch/plugin.mjs`
+- Detached Pi startup rollback and failure outbox: `bin/lib/bootstrap.mjs`, `bin/qq-start-worker.mjs`
+- Submission, Pi QA, and landing: `bin/lib/review.mjs`; shared verdict contract: `bin/lib/qa-verdict.mjs`
 - Workers and outcomes: `bin/qq-start-worker.mjs`, `bin/qq-review-worker.mjs`, `bin/qq-land-worker.mjs`, `bin/lib/run-events.mjs`
 - Tests: `tests/test-delegation.mjs`, `tests/test-review-flow.mjs`, `tests/test-brief-gate.mjs`

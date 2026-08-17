@@ -7,14 +7,14 @@ tags: [quickstart, architecture, navigation]
 
 # qq OpenWiki quickstart
 
-qq is an operator-controlled Pi and Herdr orchestration runtime. Its main workflow claims a Backlog task, asks the operator to approve a private brief, hands startup to a detached worker, verifies that the runner's private prompt reached its Pi transcript in an isolated Git worktree, performs up to two independent QA looks, and lands only an approved, clean proposal. The externally owned, machine-local qq-relay product provides durable agent messages and run outcomes, including startup failures.
+qq is an operator-controlled Pi/Herdr orchestration runtime with an incremental DSH path. Pi/Herdr still owns the complete Backlog-to-landing workflow. DSH now provides a daily coding workbench and can launch an approved native continuable runner through clean committed submission, but native review and landing are not yet wired. The externally owned qq-relay product provides durable agent messages and run outcomes.
 
 ## Start here
 
 - [System topology and ownership](architecture/overview.md): processes, extension composition, external boundaries, state, and entrypoints.
 - [Repository activation and execution policy](runtime/profiles-and-activation.md): `qq-methodology`, roles, profiles, prompts, context ceilings, pane state, and DSH session ownership.
-- [DSH host compatibility](runtime/dsh-compatibility.md): pinned pi2dsh mounting, relay receipts, native continuable-child evidence, and cutover blockers.
-- [DSH sequential web console](runtime/dsh-console.md): loopback-only server-rendered session control, SSE, PWA limits, and validation.
+- [DSH host compatibility](runtime/dsh-compatibility.md): native approved runner launch/submission, isolated QA evidence, relay receipts, and cutover blockers.
+- [DSH coding workbench](runtime/dsh-console.md): daily launcher, persistent sessions, explicit model route, loopback security, SSE, and PWA limits.
 - [Delegation and review lifecycle](workflow/delegation-and-review.md): `sketch`, `note`, `delegate`, `done`, QA, proposals, landing, and rollback.
 - [qq-relay integration](event-plane/service.md): installed artifact resolution, consumer boundaries, source relation, and contract validation.
 - [Agent messaging](event-plane/agent-messaging.md): `agent_messages`, `/agent-tasks`, presence, default/immediate delivery, and transcript receipts.
@@ -24,7 +24,7 @@ qq is an operator-controlled Pi and Herdr orchestration runtime. Its main workfl
 - [Model-visible skills](runtime/skills.md): Mermaid, OKF migration, and connector-writing instruction contracts.
 - [Practical validation routing](testing/validation.md): focused commands, prerequisites, live boundaries, and known gaps.
 
-## Core lifecycle
+## Complete Pi/Herdr lifecycle
 
 ```mermaid
 flowchart TD
@@ -51,7 +51,7 @@ flowchart TD
 |---|---|---|
 | `qq-methodology link|inspect|unlink` | Repository activation, external Backlog store, Pi settings/trust | [Profiles and activation](runtime/profiles-and-activation.md) |
 | `qq-profile`, `/profile` | Durable defaults and pane- or DSH-session-local role/model/effort selection | [Profiles and activation](runtime/profiles-and-activation.md) |
-| `/qq` DSH console | Sequential session navigation, Send, Interrupt, and live transcript snapshots | [DSH console](runtime/dsh-console.md) |
+| `bin/qq-dsh-workbench`, `/qq` | Persistent DSH coding session, native tools, Send, Interrupt, and live transcript snapshots | [DSH workbench](runtime/dsh-console.md) |
 | `sketch`, `note`, `delegate` | Architect task and delegation tools | [Delegation and review](workflow/delegation-and-review.md) |
 | `done`, isolated `qa_verdict` | Runner submission and structured QA result | [Delegation and review](workflow/delegation-and-review.md) |
 | `agent_messages`, `/agent-tasks` | Session discovery and durable cross-agent delivery | [Agent messaging](event-plane/agent-messaging.md) |
@@ -65,9 +65,9 @@ flowchart TD
 | Change intent | Read first | Owning source / symbols | Focused tests | Minimal validation |
 |---|---|---|---|---|
 | Change activation, roles, models, prompts, pane state, or dashboard profile API | [Profiles and activation](runtime/profiles-and-activation.md) | `bin/qq-methodology`; `bin/lib/execution-profiles.mjs`; `bin/lib/session-context.mjs`; `extensions/execution-profiles.ts`; `bin/qq-profile` | `test-methodology.sh`, `test-execution-profiles.mjs`, `test-session-context.mjs` | Run the narrow owning Node test |
-| Change pi2dsh mounting, DSH session identity, host receipt projection, or native child proof | [DSH compatibility](runtime/dsh-compatibility.md) | `compat/pi2dsh/run.sh`; `verify.mjs`; `run-subagent-proof.sh`; `bin/lib/session-context.mjs` | `test-pi2dsh-compat.mjs`, `test-session-context.mjs` | `node tests/test-pi2dsh-compat.mjs .` |
-| Change DSH console sessions, HTTP/SSE behavior, Send/Interrupt, security, or PWA assets | [DSH console](runtime/dsh-console.md) | `dsh-console/src/plugin.mjs`; `createConsoleHandler`; `createDshSessionBackend`; `renderPage` | `test-dsh-console.mjs`, conditional `test-dsh-console-live.sh` | `node tests/test-dsh-console.mjs .` |
-| Change task admission, detached bootstrap, prompt proof, worktree startup, QA, or landing | [Delegation and review](workflow/delegation-and-review.md) | `extensions/board.ts`; `bin/lib/admission.mjs`; `bin/lib/run.mjs`; `bin/lib/bootstrap.mjs`; `bin/qq-start-worker.mjs`; `bin/lib/review.mjs`; `extensions/review-flow.ts` | `test-delegation.mjs`, `test-brief-gate.mjs`, `test-review-flow.mjs` | Run the narrow owning Node test |
+| Change pi2dsh mounting, DSH identity, native runner launch/submission, or native QA proof | [DSH compatibility](runtime/dsh-compatibility.md) | `bin/lib/dsh-run.mjs`; `startDshRun`; `bin/lib/native-launch.mjs`; `dsh-native-launch/plugin.mjs`; `bin/lib/qa-verdict.mjs` | `test-pi2dsh-compat.mjs`, `test-native-qa-proof.mjs`, `test-delegation.mjs` | `node tests/test-pi2dsh-compat.mjs .` |
+| Change DSH workbench launch/model, sessions, HTTP/SSE, Send/Interrupt, security, or PWA | [DSH workbench](runtime/dsh-console.md) | `bin/qq-dsh-workbench`; `dsh-console/src/plugin.mjs`; `createConsoleHandler`; `createDshSessionBackend` | `test-dsh-console.mjs`, conditional live and real-model suites | `node tests/test-dsh-console.mjs .` |
+| Change task admission, runtime-specific bootstrap/submission, Pi QA, or landing | [Delegation and review](workflow/delegation-and-review.md) | `extensions/board.ts`; `bin/lib/admission.mjs`; `bin/lib/run.mjs`; `bin/lib/dsh-run.mjs`; `bin/lib/review.mjs`; `extensions/review-flow.ts` | `test-delegation.mjs`, `test-brief-gate.mjs`, `test-review-flow.mjs` | Run the narrow owning Node test |
 | Change qq-relay resolution or its consumer boundary | [qq-relay integration](event-plane/service.md) | `bin/qq-relay`; `qqRelayInstallRoot`; `qqRelayClientPath`; `RelayClient` loader | `test-qq-relay.sh`, `test-qq-relay-client.mjs` | `tests/test-qq-relay.sh` |
 | Change presence or agent message delivery | [Agent messaging](event-plane/agent-messaging.md) | `extensions/agent-messages.ts`; `RelayClient`; `statePaths`; `relayAgentId` | agent-message unit and installed-relay contract suites | `tests/test-qq-relay.sh` |
 | Change dashboard installed-artifact dispatch or profile contract | [Profiles and activation](runtime/profiles-and-activation.md#dashboard-boundary) | `bin/qq-dashboard`; `bin/qq-dashboard-cookies`; `qq-profile list --json` | `tests/test-dashboard.sh` | `tests/test-dashboard.sh` |
@@ -92,6 +92,7 @@ Important machine-local roots include `~/.config/qq/execution-profiles.json`, `~
 
 ## Backlog
 
+- **Native DSH review and landing:** `compat/pi2dsh/README.md` proves isolated QA after native submission, but production review-state transitions, look continuity, proposal UI, landing, and host lifecycle are not wired.
 - **Herdr Rust internals:** outside this repository; inspect the linked repository named by `herdr/downstream/upstream.env` when implementation detail is required. qq documents and tests only its integration contract.
 - **qq-relay and dashboard internals:** owned by their linked product repositories. qq's installed-artifact and semantic branch-tip contracts are documented in [qq-relay integration](event-plane/service.md) and [profiles and activation](runtime/profiles-and-activation.md#dashboard-boundary), but local tests are not complete product test suites.
 - **Hosted automation behavior:** local tests use fake OpenWiki generation and do not prove provider quality, GitHub secret wiring, PR creation, or model-visible skill execution. See [validation gaps](testing/validation.md#known-gaps).
