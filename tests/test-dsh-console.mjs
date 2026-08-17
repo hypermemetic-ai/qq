@@ -291,6 +291,33 @@ function openSse(sessionId) {
   assert.doesNotMatch(markdown, /javascript:alert|<img |href="\/settings"/);
   assert.match(markdown, /<p>diagram<\/p>/);
   assert.match(markdown, /<pre><code class="language-js">const answer = 42<\/code><\/pre>/);
+
+  const started = Date.now();
+  const emptyHeading = renderMarkdownText("# ");
+  assert.ok(Date.now() - started < 250);
+  assert.match(emptyHeading, /<p># <\/p>/);
+  assert.doesNotMatch(emptyHeading, /<h1>/);
+  for (const line of ["## ", "#\t", "   # "]) {
+    const html = renderMarkdownText(line);
+    assert.match(html, /<p>/);
+    assert.doesNotMatch(html, /<h[1-6]>/);
+  }
+
+  const blocks = renderMarkdownText([
+    "# Heading",
+    "",
+    "> quoted *text*",
+    "",
+    "- bullet",
+    "1. numbered",
+    "",
+    "---",
+  ].join("\n"));
+  assert.match(blocks, /<h1>Heading<\/h1>/);
+  assert.match(blocks, /<blockquote><p>quoted <em>text<\/em><\/p><\/blockquote>/);
+  assert.match(blocks, /<ul><li>bullet<\/li><\/ul>/);
+  assert.match(blocks, /<ol><li>numbered<\/li><\/ol>/);
+  assert.match(blocks, /<hr>/);
 }
 
 const streams = [];

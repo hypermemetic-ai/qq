@@ -231,8 +231,10 @@ function isFenceOpen(line) {
   return /^(?:`{3,}|~{3,})/.test(line);
 }
 
+const ATX_HEADING = /^\s{0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/;
+
 function isAtxHeading(line) {
-  return /^\s{0,3}#{1,6}[ \t]+/.test(line);
+  return ATX_HEADING.test(line);
 }
 
 function isQuote(line) {
@@ -298,7 +300,7 @@ function renderBlocks(source) {
       continue;
     }
 
-    const heading = /^\s{0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/.exec(line);
+    const heading = ATX_HEADING.exec(line);
     if (heading) {
       const level = heading[1].length;
       out.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);
@@ -346,6 +348,11 @@ function renderBlocks(source) {
     while (i < lines.length && !/^\s*$/.test(lines[i]) && !isBlockStart(lines[i])) {
       para.push(lines[i]);
       i += 1;
+    }
+    if (para.length === 0) {
+      out.push(renderParagraph([line]));
+      i += 1;
+      continue;
     }
     out.push(renderParagraph(para));
   }
