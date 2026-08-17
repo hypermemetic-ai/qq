@@ -16,9 +16,12 @@ const server = createServer((request, response) => {
     requestNumber += 1;
     const body = Buffer.concat(chunks).toString("utf8");
     appendFileSync(requestsPath, `${JSON.stringify({ request: requestNumber, url: request.url, body: JSON.parse(body) })}\n`, { mode: 0o600 });
-    // Keep the message-driven turn open across qq-relay's real retry backoff.
-    // This is timing control for the local model boundary, not relay tuning.
-    const responseDelayMs = requestNumber === 1 ? 750 : 3_500;
+    const parsed = JSON.parse(body);
+    const qaSurface = parsed.tools?.some((tool) => tool?.function?.name === "qa_verdict") === true;
+    const qaVerdictRecorded = parsed.messages?.some((message) => message?.role === "tool" && String(message?.tool_call_id).startsWith("call_qq_native_qa_")) === true;
+    // Keep the message-driven receipt turn open across qq-relay's real retry
+    // backoff. Native QA uses a separate deterministic function-call response.
+    const responseDelayMs = qaSurface ? 20 : requestNumber === 1 ? 750 : 3_500;
     setTimeout(() => {
       response.writeHead(200, { "content-type": "text/event-stream" });
       const base = {
@@ -27,8 +30,37 @@ const server = createServer((request, response) => {
         created: Math.floor(Date.now() / 1000),
         model: "deepseek-v4-flash",
       };
-      response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: "receipt probe step complete" }, finish_reason: null }] })}\n\n`);
-      response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`);
+      if (qaSurface && !qaVerdictRecorded) {
+        response.write(`data: ${JSON.stringify({
+          ...base,
+          choices: [{
+            index: 0,
+            delta: {
+              role: "assistant",
+              tool_calls: [{
+                index: 0,
+                id: `call_qq_native_qa_${requestNumber}`,
+                type: "function",
+                function: {
+                  name: "qa_verdict",
+                  arguments: JSON.stringify({
+                    verdict: "pass",
+                    summary: "Independent native QA boundary proof passed.",
+                    feedback: "Pinned model, prompt, tool surface, submission isolation, and durable verdict verified.",
+                    tests_modified: false,
+                  }),
+                },
+              }],
+            },
+            finish_reason: null,
+          }],
+        })}\n\n`);
+        response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`);
+      } else {
+        const content = qaSurface ? "independent native QA verdict complete" : "receipt probe step complete";
+        response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }] })}\n\n`);
+        response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`);
+      }
       response.end("data: [DONE]\n\n");
     }, responseDelayMs);
   });

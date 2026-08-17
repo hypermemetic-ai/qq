@@ -15,6 +15,7 @@ const BRIEF_GATE_ENTRYPOINT = "review";
 const BRIEF_GATE_MARKER = "QQ_BRIEF_GATE_DECIDED";
 const BOOTSTRAP_SCHEMA = "qq.run-bootstrap/v1";
 export const DSH_RUN_APPROVAL_SCHEMA = "qq.dsh-run-approval/v1";
+export const DSH_RUN_SUBMISSION_SCHEMA = "qq.dsh-run-submission/v1";
 const PROMPT_PROOF_TIMEOUT_MS = 30_000;
 const HERDR_RESPONSE_LIMIT = 1024 * 1024;
 const PANE_SHELLS = new Set([

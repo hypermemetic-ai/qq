@@ -6,6 +6,8 @@ root=$(git -C "$here" rev-parse --show-toplevel)
 toolchain="$here/toolchain"
 dsh_native="$root/dsh-native-launch"
 proof_plugin="$here/native-delegation-proof"
+qa_proof_plugin="$here/native-qa-proof"
+qa_pi_tools="$here/native-qa-pi-tools"
 
 relay_install=${QQ_RELAY_INSTALL_ROOT:-}
 if [[ $relay_install != /* || ! -f $relay_install/client.mjs ]]; then
@@ -40,7 +42,11 @@ NODE
       if [[ -n ${owned[1]:-} ]]; then git -C "$main" branch -D "${owned[1]}" >/dev/null 2>&1 || true; fi
     fi
   fi
-  rm -rf -- "$work"
+  if [[ ${QQ_DSH_NATIVE_KEEP:-0} == 1 ]]; then
+    printf 'native DSH proof kept at %s\n' "$work" >&2
+  else
+    rm -rf -- "$work"
+  fi
   exit "$rc"
 }
 trap cleanup EXIT
@@ -96,6 +102,18 @@ export DSH_HOME="$work/dsh-home"
   cat "$work/add-proof.log" >&2
   exit 1
 }
+"$dsh" plugin --profile qq-native-qa-proof add "$toolchain/node_modules/pi2dsh" >"$work/add-qa-pi2dsh.log" 2>&1 || {
+  cat "$work/add-qa-pi2dsh.log" >&2
+  exit 1
+}
+"$dsh" plugin --profile qq-native-qa-proof add "$qa_pi_tools" >"$work/add-qa-qq-profile.log" 2>&1 || {
+  cat "$work/add-qa-qq-profile.log" >&2
+  exit 1
+}
+"$dsh" plugin --profile qq-native-qa-proof add "$qa_proof_plugin" >"$work/add-qa-proof.log" 2>&1 || {
+  cat "$work/add-qa-proof.log" >&2
+  exit 1
+}
 
 node "$here/llm-stub.mjs" "$work/llm-endpoint.txt" "$work/llm-requests.jsonl" &
 llm_pid=$!
@@ -114,6 +132,12 @@ architect="session-$(node -e 'process.stdout.write(crypto.randomUUID())')"
 run_phase() {
   local phase=$1
   local state_path=${2:-}
+  local profile=qq-native-delegation-proof
+  local patch=()
+  if [[ $phase == qa* ]]; then
+    profile=qq-native-qa-proof
+    patch=(--patch "$here/qq.patch.yml" --patch "$qa_pi_tools/qa.patch.yml")
+  fi
   (
     cd "$main"
     env -i \
@@ -132,18 +156,18 @@ run_phase() {
       QQ_DSH_NATIVE_PHASE="$phase" \
       QQ_DSH_NATIVE_ARCHITECT="$architect" \
       QQ_DSH_NATIVE_STATE_PATH="$state_path" \
-      "$dsh" --profile qq-native-delegation-proof
+      "$dsh" --profile "$profile" "${patch[@]}"
   ) >"$work/$phase.stdout.log" 2>"$work/$phase.stderr.log" || {
     cat "$work/$phase.stdout.log" >&2
     cat "$work/$phase.stderr.log" >&2
     exit 1
   }
-  node - "$work/$phase.stdout.log" "$work/$phase.json" <<'NODE'
+  node - "$work/$phase.stdout.log" "$work/$phase.json" "$phase" <<'NODE'
 const fs = require('node:fs');
-const [source, output] = process.argv.slice(2);
-const prefix = 'QQ_DSH_NATIVE_DELEGATION_PROOF ';
+const [source, output, phase] = process.argv.slice(2);
+const prefix = phase.startsWith('qa') ? 'QQ_DSH_NATIVE_QA_PROOF ' : 'QQ_DSH_NATIVE_DELEGATION_PROOF ';
 const lines = fs.readFileSync(source, 'utf8').split('\n').filter((line) => line.startsWith(prefix));
-if (lines.length !== 1) throw new Error(`expected one native delegation proof in ${source}, got ${lines.length}`);
+if (lines.length !== 1) throw new Error(`expected one ${phase} proof in ${source}, got ${lines.length}`);
 fs.writeFileSync(output, `${JSON.stringify(JSON.parse(lines[0].slice(prefix.length)), null, 2)}\n`, { mode: 0o600 });
 NODE
 }
@@ -160,13 +184,17 @@ if [[ -e $(dirname "$state_path")/bootstrap.json ]]; then
   exit 1
 fi
 run_phase fresh "$state_path"
+run_phase qa "$state_path"
+run_phase qa-fresh "$state_path"
 
-node - "$work/start.json" "$work/fresh.json" "$state_path" <<'NODE'
+node - "$work/start.json" "$work/fresh.json" "$work/qa.json" "$work/qa-fresh.json" "$work/llm-requests.jsonl" "$state_path" <<'NODE'
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const [startPath, freshPath, statePath] = process.argv.slice(2);
+const [startPath, freshPath, qaPath, qaFreshPath, requestsPath, statePath] = process.argv.slice(2);
 const start = JSON.parse(fs.readFileSync(startPath, 'utf8'));
 const fresh = JSON.parse(fs.readFileSync(freshPath, 'utf8'));
+const qa = JSON.parse(fs.readFileSync(qaPath, 'utf8'));
+const qaFresh = JSON.parse(fs.readFileSync(qaFreshPath, 'utf8'));
 const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
 assert.equal(start.schema, 'qq.dsh-native-delegation-proof/v1');
 assert.equal(fresh.schema, start.schema);
@@ -204,7 +232,86 @@ assert.equal(state.submission.runtime, 'dsh');
 assert.equal(state.submission.awaiting, 'native-review');
 assert.equal(state.submission.continuation.runnerSession, start.runner_session);
 assert.equal(state.submission.continuation.worktree, state.worktree);
+assert.equal(state.qa.provider, 'deepseek-official');
+assert.equal(state.qa.model, 'deepseek-v4-flash');
+assert.equal(state.qa.effort, 'high');
+assert.equal(state.qaVerdict, undefined);
+
+assert.equal(qa.schema, 'qq.dsh-native-qa-proof/v1');
+assert.equal(qaFresh.schema, qa.schema);
+assert.equal(qa.phase, 'qa');
+assert.equal(qaFresh.phase, 'qa-fresh');
+assert.equal(qa.run_id, state.id);
+assert.equal(qaFresh.run_id, state.id);
+assert.equal(qa.qa_session, qaFresh.qa_session);
+assert.match(qa.qa_session, /^session-[a-f0-9-]{36}$/);
+assert.equal(qa.ref, state.ref);
+assert.deepEqual(qa.model_binding, {
+  provider: state.qa.provider,
+  model: state.qa.model,
+  reasoningEffort: state.qa.effort,
+});
+assert.deepEqual(qaFresh.model_binding, qa.model_binding);
+assert.deepEqual(qa.inherited_tools, ['read', 'bash', 'edit', 'write']);
+assert.deepEqual(qa.profile_tools, ['agent_messages', 'operator_stage', 'mark_session_for_scrub', 'sketch', 'note', 'delegate', 'done']);
+assert.deepEqual(qaFresh.profile_tools, qa.profile_tools);
+assert.deepEqual(qa.visible_tools, ['bash', 'edit', 'qa_verdict', 'read', 'write']);
+assert.deepEqual(qaFresh.visible_tools, qa.visible_tools);
+assert.equal(qa.visible_tools.length, 5);
+assert.equal(new Set(qa.visible_tools).size, 5);
+assert.equal(qa.complete_prompt, true);
+assert.equal(qaFresh.complete_prompt, true);
+assert.equal(qa.prompt_digest, qaFresh.prompt_digest);
+assert.equal(qa.verdict_digest, qaFresh.verdict_digest);
+assert.equal(qa.verdict, 'pass');
+assert.equal(qaFresh.verdict, qa.verdict);
+assert.equal(qa.independent, true);
+assert.equal(qa.handoff_unchanged, true);
+assert.equal(qa.persisted_prompt, true);
+assert.equal(qa.persisted_tool_result, true);
+assert.equal(qaFresh.cold_before_resume, true);
+assert.equal(qaFresh.resumed_same_identity, true);
+assert.equal(qaFresh.verdict_unchanged, true);
+assert.equal(qaFresh.handoff_unchanged, true);
+assert.equal(qaFresh.persisted_prompt, true);
+assert.equal(qaFresh.persisted_tool_result, true);
+assert.ok(qa.request_bindings.length >= 1);
+assert.ok(qa.request_bindings.every((binding) => JSON.stringify(binding) === JSON.stringify(qa.model_binding)));
+
+const qaStatePath = `${statePath.slice(0, statePath.lastIndexOf('/'))}/native-qa.json`;
+const verdictPath = `${statePath.slice(0, statePath.lastIndexOf('/'))}/native-qa-verdict.json`;
+const qaState = JSON.parse(fs.readFileSync(qaStatePath, 'utf8'));
+const verdict = JSON.parse(fs.readFileSync(verdictPath, 'utf8'));
+assert.equal(qaState.schema, 'qq.dsh-native-qa-state/v1');
+assert.equal(qaState.owner, 'qq');
+assert.equal(qaState.status, 'verdict-recorded');
+assert.equal(qaState.qaSession, qa.qa_session);
+assert.equal(qaState.prompt.complete, true);
+assert.equal(qaState.prompt.digest, qa.prompt_digest);
+assert.equal(verdict.schema, 'qq.qa-verdict/v1');
+assert.equal(verdict.version, 1);
+assert.equal(verdict.verdict, 'pass');
+assert.equal(verdict.tests_modified, false);
+assert.equal(qaState.runId, state.id);
+assert.equal(qaState.qaSession, qa.qa_session);
+assert.deepEqual(qaState.capabilities.visible.slice().sort(), qa.visible_tools);
+
+const requests = fs.readFileSync(requestsPath, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
+const qaRequests = requests.map((entry) => entry.body).filter((body) =>
+  body.tools?.some((tool) => tool?.function?.name === 'qa_verdict'));
+assert.ok(qaRequests.length >= 2, 'QA did not complete a tool-call turn');
+for (const request of qaRequests) {
+  assert.equal(request.model, qa.model_binding.model);
+  assert.deepEqual(request.tools.map((tool) => tool.function.name).sort(), qa.visible_tools);
+  assert.equal(request.messages.find((message) => message.role === 'system')?.content, qaState.prompt.text);
+}
+assert.equal(qaRequests.filter((request) => request.messages.some((message) => message.role === 'tool' && String(message.tool_call_id).startsWith('call_qq_native_qa_'))).length, 1);
 NODE
+
+if [[ -e $work/state/qq/session-contexts/$(node -p 'require(process.argv[1]).qa_session' "$work/qa.json").json ]]; then
+  echo 'native DSH QA proof added QA to the ordinary qq session-context roles' >&2
+  exit 1
+fi
 
 if [[ $(git -C "$main" rev-parse main) != "$main_ref" || $(git -C "$main" status --porcelain=v1 --untracked-files=all) != "$main_status" ]]; then
   echo 'native DSH delegation proof changed its disposable main checkout' >&2
@@ -215,6 +322,7 @@ if [[ $(git -C "$root" rev-parse main) != "$before_main" || $(git -C "$root" sta
   exit 1
 fi
 
-printf 'native DSH approved delegation proof passed: %s -> %s\n' \
+printf 'native DSH delegation and independent QA proof passed: %s -> %s -> %s\n' \
   "$(node -p 'require(process.argv[1]).bootstrap_parent_session' "$work/start.json")" \
-  "$(node -p 'require(process.argv[1]).runner_session' "$work/start.json")"
+  "$(node -p 'require(process.argv[1]).runner_session' "$work/start.json")" \
+  "$(node -p 'require(process.argv[1]).qa_session' "$work/qa.json")"

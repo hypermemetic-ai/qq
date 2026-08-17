@@ -173,6 +173,12 @@
       "fact": "The approved native prompt asks the exact DSH child to call qq done with its committed ref. Production done validates the child-owned private session context, approval, delegated real worktree, clean status, shared descendant commit, and then records status submitted with runtime dsh, look 0, and the exact architect/bootstrap-parent/runner/run-state/worktree continuation tuple. It does not launch a review worker, consume a look, stop the shared host, drain or dispose the live child, create a proposal, or land. A second process using the same installed DSH profile reconstructs the cold child context and exact submitted ref/worktree handoff; native QA continuation remains deliberately unwired."
     },
     {
+      "id": "independent-native-qa",
+      "basis": "exact-pinned-mounted-qq-pi2dsh-creation-time-submission-time-and-fresh-host-proof",
+      "verdict": "mounted-profile-five-tool-submission-guard-and-cold-result-proven",
+      "fact": "Against the real durable submitted T-63.15 handoff, a fresh profile explicitly mounts pi2dsh and one qq Pi package whose entry calls the real qq extension under qq.patch.yml and registers Pi's built-in bash/edit/write while a second patch disables native bash. The profile must expose qq-only sentinel tools, and native tool-fs stays disabled, distinguishing its exact read/bash/edit/write capability provenance from DSH defaults. QA receives the exact deepseek-official/deepseek-v4-flash/high binding, one complete self-contained prompt, native presentation, suppressed inherited runtime context, and only read, bash, edit, write, and scope-owned qa_verdict. At verdict submission qa_verdict revalidates its exact live Agent/Session identity, durable QA ownership, unchanged handoff digest and submitted run/ref/look tuple, exact worktree HEAD, common repository, and cleanliness before the owner-only exclusive verdict write. A fresh process observes the Agent cold, proves the exact persisted prompt, review instruction, tool call and result, model, and verdict, then resumes the same QA session with the same composition. The submitted handoff remains byte-for-byte unchanged at status submitted/runtime dsh/look 0/awaiting native-review, with no ordinary qq QA role, review-state transition, proposal, landing, or automatic launch."
+    },
+    {
       "id": "herdr-launch",
       "basis": "qq-source-audit-and-regression-tests",
       "verdict": "complete-pi-fallback",
@@ -213,7 +219,7 @@
     "operator_cutover": "blocked",
     "native_translation_started": true,
     "blockers": [
-      "native QA composition, look continuity, proposal, and landing",
+      "production native review-state integration, look continuity, proposal, and landing",
       "DSH transcript and scrub semantics",
       "qq model-policy routes in the DSH model directory",
       "read-tool ownership without disabling the host filesystem bundle",

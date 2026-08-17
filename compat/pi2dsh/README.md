@@ -6,7 +6,7 @@ This is an isolated compatibility harness, not an operator-runtime cutover. It m
 
 | Project | Package | Exact source revision | Package integrity |
 |---|---|---|---|
-| qq | local checkout | [`66a556aa43138bf7d119661fb03b258f95a7991b`](https://github.com/hypermemetic-ai/qq/commit/66a556aa43138bf7d119661fb03b258f95a7991b) | n/a |
+| qq | local checkout | [`9d92b9de85b149712eaaaca02bd307308f8a1264`](https://github.com/hypermemetic-ai/qq/commit/9d92b9de85b149712eaaaca02bd307308f8a1264) | n/a |
 | pi2dsh | `pi2dsh@0.12.3` | [`7420aac0f6b5513e056c44c099527ddee0d705f0`](https://github.com/weijiafu14/pi2dsh/commit/7420aac0f6b5513e056c44c099527ddee0d705f0) | `sha512-GDvzm9m9QIlEvSd9g6txZ7emKMbYCU++qFwoLgaz+qMq6sO39oe6OL839IIaU5KGfm6yKEet97tUSL5GgZpukA==` |
 | DeepSeek Harness | `@deepseek-ai/dsh@0.1.0-rc.6` | [`47f943859bef60e4160492346772ded9b24f765a`](https://github.com/deepseek-ai/deepseek-harness/commit/47f943859bef60e4160492346772ded9b24f765a) | `sha512-brpZfED7ieRa2PQ5tUxMhHrM1pb2CmKFVM/f6yMULBDMicahk+Z2OsHgTwTDnoiZm23Ftu9rQz0NN4pflaoJcg==` |
 | DSH continuable service | `@deepseek-ai/dsh-subagent@0.1.0-rc.6` | same DSH revision | `sha512-vROmBDAlaFAzzSlTBOlvg/7fO55zxhUztnLtB3lKmN5RevrNQBjTsbeIMDQ8ow5ZplxEOnLU+sikFoA5JaoH8A==` |
@@ -100,6 +100,7 @@ The complete machine-readable record is [`evidence.json`](evidence.json). At thi
 - qq's private session-context records and DSH's explicit `agents.currentInitiator()` boundary resolve that parent as architect with no run state and the continuable child as a distinct runner/profile/run-state context in both hosts; Pi/Herdr retain environment and pane-profile fallback;
 - an explicitly installed qq Cordis adapter now joins those proofs only after production board admission/note/gate approval: it carries a durable approval record into the handoff, reuses the isolated worktree lifecycle, creates a durable host-owned parent there, starts one `spawn` continuable runner, and records running only after flushing any live child Session and confirming the returned message id and marker in persistence without waiting for settlement; a fresh host reconstructs both identities and contexts without a pane or Pi session path;
 - production native `done` validates that exact child ownership, approval, worktree cleanliness, and shared descendant commit, then records a runtime-discriminated `submitted`/`native-review` handoff at look 0. It does not launch QA, stop the shared host, terminate the child, create a proposal, or land; a fresh process under the same installed profile reconstructs the exact continuation identities, worktree, and ref;
+- an isolated profile explicitly mounts pi2dsh and one `qq` Pi package whose entry calls the real qq extension and adds Pi's built-in `bash`/`edit`/`write`; it applies `qq.patch.yml` to remove the colliding native filesystem bundle and a QA patch to remove native `bash`. It then uses the real submitted handoff without consuming it. While unpublished, one independent qq-owned top-level QA Agent receives the exact installed model binding, a complete self-contained prompt, suppressed ambient runtime context, native presentation, and a `dsh-tools` allow restriction. The proof requires qq-only tools globally to distinguish the mounted profile from DSH defaults, then gives QA the exact surface `read`, `bash`, `edit`, `write`, and scope-owned `qa_verdict`. At verdict submission it rechecks the live QA identity, unchanged handoff/session/run/ref/look tuple, exact worktree HEAD, common repository, and cleanliness before persisting one `qq.qa-verdict/v1` through qq's shared atomic owner-only exclusive writer. A fresh host cold-proves the exact persisted prompt, review instruction, tool call/result, model, and unchanged verdict before resuming the same QA identity. The submitted handoff stays byte-for-byte unchanged at look 0 and QA is not added to ordinary qq roles;
 - Pi/Herdr delegation remains the complete fallback and its `done` → two-look QA behavior is unchanged. Missing native capability for an owned DSH architect still fails closed.
 
 The collision, model refusal, and session-id activation are runtime observations from the DSH boot, not static predictions.
@@ -108,7 +109,7 @@ The collision, model refusal, and session-id activation are runtime observations
 
 The approved DSH launch seam is native, but the rest of orchestration is not:
 
-- native QA composition, look continuity, proposal UI, landing, and host lifecycle remain unwired after the durable submission seam;
+- production native review-state integration, look continuity, proposal UI, landing, and host lifecycle remain unwired after the isolated QA boundary proof;
 - session scrub accepts only `~/.pi/agent/sessions` files and depends on Pi `/new` behavior;
 - absorbed shutdown and non-firing shortcut/tree events change qq workflow behavior.
 
