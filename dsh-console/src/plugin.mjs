@@ -3,7 +3,6 @@ import { createDshSessionBackend } from "./session-backend.mjs";
 
 export const name = "qq-dsh-console";
 export const inject = [
-  "agentDefaultModel",
   "agents",
   "sessions",
   "sessionPersistence",
@@ -28,6 +27,7 @@ export function apply(ctx, config) {
     "qq-dsh-console: HTML routes",
   );
   ctx.logger.info(
-    `qq DSH console: http://${ctx.webServer.host}:${ctx.webServer.port}${basePath}`,
+    `qq DSH console: ${config.provider}/${config.model} at ` +
+      `http://${ctx.webServer.host}:${ctx.webServer.port}${basePath}`,
   );
 }

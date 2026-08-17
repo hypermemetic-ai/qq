@@ -87,12 +87,21 @@ export function createDshSessionBackend(ctx, config) {
   if (typeof config.cwd !== "string" || !config.cwd.startsWith("/")) {
     throw new Error("qq-dsh-console: cwd must be an absolute path");
   }
+  const provider = String(config.provider ?? "");
+  const model = String(config.model ?? "");
+  if (!provider || !model) {
+    throw new Error("qq-dsh-console: provider and model must be selected explicitly");
+  }
+  const selectedModel = Object.freeze({
+    provider,
+    model,
+    ...(config.reasoningEffort ? { reasoningEffort: String(config.reasoningEffort) } : {}),
+  });
 
   const agents = ctx.get("agents");
   const sessions = ctx.get("sessions");
   const persistence = ctx.get("sessionPersistence");
-  const defaultModel = ctx.get("agentDefaultModel");
-  if (!agents || !sessions || !persistence || !defaultModel) {
+  if (!agents || !sessions || !persistence) {
     throw new Error("qq-dsh-console: required DSH services are unavailable");
   }
 
@@ -121,10 +130,9 @@ export function createDshSessionBackend(ctx, config) {
         throw httpError(404, "DSH session not found");
       }
 
-      const current = defaultModel.currentSelection();
-      const setup = selectionSetup({ current });
+      const setup = selectionSetup({ current: selectedModel });
       const options = {
-        agentOptions: { provider: current.provider, model: current.model },
+        agentOptions: { provider: selectedModel.provider, model: selectedModel.model },
         setup,
       };
       const handle = persisted

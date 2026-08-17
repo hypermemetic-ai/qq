@@ -5,7 +5,7 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 toolchain="$root/compat/pi2dsh/toolchain"
 npm ci --prefix "$toolchain" --no-audit --no-fund >/dev/null
 
-dsh="$toolchain/node_modules/.bin/dsh"
+workbench="$root/bin/qq-dsh-workbench"
 work=$(mktemp -d "${TMPDIR:-/tmp}/qq-dsh-console-live.XXXXXX")
 llm_pid=
 dsh_pid=
@@ -28,6 +28,7 @@ cleanup() {
     kill "$llm_pid" 2>/dev/null || true
     wait "$llm_pid" 2>/dev/null || true
   fi
+  rm -f -- "$root/.qq-dsh-workbench-tool-proof"
   if [[ ${QQ_DSH_CONSOLE_KEEP:-0} == 1 ]]; then
     printf 'test-dsh-console-live: kept %s\n' "$work" >&2
   else
@@ -49,12 +50,29 @@ done
   exit 1
 }
 llm_endpoint=$(<"$work/llm-endpoint")
+cat >"$work/local-model.patch.yml" <<YAML
+- id: llm-pi-ai
+  name: '@deepseek-ai/dsh-llm-pi-ai'
+  config:
+    providers:
+      qwen-token-plan:
+        apiKeyEnv: QWEN_TOKEN_PLAN_API_KEY
+        baseURL: '$llm_endpoint'
+        models:
+          - id: deepseek-v4-pro-0813
+            name: DeepSeek V4 Pro 0813
+            contextWindow: 1000000
+            maxTokens: 384000
+            input: [text]
+            reasoningEfforts:
+              high: high
+              max: max
+            compat:
+              thinkingFormat: qwen
+              supportsReasoningEffort: true
+YAML
 
 export DSH_HOME="$work/dsh-home"
-"$dsh" plugin --profile qq-console add "$root/dsh-console" \
-  >"$work/profile-add.log" 2>&1
-node "$root/dsh-console/configure-profile.mjs" \
-  "$DSH_HOME/profiles/qq-console/package.json" >/dev/null
 
 primary_id=session-63a11000-0000-4000-8000-000000000011
 secondary_id=session-63a11000-0000-4000-8000-000000000012
@@ -73,16 +91,19 @@ canonical() {
 }
 
 start_host() {
+  local -a session_env=()
+  if [[ -n $session_id ]]; then
+    session_env+=("QQ_DSH_SESSION_ID=$session_id")
+  fi
   env \
     HOME="$work/home" \
     XDG_CONFIG_HOME="$work/config" \
     DSH_HOME="$DSH_HOME" \
     DSH_TELEMETRY_DISABLED=1 \
-    DEEPSEEK_API_KEY=qq-dsh-console-local-probe \
-    DEEPSEEK_BASE_URL="$llm_endpoint" \
-    QQ_DSH_SESSION_ID="$session_id" \
+    QWEN_TOKEN_PLAN_API_KEY=qq-dsh-console-local-probe \
     QQ_DSH_CONSOLE_PORT="$port" \
-    "$dsh" --profile qq-console \
+    "${session_env[@]}" \
+    "$workbench" --patch "$work/local-model.patch.yml" \
     >"$work/dsh.stdout.log" 2>"$work/dsh.stderr.log" &
   dsh_pid=$!
 
@@ -246,8 +267,11 @@ wait "$post_pid"
 post_pid=
 stop_host
 
-# Local reconnect after another host restart reconstructs ordered DSH history.
+# Local reconnect after another host restart reads the launcher's saved session
+# identity rather than receiving one from the test process.
+session_id=
 start_host
+session_id=$primary_id
 curl -fsS --max-time 5 "$origin/qq/" >"$work/local-again.html"
 for prompt in 'home durable handoff' 'laptop interrupt handoff' 'phone durable handoff'; do
   grep -Fq "$prompt" "$work/local-again.html"
@@ -258,5 +282,39 @@ phone_line=$(grep -nF 'phone durable handoff' "$work/local-again.html" | head -1
 ((home_line < laptop_line && laptop_line < phone_line))
 find "$DSH_HOME/sessions" -type f \( -name session.jsonl -o -name session.jsonl.zstd \) \
   -print | grep -q .
+[[ $(<"$DSH_HOME/qq-console.session") == "$primary_id" ]]
+
+# The selected token-plan DeepSeek Pro route receives DSH's own
+# read/write/edit/search/bash schemas, and its deterministic calls execute in
+# this repository without pi2dsh.
+post_prompt workbench-tools "$primary_id" 'QQ_DSH_NATIVE_TOOL_PROBE' htmx
+grep -Fq 'QQ_DSH_NATIVE_TOOL_PROBE_COMPLETE' "$work/workbench-tools.post.html"
+[[ $(<"$root/.qq-dsh-workbench-tool-proof") == beta ]]
+node - "$work/llm-requests.jsonl" <<'NODE'
+const { readFileSync } = require("node:fs");
+const requests = readFileSync(process.argv[2], "utf8").trim().split("\n").map(JSON.parse);
+const probe = requests.filter(({ body }) => body.messages?.some(
+  ({ role, content }) => role === "user" && JSON.stringify(content).includes("QQ_DSH_NATIVE_TOOL_PROBE"),
+));
+if (probe.length !== 6) throw new Error(`expected 6 native-tool requests, got ${probe.length}`);
+for (const { body } of probe) {
+  if (body.model !== "deepseek-v4-pro-0813") throw new Error(`unexpected model ${body.model}`);
+  const names = body.tools?.map(({ function: fn }) => fn.name) ?? [];
+  for (const name of ["read", "write", "edit", "grep", "bash"]) {
+    if (!names.includes(name)) throw new Error(`missing native ${name} tool`);
+  }
+}
+const messages = probe.at(-1).body.messages;
+const results = new Map(messages.filter(({ role }) => role === "tool").map(
+  ({ tool_call_id: id, content }) => [id, JSON.stringify(content)],
+));
+for (let index = 0; index < 5; index += 1) {
+  if (!results.has(`call_qq_workbench_${index}`)) throw new Error(`missing tool result ${index}`);
+}
+if (!results.get("call_qq_workbench_1").includes("alpha")) throw new Error("native read did not observe write");
+if (!results.get("call_qq_workbench_3").includes("beta")) throw new Error("native grep did not observe edit");
+if (!results.get("call_qq_workbench_4").includes(process.cwd())) throw new Error("native bash did not pass in repository");
+NODE
+rm -f -- "$root/.qq-dsh-workbench-tool-proof"
 
 printf 'test-dsh-console-live: pass\n'
