@@ -8,7 +8,7 @@ const root = resolve(process.argv[2] ?? ".");
 const read = (path) => readFile(join(root, path), "utf8");
 const json = async (path) => JSON.parse(await read(path));
 
-const [pkg, pins, toolchain, toolchainLock, evidence, webEvidence, webQa, consoleEvidence, consoleReadme, consoleRender, consoleWorker, run, patch, relayProbe, childRun, childPlugin, childPatch, childPackage, nativeRun, nativeAdapter, nativeAdapterPatch, nativeAdapterPackage, nativeProof, nativeProofPatch, nativeProofPackage, nativeQaProof, nativeQaProofPatch, nativeQaProofPackage, qaVerdict, qaResult, relayContract, liveMessages, messages, review, scrub, runLib, runEvents, sessionContext, dshRunLib] = await Promise.all([
+const [pkg, pins, toolchain, toolchainLock, evidence, webEvidence, webQa, consoleEvidence, consoleReadme, consoleRender, consoleWorker, run, patch, relayProbe, childRun, childPlugin, childPatch, childPackage, nativeRun, nativeAdapter, nativeAdapterPatch, nativeAdapterPackage, nativeProof, nativeProofPatch, nativeProofPackage, nativeQaProof, nativeQaProofPatch, nativeQaProofPackage, nativeQaPiTools, nativeQaPiToolsPatch, nativeQaPiToolsPackage, qaVerdict, qaResult, relayContract, liveMessages, messages, review, scrub, runLib, runEvents, sessionContext, dshRunLib] = await Promise.all([
   json("package.json"),
   json("compat/pi2dsh/pins.json"),
   json("compat/pi2dsh/toolchain/package.json"),
@@ -37,6 +37,9 @@ const [pkg, pins, toolchain, toolchainLock, evidence, webEvidence, webQa, consol
   read("compat/pi2dsh/native-qa-proof/plugin.mjs"),
   read("compat/pi2dsh/native-qa-proof/cordis.patch.yml"),
   json("compat/pi2dsh/native-qa-proof/package.json"),
+  read("compat/pi2dsh/native-qa-pi-tools/index.ts"),
+  read("compat/pi2dsh/native-qa-pi-tools/qa.patch.yml"),
+  json("compat/pi2dsh/native-qa-pi-tools/package.json"),
   read("bin/lib/qa-verdict.mjs"),
   read("extensions/qa-result.ts"),
   read("tests/test-qq-relay.sh"),
@@ -154,8 +157,11 @@ assert.equal(probes.get("native-runner-submission").verdict, "durable-awaiting-n
 assert.match(probes.get("native-runner-submission").fact, /status submitted.*runtime dsh.*look 0/);
 assert.match(probes.get("native-runner-submission").fact, /does not launch a review worker/);
 assert.match(probes.get("native-runner-submission").fact, /same installed DSH profile/);
-assert.equal(probes.get("independent-native-qa").verdict, "creation-time-five-tool-and-cold-verdict-proven");
-assert.match(probes.get("independent-native-qa").fact, /read, bash, edit, write, and qa_verdict/);
+assert.equal(probes.get("independent-native-qa").verdict, "mounted-profile-five-tool-submission-guard-and-cold-result-proven");
+assert.match(probes.get("independent-native-qa").fact, /explicitly mounts pi2dsh and one qq Pi package whose entry calls the real qq extension under qq\.patch\.yml/);
+assert.match(probes.get("independent-native-qa").fact, /read, bash, edit, write, and scope-owned qa_verdict/);
+assert.match(probes.get("independent-native-qa").fact, /At verdict submission qa_verdict revalidates/);
+assert.match(probes.get("independent-native-qa").fact, /exact persisted prompt, review instruction, tool call and result/);
 assert.match(probes.get("independent-native-qa").fact, /submitted handoff remains byte-for-byte unchanged/);
 assert.match(probes.get("native-child-prompt-acceptance").fact, /cold sessionPersistence\.inspect/);
 assert.match(probes.get("native-child-prompt-acceptance").fact, /fresh host resumes the exact persisted direct parent/);
@@ -268,7 +274,10 @@ assert.match(nativeProof, /bootstrap_injections: exactMessages\.length/);
 assert.match(nativeProof, /agents\.resume\(/);
 assert.match(nativeRun, /plugin --profile qq-native-delegation-proof add "\$dsh_native"/);
 assert.match(nativeRun, /run_phase start[\s\S]*run_phase fresh[\s\S]*run_phase qa[\s\S]*run_phase qa-fresh/);
+assert.match(nativeRun, /plugin --profile qq-native-qa-proof add "\$toolchain\/node_modules\/pi2dsh"/);
+assert.match(nativeRun, /plugin --profile qq-native-qa-proof add "\$qa_pi_tools"/);
 assert.match(nativeRun, /plugin --profile qq-native-qa-proof add "\$qa_proof_plugin"/);
+assert.match(nativeRun, /patch=\(--patch "\$here\/qq\.patch\.yml" --patch "\$qa_pi_tools\/qa\.patch\.yml"\)/);
 assert.match(nativeRun, /done_requested, true/);
 assert.match(nativeRun, /clean_shared_ref_reconstructed, true/);
 assert.match(nativeRun, /visible_tools[\s\S]*qa_verdict/);
@@ -276,7 +285,7 @@ assert.match(nativeRun, /state\.qaVerdict, undefined/);
 assert.match(nativeRun, /main checkout/);
 assert.equal(nativeQaProofPackage.name, "@hypermemetic-ai/qq-dsh-native-qa-proof");
 assert.equal(nativeQaProofPackage.dsh.bundle.patch, "./cordis.patch.yml");
-assert.match(nativeQaProofPatch, /inject: \[agentDefaultModel, agents, sessions, sessionPersistence, systemPrompt, tools\]/);
+assert.match(nativeQaProofPatch, /inject: \[agentDefaultModel, agents, llm, sessions, sessionPersistence, systemPrompt, tools\]/);
 assert.match(nativeQaProof, /ctx\.agents\.create\(/);
 assert.match(nativeQaProof, /ctx\.agents\.resume\(/);
 assert.match(nativeQaProof, /agentCtx\.tools\.presentAs\("native"\)/);
@@ -292,6 +301,16 @@ assert.match(nativeQaProof, /status", "--porcelain", "--untracked-files=all"/);
 assert.match(nativeQaProof, /--git-common-dir/);
 assert.match(nativeQaProof, /submission\.continuation\?\.architectSession/);
 assert.doesNotMatch(nativeQaProof, /(?:^|\W)state\.(?:status|look|qaVerdict)\s*=(?!=)|landHandoff|setBoardStatus|sendRunEvent/);
+assert.equal(nativeQaPiToolsPackage.name, "qq");
+assert.deepEqual(nativeQaPiToolsPackage.pi.extensions, ["index.ts"]);
+assert.match(nativeQaPiTools, /import registerQQ from "\.\.\/\.\.\/\.\.\/extensions\/index\.ts"/);
+assert.match(nativeQaPiTools, /registerQQ\(pi\)[\s\S]*registerCwdTool\(pi, createBashToolDefinition\)/);
+for (const factory of ["createBashToolDefinition", "createEditToolDefinition", "createWriteToolDefinition"]) {
+  assert.match(nativeQaPiTools, new RegExp(factory));
+}
+assert.match(nativeQaPiTools, /context\?\.cwd/);
+assert.match(nativeQaPiToolsPatch, /id: tool-bash[\s\S]*disabled: true/);
+assert.match(patch, /id: tool-fs[\s\S]*disabled: true/);
 assert.match(qaVerdict, /qq\.qa-verdict\/v1/);
 assert.match(qaVerdict, /constants\.O_EXCL/);
 assert.match(qaVerdict, /await link\(temporary, path\)/);

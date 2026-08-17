@@ -13,10 +13,14 @@ const STATE_SCHEMA = "qq.dsh-native-qa-state/v1";
 const VERDICT_SCHEMA = QA_VERDICT_SCHEMA;
 const QA_TOOL_NAME = "qa_verdict";
 const REQUIRED_PI_CAPABILITIES = Object.freeze(["read", "bash", "edit", "write"]);
+const REQUIRED_QQ_PROFILE_TOOLS = Object.freeze([
+  "agent_messages", "operator_stage", "mark_session_for_scrub", "sketch", "note", "delegate", "done",
+]);
 const COMPLETE_SECTION = "qq:native-qa-complete";
+const REVIEW_MESSAGE = "Perform the independent review now and finish with the required structured verdict.";
 
 export const name = "qq-dsh-native-qa-proof";
-export const inject = ["agentDefaultModel", "agents", "sessions", "sessionPersistence", "systemPrompt", "tools"];
+export const inject = ["agentDefaultModel", "agents", "llm", "sessions", "sessionPersistence", "systemPrompt", "tools"];
 
 function assert(condition, message) {
   if (!condition) throw new Error(`qq-dsh-native-qa-proof: ${message}`);
@@ -43,13 +47,20 @@ function actualPiCapabilities(ctx) {
   const schemas = ctx.tools.schemas();
   const byName = new Map(schemas.map((schema) => [schema.name, schema]));
   const missing = REQUIRED_PI_CAPABILITIES.filter((capability) => !byName.has(capability));
-  if (missing.length) return { missing, found: stableNames(byName.keys()) };
+  const missingProfile = REQUIRED_QQ_PROFILE_TOOLS.filter((capability) => !byName.has(capability));
+  if (missing.length || missingProfile.length) return { missing, missingProfile, found: stableNames(byName.keys()) };
   return {
     missing: [],
+    missingProfile: [],
     found: stableNames(byName.keys()),
     names: REQUIRED_PI_CAPABILITIES.map((capability) => {
       const schema = byName.get(capability);
       assert(ctx.tools.get(schema.name), `installed profile cannot resolve ${schema.name}`);
+      return schema.name;
+    }),
+    profile: REQUIRED_QQ_PROFILE_TOOLS.map((capability) => {
+      const schema = byName.get(capability);
+      assert(ctx.tools.get(schema.name), `installed qq/pi2dsh profile cannot resolve ${schema.name}`);
       return schema.name;
     }),
   };
@@ -60,19 +71,25 @@ async function waitForPiCapabilities(ctx, timeoutMs = 10_000) {
   let view;
   while (Date.now() < deadline) {
     view = actualPiCapabilities(ctx);
-    if (view.missing.length === 0) return view.names;
+    if (view.missing.length === 0 && view.missingProfile.length === 0) return view;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  throw new Error(`qq-dsh-native-qa-proof: installed profile has no Pi ${view.missing.join(", ")} capability (found: ${view.found.join(", ")})`);
+  throw new Error(`qq-dsh-native-qa-proof: installed qq/pi2dsh profile is incomplete (Pi: ${view.missing.join(", ") || "ok"}; qq: ${view.missingProfile.join(", ") || "ok"}; found: ${view.found.join(", ")})`);
 }
 
-function installedBinding(ctx, state) {
+async function installedBinding(ctx, state, signal) {
   const selected = ctx.agentDefaultModel.currentSelection();
   assert(selected && typeof selected.provider === "string" && typeof selected.model === "string", "installed profile has no default model selection");
   assert(state.qa?.provider === selected.provider && state.qa?.model === selected.model,
     `submitted QA binding ${state.qa?.provider}/${state.qa?.model} differs from installed ${selected.provider}/${selected.model}`);
   assert(typeof state.qa?.effort === "string" && state.qa.effort.length > 0, "submitted handoff has no QA reasoning effort");
-  return Object.freeze({ provider: selected.provider, model: selected.model, reasoningEffort: state.qa.effort });
+  const binding = { provider: selected.provider, model: selected.model, reasoningEffort: state.qa.effort };
+  let resolved;
+  try { resolved = await ctx.llm.resolveCallConfig(binding, signal); }
+  catch (error) { throw new Error(`qq-dsh-native-qa-proof: installed QA model/effort is unavailable: ${error?.message ?? error}`); }
+  assert(resolved.provider === binding.provider && resolved.model === binding.model && resolved.reasoningEffort === binding.reasoningEffort,
+    "installed QA model resolver changed the submitted binding");
+  return Object.freeze(binding);
 }
 
 function completeQaPrompt(state, ticket, note, binding, inheritedTools) {
@@ -133,7 +150,47 @@ function installModelBinding(agentCtx, binding, requestBindings) {
   });
 }
 
-function qaTool({ proofState, proofPath, verdictPath }) {
+function assertQaIdentityAvailable(ctx, qaSession) {
+  assert(!ctx.agents.get(qaSession), `QA identity ${qaSession} already belongs to a live Agent`);
+  assert(!ctx.sessions.get(qaSession), `QA identity ${qaSession} already belongs to a live Session`);
+}
+
+async function assertNoCompositionCollisions(ctx) {
+  assert(!ctx.tools.schemas().some((schema) => schema.name === QA_TOOL_NAME), `${QA_TOOL_NAME} collides with an installed-profile tool`);
+  const assembly = await ctx.systemPrompt.assemble();
+  assert(!assembly.sections.some((section) => section.name === COMPLETE_SECTION), `${COMPLETE_SECTION} collides with an installed-profile prompt section`);
+}
+
+function assertLiveQaIdentity(ctx, proofState, exec) {
+  assert(exec?.signal && typeof exec.signal.throwIfAborted === "function", "qa_verdict has no cancellable execution identity");
+  exec.signal.throwIfAborted();
+  const agent = exec.agent;
+  assert(agent?.id === proofState.qaSession && agent.session?.id === proofState.qaSession,
+    "qa_verdict caller is not the bound QA Agent/Session");
+  assert(ctx.agents.get(proofState.qaSession) === agent && ctx.sessions.get(proofState.qaSession) === agent.session,
+    "qa_verdict caller is not the live bound QA identity");
+}
+
+async function recheckVerdictBoundary({ ctx, proofState, proofPath, statePath }, exec, expectedProofStatus = "reviewing") {
+  assertLiveQaIdentity(ctx, proofState, exec);
+  const handoffText = await readFile(statePath, "utf8");
+  exec.signal.throwIfAborted();
+  const state = validateSubmittedHandoff(await readHandoff(statePath), statePath);
+  assert(exec.agent.session.header?.cwd === state.worktree, "live QA Session left the submitted worktree");
+  assert(sha256(handoffText) === proofState.handoff.digest, "submitted handoff digest changed before verdict");
+  assert(state.id === proofState.runId && state.ref === proofState.handoff.ref && state.status === proofState.handoff.status && state.look === proofState.handoff.look,
+    "submitted run/ref/status/look tuple changed before verdict");
+  const durableProof = JSON.parse(await readFile(proofPath, "utf8"));
+  assert(durableProof.schema === STATE_SCHEMA && durableProof.owner === "qq" && durableProof.status === expectedProofStatus &&
+    durableProof.runId === proofState.runId && durableProof.qaSession === proofState.qaSession &&
+    durableProof.statePath === statePath && durableProof.handoff?.digest === proofState.handoff.digest && durableProof.handoff?.ref === proofState.handoff.ref,
+    "durable QA session/run/ref ownership changed before verdict");
+  verifySubmittedRepository(state);
+  exec.signal.throwIfAborted();
+  return state;
+}
+
+function qaTool({ ctx, proofState, proofPath, verdictPath, statePath }) {
   let submitted = false;
   return {
     name: QA_TOOL_NAME,
@@ -151,10 +208,15 @@ function qaTool({ proofState, proofPath, verdictPath }) {
       },
       render: (_args, value) => [{ type: "text", text: `qa verdict recorded: ${value.verdict}` }],
     },
-    async execute(args) {
+    async execute(args, exec) {
       if (submitted || !await absent(verdictPath)) throw new Error("qa_verdict was already submitted");
       submitted = true;
       const verdict = createQaVerdict(args);
+      await recheckVerdictBoundary({ ctx, proofState, proofPath, statePath }, exec);
+      proofState.status = "submitting";
+      proofState.updatedAt = verdict.createdAt;
+      await atomicPrivateJson(proofPath, proofState);
+      await recheckVerdictBoundary({ ctx, proofState, proofPath, statePath }, exec, "submitting");
       await writeQaVerdict(verdictPath, verdict);
       proofState.status = "verdict-recorded";
       proofState.verdict = {
@@ -163,7 +225,6 @@ function qaTool({ proofState, proofPath, verdictPath }) {
         digest: sha256(`${JSON.stringify(verdict, null, 2)}\n`),
         createdAt: verdict.createdAt,
       };
-      proofState.updatedAt = verdict.createdAt;
       await atomicPrivateJson(proofPath, proofState);
       return { recorded: true, verdict: args.verdict };
     },
@@ -173,6 +234,7 @@ function qaTool({ proofState, proofPath, verdictPath }) {
 function composeQa(agentCtx, options) {
   const requestBindings = options.requestBindings ?? [];
   installModelBinding(agentCtx, options.binding, requestBindings);
+  assert(!agentCtx.tools.schemas().some((schema) => schema.name === QA_TOOL_NAME), `${QA_TOOL_NAME} collides inside the QA scope`);
   agentCtx.tools.presentAs("native");
   agentCtx.tools.restrict({ allow: options.inheritedTools });
   agentCtx.tools.register(qaTool(options));
@@ -190,6 +252,50 @@ async function assertComposition(ctx, agent, expected) {
   assert(assembly.contexts.length === 0, "QA inherited runtime context outside its complete prompt");
   assert(JSON.stringify(stableNames(assembly.tools.map((schema) => schema.name))) === JSON.stringify(visible), "QA prompt and executable tool surfaces differ");
   return visible;
+}
+
+function verdictArguments(verdict) {
+  return {
+    verdict: verdict.verdict,
+    summary: verdict.summary,
+    feedback: verdict.feedback,
+    tests_modified: verdict.tests_modified,
+  };
+}
+
+function assertPersistedQaHistory(inspection, expected) {
+  assert(inspection.meta?.id === expected.qaSession && inspection.meta.cwd === expected.cwd,
+    "QA persistence identity or worktree changed");
+  assert(inspection.meta.parentSession === undefined && inspection.meta.origin !== "subagent",
+    "QA Agent inherited a parent/subagent identity");
+  const headers = inspection.events?.filter((event) => event.type === "request/header") ?? [];
+  assert(headers.length >= 1, "durable QA history has no request header");
+  const header = headers.at(-1).data?.header;
+  assert(header?.system === expected.prompt, "durable QA history changed the exact review prompt");
+  assert(JSON.stringify(stableNames((header.tools ?? []).map((schema) => schema.name))) === JSON.stringify(stableNames(expected.visibleTools)),
+    "durable QA history changed the exact tool surface");
+  assert(header.config?.provider === expected.binding.provider && header.config?.model === expected.binding.model &&
+    header.config?.reasoningEffort === expected.binding.reasoningEffort, "durable QA history changed the exact model binding");
+  const reviewMessages = inspection.events.filter((event) => event.type === "user/message" && event.data?.id === expected.reviewMessage.id);
+  assert(reviewMessages.length === 1 && reviewMessages[0].data?.content?.length === 1 &&
+    reviewMessages[0].data.content[0]?.type === "text" && reviewMessages[0].data.content[0].text === expected.reviewMessage.text,
+    "durable QA history changed or duplicated the review instruction");
+  const calls = inspection.events.filter((event) => event.type === "tool/call" && event.data?.name === QA_TOOL_NAME);
+  assert(calls.length === 1, "durable QA history has duplicate or missing qa_verdict calls");
+  let durableArgs;
+  try { durableArgs = JSON.parse(calls[0].data.arguments); }
+  catch { throw new Error("qq-dsh-native-qa-proof: durable qa_verdict arguments are not JSON"); }
+  assert(JSON.stringify(durableArgs) === JSON.stringify(verdictArguments(expected.verdict)), "durable qa_verdict arguments changed");
+  const results = inspection.events.filter((event) => event.type === "tool/result" &&
+    event.data?.message?.content?.[0]?.toolCallId === calls[0].data.callId);
+  assert(results.length === 1, "durable QA history has duplicate or missing qa_verdict results");
+  assert(JSON.stringify(results[0].data.message.content[0]) === JSON.stringify({
+    type: "tool-result",
+    toolCallId: calls[0].data.callId,
+    content: [{ type: "text", text: `qa verdict recorded: ${expected.verdict.verdict}` }],
+    isError: false,
+  }), "durable QA history changed the exact qa_verdict result");
+  return { call: calls[0], result: results[0], header: headers.at(-1), reviewMessage: reviewMessages[0] };
 }
 
 function pathsFor(statePath) {
@@ -233,6 +339,7 @@ function verifySubmittedRepository(state) {
   const worktreeRef = git(state.worktree, ["rev-parse", "--verify", `${state.ref}^{commit}`]);
   const sharedRef = git(state.mainRoot, ["rev-parse", "--verify", `${state.ref}^{commit}`]);
   assert(worktreeRef === state.ref && sharedRef === state.ref, "submitted ref is not the exact shared commit");
+  assert(git(state.worktree, ["rev-parse", "HEAD"]) === state.ref, "submitted worktree HEAD is not the exact ref");
   assert(git(state.worktree, ["status", "--porcelain", "--untracked-files=all"]) === "", "submitted worktree is not clean");
   try { execFileSync("git", ["merge-base", "--is-ancestor", state.baseRef, state.ref], { cwd: state.worktree, stdio: "ignore" }); }
   catch { throw new Error("qq-dsh-native-qa-proof: submitted ref does not descend from its delegated base"); }
@@ -249,12 +356,17 @@ async function runQa(ctx, config) {
   verifySubmittedRepository(state);
   const { proofPath, verdictPath } = pathsFor(config.statePath);
   assert(await absent(proofPath) && await absent(verdictPath), "submitted handoff already has a native QA proof");
+  await assertNoCompositionCollisions(ctx);
 
-  const binding = installedBinding(ctx, state);
-  const inheritedTools = await waitForPiCapabilities(ctx);
+  const binding = await installedBinding(ctx, state);
+  const capabilityView = await waitForPiCapabilities(ctx);
+  const inheritedTools = capabilityView.names;
   const visibleTools = [...inheritedTools, QA_TOOL_NAME];
   const [ticket, note] = await Promise.all([readFile(state.ticketPath, "utf8"), readFile(state.notePath, "utf8")]);
   const prompt = completeQaPrompt(state, ticket, note, binding, inheritedTools);
+  const qaSession = `session-${randomUUID()}`;
+  assertQaIdentityAvailable(ctx, qaSession);
+  const reviewMessage = { id: randomUUID(), text: REVIEW_MESSAGE };
   const now = new Date().toISOString();
   const proofState = {
     schema: STATE_SCHEMA,
@@ -262,12 +374,18 @@ async function runQa(ctx, config) {
     owner: "qq",
     status: "creating",
     runId: state.id,
-    qaSession: `session-${randomUUID()}`,
+    qaSession,
     statePath: config.statePath,
     handoff: { runtime: "dsh", status: "submitted", look: 0, ref: state.ref, digest: sha256(handoffText) },
     modelBinding: { ...binding },
-    capabilities: { inherited: [...inheritedTools], owned: QA_TOOL_NAME, visible: [...visibleTools] },
+    capabilities: {
+      inherited: [...inheritedTools],
+      profile: [...capabilityView.profile],
+      owned: QA_TOOL_NAME,
+      visible: [...visibleTools],
+    },
     prompt: { complete: true, text: prompt, digest: sha256(prompt) },
+    reviewMessage: { ...reviewMessage, digest: sha256(reviewMessage.text) },
     verdictPath,
     createdAt: now,
     updatedAt: now,
@@ -280,7 +398,17 @@ async function runQa(ctx, config) {
     meta: { cwd: state.worktree },
     agentOptions: { provider: binding.provider, model: binding.model },
     setup(agentCtx) {
-      composeQa(agentCtx, { proofState, proofPath, verdictPath, binding, inheritedTools, prompt, requestBindings });
+      composeQa(agentCtx, {
+        ctx,
+        proofState,
+        proofPath,
+        verdictPath,
+        statePath: config.statePath,
+        binding,
+        inheritedTools,
+        prompt,
+        requestBindings,
+      });
     },
   });
   try {
@@ -290,9 +418,9 @@ async function runQa(ctx, config) {
     proofState.updatedAt = new Date().toISOString();
     await atomicPrivateJson(proofPath, proofState);
     handle.agent.followup({
-      id: randomUUID(),
+      id: reviewMessage.id,
       role: "user",
-      content: [{ type: "text", text: "Perform the independent review now and finish with the required structured verdict." }],
+      content: [{ type: "text", text: reviewMessage.text }],
       source: { kind: "user" },
     });
     await handle.agent.whenIdle();
@@ -304,10 +432,17 @@ async function runQa(ctx, config) {
       "durable verdict ownership belongs to another QA identity or run");
     assert(requestBindings.length >= 1 && requestBindings.every((item) => JSON.stringify(item) === JSON.stringify(binding)), "QA model request escaped its exact binding");
     const inspection = await ctx.sessionPersistence.inspect(proofState.qaSession);
-    assert(inspection.meta?.id === proofState.qaSession && inspection.meta.cwd === state.worktree, "QA persistence identity or worktree changed");
-    assert(inspection.meta.parentSession === undefined && inspection.meta.origin !== "subagent", "QA Agent inherited a parent/subagent identity");
-    assert(inspection.events?.some((event) => event.type === "tool/call" && event.data?.name === QA_TOOL_NAME), "durable QA history has no qa_verdict call");
+    assertPersistedQaHistory(inspection, {
+      qaSession: proofState.qaSession,
+      cwd: state.worktree,
+      prompt,
+      visibleTools,
+      binding,
+      reviewMessage,
+      verdict,
+    });
     assert(await readFile(config.statePath, "utf8") === handoffText, "QA phase consumed or changed the submitted handoff");
+    verifySubmittedRepository(state);
     emit({
       schema: PROOF_SCHEMA,
       phase: "qa",
@@ -316,6 +451,7 @@ async function runQa(ctx, config) {
       ref: state.ref,
       model_binding: binding,
       inherited_tools: inheritedTools,
+      profile_tools: capabilityView.profile,
       visible_tools: actualVisible,
       complete_prompt: true,
       prompt_digest: proofState.prompt.digest,
@@ -323,6 +459,8 @@ async function runQa(ctx, config) {
       verdict: verdict.verdict,
       independent: true,
       handoff_unchanged: true,
+      persisted_prompt: true,
+      persisted_tool_result: true,
       request_bindings: requestBindings,
     });
   } finally {
@@ -343,25 +481,38 @@ async function runFresh(ctx, config) {
   assert(proofState.statePath === config.statePath && proofState.runId === state.id && proofState.handoff.digest === sha256(handoffText), "fresh host reconstructed a different handoff");
   validateQaVerdictRecord(verdict);
   assert(proofState.verdict.schema === verdict.schema && proofState.verdict.digest === sha256(verdictText), "fresh host reconstructed a different verdict");
-  assert(!ctx.agents.get(proofState.qaSession) && !ctx.sessions.get(proofState.qaSession), "QA Agent was not cold in the fresh host");
-  const liveBinding = installedBinding(ctx, state);
+  assertQaIdentityAvailable(ctx, proofState.qaSession);
+  await assertNoCompositionCollisions(ctx);
+  const liveBinding = await installedBinding(ctx, state);
   assert(JSON.stringify(liveBinding) === JSON.stringify(proofState.modelBinding), "fresh installed profile changed the QA model binding");
-  const liveTools = await waitForPiCapabilities(ctx);
-  assert(JSON.stringify(liveTools) === JSON.stringify(proofState.capabilities.inherited), "fresh installed profile changed the QA inherited tools");
+  const capabilityView = await waitForPiCapabilities(ctx);
+  assert(JSON.stringify(capabilityView.names) === JSON.stringify(proofState.capabilities.inherited), "fresh installed profile changed the QA inherited tools");
+  assert(JSON.stringify(capabilityView.profile) === JSON.stringify(proofState.capabilities.profile), "fresh host lost the installed qq/pi2dsh profile provenance");
   assert(sha256(proofState.prompt.text) === proofState.prompt.digest, "fresh host found a changed QA prompt");
+  assert(sha256(proofState.reviewMessage.text) === proofState.reviewMessage.digest, "fresh host found a changed QA review instruction");
 
   const inspectionBefore = await ctx.sessionPersistence.inspect(proofState.qaSession);
-  assert(inspectionBefore.meta?.id === proofState.qaSession && inspectionBefore.meta.parentSession === undefined && inspectionBefore.meta.origin !== "subagent", "cold QA persistence lost its independent identity");
+  assertPersistedQaHistory(inspectionBefore, {
+    qaSession: proofState.qaSession,
+    cwd: state.worktree,
+    prompt: proofState.prompt.text,
+    visibleTools: proofState.capabilities.visible,
+    binding: liveBinding,
+    reviewMessage: proofState.reviewMessage,
+    verdict,
+  });
   const handle = await ctx.agents.resume({
     resumeSessionId: proofState.qaSession,
     agentOptions: { provider: liveBinding.provider, model: liveBinding.model },
     setup(agentCtx) {
       composeQa(agentCtx, {
+        ctx,
         proofState,
         proofPath,
         verdictPath,
+        statePath: config.statePath,
         binding: liveBinding,
-        inheritedTools: liveTools,
+        inheritedTools: capabilityView.names,
         prompt: proofState.prompt.text,
         requestBindings: [],
       });
@@ -380,6 +531,7 @@ async function runFresh(ctx, config) {
       qa_session: proofState.qaSession,
       ref: state.ref,
       model_binding: liveBinding,
+      profile_tools: capabilityView.profile,
       visible_tools: actualVisible,
       complete_prompt: true,
       prompt_digest: proofState.prompt.digest,
@@ -389,6 +541,8 @@ async function runFresh(ctx, config) {
       resumed_same_identity: true,
       verdict_unchanged: true,
       handoff_unchanged: true,
+      persisted_prompt: true,
+      persisted_tool_result: true,
     });
   } finally {
     await handle.dispose();
@@ -416,10 +570,18 @@ export const internals = Object.freeze({
   PROOF_SCHEMA,
   QA_TOOL_NAME,
   REQUIRED_PI_CAPABILITIES,
+  REQUIRED_QQ_PROFILE_TOOLS,
+  REVIEW_MESSAGE,
   STATE_SCHEMA,
   VERDICT_SCHEMA,
   actualPiCapabilities,
+  assertNoCompositionCollisions,
+  assertPersistedQaHistory,
+  assertQaIdentityAvailable,
   completeQaPrompt,
+  installedBinding,
+  qaTool,
+  recheckVerdictBoundary,
   validateSubmittedHandoff,
   verifySubmittedRepository,
 });

@@ -7,6 +7,7 @@ toolchain="$here/toolchain"
 dsh_native="$root/dsh-native-launch"
 proof_plugin="$here/native-delegation-proof"
 qa_proof_plugin="$here/native-qa-proof"
+qa_pi_tools="$here/native-qa-pi-tools"
 
 relay_install=${QQ_RELAY_INSTALL_ROOT:-}
 if [[ $relay_install != /* || ! -f $relay_install/client.mjs ]]; then
@@ -101,6 +102,14 @@ export DSH_HOME="$work/dsh-home"
   cat "$work/add-proof.log" >&2
   exit 1
 }
+"$dsh" plugin --profile qq-native-qa-proof add "$toolchain/node_modules/pi2dsh" >"$work/add-qa-pi2dsh.log" 2>&1 || {
+  cat "$work/add-qa-pi2dsh.log" >&2
+  exit 1
+}
+"$dsh" plugin --profile qq-native-qa-proof add "$qa_pi_tools" >"$work/add-qa-qq-profile.log" 2>&1 || {
+  cat "$work/add-qa-qq-profile.log" >&2
+  exit 1
+}
 "$dsh" plugin --profile qq-native-qa-proof add "$qa_proof_plugin" >"$work/add-qa-proof.log" 2>&1 || {
   cat "$work/add-qa-proof.log" >&2
   exit 1
@@ -124,7 +133,11 @@ run_phase() {
   local phase=$1
   local state_path=${2:-}
   local profile=qq-native-delegation-proof
-  if [[ $phase == qa* ]]; then profile=qq-native-qa-proof; fi
+  local patch=()
+  if [[ $phase == qa* ]]; then
+    profile=qq-native-qa-proof
+    patch=(--patch "$here/qq.patch.yml" --patch "$qa_pi_tools/qa.patch.yml")
+  fi
   (
     cd "$main"
     env -i \
@@ -143,7 +156,7 @@ run_phase() {
       QQ_DSH_NATIVE_PHASE="$phase" \
       QQ_DSH_NATIVE_ARCHITECT="$architect" \
       QQ_DSH_NATIVE_STATE_PATH="$state_path" \
-      "$dsh" --profile "$profile"
+      "$dsh" --profile "$profile" "${patch[@]}"
   ) >"$work/$phase.stdout.log" 2>"$work/$phase.stderr.log" || {
     cat "$work/$phase.stdout.log" >&2
     cat "$work/$phase.stderr.log" >&2
@@ -240,6 +253,8 @@ assert.deepEqual(qa.model_binding, {
 });
 assert.deepEqual(qaFresh.model_binding, qa.model_binding);
 assert.deepEqual(qa.inherited_tools, ['read', 'bash', 'edit', 'write']);
+assert.deepEqual(qa.profile_tools, ['agent_messages', 'operator_stage', 'mark_session_for_scrub', 'sketch', 'note', 'delegate', 'done']);
+assert.deepEqual(qaFresh.profile_tools, qa.profile_tools);
 assert.deepEqual(qa.visible_tools, ['bash', 'edit', 'qa_verdict', 'read', 'write']);
 assert.deepEqual(qaFresh.visible_tools, qa.visible_tools);
 assert.equal(qa.visible_tools.length, 5);
@@ -252,10 +267,14 @@ assert.equal(qa.verdict, 'pass');
 assert.equal(qaFresh.verdict, qa.verdict);
 assert.equal(qa.independent, true);
 assert.equal(qa.handoff_unchanged, true);
+assert.equal(qa.persisted_prompt, true);
+assert.equal(qa.persisted_tool_result, true);
 assert.equal(qaFresh.cold_before_resume, true);
 assert.equal(qaFresh.resumed_same_identity, true);
 assert.equal(qaFresh.verdict_unchanged, true);
 assert.equal(qaFresh.handoff_unchanged, true);
+assert.equal(qaFresh.persisted_prompt, true);
+assert.equal(qaFresh.persisted_tool_result, true);
 assert.ok(qa.request_bindings.length >= 1);
 assert.ok(qa.request_bindings.every((binding) => JSON.stringify(binding) === JSON.stringify(qa.model_binding)));
 
