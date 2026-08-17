@@ -1,6 +1,6 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { renderPage, renderSessionContent } from "./render.mjs";
+import { readFileSync, statSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { renderPage as bundledRenderPage, renderSessionContent as bundledRenderSessionContent } from "./render.mjs";
 
 const MAX_FORM_BYTES = 524_288;
 const DEFAULT_SSE_POLL_MS = 100;
@@ -64,6 +64,24 @@ const bundledAssets = Object.freeze({
     body: readFileSync(new URL("assets/sw-v8.js", root)),
   },
 });
+
+const LIVE_ASSET_FILES = Object.freeze({
+  "console-v7.css": "assets/console.css",
+  "browser-v4.js": "assets/browser-v4.js",
+});
+const RENDER_FILE = fileURLToPath(new URL("./render.mjs", import.meta.url));
+
+export function resolveAsset(name, liveAssets = false) {
+  const bundled = bundledAssets[name];
+  if (!bundled) return undefined;
+  const relative = LIVE_ASSET_FILES[name];
+  if (!liveAssets || !relative) return { type: bundled.type, body: bundled.body, live: false };
+  return {
+    type: bundled.type,
+    body: readFileSync(new URL(relative, root)),
+    live: true,
+  };
+}
 
 function normalizeBasePath(value) {
   const path = String(value ?? "/qq");
@@ -193,6 +211,7 @@ export function createConsoleHandler(backend, options = {}) {
   }
   const basePath = normalizeBasePath(options.basePath);
   const ssePollMs = positiveInteger(options.ssePollMs, DEFAULT_SSE_POLL_MS, "ssePollMs");
+  const liveAssets = options.liveAssets === true;
   const assetsPrefix = `${basePath}/assets/`;
   const sessionsPath = `${basePath}/sessions`;
   const switchSessionPath = `${sessionsPath}/open`;
@@ -236,9 +255,18 @@ export function createConsoleHandler(backend, options = {}) {
     );
   }
 
+  async function loadRender() {
+    if (!liveAssets) {
+      return { renderPage: bundledRenderPage, renderSessionContent: bundledRenderSessionContent };
+    }
+    const stamp = statSync(RENDER_FILE).mtimeMs;
+    return import(`${pathToFileURL(RENDER_FILE).href}?t=${stamp}`);
+  }
+
   async function mutationResponse(req, res, sessionId, notice = "") {
     const paths = routes(basePath, sessionId);
     if (String(req.headers["hx-request"] ?? "").toLowerCase() === "true") {
+      const { renderSessionContent } = await loadRender();
       const body = renderSessionContent(await view(sessionId), paths, notice);
       write(res, 200, { "Content-Type": "text/html; charset=utf-8" }, body);
       return;
@@ -317,7 +345,7 @@ export function createConsoleHandler(backend, options = {}) {
         write(res, 200, { "Content-Type": "application/manifest+json; charset=utf-8" }, manifest, head);
         return;
       }
-      const asset = bundledAssets[name];
+      const asset = resolveAsset(name, liveAssets);
       if (!asset || name.includes("/") || name === "sw-v8.js") {
         text(res, 404, "Not found", head);
         return;
@@ -326,7 +354,7 @@ export function createConsoleHandler(backend, options = {}) {
         res,
         200,
         {
-          "Cache-Control": "public, max-age=31536000, immutable",
+          "Cache-Control": asset.live ? "no-store" : "public, max-age=31536000, immutable",
           "Content-Type": asset.type,
           "Content-Length": String(asset.body.length),
         },
@@ -374,6 +402,7 @@ export function createConsoleHandler(backend, options = {}) {
       try {
         const snapshot = await view(sessionId);
         const paths = routes(basePath, snapshot.id);
+        const { renderPage } = await loadRender();
         const body = renderPage(snapshot, paths, assetPaths);
         write(res, 200, { "Content-Type": "text/html; charset=utf-8" }, body, head);
       } catch (error) {
@@ -405,7 +434,8 @@ export function createConsoleHandler(backend, options = {}) {
       let closed = false;
       let timer;
       let fingerprint = snapshotFingerprint(snapshot);
-      res.write(sseEvent("session", renderSessionContent(snapshot, paths)));
+      const initialRender = await loadRender();
+      res.write(sseEvent("session", initialRender.renderSessionContent(snapshot, paths)));
 
       const close = () => {
         closed = true;
@@ -421,6 +451,7 @@ export function createConsoleHandler(backend, options = {}) {
           const nextFingerprint = snapshotFingerprint(next);
           if (nextFingerprint !== fingerprint) {
             fingerprint = nextFingerprint;
+            const { renderSessionContent } = await loadRender();
             res.write(sseEvent("session", renderSessionContent(next, paths)));
           } else {
             res.write(": keepalive\n\n");
@@ -510,10 +541,12 @@ export const internals = Object.freeze({
   DEFAULT_SSE_POLL_MS,
   MAX_FORM_BYTES,
   SECURITY_HEADERS,
+  LIVE_ASSET_FILES,
   assetNames: Object.keys(bundledAssets),
   file: fileURLToPath(import.meta.url),
   normalizeBasePath,
   parseSessionRoute,
+  resolveAsset,
   routes,
   sameOrigin,
   snapshotFingerprint,

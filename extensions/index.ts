@@ -10,6 +10,7 @@ import registerBacklogGuard from "./backlog-guard.ts";
 import registerGrokParaphraseGuard from "./grok-paraphrase-guard.ts";
 import registerBoard from "./board.ts";
 import registerReviewFlow from "./review-flow.ts";
+import registerFrontendDesignLoop from "./frontend-design-loop.ts";
 
 let detectFromPi;
 
@@ -39,4 +40,5 @@ export default function registerQQ(pi) {
   registerGrokParaphraseGuard(pi);
   registerBoard(pi, { sessionContext });
   registerReviewFlow(pi, { sessionContext });
+  registerFrontendDesignLoop(pi);
 }

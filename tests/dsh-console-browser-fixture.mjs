@@ -4,8 +4,10 @@ import { createServer } from "node:http";
 import { writeFile } from "node:fs/promises";
 import { createConsoleHandler } from "../dsh-console/src/http-app.mjs";
 
-const endpointFile = process.argv[2];
-if (!endpointFile) throw new Error("usage: dsh-console-browser-fixture.mjs <endpoint-file>");
+const args = process.argv.slice(2).filter((arg) => arg !== "--live");
+const endpointFile = args[0];
+const liveAssets = process.argv.includes("--live") || process.env.QQ_DESIGN_LOOP_LIVE === "1";
+if (!endpointFile) throw new Error("usage: dsh-console-browser-fixture.mjs <endpoint-file> [--live]");
 
 const primaryId = "session-63a11000-0000-4000-8000-000000000021";
 const secondaryId = "session-63a11000-0000-4000-8000-000000000022";
@@ -102,7 +104,7 @@ const backend = {
     return true;
   },
 };
-const consoleHandler = createConsoleHandler(backend, { ssePollMs: 30 });
+const consoleHandler = createConsoleHandler(backend, { ssePollMs: 30, liveAssets });
 
 const server = createServer((req, res) => {
   if (req.url === "/__proof/state") {
