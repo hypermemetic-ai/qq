@@ -6,7 +6,7 @@ This is an isolated compatibility harness, not an operator-runtime cutover. It m
 
 | Project | Package | Exact source revision | Package integrity |
 |---|---|---|---|
-| qq | local checkout | [`9d92b9de85b149712eaaaca02bd307308f8a1264`](https://github.com/hypermemetic-ai/qq/commit/9d92b9de85b149712eaaaca02bd307308f8a1264) | n/a |
+| qq | local checkout | [`2752b276ee4817f683a4db07fe98067cef88a2f0`](https://github.com/hypermemetic-ai/qq/commit/2752b276ee4817f683a4db07fe98067cef88a2f0) | n/a |
 | pi2dsh | `pi2dsh@0.12.3` | [`7420aac0f6b5513e056c44c099527ddee0d705f0`](https://github.com/weijiafu14/pi2dsh/commit/7420aac0f6b5513e056c44c099527ddee0d705f0) | `sha512-GDvzm9m9QIlEvSd9g6txZ7emKMbYCU++qFwoLgaz+qMq6sO39oe6OL839IIaU5KGfm6yKEet97tUSL5GgZpukA==` |
 | DeepSeek Harness | `@deepseek-ai/dsh@0.1.0-rc.6` | [`47f943859bef60e4160492346772ded9b24f765a`](https://github.com/deepseek-ai/deepseek-harness/commit/47f943859bef60e4160492346772ded9b24f765a) | `sha512-brpZfED7ieRa2PQ5tUxMhHrM1pb2CmKFVM/f6yMULBDMicahk+Z2OsHgTwTDnoiZm23Ftu9rQz0NN4pflaoJcg==` |
 | DSH continuable service | `@deepseek-ai/dsh-subagent@0.1.0-rc.6` | same DSH revision | `sha512-vROmBDAlaFAzzSlTBOlvg/7fO55zxhUztnLtB3lKmN5RevrNQBjTsbeIMDQ8ow5ZplxEOnLU+sikFoA5JaoH8A==` |

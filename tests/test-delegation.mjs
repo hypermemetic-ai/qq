@@ -389,7 +389,7 @@ try {
   assert.ok(create.args.some((arg) => arg.startsWith("QQ_RUN_ID=")));
   const herdrOps = spawnCalls.filter(({ command }) => command === "herdr").map(({ args }) => `${args[0]} ${args[1]}`);
   const processInfo = herdrOps.filter((op) => op === "pane process-info");
-  assert.equal(processInfo.length, 2);
+  assert.equal(processInfo.length, 3);
   assert.ok(herdrOps.indexOf("pane process-info") > herdrOps.indexOf("pane rename"));
   assert.ok(herdrOps.lastIndexOf("pane process-info") < herdrOps.indexOf("agent start"));
   assert.equal(herdrOps.includes("agent prompt"), false, "the private prompt must not be placed in CLI argv");
