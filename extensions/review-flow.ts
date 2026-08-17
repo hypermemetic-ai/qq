@@ -90,15 +90,22 @@ export default function registerReviewFlow(pi, deps = {}) {
   const injectedRunEvents = new Set();
 
   pi.registerTool({
-    name: "done", label: "Done", promptSnippet: "Submit the delegated ref to independent qa and stop",
-    description: "Final runner call for delegated work. Validates a clean committed ref, hands this pane to the pinned two-look qa service, and stops this run. It never merges.",
+    name: "done", label: "Done", promptSnippet: "Submit the delegated ref and stop",
+    description: "Final runner call for delegated work. Validates a clean committed ref. Pi/Herdr hands the pane to pinned two-look QA; native DSH records an awaiting-native-review handoff without starting QA. It never merges.",
     parameters: { type: "object", additionalProperties: false, required: ["ref"], properties: { ref: { type: "string", minLength: 1 } } },
     async execute(_id, params, signal, _update, ctx) {
       const qqContext = sessionContext.resolve(ctx);
       const statePath = qqContext.runState;
       if (qqContext.role !== "runner" || !statePath) return result("done is available only to a delegated runs runner.", { status: "refused" });
       try {
-        const state = await finishRun(run, ctx.cwd, statePath, params.ref);
+        const state = await finishRun(run, ctx.cwd, statePath, params.ref, { callerContext: qqContext });
+        if (state.runtime === "dsh") {
+          const message = `Submitted ${state.task.id}; it is awaiting native review. No QA look was started; stop now.`;
+          return result(message, {
+            status: "submitted", runtime: "dsh", awaiting: "native-review",
+            ref: state.ref, runner_session: state.runnerSession, state_path: statePath,
+          });
+        }
         const pid = await launchReview(statePath);
         const message = `Submitted ${state.task.id} to qa look ${state.look}. The runner is finished; stop now.`;
         setTimeout(() => { try { ctx.shutdown?.(); } catch { try { ctx.abort?.(); } catch {} } }, 25).unref?.();

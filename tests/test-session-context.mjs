@@ -187,22 +187,27 @@ try {
   }, {
     env,
     sessionContext: resumedBoundary,
-    async prepareDone(_run, _cwd, statePath) {
+    async prepareDone(_run, _cwd, statePath, _ref, options) {
       preparedPath = statePath;
-      return { task: { id: "T-1" }, look: 1 };
+      assert.deepEqual(options.callerContext, resumedBoundary.resolve(childCtx));
+      return { runtime: "dsh", task: { id: "T-1" }, look: 0, ref: "native-ref", runnerSession: childId };
     },
-    launchReview(statePath) { launchedPath = statePath; return 42; },
+    launchReview(statePath) { launchedPath = statePath; throw new Error("native done must not launch review"); },
   });
   const done = reviewTools.find((tool) => tool.name === "done");
   const parentDone = await done.execute("parent", { ref: "HEAD" }, undefined, undefined, parentCtx);
   assert.equal(parentDone.details.status, "refused");
+  let childShutdowns = 0;
   const childDone = await done.execute("child", { ref: "HEAD" }, undefined, undefined, {
     ...childCtx,
-    shutdown() {},
+    shutdown() { childShutdowns += 1; },
   });
-  assert.equal(childDone.details.status, "reviewing");
+  assert.equal(childDone.details.status, "submitted");
+  assert.equal(childDone.details.runtime, "dsh");
   assert.equal(preparedPath, childRunState);
-  assert.equal(launchedPath, childRunState);
+  assert.equal(launchedPath, undefined);
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(childShutdowns, 0);
 } finally {
   await rm(temporary, { recursive: true, force: true });
 }

@@ -164,7 +164,13 @@
       "id": "approved-native-delegation-launch",
       "basis": "exact-installed-profile-production-dispatch-and-fresh-host-proof",
       "verdict": "post-approval-native-launch-proven",
-      "fact": "An explicitly composed qq DSH launch adapter drives the production board dispatch after an injected approved gate. It reuses qq's branch/worktree/OpenWiki protection, creates a host-owned bootstrap parent in that worktree, claims the exact runner profile and run-state context before startContinuable(spawn), and marks the runtime-discriminated handoff running only after flushing any live child Session and sessionPersistence.inspect confirms the returned message id and bootstrap marker without waiting for child settlement. A fresh DSH host reconstructs both recorded identities and contexts, observes one bootstrap injection, and resumes the exact parent. The proof asks the child not to call the deliberately unwired native done path and removes its disposable worktree/repository/state."
+      "fact": "An explicitly composed qq DSH launch adapter drives the production board dispatch after an injected approved gate. It reuses qq's branch/worktree/OpenWiki protection, creates a host-owned bootstrap parent in that worktree, claims the exact runner profile and run-state context before startContinuable(spawn), and marks the runtime-discriminated handoff running only after flushing any live child Session and sessionPersistence.inspect confirms the returned message id and bootstrap marker without waiting for child settlement. The private bootstrap carries a durable runtime-discriminated approval record into the handoff. A fresh DSH host reconstructs both recorded identities and contexts, observes one bootstrap injection, and resumes the exact parent."
+    },
+    {
+      "id": "native-runner-submission",
+      "basis": "exact-installed-profile-production-done-and-fresh-host-proof",
+      "verdict": "durable-awaiting-native-review-proven",
+      "fact": "The approved native prompt asks the exact DSH child to call qq done with its committed ref. Production done validates the child-owned private session context, approval, delegated real worktree, clean status, shared descendant commit, and then records status submitted with runtime dsh, look 0, and the exact architect/bootstrap-parent/runner/run-state/worktree continuation tuple. It does not launch a review worker, consume a look, stop the shared host, drain or dispose the live child, create a proposal, or land. A second process using the same installed DSH profile reconstructs the cold child context and exact submitted ref/worktree handoff; native QA continuation remains deliberately unwired."
     },
     {
       "id": "herdr-launch",
@@ -207,7 +213,7 @@
     "operator_cutover": "blocked",
     "native_translation_started": true,
     "blockers": [
-      "native runner completion into review and QA",
+      "native QA composition, look continuity, proposal, and landing",
       "DSH transcript and scrub semantics",
       "qq model-policy routes in the DSH model directory",
       "read-tool ownership without disabling the host filesystem bundle",

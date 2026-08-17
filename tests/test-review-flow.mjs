@@ -13,6 +13,8 @@ const qaResult = await import(pathToFileURL(join(root, "extensions/qa-result.ts"
 
 const piArchitectSession = "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9";
 const dshArchitectSession = "session-4b70f906-ce0a-4135-bc9e-b231db9b98b1";
+const dshBootstrapParent = "session-1bfba388-5ac3-492a-a578-a4e05a32d790";
+const dshRunnerSession = "621eeb4e-3796-4d58-92d2-9a45e4f133b0";
 assert.equal(runEvents.runEventRecipient(piArchitectSession), `qq/review-flow/${piArchitectSession}`);
 assert.equal(runEvents.runEventRecipient(dshArchitectSession), `qq/review-flow/${dshArchitectSession}`, "the complete DSH session ID was not preserved as the run outcome address");
 assert.throws(() => runEvents.runEventRecipient(`session-${piArchitectSession}`), /canonical architect session ID/, "a non-v4 prefixed UUID was accepted as a DSH session ID");
@@ -58,10 +60,24 @@ try {
     notePath: join(scratch, "note.md"), gatePath: join(scratch, "gate.md"), statePath,
     qa: { provider: "openai-codex", model: "gpt-5.6-sol", effort: "xhigh" },
   };
-  await runLib.atomicPrivateJson(statePath, { ...base, runtime: "dsh", pane: undefined });
+  const nativeApproval = {
+    schema: runLib.DSH_RUN_APPROVAL_SCHEMA, runtime: "dsh", status: "approved",
+    runId: base.id, taskId: base.task.id,
+    architectSession: dshArchitectSession, approvedAt: "2026-08-16T10:00:00.000Z",
+  };
+  const nativeState = {
+    ...base, runtime: "dsh", pane: undefined,
+    callerSession: dshArchitectSession, bootstrapParentSession: dshBootstrapParent,
+    runnerSession: dshRunnerSession, runnerProfile: { name: "dsh-runner" },
+  };
+  const nativeCaller = {
+    schema: "qq.session-context/v1", sessionId: dshRunnerSession,
+    role: "runner", profile: "dsh-runner", runState: statePath, source: "dsh-session",
+  };
+  await runLib.atomicPrivateJson(statePath, nativeState);
   await assert.rejects(
-    review.prepareDone(async () => assert.fail("native done must stop before command execution"), worktree, statePath, "HEAD"),
-    /native DSH runner completion is not wired to review yet/,
+    review.prepareDone(async () => assert.fail("unapproved native done must stop before command execution"), worktree, statePath, "HEAD", { callerContext: nativeCaller }),
+    /no durable approved gate record/,
   );
   await runLib.atomicPrivateJson(statePath, base);
   const calls = [];
@@ -76,6 +92,44 @@ try {
     if (command === "git" && args[0] === "for-each-ref") return { code: 0, stdout: "origin\0refs/heads/main\n", stderr: "" };
     return { code: 0, stdout: "", stderr: "" };
   };
+  await runLib.atomicPrivateJson(statePath, { ...nativeState, approval: nativeApproval });
+  const callsBeforeWrongRunner = calls.length;
+  await assert.rejects(
+    review.prepareDone(run, worktree, statePath, "HEAD", { callerContext: { ...nativeCaller, sessionId: "c24ee08f-0824-4dfa-b123-d2f04bcec9d7" } }),
+    /exact owned native DSH runner session/,
+  );
+  assert.equal(calls.length, callsBeforeWrongRunner);
+  await assert.rejects(review.prepareDone(async (command, args, options) => {
+    if (command === "git" && args[0] === "rev-parse" && options.cwd === mainRoot) {
+      return { code: 1, stdout: "", stderr: "unknown commit" };
+    }
+    return run(command, args, options);
+  }, worktree, statePath, "HEAD", { callerContext: nativeCaller }), /ref is not shared with the delegated repository/);
+  assert.equal((await runLib.readHandoff(statePath)).status, "running");
+  await assert.rejects(review.prepareDone(async (command, args, options) => {
+    if (command === "git" && args[0] === "status") return { code: 0, stdout: "?? residue.txt\n", stderr: "" };
+    return run(command, args, options);
+  }, worktree, statePath, "HEAD", { callerContext: nativeCaller }), /worktree is not clean/);
+  assert.equal((await runLib.readHandoff(statePath)).status, "running");
+  const submitted = await review.prepareDone(run, worktree, statePath, "HEAD", { callerContext: nativeCaller });
+  assert.equal(submitted.status, "submitted");
+  assert.equal(submitted.look, 0, "native submission must not consume a QA look");
+  assert.equal(submitted.ref, "refsha");
+  assert.deepEqual(submitted.submission, {
+    schema: review.DSH_RUN_SUBMISSION_SCHEMA, runtime: "dsh", ref: "refsha",
+    awaiting: "native-review", submittedAt: submitted.updatedAt,
+    continuation: {
+      architectSession: dshArchitectSession,
+      bootstrapParentSession: dshBootstrapParent,
+      runnerSession: dshRunnerSession,
+      runState: statePath,
+      worktree,
+    },
+  });
+  assert.equal((await runLib.readHandoff(statePath)).status, "submitted", "fresh readers must recover the native submission");
+  assert.ok(calls.some(({ args }) => args[0] === "merge-base"));
+
+  await runLib.atomicPrivateJson(statePath, base);
   const prepared = await review.prepareDone(run, worktree, statePath, "HEAD");
   assert.equal(prepared.look, 1);
   assert.equal(prepared.status, "reviewing");
@@ -257,11 +311,44 @@ try {
   assert.equal(tools.some(({ name }) => name === "review"), false);
   const done = tools.find(({ name }) => name === "done");
   const outcome = await done.execute("d", { ref: "HEAD" }, undefined, undefined, { cwd: worktree, shutdown() { shutdowns += 1; }, abort() { throw new Error("done should shut down, not abort"); } });
-  assert.equal(outcome.details.status, "reviewing");
-  assert.equal(outcome.details.worker_pid, 99);
+  const piDoneMessage = `Submitted ${prepared.task.id} to qa look 1. The runner is finished; stop now.`;
+  assert.deepEqual(outcome, {
+    content: [{ type: "text", text: piDoneMessage }],
+    details: { status: "reviewing", look: 1, worker_pid: 99, state_path: statePath, message: piDoneMessage },
+  }, "Pi/Herdr done result changed");
   assert.equal(launched, statePath);
   await new Promise((resolve) => setTimeout(resolve, 40));
   assert.equal(shutdowns, 1);
+
+  await runLib.atomicPrivateJson(statePath, { ...nativeState, approval: nativeApproval });
+  const nativeTools = [];
+  let nativeReviewLaunches = 0;
+  let nativeShutdowns = 0;
+  let nativeAborts = 0;
+  extension.default({
+    registerTool(tool) { nativeTools.push(tool); },
+    events: { on() {} },
+    on() {},
+    exec: run,
+  }, {
+    env: {}, exec: run,
+    sessionContext: { resolve() { return nativeCaller; } },
+    launchReview() { nativeReviewLaunches += 1; throw new Error("native submission must not launch QA"); },
+  });
+  const nativeDone = nativeTools.find(({ name }) => name === "done");
+  const nativeOutcome = await nativeDone.execute("native-d", { ref: "HEAD" }, undefined, undefined, {
+    cwd: worktree,
+    shutdown() { nativeShutdowns += 1; },
+    abort() { nativeAborts += 1; },
+  });
+  assert.equal(nativeOutcome.details.status, "submitted");
+  assert.equal(nativeOutcome.details.runtime, "dsh");
+  assert.equal(nativeOutcome.details.awaiting, "native-review");
+  assert.equal(nativeOutcome.details.runner_session, dshRunnerSession);
+  assert.equal(nativeReviewLaunches, 0);
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(nativeShutdowns, 0, "native done must not shut down the shared host");
+  assert.equal(nativeAborts, 0, "native done must not abort the shared host");
 
   const verdictTools = [];
   let written;
