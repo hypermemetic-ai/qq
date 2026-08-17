@@ -65,10 +65,12 @@ main { min-height: 0; }
 }
 
 .session-heading {
-  display: flex;
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 1rem;
-  justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   padding: 1.25rem 1.5rem;
   border-bottom: 1px solid #253039;
 }
@@ -110,25 +112,75 @@ code {
   white-space: nowrap;
 }
 
-.status span {
+.status-dot {
   width: .48rem;
   height: .48rem;
   border-radius: 50%;
   background: currentColor;
 }
 
+.status-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .status-running { color: #f7ce74; border-color: #514526; background: #201c10; }
 .status-error, .status-stopped { color: #ffaaa4; border-color: #59302e; background: #231413; }
 
+.session-menu { flex: none; }
+
+.session-menu > summary {
+  display: flex;
+  min-height: 2.5rem;
+  align-items: center;
+  gap: .5rem;
+  padding: .45rem .7rem;
+  border: 1px solid #34414b;
+  border-radius: .55rem;
+  background: #151d23;
+  color: #dce4e9;
+  cursor: pointer;
+  font-size: .76rem;
+  font-weight: 750;
+  list-style: none;
+}
+
+.session-menu > summary::-webkit-details-marker { display: none; }
+
+.session-menu > summary::after {
+  width: .42rem;
+  height: .42rem;
+  border-right: 2px solid #70d8c1;
+  border-bottom: 2px solid #70d8c1;
+  content: "";
+  transform: translateY(-.12rem) rotate(45deg);
+}
+
+.session-menu[open] > summary {
+  border-color: #4b9e8b;
+  background: #12231f;
+  color: #dffbf3;
+}
+
+.session-menu[open] > summary::after { transform: translateY(.12rem) rotate(225deg); }
+.session-menu:not([open]) > .session-controls { display: none; }
+
 .session-controls {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + .5rem);
+  right: 1.5rem;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  flex: none;
+  width: min(40rem, calc(100% - 3rem));
   align-items: center;
   gap: .65rem;
-  padding: .65rem 1.5rem;
-  border-bottom: 1px solid #253039;
+  padding: .65rem;
+  border: 1px solid #34414b;
+  border-radius: .7rem;
   background: #0c1115;
+  box-shadow: 0 1rem 3rem rgba(0, 0, 0, .45);
 }
 
 .session-picker {
@@ -414,43 +466,40 @@ body > footer {
 .offline-message a { color: #72d7c0; }
 
 @media (max-width: 42rem) {
-  body { grid-template-rows: auto minmax(0, 1fr); }
-  .site-header, main { width: 100%; }
-  .site-header {
-    min-height: 2.75rem;
-    padding-inline: max(.85rem, env(safe-area-inset-left)) max(.85rem, env(safe-area-inset-right));
-    font-size: .72rem;
-  }
-  body > footer { display: none; }
-  .session-panel { border: 0; border-top: 1px solid #253039; border-radius: 0; }
+  body { grid-template-rows: minmax(0, 1fr); }
+  main { width: 100%; }
+  .site-header, body > footer { display: none; }
+  .session-panel { border: 0; border-radius: 0; }
   .session-heading {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: .65rem;
-    padding: .65rem .85rem;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: .45rem;
+    padding: max(.45rem, env(safe-area-inset-top)) max(.65rem, env(safe-area-inset-right)) .45rem max(.65rem, env(safe-area-inset-left));
   }
   .session-heading .eyebrow { display: none; }
-  .session-heading h1 { margin-bottom: .18rem; font-size: 1.05rem; }
+  .session-heading h1 { margin-bottom: .12rem; font-size: 1rem; }
   .session-heading code {
     display: block;
-    max-width: 13rem;
+    max-width: min(48vw, 13rem);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .status {
-    max-width: 10rem;
-    min-height: 2.25rem;
+    max-width: 6.5rem;
+    min-height: 2.75rem;
     margin-top: 0;
     padding: .35rem .55rem;
     overflow: hidden;
     font-size: .68rem;
-    text-overflow: ellipsis;
   }
+  .session-menu > summary { min-height: 2.75rem; padding-inline: .6rem; }
   .session-controls {
+    top: 100%;
+    right: max(.65rem, env(safe-area-inset-right));
+    width: auto;
+    left: max(.65rem, env(safe-area-inset-left));
     gap: .5rem;
-    padding: .5rem .85rem;
+    padding: .5rem;
   }
   .session-picker { gap: .4rem; }
   .session-picker label span { display: none; }
@@ -466,21 +515,22 @@ body > footer {
   .turn-error code { grid-column: 2; grid-row: 1; }
   .transcript {
     gap: .7rem;
-    padding: .75rem .85rem;
+    padding: .65rem max(.65rem, env(safe-area-inset-right)) .5rem max(.65rem, env(safe-area-inset-left));
     scrollbar-gutter: auto;
   }
   .message { width: 100%; padding: .7rem .75rem; }
   .message time { display: none; }
   .message-text { line-height: 1.45; }
   .composer {
-    padding: .65rem max(.85rem, env(safe-area-inset-right)) max(.65rem, env(safe-area-inset-bottom)) max(.85rem, env(safe-area-inset-left));
+    padding: .45rem max(.65rem, env(safe-area-inset-right)) max(.3rem, env(safe-area-inset-bottom)) max(.65rem, env(safe-area-inset-left));
   }
   .composer label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .composer-row { gap: .5rem; }
   .composer textarea { min-height: 2.75rem; max-height: 8rem; padding: .6rem .7rem; resize: none; }
   .composer button { min-height: 2.75rem; padding-inline: .9rem; }
-  .composer-actions { margin-top: .5rem; }
-  .composer-meta { margin-top: .3rem; }
+  .composer-actions { margin-top: .35rem; }
+  .composer:not(.htmx-request) .composer-meta { display: none; }
+  .composer.htmx-request .composer-meta { margin-top: .25rem; }
   .interrupt-composer { align-items: center; }
   .interrupt-composer .composer-actions { justify-content: flex-end; }
   .key-hint { display: none; }
@@ -491,15 +541,13 @@ body > footer {
 }
 
 @media (max-height: 36rem) and (max-width: 42rem) {
-  body { grid-template-rows: minmax(0, 1fr); }
-  .site-header { display: none; }
-  .session-heading { padding-block: .45rem; }
+  .session-heading { padding-block: max(.35rem, env(safe-area-inset-top)) .35rem; }
   .session-heading code { display: none; }
   .session-controls { padding-block: .4rem; }
   .session-picker select,
   .session-controls button { min-height: 2.75rem; height: 2.75rem; }
   .notice { font-size: .74rem; }
-  .composer { padding-top: .45rem; }
+  .composer { padding-top: .35rem; }
   .composer textarea,
   .composer button { min-height: 2.75rem; }
 }

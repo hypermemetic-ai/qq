@@ -146,25 +146,28 @@ export function deriveStatus(events, agentStatus) {
 
 function sessionNavigation(snapshot, paths) {
   const choices = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
-  return `<div class="session-controls" role="group" aria-label="Session controls">
-    <form class="session-picker" action="${escapeHtml(paths.switchSession)}" method="get">
-      <label for="session-choice">Session <span>${choices.length} durable</span></label>
-      <select id="session-choice" name="session" required>
-        ${choices.map((session) => {
-          const current = session.id === snapshot.id;
-          const created = Number.isFinite(session.createdAt) && session.createdAt > 0
-            ? eventTime(session.createdAt).slice(0, 10)
-            : "durable";
-          const label = `${current ? "Current · " : ""}${created} · ${session.id}`;
-          return `<option value="${escapeHtml(session.id)}"${current ? " selected" : ""}>${escapeHtml(label)}</option>`;
-        }).join("")}
-      </select>
-      <button type="submit">Open</button>
-    </form>
-    <form class="new-session" action="${escapeHtml(paths.createSession)}" method="post">
-      <button type="submit" aria-label="Start a new durable DSH session">New <span>session</span></button>
-    </form>
-  </div>`;
+  return `<details class="session-menu">
+    <summary aria-label="Show session controls"><span>Sessions</span></summary>
+    <div class="session-controls" role="group" aria-label="Session controls">
+      <form class="session-picker" action="${escapeHtml(paths.switchSession)}" method="get">
+        <label for="session-choice">Session <span>${choices.length} durable</span></label>
+        <select id="session-choice" name="session" required>
+          ${choices.map((session) => {
+            const current = session.id === snapshot.id;
+            const created = Number.isFinite(session.createdAt) && session.createdAt > 0
+              ? eventTime(session.createdAt).slice(0, 10)
+              : "durable";
+            const label = `${current ? "Current · " : ""}${created} · ${session.id}`;
+            return `<option value="${escapeHtml(session.id)}"${current ? " selected" : ""}>${escapeHtml(label)}</option>`;
+          }).join("")}
+        </select>
+        <button type="submit">Open</button>
+      </form>
+      <form class="new-session" action="${escapeHtml(paths.createSession)}" method="post">
+        <button type="submit" aria-label="Start a new durable DSH session">New <span>session</span></button>
+      </form>
+    </div>
+  </details>`;
 }
 
 function composer(paths, running) {
@@ -212,9 +215,9 @@ export function renderSessionContent(snapshot, paths, notice = "") {
         <h1 id="session-heading">Operator console</h1>
         <code>${escapeHtml(snapshot.id)}</code>
       </div>
-      <p class="status status-${escapeHtml(status.key)}" role="status"><span aria-hidden="true"></span>${escapeHtml(status.label)}</p>
+      <p class="status status-${escapeHtml(status.key)}" role="status"><span class="status-dot" aria-hidden="true"></span><span class="status-label">${escapeHtml(status.label)}</span></p>
+      ${sessionNavigation(snapshot, paths)}
     </div>
-    ${sessionNavigation(snapshot, paths)}
     ${status.detail ? `<p class="notice turn-error" role="alert"><strong>${escapeHtml(status.label)}</strong><span>${escapeHtml(status.detail)}</span>${status.code ? `<code>${escapeHtml(status.code)}</code>` : ""}</p>` : ""}
     ${notice ? `<p class="notice" role="alert">${escapeHtml(notice)}</p>` : ""}
     <div id="transcript" class="transcript" aria-live="polite" aria-label="Session transcript" hx-history="false">

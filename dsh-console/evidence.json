@@ -46,8 +46,9 @@
       "The SSE owner and target retained object identity across four messages in the Send plus Interrupt flow",
       "An Interrupt form inserted by SSE submitted successfully without htmx.process",
       "Forced closure reconnected from one to two total SSE connections and delivered a complete fifth message",
-      "The exact 390x844 viewport exposed the session selector, Open, New session, prompt, and inline Send with no horizontal overflow",
-      "A 390x520 reduced-height viewport kept the main surface full-height and the composer at its bottom edge",
+      "At the Pixel 10-sized 412x915 viewport only the consolidated identity/status/Sessions bar was visible by default; tapping Sessions disclosed the selector, Open, and New session controls without horizontal overflow",
+      "The inline composer ended exactly at the 412x915 safe-area edge, and a 412x520 reduced-height viewport kept the panel and composer at its bottom edge",
+      "A canonical page controlled by sw-v4.js and cache v4 used the existing Open action to navigate without a manual reload, immediately rendered console-v4.css, activated sw-v5.js, and removed the old cache",
       "Literal script markup rendered as text and did not execute",
       "The manifest, service worker, disconnected shell, and offline POST refusal passed"
     ],
