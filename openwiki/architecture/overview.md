@@ -7,7 +7,7 @@ tags: [architecture, runtime, ownership]
 
 # System topology and ownership
 
-qq is a private ESM package and an operator-controlled orchestration layer around Pi. It owns policy, extensions, shell and Node entrypoints, workers, and local state contracts. It does not own the Herdr, qq-relay, or dashboard product implementations.
+qq is a private ESM package and an operator-controlled orchestration layer around Pi. It owns policy, extensions, shell and Node entrypoints, workers, local state contracts, and an isolated DSH web-console proof. It does not own the Herdr, qq-relay, dashboard, pi2dsh, or DSH product implementations. The [DSH compatibility harness](../runtime/dsh-compatibility.md) is evidence, not a production runtime cutover.
 
 ## Component topology
 
@@ -24,6 +24,7 @@ flowchart TD
     Bundle --> Workflow["board and review"]
     Bundle --> Safety["safety and context"]
     Profiles --> Policy["execution-profiles.json"]
+    Profiles --> SessionContext["per-host session context"]
     Messaging --> Relay["installed qq-relay service"]
     Workflow --> Workers["start, review, and land workers"]
     MethodCLI --> GitConfig["repository Git config"]
@@ -31,6 +32,8 @@ flowchart TD
     HerdrClient --> HerdrServer["external Herdr product"]
     DashboardWrapper --> DashboardPackage["installed dashboard artifact"]
     DashboardPackage --> ProfileCLI
+    DshHost["pinned DSH host"] --> Bundle
+    DshConsole["qq DSH console"] --> DshHost
     Timer["systemd timer"] --> OpenWikiService["OpenWiki service"]
     OpenWikiService --> Generated["openwiki output"]
 ```
@@ -52,7 +55,7 @@ flowchart TD
 9. `registerBoard`
 10. `registerReviewFlow`
 
-The order makes profile activation the composition root and installs qq's replacement `read` before workflow tools. On profile application, `extensions/execution-profiles.ts` emits `qq:role-selected` with `{ role, profile }`. Messaging updates presence, the board gates architect-only tools, and review flow starts or stops architect run-event reception from that event. The Grok guard can also emit the event when selecting its fallback. The standalone QA-result surface is intentionally not registered globally; review workers invoke isolated QA behavior instead. See [repository activation and execution policy](../runtime/profiles-and-activation.md), [agent messaging](../event-plane/agent-messaging.md), [delegation and review](../workflow/delegation-and-review.md), and [safety and context](../extensions/safety-and-context.md).
+The order makes profile activation the composition root and installs qq's replacement `read` before workflow tools. `registerQQ` creates one `createQqSessionContext()` instance and shares it with profiles, board, and review flow so DSH parent/child sessions do not leak role or run ownership through process-global state. On profile application, `extensions/execution-profiles.ts` emits `qq:role-selected` with `{ role, profile }` and, for DSH, `sessionId`. Messaging updates presence, the board gates architect-only tools, and review flow starts or stops the matching architect session's run-event reception from that event. The Grok guard can also emit the event when selecting its fallback. The standalone QA-result surface is intentionally not registered globally; review workers invoke isolated QA behavior instead. See [repository activation and execution policy](../runtime/profiles-and-activation.md), [agent messaging](../event-plane/agent-messaging.md), [delegation and review](../workflow/delegation-and-review.md), and [safety and context](../extensions/safety-and-context.md).
 
 ## Process boundaries and responsibilities
 
@@ -74,7 +77,8 @@ Herdr's service launches `%h/.local/lib/qq/herdr/bin/herdr server`, logs under `
 | Repository common local Git config, `qq.methodology` | `qq-methodology`; the activation marker is local and shared by linked worktrees, never clones |
 | `~/.config/qq/execution-profiles.json` | qq profile policy; owner-only, non-symlink regular file with schema `qq.execution-profiles/v1` |
 | `~/.local/state/qq/store/<project>/` and checkout `backlog` symlink | `qq-methodology` and Backlog.md; data is outside Git and `auto_commit` is false |
-| `${XDG_STATE_HOME:-~/.local/state}/qq/pane-profiles/<pane>.json` | profile extension; owner-only pane-local role/profile selection |
+| `${XDG_STATE_HOME:-~/.local/state}/qq/pane-profiles/<pane>.json` | profile extension; owner-only pane-local role/profile selection for Pi/Herdr |
+| `${XDG_STATE_HOME:-~/.local/state}/qq/session-contexts/<session>.json` | shared host boundary; owner-only DSH role/profile/run ownership, one exact record per canonical parent or claimed child session |
 | `${XDG_STATE_HOME:-~/.local/state}/qq-relay/` | qq-relay-owned service state and `qq-relay.sock`; qq consumers connect but do not manage it |
 | `${XDG_STATE_HOME:-~/.local/state}/qq/agent-messages/presence/` | Agent-messaging extension; ephemeral private presence leases, separate from relay state |
 | `~/.local/state/qq/telemetry/` | Dashboard contract; preserve usage caches and cookie snapshot across installs and upgrades |
@@ -94,6 +98,8 @@ Do not move external Backlog or telemetry state into the repository. Generated O
 | Activate or inspect Herdr integration | `bin/qq-herdr-activate`, `bin/qq-herdr-smoke` | Does not build Herdr |
 | Start, review, or land a delegated run | `bin/qq-start-worker.mjs`, `bin/qq-review-worker.mjs`, `bin/qq-land-worker.mjs` | Internal workers consume private bootstrap or handoff JSON paths; they are not normal operator entrypoints |
 | Refresh generated wiki | `bin/qq-openwiki-service` | Reads the `openwiki` service profile then dispatches refreshes |
+| Exercise the pinned DSH host | `compat/pi2dsh/run.sh` | Compatibility-only harness; see [DSH compatibility](../runtime/dsh-compatibility.md) |
+| Run the DSH web-console proof | DSH profile configured by `dsh-console/configure-profile.mjs` | Loopback-only, sequential use; see [DSH console](../runtime/dsh-console.md) |
 | Load Pi extensions | `extensions/index.ts` | Default export `registerQQ(pi)` |
 | Invoke the host Pi installation | `bin/pi` | Host-local compatibility shim that hard-codes `/home/qqp/.local/bin/pi`; it is not a portable installer and has no focused local test |
 
