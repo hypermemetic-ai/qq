@@ -155,6 +155,12 @@
       "fact": "Two isolated host processes use @deepseek-ai/dsh-subagent rc.6 with the mounted spawn provider and one parent created in a disposable Git worktree. The first { childId, messageId } is treated only as inbox acceptance; after the child Agent and Session unregister, a cold sessionPersistence.inspect proves that exact bootstrap id and content durable under the spawn continuable descriptor. A fresh host resumes the exact persisted direct parent, observes the child cold, follows up through ctx.subagents, and proves the second accepted id durable through the same cold DSH persistence boundary. The temporary worktree is removed and main is unchanged."
     },
     {
+      "id": "qq-session-context",
+      "basis": "exact-pinned-dsh-runtime-and-private-session-ownership-records",
+      "verdict": "architect-runner-isolation-and-cold-resume-proven",
+      "fact": "The qq-owned context boundary keys private durable records by DSH's canonical parent session-<UUID> and continuable-child bare UUID identities. In each host, agents.currentInitiator resolves the architect parent to its own role/profile with no run state and the runner child to a distinct role/profile/run-state path during actual requests. A fresh host restores both records before cold child continuation; no process-global context map or inherited QQ_RUN_STATE supplies either identity. Pi and Herdr continue to use environment and pane-profile fallback."
+    },
+    {
       "id": "herdr-launch",
       "basis": "qq-source-audit",
       "verdict": "outside-extension-abi",

@@ -6,7 +6,7 @@ This is an isolated compatibility harness, not an operator-runtime cutover. It m
 
 | Project | Package | Exact source revision | Package integrity |
 |---|---|---|---|
-| qq | local checkout | [`58701b91d41237001c5b0abdc78ec45ba3bc1211`](https://github.com/hypermemetic-ai/qq/commit/58701b91d41237001c5b0abdc78ec45ba3bc1211) | n/a |
+| qq | local checkout | [`1a3141157757742e20bf582381e03e3f9d46b102`](https://github.com/hypermemetic-ai/qq/commit/1a3141157757742e20bf582381e03e3f9d46b102) | n/a |
 | pi2dsh | `pi2dsh@0.12.3` | [`7420aac0f6b5513e056c44c099527ddee0d705f0`](https://github.com/weijiafu14/pi2dsh/commit/7420aac0f6b5513e056c44c099527ddee0d705f0) | `sha512-GDvzm9m9QIlEvSd9g6txZ7emKMbYCU++qFwoLgaz+qMq6sO39oe6OL839IIaU5KGfm6yKEet97tUSL5GgZpukA==` |
 | DeepSeek Harness | `@deepseek-ai/dsh@0.1.0-rc.6` | [`47f943859bef60e4160492346772ded9b24f765a`](https://github.com/deepseek-ai/deepseek-harness/commit/47f943859bef60e4160492346772ded9b24f765a) | `sha512-brpZfED7ieRa2PQ5tUxMhHrM1pb2CmKFVM/f6yMULBDMicahk+Z2OsHgTwTDnoiZm23Ftu9rQz0NN4pflaoJcg==` |
 | DSH continuable service | `@deepseek-ai/dsh-subagent@0.1.0-rc.6` | same DSH revision | `sha512-vROmBDAlaFAzzSlTBOlvg/7fO55zxhUztnLtB3lKmN5RevrNQBjTsbeIMDQ8ow5ZplxEOnLU+sikFoA5JaoH8A==` |
@@ -96,7 +96,8 @@ The complete machine-readable record is [`evidence.json`](evidence.json). At thi
 - agent-message acknowledgement uses `ctx.sessionManager.getEntries()` as its only persistence authority; the pinned runtime probe observes the real relay's retry and redelivery, one bridged plugin-sourced `user/message`, and acknowledgement only after that durable record appears;
 - review-flow acknowledgement also uses host-managed entries without a session-file fallback; regression tests prove Pi custom-message and DSH user-message projections, while the pinned runtime probe observes a pending retry, safe redelivery without duplicate injection, and delivery only after the run outcome is durable;
 - qq's load-time client resolver works under pi2dsh against the privately installed artifact after relay source deletion, and final agent-message status is delivered without changing the exact `session-<UUID>` identity;
-- the exact rc.6 `dsh-subagent` service and in-process `spawn` provider accept a private bootstrap into a durable child Session under a parent whose workspace is a disposable worktree; a cold DSH persistence inspection, not the returned ids, proves the bootstrap durable, and a fresh host restores the exact direct parent and cold-resumes that child for a separately proven durable follow-up.
+- the exact rc.6 `dsh-subagent` service and in-process `spawn` provider accept a private bootstrap into a durable child Session under a parent whose workspace is a disposable worktree; a cold DSH persistence inspection, not the returned ids, proves the bootstrap durable, and a fresh host restores the exact direct parent and cold-resumes that child for a separately proven durable follow-up;
+- qq's private session-context records and DSH's explicit `agents.currentInitiator()` boundary resolve that parent as architect with no run state and the continuable child as a distinct runner/profile/run-state context in both hosts; Pi/Herdr retain environment and pane-profile fallback.
 
 The collision, model refusal, and session-id activation are runtime observations from the DSH boot, not static predictions.
 
