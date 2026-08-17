@@ -1,19 +1,21 @@
 "use strict";
 
 const CACHE_PREFIX = "qq-dsh-console-static-";
-const CACHE_NAME = `${CACHE_PREFIX}v5`;
+const CACHE_NAME = `${CACHE_PREFIX}v6`;
 const scopePath = new URL(self.registration.scope).pathname.replace(/\/$/, "");
 const staticPaths = [
   `${scopePath}/assets/htmx-2.0.10.min.js`,
   `${scopePath}/assets/htmx-ext-sse-2.2.4.js`,
-  `${scopePath}/assets/console-v4.css`,
+  `${scopePath}/assets/console-v5.css`,
+  `${scopePath}/assets/geist-latin-wght-normal-5.3.0.woff2`,
+  `${scopePath}/assets/geist-latin-wght-italic-5.3.0.woff2`,
   `${scopePath}/assets/browser-v3.js`,
   `${scopePath}/assets/icon-v1-192.png`,
   `${scopePath}/assets/icon-v1-512.png`,
-  `${scopePath}/assets/offline-v4.html`,
+  `${scopePath}/assets/offline-v5.html`,
 ];
 const staticPathSet = new Set(staticPaths);
-const offlinePath = `${scopePath}/assets/offline-v4.html`;
+const offlinePath = `${scopePath}/assets/offline-v5.html`;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

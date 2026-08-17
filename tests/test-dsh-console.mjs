@@ -263,6 +263,7 @@ try {
   const home = await request("/qq", { headers: { cookie: "proof-client=home" } });
   assert.equal(home.status, 200);
   assert.match(home.headers["cache-control"], /no-store/);
+  assert.match(home.headers["content-security-policy"], /font-src 'self'/);
   assert.match(home.body, /^<!doctype html>/);
   assert.match(home.body, /interactive-widget=resizes-content/);
   assert.match(home.body, new RegExp(`id="console-stream"[^>]*hx-ext="sse"[^>]*sse-connect="/qq/session/${primaryId}/events"`));
@@ -270,7 +271,8 @@ try {
   assert.match(home.body, /htmx-2\.0\.10\.min\.js/);
   assert.match(home.body, /htmx-ext-sse-2\.2\.4\.js/);
   assert.match(home.body, /rel="manifest"/);
-  assert.match(home.body, /data-service-worker="\/qq\/sw-v5\.js"/);
+  assert.match(home.body, /console-v5\.css/);
+  assert.match(home.body, /data-service-worker="\/qq\/sw-v6\.js"/);
   assert.match(home.body, new RegExp(`<option value="${secondaryId}"`));
   assert.match(home.body, /This DSH session has no transcript yet/);
   assert.match(home.body, /<details class="session-menu">[\s\S]*<summary aria-label="Show session controls">/);
@@ -298,6 +300,9 @@ try {
   const completed = await stream.waitFor(/Durable reply 1/, mark);
   assert.match(completed, /home handoff &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.doesNotMatch(completed, /<script>alert\(1\)<\/script>/);
+  assert.match(completed, /class="message message-user"[^>]*aria-label="Your message at /);
+  assert.match(completed, /class="message message-assistant"[^>]*aria-label="Assistant message at /);
+  assert.doesNotMatch(completed, /<header>/);
   assert.match(completed, /<form id="composer"/);
   const firstPost = await firstPostPromise;
   assert.equal(firstPost.status, 200);
@@ -429,20 +434,33 @@ try {
   assert.equal(manifest.scope, "/qq/");
   assert.deepEqual(manifest.icons.map((icon) => icon.sizes), ["192x192", "512x512"]);
 
-  const worker = await request("/qq/sw-v5.js");
+  const worker = await request("/qq/sw-v6.js");
   assert.equal(worker.status, 200);
   assert.equal(worker.headers["service-worker-allowed"], "/qq/");
   assert.match(worker.body, /request\.method !== "GET"/);
   assert.match(worker.body, /request\.mode === "navigate"/);
-  assert.match(worker.body, /console-v4\.css/);
-  assert.match(worker.body, /offline-v4\.html/);
+  assert.match(worker.body, /console-v5\.css/);
+  assert.match(worker.body, /geist-latin-wght-normal-5\.3\.0\.woff2/);
+  assert.match(worker.body, /geist-latin-wght-italic-5\.3\.0\.woff2/);
+  assert.match(worker.body, /offline-v5\.html/);
   assert.match(worker.body, /self\.skipWaiting\(\)/);
   assert.match(worker.body, /name\.startsWith\(CACHE_PREFIX\) && name !== CACHE_NAME/);
   assert.doesNotMatch(worker.body, /session\/|\/prompt|\/events|\/interrupt|backgroundsync|indexedDB|localStorage/i);
-  const offline = await request("/qq/assets/offline-v4.html");
+  const offline = await request("/qq/assets/offline-v5.html");
   assert.match(offline.body, /No transcript is cached and no message can be sent offline/);
-  const staticCss = await request("/qq/assets/console-v4.css");
+  assert.match(offline.body, /console-v5\.css/);
+  const staticCss = await request("/qq/assets/console-v5.css");
   assert.match(staticCss.headers["cache-control"], /immutable/);
+  assert.match(staticCss.body, /@font-face/);
+  assert.match(staticCss.body, /font-family: "Geist UI"/);
+  assert.match(staticCss.body, /geist-latin-wght-normal-5\.3\.0\.woff2/);
+  assert.match(staticCss.body, /geist-latin-wght-italic-5\.3\.0\.woff2/);
+  const normalFont = await request("/qq/assets/geist-latin-wght-normal-5.3.0.woff2");
+  assert.equal(normalFont.headers["content-type"], "font/woff2");
+  assert.match(normalFont.headers["cache-control"], /immutable/);
+  const italicFont = await request("/qq/assets/geist-latin-wght-italic-5.3.0.woff2");
+  assert.equal(italicFont.headers["content-type"], "font/woff2");
+  assert.match(italicFont.headers["cache-control"], /immutable/);
 
   // Vendored pins and negative architecture constraints are machine checked.
   const [pins, consoleEvidence, dshPins, plugin, patch, workbench, modelCompat, browser, workerSource, renderSource] = await Promise.all([
@@ -454,7 +472,7 @@ try {
     readFile(join(root, "bin/qq-dsh-workbench"), "utf8"),
     readFile(join(root, "compat/pi2dsh/toolchain/qq-dsh-model-compat.mjs"), "utf8"),
     readFile(join(root, "dsh-console/assets/browser-v3.js"), "utf8"),
-    readFile(join(root, "dsh-console/assets/sw-v5.js"), "utf8"),
+    readFile(join(root, "dsh-console/assets/sw-v6.js"), "utf8"),
     readFile(join(root, "dsh-console/src/render.mjs"), "utf8"),
   ]);
   assert.equal(pins.schema, "qq.dsh-console-vendor-pins/v1");

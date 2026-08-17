@@ -45,7 +45,7 @@ All event content, session metadata, notices, and status text are HTML-escaped. 
 
 The manifest, standalone display metadata, 192/512 icons, and versioned service worker establish the smallest install boundary. They do **not** make DSH offline:
 
-- the cache allowlist contains exact versioned htmx/SSE/CSS/browser/icon assets and `offline-v4.html` only;
+- the cache allowlist contains exact versioned htmx/SSE/CSS/font/browser/icon assets and `offline-v5.html` only;
 - navigations always try the network and fall back only to the disconnected shell;
 - session documents, fragments, SSE, the manifest, service worker, and every mutation remain network-only;
 - non-GET requests are not intercepted;
@@ -113,7 +113,7 @@ QWEN_TOKEN_PLAN_API_KEY='...' tests/test-dsh-workbench-real.sh
 
 The fast test exercises session selection, send, two live SSE states, dynamically inserted interrupt, safe rendering, collapsed verbose context, normal/htmx forms, sequential home/laptop/phone reconstruction, PWA allowlisting, explicit model selection, and negative architecture checks. The deterministic live test starts through `bin/qq-dsh-workbench`, makes its provider stub reject any `developer` role, verifies an instruction-bearing turn arrives with `system`, creates and flushes a fresh empty session through the in-page action, reopens it after restart, sends and interrupts through the real Agent/Session APIs, verifies ordered reconstruction from DSH artifacts, and executes native DSH read/write/edit/grep/bash tools in the qq repository. The credential-gated smoke makes one real request to exact `qwen-token-plan/deepseek-v4-pro-0813`.
 
-On phone widths the page is a viewport-bounded app shell: one compact top bar owns identity, status, and a **Sessions** disclosure while the session selector and creation action stay hidden until that control is tapped. Transcript history scrolls independently with context/tool rows collapsed, and the one-row prompt plus inline 44px Send target sit tight to the safe-area bottom without scrolling the document.
+On phone widths the page is a viewport-bounded app shell: one compact top bar owns identity, status, and a **Sessions** disclosure while the session selector and creation action stay hidden until that control is tapped. Transcript history scrolls independently with context/tool rows collapsed, ordinary messages omit redundant visible author headers while retaining accessible authorship, and the one-row prompt plus inline 44px Send target sit directly on the usable bottom edge while preserving any safe-area inset. The UI uses Geist variable fonts vendored from `@fontsource-variable/geist@5.3.0` under the included SIL OFL license rather than relying on a device font.
 
 [`../compat/pi2dsh/WEB_QA.md`](../compat/pi2dsh/WEB_QA.md) records the real-browser proof: two SSE swaps preserve both node identities, the newly inserted Interrupt form works without manual processing, forced stream closure reconnects through the official extension, the Pixel 10-sized `412×915` interaction has one default top bar and no overflow, the composer remains bottom-aligned at reduced height, an existing v4 cache upgrades to v5 without a hard refresh, unsafe text stays inert, and the controlled PWA fails closed after the host stops.
 
