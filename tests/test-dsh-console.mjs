@@ -578,7 +578,7 @@ try {
   assert.match(italicFont.headers["cache-control"], /immutable/);
 
   // Vendored pins and negative architecture constraints are machine checked.
-  const [pins, consoleEvidence, dshPins, dshPkg, dshLock, qqPlugin, uiPlugin, qqSession, qqPkg, uiPkg, consolePkg, patch, workbench, modelCompat, browser, workerSource, renderSource] = await Promise.all([
+  const [pins, consoleEvidence, dshPins, dshPkg, dshLock, qqPlugin, uiPlugin, relayPlugin, relaySession, qqSession, qqPkg, uiPkg, relayPkg, consolePkg, patch, workbench, modelCompat, browser, workerSource, renderSource] = await Promise.all([
     readFile(join(root, "qq-ui/vendor-pins.json"), "utf8").then(JSON.parse),
     readFile(join(root, "dsh-console/evidence.json"), "utf8").then(JSON.parse),
     readFile(join(root, "dsh/pins.json"), "utf8").then(JSON.parse),
@@ -586,9 +586,12 @@ try {
     readFile(join(root, "dsh/package-lock.json"), "utf8").then(JSON.parse),
     readFile(join(root, "qq/src/plugin.mjs"), "utf8"),
     readFile(join(root, "qq-ui/src/plugin.mjs"), "utf8"),
+    readFile(join(root, "qq-relay/src/plugin.mjs"), "utf8"),
+    readFile(join(root, "qq-relay/src/relay.mjs"), "utf8"),
     readFile(join(root, "qq/src/session.mjs"), "utf8"),
     readFile(join(root, "qq/package.json"), "utf8").then(JSON.parse),
     readFile(join(root, "qq-ui/package.json"), "utf8").then(JSON.parse),
+    readFile(join(root, "qq-relay/package.json"), "utf8").then(JSON.parse),
     readFile(join(root, "dsh-console/package.json"), "utf8").then(JSON.parse),
     readFile(join(root, "dsh-console/cordis.patch.yml"), "utf8"),
     readFile(join(root, "bin/qq-dsh-workbench"), "utf8"),
@@ -629,11 +632,21 @@ try {
   assert.match(modelCompat, /QWEN_TOKEN_PLAN_MODELS\[model\][\s\S]*supportsDeveloperRole: false/);
   assert.equal(qqPkg.name, "@hypermemetic-ai/qq");
   assert.equal(uiPkg.name, "@hypermemetic-ai/qq-ui");
+  assert.equal(relayPkg.name, "@hypermemetic-ai/qq-relay");
   assert.equal(consolePkg.name, "@hypermemetic-ai/qq-dsh-console");
   assert.equal(uiPkg.dependencies["@hypermemetic-ai/qq"], "file:../qq");
+  assert.equal(consolePkg.dependencies["@hypermemetic-ai/qq-relay"], "file:../qq-relay");
   assert.equal(qqPkg.dependencies?.["@hypermemetic-ai/qq-ui"], undefined);
+  assert.equal(relayPkg.dependencies?.["@hypermemetic-ai/qq"], undefined);
+  assert.equal(qqPkg.dependencies?.["@hypermemetic-ai/qq-relay"], undefined);
   assert.match(patch, /name: '@hypermemetic-ai\/qq'/);
   assert.match(patch, /name: '@hypermemetic-ai\/qq-ui'/);
+  assert.match(patch, /name: '@hypermemetic-ai\/qq-relay'[\s\S]*inject: \[agents, sessions\]/);
+  assert.match(workbench, /qq_relay_package="\$root\/qq-relay"/);
+  assert.match(workbench, /linked\("@hypermemetic-ai\/qq-relay", relayPath\)/);
+  assert.match(relayPlugin, /ctx\.provide\("qq-relay", service\)/);
+  assert.doesNotMatch(relayPlugin, /from "\.\.\/qq"|qq-relay-install-root|qq-relay-client/);
+  assert.doesNotMatch(relaySession, /node:(child_process|net)|createServer|qq-relay-install-root|qq-relay-client/);
   assert.match(patch, /inject: \[qq, webServer\]/);
   assert.match(uiPlugin, /refusing a non-loopback web server/);
   assert.match(uiPlugin, /inject = \["qq", "webServer"\]/);

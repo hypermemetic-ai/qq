@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@hypermemetic-ai/qq": "file:../qq",
-    "@hypermemetic-ai/qq-ui": "file:../qq-ui"
+    "@hypermemetic-ai/qq-ui": "file:../qq-ui",
+    "@hypermemetic-ai/qq-relay": "file:../qq-relay"
   }
 }
