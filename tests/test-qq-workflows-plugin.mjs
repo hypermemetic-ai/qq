@@ -318,6 +318,24 @@ try {
     assert.equal(drop.startSeq, 0);
     assert.equal(drop.endSeq, 7);
 
+    // Over Q, the whole Old prefix drops even when the h-math would keep it.
+    const overQ = decideFold({
+      events: pairs,
+      tokenMeter: { estimateMessage: (message) => {
+        const text = message.content?.[0]?.text ?? "";
+        return /operator [12]|architect [12]/.test(text) ? 125 : 100;
+      } },
+      h: 0.1,
+      q: 800,
+    });
+    assert.equal(overQ.action, "drop");
+    assert.equal(overQ.reason, "quality-ceiling");
+    assert.equal(overQ.q, 800);
+    assert.equal(overQ.oldTokens, 500);
+    assert.equal(overQ.tailTokens, 400);
+    assert.equal(overQ.startSeq, 0);
+    assert.equal(overQ.endSeq, 7);
+
     const late = decideFold({ events: pairs, pendingClerk: true });
     assert.equal(late.action, "skip");
     assert.equal(late.reason, "clerk-late");
