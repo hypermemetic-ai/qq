@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import vm from "node:vm";
 
 const root = dirname(fileURLToPath(new URL(".", import.meta.url)));
 const serviceModule = await import(pathToFileURL(join(root, "qq-dictation/src/service.mjs")));
@@ -22,7 +23,7 @@ const {
   createDictationService,
 } = serviceModule;
 const { createDictateHandler, internals } = httpModule;
-const { createHandyRecognizer, defaultHandyBin } = recognizerModule;
+const { createHandyRecognizer, defaultHandyBin, encodePcm16MonoWav, asWavBytes } = recognizerModule;
 const { renderSessionContent, renderPage } = renderModule;
 
 const scratch = mkdtempSync(join(tmpdir(), "qq-dictation."));
@@ -112,6 +113,215 @@ async function withServer(handler, run) {
   }
 }
 
+class Element {
+  constructor() {
+    this.id = "";
+    this.dataset = {};
+    this.attributes = {};
+    this.textContent = "";
+    this.parentElement = null;
+    this.classList = {
+      names: new Set(),
+      toggle(name, force) {
+        if (force === true) this.names.add(name);
+        else if (force === false) this.names.delete(name);
+        else if (this.names.has(name)) this.names.delete(name);
+        else this.names.add(name);
+        return this.names.has(name);
+      },
+      contains(name) {
+        return this.names.has(name);
+      },
+    };
+  }
+  setAttribute(name, value) {
+    this.attributes[name] = String(value);
+  }
+  getAttribute(name) {
+    return this.attributes[name] ?? null;
+  }
+  closest(selector) {
+    let node = this;
+    while (node) {
+      if (selector.startsWith("#") && node.id === selector.slice(1)) return node;
+      node = node.parentElement;
+    }
+    return null;
+  }
+}
+
+class HTMLTextAreaElement extends Element {}
+class HTMLFormElement extends Element {}
+
+function makeClientHarness(options = {}) {
+  const fetches = [];
+  let serverState = "idle";
+  let processor = null;
+  const byId = new Map();
+  const listeners = [];
+
+  const composer = new HTMLFormElement();
+  composer.id = "composer";
+  composer.dataset.sessionId = options.sessionId ?? alphaId;
+  const dictate = new Element();
+  dictate.id = "composer-dictate";
+  dictate.dataset.state = "idle";
+  dictate.textContent = "Mic";
+  dictate.parentElement = composer;
+  const submit = new Element();
+  submit.id = "composer-submit";
+  submit.parentElement = composer;
+  const prompt = new HTMLTextAreaElement();
+  prompt.id = "prompt";
+  prompt.parentElement = composer;
+  for (const node of [composer, dictate, submit, prompt]) byId.set(node.id, node);
+
+  class FakeAudioContext {
+    constructor() {
+      this.sampleRate = 16_000;
+      this.state = "running";
+      this.destination = {};
+    }
+    async resume() {
+      this.state = "running";
+    }
+    async close() {
+      this.state = "closed";
+    }
+    createMediaStreamSource() {
+      return { connect() {}, disconnect() {} };
+    }
+    createGain() {
+      return { gain: { value: 0 }, connect() {}, disconnect() {} };
+    }
+    createScriptProcessor() {
+      processor = { onaudioprocess: null, connect() {}, disconnect() {} };
+      return processor;
+    }
+  }
+
+  const mediaDevices = options.noMic
+    ? undefined
+    : {
+        async getUserMedia() {
+          if (options.micError) throw new Error("denied");
+          return { getTracks: () => [{ stop() {} }] };
+        },
+      };
+
+  const document = {
+    readyState: "complete",
+    activeElement: null,
+    querySelector(selector) {
+      if (selector.startsWith("#")) return byId.get(selector.slice(1)) ?? null;
+      return null;
+    },
+    addEventListener(type, fn, opts) {
+      listeners.push({ type, fn, capture: opts === true || opts?.capture === true });
+    },
+  };
+
+  const windowObj = {
+    AudioContext: FakeAudioContext,
+    webkitAudioContext: FakeAudioContext,
+    setInterval() {
+      return 1;
+    },
+    addEventListener() {},
+  };
+
+  const sandbox = {
+    ArrayBuffer,
+    DataView,
+    Uint8Array,
+    Int16Array,
+    Float32Array,
+    Blob,
+    Error,
+    Math,
+    JSON,
+    Object,
+    Promise,
+    Element,
+    HTMLTextAreaElement,
+    HTMLFormElement,
+    document,
+    location: { pathname: `/qq/session/${options.sessionId ?? alphaId}` },
+    navigator: { mediaDevices },
+    window: windowObj,
+    Blob,
+    fetch: async (url, init = {}) => {
+      const path = String(url);
+      const headers = init.headers ?? {};
+      const body = init.body;
+      fetches.push({ path, method: init.method ?? "GET", headers, body });
+      if (path === "/qq/dictate/" || path === "/qq/dictate") {
+        return { ok: true, status: 200, json: async () => ({ state: serverState }) };
+      }
+      if (path.endsWith("/start")) {
+        serverState = "recording";
+        return { ok: true, status: 200, json: async () => ({ state: "recording" }) };
+      }
+      if (path.endsWith("/end") || path.endsWith("/cancel")) {
+        serverState = "idle";
+        return { ok: true, status: 200, json: async () => ({ state: "idle", sent: path.endsWith("/end") }) };
+      }
+      if (path.endsWith("/focus")) {
+        return { ok: true, status: 200, json: async () => ({ lastFocus: options.sessionId ?? alphaId }) };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    },
+  };
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(clientJs, sandbox);
+
+  function dispatch(type, event, capture = false) {
+    for (const listener of listeners) {
+      if (listener.type === type && listener.capture === capture) listener.fn(event);
+    }
+  }
+
+  return {
+    fetches,
+    dictate,
+    composer,
+    prompt,
+    submit,
+    pump() {
+      const samples = new Float32Array(160);
+      for (let i = 0; i < samples.length; i += 1) samples[i] = 0.2;
+      processor?.onaudioprocess?.({ inputBuffer: { getChannelData: () => samples } });
+    },
+    click(target) {
+      const event = {
+        target,
+        preventDefault() {},
+        stopPropagation() {},
+      };
+      dispatch("click", event, true);
+    },
+    keydown(partial) {
+      const event = {
+        preventDefault() {},
+        stopPropagation() {},
+        ...partial,
+      };
+      dispatch("keydown", event, false);
+    },
+    focusPrompt() {
+      document.activeElement = prompt;
+      dispatch("focusin", { target: prompt }, false);
+    },
+  };
+}
+
+async function settle() {
+  for (let i = 0; i < 20; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
 try {
   assert.deepEqual(pluginModule.inject, ["qq", "webServer"]);
   assert.equal(pluginModule.provide, "qq-dictation");
@@ -134,7 +344,27 @@ try {
   assert.match(clientJs, /Delete/);
   assert.match(clientJs, /#composer-dictate/);
   assert.match(clientJs, /#composer-submit/);
-  assert.match(clientJs, /\/chunk/);
+  assert.match(clientJs, /AudioContext/);
+  assert.match(clientJs, /RIFF/);
+  assert.match(clientJs, /audio\/wav/);
+  assert.match(clientJs, /microphone is unavailable/);
+  assert.doesNotMatch(clientJs, /MediaRecorder/);
+  assert.doesNotMatch(clientJs, /\/chunk/);
+
+  {
+    const pcm = Buffer.from([0x00, 0x10, 0xff, 0x7f]);
+    const wav = encodePcm16MonoWav(pcm, 16_000);
+    assert.equal(wav.subarray(0, 4).toString("ascii"), "RIFF");
+    assert.equal(wav.subarray(8, 12).toString("ascii"), "WAVE");
+    assert.equal(wav.readUInt32LE(24), 16_000);
+    assert.equal(wav.readUInt16LE(22), 1);
+    assert.equal(wav.readUInt16LE(34), 16);
+    assert.equal(wav.subarray(44).equals(pcm), true);
+    assert.equal(asWavBytes(wav), wav);
+    const wrapped = asWavBytes(pcm);
+    assert.equal(wrapped.subarray(0, 4).toString("ascii"), "RIFF");
+    assert.equal(wrapped.subarray(44).equals(pcm), true);
+  }
   assert.doesNotMatch(String(qqPlugin.apply), /dictate/);
   assert.match(defaultHandyBin({ HOME: "/home/op" }), /\/\.local\/bin\/handy$/);
   assert.equal(internals.routeOf("/qq/dictate", "/qq/dictate/start"), "start");
@@ -170,6 +400,29 @@ try {
     assert.equal(sent.text, "spoken line");
     assert.deepEqual(qq.prompts, [{ id: alphaId, text: "spoken line" }]);
     assert.equal(Buffer.from(recognized[0]).toString(), "wa");
+  }
+
+  {
+    const fixture = encodePcm16MonoWav(Buffer.alloc(320, 0), 16_000);
+    assert.equal(fixture.subarray(0, 4).toString("ascii"), "RIFF");
+    const qq = fakeQq();
+    const recognized = [];
+    const service = createDictationService(
+      { get: () => qq },
+      {
+        recognize: async (audio) => {
+          recognized.push(Buffer.from(audio));
+          return "fixture line";
+        },
+      },
+    );
+    await service.start({ sessionId: alphaId });
+    const sent = await service.end({ audio: fixture });
+    assert.equal(sent.sent, true);
+    assert.equal(sent.text, "fixture line");
+    assert.deepEqual(qq.prompts, [{ id: alphaId, text: "fixture line" }]);
+    assert.equal(recognized[0].subarray(0, 4).toString("ascii"), "RIFF");
+    assert.equal(recognized[0].equals(fixture), true);
   }
 
   {
@@ -341,6 +594,38 @@ try {
   }
 
   {
+    const fixture = encodePcm16MonoWav(Buffer.alloc(320, 0), 16_000);
+    const qq = fakeQq();
+    const recognized = [];
+    const handler = createDictateHandler(
+      createDictationService({ get: () => qq }, {
+        recognize: async (audio) => {
+          recognized.push(Buffer.from(audio));
+          return "wav fixture";
+        },
+      }),
+    );
+    await withServer(handler, async (server) => {
+      const started = await request(server, "/qq/dictate/start", {
+        method: "POST",
+        headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
+        body: JSON.stringify({ sessionId: alphaId }),
+      });
+      assert.equal(started.status, 200);
+      const ended = await request(server, "/qq/dictate/end", {
+        method: "POST",
+        headers: { "content-type": "audio/wav", "sec-fetch-site": "same-origin" },
+        body: fixture,
+      });
+      assert.equal(ended.status, 200);
+      assert.match(ended.body, /"sent":true/);
+      assert.deepEqual(qq.prompts, [{ id: alphaId, text: "wav fixture" }]);
+      assert.equal(recognized[0].subarray(0, 4).toString("ascii"), "RIFF");
+      assert.equal(recognized[0].equals(fixture), true);
+    });
+  }
+
+  {
     const qq = fakeQq();
     const handler = createDictateHandler(
       createDictationService({ get: () => qq }, { recognize: async () => "nope" }),
@@ -430,7 +715,7 @@ try {
     const recognizer = createHandyRecognizer({
       handyBin: "/tmp/fake-handy",
       spawn(bin, args) {
-        spawned = { bin, args };
+        spawned = { bin, args, file: readFileSync(args[1]) };
         const listeners = { data: [], close: [] };
         queueMicrotask(() => {
           for (const fn of listeners.data) fn(Buffer.from('{"text":"hello from handy"}'));
@@ -450,13 +735,23 @@ try {
         };
       },
     });
-    const text = await recognizer.recognize(Buffer.from("RIFF"));
+    const fixture = encodePcm16MonoWav(Buffer.alloc(320, 0), 16_000);
+    const text = await recognizer.recognize(fixture);
     assert.equal(text, "hello from handy");
     assert.equal(spawned.bin, "/tmp/fake-handy");
     assert.deepEqual(spawned.args.slice(0, 3), ["--transcribe-file", spawned.args[1], "--json"]);
     assert.doesNotMatch(spawned.args.join(" "), /HERDR_PANE_ID|herdr-pane/);
+    assert.equal(spawned.file.subarray(0, 4).toString("ascii"), "RIFF");
+    assert.equal(spawned.file.subarray(8, 12).toString("ascii"), "WAVE");
+    assert.equal(spawned.file.equals(fixture), true);
 
-
+    spawned = null;
+    const wrappedText = await recognizer.recognize(Buffer.from([0x00, 0x10, 0xff, 0x7f]));
+    assert.equal(wrappedText, "hello from handy");
+    assert.equal(spawned.file.subarray(0, 4).toString("ascii"), "RIFF");
+    assert.equal(spawned.file.subarray(8, 12).toString("ascii"), "WAVE");
+    assert.equal(spawned.file.readUInt32LE(24), 16_000);
+    assert.equal(spawned.file.subarray(44).equals(Buffer.from([0x00, 0x10, 0xff, 0x7f])), true);
   }
 
   {
@@ -517,6 +812,93 @@ try {
   assert.equal(qqPlugin.provide, "qq");
   assert.doesNotMatch(String(qqPlugin.apply), /qq-dictation/);
   assert.ok(!goneId.includes("HERDR"));
+
+  {
+    const harness = makeClientHarness();
+    await settle();
+    harness.focusPrompt();
+    await settle();
+    assert.ok(harness.fetches.some((call) => String(call.path).endsWith("/focus")));
+    harness.click(harness.dictate);
+    await settle();
+    assert.equal(harness.dictate.dataset.state, "recording");
+    assert.equal(harness.dictate.textContent, "X");
+    assert.ok(harness.fetches.some((call) => String(call.path).endsWith("/start")));
+    harness.pump();
+    harness.click(harness.submit);
+    await settle();
+    const ended = harness.fetches.find((call) => String(call.path).endsWith("/end"));
+    assert.ok(ended);
+    assert.equal(ended.headers["content-type"], "audio/wav");
+    const wavBytes = Buffer.from(await ended.body.arrayBuffer());
+    assert.equal(wavBytes.subarray(0, 4).toString("ascii"), "RIFF");
+    assert.equal(wavBytes.subarray(8, 12).toString("ascii"), "WAVE");
+    assert.ok(wavBytes.length > 44);
+    assert.equal(harness.dictate.dataset.state, "idle");
+    assert.equal(harness.dictate.textContent, "Mic");
+  }
+
+  {
+    const harness = makeClientHarness();
+    await settle();
+    harness.click(harness.dictate);
+    await settle();
+    assert.equal(harness.dictate.dataset.state, "recording");
+    harness.click(harness.dictate);
+    await settle();
+    assert.ok(harness.fetches.some((call) => String(call.path).endsWith("/cancel")));
+    assert.ok(!harness.fetches.some((call) => String(call.path).endsWith("/end")));
+    assert.equal(harness.dictate.dataset.state, "idle");
+  }
+
+  {
+    const harness = makeClientHarness();
+    await settle();
+    harness.keydown({ code: "AltRight", key: "Alt" });
+    await settle();
+    assert.equal(harness.dictate.dataset.state, "recording");
+    assert.ok(harness.fetches.some((call) => String(call.path).endsWith("/start")));
+    harness.pump();
+    harness.keydown({ code: "AltRight", key: "Alt" });
+    await settle();
+    const ended = harness.fetches.find((call) => String(call.path).endsWith("/end"));
+    assert.ok(ended);
+    const wavBytes = Buffer.from(await ended.body.arrayBuffer());
+    assert.equal(wavBytes.subarray(0, 4).toString("ascii"), "RIFF");
+    assert.equal(harness.dictate.dataset.state, "idle");
+  }
+
+  {
+    const harness = makeClientHarness();
+    await settle();
+    harness.keydown({ code: "AltRight", key: "Alt" });
+    await settle();
+    assert.equal(harness.dictate.dataset.state, "recording");
+    harness.keydown({ code: "Delete", key: "Delete" });
+    await settle();
+    assert.ok(harness.fetches.some((call) => String(call.path).endsWith("/cancel")));
+    assert.ok(!harness.fetches.some((call) => String(call.path).endsWith("/end")));
+    assert.equal(harness.dictate.dataset.state, "idle");
+  }
+
+  {
+    const harness = makeClientHarness({ noMic: true });
+    await settle();
+    harness.click(harness.dictate);
+    await settle();
+    assert.equal(harness.dictate.dataset.state, "idle");
+    assert.ok(!harness.fetches.some((call) => String(call.path).endsWith("/start")));
+  }
+
+  {
+    const harness = makeClientHarness({ micError: true });
+    await settle();
+    harness.click(harness.dictate);
+    await settle();
+    assert.equal(harness.dictate.dataset.state, "idle");
+    assert.ok(harness.fetches.some((call) => String(call.path).endsWith("/start")));
+    assert.ok(harness.fetches.some((call) => String(call.path).endsWith("/cancel")));
+  }
 
   const css = readFileSync(join(root, "qq-ui/assets/console.css"), "utf8");
   assert.match(css, /grid-template-columns: minmax\(0, 1fr\) auto auto/);
