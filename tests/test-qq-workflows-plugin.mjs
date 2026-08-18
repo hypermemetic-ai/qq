@@ -67,7 +67,7 @@ function pairEvents(turn, startSeq, userText, assistantText, source) {
 
 try {
   // ---------------------------------------------------------------- module
-  assert.deepEqual(pluginModule.inject, ["agents", "sessions", "tools"]);
+  assert.deepEqual(pluginModule.inject, ["agents", "sessions"]);
   assert.equal(pluginModule.provide, "qq-workflows");
   assert.equal(pluginModule.name, "qq-workflows");
   assert.equal(NOTEBOOK_SCHEMA, "qq.workflows-notebook/v1");
@@ -421,14 +421,22 @@ try {
     store.ensure(alphaId);
     const created = [];
     const followups = [];
+    const compiled = [];
+    const sent = [];
+    const childListeners = [];
+    const childEvents = [];
     const architect = createArchitect({
       ctx: {
         get(name) {
           if (name === "qq-relay") {
             return {
-              alias: () => "80",
+              alias: (id) => (id === alphaId ? "1" : "80"),
               hang() {},
               clear() {},
+              send: async (payload) => {
+                sent.push(payload);
+                return { status: "sent" };
+              },
             };
           }
           return null;
@@ -436,7 +444,10 @@ try {
       },
       store,
       clerk: {
-        compilePacket: async () => "start from the architect stitch",
+        compilePacket: async (args) => {
+          compiled.push(args);
+          return "start from the architect stitch";
+        },
       },
       folder: { pending: () => undefined },
       agents: {
@@ -444,8 +455,14 @@ try {
           created.push(options);
           return {
             agent: {
-              session: { id: options.sessionId },
+              session: { id: options.sessionId, events: childEvents },
               followup(message) { followups.push(message); },
+              ctx: {
+                on(type, fn) {
+                  childListeners.push({ type, fn });
+                  return () => {};
+                },
+              },
             },
           };
         },
@@ -459,7 +476,21 @@ try {
     assert.equal(result.delivery, "default");
     assert.equal(created[0].meta.origin, CHILD_ORIGIN);
     assert.equal(created[0].meta.parentSession, alphaId);
+    assert.equal(compiled[0].parentSession, alphaId);
+    assert.equal(compiled[0].parentAlias, "1");
     assert.match(followups[0].content[0].text, /architect stitch/);
+
+    childEvents.push(event("assistant/message", 2, {
+      turn: 1, step: 1, message: assistantMessage("child result for parent"),
+    }));
+    const childEvent = childListeners.find((item) => item.type === "session/event");
+    assert.ok(childEvent);
+    await childEvent.fn({}, { type: "turn/end", data: { turn: 1 } });
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].fromId, created[0].sessionId);
+    assert.equal(sent[0].to, alphaId);
+    assert.equal(sent[0].delivery, "default");
+    assert.match(sent[0].message, /child result for parent/);
   }
 
   assert.equal(isArchitectSession({ session: { id: alphaId, header: {} } }), true);
@@ -467,7 +498,7 @@ try {
     session: { id: childId, header: { origin: CHILD_ORIGIN } },
   }), false);
 
-  // ---------------------------------------------------------------- scribe binding + cacheRetention: none
+  // ---------------------------------------------------------------- scribe binding: one-shot, no cacheRetention field
   {
     const policyPath = join(scratch, "execution-profiles.json");
     writeFileSync(policyPath, JSON.stringify({
@@ -614,6 +645,181 @@ try {
     const refused = await invokeTool.execute({}, { agent: fakeAgent });
     assert.equal(refused.status, "refused");
     assert.match(refused.reason, /qq-relay/);
+  }
+
+  // apply without tools: service still loads (same shape as qq-relay)
+  {
+    const dir = join(scratch, "plugin-no-tools");
+    const provided = {};
+    const hung = [];
+    const fakeAgent = {
+      id: alphaId,
+      session: { id: alphaId, events: [], header: {} },
+    };
+    pluginModule.apply({
+      get(name) {
+        if (name === "agents") return { list: () => [fakeAgent], get: () => fakeAgent };
+        if (name === "qq-relay") {
+          return { hang(id, label) { hung.push({ id, label }); }, clear() {}, alias: () => "1" };
+        }
+        return undefined;
+      },
+      provide(name, value) { provided[name] = value; },
+      effect() { throw new Error("tools effect must not run without tools"); },
+      on() { return () => {}; },
+    }, { notebookDir: dir });
+    assert.ok(provided["qq-workflows"]);
+    assert.deepEqual(hung, [{ id: alphaId, label: ARCHITECT_LABEL }]);
+  }
+
+  // tools register after ctx.inject(["tools"]) fires, not at apply time
+  {
+    const dir = join(scratch, "plugin-tools-later");
+    const registered = [];
+    let injectCallback;
+    pluginModule.apply({
+      get(name) {
+        if (name === "agents") return { list: () => [] };
+        return undefined;
+      },
+      provide() {},
+      inject(deps, callback) {
+        assert.deepEqual(deps, ["tools"]);
+        injectCallback = callback;
+      },
+      effect(fn) { fn(); return () => {}; },
+      on() { return () => {}; },
+    }, { notebookDir: dir });
+    assert.equal(registered.length, 0);
+    injectCallback({
+      get(name) {
+        if (name === "tools") {
+          return {
+            register(definition) {
+              registered.push(definition);
+              return () => {};
+            },
+          };
+        }
+        return undefined;
+      },
+      effect(fn) { fn(); return () => {}; },
+    });
+    assert.deepEqual(registered.map((tool) => tool.name), [
+      "notes_list", "notes_expand", "session_search", "invoke",
+    ]);
+  }
+
+  // prune at agent/request, never from tool/result (reentrant append)
+  {
+    const store = createNotebookStore(join(scratch, "prune"));
+    store.ensure(alphaId);
+    const pruned = [];
+    const appended = [];
+    const listeners = [];
+    const session = {
+      id: alphaId,
+      events: [],
+      append(type, data, opts) { appended.push({ type, data, opts }); },
+    };
+    const agent = {
+      session,
+      options: {},
+      ctx: {
+        on(type, fn) {
+          listeners.push({ type, fn });
+          return () => {};
+        },
+      },
+    };
+    const architect = createArchitect({
+      ctx: {
+        get(name) {
+          if (name === "toolResultPruner") {
+            return {
+              pruneSession(target) {
+                pruned.push(target);
+                target.append("tool/result", { pruned: true }, { surfaceOp: { op: "replace", start: 1, end: 1 } });
+                return { pruned: [1], charsRemoved: 100 };
+              },
+            };
+          }
+          return null;
+        },
+      },
+      store,
+      clerk: { fire: async () => ({ action: "nothing" }) },
+      folder: {
+        pending: () => undefined,
+        decide: () => ({ action: "keep" }),
+        apply: () => null,
+        clear: () => {},
+      },
+    });
+    architect.attach(agent);
+    const eventObs = listeners.find((item) => item.type === "session/event");
+    const requestObs = listeners.find((item) => item.type === "agent/request");
+    assert.ok(requestObs);
+    eventObs.fn(session, { type: "tool/result" });
+    assert.equal(pruned.length, 0);
+    await requestObs.fn({}, async () => "ok");
+    assert.equal(pruned.length, 1);
+    assert.equal(appended[0].type, "tool/result");
+  }
+
+  // hangLabel failure is visible
+  {
+    const store = createNotebookStore(join(scratch, "hang-fail"));
+    const warnings = [];
+    const architect = createArchitect({
+      ctx: {
+        logger: { warn(message) { warnings.push(message); } },
+        get(name) {
+          if (name === "qq-relay") {
+            return {
+              hang() { throw new Error("label board refused"); },
+              clear() {},
+            };
+          }
+          return null;
+        },
+      },
+      store,
+      clerk: { fire: async () => ({ action: "nothing" }) },
+      folder: { pending: () => undefined, decide: () => ({ action: "keep" }) },
+    });
+    architect.attach({
+      session: { id: alphaId, events: [], header: {} },
+      ctx: { on() { return () => {}; } },
+    });
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /failed to hang workflows:architect/);
+    assert.match(warnings[0], /label board refused/);
+  }
+
+  // compilePacket carries the parent return address
+  {
+    const store = createNotebookStore(join(scratch, "packet-address"));
+    store.ensure(alphaId);
+    const seen = [];
+    const clerk = createClerk({
+      store,
+      llm: {},
+      binding: { provider: "test", model: "scribe" },
+      run: async (_llm, _binding, request) => {
+        seen.push(request);
+        return "packet";
+      },
+    });
+    const packet = await clerk.compilePacket({
+      sessionId: alphaId,
+      events: pairEvents(1, 0, "go", "ok"),
+      parentSession: alphaId,
+      parentAlias: "1",
+    });
+    assert.equal(packet, "packet");
+    assert.match(seen[0].user, /Return address: session .* \(alias 1\)/);
+    assert.match(seen[0].system, /return address/i);
   }
 
   console.log("test-qq-workflows-plugin: pass");

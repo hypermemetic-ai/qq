@@ -647,7 +647,7 @@ try {
   assert.match(patch, /name: '@hypermemetic-ai\/qq'/);
   assert.match(patch, /name: '@hypermemetic-ai\/qq-ui'/);
   assert.match(patch, /name: '@hypermemetic-ai\/qq-relay'[\s\S]*inject: \[agents, sessions\]/);
-  assert.match(patch, /name: '@hypermemetic-ai\/qq-workflows'[\s\S]*inject: \[agents, sessions, tools\]/);
+  assert.match(patch, /name: '@hypermemetic-ai\/qq-workflows'[\s\S]*inject: \[agents, sessions\]/);
   assert.match(patch, /id: compaction-basic[\s\S]*auto: false/);
   assert.match(workbench, /qq_relay_package="\$root\/qq-relay"/);
   assert.match(workbench, /qq_workflows_package="\$root\/qq-workflows"/);
