@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -11,6 +11,10 @@ const clerkModule = await import(pathToFileURL(join(root, "qq-workflows/src/cler
 const foldModule = await import(pathToFileURL(join(root, "qq-workflows/src/fold.mjs")));
 const scribeModule = await import(pathToFileURL(join(root, "qq-workflows/src/scribe.mjs")));
 const architectModule = await import(pathToFileURL(join(root, "qq-workflows/src/architect.mjs")));
+const iterateModule = await import(pathToFileURL(join(root, "qq-workflows/src/iterate.mjs")));
+const journalModule = await import(pathToFileURL(join(root, "qq-workflows/src/journal.mjs")));
+const wikiModule = await import(pathToFileURL(join(root, "qq-workflows/src/wiki.mjs")));
+const iterateToolsModule = await import(pathToFileURL(join(root, "qq-workflows/src/iterate-tools.mjs")));
 const pluginModule = await import(pathToFileURL(join(root, "qq-workflows/src/plugin.mjs")));
 const selectionModule = await import(pathToFileURL(join(root, "qq-workflows/src/selection.mjs")));
 const settingsModule = await import(pathToFileURL(join(root, "qq-workflows/src/settings.mjs")));
@@ -28,8 +32,16 @@ const {
 } = foldModule;
 const { parseClerkOutput, resolveScribeBinding, runScribe } = scribeModule;
 const { createArchitect, isArchitectSession, isArchitectCandidate, ARCHITECT_LABEL, CHILD_ORIGIN } = architectModule;
+const { createIterate, isIterateCandidate, ITERATE_LABEL, buildHandsPacket, collectReviewEvidence } = iterateModule;
+const {
+  JOURNAL_SCHEMA, createJournalStore, defaultJournalDir, projectJournal, collectBreath, formatProjection,
+} = journalModule;
+const { WIKI_SCHEMA, createWikiStore, defaultWikiDir, projectWiki, formatWikiIndex } = wikiModule;
+const {
+  buildDeskTools, buildHandsTools, DESK_TOOL_NAMES, HANDS_TOOL_NAMES, PIXEL_TOOL_NAMES,
+} = iterateToolsModule;
 const { SELECTION_SCHEMA, createSelectionStore, defaultSelectionDir } = selectionModule;
-const { ARCHITECT_SETTINGS_SCHEMA, createArchitectSettings, formatSettingsList } = settingsModule;
+const { ARCHITECT_SETTINGS_SCHEMA, ITERATE_ROLES, createArchitectSettings, createIterateSettings, formatSettingsList } = settingsModule;
 const { parseWorkflowsInput, formatWorkflowList } = commandModule;
 
 const scratch = mkdtempSync(join(tmpdir(), "qq-workflows-plugin."));
@@ -695,9 +707,10 @@ try {
     const listed = commands[0].handler({ agent: fakeAgent, rawInput: "" });
     assert.equal(listed.kind, "success");
     assert.match(listed.text, /architect/);
+    assert.match(listed.text, /iterate/);
     assert.match(listed.text, /none selected/);
 
-    const unknown = commands[0].handler({ agent: fakeAgent, rawInput: "iterate" });
+    const unknown = commands[0].handler({ agent: fakeAgent, rawInput: "mystery" });
     assert.equal(unknown.kind, "error");
     assert.match(unknown.text, /unknown workflow/);
 
@@ -1037,6 +1050,657 @@ try {
     assert.equal(again["qq-workflows"].workflows.selected(alphaId), "architect");
     assert.deepEqual(hungAgain, [{ id: alphaId, label: ARCHITECT_LABEL }]);
     assert.ok(existsSync(join(dir, `${alphaId}.json`)));
+  }
+
+  // ---------------------------------------------------------------- iterate: journal append / polarity / persist / restart
+  {
+    const dir = join(scratch, "iterate-journal");
+    const first = createJournalStore(dir);
+    first.recordDirective(alphaId, { text: "land the frontend iterate", seq: 2 });
+    first.recordNote(alphaId, { polarity: "nit", text: "the bar is too big", seq: 4 });
+    first.recordNote(alphaId, { polarity: "praise", text: "oh that is better", seq: 5 });
+    const loaded = first.load(alphaId);
+    assert.equal(loaded.schema, JOURNAL_SCHEMA);
+    assert.equal(loaded.session, alphaId);
+    assert.equal(loaded.entries.length, 3);
+    assert.equal(statSync(first.fileFor(alphaId)).mode & 0o777, 0o600);
+    const again = createJournalStore(dir);
+    const projected = again.project(alphaId);
+    assert.equal(projected.directive.text, "land the frontend iterate");
+    assert.equal(projected.theory, null);
+    assert.equal(projected.nits.length, 1);
+    assert.equal(projected.nits[0].open, true);
+    assert.equal(projected.nits[0].breath, 1);
+    assert.equal(projected.praise.length, 1);
+    assert.equal(projected.praise[0].text, "oh that is better");
+    again.recordTheory(alphaId, { text: "the pile wants less chrome", seq: 6 });
+    const withTheory = again.project(alphaId);
+    assert.equal(withTheory.theory.text, "the pile wants less chrome");
+  }
+
+  assert.equal(
+    defaultJournalDir({ DSH_HOME: "/state/qq/dsh-workbench" }, {}),
+    "/state/qq/.qq-workflows-journals",
+  );
+  assert.equal(defaultJournalDir({}, { journalDir: "/x/journals" }), "/x/journals");
+  assert.throws(() => defaultJournalDir({}, { journalDir: "relative" }), /absolute path/);
+  assert.equal(
+    defaultWikiDir({ DSH_HOME: "/state/qq/dsh-workbench" }, {}),
+    "/state/qq/.qq-workflows-wiki",
+  );
+  assert.equal(defaultWikiDir({}, { wikiDir: "/x/wiki" }), "/x/wiki");
+  assert.throws(() => defaultWikiDir({}, { wikiDir: "relative" }), /absolute path/);
+
+  // ---------------------------------------------------------------- iterate: stable projection order + collect-then-go
+  {
+    const journal = createJournalStore(join(scratch, "iter-order"));
+    journal.recordDirective(alphaId, { text: "d", seq: 1 });
+    journal.recordTheory(alphaId, { text: "t", seq: 2 });
+    journal.recordNote(alphaId, { polarity: "nit", text: "n", seq: 3 });
+    journal.recordNote(alphaId, { polarity: "praise", text: "p", seq: 4 });
+    const projection = collectBreath(journal.load(alphaId));
+    assert.equal(projection.breath, 1);
+    assert.equal(projection.nits.length, 1);
+    assert.equal(projection.praise.length, 1);
+    // Nothing sends before go: collect is read-only.
+    assert.equal(journal.project(alphaId).breath, 1);
+    assert.deepEqual(journal.project(alphaId).sent, new Set());
+    const text = formatProjection(journal.load(alphaId), []);
+    const order = ["directive:", "theory:", "open nits:", "praise:", "wiki:"];
+    let cursor = 0;
+    for (const marker of order) {
+      const at = text.indexOf(marker);
+      assert.ok(at >= cursor, `projection ${marker} must appear after ${cursor}`);
+      cursor = at;
+    }
+  }
+
+  // ---------------------------------------------------------------- iterate: go refuses without relay / live session / reviewer
+  {
+    const journal = createJournalStore(join(scratch, "iter-go-refuse"));
+    const wiki = createWikiStore(join(scratch, "iter-go-refuse-wiki"));
+    journal.recordNote(alphaId, { polarity: "nit", text: "rail too wide", seq: 1 });
+    const parentAgent = {
+      session: { id: alphaId, events: [], header: { cwd: "/work" } },
+      ctx: { on() { return () => {}; } },
+    };
+    const noRelay = createIterate({
+      ctx: { get: () => null },
+      journal,
+      wiki,
+      settings: { get: () => ({ provider: "t", model: "m" }) },
+      agents: { create: async () => { throw new Error("must not create"); } },
+    });
+    noRelay.attach(parentAgent);
+    const noRelayResult = await noRelay.go({ agent: parentAgent });
+    assert.equal(noRelayResult.status, "refused");
+    assert.match(noRelayResult.reason, /qq-relay/);
+    assert.deepEqual(journal.project(alphaId).sent, new Set());
+
+    const relayWithReviewer = createIterate({
+      journal,
+      wiki,
+      ctx: {
+        get(name) {
+          if (name === "qq-relay") return { alias: () => "1", hang() {}, clear() {} };
+          return null;
+        },
+      },
+      settings: { get: () => null },
+      agents: { create: async () => { throw new Error("must not create"); } },
+    });
+    relayWithReviewer.attach(parentAgent);
+    const unbound = await relayWithReviewer.go({ agent: parentAgent });
+    assert.equal(unbound.status, "refused");
+    assert.match(unbound.reason, /reviewer role/);
+
+    const praiseOnlyJournal = createJournalStore(join(scratch, "iter-go-praise"));
+    praiseOnlyJournal.recordNote(alphaId, { polarity: "praise", text: "keep the cards full width", seq: 1 });
+    const praiseOnly = createIterate({
+      ctx: {
+        get(name) {
+          if (name === "qq-relay") {
+            return {
+              alias: () => "1",
+              hang() {},
+              clear() {},
+              send: async () => ({ status: "sent" }),
+            };
+          }
+          return null;
+        },
+      },
+      journal: praiseOnlyJournal,
+      wiki: createWikiStore(join(scratch, "iter-go-praise-wiki")),
+      settings: { get: () => ({ provider: "t", model: "m" }) },
+      agents: { create: async () => { throw new Error("must not create"); } },
+    });
+    praiseOnly.attach(parentAgent);
+    const invented = await praiseOnly.go({ agent: parentAgent });
+    assert.equal(invented.status, "refused");
+    assert.match(invented.reason, /praise-only/);
+  }
+
+  // ---------------------------------------------------------------- iterate: go bundles this breath, one live hands, review pass/fail
+  {
+    const journalDir = join(scratch, "iter-go");
+    const wikiDir = join(scratch, "iter-go-wiki");
+    const journal = createJournalStore(journalDir);
+    const wiki = createWikiStore(wikiDir);
+    journal.recordDirective(alphaId, { text: "land the frontend iterate", seq: 1 });
+    journal.recordNote(alphaId, { polarity: "nit", text: "left rail too wide", seq: 2 });
+    journal.recordNote(alphaId, { polarity: "praise", text: "44px send button stays", seq: 3 });
+    wiki.dump(alphaId, { text: "#composer sits on the safe-area edge", seq: 4 });
+    wiki.file(alphaId, { target: "w1", labels: ["composer"], seq: 5 });
+    journal.selectWiki(alphaId, { ids: ["w1"], seq: 6 });
+
+    const created = [];
+    const followups = [];
+    const sent = [];
+    const registeredHands = [];
+    const childListeners = [];
+    const childEvents = [];
+    const verdicts = [];
+
+    const iterate = createIterate({
+      ctx: {
+        get(name) {
+          if (name === "qq-relay") {
+            return {
+              alias: (id) => (id === alphaId ? "1" : "80"),
+              hang() {},
+              clear() {},
+              send: async (payload) => {
+                sent.push(payload);
+                return { status: "sent" };
+              },
+            };
+          }
+          return null;
+        },
+      },
+      journal,
+      wiki,
+      settings: {
+        get: (role) => (role === "hands"
+          ? { provider: "test-hands", model: "hands-model", effort: "low" }
+          : { provider: "test-review", model: "review-model" }),
+      },
+      agents: {
+        create: async (options) => {
+          created.push(options);
+          return {
+            agent: {
+              session: { id: options.sessionId, events: childEvents },
+              followup(message) { followups.push(message); },
+              ctx: {
+                on(type, fn) { childListeners.push({ type, fn }); return () => {}; },
+                get(name) {
+                  if (name === "tools") {
+                    return {
+                      register(definition) {
+                        registeredHands.push(definition);
+                        return () => {};
+                      },
+                    };
+                  }
+                  return undefined;
+                },
+              },
+            },
+          };
+        },
+      },
+      run: async (_llm, _binding, request) => {
+        verdicts.push(request);
+        return "PASS";
+      },
+      registerHandsTools: (child, queue) => {
+        for (const definition of buildHandsTools({
+          onDump: ({ text }) => queue.push(text),
+        })) {
+          child.ctx.get("tools").register(definition);
+        }
+      },
+    });
+    const parentAgent = {
+      session: { id: alphaId, events: [], header: { cwd: "/work" } },
+      ctx: { on() { return () => {}; } },
+    };
+    iterate.attach(parentAgent);
+
+    const first = await iterate.go({ agent: parentAgent });
+    assert.equal(first.status, "ok");
+    assert.equal(first.alias, "80");
+    assert.equal(first.breath, 1);
+    assert.equal(created.length, 1);
+    assert.equal(created[0].meta.origin, CHILD_ORIGIN);
+    assert.equal(created[0].meta.parentSession, alphaId);
+    assert.equal(created[0].agentOptions.provider, "test-hands");
+    const childId = created[0].sessionId;
+    assert.ok(journal.project(alphaId).sent.has("n1"));
+    assert.equal(followups.length, 1);
+    const packet = followups[0].content[0].text;
+    assert.match(packet, /left rail too wide/);
+    assert.match(packet, /44px send button stays/);
+    assert.match(packet, /Keep-outs/);
+    assert.match(packet, /selector|#composer/);
+    assert.match(packet, /console\.css/);
+    assert.match(packet, /Return address: session .* \(alias 1\)/);
+    assert.deepEqual(registeredHands.map((tool) => tool.name).sort(), [...HANDS_TOOL_NAMES].sort());
+
+    // one live hands at a time
+    const second = await iterate.go({ agent: parentAgent });
+    assert.equal(second.status, "refused");
+    assert.match(second.reason, /one live hands/);
+
+    // hands dump nodes while working
+    const dumpTool = registeredHands.find((tool) => tool.name === "wiki_dump");
+    const dumped = await dumpTool.execute(
+      { text: "composer min-height hint: 44px on phone" },
+      { agent: { session: { id: childId } } },
+    );
+    assert.equal(dumped.status, "ok");
+
+    // child delivers; reviewer passes; nits close; wiki node stays unlabeled until desk files
+    childEvents.push(event("assistant/message", 2, {
+      turn: 1, step: 1, message: assistantMessage("narrowed the left rail"),
+    }, { surfaceOp: "append" }));
+    const childEvent = childListeners.find((item) => item.type === "session/event");
+    assert.ok(childEvent);
+    await childEvent.fn({}, { type: "turn/end", seq: 3, data: { turn: 1 } });
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].message, /passed review/);
+    assert.match(sent[0].message, /Wiki nodes to file: w2/);
+    assert.equal(verdicts.length, 1);
+    assert.match(verdicts[0].user, /left rail too wide/);
+    assert.match(verdicts[0].user, /Keep-outs/);
+    assert.match(verdicts[0].user, /Shots from the design loop/);
+    assert.match(verdicts[0].user, /Patch-surface diff:/);
+    const afterPass = journal.project(alphaId);
+    assert.equal(afterPass.nits[0].open, false);
+    const wikiAfter = wiki.project(alphaId);
+    assert.ok(wikiAfter.nodes.some((node) => node.id === "w2" && node.labels.length === 0));
+
+    // next go is a new child, not a continuation
+    journal.recordNote(alphaId, { polarity: "nit", text: "heading too tall", seq: 7 });
+    const third = await iterate.go({ agent: parentAgent });
+    assert.equal(third.status, "ok");
+    assert.equal(created.length, 2);
+    assert.notEqual(created[1].sessionId, created[0].sessionId);
+
+    // fail sits; no close, no dump, no silent retry
+    const verdictsFail = [];
+    childEvents.length = 0;
+    sent.length = 0;
+    const failing = createIterate({
+      ctx: {
+        get(name) {
+          if (name === "qq-relay") {
+            return {
+              alias: () => "1",
+              hang() {},
+              clear() {},
+              send: async (payload) => { sent.push(payload); return { status: "sent" }; },
+            };
+          }
+          return null;
+        },
+      },
+      journal,
+      wiki,
+      settings: { get: () => ({ provider: "test-review", model: "review-model" }) },
+      agents: {
+        create: async (options) => ({
+          agent: {
+            session: { id: options.sessionId, events: childEvents },
+            followup() {},
+            ctx: {
+              on(type, fn) { childListeners.push({ type, fn }); return () => {}; },
+            },
+          },
+        }),
+      },
+      run: async (_llm, _binding, request) => {
+        verdictsFail.push(request);
+        return "FAIL: heading looks worse";
+      },
+      registerHandsTools: () => {},
+    });
+    failing.attach(parentAgent);
+    journal.recordNote(alphaId, { polarity: "nit", text: "heading too tall again", seq: 9 });
+    const failGo = await failing.go({ agent: parentAgent });
+    assert.equal(failGo.status, "ok");
+    childEvents.push(event("assistant/message", 2, {
+      turn: 1, step: 1, message: assistantMessage("made the heading bigger"),
+    }, { surfaceOp: "append" }));
+    await childListeners.at(-1).fn({}, { type: "turn/end", seq: 3, data: { turn: 1 } });
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].message, /failed review: heading looks worse/);
+    const afterFail = journal.project(alphaId);
+    const heading = afterFail.nits.find((note) => note.text === "heading too tall again");
+    assert.equal(heading.open, true);
+    assert.equal(verdictsFail.length, 1);
+  }
+
+  // ---------------------------------------------------------------- iterate: reviewer falls back to the one-shot llm stream
+  {
+    const journal = createJournalStore(join(scratch, "iter-go-review-hop"));
+    const wiki = createWikiStore(join(scratch, "iter-go-review-hop-wiki"));
+    journal.recordNote(alphaId, { polarity: "nit", text: "form is cramped", seq: 1 });
+    const sent = [];
+    const requests = [];
+    const childEvents = [];
+    const childListeners = [];
+    const iterate = createIterate({
+      ctx: {
+        get(name) {
+          if (name === "qq-relay") {
+            return {
+              alias: () => "1",
+              hang() {},
+              clear() {},
+              send: async (payload) => { sent.push(payload); return { status: "sent" }; },
+            };
+          }
+          return null;
+        },
+      },
+      journal,
+      wiki,
+      settings: { get: () => ({ provider: "test-review", model: "review-model" }) },
+      llm: {
+        async *stream(request) {
+          requests.push(request);
+          yield { type: "text-delta", text: "PASS" };
+        },
+      },
+      agents: {
+        create: async (options) => ({
+          agent: {
+            session: { id: options.sessionId, events: childEvents },
+            followup() {},
+            ctx: {
+              on(type, fn) { childListeners.push({ type, fn }); return () => {}; },
+            },
+          },
+        }),
+      },
+      // No `run` injected: iterate must use the llm stream like architect's scribe.
+      registerHandsTools: () => {},
+    });
+    const parentAgent = {
+      session: { id: alphaId, events: [], header: { cwd: root } },
+      ctx: { on() { return () => {}; } },
+    };
+    iterate.attach(parentAgent);
+    const result = await iterate.go({ agent: parentAgent });
+    assert.equal(result.status, "ok");
+    childEvents.push(event("assistant/message", 2, {
+      turn: 1, step: 1, message: assistantMessage("widened the form"),
+    }, { surfaceOp: "append" }));
+    await childListeners.at(-1).fn({}, { type: "turn/end", seq: 3, data: { turn: 1 } });
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].provider, "test-review");
+    assert.match(requests[0].system, /honors the directive/);
+    assert.match(requests[0].system, /shots listing and the patch-surface diff/);
+    const reviewUser = requests[0].messages?.[0]?.content?.[0]?.text ?? "";
+    assert.match(reviewUser, /form is cramped/);
+    assert.match(reviewUser, /Shots from the design loop/);
+    assert.match(reviewUser, /Patch-surface diff:/);
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].message, /passed review/);
+    assert.equal(journal.project(alphaId).nits[0].open, false);
+  }
+
+  // ---------------------------------------------------------------- iterate: reviewer prompt carries shots listing + patch-surface diff
+  {
+    const env = { HOME: scratch, XDG_STATE_HOME: join(scratch, "review-shots-state") };
+    const shots = join(env.XDG_STATE_HOME, "qq", "frontend-design-loop", "shots", "current");
+    mkdirSync(shots, { recursive: true });
+    writeFileSync(join(shots, "desktop.png"), "png");
+    writeFileSync(join(shots, "phone.png"), "xx");
+    const evidence = collectReviewEvidence({ cwd: root, env });
+    assert.match(evidence, /current\/desktop\.png \(3 bytes\)/);
+    assert.match(evidence, /current\/phone\.png \(2 bytes\)/);
+    assert.match(evidence, /Patch-surface diff:/);
+    assert.doesNotMatch(evidence, /live under /);
+  }
+
+  // ---------------------------------------------------------------- iterate: fixture-backed hands path can start and stop the design loop
+  {
+    const isolated = mkdtempSync(join(tmpdir(), "qq-workflows-hands-loop."));
+    const env = { HOME: isolated, XDG_STATE_HOME: join(isolated, "state") };
+    const designLoop = await import(pathToFileURL(join(root, "bin/lib/frontend-design-loop.mjs")));
+    const tools = buildHandsTools({
+      designLoop: {
+        startFixture: (options) => designLoop.startFixture({ ...options, env, timeoutMs: 8_000 }),
+        stopLoop: (options) => designLoop.stopLoop({
+          ...options,
+          env,
+          exec: async () => ({ code: 1, stdout: "", stderr: "absent" }),
+        }),
+      },
+    });
+    const byName = Object.fromEntries(tools.map((tool) => [tool.name, tool]));
+    const exec = { agent: { session: { header: { cwd: root } } } };
+    try {
+      const started = await byName.design_loop_start.execute({ live: false }, exec);
+      assert.equal(started.status, "ok");
+      assert.match(started.message, /Design-loop fixture listening at http:\/\/127\.0\.0\.1:\d+/);
+      assert.match(started.result.origin, /^http:\/\/127\.0\.0\.1:\d+$/);
+      assert.match(started.result.sessionUrl, /\/qq\/session\//);
+      const probe = await fetch(`${started.result.origin}/qq/assets/console-v8.css`);
+      assert.equal(probe.status, 200);
+      const stopped = await byName.design_loop_stop.execute({}, exec);
+      assert.equal(stopped.status, "ok");
+      assert.match(stopped.message, /Design-loop stopped/);
+      assert.equal(stopped.result.fixture, "signaled");
+    } finally {
+      try { await designLoop.stopLoop({ env }); } catch {}
+      rmSync(isolated, { recursive: true, force: true });
+    }
+  }
+
+  // ---------------------------------------------------------------- iterate: wiki nodes stay unlabeled until desk files; selected nodes only
+  {
+    const wiki = createWikiStore(join(scratch, "iter-wiki"));
+    wiki.ensure(alphaId);
+    wiki.dump(alphaId, { text: "a", seq: 1 });
+    wiki.dump(alphaId, { text: "b", seq: 2 });
+    const before = wiki.project(alphaId);
+    assert.equal(before.unlabeled.length, 2);
+    assert.deepEqual(before.nodes[0].labels, []);
+    assert.equal(before.nodes[0].unlabeled, true);
+    const index = wiki.index(alphaId);
+    assert.deepEqual(index.map((node) => node.unlabeled), [true, true]);
+    wiki.file(alphaId, { target: "w1", labels: ["composer"], seq: 3 });
+    const after = wiki.project(alphaId);
+    assert.equal(after.nodes.find((node) => node.id === "w1").labels[0], "composer");
+    assert.equal(after.nodes.find((node) => node.id === "w1").unlabeled, false);
+    assert.equal(after.nodes.find((node) => node.id === "w2").unlabeled, true);
+    const selected = wiki.selected(alphaId, ["w1"]);
+    assert.deepEqual(selected.map((node) => node.id), ["w1"]);
+    assert.equal(formatWikiIndex(wiki.load(alphaId))[0].labels[0], "composer");
+    const persisted = JSON.parse(readFileSync(wiki.fileFor(alphaId), "utf8"));
+    assert.equal(persisted.schema, WIKI_SCHEMA);
+    assert.equal(statSync(wiki.fileFor(alphaId)).mode & 0o777, 0o600);
+  }
+
+  // ---------------------------------------------------------------- iterate: isIterateCandidate + buildHandsPacket rules
+  {
+    assert.equal(isIterateCandidate({ session: { id: alphaId, header: {} } }), true);
+    assert.equal(isIterateCandidate({
+      session: { id: childId, header: { origin: CHILD_ORIGIN } },
+    }), false);
+    const packet = buildHandsPacket({
+      bundle: {
+        directive: { text: "d" },
+        praise: [{ text: "keep composer edge" }],
+        nits: [{ id: "n1", seq: 2, text: "shrink rail" }],
+        wikiNodes: [{ id: "w1", labels: ["composer"], text: "safe-area" }],
+        theory: { text: "t" },
+      },
+      cwd: "/work",
+      parentSession: alphaId,
+      parentAlias: "1",
+    });
+    assert.match(packet, /Directive/);
+    assert.match(packet, /Theory/);
+    assert.match(packet, /Keep-outs/);
+    assert.match(packet, /shrink rail/);
+    assert.match(packet, /safe-area/);
+    assert.match(packet, /render\.mjs/);
+    assert.match(packet, /Do not touch SSE owner/);
+    assert.match(packet, /one inner cycle/);
+    assert.match(packet, /alias 1/);
+  }
+
+  // ---------------------------------------------------------------- iterate: desk tools register; pixel tools do not
+  {
+    const dir = join(scratch, "plugin-iterate");
+    const selectedDir = join(scratch, "plugin-iterate-selected");
+    const journalDir = join(scratch, "plugin-iterate-journal");
+    const wikiDir = join(scratch, "plugin-iterate-wiki");
+    const registered = [];
+    const hung = [];
+    const cleared = [];
+    const fakeAgent = {
+      id: alphaId,
+      session: { id: alphaId, events: [], header: { cwd: "/work" } },
+      ctx: {
+        on() { return () => {}; },
+        get(name) {
+          if (name === "tools") {
+            return {
+              register(definition) {
+                registered.push(definition);
+                return () => {
+                  const index = registered.indexOf(definition);
+                  if (index >= 0) registered.splice(index, 1);
+                };
+              },
+            };
+          }
+          return undefined;
+        },
+      },
+    };
+    const provided = {};
+    pluginModule.apply({
+      get(name) {
+        if (name === "agents") return { list: () => [fakeAgent], get: () => fakeAgent };
+        if (name === "sessions") return {};
+        if (name === "qq-relay") {
+          return { hang(id, label) { hung.push({ id, label }); }, clear(id, label) { cleared.push({ id, label }); } };
+        }
+        return provided[name];
+      },
+      provide(name, value) { provided[name] = value; },
+      effect(fn) { fn(); return () => {}; },
+      on() { return () => {}; },
+    }, { notebookDir: dir, selectionDir: selectedDir, journalDir, wikiDir });
+    const service = provided["qq-workflows"];
+    service.workflows.select(alphaId, "iterate");
+    assert.deepEqual(hung, [{ id: alphaId, label: ITERATE_LABEL }]);
+    const names = registered.map((tool) => tool.name);
+    assert.deepEqual([...names].sort(), [...DESK_TOOL_NAMES].sort());
+    for (const pixel of PIXEL_TOOL_NAMES) {
+      assert.ok(!names.includes(pixel), `pixel tool ${pixel} must not register on the desk`);
+    }
+    const journalFile = join(journalDir, `${alphaId}.json`);
+    const wikiFile = join(wikiDir, `${alphaId}.json`);
+    assert.ok(existsSync(journalFile));
+    assert.ok(existsSync(wikiFile));
+    const goTool = registered.find((tool) => tool.name === "go");
+    const refused = await goTool.execute({}, { agent: fakeAgent });
+    assert.equal(refused.status, "refused");
+    assert.match(refused.reason, /reviewer role/);
+    service.workflows.clear(alphaId);
+    assert.deepEqual(cleared, [{ id: alphaId, label: ITERATE_LABEL }]);
+    assert.deepEqual(registered, []);
+  }
+
+  // ---------------------------------------------------------------- iterate: child cannot select iterate; restart restores membership
+  {
+    const dir = join(scratch, "plugin-iterate-child");
+    const selectedDir = join(scratch, "plugin-iterate-child-selected");
+    const hung = [];
+    const child = {
+      id: childId,
+      session: { id: childId, events: [], header: { origin: CHILD_ORIGIN } },
+      ctx: { on() { return () => {}; } },
+    };
+    const provided = {};
+    pluginModule.apply({
+      get(name) {
+        if (name === "agents") return { list: () => [child], get: () => child };
+        if (name === "qq-relay") {
+          return { hang(id, label) { hung.push({ id, label }); }, clear() {} };
+        }
+        return provided[name];
+      },
+      provide(name, value) { provided[name] = value; },
+      effect(fn) { fn(); return () => {}; },
+      on() { return () => {}; },
+    }, { notebookDir: dir, selectionDir: selectedDir });
+    const refused = provided["qq-workflows"].handleWorkflows({
+      agent: child,
+      rawInput: "iterate",
+    });
+    assert.equal(refused.kind, "error");
+    assert.match(refused.text, /child session/);
+    assert.deepEqual(hung, []);
+
+    const chair = {
+      id: alphaId,
+      session: { id: alphaId, events: [], header: {} },
+      ctx: { on() { return () => {}; } },
+    };
+    createSelectionStore(selectedDir).set(alphaId, "iterate");
+    const again = {};
+    const hungAgain = [];
+    pluginModule.apply({
+      get(name) {
+        if (name === "agents") return { list: () => [chair], get: () => chair };
+        if (name === "qq-relay") {
+          return { hang(id, label) { hungAgain.push({ id, label }); }, clear() {} };
+        }
+        return again[name];
+      },
+      provide(name, value) { again[name] = value; },
+      effect(fn) { fn(); return () => {}; },
+      on() { return () => {}; },
+    }, { notebookDir: dir, selectionDir: selectedDir });
+    assert.equal(again["qq-workflows"].workflows.selected(alphaId), "iterate");
+    assert.deepEqual(hungAgain, [{ id: alphaId, label: ITERATE_LABEL }]);
+  }
+
+  // ---------------------------------------------------------------- iterate: settings share settingsFile with architect
+  {
+    const settingsPath = join(scratch, "iterate-settings.json");
+    const architect = createArchitectSettings({ settingsFile: settingsPath });
+    architect.write("scribe", { provider: "test", model: "scribe" });
+    const iterate = createIterateSettings({ settingsFile: settingsPath });
+    assert.equal(iterate.unbound(), false);
+    assert.equal(iterate.get("desk"), null);
+    iterate.write("desk", { provider: "test-desk", model: "desk-model" });
+    iterate.write("hands", { provider: "test-hands", model: "hands-model", effort: "low" });
+    assert.deepEqual(iterate.get("desk"), { provider: "test-desk", model: "desk-model" });
+    // architect section survives iterate writes and vice versa
+    assert.deepEqual(createArchitectSettings({ settingsFile: settingsPath }).get("scribe"), {
+      provider: "test", model: "scribe",
+    });
+    architect.write("talking", { provider: "t", model: "talk" });
+    assert.deepEqual(iterate.get("hands"), { provider: "test-hands", model: "hands-model", effort: "low" });
+    const formatted = formatSettingsList("iterate", iterate.list(), ITERATE_ROLES);
+    assert.match(formatted, /desk: test-desk desk-model/);
+    assert.match(formatted, /hands: test-hands hands-model low/);
+    assert.match(formatted, /reviewer: unbound/);
+    assert.equal(statSync(settingsPath).mode & 0o777, 0o600);
+    const missing = createIterateSettings({});
+    assert.equal(missing.unbound(), true);
+    assert.equal(createIterateSettings({ settingsFile: "relative.json" }).unbound(), true);
   }
 
   console.log("test-qq-workflows-plugin: pass");
