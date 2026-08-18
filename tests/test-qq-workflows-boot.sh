@@ -74,7 +74,7 @@ env \
   DSH_HOME="$DSH_HOME" \
   DSH_TELEMETRY_DISABLED=1 \
   QWEN_TOKEN_PLAN_API_KEY=qq-workflows-boot-probe \
-  QQ_DSH_CONSOLE_PORT="$port" \
+  QQ_PORT="$port" \
   QQ_DSH_SESSION_ID="$primary_id" \
   "$launcher" --patch "$work/local-model.patch.yml" \
   >"$work/dsh.stdout.log" 2>"$work/dsh.stderr.log" &
@@ -117,7 +117,7 @@ env \
   DSH_HOME="$DSH_HOME" \
   DSH_TELEMETRY_DISABLED=1 \
   QWEN_TOKEN_PLAN_API_KEY=qq-workflows-boot-probe \
-  QQ_DSH_CONSOLE_PORT="$port" \
+  QQ_PORT="$port" \
   QQ_DSH_SESSION_ID="$primary_id" \
   "$launcher" --dump-config >"$work/dump.yml" 2>"$work/dump.err"
 node - "$work/dump.yml" <<'NODE'

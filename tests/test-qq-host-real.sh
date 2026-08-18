@@ -28,7 +28,7 @@ origin="http://127.0.0.1:$port"
 
 DSH_HOME="$work/dsh-home" \
 DSH_TELEMETRY_DISABLED=1 \
-QQ_DSH_CONSOLE_PORT="$port" \
+QQ_PORT="$port" \
 QQ_DSH_SESSION_ID="$session_id" \
 QQ_DSH_PROVIDER=qwen-token-plan \
 QQ_DSH_MODEL=deepseek-v4-pro-0813 \

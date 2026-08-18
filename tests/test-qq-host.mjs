@@ -340,7 +340,7 @@ try {
   assert.match(home.body, /rel="manifest"/);
   assert.match(home.body, /console-v8\.css/);
   assert.match(home.body, /browser-v4\.js/);
-  assert.match(home.body, /data-service-worker="\/qq\/sw-v9\.js"/);
+  assert.match(home.body, /data-service-worker="\/qq\/sw-v10\.js"/);
   assert.match(home.body, new RegExp(`<option value="${secondaryId}"`));
   assert.match(home.body, /This DSH session has no transcript yet/);
   assert.match(home.body, /<details class="session-menu">[\s\S]*<summary aria-label="Show session controls">/);
@@ -540,7 +540,7 @@ try {
   assert.equal(manifest.scope, "/qq/");
   assert.deepEqual(manifest.icons.map((icon) => icon.sizes), ["192x192", "512x512"]);
 
-  const worker = await request("/qq/sw-v9.js");
+  const worker = await request("/qq/sw-v10.js");
   assert.equal(worker.status, 200);
   assert.equal(worker.headers["service-worker-allowed"], "/qq/");
   assert.match(worker.body, /request\.method !== "GET"/);
@@ -552,7 +552,9 @@ try {
   assert.match(worker.body, /geist-latin-wght-italic-5\.3\.0\.woff2/);
   assert.match(worker.body, /offline-v8\.html/);
   assert.match(worker.body, /self\.skipWaiting\(\)/);
-  assert.match(worker.body, /name\.startsWith\(CACHE_PREFIX\) && name !== CACHE_NAME/);
+  assert.match(worker.body, /CACHE_PREFIX = "qq-static-"/);
+  assert.match(worker.body, /LEGACY_CACHE_PREFIX = "qq-dsh-console-static-"/);
+  assert.match(worker.body, /name\.startsWith\(CACHE_PREFIX\) \|\| name\.startsWith\(LEGACY_CACHE_PREFIX\)/);
   assert.doesNotMatch(worker.body, /session\/|\/prompt|\/events|\/interrupt|backgroundsync|indexedDB|localStorage/i);
   const offline = await request("/qq/assets/offline-v8.html");
   assert.match(offline.body, /No transcript is cached and no message can be sent offline/);
@@ -598,7 +600,7 @@ try {
     readFile(join(root, "bin/qq"), "utf8"),
     readFile(join(root, "dsh/qq-dsh-model-compat.mjs"), "utf8"),
     readFile(join(root, "qq-ui/assets/browser-v4.js"), "utf8"),
-    readFile(join(root, "qq-ui/assets/sw-v9.js"), "utf8"),
+    readFile(join(root, "qq-ui/assets/sw-v10.js"), "utf8"),
     readFile(join(root, "qq-ui/src/render.mjs"), "utf8"),
   ]);
   assert.equal(pins.schema, "qq.dsh-console-vendor-pins/v1");
@@ -645,16 +647,18 @@ try {
   assert.match(patch, /name: '@hypermemetic-ai\/qq-relay'[\s\S]*inject: \[agents, sessions\]/);
   assert.match(patch, /name: '@hypermemetic-ai\/qq-workflows'[\s\S]*inject: \[agents, sessions\]/);
   assert.match(patch, /id: compaction-basic[\s\S]*auto: false/);
-  assert.match(launcher, /qq_relay_package="\$root\/qq-relay"/);
-  assert.match(launcher, /qq_workflows_package="\$root\/qq-workflows"/);
-  assert.match(launcher, /\["@hypermemetic-ai\/qq-relay", relayPath\]/);
-  assert.match(launcher, /\["@hypermemetic-ai\/qq-workflows", workflowsPath\]/);
+  assert.match(launcher, /qq-\*\/package\.json/);
+  assert.match(launcher, /QQ_PORT=\$\{QQ_PORT:-3082\}/);
+  assert.doesNotMatch(launcher, /QQ_DSH_CONSOLE_PORT|QQ_UI_PORT|QQ_WEBSERVER_PORT|qq-dictation/);
   assert.match(launcher, /QQ_DSH_HAVE_UI/);
   assert.match(launcher, /QQ_DSH_HAVE_RELAY/);
   assert.match(launcher, /QQ_DSH_HAVE_WORKFLOWS/);
+  assert.match(patch, /QQ_PORT \?\? 3082/);
+  assert.doesNotMatch(patch, /QQ_DSH_CONSOLE_PORT|QQ_UI_PORT|QQ_WEBSERVER_PORT/);
   assert.match(patch, /QQ_DSH_HAVE_UI/);
   assert.match(patch, /QQ_DSH_HAVE_RELAY/);
   assert.match(patch, /QQ_DSH_HAVE_WORKFLOWS/);
+  assert.equal(qqPkg.files?.includes("host.patch.yml"), false);
   assert.match(relayPlugin, /ctx\.provide\("qq-relay", service\)/);
   assert.match(workflowsPlugin, /ctx\.provide\("qq-workflows", service\)/);
   assert.doesNotMatch(workflowsPlugin, /from "\.\.\/qq"|run_workflow|dsh-tool-workflow|ctx\.compaction/);
@@ -687,4 +691,4 @@ try {
   await new Promise((resolveClose) => server.close(resolveClose));
 }
 
-console.log("test-dsh-console: pass");
+console.log("test-qq-host: pass");

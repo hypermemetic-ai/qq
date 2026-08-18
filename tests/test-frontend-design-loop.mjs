@@ -41,7 +41,7 @@ assert.equal(liveCss.live, true);
 assert.match(liveCss.body.toString("utf8"), /@font-face/);
 const bakedCss = httpApp.resolveAsset("console-v8.css", false);
 assert.equal(bakedCss.live, false);
-assert.equal(httpApp.resolveAsset("sw-v9.js", true).live, false);
+assert.equal(httpApp.resolveAsset("sw-v10.js", true).live, false);
 assert.equal(httpApp.internals.LIVE_ASSET_FILES["console-v8.css"], "assets/console.css");
 
 const backend = {

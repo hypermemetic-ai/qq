@@ -16,7 +16,7 @@
   },
   "runtime_probe": {
     "verdict": "pass",
-    "entrypoint": "tests/test-dsh-console-live.sh",
+    "entrypoint": "tests/test-qq-host-live.sh",
     "profile": "qq",
     "listener": "127.0.0.1 with an ephemeral test port",
     "credential_used": false,
@@ -56,8 +56,8 @@
   },
   "sequential_client_test": {
     "entrypoints": [
-      "node tests/test-dsh-console.mjs .",
-      "tests/test-dsh-console-live.sh"
+      "node tests/test-qq-host.mjs .",
+      "tests/test-qq-host-live.sh"
     ],
     "verdict": "pass",
     "contexts": [

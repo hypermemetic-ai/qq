@@ -8,7 +8,7 @@ import { createConsoleHandler } from "../qq-ui/src/http-app.mjs";
 const args = process.argv.slice(2).filter((arg) => arg !== "--live");
 const endpointFile = args[0];
 const liveAssets = process.argv.includes("--live") || process.env.QQ_DESIGN_LOOP_LIVE === "1";
-if (!endpointFile) throw new Error("usage: dsh-console-browser-fixture.mjs <endpoint-file> [--live]");
+if (!endpointFile) throw new Error("usage: qq-ui-browser-fixture.mjs <endpoint-file> [--live]");
 
 const primaryId = "session-63a11000-0000-4000-8000-000000000021";
 const secondaryId = "session-63a11000-0000-4000-8000-000000000022";

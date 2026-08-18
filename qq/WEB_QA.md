@@ -9,8 +9,8 @@ The topology is deliberately sequential: home, laptop, and phone use one page at
 Run both repository proofs first:
 
 ```bash
-node tests/test-dsh-console.mjs .
-tests/test-dsh-console-live.sh
+node tests/test-qq-host.mjs .
+tests/test-qq-host-live.sh
 ```
 
 The live proof creates a disposable exact pinned DSH profile, keeps all model traffic on the deterministic localhost stub, materializes two canonical DSH sessions, and exercises selection, Send, SSE running/settled output, Interrupt, sequential page disconnection, host restart, and ordered reconstruction from DSH persistence. It closes each curl SSE stream before opening the next device context. The fast test covers the same HTTP/rendering boundary with deterministic timing and negative checks for leases, client storage, manual htmx processing, and unsafe PWA caching.
@@ -21,7 +21,7 @@ The fixture uses the production HTTP handler and rendering/assets with a determi
 
 ```bash
 endpoint=$(mktemp)
-node tests/dsh-console-browser-fixture.mjs "$endpoint" &
+node tests/qq-ui-browser-fixture.mjs "$endpoint" &
 fixture_pid=$!
 while [ ! -s "$endpoint" ]; do sleep 0.05; done
 origin=$(cat "$endpoint")
