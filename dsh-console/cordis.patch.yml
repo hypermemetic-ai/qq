@@ -10,10 +10,11 @@
 - id: hmr
   disabled: true
 
-# The workbench selects one real rc.6 pi-ai route rather than inheriting the
-# base bundle's DeepSeek default. The exact model is newer than rc.6's installed
-# pi-ai catalog, so this profile declares its current non-secret metadata while
-# inheriting qwen-token-plan's endpoint/protocol and referencing only its key.
+# The workbench selects one real qwen-token-plan route rather than inheriting
+# the base bundle's DeepSeek default. The exact dated model is newer than the
+# installed pi-ai catalog, so this profile declares its current non-secret
+# metadata while inheriting qwen-token-plan's endpoint/protocol and referencing
+# only its key.
 - id: agent-default-model
   name: '@deepseek-ai/dsh-agent-default-model'
   config:
@@ -36,7 +37,7 @@
               high: high
               max: max
             compat:
-              thinkingFormat: qwen
+              thinkingFormat: deepseek
               supportsDeveloperRole: false
               supportsReasoningEffort: true
 

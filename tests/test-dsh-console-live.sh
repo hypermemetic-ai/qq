@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
-toolchain="$root/compat/pi2dsh/toolchain"
+toolchain="$root/dsh"
 npm ci --prefix "$toolchain" --no-audit --no-fund >/dev/null
 
 workbench="$root/bin/qq-dsh-workbench"
@@ -38,7 +38,7 @@ cleanup() {
 trap cleanup EXIT
 
 QQ_LLM_STUB_REJECT_DEVELOPER=1 \
-  node "$root/compat/pi2dsh/llm-stub.mjs" \
+  node "$root/dsh/llm-stub.mjs" \
     "$work/llm-endpoint" "$work/llm-requests.jsonl" &
 llm_pid=$!
 for _ in {1..100}; do
@@ -69,7 +69,7 @@ cat >"$work/local-model.patch.yml" <<YAML
               high: high
               max: max
             compat:
-              thinkingFormat: qwen
+              thinkingFormat: deepseek
               supportsReasoningEffort: true
 YAML
 
@@ -305,7 +305,7 @@ find "$DSH_HOME/sessions" -type f \( -name session.jsonl -o -name session.jsonl.
 
 # The selected token-plan DeepSeek Pro route receives DSH's own
 # read/write/edit/search/bash schemas, and its deterministic calls execute in
-# this repository without pi2dsh.
+# this repository without a Pi/pi2dsh bridge.
 post_prompt workbench-tools "$primary_id" 'QQ_DSH_NATIVE_TOOL_PROBE' htmx
 grep -Fq 'QQ_DSH_NATIVE_TOOL_PROBE_COMPLETE' "$work/workbench-tools.post.html"
 [[ $(<"$root/.qq-dsh-workbench-tool-proof") == beta ]]

@@ -1,4 +1,0 @@
-# The QA profile supplies Pi's built-in bash through pi2dsh, alongside its
-# built-in edit/write tools. Disable the native name so provenance is exact.
-- id: tool-bash
-  disabled: true

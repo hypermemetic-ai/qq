@@ -36,14 +36,14 @@ qq-dsh-workbench: qwen-token-plan requires QWEN_TOKEN_PLAN_API_KEY.
 Export it before starting, or store it under that name in:
   $DSH_HOME/.credentials.yaml  (chmod 600)
 
-The launcher uses DSH rc.6's public credential-reference seam. It does not read
-or copy Pi credentials. qq's Grok route is not usable here because rc.6 has no
-supported xai-auth OAuth refresh/proxy transport path.
+The launcher uses DSH's public credential-reference seam. It does not read
+or copy Pi credentials. qq's Grok route is not usable here because the pinned
+host has no supported xai-auth OAuth refresh/proxy transport path.
 EOF
   exit 2
 fi
 
-toolchain="$root/compat/pi2dsh/toolchain"
+toolchain="$root/dsh"
 dsh="$toolchain/node_modules/.bin/dsh"
 if [[ ! -x $dsh ]]; then
   printf 'qq-dsh-workbench: installing pinned DSH toolchain\n' >&2

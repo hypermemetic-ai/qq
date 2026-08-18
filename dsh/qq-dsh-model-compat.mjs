@@ -3,8 +3,8 @@ import { QWEN_TOKEN_PLAN_MODELS } from "@earendil-works/pi-ai/providers/qwen-tok
 const provider = process.env.QQ_DSH_PROVIDER ?? "qwen-token-plan";
 const model = process.env.QQ_DSH_MODEL ?? "deepseek-v4-pro-0813";
 
-// rc.6's pi-ai catalog predates this dated route. Seed it from the compatible
-// Pro declaration before DSH resolves the workbench profile so system
+// The dated workbench route is newer than the installed pi-ai catalog. Seed it
+// from the compatible Pro declaration before DSH resolves the profile so system
 // instructions use `system`, never the provider-rejected `developer` role.
 if (provider === "qwen-token-plan" && model === "deepseek-v4-pro-0813") {
   const base = QWEN_TOKEN_PLAN_MODELS["deepseek-v4-pro"];

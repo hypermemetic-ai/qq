@@ -578,10 +578,12 @@ try {
   assert.match(italicFont.headers["cache-control"], /immutable/);
 
   // Vendored pins and negative architecture constraints are machine checked.
-  const [pins, consoleEvidence, dshPins, qqPlugin, uiPlugin, qqSession, qqPkg, uiPkg, consolePkg, patch, workbench, modelCompat, browser, workerSource, renderSource] = await Promise.all([
+  const [pins, consoleEvidence, dshPins, dshPkg, dshLock, qqPlugin, uiPlugin, qqSession, qqPkg, uiPkg, consolePkg, patch, workbench, modelCompat, browser, workerSource, renderSource] = await Promise.all([
     readFile(join(root, "qq-ui/vendor-pins.json"), "utf8").then(JSON.parse),
     readFile(join(root, "dsh-console/evidence.json"), "utf8").then(JSON.parse),
-    readFile(join(root, "compat/pi2dsh/pins.json"), "utf8").then(JSON.parse),
+    readFile(join(root, "dsh/pins.json"), "utf8").then(JSON.parse),
+    readFile(join(root, "dsh/package.json"), "utf8").then(JSON.parse),
+    readFile(join(root, "dsh/package-lock.json"), "utf8").then(JSON.parse),
     readFile(join(root, "qq/src/plugin.mjs"), "utf8"),
     readFile(join(root, "qq-ui/src/plugin.mjs"), "utf8"),
     readFile(join(root, "qq/src/session.mjs"), "utf8"),
@@ -590,13 +592,19 @@ try {
     readFile(join(root, "dsh-console/package.json"), "utf8").then(JSON.parse),
     readFile(join(root, "dsh-console/cordis.patch.yml"), "utf8"),
     readFile(join(root, "bin/qq-dsh-workbench"), "utf8"),
-    readFile(join(root, "compat/pi2dsh/toolchain/qq-dsh-model-compat.mjs"), "utf8"),
+    readFile(join(root, "dsh/qq-dsh-model-compat.mjs"), "utf8"),
     readFile(join(root, "qq-ui/assets/browser-v4.js"), "utf8"),
     readFile(join(root, "qq-ui/assets/sw-v9.js"), "utf8"),
     readFile(join(root, "qq-ui/src/render.mjs"), "utf8"),
   ]);
   assert.equal(pins.schema, "qq.dsh-console-vendor-pins/v1");
   assert.equal(consoleEvidence.schema, "qq.dsh-console-evidence/v2");
+  assert.equal(dshPins.schema, "qq.dsh-pins/v1");
+  assert.equal(dshPins.dsh.package, "@deepseek-ai/dsh");
+  assert.equal(dshPins.dsh.version, "0.1.0-rc.7");
+  assert.equal(dshPkg.dependencies["@deepseek-ai/dsh"], dshPins.dsh.version);
+  assert.equal(dshLock.packages["node_modules/@deepseek-ai/dsh"]?.version, dshPins.dsh.version);
+  assert.equal(dshLock.packages["node_modules/@deepseek-ai/dsh"]?.integrity, dshPins.dsh.integrity);
   assert.deepEqual(consoleEvidence.dsh_pin, {
     package: dshPins.dsh.package,
     version: dshPins.dsh.version,
