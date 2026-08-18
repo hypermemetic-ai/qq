@@ -58,6 +58,10 @@
         model: !!js process.env.QQ_DSH_MODEL ?? 'deepseek-v4-pro-0813'
         reasoningEffort: !!js process.env.QQ_DSH_REASONING_EFFORT
 
+    - id: qq-relay
+      name: '@hypermemetic-ai/qq-relay'
+      inject: [agents, sessions]
+
     - id: qq-ui
       name: '@hypermemetic-ai/qq-ui'
       inject: [qq, webServer]
