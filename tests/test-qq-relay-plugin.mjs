@@ -301,6 +301,12 @@ try {
     assert.equal(status.status, "sent");
     assert.equal(status.to, betaId);
     assert.throws(() => relay.status("missing"), RelayError);
+    // The canonical session id stays the exact-send fallback beside the alias.
+    const byId = await relay.send({ fromId: alphaId, to: betaId, message: "by id" });
+    assert.equal(byId.status, "sent");
+    assert.equal(byId.to, betaId);
+    assert.equal(beta.calls.steer.length, 2);
+    assert.equal(beta.calls.cancel.length, 0);
     relay.dispose();
     rmSync(file, { force: true });
   }
