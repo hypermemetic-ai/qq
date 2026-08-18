@@ -5,7 +5,7 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 toolchain="$root/dsh"
 npm ci --prefix "$toolchain" --no-audit --no-fund >/dev/null
 
-workbench="$root/bin/qq-dsh-workbench"
+launcher="$root/bin/qq"
 work=$(mktemp -d "${TMPDIR:-/tmp}/qq-workflows-boot.XXXXXX")
 llm_pid=
 dsh_pid=
@@ -76,7 +76,7 @@ env \
   QWEN_TOKEN_PLAN_API_KEY=qq-workflows-boot-probe \
   QQ_DSH_CONSOLE_PORT="$port" \
   QQ_DSH_SESSION_ID="$primary_id" \
-  "$workbench" --patch "$work/local-model.patch.yml" \
+  "$launcher" --patch "$work/local-model.patch.yml" \
   >"$work/dsh.stdout.log" 2>"$work/dsh.stderr.log" &
 dsh_pid=$!
 
@@ -98,19 +98,19 @@ done
 }
 grep -Fq "$primary_id" "$work/startup.html"
 
-profile="$DSH_HOME/profiles/qq-console/package.json"
+profile="$DSH_HOME/profiles/qq/package.json"
 [[ -f $profile ]]
 node - "$profile" "$root/qq-workflows" <<'NODE'
 const [manifestPath, workflowsPath] = process.argv.slice(2);
 const manifest = require(manifestPath);
 const dep = manifest.dependencies?.["@hypermemetic-ai/qq-workflows"];
 if (dep !== `link:${workflowsPath}` && dep !== `file:${workflowsPath}`) {
-  throw new Error(`qq-console profile is missing qq-workflows: ${dep}`);
+  throw new Error(`qq profile is missing qq-workflows: ${dep}`);
 }
 NODE
 
-grep -Fq 'auto: false' "$root/dsh-console/cordis.patch.yml"
-grep -Fq "id: compaction-basic" "$root/dsh-console/cordis.patch.yml"
+grep -Fq 'auto: false' "$root/qq/host.patch.yml"
+grep -Fq "id: compaction-basic" "$root/qq/host.patch.yml"
 env \
   HOME="$work/home" \
   XDG_CONFIG_HOME="$work/config" \
@@ -119,7 +119,7 @@ env \
   QWEN_TOKEN_PLAN_API_KEY=qq-workflows-boot-probe \
   QQ_DSH_CONSOLE_PORT="$port" \
   QQ_DSH_SESSION_ID="$primary_id" \
-  "$workbench" --dump-config >"$work/dump.yml" 2>"$work/dump.err"
+  "$launcher" --dump-config >"$work/dump.yml" 2>"$work/dump.err"
 node - "$work/dump.yml" <<'NODE'
 const { readFileSync } = require("node:fs");
 const dump = readFileSync(process.argv[2], "utf8");

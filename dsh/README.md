@@ -1,6 +1,6 @@
 # Daily DSH pin
 
-First-class `@deepseek-ai/dsh` pin for `bin/qq-dsh-workbench`. This is the daily qq + qq-ui host, not a pi2dsh compatibility harness.
+First-class `@deepseek-ai/dsh` pin for `bin/qq`. This is the daily qq host (the qq session plugin plus whichever sibling qq plugins are present), not a pi2dsh compatibility harness.
 
 Install the locked toolchain with:
 

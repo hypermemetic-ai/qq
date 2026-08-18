@@ -38,7 +38,7 @@ Phone: one top bar + Sessions disclosure; 44px Send; composer on the safe-area e
 
 ## Live assets
 
-Production workbench stays bundled and immutable. The fixture `--live` / `QQ_DESIGN_LOOP_LIVE=1` path re-reads CSS/JS from disk with `no-store` and cache-busts `render.mjs`. A pass must not restart the fixture after each edit.
+Production console stays bundled and immutable. The fixture `--live` / `QQ_DESIGN_LOOP_LIVE=1` path re-reads CSS/JS from disk with `no-store` and cache-busts `render.mjs`. A pass must not restart the fixture after each edit.
 
 ## Capture before judging
 

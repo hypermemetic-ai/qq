@@ -4,9 +4,9 @@ set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 cd "$root"
 
-: "${HOME:?qq-dsh-workbench: HOME is required}"
+: "${HOME:?qq: HOME is required}"
 state_root=${XDG_STATE_HOME:-"$HOME/.local/state"}
-export DSH_HOME=${QQ_DSH_HOME:-${DSH_HOME:-"$state_root/qq/dsh-workbench"}}
+export DSH_HOME=${QQ_DSH_HOME:-${DSH_HOME:-"$state_root/qq"}}
 export DSH_TELEMETRY_DISABLED=${DSH_TELEMETRY_DISABLED:-1}
 export QQ_DSH_CONSOLE_PORT=${QQ_DSH_CONSOLE_PORT:-3082}
 export QQ_DSH_PROVIDER=${QQ_DSH_PROVIDER:-qwen-token-plan}
@@ -32,7 +32,7 @@ if [[ $QQ_DSH_PROVIDER == qwen-token-plan ]] &&
   ! has_qwen_credential_file "$root/.env" env &&
   ! has_qwen_credential_file "$DSH_HOME/.env" env; then
   cat >&2 <<EOF
-qq-dsh-workbench: qwen-token-plan requires QWEN_TOKEN_PLAN_API_KEY.
+qq: qwen-token-plan requires QWEN_TOKEN_PLAN_API_KEY.
 Export it before starting, or store it under that name in:
   $DSH_HOME/.credentials.yaml  (chmod 600)
 
@@ -46,46 +46,54 @@ fi
 toolchain="$root/dsh"
 dsh="$toolchain/node_modules/.bin/dsh"
 if [[ ! -x $dsh ]]; then
-  printf 'qq-dsh-workbench: installing pinned DSH toolchain\n' >&2
+  printf 'qq: installing pinned DSH toolchain\n' >&2
   npm ci --prefix "$toolchain" --no-audit --no-fund
 fi
 
-profile_manifest="$DSH_HOME/profiles/qq-console/package.json"
-console_package="$root/dsh-console"
-qq_package="$root/qq"
+# Present siblings, in attach order. qq is always the session plugin; each
+# marker also gates the matching insert in qq/host.patch.yml.
+export QQ_DSH_HAVE_UI=0 QQ_DSH_HAVE_RELAY=0 QQ_DSH_HAVE_WORKFLOWS=0
 qq_ui_package="$root/qq-ui"
 qq_relay_package="$root/qq-relay"
 qq_workflows_package="$root/qq-workflows"
-if ! node - "$profile_manifest" "$console_package" "$qq_package" "$qq_ui_package" "$qq_relay_package" "$qq_workflows_package" <<'NODE'
-const [manifestPath, consolePath, qqPath, uiPath, relayPath, workflowsPath] = process.argv.slice(2);
+if [[ -f $qq_ui_package/package.json ]]; then QQ_DSH_HAVE_UI=1; fi
+if [[ -f $qq_relay_package/package.json ]]; then QQ_DSH_HAVE_RELAY=1; fi
+if [[ -f $qq_workflows_package/package.json ]]; then QQ_DSH_HAVE_WORKFLOWS=1; fi
+
+profile_manifest="$DSH_HOME/profiles/qq/package.json"
+if ! node - "$profile_manifest" "$root/qq" "$qq_ui_package" "$qq_relay_package" "$qq_workflows_package" <<'NODE'
+const { existsSync } = require("node:fs");
+const { join } = require("node:path");
+const [manifestPath, qqPath, uiPath, relayPath, workflowsPath] = process.argv.slice(2);
+const packages = [
+  ["@hypermemetic-ai/qq", qqPath],
+  ["@hypermemetic-ai/qq-ui", uiPath],
+  ["@hypermemetic-ai/qq-relay", relayPath],
+  ["@hypermemetic-ai/qq-workflows", workflowsPath],
+];
 try {
   const manifest = require(manifestPath);
   const deps = manifest.dependencies ?? {};
   const linked = (name, path) => deps[name] === `link:${path}` || deps[name] === `file:${path}`;
-  process.exit(
-    linked("@hypermemetic-ai/qq-dsh-console", consolePath) &&
-    linked("@hypermemetic-ai/qq", qqPath) &&
-    linked("@hypermemetic-ai/qq-ui", uiPath) &&
-    linked("@hypermemetic-ai/qq-relay", relayPath) &&
-    linked("@hypermemetic-ai/qq-workflows", workflowsPath)
-      ? 0
-      : 1,
-  );
+  for (const [name, path] of packages) {
+    if (existsSync(join(path, "package.json")) && !linked(name, path)) process.exit(1);
+  }
+  process.exit(0);
 } catch {
   process.exit(1);
 }
 NODE
 then
-  printf 'qq-dsh-workbench: preparing persistent DSH profile\n' >&2
-  "$dsh" plugin --profile qq-console add "$qq_package"
-  "$dsh" plugin --profile qq-console add "$qq_ui_package"
-  "$dsh" plugin --profile qq-console add "$qq_relay_package"
-  "$dsh" plugin --profile qq-console add "$qq_workflows_package"
-  "$dsh" plugin --profile qq-console add "$console_package"
+  printf 'qq: preparing persistent DSH profile\n' >&2
+  "$dsh" plugin --profile qq add "$root/qq"
+  if [[ $QQ_DSH_HAVE_UI == 1 ]]; then "$dsh" plugin --profile qq add "$qq_ui_package"; fi
+  if [[ $QQ_DSH_HAVE_RELAY == 1 ]]; then "$dsh" plugin --profile qq add "$qq_relay_package"; fi
+  if [[ $QQ_DSH_HAVE_WORKFLOWS == 1 ]]; then "$dsh" plugin --profile qq add "$qq_workflows_package"; fi
+else
+  :
 fi
-node "$root/dsh-console/configure-profile.mjs" "$profile_manifest" >/dev/null
 
-session_file="$DSH_HOME/qq-console.session"
+session_file="$DSH_HOME/qq.session"
 if [[ -n ${QQ_DSH_SESSION_ID:-} ]]; then
   session_id=$QQ_DSH_SESSION_ID
 elif [[ -f $session_file ]]; then
@@ -94,7 +102,7 @@ else
   session_id="session-$(node -e 'console.log(crypto.randomUUID())')"
 fi
 if [[ ! $session_id =~ ^session-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$ ]]; then
-  printf 'qq-dsh-workbench: invalid session id in QQ_DSH_SESSION_ID or %s\n' "$session_file" >&2
+  printf 'qq: invalid session id in QQ_DSH_SESSION_ID or %s\n' "$session_file" >&2
   exit 2
 fi
 if [[ ! -f $session_file ]]; then
@@ -103,6 +111,6 @@ if [[ ! -f $session_file ]]; then
 fi
 export QQ_DSH_SESSION_ID=$session_id
 
-printf 'qq-dsh-workbench: %s/%s · %s\n' "$QQ_DSH_PROVIDER" "$QQ_DSH_MODEL" "$QQ_DSH_SESSION_ID" >&2
-printf 'qq-dsh-workbench: state %s · http://127.0.0.1:%s/qq\n' "$DSH_HOME" "$QQ_DSH_CONSOLE_PORT" >&2
-exec node --import "$toolchain/qq-dsh-model-compat.mjs" "$dsh" --profile qq-console "$@"
+printf 'qq: %s/%s · %s\n' "$QQ_DSH_PROVIDER" "$QQ_DSH_MODEL" "$QQ_DSH_SESSION_ID" >&2
+printf 'qq: state %s · http://127.0.0.1:%s/qq\n' "$DSH_HOME" "$QQ_DSH_CONSOLE_PORT" >&2
+exec node --import "$toolchain/qq-dsh-model-compat.mjs" "$dsh" --profile qq --patch "$root/qq/host.patch.yml" "$@"

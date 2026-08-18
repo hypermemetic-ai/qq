@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Deterministic localhost OpenAI-compatible stub for isolated DSH workbench
-// proofs. It supplies no model semantics; one explicit workbench prompt drives
+// Deterministic localhost OpenAI-compatible stub for isolated DSH qq host
+// proofs. It supplies no model semantics; one explicit proof prompt drives
 // the pinned DSH base bundle's native coding tools.
 import { createServer } from "node:http";
 import { appendFileSync, writeFileSync } from "node:fs";
@@ -30,13 +30,13 @@ const server = createServer((request, response) => {
     const textOf = (content) => Array.isArray(content)
       ? content.map((part) => part?.text ?? "").join("\n")
       : String(content ?? "");
-    const workbenchProbe = parsed.messages?.some(
+    const nativeToolProbe = parsed.messages?.some(
       (message) => message?.role === "user" && textOf(message.content).includes("QQ_DSH_NATIVE_TOOL_PROBE"),
     ) === true;
-    const completedWorkbenchCalls = parsed.messages?.filter(
-      (message) => message?.role === "tool" && String(message?.tool_call_id).startsWith("call_qq_workbench_"),
+    const completedNativeToolCalls = parsed.messages?.filter(
+      (message) => message?.role === "tool" && String(message?.tool_call_id).startsWith("call_qq_native_"),
     ) ?? [];
-    const responseDelayMs = workbenchProbe ? 20 : requestNumber === 1 ? 750 : 3_500;
+    const responseDelayMs = nativeToolProbe ? 20 : requestNumber === 1 ? 750 : 3_500;
     setTimeout(() => {
       response.writeHead(200, { "content-type": "text/event-stream" });
       const base = {
@@ -45,15 +45,15 @@ const server = createServer((request, response) => {
         created: Math.floor(Date.now() / 1000),
         model: parsed.model ?? "deepseek-v4-pro-0813",
       };
-      if (workbenchProbe && completedWorkbenchCalls.length < 5) {
+      if (nativeToolProbe && completedNativeToolCalls.length < 5) {
         const calls = [
-          ["write", { file_path: ".qq-dsh-workbench-tool-proof", content: "alpha\n" }],
-          ["read", { file_path: ".qq-dsh-workbench-tool-proof" }],
-          ["edit", { file_path: ".qq-dsh-workbench-tool-proof", old_string: "alpha", new_string: "beta" }],
-          ["grep", { pattern: "beta", path: ".qq-dsh-workbench-tool-proof" }],
-          ["bash", { command: "test \"$(cat .qq-dsh-workbench-tool-proof)\" = beta && pwd", description: "Verify edited file and repository directory" }],
+          ["write", { file_path: ".qq-tool-proof", content: "alpha\n" }],
+          ["read", { file_path: ".qq-tool-proof" }],
+          ["edit", { file_path: ".qq-tool-proof", old_string: "alpha", new_string: "beta" }],
+          ["grep", { pattern: "beta", path: ".qq-tool-proof" }],
+          ["bash", { command: "test \"$(cat .qq-tool-proof)\" = beta && pwd", description: "Verify edited file and repository directory" }],
         ];
-        const index = completedWorkbenchCalls.length;
+        const index = completedNativeToolCalls.length;
         const [toolName, args] = calls[index];
         response.write(`data: ${JSON.stringify({
           ...base,
@@ -63,7 +63,7 @@ const server = createServer((request, response) => {
               role: "assistant",
               tool_calls: [{
                 index: 0,
-                id: `call_qq_workbench_${index}`,
+                id: `call_qq_native_${index}`,
                 type: "function",
                 function: { name: toolName, arguments: JSON.stringify(args) },
               }],
@@ -73,7 +73,7 @@ const server = createServer((request, response) => {
         })}\n\n`);
         response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`);
       } else {
-        const content = workbenchProbe
+        const content = nativeToolProbe
           ? "QQ_DSH_NATIVE_TOOL_PROBE_COMPLETE"
           : "receipt probe step complete";
         response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }] })}\n\n`);

@@ -578,9 +578,9 @@ try {
   assert.match(italicFont.headers["cache-control"], /immutable/);
 
   // Vendored pins and negative architecture constraints are machine checked.
-  const [pins, consoleEvidence, dshPins, dshPkg, dshLock, qqPlugin, uiPlugin, relayPlugin, relaySession, workflowsPlugin, qqSession, qqPkg, uiPkg, relayPkg, workflowsPkg, consolePkg, patch, workbench, modelCompat, browser, workerSource, renderSource] = await Promise.all([
+  const [pins, hostEvidence, dshPins, dshPkg, dshLock, qqPlugin, uiPlugin, relayPlugin, relaySession, workflowsPlugin, qqSession, qqPkg, uiPkg, relayPkg, workflowsPkg, patch, launcher, modelCompat, browser, workerSource, renderSource] = await Promise.all([
     readFile(join(root, "qq-ui/vendor-pins.json"), "utf8").then(JSON.parse),
-    readFile(join(root, "dsh-console/evidence.json"), "utf8").then(JSON.parse),
+    readFile(join(root, "qq/evidence.json"), "utf8").then(JSON.parse),
     readFile(join(root, "dsh/pins.json"), "utf8").then(JSON.parse),
     readFile(join(root, "dsh/package.json"), "utf8").then(JSON.parse),
     readFile(join(root, "dsh/package-lock.json"), "utf8").then(JSON.parse),
@@ -594,32 +594,31 @@ try {
     readFile(join(root, "qq-ui/package.json"), "utf8").then(JSON.parse),
     readFile(join(root, "qq-relay/package.json"), "utf8").then(JSON.parse),
     readFile(join(root, "qq-workflows/package.json"), "utf8").then(JSON.parse),
-    readFile(join(root, "dsh-console/package.json"), "utf8").then(JSON.parse),
-    readFile(join(root, "dsh-console/cordis.patch.yml"), "utf8"),
-    readFile(join(root, "bin/qq-dsh-workbench"), "utf8"),
+    readFile(join(root, "qq/host.patch.yml"), "utf8"),
+    readFile(join(root, "bin/qq"), "utf8"),
     readFile(join(root, "dsh/qq-dsh-model-compat.mjs"), "utf8"),
     readFile(join(root, "qq-ui/assets/browser-v4.js"), "utf8"),
     readFile(join(root, "qq-ui/assets/sw-v9.js"), "utf8"),
     readFile(join(root, "qq-ui/src/render.mjs"), "utf8"),
   ]);
   assert.equal(pins.schema, "qq.dsh-console-vendor-pins/v1");
-  assert.equal(consoleEvidence.schema, "qq.dsh-console-evidence/v2");
+  assert.equal(hostEvidence.schema, "qq.host-evidence/v1");
   assert.equal(dshPins.schema, "qq.dsh-pins/v1");
   assert.equal(dshPins.dsh.package, "@deepseek-ai/dsh");
   assert.equal(dshPins.dsh.version, "0.1.0-rc.7");
   assert.equal(dshPkg.dependencies["@deepseek-ai/dsh"], dshPins.dsh.version);
   assert.equal(dshLock.packages["node_modules/@deepseek-ai/dsh"]?.version, dshPins.dsh.version);
   assert.equal(dshLock.packages["node_modules/@deepseek-ai/dsh"]?.integrity, dshPins.dsh.integrity);
-  assert.deepEqual(consoleEvidence.dsh_pin, {
+  assert.deepEqual(hostEvidence.dsh_pin, {
     package: dshPins.dsh.package,
     version: dshPins.dsh.version,
     revision: dshPins.dsh.revision,
   });
-  assert.equal(consoleEvidence.scope.model, "sequential-single-page-handoff");
-  assert.equal(consoleEvidence.scope.controller_lease, false);
-  assert.equal(consoleEvidence.hypermedia.sse_activated, true);
-  assert.equal(consoleEvidence.pwa.network_only.includes("SSE"), true);
-  assert.equal(consoleEvidence.cutover_or_runtime_replacement_performed, false);
+  assert.equal(hostEvidence.scope.model, "sequential-single-page-handoff");
+  assert.equal(hostEvidence.scope.controller_lease, false);
+  assert.equal(hostEvidence.hypermedia.sse_activated, true);
+  assert.equal(hostEvidence.pwa.network_only.includes("SSE"), true);
+  assert.equal(hostEvidence.cutover_or_runtime_replacement_performed, false);
   for (const artifact of pins.artifacts) {
     const content = await readFile(join(root, "qq-ui", artifact.file));
     assert.equal(createHash("sha256").update(content).digest("hex"), artifact.sha256);
@@ -630,16 +629,13 @@ try {
   assert.match(patch, /model:.*deepseek-v4-pro-0813/);
   assert.match(patch, /id: deepseek-v4-pro-0813[\s\S]*supportsDeveloperRole: false/);
   assert.match(patch, /apiKeyEnv: QWEN_TOKEN_PLAN_API_KEY/);
-  assert.match(workbench, /--import.*qq-dsh-model-compat\.mjs/);
+  assert.match(launcher, /--import.*qq-dsh-model-compat\.mjs/);
   assert.match(modelCompat, /QWEN_TOKEN_PLAN_MODELS\[model\][\s\S]*supportsDeveloperRole: false/);
   assert.equal(qqPkg.name, "@hypermemetic-ai/qq");
   assert.equal(uiPkg.name, "@hypermemetic-ai/qq-ui");
   assert.equal(relayPkg.name, "@hypermemetic-ai/qq-relay");
   assert.equal(workflowsPkg.name, "@hypermemetic-ai/qq-workflows");
-  assert.equal(consolePkg.name, "@hypermemetic-ai/qq-dsh-console");
   assert.equal(uiPkg.dependencies["@hypermemetic-ai/qq"], "file:../qq");
-  assert.equal(consolePkg.dependencies["@hypermemetic-ai/qq-relay"], "file:../qq-relay");
-  assert.equal(consolePkg.dependencies["@hypermemetic-ai/qq-workflows"], "file:../qq-workflows");
   assert.equal(qqPkg.dependencies?.["@hypermemetic-ai/qq-ui"], undefined);
   assert.equal(relayPkg.dependencies?.["@hypermemetic-ai/qq"], undefined);
   assert.equal(qqPkg.dependencies?.["@hypermemetic-ai/qq-relay"], undefined);
@@ -649,10 +645,16 @@ try {
   assert.match(patch, /name: '@hypermemetic-ai\/qq-relay'[\s\S]*inject: \[agents, sessions\]/);
   assert.match(patch, /name: '@hypermemetic-ai\/qq-workflows'[\s\S]*inject: \[agents, sessions\]/);
   assert.match(patch, /id: compaction-basic[\s\S]*auto: false/);
-  assert.match(workbench, /qq_relay_package="\$root\/qq-relay"/);
-  assert.match(workbench, /qq_workflows_package="\$root\/qq-workflows"/);
-  assert.match(workbench, /linked\("@hypermemetic-ai\/qq-relay", relayPath\)/);
-  assert.match(workbench, /linked\("@hypermemetic-ai\/qq-workflows", workflowsPath\)/);
+  assert.match(launcher, /qq_relay_package="\$root\/qq-relay"/);
+  assert.match(launcher, /qq_workflows_package="\$root\/qq-workflows"/);
+  assert.match(launcher, /\["@hypermemetic-ai\/qq-relay", relayPath\]/);
+  assert.match(launcher, /\["@hypermemetic-ai\/qq-workflows", workflowsPath\]/);
+  assert.match(launcher, /QQ_DSH_HAVE_UI/);
+  assert.match(launcher, /QQ_DSH_HAVE_RELAY/);
+  assert.match(launcher, /QQ_DSH_HAVE_WORKFLOWS/);
+  assert.match(patch, /QQ_DSH_HAVE_UI/);
+  assert.match(patch, /QQ_DSH_HAVE_RELAY/);
+  assert.match(patch, /QQ_DSH_HAVE_WORKFLOWS/);
   assert.match(relayPlugin, /ctx\.provide\("qq-relay", service\)/);
   assert.match(workflowsPlugin, /ctx\.provide\("qq-workflows", service\)/);
   assert.doesNotMatch(workflowsPlugin, /from "\.\.\/qq"|run_workflow|dsh-tool-workflow|ctx\.compaction/);
@@ -665,9 +667,9 @@ try {
   assert.match(qqPlugin, /inject = \["agents", "sessions", "sessionPersistence"\]/);
   assert.doesNotMatch(qqSession, /<!doctype html>|htmx|text\/css|EventSource/);
   assert.doesNotMatch(uiPlugin, /agents\.create|sessionPersistence|followup|Agent\.cancel/);
-  assert.match(workbench, /state_root.*qq\/dsh-workbench/);
-  assert.match(workbench, /qq-console\.session/);
-  assert.doesNotMatch(`${qqPlugin}\n${uiPlugin}\n${patch}\n${workbench}`, /qq\.patch\.yml|name:.*pi2dsh|plugin.*pi2dsh|auth\.json/);
+  assert.match(launcher, /state_root\/qq/);
+  assert.match(launcher, /qq\.session/);
+  assert.doesNotMatch(`${qqPlugin}\n${uiPlugin}\n${patch}\n${launcher}`, /qq\.patch\.yml|name:.*pi2dsh|plugin.*pi2dsh|auth\.json/);
   assert.doesNotMatch(`${qqPlugin}\n${uiPlugin}\n${patch}`, /name:.*(?:dsh-web-app|api-proxy|client-connection)/);
   assert.match(browser, /transcript\.scrollTop = transcript\.scrollHeight/);
   assert.match(browser, /input\.style\.height = `\$\{input\.scrollHeight \+ input\.offsetHeight - input\.clientHeight\}px`/);

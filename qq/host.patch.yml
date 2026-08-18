@@ -1,6 +1,7 @@
-# qq-owned HTML console over the DSH base bundle. This is not stock DSH Web:
-# there is no api-proxy, React client roster, WebSocket, or frontend fallback.
-# The bundle composes two same-host plugins: qq (logic) and qq-ui (presentation).
+# qq host attach recipe. `bin/qq` applies this list as a --patch overlay over
+# the pinned dsh-base bundle, so qq plus the sibling qq plugins present on disk
+# compose in one host process. This is the attach recipe, not a second product;
+# each sibling is bound only when its tree is present.
 
 - id: system-prompt
   config:
@@ -16,11 +17,10 @@
   config:
     auto: false
 
-# The workbench selects one real qwen-token-plan route rather than inheriting
-# the base bundle's DeepSeek default. The exact dated model is newer than the
-# installed pi-ai catalog, so this profile declares its current non-secret
-# metadata while inheriting qwen-token-plan's endpoint/protocol and referencing
-# only its key.
+# qq selects one real qwen-token-plan route rather than inheriting the base
+# bundle's DeepSeek default. The exact dated model is newer than the installed
+# pi-ai catalog, so this profile declares its current non-secret metadata while
+# inheriting qwen-token-plan's endpoint/protocol and referencing only its key.
 - id: agent-default-model
   name: '@deepseek-ai/dsh-agent-default-model'
   config:
@@ -48,7 +48,7 @@
               supportsReasoningEffort: true
 
 - insert:
-    - id: qq-console-webserver
+    - id: qq-webserver
       name: '@deepseek-ai/dsh-host-webserver'
       config:
         host: 127.0.0.1
@@ -64,16 +64,22 @@
         model: !!js process.env.QQ_DSH_MODEL ?? 'deepseek-v4-pro-0813'
         reasoningEffort: !!js process.env.QQ_DSH_REASONING_EFFORT
 
+    # Missing siblings must not stop qq from booting. `bin/qq` exports one
+    # HAVE flag per present sibling; the matching insert stays disabled when
+    # the directory is absent.
     - id: qq-relay
       name: '@hypermemetic-ai/qq-relay'
+      disabled: !!js process.env.QQ_DSH_HAVE_RELAY !== '1'
       inject: [agents, sessions]
 
     - id: qq-workflows
       name: '@hypermemetic-ai/qq-workflows'
+      disabled: !!js process.env.QQ_DSH_HAVE_WORKFLOWS !== '1'
       inject: [agents, sessions]
 
     - id: qq-ui
       name: '@hypermemetic-ai/qq-ui'
+      disabled: !!js process.env.QQ_DSH_HAVE_UI !== '1'
       inject: [qq, webServer]
       config:
         basePath: /qq
