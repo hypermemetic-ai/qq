@@ -10,7 +10,7 @@ One active page at a time is an operator convention, not an enforcement protocol
 
 ## DSH authority and controls
 
-The bundle composes `@deepseek-ai/dsh-base@0.1.0-rc.6`, one loopback-only `@deepseek-ai/dsh-host-webserver`, the presentation-neutral [`@hypermemetic-ai/qq`](../qq) service, and the server-rendered [`@hypermemetic-ai/qq-ui`](../qq-ui) plugin in the same DSH/Cordis host process. It does not compose stock `dsh-web-app`, the Host API proxy, WebSockets, a client-side router, a second Node server, or a second database.
+The bundle composes `@deepseek-ai/dsh-base@0.1.0-rc.7`, one loopback-only `@deepseek-ai/dsh-host-webserver`, the presentation-neutral [`@hypermemetic-ai/qq`](../qq) service, and the server-rendered [`@hypermemetic-ai/qq-ui`](../qq-ui) plugin in the same DSH/Cordis host process. It does not compose stock `dsh-web-app`, the Host API proxy, WebSockets, a client-side router, a second Node server, or a second database.
 
 DSH owns every authoritative value:
 
@@ -22,7 +22,7 @@ DSH owns every authoritative value:
 - Send invokes `Agent.followup()`, waits for DSH quiescence, and flushes the DSH Session;
 - Interrupt invokes `Agent.cancel({ kind: "user" })`, waits for cancellation convergence, and flushes DSH when a turn was running.
 
-A pinned rc.6 cancellation can become live-idle before its still-open durable turn receives crash-recovery closure. The live UI therefore follows the Agent's current status; after restart, DSH persistence may label that final turn as recovered after interruption. The console does not synthesize or rewrite a DSH turn boundary.
+A pinned DSH cancellation can become live-idle before its still-open durable turn receives crash-recovery closure. The live UI therefore follows the Agent's current status; after restart, DSH persistence may label that final turn as recovered after interruption. The console does not synthesize or rewrite a DSH turn boundary.
 
 ## Stable htmx/SSE lifecycle
 
@@ -66,7 +66,7 @@ Open `http://127.0.0.1:3082/qq/`. On first use the script installs the locked to
 
 The first start records a canonical session identity in `$DSH_HOME/qq-console.session`. Killing the process and running the same command resumes that session from DSH's own session log. The always-visible session control can reopen any persisted DSH session, and **New session** creates and opens a fresh durable identity without changing the configured default. `QQ_DSH_SESSION_ID=session-<UUID>` selects an existing identity or establishes the saved identity on a fresh home.
 
-The workbench explicitly selects `qwen-token-plan/deepseek-v4-pro-0813`. That exact Pro revision is present in the operator's current token-plan catalog but is newer than rc.6's installed pi-ai catalog. The console profile therefore declares its current non-secret model metadata (name, capacities, text input, Qwen thinking format, `high`/`max` efforts, and no `developer` role) through rc.6's public `models` configuration. A launch-only Node preload seeds the dated route from the installed `deepseek-v4-pro` catalog entry before DSH resolves that profile; this preserves the exact outbound model id while carrying the token-plan route's `supportsDeveloperRole: false` compatibility into rc.6's pi-ai adapter. System instructions consequently travel as `system`, not the provider-rejected `developer` role. The provider still inherits the pinned `qwen-token-plan` endpoint and OpenAI-completions protocol and resolves only the existing `QWEN_TOKEN_PLAN_API_KEY` credential reference; this is neither a model substitution nor a credential adapter, and no key is stored in this repository. DSH also accepts the key in an owner-only `$DSH_HOME/.credentials.yaml`:
+The workbench explicitly selects `qwen-token-plan/deepseek-v4-pro-0813`. That exact Pro revision is newer than the pinned host's installed pi-ai catalog. The console profile therefore declares its current non-secret model metadata (name, capacities, text input, DeepSeek thinking format, `high`/`max` efforts, and no `developer` role) through DSH's public `models` configuration. A launch-only Node preload in [`../dsh/qq-dsh-model-compat.mjs`](../dsh/qq-dsh-model-compat.mjs) seeds the dated route from the installed `deepseek-v4-pro` catalog entry before DSH resolves that profile; this preserves the exact outbound model id while carrying the token-plan route's `supportsDeveloperRole: false` compatibility into the pinned pi-ai adapter. System instructions consequently travel as `system`, not the provider-rejected `developer` role. The provider still inherits the pinned `qwen-token-plan` endpoint and OpenAI-completions protocol and resolves only the existing `QWEN_TOKEN_PLAN_API_KEY` credential reference; this is neither a model substitution nor a credential adapter, and no key is stored in this repository. DSH also accepts the key in an owner-only `$DSH_HOME/.credentials.yaml`:
 
 ```yaml
 QWEN_TOKEN_PLAN_API_KEY: your-key
@@ -74,7 +74,7 @@ QWEN_TOKEN_PLAN_API_KEY: your-key
 
 Set its mode with `chmod 600 "$DSH_HOME/.credentials.yaml"`. The selection remains launch-local and visible through `QQ_DSH_PROVIDER`, `QQ_DSH_MODEL`, and `QQ_DSH_REASONING_EFFORT`; a different route/model must first be declared through the same supported DSH profile/settings seam. This workbench does not add a qq-wide model policy.
 
-The composed profile is only `@deepseek-ai/dsh-base` plus this console. The model therefore receives DSH's native `read`, `write`, `edit`, `glob`, `grep`, and `bash` coding tools rooted in the qq repository; pi2dsh and qq's Pi tools are not mounted.
+The composed profile is only `@deepseek-ai/dsh-base` plus this console. The model therefore receives DSH's native `read`, `write`, `edit`, `glob`, `grep`, and `bash` coding tools rooted in the qq repository; qq's Pi tools are not mounted.
 
 ## Migration boundary
 
@@ -88,12 +88,12 @@ The composed profile is only `@deepseek-ai/dsh-base` plus this console. The mode
 ### Does not migrate
 
 - No Pi transcript, Pi/Herdr run state, pane state, or credential file is imported. The launcher never reads Pi auth storage or copies a secret; the operator separately makes the named DSH credential reference resolvable through the launch environment or DSH credential file.
-- qq delegation, approval gates, runner/reviewer launch and ownership, agent messaging, independent QA, `done`, landing, and merge workflows remain on Pi/Herdr. This workbench mounts no qq/pi2dsh orchestration.
+- qq delegation, approval gates, runner/reviewer launch and ownership, agent messaging, independent QA, `done`, landing, and merge workflows remain on Pi/Herdr. This workbench mounts no qq orchestration.
 - There is no cutover. Rollback is Ctrl-C on DSH, then start a fresh Pi session with `pi` or return to the cockpit with `bin/qq-herdr-launch`; the isolated DSH home can remain for later resume and does not alter Pi/Herdr state.
 
 ### Known provider limitation
 
-qq normally uses `xai-auth/grok-4.6`, but that route is not available through a supported public seam in pinned DSH rc.6. qq's current Grok traffic uses an OAuth session with refresh plus the `https://cli-chat-proxy.grok.com/v1` Responses transport and its dynamic routing headers. rc.6's pi-ai adapter explicitly has no OAuth credential store, login, or refresh flow and only accepts credential references as API keys. Reusing the current Grok route would therefore require an auth/transport adapter, which this workbench intentionally does not add. The explicit fallback is DeepSeek V4 Pro 0813 through the existing Qwen subscription route; it never silently selects a Qwen model, DeepSeek Flash, or OpenAI.
+qq normally uses `xai-auth/grok-4.6`, but that route is not available through a supported public seam in the pinned DSH host. qq's current Grok traffic uses an OAuth session with refresh plus the `https://cli-chat-proxy.grok.com/v1` Responses transport and its dynamic routing headers. The pinned pi-ai adapter has no OAuth credential store, login, or refresh flow and only accepts credential references as API keys. Reusing the current Grok route would therefore require an auth/transport adapter, which this workbench intentionally does not add. The explicit fallback is DeepSeek V4 Pro 0813 through the existing Qwen subscription route; it never silently selects a Qwen model, DeepSeek Flash, or OpenAI.
 
 The plugin refuses a webserver host other than `127.0.0.1` and adds no authentication. A remote laptop or phone therefore needs a separately authenticated loopback tunnel, for example:
 
@@ -116,6 +116,6 @@ The fast test exercises session selection, send, two live SSE states, dynamicall
 
 On phone widths the page is a viewport-bounded app shell: one compact top bar owns identity, status, and a **Sessions** disclosure while the session selector and creation action stay hidden until that control is tapped. Transcript history scrolls independently with context/tool rows collapsed, ordinary messages omit redundant visible author headers while retaining accessible authorship, and the one-row prompt plus inline 44px Send target sit directly on the usable bottom edge while preserving any safe-area inset. The UI uses Geist variable fonts vendored from `@fontsource-variable/geist@5.3.0` under the included SIL OFL license rather than relying on a device font.
 
-[`../compat/pi2dsh/WEB_QA.md`](../compat/pi2dsh/WEB_QA.md) records the real-browser proof: two SSE swaps preserve both node identities, the newly inserted Interrupt form works without manual processing, forced stream closure reconnects through the official extension, the Pixel 10-sized `412×915` interaction has one default top bar and no overflow, the composer remains bottom-aligned at reduced height, an existing v4 cache upgrades to v5 without a hard refresh, unsafe text stays inert, and the controlled PWA fails closed after the host stops.
+[`WEB_QA.md`](WEB_QA.md) records the real-browser proof: two SSE swaps preserve both node identities, the newly inserted Interrupt form works without manual processing, forced stream closure reconnects through the official extension, the Pixel 10-sized `412×915` interaction has one default top bar and no overflow, the composer remains bottom-aligned at reduced height, an existing v4 cache upgrades to v5 without a hard refresh, unsafe text stays inert, and the controlled PWA fails closed after the host stops.
 
 This workbench does not add approval/question rendering, an in-page model picker, offline DSH behavior, simultaneous-client coordination, shared browser state, authentication, delegation/QA orchestration, or a physical-device claim.

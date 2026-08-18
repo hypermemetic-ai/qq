@@ -24,4 +24,3 @@ done
 "$ROOT/bin/qq-relay" --state-dir "$relay_state_dir" inspect '{"view":"health"}' \
   | grep -Fq '"service":"qq-relay"'
 node --experimental-strip-types "$ROOT/tests/test-agent-messages-live.mjs" "$ROOT" "$relay_socket" "$relay_state_home"
-QQ_PI2DSH_RELAY_STATE_HOME="$relay_state_home" "$ROOT/compat/pi2dsh/run.sh"

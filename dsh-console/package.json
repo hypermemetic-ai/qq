@@ -8,7 +8,8 @@
     "cordis.patch.yml",
     "configure-profile.mjs",
     "evidence.json",
-    "README.md"
+    "README.md",
+    "WEB_QA.md"
   ],
   "dsh": {
     "bundle": {

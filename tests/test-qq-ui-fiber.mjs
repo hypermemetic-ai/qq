@@ -7,8 +7,8 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const root = resolve(process.argv[2] ?? ".");
-const toolchain = join(root, "compat/pi2dsh/toolchain");
-const cordisEntry = join(toolchain, "node_modules/cordis/lib/index.js");
+const toolchain = join(root, "dsh");
+const cordisEntry = join(toolchain, "node_modules/@deepseek-ai/cordis/lib/index.js");
 if (!existsSync(cordisEntry)) {
   execFileSync("npm", ["ci", "--prefix", toolchain, "--no-audit", "--no-fund"], {
     stdio: "inherit",

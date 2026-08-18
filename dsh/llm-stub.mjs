@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Deterministic localhost OpenAI-compatible stub for isolated DSH proofs. It
-// supplies no model semantics; one explicit workbench prompt drives the pinned
-// DSH base bundle's native coding tools.
+// Deterministic localhost OpenAI-compatible stub for isolated DSH workbench
+// proofs. It supplies no model semantics; one explicit workbench prompt drives
+// the pinned DSH base bundle's native coding tools.
 import { createServer } from "node:http";
 import { appendFileSync, writeFileSync } from "node:fs";
 
@@ -27,8 +27,6 @@ const server = createServer((request, response) => {
       }));
       return;
     }
-    const qaSurface = parsed.tools?.some((tool) => tool?.function?.name === "qa_verdict") === true;
-    const qaVerdictRecorded = parsed.messages?.some((message) => message?.role === "tool" && String(message?.tool_call_id).startsWith("call_qq_native_qa_")) === true;
     const textOf = (content) => Array.isArray(content)
       ? content.map((part) => part?.text ?? "").join("\n")
       : String(content ?? "");
@@ -38,16 +36,14 @@ const server = createServer((request, response) => {
     const completedWorkbenchCalls = parsed.messages?.filter(
       (message) => message?.role === "tool" && String(message?.tool_call_id).startsWith("call_qq_workbench_"),
     ) ?? [];
-    // Keep the message-driven receipt turn open across qq-relay's real retry
-    // backoff. Native QA and workbench tools use deterministic fast responses.
-    const responseDelayMs = qaSurface || workbenchProbe ? 20 : requestNumber === 1 ? 750 : 3_500;
+    const responseDelayMs = workbenchProbe ? 20 : requestNumber === 1 ? 750 : 3_500;
     setTimeout(() => {
       response.writeHead(200, { "content-type": "text/event-stream" });
       const base = {
-        id: `chatcmpl-qq-pi2dsh-${requestNumber}`,
+        id: `chatcmpl-qq-dsh-${requestNumber}`,
         object: "chat.completion.chunk",
         created: Math.floor(Date.now() / 1000),
-        model: parsed.model ?? "deepseek-v4-flash",
+        model: parsed.model ?? "deepseek-v4-pro-0813",
       };
       if (workbenchProbe && completedWorkbenchCalls.length < 5) {
         const calls = [
@@ -76,38 +72,10 @@ const server = createServer((request, response) => {
           }],
         })}\n\n`);
         response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`);
-      } else if (qaSurface && !qaVerdictRecorded) {
-        response.write(`data: ${JSON.stringify({
-          ...base,
-          choices: [{
-            index: 0,
-            delta: {
-              role: "assistant",
-              tool_calls: [{
-                index: 0,
-                id: `call_qq_native_qa_${requestNumber}`,
-                type: "function",
-                function: {
-                  name: "qa_verdict",
-                  arguments: JSON.stringify({
-                    verdict: "pass",
-                    summary: "Independent native QA boundary proof passed.",
-                    feedback: "Pinned model, prompt, tool surface, submission isolation, and durable verdict verified.",
-                    tests_modified: false,
-                  }),
-                },
-              }],
-            },
-            finish_reason: null,
-          }],
-        })}\n\n`);
-        response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`);
       } else {
         const content = workbenchProbe
           ? "QQ_DSH_NATIVE_TOOL_PROBE_COMPLETE"
-          : qaSurface
-            ? "independent native QA verdict complete"
-            : "receipt probe step complete";
+          : "receipt probe step complete";
         response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }] })}\n\n`);
         response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`);
       }

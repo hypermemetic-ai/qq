@@ -1,6 +1,6 @@
 # qq DSH sequential-console browser QA
 
-This is the focused T-63.11 proof for the qq-owned server-rendered console in [`../../dsh-console`](../../dsh-console). It replaces the prior community-plugin experiment as the active Web QA target; T-63.10 remains requirements evidence only. The result is recorded in [`web-evidence.json`](web-evidence.json).
+This is the focused browser QA for the qq-owned server-rendered console in this directory. It replaces the prior community-plugin experiment as the active Web QA target; T-63.10 remains requirements evidence only. The result is recorded in [`evidence.json`](evidence.json).
 
 The topology is deliberately sequential: home, laptop, and phone use one page at a time. The same thing reconstructed on each device is the canonical DSH session id and ordered durable transcript, not synchronized browser state. Do not open extra pages to invent an observer/controller test.
 
@@ -13,7 +13,7 @@ node tests/test-dsh-console.mjs .
 tests/test-dsh-console-live.sh
 ```
 
-The live proof creates a disposable exact rc.6 profile, keeps all model traffic on the deterministic localhost stub, materializes two canonical DSH sessions, and exercises selection, Send, SSE running/settled output, Interrupt, sequential page disconnection, host restart, and ordered reconstruction from DSH persistence. It closes each curl SSE stream before opening the next device context. The fast test covers the same HTTP/rendering boundary with deterministic timing and negative checks for leases, client storage, manual htmx processing, and unsafe PWA caching.
+The live proof creates a disposable exact pinned DSH profile, keeps all model traffic on the deterministic localhost stub, materializes two canonical DSH sessions, and exercises selection, Send, SSE running/settled output, Interrupt, sequential page disconnection, host restart, and ordered reconstruction from DSH persistence. It closes each curl SSE stream before opening the next device context. The fast test covers the same HTTP/rendering boundary with deterministic timing and negative checks for leases, client storage, manual htmx processing, and unsafe PWA caching.
 
 ## Real-browser fixture
 
@@ -145,7 +145,7 @@ Reload the selected canonical session URL. The observed controlled page rendered
 
 ## Security/topology checks
 
-- [`cordis.patch.yml`](../../dsh-console/cordis.patch.yml) binds `127.0.0.1`; [`plugin.mjs`](../../qq-ui/src/plugin.mjs) refuses any other host.
+- [`cordis.patch.yml`](cordis.patch.yml) binds `127.0.0.1`; [`plugin.mjs`](../qq-ui/src/plugin.mjs) refuses any other host.
 - Every data/SSE/fragment/mutation response is `no-store`; static immutable caching is restricted to versioned presentation assets.
 - Mutations enforce same-origin request metadata, and all server-rendered data is escaped.
 - Remote laptop/phone use requires separately authenticated loopback forwarding. The plugin adds no authentication and must not be LAN-bound.
