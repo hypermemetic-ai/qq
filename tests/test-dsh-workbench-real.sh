@@ -2,9 +2,9 @@
 set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
-: "${QWEN_TOKEN_PLAN_API_KEY:?set QWEN_TOKEN_PLAN_API_KEY to run the real workbench smoke}"
+: "${QWEN_TOKEN_PLAN_API_KEY:?set QWEN_TOKEN_PLAN_API_KEY to run the real qq host smoke}"
 
-work=$(mktemp -d "${TMPDIR:-/tmp}/qq-dsh-workbench-real.XXXXXX")
+work=$(mktemp -d "${TMPDIR:-/tmp}/qq-host-real.XXXXXX")
 pid=
 cleanup() {
   if [[ -n $pid ]]; then
@@ -32,7 +32,7 @@ QQ_DSH_CONSOLE_PORT="$port" \
 QQ_DSH_SESSION_ID="$session_id" \
 QQ_DSH_PROVIDER=qwen-token-plan \
 QQ_DSH_MODEL=deepseek-v4-pro-0813 \
-"$root/bin/qq-dsh-workbench" \
+"$root/bin/qq" \
   >"$work/dsh.stdout.log" 2>"$work/dsh.stderr.log" &
 pid=$!
 
@@ -43,7 +43,7 @@ for _ in {1..600}; do
   if ! kill -0 "$pid" 2>/dev/null; then
     cat "$work/dsh.stdout.log" >&2
     cat "$work/dsh.stderr.log" >&2
-    echo "test-dsh-workbench-real: DSH host exited during startup" >&2
+    echo "test-qq-host-real: DSH host exited during startup" >&2
     exit 1
   fi
   sleep 0.05
@@ -70,4 +70,4 @@ curl -fsS --max-time 300 \
 grep -Fq "$nonce" "$work/response.html"
 grep -Fq 'qwen-token-plan/deepseek-v4-pro-0813' "$work/dsh.stderr.log"
 
-printf 'test-dsh-workbench-real: pass (%s)\n' "$nonce"
+printf 'test-qq-host-real: pass (%s)\n' "$nonce"

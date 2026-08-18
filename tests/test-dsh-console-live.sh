@@ -5,8 +5,8 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 toolchain="$root/dsh"
 npm ci --prefix "$toolchain" --no-audit --no-fund >/dev/null
 
-workbench="$root/bin/qq-dsh-workbench"
-work=$(mktemp -d "${TMPDIR:-/tmp}/qq-dsh-console-live.XXXXXX")
+launcher="$root/bin/qq"
+work=$(mktemp -d "${TMPDIR:-/tmp}/qq-host-live.XXXXXX")
 llm_pid=
 dsh_pid=
 stream_pid=
@@ -28,7 +28,7 @@ cleanup() {
     kill "$llm_pid" 2>/dev/null || true
     wait "$llm_pid" 2>/dev/null || true
   fi
-  rm -f -- "$root/.qq-dsh-workbench-tool-proof"
+  rm -f -- "$root/.qq-tool-proof"
   if [[ ${QQ_DSH_CONSOLE_KEEP:-0} == 1 ]]; then
     printf 'test-dsh-console-live: kept %s\n' "$work" >&2
   else
@@ -101,10 +101,10 @@ start_host() {
     XDG_CONFIG_HOME="$work/config" \
     DSH_HOME="$DSH_HOME" \
     DSH_TELEMETRY_DISABLED=1 \
-    QWEN_TOKEN_PLAN_API_KEY=qq-dsh-console-local-probe \
+    QWEN_TOKEN_PLAN_API_KEY=qq-local-probe \
     QQ_DSH_CONSOLE_PORT="$port" \
     "${session_env[@]}" \
-    "$workbench" --patch "$work/local-model.patch.yml" \
+    "$launcher" --patch "$work/local-model.patch.yml" \
     >"$work/dsh.stdout.log" 2>"$work/dsh.stderr.log" &
   dsh_pid=$!
 
@@ -232,6 +232,26 @@ session_id=$primary_id
 start_host
 grep -Fq '<!doctype html>' "$work/startup.html"
 grep -Fq "$primary_id" "$work/startup.html"
+
+# The full-tree launcher bind attaches every sibling plugin that exists on
+# disk: qq plus qq-ui, qq-relay, and qq-workflows share the qq profile.
+profile="$DSH_HOME/profiles/qq/package.json"
+[[ -f $profile ]]
+node - "$profile" "$root/qq" "$root/qq-ui" "$root/qq-relay" "$root/qq-workflows" <<'NODE'
+const [manifestPath, qqPath, uiPath, relayPath, workflowsPath] = process.argv.slice(2);
+const manifest = require(manifestPath);
+const deps = manifest.dependencies ?? {};
+const linked = (name, path) => deps[name] === `link:${path}` || deps[name] === `file:${path}`;
+for (const [name, path] of [
+  ["@hypermemetic-ai/qq", qqPath],
+  ["@hypermemetic-ai/qq-ui", uiPath],
+  ["@hypermemetic-ai/qq-relay", relayPath],
+  ["@hypermemetic-ai/qq-workflows", workflowsPath],
+]) {
+  if (!linked(name, path)) throw new Error(`qq profile is missing ${name}: ${deps[name]}`);
+}
+NODE
+
 open_stream home "$primary_id" proof-home
 post_prompt home "$primary_id" 'home durable handoff' htmx &
 post_pid=$!
@@ -301,14 +321,14 @@ phone_line=$(grep -nF 'phone durable handoff' "$work/local-again.html" | head -1
 ((home_line < laptop_line && laptop_line < phone_line))
 find "$DSH_HOME/sessions" -type f \( -name session.jsonl -o -name session.jsonl.zstd \) \
   -print | grep -q .
-[[ $(<"$DSH_HOME/qq-console.session") == "$primary_id" ]]
+[[ $(<"$DSH_HOME/qq.session") == "$primary_id" ]]
 
 # The selected token-plan DeepSeek Pro route receives DSH's own
 # read/write/edit/search/bash schemas, and its deterministic calls execute in
 # this repository without a Pi/pi2dsh bridge.
-post_prompt workbench-tools "$primary_id" 'QQ_DSH_NATIVE_TOOL_PROBE' htmx
-grep -Fq 'QQ_DSH_NATIVE_TOOL_PROBE_COMPLETE' "$work/workbench-tools.post.html"
-[[ $(<"$root/.qq-dsh-workbench-tool-proof") == beta ]]
+post_prompt native-tools "$primary_id" 'QQ_DSH_NATIVE_TOOL_PROBE' htmx
+grep -Fq 'QQ_DSH_NATIVE_TOOL_PROBE_COMPLETE' "$work/native-tools.post.html"
+[[ $(<"$root/.qq-tool-proof") == beta ]]
 node - "$work/llm-requests.jsonl" <<'NODE'
 const { readFileSync } = require("node:fs");
 const requests = readFileSync(process.argv[2], "utf8").trim().split("\n").map(JSON.parse);
@@ -320,10 +340,10 @@ for (const { body } of requests) {
 const instructionTurn = requests.find(({ body }) => body.messages?.some(
   ({ role, content }) => role === "user" && JSON.stringify(content).includes("home durable handoff"),
 ));
-if (!instructionTurn) throw new Error("missing instruction-bearing workbench turn");
+if (!instructionTurn) throw new Error("missing instruction-bearing qq turn");
 const system = instructionTurn.body.messages?.find(({ role }) => role === "system");
 if (!JSON.stringify(system?.content).includes("coding agent")) {
-  throw new Error("workbench instructions did not reach the compatible system role");
+  throw new Error("qq instructions did not reach the compatible system role");
 }
 const probe = requests.filter(({ body }) => body.messages?.some(
   ({ role, content }) => role === "user" && JSON.stringify(content).includes("QQ_DSH_NATIVE_TOOL_PROBE"),
@@ -341,12 +361,12 @@ const results = new Map(messages.filter(({ role }) => role === "tool").map(
   ({ tool_call_id: id, content }) => [id, JSON.stringify(content)],
 ));
 for (let index = 0; index < 5; index += 1) {
-  if (!results.has(`call_qq_workbench_${index}`)) throw new Error(`missing tool result ${index}`);
+  if (!results.has(`call_qq_native_${index}`)) throw new Error(`missing tool result ${index}`);
 }
-if (!results.get("call_qq_workbench_1").includes("alpha")) throw new Error("native read did not observe write");
-if (!results.get("call_qq_workbench_3").includes("beta")) throw new Error("native grep did not observe edit");
-if (!results.get("call_qq_workbench_4").includes(process.cwd())) throw new Error("native bash did not pass in repository");
+if (!results.get("call_qq_native_1").includes("alpha")) throw new Error("native read did not observe write");
+if (!results.get("call_qq_native_3").includes("beta")) throw new Error("native grep did not observe edit");
+if (!results.get("call_qq_native_4").includes(process.cwd())) throw new Error("native bash did not pass in repository");
 NODE
-rm -f -- "$root/.qq-dsh-workbench-tool-proof"
+rm -f -- "$root/.qq-tool-proof"
 
 printf 'test-dsh-console-live: pass\n'

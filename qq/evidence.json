@@ -1,5 +1,5 @@
 {
-  "schema": "qq.dsh-console-evidence/v2",
+  "schema": "qq.host-evidence/v1",
   "observed_at": "2026-08-17",
   "dsh_pin": {
     "package": "@deepseek-ai/dsh",
@@ -17,7 +17,7 @@
   "runtime_probe": {
     "verdict": "pass",
     "entrypoint": "tests/test-dsh-console-live.sh",
-    "profile": "qq-console",
+    "profile": "qq",
     "listener": "127.0.0.1 with an ephemeral test port",
     "credential_used": false,
     "model_boundary": "deterministic localhost DeepSeek-wire stub",
@@ -39,7 +39,7 @@
   },
   "browser_qa": {
     "verdict": "pass",
-    "instructions": "dsh-console/WEB_QA.md",
+    "instructions": "qq/WEB_QA.md",
     "engine": "Chromium through agent-browser",
     "facts": [
       "Two SSE messages covered running and settled swaps after one Send",
