@@ -10,6 +10,12 @@
 - id: hmr
   disabled: true
 
+# Architect owns fold on this profile. compact-basic must not auto-summarize
+# the talking session; qq-workflows chops fat tool dumps and folds by notes.
+- id: compaction-basic
+  config:
+    auto: false
+
 # The workbench selects one real qwen-token-plan route rather than inheriting
 # the base bundle's DeepSeek default. The exact dated model is newer than the
 # installed pi-ai catalog, so this profile declares its current non-secret
@@ -60,6 +66,10 @@
 
     - id: qq-relay
       name: '@hypermemetic-ai/qq-relay'
+      inject: [agents, sessions]
+
+    - id: qq-workflows
+      name: '@hypermemetic-ai/qq-workflows'
       inject: [agents, sessions]
 
     - id: qq-ui

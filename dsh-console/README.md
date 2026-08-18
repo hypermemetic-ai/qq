@@ -10,9 +10,9 @@ One active page at a time is an operator convention, not an enforcement protocol
 
 ## DSH authority and controls
 
-The bundle composes `@deepseek-ai/dsh-base@0.1.0-rc.7`, one loopback-only `@deepseek-ai/dsh-host-webserver`, the presentation-neutral [`@hypermemetic-ai/qq`](../qq) service, the in-process [`@hypermemetic-ai/qq-relay`](../qq-relay) messaging plugin, and the server-rendered [`@hypermemetic-ai/qq-ui`](../qq-ui) plugin in the same DSH/Cordis host process. It does not compose stock `dsh-web-app`, the Host API proxy, WebSockets, a client-side router, a second Node server, or a second database.
+The bundle composes `@deepseek-ai/dsh-base@0.1.0-rc.7`, one loopback-only `@deepseek-ai/dsh-host-webserver`, the presentation-neutral [`@hypermemetic-ai/qq`](../qq) service, the in-process [`@hypermemetic-ai/qq-relay`](../qq-relay) messaging plugin, the [`@hypermemetic-ai/qq-workflows`](../qq-workflows) architect plugin, and the server-rendered [`@hypermemetic-ai/qq-ui`](../qq-ui) plugin in the same DSH/Cordis host process. It does not compose stock `dsh-web-app`, the Host API proxy, WebSockets, a client-side router, a second Node server, or a second database.
 
-qq-relay gives loaded sessions in this one host a live directory, spoken aliases, and two send modes (default steer, urgent halt-then-turn) through the `relay_list`, `relay_send`, and `relay_status` tools. Its mailbox is in-process: no daemon, socket, presence files, or install root.
+qq-relay gives loaded sessions in this one host a live directory, spoken aliases, and two send modes (default steer, urgent halt-then-turn) through the `relay_list`, `relay_send`, and `relay_status` tools. Its mailbox is in-process: no daemon, socket, presence files, or install root. qq-workflows hangs `workflows:architect` on the live session and registers notebook, lookup, and invoke tools. compact-basic is `auto: false` on this profile; architect owns fold.
 
 DSH owns every authoritative value:
 

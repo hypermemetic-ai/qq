@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Same-host DSH profile bundle composing @hypermemetic-ai/qq and @hypermemetic-ai/qq-ui.",
+  "description": "Same-host DSH profile bundle composing @hypermemetic-ai/qq, qq-ui, qq-relay, and qq-workflows.",
   "files": [
     "cordis.patch.yml",
     "configure-profile.mjs",
@@ -19,6 +19,7 @@
   "dependencies": {
     "@hypermemetic-ai/qq": "file:../qq",
     "@hypermemetic-ai/qq-ui": "file:../qq-ui",
-    "@hypermemetic-ai/qq-relay": "file:../qq-relay"
+    "@hypermemetic-ai/qq-relay": "file:../qq-relay",
+    "@hypermemetic-ai/qq-workflows": "file:../qq-workflows"
   }
 }

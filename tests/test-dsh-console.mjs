@@ -578,7 +578,7 @@ try {
   assert.match(italicFont.headers["cache-control"], /immutable/);
 
   // Vendored pins and negative architecture constraints are machine checked.
-  const [pins, consoleEvidence, dshPins, dshPkg, dshLock, qqPlugin, uiPlugin, relayPlugin, relaySession, qqSession, qqPkg, uiPkg, relayPkg, consolePkg, patch, workbench, modelCompat, browser, workerSource, renderSource] = await Promise.all([
+  const [pins, consoleEvidence, dshPins, dshPkg, dshLock, qqPlugin, uiPlugin, relayPlugin, relaySession, workflowsPlugin, qqSession, qqPkg, uiPkg, relayPkg, workflowsPkg, consolePkg, patch, workbench, modelCompat, browser, workerSource, renderSource] = await Promise.all([
     readFile(join(root, "qq-ui/vendor-pins.json"), "utf8").then(JSON.parse),
     readFile(join(root, "dsh-console/evidence.json"), "utf8").then(JSON.parse),
     readFile(join(root, "dsh/pins.json"), "utf8").then(JSON.parse),
@@ -588,10 +588,12 @@ try {
     readFile(join(root, "qq-ui/src/plugin.mjs"), "utf8"),
     readFile(join(root, "qq-relay/src/plugin.mjs"), "utf8"),
     readFile(join(root, "qq-relay/src/relay.mjs"), "utf8"),
+    readFile(join(root, "qq-workflows/src/plugin.mjs"), "utf8"),
     readFile(join(root, "qq/src/session.mjs"), "utf8"),
     readFile(join(root, "qq/package.json"), "utf8").then(JSON.parse),
     readFile(join(root, "qq-ui/package.json"), "utf8").then(JSON.parse),
     readFile(join(root, "qq-relay/package.json"), "utf8").then(JSON.parse),
+    readFile(join(root, "qq-workflows/package.json"), "utf8").then(JSON.parse),
     readFile(join(root, "dsh-console/package.json"), "utf8").then(JSON.parse),
     readFile(join(root, "dsh-console/cordis.patch.yml"), "utf8"),
     readFile(join(root, "bin/qq-dsh-workbench"), "utf8"),
@@ -633,18 +635,27 @@ try {
   assert.equal(qqPkg.name, "@hypermemetic-ai/qq");
   assert.equal(uiPkg.name, "@hypermemetic-ai/qq-ui");
   assert.equal(relayPkg.name, "@hypermemetic-ai/qq-relay");
+  assert.equal(workflowsPkg.name, "@hypermemetic-ai/qq-workflows");
   assert.equal(consolePkg.name, "@hypermemetic-ai/qq-dsh-console");
   assert.equal(uiPkg.dependencies["@hypermemetic-ai/qq"], "file:../qq");
   assert.equal(consolePkg.dependencies["@hypermemetic-ai/qq-relay"], "file:../qq-relay");
+  assert.equal(consolePkg.dependencies["@hypermemetic-ai/qq-workflows"], "file:../qq-workflows");
   assert.equal(qqPkg.dependencies?.["@hypermemetic-ai/qq-ui"], undefined);
   assert.equal(relayPkg.dependencies?.["@hypermemetic-ai/qq"], undefined);
   assert.equal(qqPkg.dependencies?.["@hypermemetic-ai/qq-relay"], undefined);
+  assert.equal(workflowsPkg.dependencies?.["@hypermemetic-ai/qq"], undefined);
   assert.match(patch, /name: '@hypermemetic-ai\/qq'/);
   assert.match(patch, /name: '@hypermemetic-ai\/qq-ui'/);
   assert.match(patch, /name: '@hypermemetic-ai\/qq-relay'[\s\S]*inject: \[agents, sessions\]/);
+  assert.match(patch, /name: '@hypermemetic-ai\/qq-workflows'[\s\S]*inject: \[agents, sessions\]/);
+  assert.match(patch, /id: compaction-basic[\s\S]*auto: false/);
   assert.match(workbench, /qq_relay_package="\$root\/qq-relay"/);
+  assert.match(workbench, /qq_workflows_package="\$root\/qq-workflows"/);
   assert.match(workbench, /linked\("@hypermemetic-ai\/qq-relay", relayPath\)/);
+  assert.match(workbench, /linked\("@hypermemetic-ai\/qq-workflows", workflowsPath\)/);
   assert.match(relayPlugin, /ctx\.provide\("qq-relay", service\)/);
+  assert.match(workflowsPlugin, /ctx\.provide\("qq-workflows", service\)/);
+  assert.doesNotMatch(workflowsPlugin, /from "\.\.\/qq"|run_workflow|dsh-tool-workflow|ctx\.compaction/);
   assert.doesNotMatch(relayPlugin, /from "\.\.\/qq"|qq-relay-install-root|qq-relay-client/);
   assert.doesNotMatch(relaySession, /node:(child_process|net)|createServer|qq-relay-install-root|qq-relay-client/);
   assert.match(patch, /inject: \[qq, webServer\]/);
