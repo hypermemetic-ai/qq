@@ -248,4 +248,68 @@ if (text.includes("/workflows architect") && /"type":"user\/message"/.test(text)
 }
 NODE
 
+iterate_journal="$work/.qq-workflows-journals/$primary_id.json"
+[[ ! -f $iterate_journal ]] || {
+  echo "test-qq-workflows-boot: iterate journal existed before /workflows iterate" >&2
+  exit 1
+}
+
+post_prompt iter_select '/workflows iterate'
+[[ ! -f $work/llm-requests.jsonl ]] || ! grep -Fq '/workflows iterate' "$work/llm-requests.jsonl" || {
+  echo "test-qq-workflows-boot: /workflows iterate was sent to the model" >&2
+  exit 1
+}
+
+for _ in {1..100}; do
+  [[ -f $iterate_journal ]] && break
+  sleep 0.05
+done
+[[ -f $iterate_journal ]] || {
+  echo "test-qq-workflows-boot: iterate journal was not created after /workflows iterate" >&2
+  exit 1
+}
+node - "$iterate_journal" <<'NODE'
+const journal = require(process.argv[2]);
+if (journal.schema !== "qq.workflows-iterate-journal/v1") throw new Error("bad journal schema");
+if (!Array.isArray(journal.entries)) throw new Error("journal entries missing");
+NODE
+mode=$(stat -c '%a' "$iterate_journal")
+[[ $mode == 600 ]]
+if grep -Fq 'failed to hang workflows:iterate' "$work/dsh.stderr.log"; then
+  echo "test-qq-workflows-boot: workflows:iterate hang failed after select" >&2
+  exit 1
+fi
+
+post_prompt iter_settings '/workflows settings iterate desk test-provider desk-model medium'
+node - "$settings_file" <<'NODE'
+const { readFileSync } = require("node:fs");
+const settings = JSON.parse(readFileSync(process.argv[2], "utf8"));
+if (settings.roles?.scribe?.model !== "test-model") {
+  throw new Error("iterate settings write lost architect roles");
+}
+if (settings.iterate?.roles?.desk?.model !== "desk-model") {
+  throw new Error(`iterate desk role not written: ${JSON.stringify(settings.iterate)}`);
+}
+NODE
+
+post_prompt iter_talk 'Reply with exactly iterate-boot and nothing else.'
+grep -Fq 'iterate-boot' "$work/iter_talk.html"
+
+node - "$work/llm-requests.jsonl" <<'NODE'
+const { readFileSync } = require("node:fs");
+const requests = readFileSync(process.argv[2], "utf8").trim().split("\n").filter(Boolean).map(JSON.parse);
+const turn = requests.find(({ body }) => body.messages?.some(
+  ({ role, content }) => role === "user" && JSON.stringify(content).includes("iterate-boot"),
+));
+if (!turn) throw new Error("missing iterate desk turn");
+const names = turn.body.tools?.map((tool) => tool.function?.name ?? tool.name) ?? [];
+for (const name of ["journal_record", "journal_close", "journal_list", "wiki_file", "wiki_select", "go"]) {
+  if (!names.includes(name)) throw new Error(`missing ${name} desk tool; have ${names.join(",")}`);
+}
+for (const pixel of ["design_loop_start", "design_loop_capture", "design_loop_measure", "design_loop_seed", "design_loop_stop"]) {
+  if (names.includes(pixel)) throw new Error(`pixel tool ${pixel} registered on the desk`);
+}
+if (names.includes("run_workflow")) throw new Error("run_workflow dispatcher must not register");
+NODE
+
 printf 'test-qq-workflows-boot: pass\n'
