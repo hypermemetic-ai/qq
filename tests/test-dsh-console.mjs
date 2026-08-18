@@ -667,8 +667,13 @@ try {
   assert.match(qqPlugin, /inject = \["agents", "sessions", "sessionPersistence"\]/);
   assert.doesNotMatch(qqSession, /<!doctype html>|htmx|text\/css|EventSource/);
   assert.doesNotMatch(uiPlugin, /agents\.create|sessionPersistence|followup|Agent\.cancel/);
+  assert.match(launcher, /QQ_DSH_HOME:-\$\{DSH_HOME:-"\$state_root\/qq"\}/);
+  assert.match(launcher, /\$\{HOME:\?qq: HOME is required\}/);
+  assert.match(launcher, /profiles\/qq\/package\.json/);
+  assert.match(launcher, /--profile qq --patch "\$root\/qq\/host\.patch\.yml"/);
   assert.match(launcher, /state_root\/qq/);
   assert.match(launcher, /qq\.session/);
+  assert.doesNotMatch(`${patch}\n${launcher}`, /qq-dsh-workbench|qq-console|dsh-console|workbench/);
   assert.doesNotMatch(`${qqPlugin}\n${uiPlugin}\n${patch}\n${launcher}`, /qq\.patch\.yml|name:.*pi2dsh|plugin.*pi2dsh|auth\.json/);
   assert.doesNotMatch(`${qqPlugin}\n${uiPlugin}\n${patch}`, /name:.*(?:dsh-web-app|api-proxy|client-connection)/);
   assert.match(browser, /transcript\.scrollTop = transcript\.scrollHeight/);

@@ -232,6 +232,26 @@ session_id=$primary_id
 start_host
 grep -Fq '<!doctype html>' "$work/startup.html"
 grep -Fq "$primary_id" "$work/startup.html"
+
+# The full-tree launcher bind attaches every sibling plugin that exists on
+# disk: qq plus qq-ui, qq-relay, and qq-workflows share the qq profile.
+profile="$DSH_HOME/profiles/qq/package.json"
+[[ -f $profile ]]
+node - "$profile" "$root/qq" "$root/qq-ui" "$root/qq-relay" "$root/qq-workflows" <<'NODE'
+const [manifestPath, qqPath, uiPath, relayPath, workflowsPath] = process.argv.slice(2);
+const manifest = require(manifestPath);
+const deps = manifest.dependencies ?? {};
+const linked = (name, path) => deps[name] === `link:${path}` || deps[name] === `file:${path}`;
+for (const [name, path] of [
+  ["@hypermemetic-ai/qq", qqPath],
+  ["@hypermemetic-ai/qq-ui", uiPath],
+  ["@hypermemetic-ai/qq-relay", relayPath],
+  ["@hypermemetic-ai/qq-workflows", workflowsPath],
+]) {
+  if (!linked(name, path)) throw new Error(`qq profile is missing ${name}: ${deps[name]}`);
+}
+NODE
+
 open_stream home "$primary_id" proof-home
 post_prompt home "$primary_id" 'home durable handoff' htmx &
 post_pid=$!
