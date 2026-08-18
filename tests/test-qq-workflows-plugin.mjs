@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -12,6 +12,9 @@ const foldModule = await import(pathToFileURL(join(root, "qq-workflows/src/fold.
 const scribeModule = await import(pathToFileURL(join(root, "qq-workflows/src/scribe.mjs")));
 const architectModule = await import(pathToFileURL(join(root, "qq-workflows/src/architect.mjs")));
 const pluginModule = await import(pathToFileURL(join(root, "qq-workflows/src/plugin.mjs")));
+const selectionModule = await import(pathToFileURL(join(root, "qq-workflows/src/selection.mjs")));
+const settingsModule = await import(pathToFileURL(join(root, "qq-workflows/src/settings.mjs")));
+const commandModule = await import(pathToFileURL(join(root, "qq-workflows/src/command.mjs")));
 
 const {
   NOTEBOOK_SCHEMA, DEFAULT_CARD_NAME, createNotebookStore, defaultNotebookDir, formatStub,
@@ -24,7 +27,10 @@ const {
   pairBoundaries, createFolder,
 } = foldModule;
 const { parseClerkOutput, resolveScribeBinding, runScribe } = scribeModule;
-const { createArchitect, isArchitectSession, ARCHITECT_LABEL, CHILD_ORIGIN } = architectModule;
+const { createArchitect, isArchitectSession, isArchitectCandidate, ARCHITECT_LABEL, CHILD_ORIGIN } = architectModule;
+const { SELECTION_SCHEMA, createSelectionStore, defaultSelectionDir } = selectionModule;
+const { ARCHITECT_SETTINGS_SCHEMA, createArchitectSettings, formatSettingsList } = settingsModule;
+const { parseWorkflowsInput, formatWorkflowList } = commandModule;
 
 const scratch = mkdtempSync(join(tmpdir(), "qq-workflows-plugin."));
 const sessionId = (marker) =>
@@ -468,9 +474,12 @@ try {
         },
       },
     });
-    const result = await architect.invoke({
-      agent: { session: { id: alphaId, events: pairEvents(1, 0, "go", "ok"), header: { cwd: "/work" } } },
-    });
+    const parentAgent = {
+      session: { id: alphaId, events: pairEvents(1, 0, "go", "ok"), header: { cwd: "/work" } },
+      ctx: { on() { return () => {}; } },
+    };
+    architect.attach(parentAgent);
+    const result = await architect.invoke({ agent: parentAgent });
     assert.equal(result.status, "ok");
     assert.equal(result.alias, "80");
     assert.equal(result.delivery, "default");
@@ -493,25 +502,95 @@ try {
     assert.match(sent[0].message, /child result for parent/);
   }
 
-  assert.equal(isArchitectSession({ session: { id: alphaId, header: {} } }), true);
-  assert.equal(isArchitectSession({
+  assert.equal(isArchitectCandidate({ session: { id: alphaId, header: {} } }), true);
+  assert.equal(isArchitectCandidate({
     session: { id: childId, header: { origin: CHILD_ORIGIN } },
   }), false);
+  assert.equal(isArchitectSession({ session: { id: alphaId, header: {} } }), true);
 
-  // ---------------------------------------------------------------- scribe binding: one-shot, no cacheRetention field
+  // ---------------------------------------------------------------- selection default none; persist/restart
+  {
+    assert.equal(
+      defaultSelectionDir({ DSH_HOME: "/state/qq/dsh-workbench" }, {}),
+      "/state/qq/.qq-workflows-selected",
+    );
+    assert.equal(
+      defaultSelectionDir({}, { selectionDir: "/x/selected" }),
+      "/x/selected",
+    );
+    assert.throws(() => defaultSelectionDir({}, { selectionDir: "relative" }), /absolute path/);
+    const dir = join(scratch, "selected");
+    const first = createSelectionStore(dir);
+    assert.equal(first.get(alphaId), null);
+    first.set(alphaId, "architect");
+    assert.equal(statSync(first.fileFor(alphaId)).mode & 0o777, 0o600);
+    const again = createSelectionStore(dir);
+    assert.equal(again.get(alphaId), "architect");
+    again.set(alphaId, null);
+    assert.equal(createSelectionStore(dir).get(alphaId), null);
+    const parsed = JSON.parse(readFileSync(first.fileFor(alphaId), "utf8"));
+    assert.equal(parsed.schema, SELECTION_SCHEMA);
+    assert.equal(parsed.session, alphaId);
+    assert.equal(parsed.workflow, null);
+  }
+
+  // ---------------------------------------------------------------- settingsFile: declared path, not execution-profiles
   {
     const policyPath = join(scratch, "execution-profiles.json");
     writeFileSync(policyPath, JSON.stringify({
       scribe: { provider: "xai-auth", model: "grok-4.6", effort: "high" },
     }));
-    assert.deepEqual(
-      resolveScribeBinding({ executionProfilesPath: policyPath }),
-      { provider: "xai-auth", model: "grok-4.6", effort: "high" },
-    );
+    assert.equal(resolveScribeBinding({ executionProfilesPath: policyPath }), null);
     assert.deepEqual(
       resolveScribeBinding({ scribe: { provider: "test", model: "scribe", effort: "low" } }),
       { provider: "test", model: "scribe", effort: "low" },
     );
+    const missing = createArchitectSettings({ settingsFile: join(scratch, "missing-settings.json") });
+    assert.equal(missing.unbound(), true);
+    assert.equal(missing.get("scribe"), null);
+    assert.match(formatSettingsList("architect", missing.list()), /unbound/);
+    const relative = createArchitectSettings({ settingsFile: "relative.json" });
+    assert.equal(relative.unbound(), true);
+    const settingsPath = join(scratch, "architect-settings.json");
+    const settings = createArchitectSettings({ settingsFile: settingsPath });
+    assert.equal(settings.unbound(), true);
+    settings.write("scribe", { provider: "test", model: "scribe", effort: "low" });
+    assert.equal(existsSync(policyPath), true);
+    assert.equal(JSON.parse(readFileSync(policyPath, "utf8")).scribe.model, "grok-4.6");
+    assert.equal(statSync(settingsPath).mode & 0o777, 0o600);
+    const loaded = JSON.parse(readFileSync(settingsPath, "utf8"));
+    assert.equal(loaded.schema, ARCHITECT_SETTINGS_SCHEMA);
+    assert.deepEqual(loaded.roles.scribe, { provider: "test", model: "scribe", effort: "low" });
+    assert.deepEqual(settings.get("scribe"), { provider: "test", model: "scribe", effort: "low" });
+    assert.deepEqual(resolveScribeBinding({ settings }), settings.get("scribe"));
+    assert.match(formatSettingsList("architect", settings.list()), /scribe: test scribe low/);
+  }
+
+  // ---------------------------------------------------------------- command parse
+  {
+    assert.deepEqual(parseWorkflowsInput(""), { action: "list" });
+    assert.deepEqual(parseWorkflowsInput("architect"), { action: "select", workflow: "architect" });
+    assert.deepEqual(parseWorkflowsInput("iterate"), { action: "select", workflow: "iterate" });
+    assert.deepEqual(parseWorkflowsInput("none"), { action: "clear" });
+    assert.deepEqual(parseWorkflowsInput("off"), { action: "clear" });
+    assert.deepEqual(parseWorkflowsInput("settings"), { action: "settings-list", workflow: null });
+    assert.deepEqual(parseWorkflowsInput("settings architect"), { action: "settings-list", workflow: "architect" });
+    assert.deepEqual(
+      parseWorkflowsInput("settings architect scribe test-provider test-model low"),
+      {
+        action: "settings-write",
+        workflow: "architect",
+        role: "scribe",
+        binding: { provider: "test-provider", model: "test-model", effort: "low" },
+      },
+    );
+    assert.equal(parseWorkflowsInput("mystery extra").action, "error");
+    assert.match(formatWorkflowList(["architect"], null), /none selected/);
+    assert.match(formatWorkflowList(["architect"], "architect"), /architect \(selected\)/);
+  }
+
+  // ---------------------------------------------------------------- scribe binding: one-shot, no cacheRetention field
+  {
     const seen = [];
     const text = await runScribe({
       async *stream(options) {
@@ -525,32 +604,39 @@ try {
     assert.match(seen[0].sessionId, /^session-/);
   }
 
-  // ---------------------------------------------------------------- plugin apply: tools + label hang
+  // ---------------------------------------------------------------- plugin apply: default none; select attaches
   {
     const dir = join(scratch, "plugin-apply");
+    const selectedDir = join(scratch, "plugin-apply-selected");
     const registered = [];
     const hung = [];
+    const cleared = [];
+    const commands = [];
     const agents = new Map();
-    const agentCtxListeners = [];
     const fakeAgent = {
       id: alphaId,
       options: { provider: "qwen-token-plan", model: "deepseek-v4-pro-0813" },
       session: { id: alphaId, events: [], header: { cwd: "/work" } },
       ctx: {
-        on(type, fn) {
-          agentCtxListeners.push({ type, fn });
-          return () => {};
+        on() { return () => {}; },
+        get(name) {
+          if (name === "tools") {
+            return {
+              register(definition) {
+                registered.push(definition);
+                return () => {
+                  const index = registered.indexOf(definition);
+                  if (index >= 0) registered.splice(index, 1);
+                };
+              },
+            };
+          }
+          return undefined;
         },
       },
     };
     agents.set(alphaId, fakeAgent);
     const created = [];
-    const toolsService = {
-      register(definition) {
-        registered.push(definition);
-        return () => {};
-      },
-    };
     const provided = {};
     pluginModule.apply({
       get(name) {
@@ -570,11 +656,18 @@ try {
           };
         }
         if (name === "sessions") return {};
-        if (name === "tools") return toolsService;
+        if (name === "commands") {
+          return {
+            register(definition) {
+              commands.push(definition);
+              return () => {};
+            },
+          };
+        }
         if (name === "qq-relay") {
           return {
             hang(id, label) { hung.push({ id, label }); },
-            clear() {},
+            clear(id, label) { cleared.push({ id, label }); },
             alias: () => "1",
           };
         }
@@ -585,22 +678,44 @@ try {
       on() { return () => {}; },
     }, {
       notebookDir: dir,
+      selectionDir: selectedDir,
       scribe: { provider: "test", model: "scribe" },
       runScribe: async () => "start from the architect stitch",
     });
 
-    assert.ok(provided["qq-workflows"]);
+    const service = provided["qq-workflows"];
+    assert.ok(service);
+    assert.equal(existsSync(join(dir, `${alphaId}.json`)), false);
+    assert.deepEqual(registered.map((tool) => tool.name), []);
+    assert.deepEqual(hung, []);
+    assert.equal(service.workflows.selected(alphaId), null);
+    assert.equal(commands.length, 1);
+    assert.equal(commands[0].name, "workflows");
+
+    const listed = commands[0].handler({ agent: fakeAgent, rawInput: "" });
+    assert.equal(listed.kind, "success");
+    assert.match(listed.text, /architect/);
+    assert.match(listed.text, /none selected/);
+
+    const unknown = commands[0].handler({ agent: fakeAgent, rawInput: "iterate" });
+    assert.equal(unknown.kind, "error");
+    assert.match(unknown.text, /unknown workflow/);
+
+    const selected = commands[0].handler({ agent: fakeAgent, rawInput: "architect" });
+    assert.equal(selected.kind, "success");
+    assert.equal(service.workflows.selected(alphaId), "architect");
+    assert.ok(existsSync(join(dir, `${alphaId}.json`)));
     assert.deepEqual(registered.map((tool) => tool.name), [
       "notes_list", "notes_expand", "session_search", "invoke",
     ]);
     assert.deepEqual(hung, [{ id: alphaId, label: ARCHITECT_LABEL }]);
 
     const [listTool, expandTool, searchTool, invokeTool] = registered;
-    const listed = await listTool.execute({}, { agent: fakeAgent });
-    assert.equal(listed.status, "ok");
-    assert.match(listTool.output.render({}, listed)[0].text, /card concern/);
+    const notes = await listTool.execute({}, { agent: fakeAgent });
+    assert.equal(notes.status, "ok");
+    assert.match(listTool.output.render({}, notes)[0].text, /card concern/);
 
-    provided["qq-workflows"].store.appendNote(alphaId, { text: "cited", startSeq: 5, endSeq: 8 });
+    service.store.appendNote(alphaId, { text: "cited", startSeq: 5, endSeq: 8 });
     fakeAgent.session.events = pairEvents(1, 4, "operator cited this", "ok");
     const expanded = await expandTool.execute({ startSeq: 5, endSeq: 5 }, { agent: fakeAgent });
     assert.equal(expanded.status, "ok");
@@ -613,48 +728,66 @@ try {
     const invoked = await invokeTool.execute({}, { agent: fakeAgent });
     assert.equal(invoked.status, "ok");
     assert.equal(invoked.alias, "1");
+
+    const clearedSelection = commands[0].handler({ agent: fakeAgent, rawInput: "none" });
+    assert.equal(clearedSelection.kind, "success");
+    assert.equal(service.workflows.selected(alphaId), null);
+    assert.deepEqual(registered, []);
+    assert.deepEqual(cleared, [{ id: alphaId, label: ARCHITECT_LABEL }]);
+    assert.ok(service.architect.attached(alphaId) == null);
   }
 
   // invoke tool refuses when relay is absent
   {
     const dir = join(scratch, "plugin-no-relay");
+    const selectedDir = join(scratch, "plugin-no-relay-selected");
     const registered = [];
     const fakeAgent = {
       id: alphaId,
       session: { id: alphaId, events: [], header: {} },
+      ctx: {
+        on() { return () => {}; },
+        get(name) {
+          if (name === "tools") {
+            return {
+              register(definition) {
+                registered.push(definition);
+                return () => {};
+              },
+            };
+          }
+          return undefined;
+        },
+      },
     };
+    const provided = {};
     pluginModule.apply({
       get(name) {
         if (name === "agents") return { list: () => [fakeAgent], get: () => fakeAgent };
         if (name === "sessions") return {};
-        if (name === "tools") {
-          return {
-            register(definition) {
-              registered.push(definition);
-              return () => {};
-            },
-          };
-        }
-        return undefined;
+        return provided[name];
       },
-      provide() {},
+      provide(name, value) { provided[name] = value; },
       effect(fn) { fn(); return () => {}; },
       on() { return () => {}; },
-    }, { notebookDir: dir });
+    }, { notebookDir: dir, selectionDir: selectedDir });
+    provided["qq-workflows"].workflows.select(alphaId, "architect");
     const invokeTool = registered.find((tool) => tool.name === "invoke");
     const refused = await invokeTool.execute({}, { agent: fakeAgent });
     assert.equal(refused.status, "refused");
     assert.match(refused.reason, /qq-relay/);
   }
 
-  // apply without tools: service still loads (same shape as qq-relay)
+  // apply without tools: service still loads; boot does not hang
   {
     const dir = join(scratch, "plugin-no-tools");
+    const selectedDir = join(scratch, "plugin-no-tools-selected");
     const provided = {};
     const hung = [];
     const fakeAgent = {
       id: alphaId,
       session: { id: alphaId, events: [], header: {} },
+      ctx: { on() { return () => {}; } },
     };
     pluginModule.apply({
       get(name) {
@@ -667,47 +800,75 @@ try {
       provide(name, value) { provided[name] = value; },
       effect() { throw new Error("tools effect must not run without tools"); },
       on() { return () => {}; },
-    }, { notebookDir: dir });
+    }, { notebookDir: dir, selectionDir: selectedDir });
     assert.ok(provided["qq-workflows"]);
+    assert.deepEqual(hung, []);
+    provided["qq-workflows"].workflows.select(alphaId, "architect");
     assert.deepEqual(hung, [{ id: alphaId, label: ARCHITECT_LABEL }]);
   }
 
-  // tools register after ctx.inject(["tools"]) fires, not at apply time
+  // tools stay off the host tools service until a session is selected
   {
     const dir = join(scratch, "plugin-tools-later");
+    const selectedDir = join(scratch, "plugin-tools-later-selected");
     const registered = [];
-    let injectCallback;
     pluginModule.apply({
       get(name) {
         if (name === "agents") return { list: () => [] };
-        return undefined;
-      },
-      provide() {},
-      inject(deps, callback) {
-        assert.deepEqual(deps, ["tools"]);
-        injectCallback = callback;
-      },
-      effect(fn) { fn(); return () => {}; },
-      on() { return () => {}; },
-    }, { notebookDir: dir });
-    assert.equal(registered.length, 0);
-    injectCallback({
-      get(name) {
         if (name === "tools") {
           return {
-            register(definition) {
-              registered.push(definition);
-              return () => {};
-            },
+            register() { throw new Error("host tools must not receive architect tools"); },
           };
         }
         return undefined;
       },
+      provide() {},
+      inject(deps, callback) {
+        if (deps.includes("tools")) throw new Error("plugin must not inject tools globally");
+        if (deps.includes("commands")) callback({ get() { return undefined; }, effect() { return () => {}; } });
+      },
       effect(fn) { fn(); return () => {}; },
+      on() { return () => {}; },
+    }, { notebookDir: dir, selectionDir: selectedDir });
+    assert.deepEqual(registered, []);
+  }
+
+  // settings write goes to settingsFile, not execution-profiles
+  {
+    const dir = join(scratch, "plugin-settings");
+    const selectedDir = join(scratch, "plugin-settings-selected");
+    const settingsPath = join(scratch, "plugin-settings.json");
+    const policyPath = join(scratch, "plugin-execution-profiles.json");
+    writeFileSync(policyPath, JSON.stringify({ scribe: { provider: "keep", model: "me" } }));
+    const provided = {};
+    const fakeAgent = {
+      id: alphaId,
+      session: { id: alphaId, events: [], header: {} },
+      ctx: { on() { return () => {}; } },
+    };
+    pluginModule.apply({
+      get(name) {
+        if (name === "agents") return { list: () => [fakeAgent], get: () => fakeAgent };
+        return provided[name];
+      },
+      provide(name, value) { provided[name] = value; },
+      effect(fn) { fn(); return () => {}; },
+      on() { return () => {}; },
+    }, { notebookDir: dir, selectionDir: selectedDir, settingsFile: settingsPath });
+    const result = provided["qq-workflows"].handleWorkflows({
+      agent: fakeAgent,
+      rawInput: "settings architect scribe test-provider test-model low",
     });
-    assert.deepEqual(registered.map((tool) => tool.name), [
-      "notes_list", "notes_expand", "session_search", "invoke",
-    ]);
+    assert.equal(result.kind, "success");
+    assert.match(result.text, /scribe: test-provider test-model low/);
+    assert.deepEqual(JSON.parse(readFileSync(settingsPath, "utf8")).roles.scribe, {
+      provider: "test-provider", model: "test-model", effort: "low",
+    });
+    assert.deepEqual(JSON.parse(readFileSync(policyPath, "utf8")), {
+      scribe: { provider: "keep", model: "me" },
+    });
+    const missing = createArchitectSettings({});
+    assert.equal(missing.unbound(), true);
   }
 
   // prune at agent/request, never from tool/result (reentrant append)
@@ -820,6 +981,62 @@ try {
     assert.equal(packet, "packet");
     assert.match(seen[0].user, /Return address: session .* \(alias 1\)/);
     assert.match(seen[0].system, /return address/i);
+  }
+
+  // child cannot be selected as architect; restart restores membership
+  {
+    const dir = join(scratch, "plugin-child");
+    const selectedDir = join(scratch, "plugin-child-selected");
+    const hung = [];
+    const child = {
+      id: childId,
+      session: { id: childId, events: [], header: { origin: CHILD_ORIGIN } },
+      ctx: { on() { return () => {}; } },
+    };
+    const chair = {
+      id: alphaId,
+      session: { id: alphaId, events: [], header: {} },
+      ctx: { on() { return () => {}; } },
+    };
+    const provided = {};
+    pluginModule.apply({
+      get(name) {
+        if (name === "agents") return { list: () => [child], get: (id) => (id === childId ? child : null) };
+        if (name === "qq-relay") {
+          return { hang(id, label) { hung.push({ id, label }); }, clear() {}, alias: () => "1" };
+        }
+        return provided[name];
+      },
+      provide(name, value) { provided[name] = value; },
+      effect(fn) { fn(); return () => {}; },
+      on() { return () => {}; },
+    }, { notebookDir: dir, selectionDir: selectedDir });
+    const refused = provided["qq-workflows"].handleWorkflows({
+      agent: child,
+      rawInput: "architect",
+    });
+    assert.equal(refused.kind, "error");
+    assert.match(refused.text, /child session/);
+    assert.deepEqual(hung, []);
+
+    createSelectionStore(selectedDir).set(alphaId, "architect");
+    const again = {};
+    const hungAgain = [];
+    pluginModule.apply({
+      get(name) {
+        if (name === "agents") return { list: () => [chair], get: (id) => (id === alphaId ? chair : null) };
+        if (name === "qq-relay") {
+          return { hang(id, label) { hungAgain.push({ id, label }); }, clear() {}, alias: () => "1" };
+        }
+        return again[name];
+      },
+      provide(name, value) { again[name] = value; },
+      effect(fn) { fn(); return () => {}; },
+      on() { return () => {}; },
+    }, { notebookDir: dir, selectionDir: selectedDir });
+    assert.equal(again["qq-workflows"].workflows.selected(alphaId), "architect");
+    assert.deepEqual(hungAgain, [{ id: alphaId, label: ARCHITECT_LABEL }]);
+    assert.ok(existsSync(join(dir, `${alphaId}.json`)));
   }
 
   console.log("test-qq-workflows-plugin: pass");
