@@ -149,7 +149,6 @@ if grep -Fq 'workflows:architect' "$work/dsh.stderr.log"; then
 fi
 mkdir -p -- "$work/config/qq"
 printf '%s\n' '{"scribe":{"provider":"keep","model":"me"}}' >"$work/config/qq/execution-profiles.json"
-profiles_before=$(<"$work/config/qq/execution-profiles.json")
 
 post_prompt() {
   local name=$1
