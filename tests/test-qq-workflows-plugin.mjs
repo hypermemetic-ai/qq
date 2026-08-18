@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -32,7 +32,7 @@ const {
 } = foldModule;
 const { parseClerkOutput, resolveScribeBinding, runScribe } = scribeModule;
 const { createArchitect, isArchitectSession, isArchitectCandidate, ARCHITECT_LABEL, CHILD_ORIGIN } = architectModule;
-const { createIterate, isIterateCandidate, ITERATE_LABEL, buildHandsPacket } = iterateModule;
+const { createIterate, isIterateCandidate, ITERATE_LABEL, buildHandsPacket, collectReviewEvidence } = iterateModule;
 const {
   JOURNAL_SCHEMA, createJournalStore, defaultJournalDir, projectJournal, collectBreath, formatProjection,
 } = journalModule;
@@ -1315,6 +1315,8 @@ try {
     assert.equal(verdicts.length, 1);
     assert.match(verdicts[0].user, /left rail too wide/);
     assert.match(verdicts[0].user, /Keep-outs/);
+    assert.match(verdicts[0].user, /Shots from the design loop/);
+    assert.match(verdicts[0].user, /Patch-surface diff:/);
     const afterPass = journal.project(alphaId);
     assert.equal(afterPass.nits[0].open, false);
     const wikiAfter = wiki.project(alphaId);
@@ -1428,7 +1430,7 @@ try {
       registerHandsTools: () => {},
     });
     const parentAgent = {
-      session: { id: alphaId, events: [], header: { cwd: "/work" } },
+      session: { id: alphaId, events: [], header: { cwd: root } },
       ctx: { on() { return () => {}; } },
     };
     iterate.attach(parentAgent);
@@ -1441,9 +1443,63 @@ try {
     assert.equal(requests.length, 1);
     assert.equal(requests[0].provider, "test-review");
     assert.match(requests[0].system, /honors the directive/);
+    assert.match(requests[0].system, /shots listing and the patch-surface diff/);
+    const reviewUser = requests[0].messages?.[0]?.content?.[0]?.text ?? "";
+    assert.match(reviewUser, /form is cramped/);
+    assert.match(reviewUser, /Shots from the design loop/);
+    assert.match(reviewUser, /Patch-surface diff:/);
     assert.equal(sent.length, 1);
     assert.match(sent[0].message, /passed review/);
     assert.equal(journal.project(alphaId).nits[0].open, false);
+  }
+
+  // ---------------------------------------------------------------- iterate: reviewer prompt carries shots listing + patch-surface diff
+  {
+    const env = { HOME: scratch, XDG_STATE_HOME: join(scratch, "review-shots-state") };
+    const shots = join(env.XDG_STATE_HOME, "qq", "frontend-design-loop", "shots", "current");
+    mkdirSync(shots, { recursive: true });
+    writeFileSync(join(shots, "desktop.png"), "png");
+    writeFileSync(join(shots, "phone.png"), "xx");
+    const evidence = collectReviewEvidence({ cwd: root, env });
+    assert.match(evidence, /current\/desktop\.png \(3 bytes\)/);
+    assert.match(evidence, /current\/phone\.png \(2 bytes\)/);
+    assert.match(evidence, /Patch-surface diff:/);
+    assert.doesNotMatch(evidence, /live under /);
+  }
+
+  // ---------------------------------------------------------------- iterate: fixture-backed hands path can start and stop the design loop
+  {
+    const isolated = mkdtempSync(join(tmpdir(), "qq-workflows-hands-loop."));
+    const env = { HOME: isolated, XDG_STATE_HOME: join(isolated, "state") };
+    const designLoop = await import(pathToFileURL(join(root, "bin/lib/frontend-design-loop.mjs")));
+    const tools = buildHandsTools({
+      designLoop: {
+        startFixture: (options) => designLoop.startFixture({ ...options, env, timeoutMs: 8_000 }),
+        stopLoop: (options) => designLoop.stopLoop({
+          ...options,
+          env,
+          exec: async () => ({ code: 1, stdout: "", stderr: "absent" }),
+        }),
+      },
+    });
+    const byName = Object.fromEntries(tools.map((tool) => [tool.name, tool]));
+    const exec = { agent: { session: { header: { cwd: root } } } };
+    try {
+      const started = await byName.design_loop_start.execute({ live: false }, exec);
+      assert.equal(started.status, "ok");
+      assert.match(started.message, /Design-loop fixture listening at http:\/\/127\.0\.0\.1:\d+/);
+      assert.match(started.result.origin, /^http:\/\/127\.0\.0\.1:\d+$/);
+      assert.match(started.result.sessionUrl, /\/qq\/session\//);
+      const probe = await fetch(`${started.result.origin}/qq/assets/console-v8.css`);
+      assert.equal(probe.status, 200);
+      const stopped = await byName.design_loop_stop.execute({}, exec);
+      assert.equal(stopped.status, "ok");
+      assert.match(stopped.message, /Design-loop stopped/);
+      assert.equal(stopped.result.fixture, "signaled");
+    } finally {
+      try { await designLoop.stopLoop({ env }); } catch {}
+      rmSync(isolated, { recursive: true, force: true });
+    }
   }
 
   // ---------------------------------------------------------------- iterate: wiki nodes stay unlabeled until desk files; selected nodes only
