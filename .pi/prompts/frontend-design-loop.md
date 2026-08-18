@@ -8,7 +8,7 @@ There is no token file, rubric, or design contract. The design-loop tools do the
 
 ## Tools
 
-- `design_loop_start` — start `tests/dsh-console-browser-fixture.mjs` with live assets; returns origin + session URL
+- `design_loop_start` — start `tests/qq-ui-browser-fixture.mjs` with live assets; returns origin + session URL
 - `design_loop_seed` — POST a sample prompt so the transcript is not empty
 - `design_loop_capture` — reload, shoot desktop 1280×800 and Pixel 10 412×915, optionally 412×520 short, measure default boxes
 - `design_loop_measure` — `get box` / `get styles` for named selectors

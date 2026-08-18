@@ -52,7 +52,7 @@
       name: '@deepseek-ai/dsh-host-webserver'
       config:
         host: 127.0.0.1
-        port: !!js Number(process.env.QQ_DSH_CONSOLE_PORT ?? 3082)
+        port: !!js Number(process.env.QQ_PORT ?? 3082)
 
     - id: qq
       name: '@hypermemetic-ai/qq'

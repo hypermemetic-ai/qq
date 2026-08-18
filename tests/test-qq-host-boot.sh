@@ -49,7 +49,7 @@ boot() {
     DSH_HOME="$state" \
     DSH_TELEMETRY_DISABLED=1 \
     QWEN_TOKEN_PLAN_API_KEY=qq-host-boot-probe \
-    QQ_DSH_CONSOLE_PORT="$port" \
+    QQ_PORT="$port" \
     QQ_DSH_SESSION_ID=session-63a11000-0000-4000-8000-0000000000aa \
     "$sim/bin/qq" >"$sim/$name.stdout.log" 2>"$sim/$name.stderr.log" &
   dsh_pid=$!

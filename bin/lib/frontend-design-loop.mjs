@@ -129,7 +129,7 @@ export async function startFixture(options = {}) {
   try { unlinkSync(endpointFile); } catch {}
 
   const spawn = options.spawn ?? defaultSpawn;
-  const child = spawn(process.execPath, ["tests/dsh-console-browser-fixture.mjs", endpointFile, ...(live ? ["--live"] : [])], {
+  const child = spawn(process.execPath, ["tests/qq-ui-browser-fixture.mjs", endpointFile, ...(live ? ["--live"] : [])], {
     cwd: root,
     env: { ...process.env, ...env, ...(live ? { QQ_DESIGN_LOOP_LIVE: "1" } : {}) },
     detached: true,

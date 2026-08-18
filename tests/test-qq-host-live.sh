@@ -29,8 +29,8 @@ cleanup() {
     wait "$llm_pid" 2>/dev/null || true
   fi
   rm -f -- "$root/.qq-tool-proof"
-  if [[ ${QQ_DSH_CONSOLE_KEEP:-0} == 1 ]]; then
-    printf 'test-dsh-console-live: kept %s\n' "$work" >&2
+  if [[ ${QQ_HOST_TEST_KEEP:-0} == 1 ]]; then
+    printf 'test-qq-host-live: kept %s\n' "$work" >&2
   else
     rm -rf -- "$work"
   fi
@@ -47,7 +47,7 @@ for _ in {1..100}; do
   sleep 0.05
 done
 [[ -s $work/llm-endpoint ]] || {
-  echo "test-dsh-console-live: localhost model stub did not start" >&2
+  echo "test-qq-host-live: localhost model stub did not start" >&2
   exit 1
 }
 llm_endpoint=$(<"$work/llm-endpoint")
@@ -102,7 +102,7 @@ start_host() {
     DSH_HOME="$DSH_HOME" \
     DSH_TELEMETRY_DISABLED=1 \
     QWEN_TOKEN_PLAN_API_KEY=qq-local-probe \
-    QQ_DSH_CONSOLE_PORT="$port" \
+    QQ_PORT="$port" \
     "${session_env[@]}" \
     "$launcher" --patch "$work/local-model.patch.yml" \
     >"$work/dsh.stdout.log" 2>"$work/dsh.stderr.log" &
@@ -115,12 +115,12 @@ start_host() {
     if ! kill -0 "$dsh_pid" 2>/dev/null; then
       cat "$work/dsh.stdout.log" >&2
       cat "$work/dsh.stderr.log" >&2
-      echo "test-dsh-console-live: DSH host exited during startup" >&2
+      echo "test-qq-host-live: DSH host exited during startup" >&2
       exit 1
     fi
     sleep 0.05
   done
-  echo "test-dsh-console-live: DSH host did not become ready" >&2
+  echo "test-qq-host-live: DSH host did not become ready" >&2
   exit 1
 }
 
@@ -146,7 +146,7 @@ wait_file() {
     grep -Fq "$text" "$file" 2>/dev/null && return
     sleep 0.05
   done
-  echo "test-dsh-console-live: timed out waiting for '$text' in $file" >&2
+  echo "test-qq-host-live: timed out waiting for '$text' in $file" >&2
   exit 1
 }
 
@@ -160,7 +160,7 @@ wait_count() {
     ((count >= expected)) && return
     sleep 0.05
   done
-  echo "test-dsh-console-live: timed out waiting for $expected copies of '$text' in $file" >&2
+  echo "test-qq-host-live: timed out waiting for $expected copies of '$text' in $file" >&2
   exit 1
 }
 
@@ -221,7 +221,7 @@ create_session() {
   local location
   location=$(awk 'tolower($1) == "location:" { gsub("\\r", "", $2); print $2 }' "$work/$client.headers" | tail -1)
   [[ $location =~ ^/qq/session/session-[0-9a-f-]{36}$ ]] || {
-    echo "test-dsh-console-live: new session did not return a canonical location" >&2
+    echo "test-qq-host-live: new session did not return a canonical location" >&2
     return 1
   }
   printf '%s\n' "${location##*/}"
@@ -369,4 +369,4 @@ if (!results.get("call_qq_native_4").includes(process.cwd())) throw new Error("n
 NODE
 rm -f -- "$root/.qq-tool-proof"
 
-printf 'test-dsh-console-live: pass\n'
+printf 'test-qq-host-live: pass\n'

@@ -8,7 +8,7 @@ cd "$root"
 state_root=${XDG_STATE_HOME:-"$HOME/.local/state"}
 export DSH_HOME=${QQ_DSH_HOME:-${DSH_HOME:-"$state_root/qq"}}
 export DSH_TELEMETRY_DISABLED=${DSH_TELEMETRY_DISABLED:-1}
-export QQ_DSH_CONSOLE_PORT=${QQ_DSH_CONSOLE_PORT:-3082}
+export QQ_PORT=${QQ_PORT:-3082}
 export QQ_DSH_PROVIDER=${QQ_DSH_PROVIDER:-qwen-token-plan}
 export QQ_DSH_MODEL=${QQ_DSH_MODEL:-deepseek-v4-pro-0813}
 
@@ -50,27 +50,32 @@ if [[ ! -x $dsh ]]; then
   npm ci --prefix "$toolchain" --no-audit --no-fund
 fi
 
-# Present siblings, in attach order. qq is always the session plugin; each
-# marker also gates the matching insert in qq/host.patch.yml.
+# Present siblings. qq is always the session plugin. Every other $root/qq-*
+# package is added when its package.json exists; HAVE flags from the same scan
+# keep today's host.patch.yml inserts disabled when a named sibling is absent.
 export QQ_DSH_HAVE_UI=0 QQ_DSH_HAVE_RELAY=0 QQ_DSH_HAVE_WORKFLOWS=0
-qq_ui_package="$root/qq-ui"
-qq_relay_package="$root/qq-relay"
-qq_workflows_package="$root/qq-workflows"
-if [[ -f $qq_ui_package/package.json ]]; then QQ_DSH_HAVE_UI=1; fi
-if [[ -f $qq_relay_package/package.json ]]; then QQ_DSH_HAVE_RELAY=1; fi
-if [[ -f $qq_workflows_package/package.json ]]; then QQ_DSH_HAVE_WORKFLOWS=1; fi
+qq_siblings=()
+for qq_pkg in "$root"/qq-*/package.json; do
+  [[ -f $qq_pkg ]] || continue
+  qq_dir=${qq_pkg%/package.json}
+  qq_siblings+=("$qq_dir")
+  case ${qq_dir##*/} in
+    qq-ui) QQ_DSH_HAVE_UI=1 ;;
+    qq-relay) QQ_DSH_HAVE_RELAY=1 ;;
+    qq-workflows) QQ_DSH_HAVE_WORKFLOWS=1 ;;
+  esac
+done
 
 profile_manifest="$DSH_HOME/profiles/qq/package.json"
-if ! node - "$profile_manifest" "$root/qq" "$qq_ui_package" "$qq_relay_package" "$qq_workflows_package" <<'NODE'
-const { existsSync } = require("node:fs");
+if ! node - "$profile_manifest" "$root/qq" ${qq_siblings[@]+"${qq_siblings[@]}"} <<'NODE'
+const { existsSync, readFileSync } = require("node:fs");
 const { join } = require("node:path");
-const [manifestPath, qqPath, uiPath, relayPath, workflowsPath] = process.argv.slice(2);
-const packages = [
-  ["@hypermemetic-ai/qq", qqPath],
-  ["@hypermemetic-ai/qq-ui", uiPath],
-  ["@hypermemetic-ai/qq-relay", relayPath],
-  ["@hypermemetic-ai/qq-workflows", workflowsPath],
-];
+const [manifestPath, qqPath, ...siblingPaths] = process.argv.slice(2);
+const packages = [["@hypermemetic-ai/qq", qqPath]];
+for (const siblingPath of siblingPaths) {
+  const pkg = JSON.parse(readFileSync(join(siblingPath, "package.json"), "utf8"));
+  packages.push([pkg.name, siblingPath]);
+}
 try {
   const manifest = require(manifestPath);
   const deps = manifest.dependencies ?? {};
@@ -86,9 +91,9 @@ NODE
 then
   printf 'qq: preparing persistent DSH profile\n' >&2
   "$dsh" plugin --profile qq add "$root/qq"
-  if [[ $QQ_DSH_HAVE_UI == 1 ]]; then "$dsh" plugin --profile qq add "$qq_ui_package"; fi
-  if [[ $QQ_DSH_HAVE_RELAY == 1 ]]; then "$dsh" plugin --profile qq add "$qq_relay_package"; fi
-  if [[ $QQ_DSH_HAVE_WORKFLOWS == 1 ]]; then "$dsh" plugin --profile qq add "$qq_workflows_package"; fi
+  for sibling in ${qq_siblings[@]+"${qq_siblings[@]}"}; do
+    "$dsh" plugin --profile qq add "$sibling"
+  done
 else
   :
 fi
@@ -112,5 +117,5 @@ fi
 export QQ_DSH_SESSION_ID=$session_id
 
 printf 'qq: %s/%s · %s\n' "$QQ_DSH_PROVIDER" "$QQ_DSH_MODEL" "$QQ_DSH_SESSION_ID" >&2
-printf 'qq: state %s · http://127.0.0.1:%s/qq\n' "$DSH_HOME" "$QQ_DSH_CONSOLE_PORT" >&2
+printf 'qq: state %s · http://127.0.0.1:%s/qq\n' "$DSH_HOME" "$QQ_PORT" >&2
 exec node --import "$toolchain/qq-dsh-model-compat.mjs" "$dsh" --profile qq --patch "$root/qq/host.patch.yml" "$@"
