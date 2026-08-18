@@ -1381,6 +1381,71 @@ try {
     assert.equal(verdictsFail.length, 1);
   }
 
+  // ---------------------------------------------------------------- iterate: reviewer falls back to the one-shot llm stream
+  {
+    const journal = createJournalStore(join(scratch, "iter-go-review-hop"));
+    const wiki = createWikiStore(join(scratch, "iter-go-review-hop-wiki"));
+    journal.recordNote(alphaId, { polarity: "nit", text: "form is cramped", seq: 1 });
+    const sent = [];
+    const requests = [];
+    const childEvents = [];
+    const childListeners = [];
+    const iterate = createIterate({
+      ctx: {
+        get(name) {
+          if (name === "qq-relay") {
+            return {
+              alias: () => "1",
+              hang() {},
+              clear() {},
+              send: async (payload) => { sent.push(payload); return { status: "sent" }; },
+            };
+          }
+          return null;
+        },
+      },
+      journal,
+      wiki,
+      settings: { get: () => ({ provider: "test-review", model: "review-model" }) },
+      llm: {
+        async *stream(request) {
+          requests.push(request);
+          yield { type: "text-delta", text: "PASS" };
+        },
+      },
+      agents: {
+        create: async (options) => ({
+          agent: {
+            session: { id: options.sessionId, events: childEvents },
+            followup() {},
+            ctx: {
+              on(type, fn) { childListeners.push({ type, fn }); return () => {}; },
+            },
+          },
+        }),
+      },
+      // No `run` injected: iterate must use the llm stream like architect's scribe.
+      registerHandsTools: () => {},
+    });
+    const parentAgent = {
+      session: { id: alphaId, events: [], header: { cwd: "/work" } },
+      ctx: { on() { return () => {}; } },
+    };
+    iterate.attach(parentAgent);
+    const result = await iterate.go({ agent: parentAgent });
+    assert.equal(result.status, "ok");
+    childEvents.push(event("assistant/message", 2, {
+      turn: 1, step: 1, message: assistantMessage("widened the form"),
+    }, { surfaceOp: "append" }));
+    await childListeners.at(-1).fn({}, { type: "turn/end", seq: 3, data: { turn: 1 } });
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].provider, "test-review");
+    assert.match(requests[0].system, /honors the directive/);
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].message, /passed review/);
+    assert.equal(journal.project(alphaId).nits[0].open, false);
+  }
+
   // ---------------------------------------------------------------- iterate: wiki nodes stay unlabeled until desk files; selected nodes only
   {
     const wiki = createWikiStore(join(scratch, "iter-wiki"));
