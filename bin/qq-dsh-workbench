@@ -55,8 +55,9 @@ console_package="$root/dsh-console"
 qq_package="$root/qq"
 qq_ui_package="$root/qq-ui"
 qq_relay_package="$root/qq-relay"
-if ! node - "$profile_manifest" "$console_package" "$qq_package" "$qq_ui_package" "$qq_relay_package" <<'NODE'
-const [manifestPath, consolePath, qqPath, uiPath, relayPath] = process.argv.slice(2);
+qq_workflows_package="$root/qq-workflows"
+if ! node - "$profile_manifest" "$console_package" "$qq_package" "$qq_ui_package" "$qq_relay_package" "$qq_workflows_package" <<'NODE'
+const [manifestPath, consolePath, qqPath, uiPath, relayPath, workflowsPath] = process.argv.slice(2);
 try {
   const manifest = require(manifestPath);
   const deps = manifest.dependencies ?? {};
@@ -65,7 +66,8 @@ try {
     linked("@hypermemetic-ai/qq-dsh-console", consolePath) &&
     linked("@hypermemetic-ai/qq", qqPath) &&
     linked("@hypermemetic-ai/qq-ui", uiPath) &&
-    linked("@hypermemetic-ai/qq-relay", relayPath)
+    linked("@hypermemetic-ai/qq-relay", relayPath) &&
+    linked("@hypermemetic-ai/qq-workflows", workflowsPath)
       ? 0
       : 1,
   );
@@ -78,6 +80,7 @@ then
   "$dsh" plugin --profile qq-console add "$qq_package"
   "$dsh" plugin --profile qq-console add "$qq_ui_package"
   "$dsh" plugin --profile qq-console add "$qq_relay_package"
+  "$dsh" plugin --profile qq-console add "$qq_workflows_package"
   "$dsh" plugin --profile qq-console add "$console_package"
 fi
 node "$root/dsh-console/configure-profile.mjs" "$profile_manifest" >/dev/null
