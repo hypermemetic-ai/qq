@@ -302,6 +302,26 @@ export function createQqService(ctx, config) {
     },
     async prompt(sessionId, text) {
       const agent = await agentForSession(sessionId);
+      const line = String(text ?? "");
+      if (line.startsWith("/")) {
+        const commands = ctx.get("commands", false);
+        if (!commands || typeof commands.execute !== "function") {
+          throw httpError(503, "qq: slash commands require ctx.commands");
+        }
+        const parsed = typeof commands.parseCommand === "function"
+          ? commands.parseCommand(line)
+          : /^\/([a-z][a-z0-9_-]*)(?=$|[\t\n\r ])/u.exec(line);
+        if (!parsed) {
+          throw httpError(400, "qq: unknown slash command");
+        }
+        const name = parsed.name ?? parsed[1];
+        const execution = await commands.execute(agent, line, new AbortController().signal);
+        if (!execution) {
+          throw httpError(400, `qq: unknown slash command /${name}`);
+        }
+        await sessions.flush(agent.session);
+        return;
+      }
       agent.followup(userMessage(text));
       await waitForIdle(agent, () => agents.get(sessionId) ?? agent);
       await sessions.flush(agent.session);

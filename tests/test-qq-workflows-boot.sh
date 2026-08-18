@@ -35,6 +35,7 @@ done
   exit 1
 }
 llm_endpoint=$(<"$work/llm-endpoint")
+settings_file="$work/architect-settings.json"
 cat >"$work/local-model.patch.yml" <<YAML
 - id: llm-pi-ai
   name: '@deepseek-ai/dsh-llm-pi-ai'
@@ -55,6 +56,12 @@ cat >"$work/local-model.patch.yml" <<YAML
             compat:
               thinkingFormat: deepseek
               supportsReasoningEffort: true
+
+- id: qq-workflows
+  name: '@hypermemetic-ai/qq-workflows'
+  inject: [agents, sessions]
+  config:
+    settingsFile: '$settings_file'
 YAML
 
 export DSH_HOME="$work/dsh-home"
@@ -132,12 +139,43 @@ if (!/- id: qq-workflows[\s\S]*name: '@hypermemetic-ai\/qq-workflows'/.test(dump
 NODE
 
 notebook="$work/.qq-workflows-notebooks/$primary_id.json"
+[[ ! -f $notebook ]] || {
+  echo "test-qq-workflows-boot: notebook existed before /workflows architect" >&2
+  exit 1
+}
+if grep -Fq 'workflows:architect' "$work/dsh.stderr.log"; then
+  echo "test-qq-workflows-boot: workflows:architect hang appeared before select" >&2
+  exit 1
+fi
+mkdir -p -- "$work/config/qq"
+printf '%s\n' '{"scribe":{"provider":"keep","model":"me"}}' >"$work/config/qq/execution-profiles.json"
+profiles_before=$(<"$work/config/qq/execution-profiles.json")
+
+post_prompt() {
+  local name=$1
+  local text=$2
+  local encoded
+  encoded=$(node -e 'process.stdout.write(new URLSearchParams({prompt: process.argv[1]}).toString())' "$text")
+  curl -fsS --max-time 30 \
+    -H "Origin: $origin" \
+    -H 'HX-Request: true' \
+    -H 'Content-Type: application/x-www-form-urlencoded' \
+    --data "$encoded" \
+    "$origin/qq/session/$primary_id/prompt" >"$work/$name.html"
+}
+
+post_prompt select '/workflows architect'
+[[ ! -f $work/llm-requests.jsonl ]] || ! grep -Fq '/workflows architect' "$work/llm-requests.jsonl" || {
+  echo "test-qq-workflows-boot: /workflows architect was sent to the model" >&2
+  exit 1
+}
+
 for _ in {1..100}; do
   [[ -f $notebook ]] && break
   sleep 0.05
 done
 [[ -f $notebook ]] || {
-  echo "test-qq-workflows-boot: architect notebook was not created on attach" >&2
+  echo "test-qq-workflows-boot: architect notebook was not created after /workflows architect" >&2
   exit 1
 }
 node - "$notebook" <<'NODE'
@@ -147,20 +185,43 @@ if (!notebook.cards?.some((card) => card.open)) throw new Error("no open card");
 NODE
 mode=$(stat -c '%a' "$notebook")
 [[ $mode == 600 ]]
+selected="$work/.qq-workflows-selected/$primary_id.json"
+[[ -f $selected ]] || {
+  echo "test-qq-workflows-boot: selection file was not written" >&2
+  exit 1
+}
+node - "$selected" <<'NODE'
+const selection = require(process.argv[2]);
+if (selection.schema !== "qq.workflows-selection/v1") throw new Error("bad selection schema");
+if (selection.workflow !== "architect") throw new Error(`selected ${selection.workflow}`);
+NODE
+mode=$(stat -c '%a' "$selected")
+[[ $mode == 600 ]]
 
-encoded=$(node -e 'process.stdout.write(new URLSearchParams({prompt: process.argv[1]}).toString())' \
-  'Reply with exactly workflows-boot and nothing else.')
-curl -fsS --max-time 30 \
-  -H "Origin: $origin" \
-  -H 'HX-Request: true' \
-  -H 'Content-Type: application/x-www-form-urlencoded' \
-  --data "$encoded" \
-  "$origin/qq/session/$primary_id/prompt" >"$work/prompt.html"
-grep -Fq 'workflows-boot' "$work/prompt.html"
-
-node - "$work/llm-requests.jsonl" <<'NODE'
+post_prompt settings '/workflows settings architect scribe test-provider test-model low'
+[[ -f $settings_file ]] || {
+  echo "test-qq-workflows-boot: settingsFile was not written" >&2
+  exit 1
+}
+node - "$settings_file" "$work/config/qq/execution-profiles.json" <<'NODE'
 const { readFileSync } = require("node:fs");
-const requests = readFileSync(process.argv[2], "utf8").trim().split("\n").map(JSON.parse);
+const settings = JSON.parse(readFileSync(process.argv[2], "utf8"));
+if (settings.roles?.scribe?.model !== "test-model") {
+  throw new Error(`settingsFile was not written: ${JSON.stringify(settings)}`);
+}
+const profiles = JSON.parse(readFileSync(process.argv[3], "utf8"));
+if (profiles.scribe?.model === "test-model" || profiles.scribe?.provider === "test-provider") {
+  throw new Error("execution-profiles.json received the architect settings write");
+}
+NODE
+
+post_prompt talk 'Reply with exactly workflows-boot and nothing else.'
+grep -Fq 'workflows-boot' "$work/talk.html"
+
+node - "$work/llm-requests.jsonl" "$DSH_HOME" "$primary_id" <<'NODE'
+const { readFileSync, readdirSync, statSync } = require("node:fs");
+const { join } = require("node:path");
+const requests = readFileSync(process.argv[2], "utf8").trim().split("\n").filter(Boolean).map(JSON.parse);
 const turn = requests.find(({ body }) => body.messages?.some(
   ({ role, content }) => role === "user" && JSON.stringify(content).includes("workflows-boot"),
 ));
@@ -170,6 +231,22 @@ for (const name of ["notes_list", "notes_expand", "session_search", "invoke"]) {
   if (!names.includes(name)) throw new Error(`missing ${name} tool; have ${names.join(",")}`);
 }
 if (names.includes("run_workflow")) throw new Error("run_workflow dispatcher must not register");
+const walk = (dir, files = []) => {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) walk(path, files);
+    else files.push(path);
+  }
+  return files;
+};
+const logs = walk(join(process.argv[3], "sessions")).filter((path) => path.endsWith("session.jsonl"));
+const text = logs.map((path) => readFileSync(path, "utf8")).join("\n");
+if (text && (!text.includes("command/run") || !text.includes("workflows"))) {
+  throw new Error("session log is missing command/run for /workflows");
+}
+if (text.includes("/workflows architect") && /"type":"user\/message"/.test(text)) {
+  throw new Error("/workflows architect was stored as a user prompt");
+}
 NODE
 
 printf 'test-qq-workflows-boot: pass\n'
