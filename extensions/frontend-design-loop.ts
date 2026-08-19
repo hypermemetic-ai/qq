@@ -31,7 +31,7 @@ export default function registerFrontendDesignLoop(pi, deps = {}) {
     label: "Design Loop Start",
     promptSnippet: "Start the live-asset dsh-console fixture",
     description:
-      "Start the dsh-console browser fixture with live CSS/JS assets and return the origin plus session URL.",
+      "Start the design loop with live CSS/JS assets and return the origin plus session URL.",
     parameters: {
       type: "object",
       additionalProperties: false,

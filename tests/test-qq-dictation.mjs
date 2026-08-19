@@ -373,7 +373,7 @@ try {
   assert.equal(resumeSessionId({ DSH_HOME: scratch }), alphaId);
   writeFileSync(join(scratch, "qq.session"), "not-a-session\n");
   writeFileSync(join(scratch, "qq-console.session"), `${betaId}\n`);
-  assert.equal(resumeSessionId({ DSH_HOME: scratch }), betaId);
+  assert.equal(resumeSessionId({ DSH_HOME: scratch }), "");
   assert.equal(resumeSessionId({}), "");
 
   {

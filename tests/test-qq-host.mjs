@@ -338,7 +338,8 @@ try {
   assert.match(home.body, /htmx-2\.0\.10\.min\.js/);
   assert.match(home.body, /htmx-ext-sse-2\.2\.4\.js/);
   assert.match(home.body, /rel="manifest"/);
-  assert.match(home.body, /console-v8\.css/);
+  assert.match(home.body, /console-v9\.css/);
+  assert.doesNotMatch(home.body, /console-v8\.css/);
   assert.match(home.body, /browser-v4\.js/);
   assert.match(home.body, /data-service-worker="\/qq\/sw-v10\.js"/);
   assert.match(home.body, new RegExp(`<option value="${secondaryId}"`));
@@ -546,6 +547,7 @@ try {
   assert.match(worker.body, /request\.method !== "GET"/);
   assert.match(worker.body, /request\.mode === "navigate"/);
   assert.match(worker.body, /console-v8\.css/);
+  assert.match(worker.body, /console-v9\.css/);
   assert.match(worker.body, /browser-v4\.js/);
   assert.match(worker.body, /reconnect-v1\.js/);
   assert.match(worker.body, /geist-latin-wght-normal-5\.3\.0\.woff2/);
@@ -560,7 +562,7 @@ try {
   assert.match(offline.body, /No transcript is cached and no message can be sent offline/);
   assert.match(offline.body, /console-v8\.css/);
   assert.match(offline.body, /reconnect-v1\.js/);
-  const staticCss = await request("/qq/assets/console-v8.css");
+  const staticCss = await request("/qq/assets/console-v9.css");
   assert.match(staticCss.headers["cache-control"], /immutable/);
   assert.match(staticCss.body, /@font-face/);
   assert.match(staticCss.body, /font-family: "Geist UI"/);

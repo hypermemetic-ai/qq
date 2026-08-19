@@ -31,7 +31,7 @@ const {
   pairBoundaries, createFolder,
 } = foldModule;
 const { parseClerkOutput, resolveScribeBinding, runScribe } = scribeModule;
-const { createArchitect, isArchitectSession, isArchitectCandidate, ARCHITECT_LABEL, CHILD_ORIGIN } = architectModule;
+const { createArchitect, isArchitectCandidate, ARCHITECT_LABEL, CHILD_ORIGIN } = architectModule;
 const { createIterate, isIterateCandidate, ITERATE_LABEL, buildHandsPacket, collectReviewEvidence } = iterateModule;
 const {
   JOURNAL_SCHEMA, createJournalStore, defaultJournalDir, projectJournal, collectBreath, formatProjection,
@@ -518,7 +518,6 @@ try {
   assert.equal(isArchitectCandidate({
     session: { id: childId, header: { origin: CHILD_ORIGIN } },
   }), false);
-  assert.equal(isArchitectSession({ session: { id: alphaId, header: {} } }), true);
 
   // ---------------------------------------------------------------- selection default none; persist/restart
   {
@@ -1490,7 +1489,7 @@ try {
       assert.match(started.message, /Design-loop fixture listening at http:\/\/127\.0\.0\.1:\d+/);
       assert.match(started.result.origin, /^http:\/\/127\.0\.0\.1:\d+$/);
       assert.match(started.result.sessionUrl, /\/qq\/session\//);
-      const probe = await fetch(`${started.result.origin}/qq/assets/console-v8.css`);
+      const probe = await fetch(`${started.result.origin}/qq/assets/console-v9.css`);
       assert.equal(probe.status, 200);
       const stopped = await byName.design_loop_stop.execute({}, exec);
       assert.equal(stopped.status, "ok");
