@@ -8,6 +8,7 @@ import registerContinue from "./continue.ts";
 import registerSessionScrub from "./session-scrub.ts";
 import registerBacklogGuard from "./backlog-guard.ts";
 import registerGrokParaphraseGuard from "./grok-paraphrase-guard.ts";
+import registerGrokAutoContinue from "./grok-auto-continue.ts";
 import registerBoard from "./board.ts";
 import registerReviewFlow from "./review-flow.ts";
 import registerFrontendDesignLoop from "./frontend-design-loop.ts";
@@ -38,6 +39,7 @@ export default function registerQQ(pi) {
   registerSessionScrub(pi);
   registerBacklogGuard(pi);
   registerGrokParaphraseGuard(pi);
+  registerGrokAutoContinue(pi);
   registerBoard(pi, { sessionContext });
   registerReviewFlow(pi, { sessionContext });
   registerFrontendDesignLoop(pi);

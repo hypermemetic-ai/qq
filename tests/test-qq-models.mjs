@@ -354,6 +354,30 @@ try {
   }
 
   {
+    const home = join(scratch, "transport-503");
+    const store = createAuthStore({ env: { HOME: "/home/u", DSH_HOME: home } });
+    await store.write("grok", tokens("grok"));
+    let calls = 0;
+    const adapter = createGrokAdapter({
+      store,
+      sleepFn: async () => {},
+      fetchImpl: async () => {
+        calls += 1;
+        if (calls === 1) return jsonResponse("overloaded", 503);
+        return { ok: true, status: 200, async text() { return "data: {\"text\":\"recovered-503\"}\n\n"; } };
+      },
+    });
+    const streamed = [];
+    for await (const chunk of adapter.stream({
+      provider: "xai-auth",
+      model: "grok-4.6",
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+    })) streamed.push(chunk);
+    assert.equal(calls, 2);
+    assert.ok(streamed.some((chunk) => chunk.text === "recovered-503"));
+  }
+
+  {
     const home = join(scratch, "reject");
     const store = createAuthStore({ env: { HOME: "/home/u", DSH_HOME: home } });
     await store.write("grok", tokens("grok"));
@@ -379,6 +403,10 @@ try {
     assert.equal(classifyGrokFailure({ status: 400 }), "reject");
     assert.equal(classifyGrokFailure({ message: "Responses failed" }), "transport");
     assert.equal(classifyGrokFailure({ status: 401 }), "auth");
+    assert.equal(classifyGrokFailure({ status: 503 }), "transport");
+    assert.equal(classifyGrokFailure({ status: 429 }), "transport");
+    const provider = new grokModule.GrokLlmError("Responses failed (503)", "PROVIDER", { status: 503 });
+    assert.deepEqual(provider.failure, { message: "Responses failed (503)", code: "PROVIDER", status: 503 });
     assert.doesNotMatch(redact("Authorization Bearer super-secret-token"), /super-secret-token/);
   }
 
