@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, request as httpRequest } from "node:http";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
@@ -71,11 +71,14 @@ try {
   {
     const launcher = readFileSync(join(root, "bin/qq"), "utf8");
     const patch = readFileSync(join(root, "qq/host.patch.yml"), "utf8");
+    const uiPlugin = readFileSync(join(root, "qq-ui/src/plugin.mjs"), "utf8");
     const pkg = JSON.parse(readFileSync(join(root, "qq-models/package.json"), "utf8"));
     const cordis = readFileSync(join(root, "qq-models/cordis.patch.yml"), "utf8");
     assert.doesNotMatch(patch, /qq-models|QQ_DSH_HAVE_MODELS/);
     assert.doesNotMatch(launcher, /QQ_DSH_HAVE_MODELS/);
     assert.match(launcher, /qq-\*\/package\.json/);
+    assert.match(uiPlugin, /loginSheetFor/);
+    assert.match(uiPlugin, /qq-models/);
     assert.equal(pkg.name, "@hypermemetic-ai/qq-models");
     assert.equal(pkg.dsh?.bundle?.patch, "./cordis.patch.yml");
     assert.match(cordis, /id: qq-models/);
@@ -172,6 +175,8 @@ try {
     assert.equal(notices.at(-1)?.source.plugin, "qq-models");
     assert.match(notices.at(-1)?.content[0].text, /Grok logged in/);
     assert.doesNotMatch(JSON.stringify(notices), /access-grok|refresh-grok/);
+    assert.equal(existsSync(join(home, ".openai-codex-auth.json")), false);
+    assert.equal(existsSync(join(home, ".qq-codex-auth.json")), false);
   }
 
   {
@@ -229,22 +234,42 @@ try {
   }
 
   {
-    const home = join(scratch, "isolation");
-    const store = createAuthStore({ env: { HOME: "/home/u", DSH_HOME: home } });
-    await store.write("grok", tokens("grok"));
+    const operatorHome = join(scratch, "operator-home");
+    mkdirSync(join(operatorHome, ".pi", "agent"), { recursive: true });
+    mkdirSync(join(operatorHome, ".codex"), { recursive: true });
+    mkdirSync(join(operatorHome, ".grok"), { recursive: true });
     const forbidden = [
-      join(homedir(), ".pi/agent/auth.json"),
-      join(homedir(), ".codex/auth.json"),
-      join(homedir(), ".grok/auth.json"),
+      join(operatorHome, ".pi/agent/auth.json"),
+      join(operatorHome, ".codex/auth.json"),
+      join(operatorHome, ".grok/auth.json"),
     ];
-    for (const file of forbidden) {
-      if (!existsSync(file)) continue;
-      const before = statSync(file).mtimeMs;
-      assert.notEqual(store.pathFor("grok"), file);
-      assert.equal(statSync(file).mtimeMs, before);
-    }
-    assert.equal(store.pathFor("grok").endsWith(".qq-grok-auth.json"), true);
+    const marker = "foreign-token-do-not-copy\n";
+    for (const file of forbidden) writeFileSync(file, marker, { mode: 0o600 });
+    const stamps = Object.fromEntries(forbidden.map((file) => [file, statSync(file).mtimeMs]));
+    const home = join(scratch, "isolation");
+    const store = createAuthStore({ env: { HOME: operatorHome, DSH_HOME: home } });
+    const login = createLoginService({
+      store,
+      env: { HOME: operatorHome, DSH_HOME: home },
+      startDeviceFn: async (id) => ({
+        connector: id,
+        deviceCode: "dev",
+        userCode: "ISOL",
+        verificationUri: "https://auth.x.ai/connect/device",
+        intervalSeconds: 0,
+        expiresInSeconds: 60,
+      }),
+      pollDeviceFn: async () => tokens("grok"),
+    });
+    await login.handleLogin({ agent: { session: { id: sessionId } }, rawInput: "grok" });
+    await login.polls.get("grok").work;
+    assert.equal(store.present("grok"), true);
     assert.match(store.pathFor("grok"), /\/\.qq-grok-auth\.json$/);
+    assert.equal(existsSync(join(operatorHome, ".qq-grok-auth.json")), false);
+    for (const file of forbidden) {
+      assert.equal(readFileSync(file, "utf8"), marker);
+      assert.equal(statSync(file).mtimeMs, stamps[file]);
+    }
   }
 
   {
@@ -592,20 +617,15 @@ try {
     });
     assert.equal(missing.status, 2);
     assert.match(missing.stderr, /xai-auth requires a Grok login/);
-    const state = join(scratch, "gate-ready");
-    mkdirSync(state, { recursive: true });
-    writeFileSync(join(state, ".qq-grok-auth.json"), "{}\n", { mode: 0o600 });
-    const present = spawnSync("bash", ["-c", `source /dev/null; QQ_DSH_PROVIDER=xai-auth DSH_HOME=${state} HOME=${scratch}/gate-home bash -c '
-      auth_ext=json
-      selected_login="$DSH_HOME/.qq-grok-auth.$auth_ext"
-      if [[ ! -f $selected_login ]]; then echo missing; exit 2; fi
-      if [[ -z \${QWEN_TOKEN_PLAN_API_KEY:-} ]]; then echo no-qwen-ok; fi
-    '`], { encoding: "utf8" });
-    assert.equal(present.status, 0);
-    assert.match(present.stdout, /no-qwen-ok/);
+    assert.doesNotMatch(missing.stderr, /QWEN_TOKEN_PLAN_API_KEY/);
     const launcher = readFileSync(script, "utf8");
     assert.doesNotMatch(launcher, /Grok is not usable|xai-auth OAuth refresh\/proxy/);
     assert.match(launcher, /xai-auth requires a Grok login/);
+    const xaiArm = launcher.match(/xai-auth\)\s*([\s\S]*?);;/)?.[1] ?? "";
+    assert.match(xaiArm, /\.qq-grok-auth\.\$\{auth_ext\}/);
+    assert.doesNotMatch(xaiArm, /QWEN_TOKEN_PLAN_API_KEY/);
+    const qwenArm = launcher.match(/qwen-token-plan\)\s*([\s\S]*?);;/)?.[1] ?? "";
+    assert.match(qwenArm, /QWEN_TOKEN_PLAN_API_KEY/);
   }
 
   {
