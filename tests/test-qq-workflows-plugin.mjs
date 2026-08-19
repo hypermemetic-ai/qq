@@ -9,6 +9,7 @@ const root = new URL("..", import.meta.url).pathname;
 const notebookModule = await import(pathToFileURL(join(root, "qq-workflows/src/notebook.mjs")));
 const clerkModule = await import(pathToFileURL(join(root, "qq-workflows/src/clerk.mjs")));
 const foldModule = await import(pathToFileURL(join(root, "qq-workflows/src/fold.mjs")));
+const askModule = await import(pathToFileURL(join(root, "qq/src/ask.mjs")));
 const scribeModule = await import(pathToFileURL(join(root, "qq-workflows/src/scribe.mjs")));
 const architectModule = await import(pathToFileURL(join(root, "qq-workflows/src/architect.mjs")));
 const iterateModule = await import(pathToFileURL(join(root, "qq-workflows/src/iterate.mjs")));
@@ -30,7 +31,8 @@ const {
   DEFAULT_H, DEFAULT_Q, GROK_Q, MIN_PAIRS, shouldDropOld, qualityCeiling, decideFold,
   pairBoundaries, createFolder,
 } = foldModule;
-const { parseClerkOutput, resolveScribeBinding, runScribe } = scribeModule;
+const { oneShot } = askModule;
+const { parseClerkOutput, resolveScribeBinding } = scribeModule;
 const { createArchitect, isArchitectCandidate, ARCHITECT_LABEL, CHILD_ORIGIN } = architectModule;
 const { createIterate, isIterateCandidate, ITERATE_LABEL, buildHandsPacket, collectReviewEvidence } = iterateModule;
 const {
@@ -247,7 +249,7 @@ try {
       turn: 3,
       events: pairEvents(3, 10, "That plan is out.", "withdrawn"),
     });
-    // parse happens inside fire via scribe output
+    // parse happens inside fire on the one-shot output
     assert.equal(withdrawn.action, "note");
   }
 
@@ -600,10 +602,10 @@ try {
     assert.match(formatWorkflowList(["architect"], "architect"), /architect \(selected\)/);
   }
 
-  // ---------------------------------------------------------------- scribe binding: one-shot, no cacheRetention field
+  // ---------------------------------------------------------------- one-shot hop lives on qq; workflows do not copy it
   {
     const seen = [];
-    const text = await runScribe({
+    const text = await oneShot({
       async *stream(options) {
         seen.push(options);
         yield { type: "text-delta", index: 0, text: "note" };
@@ -613,6 +615,17 @@ try {
     assert.equal("cacheRetention" in seen[0], false);
     assert.equal(seen[0].provider, "test");
     assert.match(seen[0].sessionId, /^session-/);
+    const empty = await oneShot({}, { provider: "test", model: "scribe" }, { user: "hi" });
+    assert.equal(empty, "");
+    const unbound = await oneShot({ async *stream() { yield { type: "text-delta", text: "no" }; } }, null, { user: "hi" });
+    assert.equal(unbound, "");
+    const clerkSource = readFileSync(join(root, "qq-workflows/src/clerk.mjs"), "utf8");
+    const iterateSource = readFileSync(join(root, "qq-workflows/src/iterate.mjs"), "utf8");
+    const scribeSource = readFileSync(join(root, "qq-workflows/src/scribe.mjs"), "utf8");
+    assert.match(clerkSource, /from "\.\.\/\.\.\/qq\/src\/ask\.mjs"/);
+    assert.match(iterateSource, /from "\.\.\/\.\.\/qq\/src\/ask\.mjs"/);
+    assert.doesNotMatch(iterateSource, /runScribe|from "\.\/scribe\.mjs"/);
+    assert.doesNotMatch(scribeSource, /llm\.stream|runScribe|randomUUID/);
   }
 
   // ---------------------------------------------------------------- plugin apply: default none; select attaches
@@ -1425,7 +1438,7 @@ try {
           },
         }),
       },
-      // No `run` injected: iterate must use the llm stream like architect's scribe.
+      // No `run` injected: iterate must use the qq one-shot hop on llm.stream.
       registerHandsTools: () => {},
     });
     const parentAgent = {

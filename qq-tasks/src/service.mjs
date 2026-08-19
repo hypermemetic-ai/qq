@@ -1,8 +1,8 @@
 // Public qq-tasks service. Callers already have the text; this plugin
 // does not invent tickets. Rundown is a one-shot model job on this
-// plugin's rundown role — not architect scribe.
+// plugin's rundown role.
 
-import { randomUUID } from "node:crypto";
+import { oneShot } from "../../qq/src/ask.mjs";
 
 export const RUNDOWN_SYSTEM = [
   "You report on the live task pile. You do not judge. You do not file tickets.",
@@ -10,15 +10,6 @@ export const RUNDOWN_SYSTEM = [
   "Not a raw file listing. Operator and architect judge the report.",
   "No reasoning dump. No essay.",
 ].join("\n");
-
-function userMessage(text) {
-  return {
-    id: randomUUID(),
-    role: "user",
-    content: [{ type: "text", text }],
-    source: { kind: "plugin", plugin: "qq-tasks", form: "notice" },
-  };
-}
 
 function formatPile(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return "(empty pile)";
@@ -34,36 +25,10 @@ function formatPile(rows) {
   }).join("\n");
 }
 
-/**
- * One-shot llm.stream. Fresh sessionId each call. Empty string on miss.
- */
-export async function runRundownModel(llm, binding, { system, user, signal } = {}) {
-  if (!llm || typeof llm.stream !== "function") return "";
-  if (!binding?.provider || !binding?.model) return "";
-  const request = {
-    provider: binding.provider,
-    model: binding.model,
-    ...(binding.effort ? { reasoningEffort: binding.effort } : {}),
-    system,
-    messages: [userMessage(user)],
-    sessionId: `session-${randomUUID()}`,
-    ...(signal ? { signal } : {}),
-  };
-  let text = "";
-  try {
-    for await (const chunk of llm.stream(request)) {
-      if (chunk?.type === "text-delta") text += chunk.text ?? "";
-    }
-  } catch {
-    return "";
-  }
-  return text.trim();
-}
-
 export function createTasksService(store, options = {}) {
   const settings = options.settings;
   const llm = options.llm;
-  const run = options.runRundown ?? runRundownModel;
+  const run = options.runRundown ?? oneShot;
 
   const service = Object.freeze({
     create(input) {
@@ -106,5 +71,4 @@ export function createTasksService(store, options = {}) {
 
 export const internals = Object.freeze({
   formatPile,
-  userMessage,
 });
