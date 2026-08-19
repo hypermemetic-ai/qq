@@ -1042,6 +1042,23 @@ try {
     "--no-skills", "--no-prompt-templates", "--no-context-files", "--tools", "read,bash,edit,write,qa_verdict",
     "--session-dir", join(scratch, "state", "qa-session"), "--session-id", committedTests.state.qaSessionId,
   ]);
+  const grokQaArgs = review.qaLaunchArgs(
+    { qa: { provider: "xai-auth", model: "grok-4.6", effort: "high" }, look: 1 },
+    {
+      servicePromptPath: join(scratch, "state", "qa-system-prompt-1.md"),
+      sessionDir: join(scratch, "state", "qa-session"),
+      qaSessionId: "qa-session-id",
+      env: { HOME: homedir() },
+    },
+  );
+  assert.deepEqual(grokQaArgs, [
+    "--model", "xai-auth/grok-4.6", "--thinking", "high",
+    "--system-prompt", join(scratch, "state", "qa-system-prompt-1.md"),
+    "--no-extensions", "--extension", resolve(root, "extensions", "qa-result.ts"),
+    "--extension", join(homedir(), ".pi", "agent", "npm", "node_modules", "pi-xai-oauth", "extensions", "xai-oauth.ts"),
+    "--no-skills", "--no-prompt-templates", "--no-context-files", "--tools", "read,bash,edit,write,qa_verdict",
+    "--session-dir", join(scratch, "state", "qa-session"), "--session-id", "qa-session-id",
+  ]);
   const qaTaskPrompt = committedTests.calls.find(({ args }) => args[0] === "agent" && args[1] === "prompt");
   assert.match(qaTaskPrompt.args[3], /outbound ticket and note/);
   assert.match(qaTaskPrompt.args[3], new RegExp(base.gatePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));

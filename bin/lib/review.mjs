@@ -3,6 +3,7 @@ import { mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { GROK_PROVIDERS, agentModelsPath } from "./execution-profiles.mjs";
 import { DSH_RUN_APPROVAL_SCHEMA, DSH_RUN_SUBMISSION_SCHEMA, atomicPrivateJson, parseHerdr, readHandoff, removeWorktree, runsRoot, waitForAvailableShell } from "./run.mjs";
 import { RUN_BLOCKED_KIND, sendRunEvent } from "./run-events.mjs";
 import { DSH_CHILD_SESSION_ID, DSH_SESSION_ID } from "./session-context.mjs";
@@ -327,13 +328,20 @@ export function runnerAgentName(state) {
   return `runner-${state.id}`.slice(0, 32);
 }
 
+function xaiOAuthExtensionPath(env = process.env) {
+  return join(dirname(agentModelsPath(env)), "npm", "node_modules", "pi-xai-oauth", "extensions", "xai-oauth.ts");
+}
+
 export function qaLaunchArgs(state, options) {
   const args = [
     "--model", `${state.qa.provider}/${state.qa.model}`, "--thinking", state.qa.effort,
     "--system-prompt", options.servicePromptPath, "--no-extensions", "--extension", join(QQ_ROOT, "extensions", "qa-result.ts"),
+  ];
+  if (GROK_PROVIDERS.has(state.qa.provider)) args.push("--extension", xaiOAuthExtensionPath(options.env));
+  args.push(
     "--no-skills", "--no-prompt-templates", "--no-context-files", "--tools", "read,bash,edit,write,qa_verdict",
     "--session-dir", options.sessionDir,
-  ];
+  );
   if (state.look === 1) args.push("--session-id", options.qaSessionId);
   else args.push("--session", options.qaSessionId);
   return args;
@@ -437,7 +445,7 @@ export async function conductReview(run, statePath, options = {}) {
   const servicePromptPath = join(dirname(statePath), `qa-system-prompt-${state.look}.md`);
   await rm(servicePromptPath, { force: true });
   await writeFile(servicePromptPath, servicePrompt, { mode: 0o600, flag: "wx" });
-  const launchArgs = qaLaunchArgs(state, { servicePromptPath, sessionDir, qaSessionId });
+  const launchArgs = qaLaunchArgs(state, { servicePromptPath, sessionDir, qaSessionId, env });
   try {
     await stopAgent(run, state.pane);
     await takePane(run, state.pane, qaAgentName(state), launchArgs);
