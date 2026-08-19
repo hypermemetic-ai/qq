@@ -1,13 +1,16 @@
 // @ts-nocheck
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { readExecutionPolicy } from "../bin/lib/execution-profiles.mjs";
 
 import { retryBootstrapFailureOutbox } from "../bin/lib/bootstrap.mjs";
 import { RelayClient } from "../bin/lib/qq-relay-client.mjs";
 import { atomicPrivateJson, readHandoff, stateHome } from "../bin/lib/run.mjs";
 import { createQqSessionContext } from "../bin/lib/session-context.mjs";
-import { formatPack, isFailedLand, isQaPassedProposal, listProposals, prepareDone, projectFromCwd } from "../bin/lib/review.mjs";
+import { compilePacket, formatPack, formatPacket, isFailedLand, isQaPassedProposal, listProposals, prepareDone, projectFromCwd, routePacket } from "../bin/lib/review.mjs";
 import { RUN_BLOCKED_KIND, RUN_BOOTSTRAP_FAILED_KIND, parseRunEvent, runEventDeliveryGuard, runEventEndpoint, runEventRecipient } from "../bin/lib/run-events.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -26,6 +29,23 @@ function commandReason(execution, fallback) {
   return execution?.stderr?.trim() || execution?.stdout?.trim() || fallback;
 }
 
+async function completeFromContext(ctx, { system, user }) {
+  if (typeof ctx.modelRegistry?.find !== "function" || typeof ctx.modelRegistry?.complete !== "function") return "";
+  try {
+    const policy = await readExecutionPolicy();
+    const model = ctx.modelRegistry.find(policy.scribe.provider, policy.scribe.model);
+    if (!model) return "";
+    const response = await ctx.modelRegistry.complete(
+      model,
+      { systemPrompt: system, messages: [{ role: "user", content: [{ type: "text", text: user }], timestamp: Date.now() }] },
+      { reasoning: "low", cacheRetention: "none", sessionId: randomUUID(), signal: ctx.signal },
+    );
+    return (response?.content ?? []).filter((part) => part.type === "text").map((part) => part.text).join("\n").trim();
+  } catch {
+    return "";
+  }
+}
+
 export function runOutcomeMessage(event) {
   const payload = event.payload;
   if (event.kind === RUN_BOOTSTRAP_FAILED_KIND) {
@@ -42,6 +62,7 @@ export function runOutcomeMessage(event) {
     };
   }
   if (event.kind === RUN_BLOCKED_KIND) {
+    const pack = formatPack({ summary: payload.review.summary, files: payload.review.files });
     return {
       customType: "qq-run-blocked",
       content: [
@@ -50,12 +71,13 @@ export function runOutcomeMessage(event) {
         `At: ${payload.review.blocked_at}`,
         `Reason: ${payload.review.reason}`,
         "",
-        formatPack({ summary: payload.review.summary, files: payload.review.files }),
+        payload.packet ? formatPacket(payload.packet) : pack,
       ].join("\n"),
       display: true,
       details: { ...payload, event_id: event.eventId },
     };
   }
+  const pack = formatPack({ summary: payload.landing.summary, files: payload.landing.files });
   return {
     customType: "qq-run-landed",
     content: [
@@ -64,7 +86,7 @@ export function runOutcomeMessage(event) {
       `Target: ${payload.landing.target_branch}`,
       `At: ${payload.landing.landed_at}`,
       "",
-      formatPack({ summary: payload.landing.summary, files: payload.landing.files }),
+      payload.packet ? formatPacket(payload.packet) : pack,
     ].join("\n"),
     display: true,
     details: { ...payload, event_id: event.eventId },
@@ -78,6 +100,8 @@ export default function registerReviewFlow(pi, deps = {}) {
   const eventClient = deps.eventClient ?? new RelayClient(join(stateHome(env), "qq-relay", "qq-relay.sock"));
   const retryBootstrapFailures = deps.retryBootstrapFailureOutbox ?? retryBootstrapFailureOutbox;
   const finishRun = deps.prepareDone ?? prepareDone;
+  const buildPacket = deps.compilePacket ?? compilePacket;
+  const stampRoute = deps.routePacket ?? routePacket;
   const sleep = deps.sleep ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
   const sessionContext = deps.sessionContext ?? createQqSessionContext({ env });
   let currentContext;
@@ -91,7 +115,7 @@ export default function registerReviewFlow(pi, deps = {}) {
 
   pi.registerTool({
     name: "done", label: "Done", promptSnippet: "Submit the delegated ref and stop",
-    description: "Final runner call for delegated work. Validates a clean committed ref. Pi/Herdr hands the pane to pinned two-look QA; native DSH records an awaiting-native-review handoff without starting QA. It never merges.",
+    description: "Final runner call for delegated work. Validates a clean committed ref. Compiles the sniff packet and routes review or land. Pi/Herdr hands the pane to pinned two-look QA when route stamps review; native DSH records an awaiting-native-review handoff without starting QA. Route-stamped land merges, then relays the packet. It never merges from the runner process except through the land worker.",
     parameters: { type: "object", additionalProperties: false, required: ["ref"], properties: { ref: { type: "string", minLength: 1 } } },
     async execute(_id, params, signal, _update, ctx) {
       const qqContext = sessionContext.resolve(ctx);
@@ -106,10 +130,27 @@ export default function registerReviewFlow(pi, deps = {}) {
             ref: state.ref, runner_session: state.runnerSession, state_path: statePath,
           });
         }
+        if (state.look === 1) {
+          const packet = await buildPacket(run, state);
+          const mark = await stampRoute(packet, {
+            complete: deps.complete ?? ((request) => completeFromContext(ctx, request)),
+          });
+          packet.mark = mark;
+          state.packet = packet;
+          state.pack = { summary: mark === "land" ? "land" : state.pack?.summary ?? "review", files: packet.files };
+          await atomicPrivateJson(statePath, state);
+          if (mark === "land") {
+            await land(state);
+            const landed = await readHandoff(statePath);
+            const message = `Landed ${landed.task.id}. The packet was relayed for sniff. The runner is finished; stop now.`;
+            setTimeout(() => { try { ctx.shutdown?.(); } catch { try { ctx.abort?.(); } catch {} } }, 25).unref?.();
+            return result(message, { status: "landed", mark, ref: landed.ref, state_path: statePath });
+          }
+        }
         const pid = await launchReview(statePath);
         const message = `Submitted ${state.task.id} to qa look ${state.look}. The runner is finished; stop now.`;
         setTimeout(() => { try { ctx.shutdown?.(); } catch { try { ctx.abort?.(); } catch {} } }, 25).unref?.();
-        return result(message, { status: "reviewing", look: state.look, worker_pid: pid, state_path: statePath });
+        return result(message, { status: "reviewing", look: state.look, mark: state.packet?.mark ?? "review", worker_pid: pid, state_path: statePath });
       } catch (error) {
         return result(`done refused: ${error instanceof Error ? error.message : String(error)}`, { status: "refused" });
       }
