@@ -1,8 +1,16 @@
 # `@hypermemetic-ai/qq`
 
 Presentation-neutral Cordis service over DSH Agents and sessions. This package
-owns list, read, create, prompt, interrupt, and status/change observation. It
-contains no HTML, routes, CSS, htmx, or browser assumptions.
+owns list, read, create, prompt, interrupt, status/change observation, and the
+live session number book. It contains no HTML, routes, CSS, htmx, or browser
+assumptions.
+
+Live sessions wear a short number (`1 2 3 4 9 10 12 20 40 80`, then strange,
+then integers above 100). The book is schema `qq.alias/v1`, persisted at
+`.qq-aliases.json` beside `DSH_HOME` (`aliasFile` overrides), mode `0600`,
+written atomically. A leftover `.qq-relay-aliases.json` is read once and
+migrated onto the new path. `list` / `read` include `alias` only while the
+session is live. The UUID stays the identity; the number is the face.
 
 ## Host recipe
 
