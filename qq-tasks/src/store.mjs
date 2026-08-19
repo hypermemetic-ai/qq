@@ -20,7 +20,7 @@ import {
   writeFileSync,
 } from "node:fs";
 
-import { dealId, normalizeId } from "./names.mjs";
+import { dealId, normalizeId, WARM_COUNT } from "./names.mjs";
 
 export const BOOK_SCHEMA = "qq.tasks-book/v1";
 export const DEFAULT_PROJECT = "qq";
@@ -341,6 +341,7 @@ export function createTaskStore(dirPath, options = {}) {
       const book = loadBook();
       book.live = book.live.filter((live) => live !== row.id);
       if (!book.warm.includes(row.id)) book.warm.push(row.id);
+      if (book.warm.length > WARM_COUNT) book.warm.splice(0, book.warm.length - WARM_COUNT);
       persistBook(book);
       return row.id;
     },
