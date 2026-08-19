@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { createConsoleHandler } from "../qq-ui/src/http-app.mjs";
 import { createQqService } from "../qq/src/session.mjs";
 import { renderMarkdownText, renderMessageText } from "../qq-ui/src/markdown.mjs";
+import { renderSessionContent } from "../qq-ui/src/render.mjs";
 
 const root = resolve(process.argv[2] ?? ".");
 const primaryId = "session-63a11000-0000-4000-8000-000000000001";
@@ -320,6 +321,51 @@ function openSse(sessionId) {
   assert.match(blocks, /<hr>/);
 }
 
+{
+  const liveId = "session-63a11000-0000-4000-8000-0000000000aa";
+  const durableId = "session-63a11000-0000-4000-8000-0000000000bb";
+  const paths = {
+    canonical: `/qq/session/${liveId}`,
+    events: `/qq/session/${liveId}/events`,
+    interrupt: `/qq/session/${liveId}/interrupt`,
+    prompt: `/qq/session/${liveId}/prompt`,
+    createSession: "/qq/sessions",
+    switchSession: "/qq/sessions/open",
+  };
+  const html = renderSessionContent({
+    id: liveId,
+    alias: "12",
+    events: [],
+    agentStatus: "idle",
+    sessions: [
+      { id: liveId, alias: "12", createdAt: Date.UTC(2026, 7, 16, 12) },
+      { id: durableId, createdAt: Date.UTC(2026, 7, 15, 12) },
+    ],
+  }, paths);
+  assert.match(html, /<code>12<\/code>/);
+  assert.doesNotMatch(html, new RegExp(`<code>${liveId}</code>`));
+  assert.match(html, new RegExp(`<option value="${liveId}" selected>Current · 12</option>`));
+  assert.match(html, new RegExp(`<option value="${durableId}">2026-08-15</option>`));
+  const durableLabel = html.match(new RegExp(`<option value="${durableId}">([^<]*)</option>`))[1];
+  assert.doesNotMatch(durableLabel, /session-/);
+  assert.match(html, new RegExp(`hx-push-url="/qq/session/${liveId}"`));
+  assert.match(html, new RegExp(`data-session-id="${liveId}"`));
+
+  const dated = renderSessionContent({
+    id: liveId,
+    events: [],
+    sessions: [{ id: liveId, createdAt: Date.UTC(2026, 7, 16, 12) }],
+  }, paths);
+  assert.match(dated, /<code>2026-08-16<\/code>/);
+  assert.match(dated, new RegExp(`<option value="${liveId}" selected>Current · 2026-08-16</option>`));
+  assert.doesNotMatch(dated, new RegExp(`<code>${liveId}</code>`));
+  assert.match(dated, new RegExp(`hx-push-url="/qq/session/${liveId}"`));
+
+  const undealt = renderSessionContent({ id: liveId, events: [] }, paths);
+  assert.match(undealt, /<code>durable<\/code>/);
+  assert.doesNotMatch(undealt, new RegExp(`<code>${liveId}</code>`));
+}
+
 const streams = [];
 try {
   // Stable htmx/SSE lifecycle: the owner and target wrap inner-only fragments.
@@ -342,7 +388,12 @@ try {
   assert.doesNotMatch(home.body, /console-v8\.css/);
   assert.match(home.body, /browser-v4\.js/);
   assert.match(home.body, /data-service-worker="\/qq\/sw-v10\.js"/);
+  assert.match(home.body, /<code>\d+<\/code>/);
+  assert.doesNotMatch(home.body, new RegExp(`<code>${primaryId}</code>`));
+  assert.match(home.body, new RegExp(`<option value="${primaryId}" selected>Current · \\d+</option>`));
+  assert.match(home.body, new RegExp(`<option value="${secondaryId}">2026-08-15</option>`));
   assert.match(home.body, new RegExp(`<option value="${secondaryId}"`));
+  assert.match(home.body, new RegExp(`hx-push-url="/qq/session/${primaryId}"`));
   assert.match(home.body, /This DSH session has no transcript yet/);
   assert.match(home.body, /<details class="session-menu">[\s\S]*<summary aria-label="Show session controls">/);
   assert.doesNotMatch(home.body, /<details class="session-menu" open/);
@@ -420,7 +471,8 @@ try {
   assert.equal(switched.headers.location, `/qq/session/${secondaryId}`);
   const selected = await request(switched.headers.location);
   assert.equal(selected.status, 200);
-  assert.match(selected.body, new RegExp(`<code>${secondaryId}</code>`));
+  assert.match(selected.body, /<code>\d+<\/code>/);
+  assert.doesNotMatch(selected.body, new RegExp(`<code>${secondaryId}</code>`));
   assert.match(selected.body, new RegExp(`<option value="${secondaryId}" selected>Current`));
   const secondaryPost = await post(secondaryId, "prompt", { prompt: "selected durable session" });
   assert.equal(secondaryPost.status, 200);
