@@ -1195,6 +1195,21 @@ try {
   assert.doesNotMatch(browser, /localStorage|sessionStorage|indexedDB|document\.cookie|EventSource|WebSocket|htmx\.process/);
   assert.doesNotMatch(renderSource, /outerHTML|controller|observer|lease|take control/i);
   assert.doesNotMatch(workerSource, /addEventListener\("(?:sync|periodicsync|push|notificationclick)"|indexedDB|localStorage/i);
+
+  const [hostUnit, hostActivate] = await Promise.all([
+    readFile(join(root, "systemd/user/qq.service"), "utf8"),
+    readFile(join(root, "bin/qq-host-activate"), "utf8"),
+  ]);
+  assert.match(hostUnit, /ExecStart=%h\/projects\/qq\/bin\/qq/);
+  assert.match(hostUnit, /QQ_DSH_PROVIDER=xai-auth/);
+  assert.match(hostUnit, /QQ_DSH_MODEL=grok-4.6/);
+  assert.match(hostUnit, /%h\/\.local\/state\/qq\/host\.log/);
+  assert.match(hostUnit, /WantedBy=default\.target/);
+  assert.doesNotMatch(hostUnit, /qq-dictation|QQ_DSH_HAVE_DICTATION|herdr pane|op-stage/);
+  assert.match(hostActivate, /systemctl --user daemon-reload/);
+  assert.match(hostActivate, /systemctl --user enable qq\.service/);
+  assert.match(hostActivate, /systemctl --user restart qq\.service/);
+  assert.doesNotMatch(hostActivate, /herdr pane add|operator_stage/);
 } finally {
   for (const stream of streams) stream.close();
   server.closeAllConnections?.();
