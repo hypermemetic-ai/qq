@@ -256,6 +256,27 @@ try {
     assert.equal(ran, 1);
     bound.archive(id);
     assert.deepEqual(bound.list(), []);
+    const serviceSource = readFileSync(join(root, "qq-tasks/src/service.mjs"), "utf8");
+    assert.match(serviceSource, /from "\.\.\/\.\.\/qq\/src\/ask\.mjs"/);
+    assert.doesNotMatch(serviceSource, /runRundownModel|llm\.stream|randomUUID/);
+
+    const streamed = [];
+    const live = createTasksService(store, {
+      settings,
+      llm: {
+        async *stream(options) {
+          streamed.push(options);
+          yield { type: "text-delta", text: "live pile report" };
+        },
+      },
+    });
+    live.create({ title: "Streamed" });
+    assert.equal(await live.rundown(), "live pile report");
+    assert.equal(streamed.length, 1);
+    assert.equal(streamed[0].provider, "test");
+    assert.equal(streamed[0].model, "reporter");
+    assert.equal("cacheRetention" in streamed[0], false);
+    assert.match(streamed[0].sessionId, /^session-/);
   }
 
   // rundown is absent when the plugin is not loaded

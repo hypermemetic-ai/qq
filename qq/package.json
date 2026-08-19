@@ -8,7 +8,8 @@
   "exports": {
     ".": "./src/plugin.mjs",
     "./session": "./src/session.mjs",
-    "./alias": "./src/alias.mjs"
+    "./alias": "./src/alias.mjs",
+    "./ask": "./src/ask.mjs"
   },
   "files": [
     "src/",
