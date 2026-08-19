@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import { createAliasBook, defaultAliasFile, defaultLegacyAliasFile } from "./alias.mjs";
+
 const SESSION_ID = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEFAULT_OBSERVE_MS = 100;
 
@@ -86,7 +88,8 @@ export function snapshotFingerprint(snapshot) {
     last?.seq,
     last?.type,
     last?.data?.reason?.kind,
-    sessions.map((session) => [session.id, session.createdAt]),
+    sessions.map((session) => [session.id, session.createdAt, session.alias]),
+    snapshot?.alias,
   ]);
 }
 
@@ -182,6 +185,62 @@ export function createQqService(ctx, config) {
 
   const agentPromises = new Map();
   const defaultCreatedAt = Date.now();
+  const aliasFile = config.aliasFile !== undefined || envHasDshHome()
+    ? defaultAliasFile(process.env, config)
+    : undefined;
+  const book = createAliasBook(aliasFile, {
+    now: config.now,
+    rng: config.rng,
+    legacyFile: aliasFile ? defaultLegacyAliasFile(process.env) : undefined,
+  });
+
+  function envHasDshHome() {
+    return typeof process.env.DSH_HOME === "string" && process.env.DSH_HOME.trim().length > 0;
+  }
+
+  function liveAgents() {
+    const listed = typeof agents.list === "function"
+      ? agents.list()
+      : [agents.get(defaultSessionId)].filter(Boolean);
+    return listed.filter((agent) => SESSION_ID.test(agent?.session?.id));
+  }
+
+  function liveSessionIds() {
+    return liveAgents().map((agent) => agent.session.id);
+  }
+
+  function syncLive(extraId) {
+    const ids = liveSessionIds();
+    if (SESSION_ID.test(extraId) && !ids.includes(extraId)) ids.push(extraId);
+    book.sync(ids);
+  }
+
+  function liveAlias(sessionId) {
+    if (!SESSION_ID.test(sessionId) || !agents.get(sessionId)) return undefined;
+    syncLive(sessionId);
+    return book.aliasFor(sessionId);
+  }
+
+  function resolveAlias(address) {
+    syncLive();
+    const exact = liveAgents().find((agent) => agent.session.id === address);
+    if (exact) return exact.session.id;
+    return liveAgents().find((agent) => book.aliasFor(agent.session.id) === address)?.session.id;
+  }
+
+  if (typeof ctx.on === "function") {
+    ctx.on("agent/created", ({ agent }) => {
+      const sessionId = agent?.session?.id;
+      if (SESSION_ID.test(sessionId)) syncLive(sessionId);
+    });
+    ctx.on("agent/disposed", () => {
+      syncLive();
+    });
+  }
+  if (typeof ctx.effect === "function") {
+    ctx.effect(() => () => book.close(), "qq: alias book");
+  }
+  syncLive();
 
   async function persistedHeaders() {
     return (await persistence.list()).filter((header) => SESSION_ID.test(header?.id));
@@ -217,6 +276,7 @@ export function createQqService(ctx, config) {
             meta: { cwd: config.cwd },
             ...options,
           });
+      syncLive(handle.agent.session.id);
       return handle.agent;
     })();
     agentPromises.set(sessionId, promise);
@@ -238,10 +298,7 @@ export function createQqService(ctx, config) {
         cwd: header.cwd,
       }]),
     );
-    const liveAgents = typeof agents.list === "function"
-      ? agents.list()
-      : [agents.get(defaultSessionId)].filter(Boolean);
-    for (const agent of liveAgents) {
+    for (const agent of liveAgents()) {
       if (!SESSION_ID.test(agent?.session?.id) || byId.has(agent.session.id)) continue;
       byId.set(agent.session.id, {
         id: agent.session.id,
@@ -258,17 +315,25 @@ export function createQqService(ctx, config) {
         cwd: config.cwd,
       });
     }
-    return [...byId.values()].sort(
-      (left, right) => right.createdAt - left.createdAt || left.id.localeCompare(right.id),
-    );
+    syncLive();
+    return [...byId.values()]
+      .map((session) => {
+        const alias = agents.get(session.id) ? book.aliasFor(session.id) : undefined;
+        return alias ? { ...session, alias } : session;
+      })
+      .sort(
+        (left, right) => right.createdAt - left.createdAt || left.id.localeCompare(right.id),
+      );
   }
 
   async function read(sessionId) {
     const agent = await agentForSession(sessionId);
+    const alias = liveAlias(agent.session.id);
     return {
       id: agent.session.id,
       events: agent.session.events,
       agentStatus: agent.status,
+      ...(alias ? { alias } : {}),
     };
   }
 
@@ -285,6 +350,8 @@ export function createQqService(ctx, config) {
     defaultSessionId,
     list,
     read,
+    alias: liveAlias,
+    resolve: resolveAlias,
     async create() {
       await ctx.get("loader")?.await();
       const sessionId = `session-${randomUUID()}`;
@@ -298,7 +365,10 @@ export function createQqService(ctx, config) {
       // DSH's creation event establishes the header; its flush boundary makes
       // even a brand-new empty session durable before the browser opens it.
       await sessions.flush(handle.agent.session);
-      return { id: handle.agent.session.id };
+      const createdId = handle.agent.session.id;
+      syncLive(createdId);
+      const alias = book.aliasFor(createdId);
+      return alias ? { id: createdId, alias } : { id: createdId };
     },
     async prompt(sessionId, text) {
       const agent = await agentForSession(sessionId);
