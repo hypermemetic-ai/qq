@@ -84,6 +84,13 @@ for qq_pkg in "$root"/qq-*/package.json; do
   esac
 done
 
+# image-finder lives next to this repo, not as qq-*. Bind it the same way as
+# qq-tasks: dsh plugin add from the sibling tree, not host.patch.yml.
+find_root=${QQ_FIND_ROOT:-"$root/../image-finder"}
+if [[ -f $find_root/package.json ]] && grep -Fq '"name": "@hypermemetic-ai/image-finder"' "$find_root/package.json"; then
+  qq_siblings+=("$(cd -- "$find_root" && pwd -P)")
+fi
+
 profile_manifest="$DSH_HOME/profiles/qq/package.json"
 if ! node - "$profile_manifest" "$root/qq" ${qq_siblings[@]+"${qq_siblings[@]}"} <<'NODE'
 const { existsSync, readFileSync } = require("node:fs");
