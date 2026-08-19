@@ -249,7 +249,7 @@ try {
       turn: 3,
       events: pairEvents(3, 10, "That plan is out.", "withdrawn"),
     });
-    // parse happens inside fire via scribe output
+    // parse happens inside fire on the one-shot output
     assert.equal(withdrawn.action, "note");
   }
 
@@ -1438,7 +1438,7 @@ try {
           },
         }),
       },
-      // No `run` injected: iterate must use the llm stream like architect's scribe.
+      // No `run` injected: iterate must use the qq one-shot hop on llm.stream.
       registerHandsTools: () => {},
     });
     const parentAgent = {
