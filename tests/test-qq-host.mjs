@@ -394,7 +394,31 @@ function openSse(sessionId, port = address.port) {
   }, paths);
   assert.match(popup, /class="offer-popup"/);
   assert.doesNotMatch(popup, /For the runner/);
+  assert.doesNotMatch(popup, /class="notice"/);
   assert.equal(renderOfferPopup(null, paths), "");
+  const refusedPopup = renderOfferPopup({
+    id: "offer-1",
+    title: "Ship leftover",
+    brief: "Compile the leftover and start run.",
+  }, paths, "bank requires qq-tasks");
+  assert.match(refusedPopup, /class="notice" role="alert">bank requires qq-tasks/);
+  assert.match(refusedPopup, /name="choice" value="handoff">Hand off/);
+  assert.match(refusedPopup, /name="choice" value="bank">Bank/);
+  assert.match(refusedPopup, /name="choice" value="ignore">Ignore/);
+  const noticeAt = refusedPopup.indexOf('class="notice"');
+  const actionsAt = refusedPopup.indexOf('class="offer-actions"');
+  assert.ok(noticeAt >= 0 && actionsAt > noticeAt);
+  const refusedOffer = renderSessionContent({
+    id: liveId,
+    events: [],
+    offer: {
+      id: "offer-1",
+      title: "Ship leftover",
+      brief: "Compile the leftover and start run.",
+    },
+  }, paths, "bank requires qq-tasks");
+  assert.match(refusedOffer, /class="offer-popup"[\s\S]*class="notice" role="alert">bank requires qq-tasks<\/p>[\s\S]*class="offer-actions"/);
+  assert.equal([...refusedOffer.matchAll(/class="notice"/g)].length, 2);
 }
 
 {
@@ -411,8 +435,6 @@ function openSse(sessionId, port = address.port) {
     chooseOffer: async (_id, choice) => {
       lastChoice = choice;
       if (choice === "bank") {
-        pending.id = "";
-        pending.brief = "";
         return { status: "refused", reason: "bank requires qq-tasks" };
       }
       pending.id = "";
@@ -452,6 +474,37 @@ function openSse(sessionId, port = address.port) {
       const appeared = await stream.waitFor(/offer-popup/);
       assert.match(appeared, /<form class="offer-actions"/);
       assert.match(appeared, /name="choice" value="handoff"/);
+      const bankBody = new URLSearchParams({ choice: "bank" }).toString();
+      const refused = await new Promise((resolveRequest, reject) => {
+        const req = httpRequest({
+          host: "127.0.0.1",
+          port: offerPort,
+          path: `/qq/session/${primaryId}/offer`,
+          method: "POST",
+          agent: false,
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            "content-length": Buffer.byteLength(bankBody),
+            "hx-request": "true",
+            "sec-fetch-site": "same-origin",
+          },
+        }, (res) => {
+          const chunks = [];
+          res.on("data", (chunk) => chunks.push(chunk));
+          res.on("end", () => resolveRequest({
+            status: res.statusCode,
+            body: Buffer.concat(chunks).toString("utf8"),
+          }));
+        });
+        req.on("error", reject);
+        req.end(bankBody);
+      });
+      assert.equal(refused.status, 200);
+      assert.equal(lastChoice, "bank");
+      assert.match(refused.body, /class="offer-popup"[\s\S]*class="notice" role="alert">bank requires qq-tasks<\/p>[\s\S]*class="offer-actions"/);
+      assert.match(refused.body, /name="choice" value="handoff">Hand off/);
+      assert.match(refused.body, /name="choice" value="bank">Bank/);
+      assert.match(refused.body, /name="choice" value="ignore">Ignore/);
       const mark = stream.checkpoint();
       const body = new URLSearchParams({ choice: "ignore" }).toString();
       const ignored = await new Promise((resolveRequest, reject) => {
