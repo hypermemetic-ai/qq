@@ -192,6 +192,10 @@ try {
       assert.deepEqual(options.callerContext, resumedBoundary.resolve(childCtx));
       return { runtime: "dsh", task: { id: "T-1" }, look: 0, ref: "native-ref", runnerSession: childId };
     },
+    async compilePacket() {
+      return { schema: "qq.route-packet/v1", brief: "session store identity", files: [{ path: "bin/lib/session.mjs", added: 1, deleted: 0 }], pointers: [], mark: null };
+    },
+    async routePacket() { return "review"; },
     launchReview(statePath) { launchedPath = statePath; throw new Error("native done must not launch review"); },
   });
   const done = reviewTools.find((tool) => tool.name === "done");

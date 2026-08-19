@@ -10,7 +10,7 @@ import { retryBootstrapFailureOutbox } from "../bin/lib/bootstrap.mjs";
 import { RelayClient } from "../bin/lib/qq-relay-client.mjs";
 import { atomicPrivateJson, readHandoff, stateHome } from "../bin/lib/run.mjs";
 import { createQqSessionContext } from "../bin/lib/session-context.mjs";
-import { compilePacket, formatPack, formatPacket, isFailedLand, isQaPassedProposal, listProposals, prepareDone, projectFromCwd, routePacket } from "../bin/lib/review.mjs";
+import { compilePacket, formatPack, formatPacket, isFailedLand, listProposals, prepareDone, projectFromCwd, routePacket } from "../bin/lib/review.mjs";
 import { RUN_BLOCKED_KIND, RUN_BOOTSTRAP_FAILED_KIND, parseRunEvent, runEventDeliveryGuard, runEventEndpoint, runEventRecipient } from "../bin/lib/run-events.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -124,6 +124,20 @@ export default function registerReviewFlow(pi, deps = {}) {
       try {
         const state = await finishRun(run, ctx.cwd, statePath, params.ref, { callerContext: qqContext });
         if (state.runtime === "dsh") {
+          const packet = await buildPacket(run, state);
+          const mark = await stampRoute(packet, {
+            complete: deps.complete ?? ((request) => completeFromContext(ctx, request)),
+          });
+          packet.mark = mark;
+          state.packet = packet;
+          state.pack = { summary: mark === "land" ? "land" : state.pack?.summary ?? "review", files: packet.files };
+          await atomicPrivateJson(statePath, state);
+          if (mark === "land") {
+            await land(state);
+            const landed = await readHandoff(statePath);
+            const message = `Landed ${landed.task.id}. The packet was relayed for sniff. The runner is finished; stop now.`;
+            return result(message, { status: "landed", runtime: "dsh", mark, ref: landed.ref, state_path: statePath });
+          }
           const message = `Submitted ${state.task.id}; it is awaiting native review. No QA look was started; stop now.`;
           return result(message, {
             status: "submitted", runtime: "dsh", awaiting: "native-review",
@@ -185,11 +199,9 @@ export default function registerReviewFlow(pi, deps = {}) {
     let choice;
     try {
       const pack = formatPack(state.pack ?? { summary: state.blockedReason || "qa blocked", files: [] });
-      const choices = isQaPassedProposal(state) ? ["approve", "discuss", "later"] : ["discuss", "later"];
+      const choices = ["discuss", "later"];
       choice = await ctx.ui.select(pack, choices);
-      if (choice === "approve") {
-        await land(state);
-      } else if (choice === "discuss") {
+      if (choice === "discuss") {
         const comment = await ctx.ui.input("Operator discuss note");
         if (!comment) return;
         if (state.status === "proposal") state.status = "commented";
@@ -227,7 +239,7 @@ export default function registerReviewFlow(pi, deps = {}) {
     }
     const project = projectFromCwd(ctx.cwd, env);
     for (const state of await listProposals(project, env)) {
-      if (!ownsHandoff(state, ctx) || (state.status === "blocked" && !isFailedLand(state))) continue;
+      if (!ownsHandoff(state, ctx) || !isFailedLand(state)) continue;
       await offer(state, ctx);
     }
   }
