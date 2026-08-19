@@ -1,0 +1,26 @@
+{
+  "name": "@hypermemetic-ai/qq-tasks",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Markdown pile / backlog plugin for the qq DSH host. One repository, one plugin, one version.",
+  "main": "src/plugin.mjs",
+  "exports": {
+    ".": "./src/plugin.mjs",
+    "./names": "./src/names.mjs",
+    "./store": "./src/store.mjs",
+    "./settings": "./src/settings.mjs",
+    "./service": "./src/service.mjs",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "files": [
+    "src/",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
