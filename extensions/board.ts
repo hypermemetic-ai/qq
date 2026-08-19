@@ -195,19 +195,59 @@ async function admissionTasks(run, cwd, incoming, signal) {
   return [...found.values()];
 }
 
+function hopText(response) {
+  return (response?.content ?? [])
+    .filter((part) => part?.type === "text" && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("\n")
+    .trim();
+}
+
+/** Nested scribe complete(). Parent-turn abort cancels before the first try.
+ *  A dead hop (aborted/empty while the operator did not cancel) retries once
+ *  on a fresh session id. The parent signal is not passed through: the Grok
+ *  proxy already returns stopReason aborted on transport death, and sharing
+ *  the architect turn signal was classifying those as operator cancel. */
+export async function completeScribeHop(ctx, model, context, options) {
+  const cancelMessage = options.cancelMessage ?? "scribe hop was cancelled";
+  const deadMessage = options.deadMessage ?? "scribe hop died";
+  if (ctx.signal?.aborted) throw new Error(cancelMessage);
+  let lastError;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await ctx.modelRegistry.complete(
+        model,
+        context,
+        { ...options.complete, sessionId: randomUUID() },
+      );
+      const text = hopText(response);
+      if (response?.stopReason !== "aborted" && text) return { response, text };
+      lastError = new Error(deadMessage);
+    } catch (error) {
+      if (ctx.signal?.aborted) throw new Error(cancelMessage);
+      lastError = error instanceof Error ? error : new Error(deadMessage);
+    }
+  }
+  if (ctx.signal?.aborted) throw new Error(cancelMessage);
+  throw lastError ?? new Error(deadMessage);
+}
+
 export async function makeAdmissionDecision(ctx, evidence, deps = {}) {
   const policy = await readExecutionPolicy(deps.policyPath);
   const prompt = await readFile(deps.admissionPromptPath ?? join(QQ_ROOT, "prompts", "services", "admission-vet.md"), "utf8");
   const model = ctx.modelRegistry.find(policy.scribe.provider, policy.scribe.model);
   if (!model) throw new Error(`admission vet model is unavailable: ${policy.scribe.provider}/${policy.scribe.model}`);
-  const response = await ctx.modelRegistry.complete(
+  const { text } = await completeScribeHop(
+    ctx,
     model,
     { systemPrompt: prompt.trim(), messages: [{ role: "user", content: [{ type: "text", text: evidence }], timestamp: Date.now() }] },
-    { reasoning: "low", cacheRetention: "none", sessionId: randomUUID(), signal: ctx.signal },
+    {
+      complete: { reasoning: "low", cacheRetention: "none" },
+      cancelMessage: "admission vet was cancelled",
+      deadMessage: "admission vet hop died",
+    },
   );
-  if (response.stopReason === "aborted") throw new Error("admission vet was cancelled");
-  const source = response.content.filter((part) => part.type === "text").map((part) => part.text).join("\n").trim();
-  return parseAdmissionDecision(source);
+  return parseAdmissionDecision(text);
 }
 
 export async function admitDelegate(ctx, id, options = {}) {
@@ -270,14 +310,16 @@ export async function makeNote(ctx, task, deps = {}) {
     content: [{ type: "text", text: attachments }],
     timestamp: Date.now(),
   };
-  const response = await ctx.modelRegistry.complete(
+  const { text: note } = await completeScribeHop(
+    ctx,
     model,
     { systemPrompt: prompt.trim(), messages: [userMessage] },
-    { reasoning: policy.scribe.effort, cacheRetention: "none", sessionId: randomUUID(), signal: ctx.signal },
+    {
+      complete: { reasoning: policy.scribe.effort, cacheRetention: "none" },
+      cancelMessage: "note generation was cancelled",
+      deadMessage: "scribe hop died",
+    },
   );
-  if (response.stopReason === "aborted") throw new Error("note generation was cancelled");
-  const note = response.content.filter((part) => part.type === "text").map((part) => part.text).join("\n").trim();
-  if (!note) throw new Error("scribe returned an empty note");
   return { note, transcript, qaBinding: policy.qa };
 }
 

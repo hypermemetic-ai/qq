@@ -233,6 +233,69 @@ try {
   assert.equal(vetRequest.options.cacheRetention, "none");
   assert.notEqual(vetRequest.options.sessionId, scribeRequest.options.sessionId);
   assert.equal(vetRequest.request.messages[0].content[0].text, "live evidence");
+  assert.equal(scribeRequest.options.signal, undefined);
+  assert.equal(vetRequest.options.signal, undefined);
+
+  const hopCalls = [];
+  const hopCtx = {
+    signal: undefined,
+    sessionManager: { getBranch: () => branch },
+    modelRegistry: {
+      find(provider, model) { return { provider, id: model }; },
+      async complete(_model, _request, options) {
+        hopCalls.push(options.sessionId);
+        if (hopCalls.length === 1) return { stopReason: "aborted", content: [] };
+        return { stopReason: "stop", content: [{ type: "text", text: exactNote }] };
+      },
+    },
+  };
+  const recovered = await extension.makeNote(hopCtx, task, { policyPath, scribePromptPath: join(root, "prompts", "services", "scribe.md") });
+  assert.equal(recovered.note, exactNote);
+  assert.equal(hopCalls.length, 2);
+  assert.notEqual(hopCalls[0], hopCalls[1]);
+
+  await assert.rejects(
+    () => extension.makeNote({
+      signal: undefined,
+      sessionManager: { getBranch: () => branch },
+      modelRegistry: {
+        find(provider, model) { return { provider, id: model }; },
+        async complete() { return { stopReason: "aborted", content: [] }; },
+      },
+    }, task, { policyPath, scribePromptPath: join(root, "prompts", "services", "scribe.md") }),
+    /scribe hop died/,
+  );
+
+  let cancelledCalls = 0;
+  const alreadyAborted = new AbortController();
+  alreadyAborted.abort();
+  await assert.rejects(
+    () => extension.makeNote({
+      signal: alreadyAborted.signal,
+      sessionManager: { getBranch: () => branch },
+      modelRegistry: {
+        find(provider, model) { return { provider, id: model }; },
+        async complete() { cancelledCalls += 1; return { stopReason: "stop", content: [{ type: "text", text: exactNote }] }; },
+      },
+    }, task, { policyPath, scribePromptPath: join(root, "prompts", "services", "scribe.md") }),
+    /note generation was cancelled/,
+  );
+  assert.equal(cancelledCalls, 0);
+
+  const emptyThenNote = [];
+  const emptyRecovered = await extension.makeNote({
+    sessionManager: { getBranch: () => branch },
+    modelRegistry: {
+      find(provider, model) { return { provider, id: model }; },
+      async complete() {
+        emptyThenNote.push(1);
+        if (emptyThenNote.length === 1) return { stopReason: "stop", content: [{ type: "text", text: "   " }] };
+        return { stopReason: "stop", content: [{ type: "text", text: exactNote }] };
+      },
+    },
+  }, task, { policyPath, scribePromptPath: join(root, "prompts", "services", "scribe.md") });
+  assert.equal(emptyRecovered.note, exactNote);
+  assert.equal(emptyThenNote.length, 2);
 
   const prepared = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task, note: exactNote, transcript });
   assert.equal(await readFile(prepared.ticketPath, "utf8"), `${ticket}\n`);
