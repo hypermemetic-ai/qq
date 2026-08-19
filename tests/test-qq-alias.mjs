@@ -206,6 +206,7 @@ try {
       [durableOnly, { id: durableOnly, events: [], createdAt: 1, cwd: "/work" }],
     ]);
     const live = new Map();
+    const listeners = new Map();
     function fakeAgent(id) {
       return {
         session: { id, events: [], header: { createdAt: 2, cwd: "/work" } },
@@ -249,6 +250,7 @@ try {
         if (name === "loader") return { async await() {} };
         return undefined;
       },
+      on(name, handler) { listeners.set(name, handler); },
     };
     const qq = createQqService(ctx, {
       sessionId: alphaId,
@@ -281,6 +283,22 @@ try {
     const raw = JSON.parse(readFileSync(file, "utf8"));
     assert.equal(raw.schema, ALIAS_SCHEMA);
     assert.equal(statSync(file).mode & 0o777, 0o600);
+
+    // Live sessions another plugin creates are dealt through agent/created;
+    // their alias and departure persist through the event handlers alone.
+    const appearId = sessionId("000000000098");
+    const appeared = fakeAgent(appearId);
+    live.set(appearId, appeared);
+    listeners.get("agent/created")?.({ agent: appeared });
+    const afterAppear = JSON.parse(readFileSync(file, "utf8")).entries;
+    assert.equal(afterAppear.find((item) => item.session === appearId)?.alias, "40");
+
+    live.delete(appearId);
+    listeners.get("agent/disposed")?.();
+    const afterDisposed = JSON.parse(readFileSync(file, "utf8")).entries;
+    const departed = afterDisposed.find((item) => item.session === appearId);
+    assert.ok(departed, "disposed session keeps its persisted entry");
+    assert.notEqual(departed.goneAt, null, "agent/disposed marks the alias gone");
     live.delete(alphaId);
     const afterLeave = await qq.list();
     assert.equal(afterLeave.find((row) => row.id === alphaId).alias, undefined);

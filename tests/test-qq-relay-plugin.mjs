@@ -11,6 +11,7 @@ const labelsModule = await import(pathToFileURL(join(root, "qq-relay/src/labels.
 const relayModule = await import(pathToFileURL(join(root, "qq-relay/src/relay.mjs")));
 const toolsModule = await import(pathToFileURL(join(root, "qq-relay/src/tools.mjs")));
 const pluginModule = await import(pathToFileURL(join(root, "qq-relay/src/plugin.mjs")));
+const qqPluginModule = await import(pathToFileURL(join(root, "qq/src/plugin.mjs")));
 const { createAliasBook } = aliasModule;
 const { createLabelBoard } = labelsModule;
 const { createRelayService, relayEnvelope, RelayError } = relayModule;
@@ -126,19 +127,44 @@ try {
     return { ctx, agents, services, file };
   }
 
+  // One qq book feeds relay: the qq plugin deals aliases and relay consumes
+  // them through ctx, with no alias config of its own.
   {
-    const file = join(scratch, "service-alias.json");
-    const { ctx, agents } = makeCtx();
+    const file = join(scratch, "relay-consumes-qq.json");
+    const agents = new Map();
     const alpha = makeFakeAgent(alphaId);
     const beta = makeFakeAgent(betaId);
     agents.set(alphaId, alpha);
     agents.set(betaId, beta);
-    const relay = createRelayService(ctx, { aliasFile: file, rng: () => 0 });
+    const provided = {};
+    const ctx = {
+      get(name, _strict = false) {
+        if (name === "agents") return { list: () => [...agents.values()], get: (id) => agents.get(id) };
+        if (name === "sessions") return { flush: async () => true };
+        if (name === "sessionPersistence") return { async list() { return []; } };
+        return provided[name];
+      },
+      provide(name, value) { provided[name] = value; },
+      effect(fn) { fn(); return () => {}; },
+    };
+    qqPluginModule.apply(ctx, {
+      sessionId: alphaId,
+      cwd: "/work",
+      provider: "qwen-token-plan",
+      model: "deepseek-v4-pro-0813",
+      aliasFile: file,
+      rng: () => 0,
+    });
+    const relay = createRelayService(ctx, {});
     assert.equal(relay.alias(alphaId), "1");
     assert.equal(relay.alias(betaId), "80");
     assert.equal(relay.resolve("1"), alphaId);
-    assert.equal(relay.resolve(alphaId), alphaId);
-    assert.equal(relay.resolve("404"), undefined);
+    assert.equal(relay.resolve("80"), betaId);
+    assert.deepEqual(relay.list().map((row) => row.alias), ["1", "80"]);
+    const sent = await relay.send({ fromId: alphaId, to: "80", message: "through qq's book" });
+    assert.equal(sent.to, betaId);
+    assert.equal(sent.to_alias, "80");
+    assert.match(beta.calls.steer[0].content[0].text, /^From session 1 \(/);
     relay.dispose();
     rmSync(file, { force: true });
   }
@@ -166,14 +192,13 @@ try {
   // default send steers; the envelope carries the DSH plugin source mark and a
   // from-line so the recipient never reads it as the operator typing.
   {
-    const file = join(scratch, "service-send.json");
     const flushes = [];
     const { ctx, agents } = makeCtx({ flushes });
     const alpha = makeFakeAgent(alphaId);
     const beta = makeFakeAgent(betaId);
     agents.set(alphaId, alpha);
     agents.set(betaId, beta);
-    const relay = createRelayService(ctx, { aliasFile: file, rng: () => 0 });
+    const relay = createRelayService(ctx, {});
     const result = await relay.send({ fromId: alphaId, to: "80", message: "review this diff" });
     assert.equal(result.status, "sent");
     assert.equal(result.to, betaId);
@@ -200,18 +225,16 @@ try {
     assert.equal(beta.calls.steer.length, 2);
     assert.equal(beta.calls.cancel.length, 0);
     relay.dispose();
-    rmSync(file, { force: true });
   }
 
   // urgent send to a running recipient: cancel first, then a followup turn.
   {
-    const file = join(scratch, "service-urgent.json");
     const { ctx, agents } = makeCtx();
     const alpha = makeFakeAgent(alphaId);
     const beta = makeFakeAgent(betaId, { running: true });
     agents.set(alphaId, alpha);
     agents.set(betaId, beta);
-    const relay = createRelayService(ctx, { aliasFile: file, rng: () => 0 });
+    const relay = createRelayService(ctx, {});
     const result = await relay.send({
       fromId: alphaId,
       to: betaId,
@@ -224,34 +247,30 @@ try {
     assert.equal(beta.calls.steer.length, 0);
     assert.equal(beta.calls.followup.length, 1);
     relay.dispose();
-    rmSync(file, { force: true });
   }
 
   // urgent send to an idle recipient: no halt needed, still a fresh turn.
   {
-    const file = join(scratch, "service-urgent-idle.json");
     const { ctx, agents } = makeCtx();
     const alpha = makeFakeAgent(alphaId);
     const beta = makeFakeAgent(betaId);
     agents.set(alphaId, alpha);
     agents.set(betaId, beta);
-    const relay = createRelayService(ctx, { aliasFile: file, rng: () => 0 });
+    const relay = createRelayService(ctx, {});
     await relay.send({ fromId: alphaId, to: betaId, message: "new turn", delivery: "urgent" });
     assert.equal(beta.calls.cancel.length, 0);
     assert.equal(beta.calls.followup.length, 1);
     relay.dispose();
-    rmSync(file, { force: true });
   }
 
   // Refusals are typed, not thrown through the tool layer.
   {
-    const file = join(scratch, "service-refusals.json");
     const { ctx, agents } = makeCtx();
     const alpha = makeFakeAgent(alphaId);
     const beta = makeFakeAgent(betaId);
     agents.set(alphaId, alpha);
     agents.set(betaId, beta);
-    const relay = createRelayService(ctx, { aliasFile: file, rng: () => 0 });
+    const relay = createRelayService(ctx, {});
     await assert.rejects(() => relay.send({ fromId: alphaId, to: alphaId, message: "self" }), /own session/);
     await assert.rejects(() => relay.send({ fromId: alphaId, to: "911", message: "who" }), /no live session/);
     await assert.rejects(() => relay.send({ fromId: alphaId, to: betaId, message: "   " }), /non-empty/);
@@ -261,12 +280,10 @@ try {
     await assert.rejects(() => relay.send({ fromId: sessionId("9999"), to: betaId, message: "missing" }), /live session-<UUID> sender/);
     await assert.rejects(() => relay.send({ fromId: alphaId, to: sessionId("7777"), message: "ghost" }), /no live session/);
     relay.dispose();
-    rmSync(file, { force: true });
   }
 
   // Directory rows: alias, one status phrase, labels, sorted by alias number.
   {
-    const file = join(scratch, "service-list.json");
     const { ctx, agents } = makeCtx();
     const alpha = makeFakeAgent(alphaId, { running: true });
     const beta = makeFakeAgent(betaId);
@@ -274,7 +291,7 @@ try {
     agents.set(alphaId, alpha);
     agents.set(betaId, beta);
     agents.set(gammaId, gamma);
-    const relay = createRelayService(ctx, { aliasFile: file, rng: () => 0 });
+    const relay = createRelayService(ctx, {});
     relay.hang(betaId, "tasks:T-66");
     relay.hang(betaId, "workflows:delegate");
     const rows = relay.list();
@@ -292,7 +309,6 @@ try {
     assert.deepEqual(relay.list().map((row) => row.session), [alphaId, gammaId]);
     assert.deepEqual(relay.labelsFor(betaId), []);
     relay.dispose();
-    rmSync(file, { force: true });
   }
 
   // ---------------------------------------------------------------- tools
@@ -324,7 +340,7 @@ try {
       },
       provide: (name, value) => { provided[name] = value; },
       effect: (fn) => { fn(); return () => {}; },
-    }, { aliasFile: file, rng: () => 0 });
+    }, {});
 
     assert.ok(provided["qq-relay"], "plugin provides the qq-relay service");
     assert.deepEqual(registered.map((tool) => tool.name), ["relay_list", "relay_send", "relay_status"]);
