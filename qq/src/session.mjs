@@ -184,6 +184,7 @@ export function createQqService(ctx, config) {
   }
 
   const agentPromises = new Map();
+  const handles = new Map();
   const defaultCreatedAt = Date.now();
   const aliasFile = config.aliasFile !== undefined || envHasDshHome()
     ? defaultAliasFile(process.env, config)
@@ -207,6 +208,14 @@ export function createQqService(ctx, config) {
 
   function liveSessionIds() {
     return liveAgents().map((agent) => agent.session.id);
+  }
+
+  function rememberHandle(handle) {
+    const sessionId = handle?.agent?.session?.id;
+    if (SESSION_ID.test(sessionId) && typeof handle.dispose === "function") {
+      handles.set(sessionId, handle);
+    }
+    return handle;
   }
 
   function syncLive(extraId) {
@@ -269,13 +278,13 @@ export function createQqService(ctx, config) {
         agentOptions: { provider: selectedModel.provider, model: selectedModel.model },
         setup,
       };
-      const handle = persisted
+      const handle = rememberHandle(persisted
         ? await agents.resume({ resumeSessionId: sessionId, ...options })
         : await agents.create({
             sessionId,
             meta: { cwd: config.cwd },
             ...options,
-          });
+          }));
       syncLive(handle.agent.session.id);
       return handle.agent;
     })();
@@ -356,12 +365,12 @@ export function createQqService(ctx, config) {
       await ctx.get("loader")?.await();
       const sessionId = `session-${randomUUID()}`;
       const setup = selectionSetup({ current: selectedModel });
-      const handle = await agents.create({
+      const handle = rememberHandle(await agents.create({
         sessionId,
         meta: { cwd: config.cwd },
         agentOptions: { provider: selectedModel.provider, model: selectedModel.model },
         setup,
-      });
+      }));
       // DSH's creation event establishes the header; its flush boundary makes
       // even a brand-new empty session durable before the browser opens it.
       await sessions.flush(handle.agent.session);
@@ -396,6 +405,18 @@ export function createQqService(ctx, config) {
         }
         return typeof result?.text === "string" ? result.text : "";
       }
+      const finder = ctx.get("image-finder", false);
+      if (finder && typeof finder.inFindMode === "function" && finder.inFindMode(sessionId)) {
+        if (typeof finder.handlePrompt !== "function") {
+          throw httpError(503, "image-finder: find mode is unavailable");
+        }
+        const result = await finder.handlePrompt({ agent, rawInput: line });
+        await sessions.flush(agent.session);
+        if (result?.kind === "error") {
+          throw httpError(400, result.text || "qq: find failed");
+        }
+        return typeof result?.text === "string" ? result.text : "";
+      }
       agent.followup(userMessage(text));
       await waitForIdle(agent, () => agents.get(sessionId) ?? agent);
       await sessions.flush(agent.session);
@@ -409,6 +430,22 @@ export function createQqService(ctx, config) {
         await sessions.flush(agent.session);
       }
       return wasRunning;
+    },
+    async close(sessionId) {
+      if (!SESSION_ID.test(sessionId)) throw httpError(404, "DSH session not found");
+      if (!handles.has(sessionId)) await agentForSession(sessionId);
+      const handle = handles.get(sessionId);
+      if (!handle || typeof handle.dispose !== "function") {
+        throw httpError(409, "qq: session is not closeable");
+      }
+      handles.delete(sessionId);
+      agentPromises.delete(sessionId);
+      await handle.dispose();
+      syncLive();
+      const remaining = await list();
+      const next = remaining.find((row) => row.id !== sessionId);
+      if (next) return { id: next.id, closed: sessionId };
+      return { ...(await create()), closed: sessionId };
     },
     observe(sessionId, listener, options = {}) {
       return observeSnapshot(() => view(sessionId), listener, options);

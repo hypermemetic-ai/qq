@@ -82,6 +82,57 @@ await qq.prompt(sessionId, "ordinary talking turn");
 assert.equal(followups.length, 1);
 assert.equal(followups[0].content[0].text, "ordinary talking turn");
 
+{
+  const findFollowups = [];
+  const findFlushed = [];
+  const findPrompts = [];
+  let findMode = true;
+  const findAgent = {
+    session: { id: sessionId, events: [] },
+    status: "idle",
+    followup(message) { findFollowups.push(message); },
+    whenIdle: async () => {},
+  };
+  const findQq = createQqService(
+    {
+      get(name, optional) {
+        if (name === "agents") {
+          return {
+            get: (id) => (id === sessionId ? findAgent : undefined),
+            list: () => [findAgent],
+          };
+        }
+        if (name === "sessions") return { async flush(session) { findFlushed.push(session.id); } };
+        if (name === "sessionPersistence") {
+          return { async list() { return [{ id: sessionId, createdAt: 1, cwd: "/work" }]; } };
+        }
+        if (name === "image-finder") {
+          return {
+            inFindMode: () => findMode,
+            async handlePrompt({ rawInput }) {
+              findPrompts.push(rawInput);
+              return { kind: "success", text: `Finding ${rawInput}.` };
+            },
+          };
+        }
+        if (optional) return undefined;
+        return undefined;
+      },
+    },
+    {
+      sessionId,
+      cwd: "/work",
+      provider: "qwen-token-plan",
+      model: "deepseek-v4-pro-0813",
+    },
+  );
+  const notice = await findQq.prompt(sessionId, "tall woman rain");
+  assert.equal(notice, "Finding tall woman rain.");
+  assert.deepEqual(findPrompts, ["tall woman rain"]);
+  assert.equal(findFollowups.length, 0);
+  assert.ok(findFlushed.includes(sessionId));
+}
+
 const missingCommands = createQqService(
   {
     get(name) {
