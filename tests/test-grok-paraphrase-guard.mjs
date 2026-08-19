@@ -6,12 +6,25 @@ const root = process.argv[2];
 const {
   default: register,
   assistantText,
+  CONTEXT_MARKER,
+  CUSTOM_TYPE,
+  detectExactSuffixCycle,
+  extractThinking,
   isGrok46,
   jaccard,
+  LOOP_MARKER,
   normalizeText,
+  REDERIVED_MARKER,
+  REDERIVED_RECOVERY,
   repeatedStreamBlock,
   SANITY_MESSAGE,
-  STREAM_SCAN_WORDS,
+  sanitizeTaintedThinking,
+  sanitizeThinking,
+  STAGNATION_MARKER,
+  STAGNATION_RECOVERY,
+  STREAM_RECOVERY,
+  STUCK_RECOVERY,
+  StreamLoopDetector,
 } = await import(pathToFileURL(join(root, "extensions/grok-paraphrase-guard.ts")));
 
 const RUNAWAY = "I can also add tests to verify the new behavior. Just let me know how you'd like to proceed. ";
@@ -28,13 +41,13 @@ const STALL = [
   "The last batch died mid-read. I’ll recover those APIs, then implement spawn and the `done`/`qa`/`land` chain as two commits.",
 ];
 
-function turn(text, tools = []) {
+function turn(text, tools = [], thinking = "") {
   return {
     type: "turn_end",
     message: {
       role: "assistant",
       content: [
-        { type: "thinking", thinking: "ignore me" },
+        ...(thinking ? [{ type: "thinking", thinking }] : [{ type: "thinking", thinking: "ignore me" }]),
         ...(text ? [{ type: "text", text }] : []),
         ...tools.map((tool, index) => ({
           type: "toolCall",
@@ -57,70 +70,40 @@ function messageUpdate(delta, type = "thinking_delta") {
 function harness(model = { id: "grok-4.6", provider: "xai" }, options = {}) {
   const events = new Map();
   const notices = [];
-  const navigated = [];
-  const applied = [];
   const sent = [];
   let aborted = 0;
-  let effort;
-  let leaf = "leaf-0";
-  const branch = [{ id: "leaf-0", type: "message", message: { role: "assistant" } }];
-  const fallback = {
-    name: "sol-high",
-    profile: { provider: "openai-codex", model: "gpt-5.6-sol", effort: "xhigh" },
-  };
   const ctx = {
     model,
     abort() { aborted += 1; },
-    navigateTree(id, options) {
-      navigated.push({ id, options });
-      leaf = id;
-      branch.push({ id: `after-${id}`, type: "message", message: { role: "assistant" } });
-    },
-    sessionManager: {
-      getLeafId() { return leaf; },
-      getBranch() { return branch; },
-    },
-    modelRegistry: {
-      find(provider, id) {
-        if (provider === fallback.profile.provider && id === fallback.profile.model) {
-          return { provider, id, contextWindow: 200000 };
-        }
-        return undefined;
-      },
-    },
     ui: {
       notify(message, type) { notices.push({ message, type }); },
-      setStatus() {},
     },
   };
   const pi = {
     on(name, fn) { events.set(name, [...(events.get(name) ?? []), fn]); },
-    async setModel(next) { applied.push(next); ctx.model = next; return true; },
-    setThinkingLevel(value) { effort = value; },
-    getThinkingLevel() { return effort; },
-    events: { emit() {} },
-    sendUserMessage(message) { sent.push(message); },
+    sendMessage(message, options) { sent.push({ message, options }); },
   };
   register(pi, {
-    readPolicy: async () => options.policy ?? {
-      roles: { runner: { default: "grok-high", profiles: { "sol-high": fallback.profile } } },
-    },
-    streamDetector: options.streamDetector,
-    streamScanWords: options.streamScanWords,
+    createDetector: options.createDetector,
+    semantic: options.semantic,
+    sendMessage: options.sendMessage ?? ((message, sendOptions) => sent.push({ message, options: sendOptions })),
   });
   return {
     notices,
-    navigated,
-    applied,
     sent,
     get aborted() { return aborted; },
-    get effort() { return effort; },
     async emit(name, event = {}) {
-      for (const fn of events.get(name) ?? []) await fn(event, ctx);
+      let result;
+      for (const fn of events.get(name) ?? []) {
+        const next = await fn(event, ctx);
+        if (next !== undefined) result = next;
+      }
+      return result;
     },
-    async play(text, tools) {
+    async play(text, extras = {}) {
       await this.emit("turn_start", { type: "turn_start" });
-      await this.emit("turn_end", turn(text, tools));
+      const event = turn(text, extras.tools, extras.thinking);
+      return this.emit("message_end", { type: "message_end", message: event.message });
     },
     async stream(text, type = "thinking_delta", chunkSize = 23) {
       await this.emit("turn_start", { type: "turn_start" });
@@ -128,13 +111,13 @@ function harness(model = { id: "grok-4.6", provider: "xai" }, options = {}) {
       for (let offset = 0; offset < text.length && aborted === before; offset += chunkSize) {
         await this.emit("message_update", messageUpdate(text.slice(offset, offset + chunkSize), type));
       }
-      if (aborted === before) await this.emit("turn_end", turn(type === "text_delta" ? text : ""));
-    },
-    setLeaf(id, entry = { type: "message", message: { role: "assistant" } }) {
-      leaf = id;
-      const existing = branch.find((item) => item.id === id);
-      if (existing) Object.assign(existing, entry, { id });
-      else branch.push({ id, ...entry });
+      const message = {
+        role: "assistant",
+        content: type === "text_delta"
+          ? [{ type: "text", text }]
+          : [{ type: "thinking", thinking: text }, { type: "text", text: "visible wrap-up" }],
+      };
+      return this.emit("message_end", { type: "message_end", message });
     },
     setModel(next) { ctx.model = next; },
   };
@@ -146,11 +129,62 @@ assert.equal(isGrok46({ model: { id: "gpt-5.6-sol" } }), false);
 assert.equal(assistantText(turn("short")), "");
 assert.ok(assistantText(turn(STALL[0])).length >= 40);
 assert.equal(repeatedStreamBlock(RUNAWAY.repeat(2)), undefined);
-assert.deepEqual(repeatedStreamBlock(RUNAWAY.repeat(3)), {
-  repeats: 3,
-  words: 19,
-  text: "i can also add tests to verify the new behavior just let me know how you'd like to proceed",
-});
+assert.match(repeatedStreamBlock(RUNAWAY.repeat(3)), /exact 93-character cycle 3×/);
+assert.equal(detectExactSuffixCycle("the ".repeat(44)), undefined);
+assert.equal(detectExactSuffixCycle("the ".repeat(45)).repeats, 45);
+assert.equal(detectExactSuffixCycle("the ".repeat(45)).unit, "the ");
+assert.equal(SANITY_MESSAGE, STREAM_RECOVERY);
+
+{
+  const looped = turn("visible wrap-up", [], RUNAWAY.repeat(3));
+  const cleaned = sanitizeThinking(looped.message, LOOP_MARKER);
+  assert.equal(extractThinking(cleaned), "");
+  assert.equal(cleaned.content[0].type, "text");
+  assert.equal(cleaned.content[0].text, LOOP_MARKER);
+  const gated = sanitizeTaintedThinking(looped.message, new Set([RUNAWAY.repeat(3)]));
+  assert.equal(gated.content[0].text, CONTEXT_MARKER);
+}
+
+{
+  const detector = new StreamLoopDetector();
+  const fillers = [
+    "Just doing it and pushing ahead while maintaining momentum without naming anything concrete yet.\n\n",
+    "Pushing ahead and just doing it while maintaining momentum without naming anything concrete yet.\n\n",
+    "Maintaining momentum and just doing it while pushing ahead without naming anything concrete yet.\n\n",
+    "Just doing it while maintaining momentum and pushing ahead without naming anything concrete yet.\n\n",
+    "Pushing ahead while maintaining momentum and just doing it without naming anything concrete yet.\n\n",
+    "Maintaining momentum while pushing ahead and just doing it without naming anything concrete yet.\n\n",
+    "Just doing it and maintaining momentum while pushing ahead without naming anything concrete yet.\n\n",
+    "Pushing ahead and maintaining momentum while just doing it without naming anything concrete yet.\n\n",
+    "Maintaining momentum and pushing ahead while just doing it without naming anything concrete yet.\n\n",
+  ];
+  let hit;
+  for (const filler of fillers) {
+    hit = detector.push(filler);
+    if (hit) break;
+  }
+  assert.match(hit, /low-information segments/);
+}
+
+{
+  const detector = new StreamLoopDetector();
+  const paragraphs = [
+    "Confirming the safety of the current approach before proceeding with the remaining work items now.\n\n",
+    "Confirming the safety of the current approach before proceeding with the remaining work items soon.\n\n",
+    "Confirming the safety of the current approach before proceeding with the remaining work items next.\n\n",
+    "Confirming the safety of the current approach before proceeding with the remaining work items later.\n\n",
+    "Confirming the safety of the current approach before proceeding with the remaining work items today.\n\n",
+    "Confirming the safety of the current approach before proceeding with the remaining work items again.\n\n",
+    "Confirming the safety of the current approach before proceeding with the remaining work items still.\n\n",
+    "Confirming the safety of the current approach before proceeding with the remaining work items here.\n\n",
+  ];
+  let hit;
+  for (const paragraph of paragraphs) {
+    hit = detector.push(paragraph);
+    if (hit) break;
+  }
+  assert.match(hit, /near-identical segments/);
+}
 
 for (let i = 1; i < STALL.length; i += 1) {
   const score = jaccard(normalizeText(STALL[i - 1]).slice(0, 240), normalizeText(STALL[i]).slice(0, 240));
@@ -158,157 +192,126 @@ for (let i = 1; i < STALL.length; i += 1) {
 }
 
 {
-  const scans = [];
+  const pushes = [];
   const h = harness(undefined, {
-    streamDetector(text) { scans.push(text); return undefined; },
+    createDetector() {
+      return {
+        push(delta) { pushes.push(["push", delta]); return undefined; },
+        flush() { pushes.push(["flush"]); return undefined; },
+      };
+    },
   });
   await h.emit("turn_start", { type: "turn_start" });
-  for (const character of "one you'd two we’ll rock'n'roll six seven eight ") {
-    await h.emit("message_update", messageUpdate(character));
-  }
-  assert.equal(STREAM_SCAN_WORDS, 8);
-  assert.equal(scans.length, 1, "split words and apostrophes count as eight completed matcher words");
-  for (const character of "nine ten eleven twelve thirteen fourteen fifteen ") {
-    await h.emit("message_update", messageUpdate(character));
-  }
-  assert.equal(scans.length, 1, "seven more completed words stay inside the proved delay bound");
-  await h.emit("turn_end", turn(""));
-  assert.equal(scans.length, 2, "turn end flushes a partial batch");
+  await h.emit("message_update", messageUpdate("hello"));
+  await h.emit("message_update", messageUpdate(" world"));
+  await h.emit("message_end", { type: "message_end", message: turn("").message });
+  assert.deepEqual(pushes, [["push", "hello"], ["push", " world"], ["flush"]]);
 }
 
 {
-  let scans = 0;
-  const h = harness(undefined, {
-    streamScanWords: 1,
-    streamDetector() { scans += 1; return undefined; },
-  });
-  const text = "Alpha beta's rock'n'roll we’ll naïve １２3 -- end' ";
-  const expectedWords = normalizeText(text).match(/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu).length;
+  const h = harness();
   await h.emit("turn_start", { type: "turn_start" });
-  for (const character of text) await h.emit("message_update", messageUpdate(character));
-  assert.equal(scans, expectedWords, "the incremental completion count matches the detector tokenizer");
+  await h.emit("message_update", messageUpdate("the ".repeat(44)));
+  assert.equal(h.aborted, 0, "short cycles wait for four repeats covering 180 characters");
+  await h.emit("message_update", messageUpdate("the ".repeat(32)));
+  assert.equal(h.aborted, 1, "the next 128-character stride catches the settled short cycle");
 }
 
 {
   const h = harness();
-  const stretch = (word, length) => word + "x".repeat(length - word.length);
-  const prefix = ["prefixa", "prefixb", "prefixc", "prefixd", "prefixe"].map((word) => stretch(word, 200));
-  const block = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet", "kilo", "lima"].map((word) => stretch(word, 280));
-  const tail = ["taila", "tailb", "tailc", "taild", "taile", "tailf", "tailg"].map((word) => stretch(word, 500));
-  await h.emit("turn_start", { type: "turn_start" });
-  for (const word of [...prefix, ...block, ...block, ...block]) {
-    await h.emit("message_update", messageUpdate(`${word} `));
-  }
-  assert.equal(h.aborted, 0, "a loop completing just after a scan waits for the next batch");
-  for (const word of tail.slice(0, -1)) await h.emit("message_update", messageUpdate(`${word} `));
-  assert.equal(h.aborted, 0);
-  await h.emit("message_update", messageUpdate(`${tail.at(-1)} `));
-  assert.equal(h.aborted, 1, "the same loop is caught after the maximum seven-word delay");
-}
-
-{
-  const h = harness();
-  h.setLeaf("good");
-  await h.stream(`A useful opening with new information. ${RUNAWAY.repeat(39)}`);
+  const rewritten = await h.stream(`A useful opening with new information. ${RUNAWAY.repeat(39)}`);
   assert.equal(h.aborted, 1);
-  await h.emit("agent_settled");
-  assert.deepEqual(h.sent, [SANITY_MESSAGE]);
-  assert.deepEqual(h.navigated, []);
-  assert.deepEqual(h.applied, []);
-  assert.match(h.notices.at(-1).message, /steered once/);
+  assert.equal(rewritten.message.content[0].text, LOOP_MARKER);
+  assert.deepEqual(h.sent, [{
+    message: { customType: CUSTOM_TYPE, content: STREAM_RECOVERY, display: true },
+    options: { triggerTurn: true },
+  }]);
+  assert.match(h.notices.at(-1).message, /removed it from context/);
 }
 
 {
   const h = harness();
-  h.setLeaf("good");
-  await h.stream(RUNAWAY.repeat(3), "text_delta", 10_000);
-  await h.emit("agent_settled");
-  assert.deepEqual(h.sent, [SANITY_MESSAGE]);
+  const rewritten = await h.stream(RUNAWAY.repeat(3), "text_delta", 10_000);
+  assert.equal(rewritten.message.content[0].text, LOOP_MARKER);
+  assert.equal(h.sent[0].message.content, STREAM_RECOVERY);
 }
 
 {
   const h = harness();
-  await h.stream(`A distinct introduction before the long repeated block. ${OBSERVED_LONG_RUNAWAY.repeat(3)}`);
-  assert.equal(h.aborted, 1);
-  await h.emit("agent_settled");
-  assert.deepEqual(h.sent, [SANITY_MESSAGE]);
+  const rewritten = await h.stream(`A distinct introduction before the long repeated block. ${OBSERVED_LONG_RUNAWAY.repeat(3)}`);
+  assert.equal(rewritten.message.content[0].text, LOOP_MARKER);
+  assert.equal(h.sent[0].message.content, STREAM_RECOVERY);
 }
 
 {
   const h = harness({ id: "gpt-5.6-sol", provider: "openai-codex" });
-  await h.stream(RUNAWAY.repeat(39));
-  await h.emit("agent_settled");
+  const rewritten = await h.stream(RUNAWAY.repeat(39));
   assert.equal(h.aborted, 0);
+  assert.equal(rewritten, undefined);
   assert.deepEqual(h.sent, []);
 }
 
 {
   const h = harness();
-  h.setLeaf("good");
   await h.stream(RUNAWAY.repeat(3));
-  await h.emit("agent_settled");
-  await h.stream(RUNAWAY.repeat(3));
-  await h.emit("agent_settled");
-  assert.equal(h.aborted, 2);
-  assert.deepEqual(h.sent, [SANITY_MESSAGE]);
-  assert.deepEqual(h.navigated, [{ id: "good", options: { summarize: false } }]);
-  await h.stream(RUNAWAY.repeat(3));
-  await h.emit("agent_settled");
-  assert.equal(h.aborted, 3);
-  assert.equal(h.applied.at(-1)?.id, "gpt-5.6-sol");
-  assert.equal(h.effort, "xhigh");
+  const rewritten = await h.stream(RUNAWAY.repeat(3));
+  assert.equal(rewritten.message.content[0].text, LOOP_MARKER);
+  assert.deepEqual(h.sent.map((item) => item.message.content), [STREAM_RECOVERY, STUCK_RECOVERY]);
+}
+
+{
+  const h = harness();
+  const first = await h.stream(RUNAWAY.repeat(3));
+  const tainted = first.message.content.find((part) => part.type === "thinking") ? RUNAWAY.repeat(3) : undefined;
+  const original = {
+    role: "assistant",
+    content: [{ type: "thinking", thinking: RUNAWAY.repeat(3) }, { type: "text", text: "keep me" }],
+  };
+  const gated = await h.emit("context", { type: "context", messages: [original] });
+  assert.equal(gated.messages[0].content[0].text, CONTEXT_MARKER);
+  assert.equal(gated.messages[0].content[1].text, "keep me");
+  assert.ok(!tainted || extractThinking(first.message) === "");
 }
 
 {
   const h = harness();
   await h.stream(RUNAWAY.repeat(3));
-  await h.emit("agent_settled");
-  await h.play("First distinct completed response with enough content to count down the recovery window.");
-  await h.play("Second distinct completed response that keeps making real progress on the requested work.");
-  await h.play("Third distinct completed response finishes the short observation window without recurrence.");
+  const rewritten = await h.play("Completely different visible answer that is long enough to count.", {
+    thinking: RUNAWAY.repeat(3),
+  });
+  assert.equal(rewritten.message.content[0].text, REDERIVED_MARKER);
+  assert.equal(h.sent.at(-1).message.content, REDERIVED_RECOVERY);
+}
+
+{
+  const h = harness();
   await h.stream(RUNAWAY.repeat(3));
-  await h.emit("agent_settled");
-  assert.equal(h.aborted, 2);
-  assert.deepEqual(h.sent, [SANITY_MESSAGE, SANITY_MESSAGE]);
-  assert.deepEqual(h.navigated, []);
+  await h.play("Completely different visible answer that is long enough to count.", {
+    thinking: RUNAWAY.repeat(3),
+  });
+  const rewritten = await h.play("Another distinct visible answer that still reconstructs the blocked plan.", {
+    thinking: RUNAWAY.repeat(3),
+  });
+  assert.equal(rewritten.message.content[0].text, REDERIVED_MARKER);
+  assert.equal(h.sent.at(-1).message.content, STUCK_RECOVERY);
 }
 
 {
   const h = harness();
-  h.setLeaf("good");
-  for (const text of STALL.slice(0, 4)) await h.play(text);
-  assert.equal(h.aborted, 0);
-  await h.play("", [{ name: "read", arguments: { path: "x" } }]);
-  await h.play(STALL[4]);
-  assert.equal(h.aborted, 1);
-  await h.emit("agent_settled");
-  assert.deepEqual(h.navigated, [{ id: "good", options: { summarize: false } }]);
-  assert.match(h.notices.at(-1).message, /rewound/);
-}
-
-{
-  const h = harness();
-  h.setLeaf("good");
-  for (const text of STALL) await h.play(text);
-  await h.emit("agent_settled");
-  assert.equal(h.navigated.length, 1);
-  h.setLeaf("after-rewind");
-  for (const text of STALL) await h.play(text);
-  await h.emit("agent_settled");
-  assert.equal(h.aborted, 2);
-  assert.equal(h.navigated.length, 1);
-  assert.equal(h.applied.at(-1)?.id, "gpt-5.6-sol");
-  assert.equal(h.effort, "xhigh");
-  assert.match(h.notices.at(-1).message, /switched to runner sol-high/);
+  for (const text of STALL.slice(0, 4)) {
+    const result = await h.play(text);
+    assert.equal(result, undefined);
+  }
+  const rewritten = await h.play(STALL[4], { thinking: STALL[4] });
+  assert.equal(rewritten.message.content[0].text, STAGNATION_MARKER);
+  assert.equal(h.sent.at(-1).message.content, STAGNATION_RECOVERY);
+  assert.match(h.notices.at(-1).message, /similar turns; removed stagnant reasoning/);
 }
 
 {
   const h = harness({ id: "gpt-5.6-sol", provider: "openai-codex" });
-  h.setLeaf("good");
-  for (const text of STALL) await h.play(text);
-  await h.emit("agent_settled");
-  assert.equal(h.aborted, 0);
-  assert.deepEqual(h.navigated, []);
+  for (const text of STALL) assert.equal(await h.play(text), undefined);
+  assert.deepEqual(h.sent, []);
 }
 
 {
@@ -318,17 +321,7 @@ for (let i = 1; i < STALL.length; i += 1) {
   await h.play(STALL[1]);
   await h.play(STALL[2]);
   await h.play(STALL[3]);
-  assert.equal(h.aborted, 0);
-}
-
-{
-  const h = harness();
-  h.setLeaf("prompt", { type: "message", message: { role: "user" } });
-  for (const text of STALL) await h.play(text);
-  await h.emit("agent_settled");
-  assert.equal(h.aborted, 1);
-  assert.deepEqual(h.navigated, []);
-  assert.match(h.notices.at(-1).message, /similar turns; stopped/);
+  assert.deepEqual(h.sent, []);
 }
 
 console.log("test-grok-paraphrase-guard: pass");
