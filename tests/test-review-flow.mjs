@@ -9,6 +9,7 @@ const review = await import(pathToFileURL(join(root, "bin/lib/review.mjs")));
 const runLib = await import(pathToFileURL(join(root, "bin/lib/run.mjs")));
 const runEvents = await import(pathToFileURL(join(root, "bin/lib/run-events.mjs")));
 const extension = await import(pathToFileURL(join(root, "extensions/review-flow.ts")));
+const reviewWorker = await import(pathToFileURL(join(root, "bin/qq-review-worker.mjs")));
 const qaResult = await import(pathToFileURL(join(root, "extensions/qa-result.ts")));
 
 const piArchitectSession = "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9";
@@ -486,9 +487,71 @@ try {
   assert.equal(nativeOutcome.details.awaiting, "native-review");
   assert.equal(nativeOutcome.details.runner_session, dshRunnerSession);
   assert.equal(nativeReviewLaunches, 0);
+  const nativeSubmitted = JSON.parse(await readFile(statePath, "utf8"));
+  assert.equal(nativeSubmitted.status, "submitted");
+  assert.equal(nativeSubmitted.submission.awaiting, "native-review");
+  assert.equal(nativeSubmitted.packet.schema, review.ROUTE_PACKET_SCHEMA);
+  assert.equal(nativeSubmitted.packet.mark, "review");
+  assert.match(nativeSubmitted.packet.brief, /One task/);
   await new Promise((resolve) => setTimeout(resolve, 40));
   assert.equal(nativeShutdowns, 0, "native done must not shut down the shared host");
   assert.equal(nativeAborts, 0, "native done must not abort the shared host");
+
+  await runLib.atomicPrivateJson(statePath, { ...nativeState, approval: nativeApproval });
+  const paintNativeTools = [];
+  let paintNativeReviewLaunches = 0;
+  let paintNativeShutdowns = 0;
+  let paintNativeAborts = 0;
+  const paintNativeRun = async (command, args, options = {}) => {
+    if (command === "git" && args[0] === "rev-parse" && args.includes("--git-common-dir")) {
+      return { code: 0, stdout: `${join(scratch, "git-common")}\n`, stderr: "" };
+    }
+    if (command === "flock") {
+      const current = JSON.parse(await readFile(args.at(-1), "utf8"));
+      current.status = "landed";
+      current.landedAt = "2026-04-01T00:00:05.000Z";
+      current.updatedAt = current.landedAt;
+      await runLib.atomicPrivateJson(current.statePath, current);
+      return { code: 0, stdout: `Landed ${current.task.id}.\n`, stderr: "" };
+    }
+    return run(command, args, options);
+  };
+  extension.default({
+    registerTool(tool) { paintNativeTools.push(tool); },
+    events: { on() {} },
+    on() {},
+    exec: paintNativeRun,
+  }, {
+    env: {}, exec: paintNativeRun,
+    sessionContext: { resolve() { return nativeCaller; } },
+    async compilePacket() {
+      return {
+        schema: review.ROUTE_PACKET_SCHEMA,
+        brief: "Paint the button color in the stylesheet.",
+        files: [{ path: "src/button.css", added: 200, deleted: 10 }],
+        pointers: ["src/button.css:1 .btn"],
+        mark: null,
+      };
+    },
+    async routePacket() { return "land"; },
+    launchReview() { paintNativeReviewLaunches += 1; throw new Error("native land must not launch QA"); },
+  });
+  const paintNativeDone = paintNativeTools.find(({ name }) => name === "done");
+  const paintNativeOutcome = await paintNativeDone.execute("native-paint", { ref: "HEAD" }, undefined, undefined, {
+    cwd: worktree,
+    shutdown() { paintNativeShutdowns += 1; },
+    abort() { paintNativeAborts += 1; },
+  });
+  assert.equal(paintNativeOutcome.details.status, "landed");
+  assert.equal(paintNativeOutcome.details.runtime, "dsh");
+  assert.equal(paintNativeOutcome.details.mark, "land");
+  assert.equal(paintNativeReviewLaunches, 0);
+  const paintNativeLanded = JSON.parse(await readFile(statePath, "utf8"));
+  assert.equal(paintNativeLanded.status, "landed");
+  assert.equal(paintNativeLanded.packet.mark, "land");
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(paintNativeShutdowns, 0, "native land must not shut down the shared host");
+  assert.equal(paintNativeAborts, 0, "native land must not abort the shared host");
 
   const verdictTools = [];
   let written;
@@ -515,7 +578,8 @@ try {
     task: { id: "TASK-2", title: "Commented task" }, statePath: commentedPath, updatedAt: "2026-04-01T00:00:01.000Z",
   });
   await runLib.atomicPrivateJson(laterPath, {
-    ...proposalState, id: "task-later", task: { id: "TASK-3", title: "Later task" }, statePath: laterPath,
+    ...proposalState, id: "task-later", status: "blocked", blockedReason: "merge failed: checkout busy",
+    task: { id: "TASK-3", title: "Later task" }, statePath: laterPath,
   });
   const listedProposals = await review.listProposals("qq", listEnv);
   assert.deepEqual(listedProposals.map((item) => item.id), ["task-later"]);
@@ -565,7 +629,7 @@ try {
   await architectEvents.get("session_start")({}, ctx);
   assert.equal(bootstrapFailureRetries[0].sessionId, base.architectSession, "architect startup must retry its bootstrap failure outbox");
   assert.equal(bootstrapFailureRetries[0].options.client, quietEventClient);
-  assert.deepEqual(choices.map((item) => item.options), [["approve", "discuss", "later"]]);
+  assert.deepEqual(choices.map((item) => item.options), [["discuss", "later"]]);
   assert.equal(choices[0].pack, "small fix\nsrc/a.ts +2/-1");
   assert.equal(JSON.parse(await readFile(laterPath, "utf8")).status, "later");
   await architectEvents.get("agent_settled")();
@@ -573,14 +637,15 @@ try {
   assert.equal(choices.length, 1);
 
   const laterAgain = JSON.parse(await readFile(laterPath, "utf8"));
-  laterAgain.status = "proposal";
+  laterAgain.status = "blocked";
+  laterAgain.blockedReason = "merge failed: lock held";
   laterAgain.updatedAt = "2026-04-01T00:00:09.000Z";
   await runLib.atomicPrivateJson(laterPath, laterAgain);
   queued.push("discuss");
   await architectEvents.get("agent_settled")();
   assert.equal(choices.length, 2);
   const commented = JSON.parse(await readFile(laterPath, "utf8"));
-  assert.equal(commented.status, "commented");
+  assert.equal(commented.status, "blocked");
   assert.equal(commented.ref, "refsha");
   assert.equal(commented.operatorComment, "tighten the summary");
   assert.deepEqual(boardCalls, []);
@@ -676,12 +741,14 @@ try {
       getSessionFile() { throw new Error("review receipts must not read Pi session files"); },
     },
     ui: {
-      async select() { return "approve"; },
+      async select() { throw new Error("pass land must not wait for an approve choice"); },
       async input() { throw new Error("successful land should not request input"); },
       notify(message, level) { successfulLandNotifications.push({ message, level }); },
     },
   };
   await successfulLandEvents.get("session_start")({}, successfulLandCtx);
+  assert.equal(JSON.parse(await readFile(successfulLandPath, "utf8")).status, "proposal");
+  await reviewWorker.landPassedProposal(successfulLandRun, JSON.parse(await readFile(successfulLandPath, "utf8")));
   await waitFor("persisted landed event acknowledgement", () => acknowledgedRunEvents.length === 1);
   assert.equal(JSON.parse(await readFile(successfulLandPath, "utf8")).status, "landed");
   assert.equal(runEventNextCalls[0].consumer_id, `qq/review-flow/${successfulLandState.architectSession}`);
@@ -812,8 +879,8 @@ try {
   const failedLandPath = join(failedLandDir, "handoff.json");
   const failedLandEnv = { HOME: scratch, XDG_STATE_HOME: failedLandXdg, QQ_AGENT_PROJECT: "qq", QQ_AGENT_ROLE: "architect" };
   await runLib.atomicPrivateJson(failedLandPath, {
-    ...proposalState, id: "task-failed-land", task: { id: "TASK-6", title: "Failed land" },
-    statePath: failedLandPath, updatedAt: "2026-04-01T00:00:04.000Z",
+    ...proposalState, id: "task-failed-land", status: "blocked", blockedReason: "merge failed: checkout busy",
+    task: { id: "TASK-6", title: "Failed land" }, statePath: failedLandPath, updatedAt: "2026-04-01T00:00:04.000Z",
   });
   const failedLandTools = [];
   const failedLandEvents = new Map();
@@ -841,7 +908,7 @@ try {
   extension.default(failedLandPi, { env: failedLandEnv, exec: failedLandRun, eventClient: quietEventClient });
   assert.equal(failedLandTools.some(({ name }) => name === "review"), false);
   const failedLandChoices = [];
-  const failedLandQueued = ["approve"];
+  const failedLandQueued = ["later"];
   const failedLandCtx = {
     ...ctx,
     ui: {
@@ -849,22 +916,19 @@ try {
         failedLandChoices.push({ pack, options });
         return failedLandQueued.shift() ?? "later";
       },
-      async input() { return "leave this blocked"; },
+      async input() { throw new Error("failed land must not request an approve note"); },
       notify() {},
     },
   };
   await failedLandEvents.get("session_start")({}, failedLandCtx);
   assert.equal(failedLandChoices.length, 1);
   const firstFailedLand = JSON.parse(await readFile(failedLandPath, "utf8"));
-  assert.equal(firstFailedLand.status, "blocked");
+  assert.equal(firstFailedLand.status, "later");
   assert.equal(firstFailedLand.blockedReason, "merge failed: checkout busy");
-  assert.deepEqual(failedLandChoices[0].options, ["approve", "discuss", "later"]);
+  assert.deepEqual(failedLandChoices[0].options, ["discuss", "later"]);
   await failedLandEvents.get("agent_settled")();
-  assert.equal(failedLandChoices.length, 2);
-  assert.deepEqual(failedLandChoices[1].options, ["approve", "discuss", "later"]);
+  assert.equal(failedLandChoices.length, 1);
   assert.equal(JSON.parse(await readFile(failedLandPath, "utf8")).status, "later");
-  await failedLandEvents.get("agent_settled")();
-  assert.equal(failedLandChoices.length, 2);
   await failedLandEvents.get("session_shutdown")();
 
   assert.equal(review.isTestPath("tests/test-review-flow.mjs"), true);
@@ -1137,6 +1201,67 @@ try {
   assert.ok(sentRunEvents.every(({ recipient_id }) => recipient_id === `qq/review-flow/${base.architectSession}`));
   assert.ok(sentRunEvents.every(({ kind }) => kind !== "agent.message"));
   assert.ok(sentRunEvents.every(({ payload }) => payload.schema !== "qq.agent-message/v2"));
+
+  await runLib.atomicPrivateJson(statePath, {
+    ...prepared, status: "proposal", look: 1, ref: "refsha",
+    pack: { summary: "small fix", files: [{ path: "src/a.ts", added: 2, deleted: 1 }] },
+    packet: {
+      schema: review.ROUTE_PACKET_SCHEMA,
+      brief: "Keep the change small.",
+      files: [{ path: "src/a.ts", added: 2, deleted: 1 }],
+      pointers: ["src/a.ts:3 export function a"],
+      mark: "pass",
+    },
+  });
+  const passLandRun = async (command, args, options = {}) => {
+    if (command === "git" && args[0] === "rev-parse" && args.includes("--git-common-dir")) {
+      return { code: 0, stdout: `${join(scratch, "git-common")}\n`, stderr: "" };
+    }
+    if (command === "flock") {
+      const current = JSON.parse(await readFile(args.at(-1), "utf8"));
+      current.status = "landed";
+      current.landedAt = "2026-04-01T00:00:08.000Z";
+      current.updatedAt = current.landedAt;
+      await runLib.atomicPrivateJson(current.statePath, current);
+      return { code: 0, stdout: `Landed ${current.task.id}.\n`, stderr: "" };
+    }
+    return run(command, args, options);
+  };
+  const passLanded = await reviewWorker.landPassedProposal(passLandRun, JSON.parse(await readFile(statePath, "utf8")));
+  assert.equal(passLanded.status, "landed");
+  assert.equal(JSON.parse(await readFile(statePath, "utf8")).status, "landed");
+
+  await runLib.atomicPrivateJson(statePath, {
+    ...prepared, status: "proposal", look: 1, ref: "refsha",
+    pack: { summary: "small fix", files: [{ path: "src/a.ts", added: 2, deleted: 1 }] },
+    packet: {
+      schema: review.ROUTE_PACKET_SCHEMA,
+      brief: "Keep the change small.",
+      files: [{ path: "src/a.ts", added: 2, deleted: 1 }],
+      pointers: ["src/a.ts:3 export function a"],
+      mark: "pass",
+    },
+  });
+  await assert.rejects(reviewWorker.landPassedProposal(async (command, args, options = {}) => {
+    if (command === "git" && args[0] === "rev-parse" && args.includes("--git-common-dir")) {
+      return { code: 0, stdout: `${join(scratch, "git-common")}\n`, stderr: "" };
+    }
+    if (command === "flock") {
+      const current = JSON.parse(await readFile(args.at(-1), "utf8"));
+      current.status = "blocked";
+      current.blockedReason = "proposal no longer merges cleanly: content conflict";
+      current.packet = { ...current.packet, mark: "fail" };
+      current.updatedAt = "2026-04-01T00:00:09.000Z";
+      await runLib.atomicPrivateJson(current.statePath, current);
+      return { code: 1, stdout: "", stderr: current.blockedReason };
+    }
+    return run(command, args, options);
+  }, JSON.parse(await readFile(statePath, "utf8"))), /proposal no longer merges cleanly/);
+
+  const failedPassLand = JSON.parse(await readFile(statePath, "utf8"));
+  assert.equal(failedPassLand.status, "blocked");
+  assert.equal(failedPassLand.packet.mark, "fail");
+  assert.notEqual(failedPassLand.status, "landed");
 
   prepared.status = "commented";
   prepared.ref = "refsha";
