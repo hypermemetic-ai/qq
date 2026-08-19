@@ -7,7 +7,7 @@ import { join, resolve } from "node:path";
 import { createConsoleHandler } from "../qq-ui/src/http-app.mjs";
 import { createQqService } from "../qq/src/session.mjs";
 import { renderMarkdownText, renderMessageText } from "../qq-ui/src/markdown.mjs";
-import { renderOfferPopup, renderSessionContent } from "../qq-ui/src/render.mjs";
+import { renderLoginSheet, renderOfferPopup, renderSessionContent } from "../qq-ui/src/render.mjs";
 
 const root = resolve(process.argv[2] ?? ".");
 const primaryId = "session-63a11000-0000-4000-8000-000000000001";
@@ -396,6 +396,21 @@ function openSse(sessionId, port = address.port) {
   assert.doesNotMatch(popup, /For the runner/);
   assert.doesNotMatch(popup, /class="notice"/);
   assert.equal(renderOfferPopup(null, paths), "");
+  const loginSheet = renderLoginSheet({
+    action: "login",
+    connectors: [
+      { id: "grok", label: "Grok" },
+      { id: "codex", label: "Codex" },
+      { id: "qwen", label: "Qwen", hostOwned: true },
+    ],
+  }, { prompt: `/qq/session/${liveId}/prompt` });
+  assert.match(loginSheet, /class="offer-popup login-popup"/);
+  assert.match(loginSheet, /data-connector="grok"/);
+  assert.match(loginSheet, /data-connector="codex"/);
+  assert.match(loginSheet, /data-connector="qwen"/);
+  assert.match(loginSheet, /value="\/login grok"/);
+  assert.doesNotMatch(loginSheet, /Hand off|Ready leftover|offer-handoff/);
+  assert.equal(renderLoginSheet({ connectors: [] }, paths), "");
   const refusedPopup = renderOfferPopup({
     id: "offer-1",
     title: "Ship leftover",
@@ -914,6 +929,8 @@ try {
   assert.match(launcher, /state_root\/qq/);
   assert.match(launcher, /qq\.session/);
   assert.doesNotMatch(`${patch}\n${launcher}`, /qq-dsh-workbench|qq-console|dsh-console|workbench/);
+  assert.doesNotMatch(patch, /qq-models|QQ_DSH_HAVE_MODELS/);
+  assert.doesNotMatch(launcher, /QQ_DSH_HAVE_MODELS/);
   assert.doesNotMatch(`${qqPlugin}\n${uiPlugin}\n${patch}\n${launcher}`, /qq\.patch\.yml|name:.*pi2dsh|plugin.*pi2dsh|auth\.json/);
   assert.doesNotMatch(`${qqPlugin}\n${uiPlugin}\n${patch}`, /name:.*(?:dsh-web-app|api-proxy|client-connection)/);
   assert.match(browser, /transcript\.scrollTop = transcript\.scrollHeight/);

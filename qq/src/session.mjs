@@ -390,7 +390,11 @@ export function createQqService(ctx, config) {
           throw httpError(400, `qq: unknown slash command /${name}`);
         }
         await sessions.flush(agent.session);
-        return;
+        const result = execution.result;
+        if (result?.kind === "error") {
+          throw httpError(400, result.text || `qq: /${name} failed`);
+        }
+        return typeof result?.text === "string" ? result.text : "";
       }
       agent.followup(userMessage(text));
       await waitForIdle(agent, () => agents.get(sessionId) ?? agent);

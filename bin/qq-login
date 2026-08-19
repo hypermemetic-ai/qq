@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+: "${HOME:?qq: HOME is required}"
+state_root=${XDG_STATE_HOME:-"$HOME/.local/state"}
+export DSH_HOME=${QQ_DSH_HOME:-${DSH_HOME:-"$state_root/qq"}}
+exec node "$root/qq-models/bin/login.mjs" "$@"

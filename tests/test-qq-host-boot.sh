@@ -95,7 +95,7 @@ const linked = (name, path) => deps[name] === `link:${path}` || deps[name] === `
 if (!linked("@hypermemetic-ai/qq", qqPath)) {
   throw new Error(`qq profile is missing qq: ${deps["@hypermemetic-ai/qq"]}`);
 }
-for (const name of ["@hypermemetic-ai/qq-ui", "@hypermemetic-ai/qq-relay", "@hypermemetic-ai/qq-workflows"]) {
+for (const name of ["@hypermemetic-ai/qq-ui", "@hypermemetic-ai/qq-relay", "@hypermemetic-ai/qq-workflows", "@hypermemetic-ai/qq-models"]) {
   if (deps[name] !== undefined) throw new Error(`qq profile unexpectedly binds ${name}: ${deps[name]}`);
 }
 NODE
@@ -133,6 +133,9 @@ for (const [name, path] of [
 }
 if (deps["@hypermemetic-ai/qq-workflows"] !== undefined) {
   throw new Error(`qq profile unexpectedly binds qq-workflows: ${deps["@hypermemetic-ai/qq-workflows"]}`);
+}
+if (deps["@hypermemetic-ai/qq-models"] !== undefined) {
+  throw new Error(`qq profile unexpectedly binds qq-models: ${deps["@hypermemetic-ai/qq-models"]}`);
 }
 NODE
 stop_host
