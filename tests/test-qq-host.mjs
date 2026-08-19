@@ -795,10 +795,10 @@ try {
   assert.match(home.body, /htmx-2\.0\.10\.min\.js/);
   assert.match(home.body, /htmx-ext-sse-2\.2\.4\.js/);
   assert.match(home.body, /rel="manifest"/);
-  assert.match(home.body, /console-v11\.css/);
-  assert.doesNotMatch(home.body, /console-v10\.css/);
+  assert.match(home.body, /console-v12\.css/);
+  assert.doesNotMatch(home.body, /console-v11\.css/);
   assert.match(home.body, /browser-v4\.js/);
-  assert.match(home.body, /data-service-worker="\/qq\/sw-v11\.js"/);
+  assert.match(home.body, /data-service-worker="\/qq\/sw-v12\.js"/);
   assert.match(home.body, /<code>\d+<\/code>/);
   assert.doesNotMatch(home.body, new RegExp(`<code>${primaryId}</code>`));
   assert.match(home.body, new RegExp(`<option value="${primaryId}" selected>Current · \\d+</option>`));
@@ -1004,7 +1004,7 @@ try {
   assert.equal(manifest.scope, "/qq/");
   assert.deepEqual(manifest.icons.map((icon) => icon.sizes), ["192x192", "512x512"]);
 
-  const worker = await request("/qq/sw-v11.js");
+  const worker = await request("/qq/sw-v12.js");
   assert.equal(worker.status, 200);
   assert.equal(worker.headers["service-worker-allowed"], "/qq/");
   assert.match(worker.body, /request\.method !== "GET"/);
@@ -1013,6 +1013,7 @@ try {
   assert.match(worker.body, /console-v9\.css/);
   assert.match(worker.body, /console-v10\.css/);
   assert.match(worker.body, /console-v11\.css/);
+  assert.match(worker.body, /console-v12\.css/);
   assert.match(worker.body, /browser-v4\.js/);
   assert.match(worker.body, /reconnect-v1\.js/);
   assert.match(worker.body, /geist-latin-wght-normal-5\.3\.0\.woff2/);
@@ -1027,7 +1028,7 @@ try {
   assert.match(offline.body, /No transcript is cached and no message can be sent offline/);
   assert.match(offline.body, /console-v8\.css/);
   assert.match(offline.body, /reconnect-v1\.js/);
-  const staticCss = await request("/qq/assets/console-v11.css");
+  const staticCss = await request("/qq/assets/console-v12.css");
   assert.match(staticCss.headers["cache-control"], /immutable/);
   assert.match(staticCss.body, /@font-face/);
   assert.match(staticCss.body, /font-family: "Geist UI"/);
@@ -1071,7 +1072,7 @@ try {
     readFile(join(root, "bin/qq"), "utf8"),
     readFile(join(root, "dsh/qq-dsh-model-compat.mjs"), "utf8"),
     readFile(join(root, "qq-ui/assets/browser-v4.js"), "utf8"),
-    readFile(join(root, "qq-ui/assets/sw-v11.js"), "utf8"),
+    readFile(join(root, "qq-ui/assets/sw-v12.js"), "utf8"),
     readFile(join(root, "qq-ui/src/render.mjs"), "utf8"),
   ]);
   assert.equal(pins.schema, "qq.dsh-console-vendor-pins/v1");

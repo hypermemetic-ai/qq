@@ -36,13 +36,13 @@ assert.deepEqual(lib.VIEWPORTS.desktop, { width: 1280, height: 800 });
 assert.deepEqual(lib.VIEWPORTS.phone, { width: 412, height: 915 });
 assert.deepEqual(lib.VIEWPORTS.short, { width: 412, height: 520 });
 
-const liveCss = httpApp.resolveAsset("console-v11.css", true);
+const liveCss = httpApp.resolveAsset("console-v12.css", true);
 assert.equal(liveCss.live, true);
 assert.match(liveCss.body.toString("utf8"), /@font-face/);
-const bakedCss = httpApp.resolveAsset("console-v11.css", false);
+const bakedCss = httpApp.resolveAsset("console-v12.css", false);
 assert.equal(bakedCss.live, false);
-assert.equal(httpApp.resolveAsset("sw-v11.js", true).live, false);
-assert.equal(httpApp.internals.LIVE_ASSET_FILES["console-v11.css"], "assets/console.css");
+assert.equal(httpApp.resolveAsset("sw-v12.js", true).live, false);
+assert.equal(httpApp.internals.LIVE_ASSET_FILES["console-v12.css"], "assets/console.css");
 
 const backend = {
   defaultSessionId: "session-63a11000-0000-4000-8000-000000000021",
@@ -60,12 +60,12 @@ const livePort = liveServer.address().port;
 const cssPath = join(root, "qq-ui/assets/console.css");
 const originalCss = await readFile(cssPath);
 try {
-  const first = await fetch(`http://127.0.0.1:${livePort}/qq/assets/console-v11.css`);
+  const first = await fetch(`http://127.0.0.1:${livePort}/qq/assets/console-v12.css`);
   assert.equal(first.status, 200);
   assert.match(first.headers.get("cache-control"), /no-store/);
   assert.match(await first.text(), /@font-face/);
   await writeFile(cssPath, `${originalCss}\n/* design-loop-live-proof */\n`);
-  const second = await fetch(`http://127.0.0.1:${livePort}/qq/assets/console-v11.css`);
+  const second = await fetch(`http://127.0.0.1:${livePort}/qq/assets/console-v12.css`);
   assert.match(await second.text(), /design-loop-live-proof/);
 } finally {
   await writeFile(cssPath, originalCss);
@@ -76,7 +76,7 @@ try {
 const bakedServer = createServer(httpApp.createConsoleHandler(observed, { ssePollMs: 20 }));
 await new Promise((resolveListen) => bakedServer.listen(0, "127.0.0.1", resolveListen));
 try {
-  const baked = await fetch(`http://127.0.0.1:${bakedServer.address().port}/qq/assets/console-v11.css`);
+  const baked = await fetch(`http://127.0.0.1:${bakedServer.address().port}/qq/assets/console-v12.css`);
   assert.match(baked.headers.get("cache-control"), /immutable/);
 } finally {
   bakedServer.closeAllConnections?.();
