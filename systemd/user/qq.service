@@ -1,5 +1,5 @@
 [Unit]
-Description=qq daily DSH host
+Description=qq host
 After=network.target
 
 [Service]
