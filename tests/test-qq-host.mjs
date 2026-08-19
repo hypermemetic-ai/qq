@@ -7,7 +7,7 @@ import { join, resolve } from "node:path";
 import { createConsoleHandler } from "../qq-ui/src/http-app.mjs";
 import { createQqService } from "../qq/src/session.mjs";
 import { renderMarkdownText, renderMessageText } from "../qq-ui/src/markdown.mjs";
-import { renderSessionContent } from "../qq-ui/src/render.mjs";
+import { renderOfferPopup, renderSessionContent } from "../qq-ui/src/render.mjs";
 
 const root = resolve(process.argv[2] ?? ".");
 const primaryId = "session-63a11000-0000-4000-8000-000000000001";
@@ -194,7 +194,7 @@ function post(sessionId, action, fields = {}, extraHeaders = {}, htmx = true) {
   });
 }
 
-function openSse(sessionId) {
+function openSse(sessionId, port = address.port) {
   return new Promise((resolveOpen, rejectOpen) => {
     const messages = [];
     const waiters = new Set();
@@ -202,7 +202,7 @@ function openSse(sessionId) {
     let response;
     const req = httpRequest({
       host: "127.0.0.1",
-      port: address.port,
+      port,
       path: `/qq/session/${sessionId}/events`,
       method: "GET",
       agent: false,
@@ -329,6 +329,7 @@ function openSse(sessionId) {
     events: `/qq/session/${liveId}/events`,
     interrupt: `/qq/session/${liveId}/interrupt`,
     prompt: `/qq/session/${liveId}/prompt`,
+    offer: `/qq/session/${liveId}/offer`,
     createSession: "/qq/sessions",
     switchSession: "/qq/sessions/open",
   };
@@ -364,6 +365,131 @@ function openSse(sessionId) {
   const undealt = renderSessionContent({ id: liveId, events: [] }, paths);
   assert.match(undealt, /<code>durable<\/code>/);
   assert.doesNotMatch(undealt, new RegExp(`<code>${liveId}</code>`));
+  assert.doesNotMatch(undealt, /offer-popup/);
+
+  const offered = renderSessionContent({
+    id: liveId,
+    events: [],
+    offer: {
+      id: "offer-1",
+      title: "Ship leftover",
+      brief: "Compile the leftover and start run.",
+      runnerBrief: "Return address: session parent",
+    },
+  }, paths);
+  assert.match(offered, /class="offer-popup"/);
+  assert.match(offered, /role="dialog"/);
+  assert.match(offered, /Ship leftover/);
+  assert.match(offered, /Compile the leftover and start run/);
+  assert.match(offered, /For the runner/);
+  assert.match(offered, /Return address: session parent/);
+  assert.match(offered, /name="choice" value="handoff">Hand off/);
+  assert.match(offered, /name="choice" value="bank">Bank/);
+  assert.match(offered, /name="choice" value="ignore">Ignore/);
+  assert.match(offered, new RegExp(`hx-post="/qq/session/${liveId}/offer"`));
+  const popup = renderOfferPopup({
+    id: "offer-1",
+    title: "Ship leftover",
+    brief: "Compile the leftover and start run.",
+  }, paths);
+  assert.match(popup, /class="offer-popup"/);
+  assert.doesNotMatch(popup, /For the runner/);
+  assert.equal(renderOfferPopup(null, paths), "");
+}
+
+{
+  const pending = {
+    id: "offer-http",
+    title: "Ship leftover",
+    brief: "Operator brief for the leftover.",
+    runnerBrief: "Return address: session parent",
+  };
+  let lastChoice = "";
+  const offerServer = createServer(createConsoleHandler(backend, {
+    ssePollMs: 20,
+    offerFor: async (id) => (id === primaryId ? pending : null),
+    chooseOffer: async (_id, choice) => {
+      lastChoice = choice;
+      if (choice === "bank") {
+        pending.id = "";
+        pending.brief = "";
+        return { status: "refused", reason: "bank requires qq-tasks" };
+      }
+      pending.id = "";
+      pending.brief = "";
+      return { status: "ok", action: choice };
+    },
+  }));
+  await new Promise((resolveListen) => offerServer.listen(0, "127.0.0.1", resolveListen));
+  const offerPort = offerServer.address().port;
+  try {
+    const page = await new Promise((resolveRequest, reject) => {
+      const req = httpRequest({
+        host: "127.0.0.1",
+        port: offerPort,
+        path: `/qq/session/${primaryId}`,
+        method: "GET",
+        agent: false,
+      }, (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => resolveRequest({
+          status: res.statusCode,
+          body: Buffer.concat(chunks).toString("utf8"),
+        }));
+      });
+      req.on("error", reject);
+      req.end();
+    });
+    assert.equal(page.status, 200);
+    assert.match(page.body, /class="offer-popup"/);
+    assert.match(page.body, /Hand off/);
+    assert.match(page.body, /Bank/);
+    assert.match(page.body, /Ignore/);
+    const stream = await openSse(primaryId, offerPort);
+    try {
+      // The production console always reads offers; its SSE shows them as they appear.
+      const appeared = await stream.waitFor(/offer-popup/);
+      assert.match(appeared, /<form class="offer-actions"/);
+      assert.match(appeared, /name="choice" value="handoff"/);
+      const mark = stream.checkpoint();
+      const body = new URLSearchParams({ choice: "ignore" }).toString();
+      const ignored = await new Promise((resolveRequest, reject) => {
+        const req = httpRequest({
+          host: "127.0.0.1",
+          port: offerPort,
+          path: `/qq/session/${primaryId}/offer`,
+          method: "POST",
+          agent: false,
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            "content-length": Buffer.byteLength(body),
+            "hx-request": "true",
+            "sec-fetch-site": "same-origin",
+          },
+        }, (res) => {
+          const chunks = [];
+          res.on("data", (chunk) => chunks.push(chunk));
+          res.on("end", () => resolveRequest({
+            status: res.statusCode,
+            body: Buffer.concat(chunks).toString("utf8"),
+          }));
+        });
+        req.on("error", reject);
+        req.end(body);
+      });
+      assert.equal(ignored.status, 200);
+      assert.equal(lastChoice, "ignore");
+      assert.doesNotMatch(ignored.body, /offer-popup/);
+      const cleared = await stream.waitFor(/<form id="composer"/, mark);
+      assert.doesNotMatch(cleared, /offer-popup/);
+    } finally {
+      stream.close();
+    }
+  } finally {
+    offerServer.closeAllConnections?.();
+    await new Promise((resolveClose) => offerServer.close(resolveClose));
+  }
 }
 
 const streams = [];
@@ -384,8 +510,8 @@ try {
   assert.match(home.body, /htmx-2\.0\.10\.min\.js/);
   assert.match(home.body, /htmx-ext-sse-2\.2\.4\.js/);
   assert.match(home.body, /rel="manifest"/);
-  assert.match(home.body, /console-v9\.css/);
-  assert.doesNotMatch(home.body, /console-v8\.css/);
+  assert.match(home.body, /console-v10\.css/);
+  assert.doesNotMatch(home.body, /console-v9\.css/);
   assert.match(home.body, /browser-v4\.js/);
   assert.match(home.body, /data-service-worker="\/qq\/sw-v10\.js"/);
   assert.match(home.body, /<code>\d+<\/code>/);
@@ -600,6 +726,7 @@ try {
   assert.match(worker.body, /request\.mode === "navigate"/);
   assert.match(worker.body, /console-v8\.css/);
   assert.match(worker.body, /console-v9\.css/);
+  assert.match(worker.body, /console-v10\.css/);
   assert.match(worker.body, /browser-v4\.js/);
   assert.match(worker.body, /reconnect-v1\.js/);
   assert.match(worker.body, /geist-latin-wght-normal-5\.3\.0\.woff2/);
@@ -614,7 +741,7 @@ try {
   assert.match(offline.body, /No transcript is cached and no message can be sent offline/);
   assert.match(offline.body, /console-v8\.css/);
   assert.match(offline.body, /reconnect-v1\.js/);
-  const staticCss = await request("/qq/assets/console-v9.css");
+  const staticCss = await request("/qq/assets/console-v10.css");
   assert.match(staticCss.headers["cache-control"], /immutable/);
   assert.match(staticCss.body, /@font-face/);
   assert.match(staticCss.body, /font-family: "Geist UI"/);
@@ -624,6 +751,8 @@ try {
   assert.match(staticCss.body, /\.message-markdown/);
   assert.match(staticCss.body, /\.message-markdown a \{/);
   assert.match(staticCss.body, /\.composer textarea \{[\s\S]*max-height: 12rem;[\s\S]*overflow-y: auto;[\s\S]*resize: none;/);
+  assert.match(staticCss.body, /\.offer-popup/);
+  assert.match(staticCss.body, /\.offer-handoff/);
   assert.doesNotMatch(staticCss.body, /align-self:\s*flex-end/);
   assert.doesNotMatch(staticCss.body, /min\(88%/);
   const normalFont = await request("/qq/assets/geist-latin-wght-normal-5.3.0.woff2");

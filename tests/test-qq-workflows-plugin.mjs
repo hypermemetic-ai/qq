@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 const root = new URL("..", import.meta.url).pathname;
 const notebookModule = await import(pathToFileURL(join(root, "qq-workflows/src/notebook.mjs")));
 const clerkModule = await import(pathToFileURL(join(root, "qq-workflows/src/clerk.mjs")));
+const offerModule = await import(pathToFileURL(join(root, "qq-workflows/src/offer.mjs")));
 const foldModule = await import(pathToFileURL(join(root, "qq-workflows/src/fold.mjs")));
 const askModule = await import(pathToFileURL(join(root, "qq/src/ask.mjs")));
 const scribeModule = await import(pathToFileURL(join(root, "qq-workflows/src/scribe.mjs")));
@@ -33,6 +34,9 @@ const {
 } = foldModule;
 const { oneShot } = askModule;
 const { parseClerkOutput, resolveScribeBinding } = scribeModule;
+const {
+  classifyLeftover, leftoverTitle, splitOperatorBrief, askedHandoff,
+} = offerModule;
 const { createArchitect, isArchitectCandidate, ARCHITECT_LABEL, CHILD_ORIGIN } = architectModule;
 const { createIterate, isIterateCandidate, ITERATE_LABEL, buildHandsPacket, collectReviewEvidence } = iterateModule;
 const {
@@ -1502,7 +1506,7 @@ try {
       assert.match(started.message, /Design-loop fixture listening at http:\/\/127\.0\.0\.1:\d+/);
       assert.match(started.result.origin, /^http:\/\/127\.0\.0\.1:\d+$/);
       assert.match(started.result.sessionUrl, /\/qq\/session\//);
-      const probe = await fetch(`${started.result.origin}/qq/assets/console-v9.css`);
+      const probe = await fetch(`${started.result.origin}/qq/assets/console-v10.css`);
       assert.equal(probe.status, 200);
       const stopped = await byName.design_loop_stop.execute({}, exec);
       assert.equal(stopped.status, "ok");
@@ -1713,6 +1717,242 @@ try {
     const missing = createIterateSettings({});
     assert.equal(missing.unbound(), true);
     assert.equal(createIterateSettings({ settingsFile: "relative.json" }).unbound(), true);
+  }
+
+  // leftover offer: skip empty, silent-bank unfinished, popup for ambiguous-or-better
+  {
+    assert.equal(classifyLeftover({ notes: [] }), "skip");
+    assert.equal(classifyLeftover({ notes: [{ text: "todo later", startSeq: 1, endSeq: 2 }] }), "bank");
+    assert.equal(classifyLeftover({
+      notes: [{ text: "Ship the leftover popup with three pressable choices.", startSeq: 1, endSeq: 4 }],
+    }), "offer");
+    assert.equal(classifyLeftover(
+      { notes: [{ text: "todo later", startSeq: 1, endSeq: 2 }] },
+      { asked: true },
+    ), "offer");
+    assert.equal(classifyLeftover({ notes: [] }, { asked: true }), "skip");
+    assert.equal(askedHandoff("please hand off this leftover"), true);
+    assert.equal(leftoverTitle({ name: "concern" }, "Ship the leftover popup now"), "Ship the leftover popup now");
+    const split = splitOperatorBrief([
+      "Compile the leftover and start run.",
+      "Return address: session parent (alias 1)",
+    ].join("\n"));
+    assert.match(split.operatorBrief, /Compile the leftover/);
+    assert.doesNotMatch(split.operatorBrief, /Return address/);
+    assert.match(split.runnerBrief, /Return address/);
+    assert.match(split.brief, /Compile the leftover[\s\S]*Return address/);
+  }
+
+  {
+    const store = createNotebookStore(join(scratch, "offer-outcomes"));
+    store.ensure(alphaId);
+    const created = [];
+    const followups = [];
+    const compiled = [];
+    const architect = createArchitect({
+      ctx: {
+        get(name) {
+          if (name === "qq-relay") {
+            return { alias: () => "1", hang() {}, clear() {}, send: async () => ({ status: "sent" }) };
+          }
+          return null;
+        },
+      },
+      store,
+      clerk: {
+        fire: async () => ({ action: "nothing" }),
+        compilePacket: async (args) => {
+          compiled.push(args);
+          return "Operator brief for the leftover.\nReturn address: session parent";
+        },
+      },
+      folder: { pending: () => undefined, decide: () => ({ action: "keep" }) },
+      agents: {
+        create: async (options) => {
+          created.push(options);
+          return {
+            agent: {
+              session: { id: options.sessionId, events: [] },
+              followup(message) { followups.push(message); },
+              ctx: { on() { return () => {}; } },
+            },
+          };
+        },
+      },
+      tasks: {
+        create({ title, body }) {
+          created.push({ title, body });
+          return "7";
+        },
+      },
+    });
+    const parentAgent = {
+      session: { id: alphaId, events: pairEvents(1, 0, "go", "ok"), header: { cwd: "/work" } },
+      ctx: { on() { return () => {}; } },
+    };
+    architect.attach(parentAgent);
+
+    store.appendNote(alphaId, { text: "todo later", startSeq: 1, endSeq: 2 });
+    const silent = await architect.considerOffer({
+      sessionId: alphaId,
+      events: parentAgent.session.events,
+      turn: 1,
+      session: parentAgent.session,
+    });
+    assert.equal(silent.status, "ok");
+    assert.equal(silent.silent, true);
+    assert.equal(silent.action, "bank");
+    assert.equal(silent.id, "7");
+    assert.equal(architect.offer(alphaId), null);
+    assert.equal(compiled.length, 0);
+
+    store.appendNote(alphaId, {
+      text: "Ship the leftover popup with three pressable choices.",
+      startSeq: 3,
+      endSeq: 6,
+    });
+    const offered = await architect.considerOffer({
+      sessionId: alphaId,
+      events: parentAgent.session.events,
+      turn: 1,
+      session: parentAgent.session,
+    });
+    assert.equal(offered.title, "Ship the leftover popup with three pressable choices.");
+    const face = architect.offer(alphaId);
+    assert.match(face.brief, /Operator brief for the leftover/);
+    assert.doesNotMatch(face.brief, /Return address/);
+    assert.match(face.runnerBrief, /Return address/);
+    assert.deepEqual(face.choices, ["handoff", "bank", "ignore"]);
+    assert.equal(compiled.length, 1);
+
+    const ignored = await architect.choose(alphaId, { choice: "ignore" });
+    assert.equal(ignored.status, "ok");
+    assert.equal(ignored.action, "ignore");
+    assert.equal(architect.offer(alphaId), null);
+    assert.equal(created.filter((row) => row.title).length, 1);
+
+    const offeredAgain = await architect.considerOffer({
+      sessionId: alphaId,
+      events: parentAgent.session.events,
+      turn: 1,
+      session: parentAgent.session,
+    });
+    assert.equal(offeredAgain.status, "skip");
+    store.appendNote(alphaId, {
+      text: "Also file the leftover after ignore if it grows.",
+      startSeq: 7,
+      endSeq: 8,
+    });
+    await architect.considerOffer({
+      sessionId: alphaId,
+      events: parentAgent.session.events,
+      turn: 1,
+      session: parentAgent.session,
+    });
+    const banked = await architect.choose(alphaId, { choice: "bank" });
+    assert.equal(banked.status, "ok");
+    assert.equal(banked.action, "bank");
+    assert.equal(banked.id, "7");
+    assert.equal(architect.offer(alphaId), null);
+    assert.equal(created.filter((row) => row.title).length, 2);
+    assert.equal(created.length, 2);
+
+    await architect.considerOffer({
+      sessionId: alphaId,
+      events: parentAgent.session.events,
+      turn: 1,
+      session: parentAgent.session,
+    });
+    assert.equal(architect.offer(alphaId), null);
+    store.appendNote(alphaId, {
+      text: "Hand this leftover to a runner after the brief is ready.",
+      startSeq: 9,
+      endSeq: 10,
+    });
+    await architect.considerOffer({
+      sessionId: alphaId,
+      events: parentAgent.session.events,
+      turn: 1,
+      session: parentAgent.session,
+    });
+    const handed = await architect.choose(alphaId, { choice: "handoff" });
+    assert.equal(handed.status, "ok");
+    assert.equal(handed.action, "handoff");
+    assert.match(handed.brief, /Operator brief for the leftover/);
+    assert.match(followups[0].content[0].text, /Operator brief for the leftover/);
+    assert.match(followups[0].content[0].text, /Return address/);
+    assert.equal(architect.offer(alphaId), null);
+    assert.equal(created.length, 3);
+  }
+
+  {
+    const store = createNotebookStore(join(scratch, "offer-missing-tasks"));
+    store.ensure(alphaId);
+    const architect = createArchitect({
+      ctx: { get: () => null },
+      store,
+      clerk: {
+        fire: async () => ({ action: "nothing" }),
+        compilePacket: async () => "Ready leftover brief.",
+      },
+      folder: { pending: () => undefined, decide: () => ({ action: "keep" }) },
+    });
+    const parentAgent = {
+      session: { id: alphaId, events: pairEvents(1, 0, "go", "ok"), header: { cwd: "/work" } },
+      ctx: { on() { return () => {}; } },
+    };
+    architect.attach(parentAgent);
+    store.appendNote(alphaId, { text: "todo later", startSeq: 1, endSeq: 2 });
+    await architect.considerOffer({
+      sessionId: alphaId,
+      events: parentAgent.session.events,
+      turn: 1,
+      session: parentAgent.session,
+    });
+    const face = architect.offer(alphaId);
+    assert.match(face.brief, /Ready leftover brief/);
+    const banked = await architect.choose(alphaId, { choice: "bank" });
+    assert.equal(banked.status, "refused");
+    assert.match(banked.reason, /qq-tasks/);
+    assert.ok(architect.offer(alphaId));
+    const ignored = await architect.choose(alphaId, { choice: "ignore" });
+    assert.equal(ignored.action, "ignore");
+    assert.equal(architect.offer(alphaId), null);
+  }
+
+  {
+    const store = createNotebookStore(join(scratch, "offer-hop"));
+    store.ensure(alphaId);
+    store.appendNote(alphaId, {
+      text: "Ship the leftover after the talking turn ends.",
+      startSeq: 1,
+      endSeq: 4,
+    });
+    const listeners = [];
+    const architect = createArchitect({
+      ctx: { get: () => null },
+      store,
+      clerk: {
+        fire: async () => ({ action: "nothing" }),
+        compilePacket: async () => "Hop brief for the leftover.",
+      },
+      folder: { pending: () => undefined, decide: () => ({ action: "keep" }) },
+    });
+    const parentAgent = {
+      session: { id: alphaId, events: pairEvents(1, 0, "go", "ok"), header: { cwd: "/work" } },
+      ctx: {
+        on(type, fn) {
+          listeners.push({ type, fn });
+          return () => {};
+        },
+      },
+    };
+    architect.attach(parentAgent);
+    const turnObs = listeners.filter((item) => item.type === "session/event").at(-1);
+    await turnObs.fn(parentAgent.session, { type: "turn/end", data: { turn: 1 } });
+    const face = architect.offer(alphaId);
+    assert.match(face.brief, /Hop brief for the leftover/);
+    assert.deepEqual(face.choices, ["handoff", "bank", "ignore"]);
   }
 
   console.log("test-qq-workflows-plugin: pass");
