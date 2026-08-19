@@ -69,6 +69,9 @@ function fakeQq(options = {}) {
     async interrupt() {
       return false;
     },
+    async close() {
+      throw new Error("unused");
+    },
     create() {
       throw new Error("unused");
     },
@@ -918,13 +921,14 @@ try {
     harness.click(harness.dictate);
     await settle();
     assert.equal(harness.dictate.dataset.state, "idle");
-    assert.ok(harness.fetches.some((call) => String(call.path).endsWith("/start")));
-    assert.ok(harness.fetches.some((call) => String(call.path).endsWith("/cancel")));
+    assert.ok(!harness.fetches.some((call) => String(call.path).endsWith("/start")));
   }
 
   const css = readFileSync(join(root, "qq-ui/assets/console.css"), "utf8");
   assert.match(css, /\.composer-row \{[\s\S]*grid-template-columns: minmax\(0, 1fr\) auto;/);
   assert.match(css, /#composer-dictate/);
+  assert.match(css, /#composer-dictate svg \{[\s\S]*grid-area: 1 \/ 1/);
+  assert.match(css, /#composer-dictate \.dictate-cancel[\s\S]*visibility: hidden/);
   assert.match(css, /#composer-submit \{[\s\S]*clip-path: inset\(50%\)/);
   assert.match(css, /@media \(min-width: 42\.01rem\) and \(pointer: fine\) \{[\s\S]*#composer-dictate \{ display: none; \}/);
 } finally {

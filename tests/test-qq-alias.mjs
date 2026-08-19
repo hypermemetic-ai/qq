@@ -225,13 +225,19 @@ try {
             async resume({ resumeSessionId }) {
               const agent = fakeAgent(resumeSessionId);
               live.set(resumeSessionId, agent);
-              return { agent };
+              return {
+                agent,
+                async dispose() { live.delete(resumeSessionId); states.delete(resumeSessionId); },
+              };
             },
             async create({ sessionId: id }) {
               states.set(id, { id, events: [], createdAt: 3, cwd: "/work" });
               const agent = fakeAgent(id);
               live.set(id, agent);
-              return { agent };
+              return {
+                agent,
+                async dispose() { live.delete(id); states.delete(id); },
+              };
             },
           };
         }

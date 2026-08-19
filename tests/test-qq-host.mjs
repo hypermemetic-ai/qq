@@ -100,7 +100,13 @@ const services = {
       assert.equal(options.setup(fakeAgentContext), undefined);
       const agent = fakeAgent(state);
       liveAgents.set(state.id, agent);
-      return { agent };
+      return {
+        agent,
+        async dispose() {
+          liveAgents.delete(state.id);
+          states.delete(state.id);
+        },
+      };
     },
     async create(options) {
       creates += 1;
@@ -118,7 +124,13 @@ const services = {
       assert.equal(options.setup(fakeAgentContext), undefined);
       const agent = fakeAgent(state);
       liveAgents.set(state.id, agent);
-      return { agent };
+      return {
+        agent,
+        async dispose() {
+          liveAgents.delete(state.id);
+          states.delete(state.id);
+        },
+      };
     },
   },
   sessions: {
@@ -331,6 +343,7 @@ function openSse(sessionId, port = address.port) {
     prompt: `/qq/session/${liveId}/prompt`,
     offer: `/qq/session/${liveId}/offer`,
     overlay: `/qq/session/${liveId}/overlay`,
+    close: `/qq/session/${liveId}/close`,
     createSession: "/qq/sessions",
     switchSession: "/qq/sessions/open",
   };
@@ -795,10 +808,10 @@ try {
   assert.match(home.body, /htmx-2\.0\.10\.min\.js/);
   assert.match(home.body, /htmx-ext-sse-2\.2\.4\.js/);
   assert.match(home.body, /rel="manifest"/);
-  assert.match(home.body, /console-v12\.css/);
-  assert.doesNotMatch(home.body, /console-v11\.css/);
-  assert.match(home.body, /browser-v4\.js/);
-  assert.match(home.body, /data-service-worker="\/qq\/sw-v12\.js"/);
+  assert.match(home.body, /console-v13\.css/);
+  assert.doesNotMatch(home.body, /console-v12\.css/);
+  assert.match(home.body, /browser-v5\.js/);
+  assert.match(home.body, /data-service-worker="\/qq\/sw-v13\.js"/);
   assert.match(home.body, /<code>\d+<\/code>/);
   assert.doesNotMatch(home.body, new RegExp(`<code>${primaryId}</code>`));
   assert.match(home.body, new RegExp(`<option value="${primaryId}" selected>Current · \\d+</option>`));
@@ -907,6 +920,21 @@ try {
   assert.equal(fresh.status, 200);
   assert.match(fresh.body, new RegExp(`<option value="${freshId}" selected>Current`));
   assert.match(fresh.body, /This DSH session has no transcript yet/);
+  assert.match(fresh.body, /id="close-session"/);
+
+  const closedResponse = await request(`/qq/session/${freshId}/close`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      "content-length": "0",
+    },
+    body: "",
+  });
+  assert.equal(closedResponse.status, 303);
+  assert.match(closedResponse.headers.location, /^\/qq\/session\/session-[0-9a-f-]{36}$/);
+  assert.notEqual(closedResponse.headers.location, `/qq/session/${freshId}`);
+  const closedGone = await request(`/qq/session/${freshId}`);
+  assert.equal(closedGone.status, 404);
 
   // Mutations fail same-origin checks on the server; there is no browser lease.
   const rejected = await post(primaryId, "prompt", { prompt: "rejected" }, {
@@ -1004,7 +1032,7 @@ try {
   assert.equal(manifest.scope, "/qq/");
   assert.deepEqual(manifest.icons.map((icon) => icon.sizes), ["192x192", "512x512"]);
 
-  const worker = await request("/qq/sw-v12.js");
+  const worker = await request("/qq/sw-v13.js");
   assert.equal(worker.status, 200);
   assert.equal(worker.headers["service-worker-allowed"], "/qq/");
   assert.match(worker.body, /request\.method !== "GET"/);
@@ -1013,8 +1041,8 @@ try {
   assert.match(worker.body, /console-v9\.css/);
   assert.match(worker.body, /console-v10\.css/);
   assert.match(worker.body, /console-v11\.css/);
-  assert.match(worker.body, /console-v12\.css/);
-  assert.match(worker.body, /browser-v4\.js/);
+  assert.match(worker.body, /console-v13\.css/);
+  assert.match(worker.body, /browser-v5\.js/);
   assert.match(worker.body, /reconnect-v1\.js/);
   assert.match(worker.body, /geist-latin-wght-normal-5\.3\.0\.woff2/);
   assert.match(worker.body, /geist-latin-wght-italic-5\.3\.0\.woff2/);
@@ -1028,7 +1056,7 @@ try {
   assert.match(offline.body, /No transcript is cached and no message can be sent offline/);
   assert.match(offline.body, /console-v8\.css/);
   assert.match(offline.body, /reconnect-v1\.js/);
-  const staticCss = await request("/qq/assets/console-v12.css");
+  const staticCss = await request("/qq/assets/console-v13.css");
   assert.match(staticCss.headers["cache-control"], /immutable/);
   assert.match(staticCss.body, /@font-face/);
   assert.match(staticCss.body, /font-family: "Geist UI"/);
@@ -1039,6 +1067,8 @@ try {
   assert.match(staticCss.body, /\.message-markdown a \{/);
   assert.match(staticCss.body, /\.composer textarea \{[\s\S]*max-height: 12rem;[\s\S]*overflow-y: auto;[\s\S]*resize: none;/);
   assert.match(staticCss.body, /\.offer-popup/);
+  assert.match(staticCss.body, /min\(90ch/);
+  assert.match(staticCss.body, /visibility: hidden/);
   assert.match(staticCss.body, /\.offer-handoff/);
   assert.match(staticCss.body, /\.overlay-popup/);
   assert.match(staticCss.body, /\.overlay-keep/);
@@ -1071,8 +1101,8 @@ try {
     readFile(join(root, "qq/host.patch.yml"), "utf8"),
     readFile(join(root, "bin/qq"), "utf8"),
     readFile(join(root, "dsh/qq-dsh-model-compat.mjs"), "utf8"),
-    readFile(join(root, "qq-ui/assets/browser-v4.js"), "utf8"),
-    readFile(join(root, "qq-ui/assets/sw-v12.js"), "utf8"),
+    readFile(join(root, "qq-ui/assets/browser-v5.js"), "utf8"),
+    readFile(join(root, "qq-ui/assets/sw-v13.js"), "utf8"),
     readFile(join(root, "qq-ui/src/render.mjs"), "utf8"),
   ]);
   assert.equal(pins.schema, "qq.dsh-console-vendor-pins/v1");
@@ -1159,6 +1189,9 @@ try {
   assert.doesNotMatch(`${qqPlugin}\n${uiPlugin}\n${patch}`, /name:.*(?:dsh-web-app|api-proxy|client-connection)/);
   assert.match(browser, /transcript\.scrollTop = transcript\.scrollHeight/);
   assert.match(browser, /input\.style\.height = `\$\{input\.scrollHeight \+ input\.offsetHeight - input\.clientHeight\}px`/);
+  assert.match(browser, /desktopChair/);
+  assert.match(browser, /pendingClose/);
+  assert.match(browser, /#close-session/);
   assert.doesNotMatch(browser, /localStorage|sessionStorage|indexedDB|document\.cookie|EventSource|WebSocket|htmx\.process/);
   assert.doesNotMatch(renderSource, /outerHTML|controller|observer|lease|take control/i);
   assert.doesNotMatch(workerSource, /addEventListener\("(?:sync|periodicsync|push|notificationclick)"|indexedDB|localStorage/i);

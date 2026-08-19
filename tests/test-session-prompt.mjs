@@ -158,4 +158,65 @@ await assert.rejects(
   /slash commands require ctx.commands/,
 );
 
+{
+  const disposed = [];
+  const live = new Map();
+  const persisted = [];
+  const fake = (id) => ({
+    session: { id, events: [], header: { createdAt: Date.now(), cwd: "/work" } },
+    status: "idle",
+    followup() {},
+    cancel() {},
+    whenIdle: async () => {},
+  });
+  const closeQq = createQqService(
+    {
+      get(name) {
+        if (name === "agents") {
+          return {
+            get: (id) => live.get(id),
+            list: () => [...live.values()],
+            async create({ sessionId: id }) {
+              const agent = fake(id);
+              live.set(id, agent);
+              persisted.push({ id, createdAt: Date.now(), cwd: "/work" });
+              return {
+                agent,
+                async dispose() {
+                  disposed.push(id);
+                  live.delete(id);
+                  const at = persisted.findIndex((row) => row.id === id);
+                  if (at >= 0) persisted.splice(at, 1);
+                },
+              };
+            },
+          };
+        }
+        if (name === "sessions") return { async flush() {} };
+        if (name === "sessionPersistence") {
+          return { async list() { return [...persisted]; } };
+        }
+        if (name === "loader") return { async await() {} };
+        return undefined;
+      },
+    },
+    {
+      sessionId,
+      cwd: "/work",
+      provider: "qwen-token-plan",
+      model: "deepseek-v4-pro-0813",
+    },
+  );
+  const first = await closeQq.create();
+  const second = await closeQq.create();
+  const closed = await closeQq.close(first.id);
+  assert.deepEqual(disposed, [first.id]);
+  assert.equal(closed.closed, first.id);
+  assert.notEqual(closed.id, first.id);
+  assert.ok([second.id, sessionId].includes(closed.id));
+  await assert.rejects(() => closeQq.read(first.id), /not found/);
+  live.set(sessionId, agent);
+  await assert.rejects(() => closeQq.close(sessionId), /not closeable/);
+}
+
 console.log("test-session-prompt: pass");

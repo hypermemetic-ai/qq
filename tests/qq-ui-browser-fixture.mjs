@@ -89,6 +89,19 @@ const backend = {
     });
     flushes += 1;
   },
+  async close(id) {
+    if (!states.has(id)) {
+      const error = new Error("DSH session not found");
+      error.status = 404;
+      throw error;
+    }
+    const remaining = [...states.keys()].filter((sessionId) => sessionId !== id);
+    states.delete(id);
+    pending.get(id)?.resolve();
+    pending.delete(id);
+    if (remaining[0]) return { id: remaining[0], closed: id };
+    return { ...(await this.create()), closed: id };
+  },
   async interrupt(id) {
     const state = states.get(id);
     const active = pending.get(id);

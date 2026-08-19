@@ -94,13 +94,19 @@ const services = {
       const agent = fakeAgent();
       options.setup?.({ on() { return () => {}; } });
       liveAgents.set(options.resumeSessionId, agent);
-      return { agent };
+      return {
+        agent,
+        async dispose() { liveAgents.delete(options.resumeSessionId); },
+      };
     },
     async create(options) {
       const agent = fakeAgent();
       options.setup?.({ on() { return () => {}; } });
       liveAgents.set(options.sessionId, agent);
-      return { agent };
+      return {
+        agent,
+        async dispose() { liveAgents.delete(options.sessionId); },
+      };
     },
   },
   sessions: {
@@ -261,7 +267,7 @@ assert.equal(qq.defaultSessionId, sessionId);
 
 const uiFiber = ctx.plugin(uiPlugin, { basePath: "/qq", ssePollMs: 20 });
 await uiFiber;
-assert.equal(routes.length, 1);
+assert.equal(routes.length, 2);
 
 const page = await request("/qq/");
 assert.equal(page.status, 200);
