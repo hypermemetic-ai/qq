@@ -1,0 +1,6 @@
+# qq-tasks profile layer. `dsh plugin add` activates this when the sibling
+# tree is present. Not named in bin/qq or qq/host.patch.yml.
+
+- insert:
+    - id: qq-tasks
+      name: '@hypermemetic-ai/qq-tasks'
