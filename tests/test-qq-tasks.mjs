@@ -15,7 +15,7 @@ const workflowsPlugin = await import(pathToFileURL(join(root, "qq-workflows/src/
 const workflowsTools = await import(pathToFileURL(join(root, "qq-workflows/src/tools.mjs")));
 
 const {
-  FROZEN, FIRST_OVERFLOW_START, FIRST_OVERFLOW_END, farthestFirst, dealId, overflowBand, normalizeId,
+  FROZEN, FIRST_OVERFLOW_START, FIRST_OVERFLOW_END, WARM_COUNT, farthestFirst, dealId, overflowBand, normalizeId,
 } = namesModule;
 const {
   BOOK_SCHEMA, DEFAULT_PROJECT, createTaskStore, defaultStoreDir, defaultProject, parseTicket, formatTicket,
@@ -49,6 +49,7 @@ try {
   assert.equal(new Set(FROZEN).size, 99);
   assert.equal(FIRST_OVERFLOW_START, 1000);
   assert.equal(FIRST_OVERFLOW_END, 9999);
+  assert.equal(WARM_COUNT, 3);
   assert.deepEqual(overflowBand(1000), { start: 1000, end: 9999 });
   assert.deepEqual(overflowBand(10_000), { start: 10_000, end: 99_999 });
   assert.equal(normalizeId("340"), "340");
@@ -207,15 +208,19 @@ try {
 
     const warmDir = join(scratch, "overflow-warm");
     const warmer = createTaskStore(warmDir, { rng: () => 0 });
+    const archived = [];
     for (let index = 0; index < FROZEN.length; index += 1) {
       const id = warmer.create({ title: `w${index}` });
       warmer.archive(id);
+      archived.push(id);
     }
+    const lastWarm = archived.slice(-WARM_COUNT);
     assert.equal(warmer.book().live.length, 0);
-    assert.equal(warmer.book().warm.length, 99);
-    const afterWarm = warmer.create({ title: "must overflow" });
-    const afterValue = Number(afterWarm);
-    assert.ok(afterValue >= FIRST_OVERFLOW_START && afterValue <= FIRST_OVERFLOW_END, afterWarm);
+    assert.equal(warmer.book().warm.length, WARM_COUNT);
+    assert.deepEqual(warmer.book().warm, lastWarm);
+    const afterWarm = warmer.create({ title: "reuse frozen" });
+    assert.ok(FROZEN.includes(afterWarm), `expected frozen reuse, got ${afterWarm}`);
+    assert.ok(!lastWarm.includes(afterWarm), `last ${WARM_COUNT} archived stay warm`);
   }
 
   // service + rundown refuses when settings unbound

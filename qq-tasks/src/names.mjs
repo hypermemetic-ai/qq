@@ -45,6 +45,9 @@ export function overflowBand(start) {
   return { start, end: start * 10 - 1 };
 }
 
+/** Last few archived names stay warm; older ones return to the deck. */
+export const WARM_COUNT = 3;
+
 /**
  * Deal one free name. Frozen set first; when every frozen name is live or
  * warm, unlock 1000–9999, then 10000–99999, and so on.
