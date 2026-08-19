@@ -422,6 +422,10 @@ export function createQqService(ctx, config) {
       await sessions.flush(agent.session);
     },
     async interrupt(sessionId) {
+      const finder = ctx.get("image-finder", false);
+      const abortedFind = typeof finder?.abortCompile === "function"
+        ? Boolean(finder.abortCompile(sessionId))
+        : false;
       const agent = await agentForSession(sessionId);
       const wasRunning = agent.status === "running";
       agent.cancel({ kind: "user" });
@@ -429,7 +433,7 @@ export function createQqService(ctx, config) {
         await waitForIdle(agent, () => agents.get(sessionId) ?? agent);
         await sessions.flush(agent.session);
       }
-      return wasRunning;
+      return wasRunning || abortedFind;
     },
     async close(sessionId) {
       if (!SESSION_ID.test(sessionId)) throw httpError(404, "DSH session not found");

@@ -133,6 +133,52 @@ assert.equal(followups[0].content[0].text, "ordinary talking turn");
   assert.ok(findFlushed.includes(sessionId));
 }
 
+{
+  const aborted = [];
+  const idleAgent = {
+    session: { id: sessionId, events: [] },
+    status: "idle",
+    followup() {},
+    cancel() {},
+    whenIdle: async () => {},
+  };
+  const findQq = createQqService(
+    {
+      get(name, optional) {
+        if (name === "agents") {
+          return {
+            get: (id) => (id === sessionId ? idleAgent : undefined),
+            list: () => [idleAgent],
+          };
+        }
+        if (name === "sessions") return { async flush() {} };
+        if (name === "sessionPersistence") {
+          return { async list() { return [{ id: sessionId, createdAt: 1, cwd: "/work" }]; } };
+        }
+        if (name === "image-finder") {
+          return {
+            inFindMode: () => true,
+            abortCompile(id) {
+              aborted.push(id);
+              return true;
+            },
+          };
+        }
+        if (optional) return undefined;
+        return undefined;
+      },
+    },
+    {
+      sessionId,
+      cwd: "/work",
+      provider: "qwen-token-plan",
+      model: "deepseek-v4-pro-0813",
+    },
+  );
+  assert.equal(await findQq.interrupt(sessionId), true);
+  assert.deepEqual(aborted, [sessionId]);
+}
+
 const missingCommands = createQqService(
   {
     get(name) {
