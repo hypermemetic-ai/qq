@@ -7,7 +7,7 @@ decision=${QQ_BRIEF_GATE_DECISION:?QQ_BRIEF_GATE_DECISION is required}
 glow=${QQ_BRIEF_GATE_GLOW:-/home/linuxbrew/.linuxbrew/bin/glow}
 
 if [[ ! -f $document || -L $document ]]; then
-  printf 'Delegate gate refused an unsafe ticket-and-note path.\n' >&2
+  printf 'Delegate gate refused an unsafe ticket path.\n' >&2
   exit 1
 fi
 if [[ ! -x $glow ]]; then
@@ -17,11 +17,11 @@ fi
 
 # Static output stays in the plugin pane's primary screen across resizes.
 "$glow" "$document" || {
-  printf 'Glow could not render the delegate ticket and note.\n' >&2
+  printf 'Glow could not render the delegate ticket.\n' >&2
   exit 1
 }
 
-printf '\nDelegate this ticket with this note?  [a] approve   [c] cancel\n'
+printf '\nDelegate this ticket?  [a] approve   [c] cancel\n'
 while true; do
   printf '> '
   IFS= read -r -n 1 choice || exit 1

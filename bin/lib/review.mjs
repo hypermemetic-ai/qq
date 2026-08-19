@@ -79,15 +79,8 @@ export function formatPacket(packet) {
 }
 
 async function readBrief(state) {
-  let ticket = "";
-  let note = "";
-  if (state?.ticketPath) {
-    try { ticket = await readFile(state.ticketPath, "utf8"); } catch {}
-  }
-  if (state?.notePath) {
-    try { note = await readFile(state.notePath, "utf8"); } catch {}
-  }
-  return `${ticket.trim()}\n\n---\n\n## Delegate note\n\n${note.trim()}`.trim();
+  if (!state?.ticketPath) return "";
+  try { return (await readFile(state.ticketPath, "utf8")).trim(); } catch { return ""; }
 }
 
 export async function compilePacket(run, state, options = {}) {
@@ -348,10 +341,10 @@ export function qaLaunchArgs(state, options) {
 }
 
 export function qaLookPrompt(state) {
-  const ticketAndNotePath = state.gatePath ?? state.briefPath;
+  const ticketPath = state.ticketPath ?? state.gatePath ?? state.briefPath;
   return state.look === 1
-    ? `Look 1. Review ref ${state.ref} against the outbound ticket and note at ${ticketAndNotePath}. Base is ${state.baseRef}. You own test quality: you may edit tests and commit test-only changes. Never edit or commit production code. Reject bad or excess tests, bloat, and over-engineering.`
-    : `Look 2, the final look. Review updated ref ${state.ref} against the same outbound ticket and note at ${ticketAndNotePath} and your prior rejection. You still own test quality: you may edit tests and commit test-only changes, but never edit or commit production code. There is no third look.`;
+    ? `Look 1. Review ref ${state.ref} against the outbound ticket at ${ticketPath}. Base is ${state.baseRef}. You own test quality: you may edit tests and commit test-only changes. Never edit or commit production code. Reject bad or excess tests, bloat, and over-engineering.`
+    : `Look 2, the final look. Review updated ref ${state.ref} against the same outbound ticket at ${ticketPath} and your prior rejection. You still own test quality: you may edit tests and commit test-only changes, but never edit or commit production code. There is no third look.`;
 }
 
 export function isTestPath(path) {

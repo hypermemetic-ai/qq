@@ -62,8 +62,8 @@ export function formatNoteTake(text, value = new Date()) {
   return `---\n\n${timestamp}\n\n${text}`;
 }
 
-export function formatGateDocument(ticket, note) {
-  return `${ticket.trimEnd()}\n\n---\n\n## Delegate note\n\n${note.trim()}\n`;
+export function formatGateDocument(ticket) {
+  return `${ticket.trimEnd()}\n`;
 }
 
 export function stateHome(env = process.env) {
@@ -95,13 +95,12 @@ function projectSlug(value) {
 }
 
 export async function prepareRun(options) {
-  const { cwd, env = process.env, task, note } = options;
+  const { cwd, env = process.env, task } = options;
   const project = projectSlug(options.project || basename(resolve(cwd)));
   const workspace = env.HERDR_WORKSPACE_ID;
   if (options.runtime !== "dsh" && (typeof workspace !== "string" || workspace === "")) {
     throw new Error("delegate requires a Herdr workspace");
   }
-  if (typeof note !== "string" || note.trim() === "") throw new Error("delegate requires a non-empty note");
   const slug = taskSlug(task.id);
   const nonce = randomUUID().slice(0, 8);
   const stateDir = join(runsRoot(project, env), `${slug}-${nonce}`);
@@ -121,9 +120,9 @@ export async function prepareRun(options) {
   try {
     await privateDirectory(stateDir);
     await writeFile(prepared.ticketPath, `${ticket}\n`, { mode: 0o600, flag: "wx" });
-    await writeFile(prepared.transcriptPath, `${options.transcript?.trimEnd() ?? ""}\n`, { mode: 0o600, flag: "wx" });
-    await writeFile(prepared.notePath, `${note.trim()}\n`, { mode: 0o600, flag: "wx" });
-    await writeFile(prepared.gatePath, formatGateDocument(ticket, note), { mode: 0o600, flag: "wx" });
+    await writeFile(prepared.transcriptPath, "\n", { mode: 0o600, flag: "wx" });
+    await writeFile(prepared.notePath, `${ticket}\n`, { mode: 0o600, flag: "wx" });
+    await writeFile(prepared.gatePath, formatGateDocument(ticket), { mode: 0o600, flag: "wx" });
     return prepared;
   } catch (error) {
     await rm(stateDir, { recursive: true, force: true }).catch(() => {});
@@ -545,9 +544,10 @@ export async function createRunWorkspace(run, cwd, prepared, options = {}) {
   }
 }
 
-export function formatRunnerPrompt(marker, ticket, note, options = {}) {
+export function formatRunnerPrompt(marker, ticket, options = {}) {
   const instruction = "Implement the task in this worktree, commit the result, then call done with ref HEAD. Do not merge.";
-  return `${marker}\n\nWork from the full Backlog ticket and delegate note below. The note is also at ${options.notePath}. ${instruction}\n\n${ticket.trimEnd()}\n\n---\n\n## Delegate note\n\n${note.trimEnd()}`;
+  const location = options.ticketPath ? ` The ticket is also at ${options.ticketPath}.` : "";
+  return `${marker}\n\nWork from the Backlog ticket below.${location} ${instruction}\n\n${ticket.trimEnd()}`;
 }
 
 export async function startRun(options) {
@@ -565,13 +565,11 @@ export async function startRun(options) {
   let baseBranch;
   let paneId;
   let runnerTicket = "";
-  let runnerNote = "";
   let prompt = "";
   let createdWorktree = false;
   let createdPane = false;
   try {
     runnerTicket = await readFile(ticketPath, "utf8");
-    runnerNote = await readFile(notePath, "utf8");
     const runWorkspace = await createRunWorkspace(run, cwd, prepared, { env, signal });
     ({ mainRoot, baseRef, baseBranch } = runWorkspace);
     createdWorktree = true;
@@ -612,7 +610,7 @@ export async function startRun(options) {
     await atomicPrivateJson(statePath, state);
     await waitForAvailableShell(run, paneId, { signal });
     await checked(run, "herdr", ["agent", "start", `runner-${slug}-${nonce}`, "--kind", "pi", "--pane", paneId, "--", "--approve"], { signal }, "cannot start runs runner");
-    prompt = formatRunnerPrompt(marker, runnerTicket, runnerNote, { notePath, runtime: "pi-herdr" });
+    prompt = formatRunnerPrompt(marker, runnerTicket, { ticketPath, runtime: "pi-herdr" });
     await (options.submitPrompt ?? submitAgentPrompt)(paneId, prompt, { env, signal });
     const inspectAgent = options.inspectAgent ?? ((target, requestOptions) =>
       herdrApiRequest("agent.get", { target }, { env, ...requestOptions }));
@@ -648,7 +646,7 @@ export async function startRun(options) {
     }
     const safe = sanitizeBootstrapReason(error, {
       env,
-      secrets: [runnerTicket, runnerTicket.trim(), runnerNote, runnerNote.trim(), prompt, ticketPath, notePath, gatePath, statePath],
+      secrets: [runnerTicket, runnerTicket.trim(), prompt, ticketPath, notePath, gatePath, statePath],
     });
     if (cleanupFailures.length > 0) throw new Error(`${safe}; ${cleanupFailures.map((failure) => failure.message).join("; ")}`);
     throw new Error(safe);

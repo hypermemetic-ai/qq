@@ -96,7 +96,7 @@ PY
 )
 read -r second third <<<"$pane_ids"
 
-printf '# Exact disposable ticket\n\n## Delegate note\n\nExact disposable note\n' > "$base/gate.md"
+printf '# Exact disposable ticket\n' > "$base/gate.md"
 cat > "$base/glow" <<'EOF'
 #!/usr/bin/env bash
 cat "$1"

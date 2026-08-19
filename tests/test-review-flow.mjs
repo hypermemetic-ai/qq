@@ -168,13 +168,14 @@ try {
   assert.equal((await runLib.readHandoff(statePath)).status, "submitted", "fresh readers must recover the native submission");
   assert.ok(calls.some(({ args }) => args[0] === "merge-base"));
 
-  await writeFile(base.ticketPath, "# TASK-1\n\nOne task.\n");
-  await writeFile(base.notePath, "Keep the change small.\n");
+  await writeFile(base.ticketPath, "# TASK-1\n\nOne task.\n\nKeep the change small.\n");
+  await writeFile(base.notePath, "Leftover private note must not enter the packet.\n");
   await runLib.atomicPrivateJson(statePath, base);
   const compiled = await review.compilePacket(run, { ...base, ref: "refsha" });
   assert.equal(compiled.schema, review.ROUTE_PACKET_SCHEMA);
   assert.match(compiled.brief, /One task/);
   assert.match(compiled.brief, /Keep the change small/);
+  assert.doesNotMatch(compiled.brief, /Leftover private note|Delegate note/);
   assert.deepEqual(compiled.files, [{ path: "src/a.ts", added: 2, deleted: 1 }]);
   assert.deepEqual(compiled.pointers, ["src/a.ts:3 export function a"]);
   assert.equal(JSON.stringify(compiled).includes("+return 1;"), false, "packet must not include full hunks");
@@ -1060,8 +1061,8 @@ try {
     "--session-dir", join(scratch, "state", "qa-session"), "--session-id", "qa-session-id",
   ]);
   const qaTaskPrompt = committedTests.calls.find(({ args }) => args[0] === "agent" && args[1] === "prompt");
-  assert.match(qaTaskPrompt.args[3], /outbound ticket and note/);
-  assert.match(qaTaskPrompt.args[3], new RegExp(base.gatePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(qaTaskPrompt.args[3], /outbound ticket/);
+  assert.match(qaTaskPrompt.args[3], new RegExp(base.ticketPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.equal(committedTests.qaPromptAtLaunch.path, join(scratch, "state", "qa-system-prompt-1.md"));
   assert.equal(committedTests.qaPromptAtLaunch.mode, 0o600);
   assert.match(committedTests.qaPromptAtLaunch.content, /own the tests and may commit test-only changes/);

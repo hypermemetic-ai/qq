@@ -2,12 +2,12 @@ id = "qq.brief-gate"
 name = "qq Delegate Gate"
 version = "0.1.0"
 min_herdr_version = "0.7.5"
-description = "Operator-owned approval gate for a ticket and delegate note"
+description = "Operator-owned approval gate for a ticket"
 platforms = ["linux"]
 
 [[panes]]
 id = "review"
-title = "Review delegate ticket and note"
-description = "Read the full ticket and note, then approve or cancel delegation"
+title = "Review delegate ticket"
+description = "Read the full ticket, then approve or cancel delegation"
 placement = "split"
 command = ["bash", "brief-gate.sh"]

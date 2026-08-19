@@ -9,7 +9,7 @@ import { profileFor, readExecutionPolicy } from "../bin/lib/execution-profiles.m
 import { launchNativeBootstrap } from "../bin/lib/native-launch.mjs";
 import { createQqSessionContext } from "../bin/lib/session-context.mjs";
 import { collectLiveWorktreeDiffs, findExistingBrief, withAdmissionLock } from "../bin/lib/admission.mjs";
-import { awaitBriefGate, discardRun, formatNoteTake, formatTicket, prepareBootstrapRequest, prepareRun } from "../bin/lib/run.mjs";
+import { awaitBriefGate, discardRun, formatNoteTake, prepareBootstrapRequest, prepareRun } from "../bin/lib/run.mjs";
 
 const QQ_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BACKLOG = join(QQ_ROOT, "node_modules", ".bin", "backlog");
@@ -50,8 +50,6 @@ export function detachedBootstrapWorker(requestPath, env, options = {}) {
   });
 }
 
-export { formatTicket };
-
 function result(message, details = {}) {
   return { content: [{ type: "text", text: message }], details: { ...details, message } };
 }
@@ -67,62 +65,6 @@ async function taskView(run, cwd, id, signal) {
   try { value = JSON.parse(execution.stdout); } catch { throw new Error("Backlog returned malformed task JSON"); }
   if (!value?.task?.id || !value?.task?.title || !value?.task?.status) throw new Error("Backlog returned an incomplete task");
   return value.task;
-}
-
-function textContent(content) {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content.filter((block) => block?.type === "text" && typeof block.text === "string")
-    .map((block) => block.text).join("\n");
-}
-
-function latestOperatorTurnEntries(branch, limit = 100) {
-  if (!Array.isArray(branch)) return [];
-  const operatorTurns = [];
-  for (let index = 0; index < branch.length; index += 1) {
-    if (branch[index]?.type === "message" && branch[index].message?.role === "user") operatorTurns.push(index);
-  }
-  if (operatorTurns.length === 0) return [];
-  return branch.slice(operatorTurns[Math.max(0, operatorTurns.length - limit)]);
-}
-
-export function serializeTranscript(branch, limit = 100) {
-  const parts = [];
-  for (const entry of latestOperatorTurnEntries(branch, limit)) {
-    if (entry?.type !== "message") continue;
-    const message = entry.message;
-    if (message?.role === "user") {
-      const text = textContent(message.content);
-      if (text) parts.push(`[User]: ${text}`);
-      continue;
-    }
-    if (message?.role !== "assistant") continue;
-    const text = textContent(message.content);
-    if (text) parts.push(`[Assistant]: ${text}`);
-    const tools = Array.isArray(message.content)
-      ? message.content.filter((block) => block?.type === "toolCall" && typeof block.name === "string").map((block) => block.name)
-      : [];
-    if (tools.length) parts.push(`[Assistant tools]: ${tools.join(", ")}`);
-  }
-  return parts.join("\n\n");
-}
-
-function fileOperations(entries) {
-  const read = new Set();
-  const modified = new Set();
-  for (const entry of entries) {
-    const message = entry?.type === "message" ? entry.message : entry;
-    if (message?.role !== "assistant" || !Array.isArray(message.content)) continue;
-    for (const block of message.content) {
-      if (block?.type !== "toolCall" || typeof block.arguments?.path !== "string") continue;
-      if (block.name === "read") read.add(block.arguments.path);
-      if (block.name === "edit" || block.name === "write") modified.add(block.arguments.path);
-    }
-  }
-  return {
-    read: [...read].filter((path) => !modified.has(path)).sort(),
-    modified: [...modified].sort(),
-  };
 }
 
 function oneLine(value) {
@@ -288,41 +230,6 @@ export async function withGlowTurn(key, action) {
   }
 }
 
-export async function makeNote(ctx, task, deps = {}) {
-  const policy = await readExecutionPolicy(deps.policyPath);
-  const prompt = await readFile(deps.scribePromptPath ?? join(QQ_ROOT, "prompts", "services", "scribe.md"), "utf8");
-  const model = ctx.modelRegistry.find(policy.scribe.provider, policy.scribe.model);
-  if (!model) throw new Error(`scribe model is unavailable: ${policy.scribe.provider}/${policy.scribe.model}`);
-  const entries = latestOperatorTurnEntries(ctx.sessionManager.getBranch());
-  const transcript = serializeTranscript(entries);
-  const files = fileOperations(entries);
-  const fileText = [
-    files.read.length ? `Read files:\n${files.read.map((path) => `- ${path}`).join("\n")}` : "",
-    files.modified.length ? `Modified files:\n${files.modified.map((path) => `- ${path}`).join("\n")}` : "",
-  ].filter(Boolean).join("\n\n");
-  const attachments = [
-    `Attached ticket (ticket.md):\n\n${formatTicket(task)}`,
-    `Attached architect transcript (transcript.md):\n\n${transcript}`,
-    fileText,
-  ].filter(Boolean).join("\n\n");
-  const userMessage = {
-    role: "user",
-    content: [{ type: "text", text: attachments }],
-    timestamp: Date.now(),
-  };
-  const { text: note } = await completeScribeHop(
-    ctx,
-    model,
-    { systemPrompt: prompt.trim(), messages: [userMessage] },
-    {
-      complete: { reasoning: policy.scribe.effort, cacheRetention: "none" },
-      cancelMessage: "note generation was cancelled",
-      deadMessage: "scribe hop died",
-    },
-  );
-  return { note, transcript, qaBinding: policy.qa };
-}
-
 export default function registerBoard(pi, deps = {}) {
   const env = deps.env ?? process.env;
   const run = deps.exec ?? ((command, args, options) => pi.exec(command, args, options));
@@ -358,15 +265,14 @@ export default function registerBoard(pi, deps = {}) {
   });
 
   pi.registerTool({
-    name: "delegate", label: "Delegate", promptSnippet: "Vet and claim one aligned task, then prepare its note and approval gate",
-    description: "Vet one To Do ticket against active work, bounce conflicts in chat, or claim it; then prepare its note, wait for approval or cancellation in an operator-owned Glow pane, and start an isolated messaging-enabled runner if approved. Architect sessions only.",
+    name: "delegate", label: "Delegate", promptSnippet: "Vet and claim one filled ticket, then wait for the operator gate",
+    description: "Fill the Backlog ticket first. The ticket is the work order. Vet one To Do ticket against active work, bounce conflicts in chat, or claim it; then wait for approval or cancellation in an operator-owned Glow pane, and start an isolated messaging-enabled runner if approved. Architect sessions only.",
     parameters: { type: "object", additionalProperties: false, required: ["id"], properties: { id: { type: "string" } } },
     async execute(_id, params, signal, _update, ctx) {
       const callerContext = sessionContext.resolve(ctx);
       if (callerContext.role !== "architect") return result("delegate is available only in an architect session.");
       let claimedTask;
       let prepared;
-      let outboundNote;
       try {
         const operationSignal = signal ?? ctx.signal;
         const operationCtx = { ...ctx, signal: operationSignal };
@@ -381,11 +287,9 @@ export default function registerBoard(pi, deps = {}) {
         if (admission?.kind !== "claimed" || !task?.id) throw new Error("delegate admission returned a malformed claim");
         claimedTask = task.id;
         const project = admission.project || env.QQ_AGENT_PROJECT || basename(resolve(ctx.cwd));
-
-        const { note, transcript, qaBinding } = await (deps.makeNote ?? makeNote)(operationCtx, task, deps);
-        outboundNote = note;
+        const policy = await (deps.readExecutionPolicy ?? readExecutionPolicy)(deps.policyPath);
         prepared = await (deps.prepareRun ?? prepareRun)({
-          cwd: ctx.cwd, env, project, task, note, transcript,
+          cwd: ctx.cwd, env, project, task,
           runtime: callerContext.source === "dsh-session" ? "dsh" : "pi-herdr",
         });
         const decision = await (deps.withGlowTurn ?? withGlowTurn)(admission.commonDir || project, () => (deps.awaitBriefGate ?? awaitBriefGate)({
@@ -403,12 +307,11 @@ export default function registerBoard(pi, deps = {}) {
 
         let runnerProfile;
         if (callerContext.source === "dsh-session") {
-          const policy = await (deps.readExecutionPolicy ?? readExecutionPolicy)(deps.policyPath);
           const selected = profileFor(policy, "runner");
           runnerProfile = { name: selected.name, ...selected.profile };
         }
         const bootstrap = await (deps.prepareBootstrapRequest ?? prepareBootstrapRequest)({
-          cwd: ctx.cwd, env, task, prepared, qaBinding, project, signal: operationSignal,
+          cwd: ctx.cwd, env, task, prepared, qaBinding: policy.qa, project, signal: operationSignal,
           architectSession: ctx.sessionManager.getSessionId(), runnerProfile,
         });
         if (operationSignal?.aborted) throw operationSignal.reason ?? new Error("delegation was cancelled");
@@ -435,8 +338,7 @@ export default function registerBoard(pi, deps = {}) {
           try { await (deps.discardRun ?? discardRun)(prepared); } catch {}
         }
         const message = error instanceof Error ? error.message : String(error);
-        const safeMessage = outboundNote && message.includes(outboundNote) ? "runs operation failed" : message;
-        return result(`delegate refused: ${safeMessage}`, { status: "refused" });
+        return result(`delegate refused: ${message}`, { status: "refused" });
       }
     },
   });

@@ -169,13 +169,11 @@ export async function startDshRun(options) {
   let childClaimed = false;
   let unregisterSetup;
   let runnerTicket = "";
-  let runnerNote = "";
   let prompt = "";
   const parentContext = contextForParent(profile);
   const childContext = contextForChild(profile, statePath);
   try {
     runnerTicket = await readFile(ticketPath, "utf8");
-    runnerNote = await readFile(notePath, "utf8");
     workspace = await createRunWorkspace(run, cwd, prepared, { env, signal });
 
     parentId = `session-${randomUUID()}`;
@@ -219,7 +217,7 @@ export async function startDshRun(options) {
       installModelSelection(childCtx, profile);
       return () => {};
     });
-    prompt = formatRunnerPrompt(marker, runnerTicket, runnerNote, { notePath, runtime: "dsh" });
+    prompt = formatRunnerPrompt(marker, runnerTicket, { ticketPath, runtime: "dsh" });
     const startSignal = signal ?? AbortSignal.timeout(options.startTimeoutMs ?? ACCEPTANCE_TIMEOUT_MS);
     const accepted = await serviceCall(() => services.agents.withInitiator(parent, () =>
       services.subagents.startContinuable({

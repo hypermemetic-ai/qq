@@ -109,6 +109,7 @@ assert.ok(stalledPollTimeout > 0 && stalledPollTimeout <= 20, "each inspection m
 const scratch = await mkdtemp(join(homedir(), "qq-delegation-test."));
 try {
   const exactNote = "PRIVATE exact runner note";
+  const ticketSecret = "SECRET ticket body must not leak";
   const env = {
     HOME: scratch,
     XDG_STATE_HOME: join(scratch, "state"),
@@ -166,24 +167,6 @@ try {
 
   const task = { id: "TASK-1", title: "One task", description: "Do the task.", implementationNotes: "Try the narrow seam." };
   const ticket = lib.formatTicket(task);
-  const branch = [];
-  for (let index = 0; index < 102; index += 1) {
-    branch.push({ type: "message", message: { role: "user", content: [{ type: "text", text: `operator-${index}` }] } });
-    branch.push({ type: "message", message: { role: "assistant", content: index === 101 ? [
-      { type: "thinking", thinking: "SECRET_THINKING" },
-      { type: "text", text: "Observed the final turn." },
-      { type: "toolCall", name: "read", arguments: { path: "src/final.ts" } },
-    ] : [{ type: "text", text: `reply-${index}` }] } });
-    if (index === 50) branch.push({ type: "compaction", summary: "SECRET_COMPACTION" });
-  }
-  branch.push({ type: "message", message: { role: "toolResult", content: [{ type: "text", text: "SECRET_TOOL_RESULT" }] } });
-  const transcript = extension.serializeTranscript(branch);
-  assert.equal(transcript.includes("[User]: operator-0\n\n"), false);
-  assert.equal(transcript.includes("[User]: operator-1\n\n"), false);
-  assert.match(transcript, /\[User\]: operator-2/);
-  assert.match(transcript, /\[User\]: operator-101/);
-  assert.match(transcript, /\[Assistant tools\]: read/);
-  assert.doesNotMatch(transcript, /SECRET_THINKING|SECRET_COMPACTION|SECRET_TOOL_RESULT|src\/final\.ts/);
 
   const policyPath = join(scratch, "execution-profiles.json");
   await writeFile(policyPath, JSON.stringify({
@@ -195,119 +178,96 @@ try {
     scribe: { provider: "test", model: "scribe", effort: "low" },
     qa: { provider: "test", model: "qa", effort: "xhigh" },
   }), { mode: 0o600 });
-  let scribeRequest;
   let vetRequest;
   const completionCtx = {
     signal: undefined,
-    sessionManager: { getBranch: () => branch },
     modelRegistry: {
       find(provider, model) { assert.equal(`${provider}/${model}`, "test/scribe"); return { provider, id: model }; },
       async complete(_model, request, options) {
-        if (request.systemPrompt.startsWith("Vet one proposed delegation")) {
-          vetRequest = { request, options };
-          return { stopReason: "stop", content: [{ type: "text", text: '{"decision":"bounce","reason":"review.mjs is already live"}' }] };
-        }
-        scribeRequest = { request, options };
-        return { stopReason: "stop", content: [{ type: "text", text: exactNote }] };
+        vetRequest = { request, options };
+        return { stopReason: "stop", content: [{ type: "text", text: '{"decision":"bounce","reason":"review.mjs is already live"}' }] };
       },
     },
   };
-  const generated = await extension.makeNote(completionCtx, task, { policyPath, scribePromptPath: join(root, "prompts", "services", "scribe.md") });
-  assert.equal(generated.note, exactNote);
-  assert.equal(generated.transcript, transcript);
-  assert.equal(scribeRequest.request.systemPrompt, "Write a helpful note for the next agent.\nOnly what's missing in the ticket: decisions, files, names, constraints, and what's still open.\nPlain language.");
-  const scribeInput = scribeRequest.request.messages[0].content[0].text;
-  assert.match(scribeInput, /Attached ticket \(ticket\.md\):/);
-  assert.match(scribeInput, /# TASK-1 — One task/);
-  assert.match(scribeInput, /## Architect notes \/ scratch\n\nTry the narrow seam\./);
-  assert.match(scribeInput, /Attached architect transcript \(transcript\.md\):/);
-  assert.match(scribeInput, /Read files:\n- src\/final\.ts/);
-  assert.doesNotMatch(scribeInput, /operator-0\n|operator-1\n|SECRET_THINKING|SECRET_COMPACTION|SECRET_TOOL_RESULT/);
-  assert.equal(scribeRequest.options.reasoning, "low");
-  assert.equal(scribeRequest.options.cacheRetention, "none");
   const vetDecision = await extension.makeAdmissionDecision(completionCtx, "live evidence", {
     policyPath, admissionPromptPath: join(root, "prompts", "services", "admission-vet.md"),
   });
   assert.deepEqual(vetDecision, { decision: "bounce", reason: "review.mjs is already live" });
   assert.equal(vetRequest.options.reasoning, "low");
   assert.equal(vetRequest.options.cacheRetention, "none");
-  assert.notEqual(vetRequest.options.sessionId, scribeRequest.options.sessionId);
   assert.equal(vetRequest.request.messages[0].content[0].text, "live evidence");
-  assert.equal(scribeRequest.options.signal, undefined);
   assert.equal(vetRequest.options.signal, undefined);
 
   const hopCalls = [];
   const hopCtx = {
     signal: undefined,
-    sessionManager: { getBranch: () => branch },
     modelRegistry: {
       find(provider, model) { return { provider, id: model }; },
       async complete(_model, _request, options) {
         hopCalls.push(options.sessionId);
         if (hopCalls.length === 1) return { stopReason: "aborted", content: [] };
-        return { stopReason: "stop", content: [{ type: "text", text: exactNote }] };
+        return { stopReason: "stop", content: [{ type: "text", text: '{"decision":"clear"}' }] };
       },
     },
   };
-  const recovered = await extension.makeNote(hopCtx, task, { policyPath, scribePromptPath: join(root, "prompts", "services", "scribe.md") });
-  assert.equal(recovered.note, exactNote);
+  const recovered = await extension.makeAdmissionDecision(hopCtx, "live evidence", {
+    policyPath, admissionPromptPath: join(root, "prompts", "services", "admission-vet.md"),
+  });
+  assert.deepEqual(recovered, { decision: "clear" });
   assert.equal(hopCalls.length, 2);
   assert.notEqual(hopCalls[0], hopCalls[1]);
 
   await assert.rejects(
-    () => extension.makeNote({
+    () => extension.makeAdmissionDecision({
       signal: undefined,
-      sessionManager: { getBranch: () => branch },
       modelRegistry: {
         find(provider, model) { return { provider, id: model }; },
         async complete() { return { stopReason: "aborted", content: [] }; },
       },
-    }, task, { policyPath, scribePromptPath: join(root, "prompts", "services", "scribe.md") }),
-    /scribe hop died/,
+    }, "live evidence", { policyPath, admissionPromptPath: join(root, "prompts", "services", "admission-vet.md") }),
+    /admission vet hop died/,
   );
 
   let cancelledCalls = 0;
   const alreadyAborted = new AbortController();
   alreadyAborted.abort();
   await assert.rejects(
-    () => extension.makeNote({
+    () => extension.makeAdmissionDecision({
       signal: alreadyAborted.signal,
-      sessionManager: { getBranch: () => branch },
       modelRegistry: {
         find(provider, model) { return { provider, id: model }; },
-        async complete() { cancelledCalls += 1; return { stopReason: "stop", content: [{ type: "text", text: exactNote }] }; },
+        async complete() { cancelledCalls += 1; return { stopReason: "stop", content: [{ type: "text", text: '{"decision":"clear"}' }] }; },
       },
-    }, task, { policyPath, scribePromptPath: join(root, "prompts", "services", "scribe.md") }),
-    /note generation was cancelled/,
+    }, "live evidence", { policyPath, admissionPromptPath: join(root, "prompts", "services", "admission-vet.md") }),
+    /admission vet was cancelled/,
   );
   assert.equal(cancelledCalls, 0);
 
-  const emptyThenNote = [];
-  const emptyRecovered = await extension.makeNote({
-    sessionManager: { getBranch: () => branch },
+  const emptyThenClear = [];
+  const emptyRecovered = await extension.makeAdmissionDecision({
     modelRegistry: {
       find(provider, model) { return { provider, id: model }; },
       async complete() {
-        emptyThenNote.push(1);
-        if (emptyThenNote.length === 1) return { stopReason: "stop", content: [{ type: "text", text: "   " }] };
-        return { stopReason: "stop", content: [{ type: "text", text: exactNote }] };
+        emptyThenClear.push(1);
+        if (emptyThenClear.length === 1) return { stopReason: "stop", content: [{ type: "text", text: "   " }] };
+        return { stopReason: "stop", content: [{ type: "text", text: '{"decision":"clear"}' }] };
       },
     },
-  }, task, { policyPath, scribePromptPath: join(root, "prompts", "services", "scribe.md") });
-  assert.equal(emptyRecovered.note, exactNote);
-  assert.equal(emptyThenNote.length, 2);
+  }, "live evidence", { policyPath, admissionPromptPath: join(root, "prompts", "services", "admission-vet.md") });
+  assert.deepEqual(emptyRecovered, { decision: "clear" });
+  assert.equal(emptyThenClear.length, 2);
 
-  const prepared = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task, note: exactNote, transcript });
+  const prepared = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task });
   assert.equal(await readFile(prepared.ticketPath, "utf8"), `${ticket}\n`);
-  assert.equal(await readFile(prepared.transcriptPath, "utf8"), `${transcript}\n`);
-  assert.equal(await readFile(prepared.notePath, "utf8"), `${exactNote}\n`);
-  assert.equal(await readFile(prepared.gatePath, "utf8"), lib.formatGateDocument(ticket, exactNote));
+  assert.equal(await readFile(prepared.transcriptPath, "utf8"), `\n`);
+  assert.equal(await readFile(prepared.notePath, "utf8"), `${ticket}\n`);
+  assert.equal(await readFile(prepared.gatePath, "utf8"), lib.formatGateDocument(ticket));
   assert.equal((await lstat(prepared.stateDir)).mode & 0o077, 0);
   assert.equal((await lstat(prepared.ticketPath)).mode & 0o077, 0);
   assert.equal((await lstat(prepared.transcriptPath)).mode & 0o077, 0);
   assert.equal((await lstat(prepared.notePath)).mode & 0o077, 0);
   assert.equal((await lstat(prepared.gatePath)).mode & 0o077, 0);
-  assert.equal(await admission.findExistingBrief({ taskId: task.id, project: "qq", env }), exactNote);
+  assert.equal(await admission.findExistingBrief({ taskId: task.id, project: "qq", env }), ticket);
   const preparedBootstrap = await lib.prepareBootstrapRequest({
     cwd: "/repo", env, task, prepared, qaBinding: { model: "qa" },
     architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a9",
@@ -436,7 +396,7 @@ try {
   assert.equal(state.notePath, prepared.notePath);
   assert.equal(state.gatePath, prepared.gatePath);
   assert.equal(state.bootstrapProof.sessionPath, proofPath);
-  assert.equal(await readFile(state.notePath, "utf8"), `${exactNote}\n`);
+  assert.equal(await readFile(state.notePath, "utf8"), `${ticket}\n`);
   assert.equal(JSON.parse(await readFile(state.statePath, "utf8")).status, "running");
   assert.ok(spawnCalls.every(({ options }) => options.signal === startSignal));
   const worktreeAddIndex = spawnCalls.findIndex(({ command, args }) => command === "git" && args[0] === "worktree" && args[1] === "add");
@@ -470,10 +430,10 @@ try {
   assert.match(prompt, /call done with ref HEAD/);
   assert.match(prompt, /# TASK-1 — One task/);
   assert.match(prompt, /## Architect notes \/ scratch/);
-  assert.ok(prompt.endsWith(exactNote));
+  assert.ok(prompt.endsWith(ticket.trimEnd()));
 
-  const droppedTask = { id: "TASK-5", title: "Dropped prompt" };
-  const droppedPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: droppedTask, note: exactNote });
+  const droppedTask = { id: "TASK-5", title: "Dropped prompt", implementationNotes: ticketSecret };
+  const droppedPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: droppedTask });
   const droppedCalls = [];
   let statusAtDroppedPrompt;
   let droppedSubmissions = 0;
@@ -487,11 +447,11 @@ try {
     async submitPrompt() {
       droppedSubmissions += 1;
       statusAtDroppedPrompt = JSON.parse(await readFile(droppedPreparation.statePath, "utf8")).status;
-      throw new Error(`agent_prompt_rejected: ${exactNote}`);
+      throw new Error(`agent_prompt_rejected: ${lib.formatTicket(droppedTask)}`);
     },
   }), (error) => {
     assert.match(error.message, /agent_prompt_rejected/);
-    assert.doesNotMatch(error.message, new RegExp(exactNote));
+    assert.doesNotMatch(error.message, new RegExp(ticketSecret));
     return true;
   });
   assert.equal(statusAtDroppedPrompt, "starting");
@@ -506,7 +466,7 @@ try {
   await assert.rejects(access(droppedPreparation.stateDir), { code: "ENOENT" });
 
   const existingTask = { id: "TASK-4", title: "Reuse runs" };
-  const existingPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: existingTask, note: exactNote });
+  const existingPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: existingTask });
   const existingCalls = [];
   const existingRun = async (command, args, options = {}) => {
     existingCalls.push({ command, args, options });
@@ -557,7 +517,7 @@ try {
   ]);
 
   const coldTask = { id: "TASK-10", title: "Cold runner" };
-  const coldPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: coldTask, note: exactNote });
+  const coldPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: coldTask });
   const coldSessionPath = join(scratch, "cold-session.jsonl");
   const coldCalls = [];
   let coldPrompt;
@@ -598,7 +558,7 @@ try {
   assert.equal(coldState.status, "running");
 
   const timeoutTask = { id: "TASK-11", title: "Unproved prompt" };
-  const timeoutPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: timeoutTask, note: exactNote });
+  const timeoutPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: timeoutTask });
   const timeoutSessionPath = join(scratch, "timeout-session.jsonl");
   const timeoutCalls = [];
   let timeoutClock = 0;
@@ -632,7 +592,7 @@ try {
   await assert.rejects(access(timeoutPreparation.stateDir), { code: "ENOENT" });
 
   const nativeTask = { id: "TASK-14", title: "Native runner" };
-  const nativePreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: nativeTask, note: exactNote });
+  const nativePreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: nativeTask });
   const nativeArchitect = "session-4b70f906-ce0a-4135-bc9e-b231db9b98b1";
   const nativeChild = "621eeb4e-3796-4d58-92d2-9a45e4f133b0";
   const nativeMessage = "1f69c7ed-19bb-4c42-9745-cf17d24d55d1";
@@ -807,8 +767,8 @@ try {
   }), /not durable within 20ms/);
   assert.equal(absentInspections, 2);
 
-  const absentTask = { id: "TASK-15", title: "Absent native persistence" };
-  const absentPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: absentTask, note: exactNote });
+  const absentTask = { id: "TASK-15", title: "Absent native persistence", implementationNotes: ticketSecret };
+  const absentPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: absentTask });
   const absentChild = "c24ee08f-0824-4dfa-b123-d2f04bcec9d7";
   let absentSetup;
   let absentParentId;
@@ -853,10 +813,10 @@ try {
     async sleep(ms) { absentStartClock += ms; },
   }), (error) => {
     assert.match(error.message, /not durable within 20ms/);
-    assert.doesNotMatch(error.message, new RegExp(exactNote));
+    assert.doesNotMatch(error.message, new RegExp(ticketSecret));
     return true;
   });
-  assert.equal(absentStarts, 1, "durability failure must not reinject the private prompt");
+  assert.equal(absentStarts, 1, "durability failure must not reinject the ticket");
   assert.equal(absentStartClock, 20);
   assert.equal(nativeBoundary.resolveSession(absentChild).source, "pi-environment");
   await assert.rejects(access(absentPreparation.stateDir), { code: "ENOENT" });
@@ -864,13 +824,13 @@ try {
   assert.equal(absentCommands.some(({ command, args }) => command === "git" && args[0] === "worktree" && args[1] === "remove"), true);
   assert.equal(absentCommands.some(({ command, args }) => command === "git" && args[0] === "branch" && args[1] === "-D"), true);
 
-  const refusedTask = { id: "TASK-16", title: "Refused native model" };
-  const refusedPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: refusedTask, note: exactNote });
+  const refusedTask = { id: "TASK-16", title: "Refused native model", implementationNotes: ticketSecret };
+  const refusedPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: refusedTask });
   const refusedServices = {
     ...nativeServices,
     agents: {
       ...nativeServices.agents,
-      async create() { throw new Error(`raw model refusal ${exactNote}`); },
+      async create() { throw new Error(`raw model refusal ${lib.formatTicket(refusedTask)}`); },
     },
   };
   await assert.rejects(dshRun.startDshRun({
@@ -879,7 +839,7 @@ try {
     runnerProfile: nativeProfile, approval: approvalFor(refusedPreparation, refusedTask), services: refusedServices, sessionContext: nativeBoundary,
   }), (error) => {
     assert.match(error.message, /bootstrap parent was refused/);
-    assert.doesNotMatch(error.message, new RegExp(exactNote));
+    assert.doesNotMatch(error.message, new RegExp(ticketSecret));
     assert.doesNotMatch(error.message, /raw model refusal/);
     return true;
   });
@@ -903,11 +863,11 @@ try {
     messageId: nativeMessage, marker: "[qq-bootstrap:task-14-native]",
   }, { signal: cancelledNative.signal }), /cancelled/);
 
-  const cancelledPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: { id: "TASK-2", title: "Cancel" }, note: exactNote });
+  const cancelledPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: { id: "TASK-2", title: "Cancel" } });
   await lib.discardRun(cancelledPreparation);
   await assert.rejects(access(cancelledPreparation.stateDir), { code: "ENOENT" });
 
-  const failedGate = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: { id: "TASK-3", title: "Fail" }, note: exactNote });
+  const failedGate = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: { id: "TASK-3", title: "Fail" } });
   let failedGateClosed = false;
   await assert.rejects(lib.awaitBriefGate({
     env, prepared: failedGate, pluginRoot: join(root, "plugins", "brief-gate"),
@@ -927,8 +887,8 @@ try {
   assert.equal(failedGateClosed, true);
   await lib.discardRun(failedGate);
 
-  const persistenceTask = { id: "TASK-11", title: "Persistence rollback" };
-  const persistencePreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: persistenceTask, note: exactNote });
+  const persistenceTask = { id: "TASK-11", title: "Persistence rollback", implementationNotes: ticketSecret };
+  const persistencePreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: persistenceTask });
   const persistenceRequest = await lib.prepareBootstrapRequest({
     cwd: "/repo", env, task: persistenceTask, prepared: persistencePreparation, qaBinding: {},
     architectSession: "019ff7ad-2cba-75a9-adc2-c15a0a92d6a8",
@@ -940,14 +900,14 @@ try {
   await assert.rejects(bootstrap.bootstrapRun(async () => ({ code: 0, stdout: "", stderr: "" }), persistenceRequest.bootstrapPath, {
     env: persistenceEnv,
     async sleep() {},
-    async startRun() { throw new Error(`agent refused ${exactNote} persistence-credential`); },
+    async startRun() { throw new Error(`agent refused ${lib.formatTicket(persistenceTask)} persistence-credential`); },
     async setBoardStatus(_run, cwd, id, status) {
       assert.deepEqual({ cwd, id, status }, { cwd: "/repo", id: persistenceTask.id, status: "To Do" });
       persistenceBoardRollback = true;
     },
     async persistBootstrapFailure() {
       await access(persistencePreparation.stateDir);
-      throw new Error(`cannot persist ${exactNote}`);
+      throw new Error("cannot persist failure outbox");
     },
     async sendRunEvent(outcome, kind) {
       assert.equal(kind, runEvents.RUN_BOOTSTRAP_FAILED_KIND);
@@ -961,22 +921,22 @@ try {
     },
   }), (error) => {
     assert.match(error.message, /notification persistence failed/);
-    assert.doesNotMatch(error.message, new RegExp(exactNote));
+    assert.doesNotMatch(error.message, new RegExp(ticketSecret));
     assert.doesNotMatch(error.message, /persistence-credential/);
     return true;
   });
   assert.equal(persistenceBoardRollback, true, "board rollback must survive failure-outbox persistence failure");
   assert.match(persistenceFailureOutcome.bootstrapFailureReason, /notification persistence failed/);
   assert.equal(persistenceFailureNotification, persistenceFailureOutcome.bootstrapFailureReason);
-  assert.doesNotMatch(JSON.stringify(persistenceFailureOutcome), new RegExp(exactNote));
+  assert.doesNotMatch(JSON.stringify(persistenceFailureOutcome), new RegExp(ticketSecret));
   assert.doesNotMatch(JSON.stringify(persistenceFailureOutcome), /persistence-credential/);
   await Promise.all([
     persistencePreparation.stateDir, persistenceRequest.bootstrapPath, persistencePreparation.ticketPath,
     persistencePreparation.notePath, persistencePreparation.gatePath, persistencePreparation.statePath,
   ].map((path) => assert.rejects(access(path), { code: "ENOENT" })));
 
-  const workerTask = { id: "TASK-12", title: "Worker rollback" };
-  const workerPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: workerTask, note: exactNote });
+  const workerTask = { id: "TASK-12", title: "Worker rollback", implementationNotes: ticketSecret };
+  const workerPreparation = await lib.prepareRun({ cwd: "/repo", env, project: "qq", task: workerTask });
   const dshArchitectSession = "session-4b70f906-ce0a-4135-bc9e-b231db9b98b1";
   const workerRequest = await lib.prepareBootstrapRequest({
     cwd: "/repo", env, task: workerTask, prepared: workerPreparation, qaBinding: {},
@@ -994,7 +954,7 @@ try {
     async sleep() {},
     async startRun(options) {
       assert.equal(options.signal, undefined, "detached worker must not inherit the architect turn signal");
-      throw new Error(`agent refused ${exactNote} credential-secret`);
+      throw new Error(`agent refused ${lib.formatTicket(workerTask)} credential-secret`);
     },
     async setBoardStatus(_run, cwd, id, status) {
       boardAttempts += 1;
@@ -1017,12 +977,12 @@ try {
     async notify(taskId, reason) {
       await assert.rejects(access(workerPreparation.stateDir), { code: "ENOENT" });
       assert.equal(taskId, workerTask.id);
-      assert.doesNotMatch(reason, new RegExp(exactNote));
+      assert.doesNotMatch(reason, new RegExp(ticketSecret));
       assert.doesNotMatch(reason, /credential-secret/);
       notificationBody = `${taskId}: bootstrap failed`;
     },
   }), (error) => {
-    assert.doesNotMatch(error.message, new RegExp(exactNote));
+    assert.doesNotMatch(error.message, new RegExp(ticketSecret));
     assert.doesNotMatch(error.message, /credential-secret/);
     return true;
   });
@@ -1032,7 +992,7 @@ try {
   assert.deepEqual(failurePayloads[0], failurePayloads[1]);
   assert.equal(failurePayloads[1].architect_session, dshArchitectSession, "the bootstrap failure producer changed the DSH architect address");
   assert.equal(failurePayloads[1].bootstrap.task_returned, true);
-  assert.doesNotMatch(JSON.stringify(failurePayloads[1]), new RegExp(exactNote));
+  assert.doesNotMatch(JSON.stringify(failurePayloads[1]), new RegExp(ticketSecret));
   assert.doesNotMatch(JSON.stringify(failurePayloads[1]), /credential-secret/);
   assert.equal(notificationBody, `${workerTask.id}: bootstrap failed`);
   const outboxRoot = bootstrap.bootstrapFailureOutboxRoot(workerEnv);
@@ -1083,7 +1043,16 @@ try {
     extension.default({
       registerTool(tool) { registrations.push(tool); },
       events: { on(name, fn) { events.set(name, fn); } },
-    }, { env, exec: run, admitDelegate, ...deps });
+    }, {
+      env, exec: run, admitDelegate,
+      async readExecutionPolicy() {
+        return {
+          qa: { provider: "test", model: "qa", effort: "low" },
+          roles: { runner: { default: "one", profiles: { one: { provider: "test", model: "runner", effort: "high" } } } },
+        };
+      },
+      ...deps,
+    });
     events.get("qq:role-selected")({ role: "architect" });
     return registrations.find(({ name }) => name === "delegate");
   }
@@ -1120,7 +1089,7 @@ try {
   assert.equal(fakeSpawn.options.detached, true);
   assert.deepEqual(fakeSpawn.options.stdio, ["ignore", "ignore", "ignore", "ipc"]);
   assert.equal(fakeSpawn.args.at(-1), "/private/bootstrap.json");
-  assert.doesNotMatch(JSON.stringify(fakeSpawn.args), new RegExp(exactNote));
+  assert.doesNotMatch(JSON.stringify(fakeSpawn.args), /One task/);
   fakeChild.emit("message", { type: "qq-bootstrap-accepted" });
   assert.equal(await launchAccepted, 4241);
 
@@ -1131,8 +1100,7 @@ try {
   let detachedWorkPending = true;
   const approvedTool = delegateHarness({
     run: backlogRun(approvalStatuses, approvalOrder),
-    async makeNote() { approvalOrder.push("scribe"); assert.deepEqual(approvalStatuses, ["In Progress"]); return { note: exactNote, qaBinding: { model: "qa" } }; },
-    async prepareRun(options) { approvalOrder.push("prepare"); assert.equal(options.note, exactNote); assert.deepEqual(approvalStatuses, ["In Progress"]); return approvedPreparation; },
+    async prepareRun(options) { approvalOrder.push("prepare"); assert.equal("note" in options, false); assert.deepEqual(approvalStatuses, ["In Progress"]); return approvedPreparation; },
     async awaitBriefGate(options) { approvalOrder.push("gate"); assert.equal(options.prepared, approvedPreparation); assert.equal(options.signal, approvalSignal); assert.deepEqual(approvalStatuses, ["In Progress"]); return "approved"; },
     async prepareBootstrapRequest(options) {
       approvalOrder.push("bootstrap");
@@ -1149,13 +1117,13 @@ try {
     async discardRun() { approvalOrder.push("discard"); },
   });
   const approved = await approvedTool.execute("approve", { id: task.id }, approvalSignal, undefined, ctx);
-  assert.deepEqual(approvalOrder, ["status:In Progress", "scribe", "prepare", "gate", "bootstrap", "launch"]);
+  assert.deepEqual(approvalOrder, ["status:In Progress", "prepare", "gate", "bootstrap", "launch"]);
   assert.deepEqual(approvalStatuses, ["In Progress"]);
   assert.equal(detachedWorkPending, true, "delegate must not await detached bootstrap work");
   assert.equal(approved.content[0].text, `Approved ${task.id}; runner starting.`);
   assert.equal(approved.details.worker_pid, 4242);
   assert.equal(approved.content[0].text.includes("\n"), false);
-  assert.doesNotMatch(JSON.stringify(approved), new RegExp(exactNote));
+  assert.doesNotMatch(JSON.stringify(approved), /Try the narrow seam/);
 
   const nativeArchitectSession = "session-4b70f906-ce0a-4135-bc9e-b231db9b98b1";
   const nativeSessionContext = {
@@ -1172,7 +1140,6 @@ try {
   const nativeTool = delegateHarness({
     sessionContext: nativeSessionContext,
     run: backlogRun([], nativeOrder),
-    async makeNote() { nativeOrder.push("scribe"); return { note: exactNote, qaBinding: { model: "qa" } }; },
     async prepareRun() { nativeOrder.push("prepare"); return approvedPreparation; },
     async awaitBriefGate() { nativeOrder.push("gate"); return "approved"; },
     async readExecutionPolicy() {
@@ -1204,19 +1171,18 @@ try {
   });
   const nativeCtx = { ...ctx, sessionManager: { getSessionId: () => nativeArchitectSession } };
   const nativeApproved = await nativeTool.execute("native-approve", { id: task.id }, undefined, undefined, nativeCtx);
-  assert.deepEqual(nativeOrder, ["status:In Progress", "scribe", "prepare", "gate", "profile", "bootstrap", "native-launch"]);
+  assert.deepEqual(nativeOrder, ["status:In Progress", "profile", "prepare", "gate", "bootstrap", "native-launch"]);
   assert.equal(piFallbackLaunched, false);
   assert.equal(nativeApproved.content[0].text, `Approved ${task.id}; native runner started.`);
   assert.equal(nativeApproved.details.status, "running");
   assert.equal(nativeApproved.details.runner_session, "621eeb4e-3796-4d58-92d2-9a45e4f133b0");
-  assert.doesNotMatch(JSON.stringify(nativeApproved), new RegExp(exactNote));
+  assert.doesNotMatch(JSON.stringify(nativeApproved), /Try the narrow seam/);
 
   const unavailableStatuses = [];
   let unavailableDiscarded = false;
   const unavailableNativeTool = delegateHarness({
     sessionContext: nativeSessionContext,
     run: backlogRun(unavailableStatuses),
-    async makeNote() { return { note: exactNote, qaBinding: {} }; },
     async prepareRun() { return approvedPreparation; },
     async awaitBriefGate() { return "approved"; },
     async readExecutionPolicy() {
@@ -1237,25 +1203,23 @@ try {
   let cancelStarted = false;
   const cancelledTool = delegateHarness({
     run: backlogRun(cancelStatuses, cancelOrder),
-    async makeNote() { cancelOrder.push("scribe"); return { note: exactNote, qaBinding: {} }; },
     async prepareRun() { cancelOrder.push("prepare"); return approvedPreparation; },
     async awaitBriefGate() { cancelOrder.push("gate"); assert.deepEqual(cancelStatuses, ["In Progress"]); return "cancelled"; },
     async discardRun() { cancelOrder.push("discard"); },
     async launchBootstrap() { cancelStarted = true; },
   });
   const cancelled = await cancelledTool.execute("cancel", { id: task.id }, undefined, undefined, ctx);
-  assert.deepEqual(cancelOrder, ["status:In Progress", "scribe", "prepare", "gate", "status:To Do", "discard"]);
+  assert.deepEqual(cancelOrder, ["status:In Progress", "prepare", "gate", "status:To Do", "discard"]);
   assert.deepEqual(cancelStatuses, ["In Progress", "To Do"]);
   assert.equal(cancelStarted, false);
   assert.equal(cancelled.content[0].text, `Cancelled ${task.id}; runner not started.`);
   assert.equal(cancelled.content[0].text.includes("\n"), false);
-  assert.doesNotMatch(JSON.stringify(cancelled), new RegExp(exactNote));
+  assert.doesNotMatch(JSON.stringify(cancelled), /Try the narrow seam/);
 
   const failureStatuses = [];
   let failureDiscarded = false;
   const failedTool = delegateHarness({
     run: backlogRun(failureStatuses),
-    async makeNote() { return { note: exactNote, qaBinding: {} }; },
     async prepareRun() { return approvedPreparation; },
     async awaitBriefGate() { throw new Error("gate unavailable"); },
     async discardRun() { failureDiscarded = true; },
@@ -1269,7 +1233,6 @@ try {
   let rollbackDiscarded = false;
   const rollbackTool = delegateHarness({
     run: backlogRun(rollbackStatuses),
-    async makeNote() { return { note: exactNote, qaBinding: {} }; },
     async prepareRun() { return approvedPreparation; },
     async awaitBriefGate() { return "approved"; },
     async prepareBootstrapRequest() { return { bootstrapPath: "/private/gate/bootstrap.json" }; },
@@ -1277,8 +1240,7 @@ try {
     async discardRun() { rollbackDiscarded = true; },
   });
   const rolledBack = await rollbackTool.execute("start-failure", { id: task.id }, undefined, undefined, ctx);
-  assert.match(rolledBack.content[0].text, /runs operation failed/);
-  assert.doesNotMatch(JSON.stringify(rolledBack), new RegExp(exactNote));
+  assert.match(rolledBack.content[0].text, /start failed: PRIVATE exact runner note/);
   assert.deepEqual(rollbackStatuses, ["In Progress", "To Do"]);
   assert.equal(rollbackDiscarded, true);
 
@@ -1288,7 +1250,6 @@ try {
   let readFailureDiscarded = false;
   const readFailureTool = delegateHarness({
     run: backlogRun(readFailureStatuses),
-    async makeNote() { return { note: exactNote, qaBinding: {} }; },
     async prepareRun() { return approvedPreparation; },
     async awaitBriefGate() { return "approved"; },
     async prepareBootstrapRequest() { return { bootstrapPath: malformedBootstrapPath }; },
@@ -1306,7 +1267,6 @@ try {
   const abortController = new AbortController();
   const abortTool = delegateHarness({
     run: backlogRun(abortStatuses),
-    async makeNote() { return { note: exactNote, qaBinding: {} }; },
     async prepareRun() { return approvedPreparation; },
     async awaitBriefGate() { return "approved"; },
     async prepareBootstrapRequest() {
@@ -1322,14 +1282,14 @@ try {
   assert.equal(abortDiscarded, true);
   assert.deepEqual(abortStatuses, ["In Progress", "To Do"]);
 
-  const noteFailureStatuses = [];
-  const noteFailureTool = delegateHarness({
-    run: backlogRun(noteFailureStatuses),
-    async makeNote() { throw new Error("note failed"); },
+  const prepareFailureStatuses = [];
+  const prepareFailureTool = delegateHarness({
+    run: backlogRun(prepareFailureStatuses),
+    async prepareRun() { throw new Error("prepare failed"); },
   });
-  const noteFailure = await noteFailureTool.execute("note-failure", { id: task.id }, undefined, undefined, ctx);
-  assert.match(noteFailure.content[0].text, /note failed/);
-  assert.deepEqual(noteFailureStatuses, ["In Progress", "To Do"]);
+  const prepareFailure = await prepareFailureTool.execute("prepare-failure", { id: task.id }, undefined, undefined, ctx);
+  assert.match(prepareFailure.content[0].text, /prepare failed/);
+  assert.deepEqual(prepareFailureStatuses, ["In Progress", "To Do"]);
 
   function admissionBoardRun(board, boardEvents) {
     return async (_command, args) => {
@@ -1359,7 +1319,7 @@ try {
 
   function actualAdmissionTool(board, boardEvents, overrides = {}) {
     const run = admissionBoardRun(board, boardEvents);
-    const calls = { notes: [], gates: [], starts: [] };
+    const calls = { gates: [], starts: [] };
     const tool = delegateHarness({
       run,
       admitDelegate: extension.admitDelegate,
@@ -1371,9 +1331,8 @@ try {
       },
       async findExistingBrief() { return undefined; },
       makeAdmissionDecision: overrides.makeAdmissionDecision,
-      async makeNote(_ctx, admittedTask) {
-        calls.notes.push(admittedTask.id);
-        return { note: `${exactNote} for ${admittedTask.id}`, qaBinding: {} };
+      async readExecutionPolicy() {
+        return { qa: { provider: "test", model: "qa", effort: "low" }, roles: { runner: { default: "one", profiles: { one: { provider: "test", model: "runner", effort: "high" } } } } };
       },
       async prepareRun({ task: admittedTask }) {
         return { taskId: admittedTask.id, stateDir: `/private/${admittedTask.id}`, notePath: `/private/${admittedTask.id}/note.md` };
@@ -1423,7 +1382,6 @@ try {
   assert.equal(secondOverlapResult.content[0].text, "Bounced TASK-7: extensions/board.ts is already claimed by TASK-6");
   assert.equal(secondOverlapResult.content[0].text.includes("\n"), false);
   assert.equal(overlapBoard.get("TASK-7").status, "To Do");
-  assert.deepEqual(overlap.calls.notes, ["TASK-6"]);
   assert.deepEqual(overlap.calls.gates, ["TASK-6"]);
   assert.deepEqual(overlap.calls.starts, ["TASK-6"]);
 
@@ -1466,7 +1424,6 @@ try {
     "Approved TASK-8; runner starting.", "Approved TASK-9; runner starting.",
   ]);
   assert.ok(clearEvents.indexOf("status:TASK-8:In Progress") < clearEvents.indexOf("second-vet-after-first-claim"));
-  assert.deepEqual(clear.calls.notes.sort(), ["TASK-8", "TASK-9"]);
   assert.deepEqual(clear.calls.starts.sort(), ["TASK-8", "TASK-9"]);
   assert.equal(maximumActiveGates, 1);
 

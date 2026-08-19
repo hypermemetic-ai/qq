@@ -25,7 +25,7 @@ async function exercise(key, expected) {
   const decisionPath = join(scratch, "decision");
   const glowPath = join(scratch, "glow");
   const glowLog = join(scratch, "glow.args");
-  await writeFile(documentPath, "# Exact private ticket\n\n## Delegate note\n\nPrivate note\n", { mode: 0o600 });
+  await writeFile(documentPath, "# Exact private ticket\n", { mode: 0o600 });
   await writeFile(glowPath, "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"$QQ_TEST_GLOW_LOG\"\ncat -- \"$1\"\n", { mode: 0o700 });
   await chmod(glowPath, 0o700);
 
@@ -49,7 +49,7 @@ async function exercise(key, expected) {
     assert.equal((await waitFor(decisionPath)).trim(), expected);
     assert.equal(await readFile(glowLog, "utf8"), `${documentPath}\n`);
     assert.match(output, /Exact private ticket/);
-    assert.match(output, /Private note/);
+    assert.doesNotMatch(output, /Private note|Delegate note/);
     assert.match(output, /\[a\] approve   \[c\] cancel/);
     assert.match(output, /QQ_BRIEF_GATE_DECIDED/);
   } finally {
@@ -150,7 +150,7 @@ async function exercisePtyResize(key, expected) {
   const decisionPath = join(scratch, "decision");
   const configPath = join(scratch, "config");
   await mkdir(join(configPath, "glow"), { recursive: true, mode: 0o700 });
-  await writeFile(documentPath, "# Resizable ticket sentinel\n\n## Delegate note\n\nReadable note sentinel\n", { mode: 0o600 });
+  await writeFile(documentPath, "# Resizable ticket sentinel\n", { mode: 0o600 });
 
   const child = spawn(process.env.PYTHON ?? "python3", ["-c", ptyDriver, join(pluginRoot, "brief-gate.sh"), key], {
     env: {
@@ -180,7 +180,7 @@ async function exercisePtyResize(key, expected) {
       .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
       .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
     assert.match(visibleOutput, /Resizable ticket sentinel/);
-    assert.match(visibleOutput, /Readable note sentinel/);
+    assert.doesNotMatch(visibleOutput, /Readable note sentinel|Delegate note/);
     assert.match(visibleOutput, /\[a\] approve   \[c\] cancel/);
     assert.match(visibleOutput, /QQ_BRIEF_GATE_DECIDED/);
     assert.doesNotMatch(output, /\x1b\[\?(?:47|1047|1049)[hl]|\x1b\[2J/);
