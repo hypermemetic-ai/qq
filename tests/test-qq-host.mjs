@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { createServer, request as httpRequest } from "node:http";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { createConsoleHandler } from "../qq-ui/src/http-app.mjs";
+import { createConsoleHandler, createRootRedirectHandler } from "../qq-ui/src/http-app.mjs";
 import { createQqService } from "../qq/src/session.mjs";
 import { renderMarkdownText, renderMessageText } from "../qq-ui/src/markdown.mjs";
 import { renderLoginSheet, renderOfferPopup, renderSessionContent } from "../qq-ui/src/render.mjs";
@@ -566,6 +566,42 @@ try {
   const shortcut = await request("/qq", { headers: { cookie: "proof-client=home" } });
   assert.equal(shortcut.status, 308);
   assert.equal(shortcut.headers.location, "/qq/");
+  const rootServer = createServer(createRootRedirectHandler("/qq"));
+  await new Promise((resolveListen) => rootServer.listen(0, "127.0.0.1", resolveListen));
+  try {
+    const rootAddress = rootServer.address();
+    assert.ok(rootAddress && typeof rootAddress !== "string");
+    const rootRequest = (path, options = {}) => new Promise((resolveRequest, reject) => {
+      const req = httpRequest({
+        host: "127.0.0.1",
+        port: rootAddress.port,
+        path,
+        method: options.method ?? "GET",
+        agent: false,
+      }, (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => resolveRequest({
+          status: res.statusCode,
+          headers: res.headers,
+          body: Buffer.concat(chunks).toString("utf8"),
+        }));
+      });
+      req.on("error", reject);
+      req.end();
+    });
+    const root = await rootRequest("/");
+    assert.equal(root.status, 308);
+    assert.equal(root.headers.location, "/qq/");
+    const withQuery = await rootRequest("/?client=phone");
+    assert.equal(withQuery.status, 308);
+    assert.equal(withQuery.headers.location, "/qq/?client=phone");
+    const posted = await rootRequest("/", { method: "POST" });
+    assert.equal(posted.status, 405);
+  } finally {
+    rootServer.closeAllConnections?.();
+    await new Promise((resolveClose) => rootServer.close(resolveClose));
+  }
   const home = await request(shortcut.headers.location, { headers: { cookie: "proof-client=home" } });
   assert.equal(home.status, 200);
   assert.match(home.headers["cache-control"], /no-store/);
@@ -918,6 +954,9 @@ try {
   assert.match(patch, /inject: \[qq, webServer\]/);
   assert.match(uiPlugin, /refusing a non-loopback web server/);
   assert.match(uiPlugin, /inject = \["qq", "webServer"\]/);
+  assert.match(uiPlugin, /kind: "exact"/);
+  assert.match(uiPlugin, /createRootRedirectHandler/);
+  assert.match(uiPlugin, /path: "\/"/);
   assert.match(qqPlugin, /provide = "qq"/);
   assert.match(qqPlugin, /inject = \["agents", "sessions", "sessionPersistence"\]/);
   assert.doesNotMatch(qqSession, /<!doctype html>|htmx|text\/css|EventSource/);
