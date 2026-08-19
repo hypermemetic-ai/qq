@@ -194,7 +194,7 @@ function post(sessionId, action, fields = {}, extraHeaders = {}, htmx = true) {
   });
 }
 
-function openSse(sessionId) {
+function openSse(sessionId, port = address.port) {
   return new Promise((resolveOpen, rejectOpen) => {
     const messages = [];
     const waiters = new Set();
@@ -202,7 +202,7 @@ function openSse(sessionId) {
     let response;
     const req = httpRequest({
       host: "127.0.0.1",
-      port: address.port,
+      port,
       path: `/qq/session/${sessionId}/events`,
       method: "GET",
       agent: false,
@@ -446,34 +446,46 @@ function openSse(sessionId) {
     assert.match(page.body, /Hand off/);
     assert.match(page.body, /Bank/);
     assert.match(page.body, /Ignore/);
-    const body = new URLSearchParams({ choice: "ignore" }).toString();
-    const ignored = await new Promise((resolveRequest, reject) => {
-      const req = httpRequest({
-        host: "127.0.0.1",
-        port: offerPort,
-        path: `/qq/session/${primaryId}/offer`,
-        method: "POST",
-        agent: false,
-        headers: {
-          "content-type": "application/x-www-form-urlencoded",
-          "content-length": Buffer.byteLength(body),
-          "hx-request": "true",
-          "sec-fetch-site": "same-origin",
-        },
-      }, (res) => {
-        const chunks = [];
-        res.on("data", (chunk) => chunks.push(chunk));
-        res.on("end", () => resolveRequest({
-          status: res.statusCode,
-          body: Buffer.concat(chunks).toString("utf8"),
-        }));
+    const stream = await openSse(primaryId, offerPort);
+    try {
+      // The production console always reads offers; its SSE shows them as they appear.
+      const appeared = await stream.waitFor(/offer-popup/);
+      assert.match(appeared, /<form class="offer-actions"/);
+      assert.match(appeared, /name="choice" value="handoff"/);
+      const mark = stream.checkpoint();
+      const body = new URLSearchParams({ choice: "ignore" }).toString();
+      const ignored = await new Promise((resolveRequest, reject) => {
+        const req = httpRequest({
+          host: "127.0.0.1",
+          port: offerPort,
+          path: `/qq/session/${primaryId}/offer`,
+          method: "POST",
+          agent: false,
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            "content-length": Buffer.byteLength(body),
+            "hx-request": "true",
+            "sec-fetch-site": "same-origin",
+          },
+        }, (res) => {
+          const chunks = [];
+          res.on("data", (chunk) => chunks.push(chunk));
+          res.on("end", () => resolveRequest({
+            status: res.statusCode,
+            body: Buffer.concat(chunks).toString("utf8"),
+          }));
+        });
+        req.on("error", reject);
+        req.end(body);
       });
-      req.on("error", reject);
-      req.end(body);
-    });
-    assert.equal(ignored.status, 200);
-    assert.equal(lastChoice, "ignore");
-    assert.doesNotMatch(ignored.body, /offer-popup/);
+      assert.equal(ignored.status, 200);
+      assert.equal(lastChoice, "ignore");
+      assert.doesNotMatch(ignored.body, /offer-popup/);
+      const cleared = await stream.waitFor(/<form id="composer"/, mark);
+      assert.doesNotMatch(cleared, /offer-popup/);
+    } finally {
+      stream.close();
+    }
   } finally {
     offerServer.closeAllConnections?.();
     await new Promise((resolveClose) => offerServer.close(resolveClose));

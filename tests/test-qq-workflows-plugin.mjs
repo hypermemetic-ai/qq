@@ -1726,6 +1726,10 @@ try {
     assert.equal(classifyLeftover({
       notes: [{ text: "Ship the leftover popup with three pressable choices.", startSeq: 1, endSeq: 4 }],
     }), "offer");
+    assert.equal(classifyLeftover(
+      { notes: [{ text: "todo later", startSeq: 1, endSeq: 2 }] },
+      { asked: true },
+    ), "offer");
     assert.equal(classifyLeftover({ notes: [] }, { asked: true }), "skip");
     assert.equal(askedHandoff("please hand off this leftover"), true);
     assert.equal(leftoverTitle({ name: "concern" }, "Ship the leftover popup now"), "Ship the leftover popup now");
