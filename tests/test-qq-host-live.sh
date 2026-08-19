@@ -276,7 +276,9 @@ open_stream laptop "$primary_id" proof-laptop
 grep -Fq 'home durable handoff' "$work/laptop.page.html"
 grep -Fq "$secondary_id" "$work/laptop.page.html"
 curl -fsS --max-time 5 "$origin$(canonical "$secondary_id")" >"$work/laptop-selected.html"
-grep -Fq "<code>$secondary_id</code>" "$work/laptop-selected.html"
+grep -Eq '<code>[0-9]+</code>' "$work/laptop-selected.html"
+! grep -Fq "<code>$secondary_id</code>" "$work/laptop-selected.html"
+grep -Fq "value=\"$secondary_id\"" "$work/laptop-selected.html"
 grep -Fq 'This DSH session has no transcript yet.' "$work/laptop-selected.html"
 post_prompt selector-setup "$secondary_id" 'secondary durable session' normal
 grep -Eq '^HTTP/[0-9.]+ 303' "$work/selector-setup.headers"
