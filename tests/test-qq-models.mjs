@@ -69,6 +69,16 @@ try {
   assert.equal(AUTH_SCHEMA, "qq.models-auth/v1");
 
   {
+    const headers = grokModule.internals.proxyHeaders("tok", "grok-4.6", sessionId);
+    assert.equal(headers["x-grok-client-identifier"], "@hypermemetic-ai/qq-models");
+    assert.equal(headers["x-grok-client-version"], "1.0.3");
+    assert.notEqual(headers["x-grok-client-version"], "0.0.0");
+    assert.match(headers["User-Agent"], /@hypermemetic-ai\/qq-models\/0\.0\.0 /);
+    assert.doesNotMatch(headers["User-Agent"], /xai-grok-cli|Grok CLI/i);
+    assert.doesNotMatch(headers["x-grok-client-identifier"], /grok-shell/);
+  }
+
+  {
     const launcher = readFileSync(join(root, "bin/qq"), "utf8");
     const patch = readFileSync(join(root, "qq/host.patch.yml"), "utf8");
     const uiPlugin = readFileSync(join(root, "qq-ui/src/plugin.mjs"), "utf8");
