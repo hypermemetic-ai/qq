@@ -126,6 +126,7 @@ try {
   ]);
 
   const byName = Object.fromEntries(registrations.map((tool) => [tool.name, tool]));
+  assert.doesNotMatch(`${byName.design_loop_start.promptSnippet}\n${byName.design_loop_start.description}`, /dsh-console/);
   const startedOut = await byName.design_loop_start.execute("x", {}, undefined, undefined, { cwd: root });
   assert.match(startedOut.content[0].text, /listening at http:\/\/127.0.0.1:9/);
   const captured = await byName.design_loop_capture.execute("x", { label: "before", short: true });

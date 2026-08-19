@@ -29,7 +29,7 @@ export default function registerFrontendDesignLoop(pi, deps = {}) {
   pi.registerTool({
     name: "design_loop_start",
     label: "Design Loop Start",
-    promptSnippet: "Start the live-asset dsh-console fixture",
+    promptSnippet: "Start the live-asset design loop",
     description:
       "Start the design loop with live CSS/JS assets and return the origin plus session URL.",
     parameters: {
