@@ -30,12 +30,29 @@ function filesFor(state) {
   }));
 }
 
+export function packetFor(state) {
+  const packet = state?.packet;
+  if (!packet || packet.schema !== "qq.route-packet/v1") return undefined;
+  return {
+    schema: packet.schema,
+    brief: packet.brief ?? "",
+    files: (packet.files ?? []).map((file) => ({
+      path: file.path,
+      added: file.added ?? null,
+      deleted: file.deleted ?? null,
+    })),
+    pointers: Array.isArray(packet.pointers) ? packet.pointers.slice(0, 8) : [],
+    mark: packet.mark ?? null,
+  };
+}
+
 export function runEventPayload(state, kind) {
   const common = {
     run_id: state.id,
     architect_session: state.architectSession,
     task: { id: state.task.id, title: state.task.title },
   };
+  const packet = packetFor(state);
   if (kind === RUN_LANDED_KIND) {
     return {
       schema: RUN_LANDED_SCHEMA,
@@ -47,6 +64,7 @@ export function runEventPayload(state, kind) {
         summary: state.pack?.summary ?? "landed",
         files: filesFor(state),
       },
+      ...(packet ? { packet } : {}),
     };
   }
   if (kind === RUN_BLOCKED_KIND) {
@@ -61,6 +79,7 @@ export function runEventPayload(state, kind) {
         summary: state.pack?.summary ?? state.blockedReason,
         files: filesFor(state),
       },
+      ...(packet ? { packet } : {}),
     };
   }
   if (kind === RUN_BOOTSTRAP_FAILED_KIND) {

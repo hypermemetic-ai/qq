@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 
-import { landHandoff } from "./lib/review.mjs";
-import { RUN_LANDED_KIND, sendRunEvent } from "./lib/run-events.mjs";
+import { ROUTE_PACKET_SCHEMA, landHandoff } from "./lib/review.mjs";
+import { readHandoff } from "./lib/run.mjs";
+import { RUN_BLOCKED_KIND, RUN_LANDED_KIND, sendRunEvent } from "./lib/run-events.mjs";
 
 const statePath = process.argv[2];
 if (!statePath) throw new Error("usage: qq-land-worker.mjs <handoff.json>");
@@ -22,7 +23,11 @@ function run(command, args, options = {}) {
 landHandoff(run, statePath).then(async (state) => {
   await sendRunEvent(state, RUN_LANDED_KIND);
   process.stdout.write(`Landed ${state.task.id}.\n`);
-}).catch((error) => {
+}).catch(async (error) => {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   process.exitCode = 1;
+  try {
+    const state = await readHandoff(statePath);
+    if (state.packet?.schema === ROUTE_PACKET_SCHEMA) await sendRunEvent(state, RUN_BLOCKED_KIND);
+  } catch {}
 });

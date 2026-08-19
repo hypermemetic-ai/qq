@@ -39,6 +39,134 @@ export function formatPack(pack) {
   return [pack.summary, ...(pack.files ?? []).map((file) => `${file.path} +${file.added ?? "?"}/-${file.deleted ?? "?"}`)].join("\n");
 }
 
+export const ROUTE_PACKET_SCHEMA = "qq.route-packet/v1";
+export const ROUTE_MARKS = Object.freeze(["review", "land"]);
+export const REVIEW_MARKS = Object.freeze(["pass", "fail"]);
+const PACKET_POINTER_LIMIT = 8;
+
+function fileCounts(file) {
+  return { path: file.path, added: file.added ?? null, deleted: file.deleted ?? null };
+}
+
+export function parseDiffPointers(source, limit = PACKET_POINTER_LIMIT) {
+  const pointers = [];
+  let path = "";
+  for (const line of String(source ?? "").split("\n")) {
+    const file = line.match(/^\+\+\+ (?:b\/)?(.+)$/);
+    if (file) {
+      path = file[1] === "/dev/null" ? "" : file[1];
+      continue;
+    }
+    const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/);
+    if (!hunk || !path) continue;
+    const context = hunk[2].trim();
+    pointers.push(context ? `${path}:${hunk[1]} ${context}` : `${path}:${hunk[1]}`);
+    if (pointers.length >= limit) break;
+  }
+  return pointers;
+}
+
+export function formatPacket(packet) {
+  const files = (packet?.files ?? []).map((file) => `${file.path} +${file.added ?? "?"}/-${file.deleted ?? "?"}`);
+  const pointers = packet?.pointers ?? [];
+  return [
+    `Mark: ${packet?.mark ?? "review"}`,
+    packet?.brief ?? "",
+    files.length ? `Files:\n${files.join("\n")}` : "Files:",
+    pointers.length ? `Pointers:\n${pointers.join("\n")}` : "Pointers:",
+  ].filter(Boolean).join("\n\n");
+}
+
+async function readBrief(state) {
+  let ticket = "";
+  let note = "";
+  if (state?.ticketPath) {
+    try { ticket = await readFile(state.ticketPath, "utf8"); } catch {}
+  }
+  if (state?.notePath) {
+    try { note = await readFile(state.notePath, "utf8"); } catch {}
+  }
+  return `${ticket.trim()}\n\n---\n\n## Delegate note\n\n${note.trim()}`.trim();
+}
+
+export async function compilePacket(run, state, options = {}) {
+  const view = { ...state, ref: options.ref ?? state.ref };
+  const files = (options.files ?? await packFor(run, view)).map(fileCounts);
+  const unified = await checked(
+    run, "git", ["diff", "-U0", "--no-color", `${view.baseRef}...${view.ref}`],
+    { cwd: view.worktree }, "cannot collect packet pointers",
+  );
+  const pointers = parseDiffPointers(unified.stdout);
+  const brief = options.brief ?? await readBrief(view);
+  return {
+    schema: ROUTE_PACKET_SCHEMA,
+    brief,
+    files,
+    pointers,
+    mark: options.mark ?? null,
+  };
+}
+
+export function parseRouteStamp(source) {
+  const first = String(source ?? "").trim().split(/\s+/)[0]?.toLowerCase();
+  if (first === "land" || first === "review") return first;
+  return undefined;
+}
+
+const REVIEW_PATH = /(^|\/)(?:session|store|identity|review|land|run|dsh)[^/]*\.(?:mjs|ts|js)$/i;
+const REVIEW_WORD = /\b(?:session|store|identity|review|land|run|handoff|relay)\b/i;
+const PAINT_PATH = /\.(?:css|scss|less|svg)$/i;
+const PAINT_WORD = /\b(?:paint|css|stylesheet|copy|comment|color|typo)\b/i;
+
+export function stampFromEvidence(packet) {
+  const files = packet?.files ?? [];
+  const brief = String(packet?.brief ?? "");
+  const index = files.map((file) => file.path).join("\n");
+  const evidence = `${brief}\n${index}`;
+  if (files.some((file) => REVIEW_PATH.test(file.path)) || REVIEW_WORD.test(evidence)) return "review";
+  if (files.length > 0 && files.every((file) => PAINT_PATH.test(file.path)) && PAINT_WORD.test(brief)) return "land";
+  return "review";
+}
+
+export function formatRouteEvidence(packet) {
+  const files = (packet?.files ?? []).map((file) => `${file.path} +${file.added ?? "?"}/-${file.deleted ?? "?"}`);
+  const pointers = packet?.pointers ?? [];
+  return [
+    "Original brief:",
+    packet?.brief ?? "",
+    "",
+    "Files touched:",
+    files.join("\n") || "(none)",
+    "",
+    "Pointers:",
+    pointers.join("\n") || "(none)",
+  ].join("\n");
+}
+
+export async function routePacket(packet, options = {}) {
+  const fallback = stampFromEvidence(packet);
+  const complete = options.complete;
+  if (typeof complete !== "function") return fallback;
+  try {
+    const prompt = options.prompt ?? (await readFile(join(QQ_ROOT, "prompts", "services", "route.md"), "utf8")).trim();
+    const source = await complete({ system: prompt, user: formatRouteEvidence(packet) });
+    return parseRouteStamp(typeof source === "string" ? source : "") ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function isRoutedLand(state) {
+  return state?.packet?.schema === ROUTE_PACKET_SCHEMA
+    && state.packet.mark === "land"
+    && typeof state.ref === "string"
+    && state.ref.length > 0;
+}
+
+export function isReadyToLand(state) {
+  return isQaPassedProposal(state) || isRoutedLand(state);
+}
+
 export async function prepareDone(run, cwd, statePath, ref, options = {}) {
   const state = await readHandoff(statePath);
   if (state.runtime === "dsh") {
@@ -146,7 +274,7 @@ export function isQaPassedProposal(state) {
 
 export async function landHandoff(run, statePath) {
   const state = await readHandoff(statePath);
-  if (!isQaPassedProposal(state)) throw new Error(`handoff is ${state.status}, not a qa-passed proposal ready to land`);
+  if (!isReadyToLand(state)) throw new Error(`handoff is ${state.status}, not a qa-passed proposal ready to land`);
   try {
     const branch = await checked(run, "git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: state.mainRoot }, "main checkout is detached");
     if (branch.stdout.trim() !== state.baseBranch) throw new Error(`main checkout is on ${branch.stdout.trim()}, not ${state.baseBranch}`);
@@ -178,6 +306,7 @@ export async function landHandoff(run, statePath) {
   } catch (error) {
     state.status = "blocked";
     state.blockedReason = error instanceof Error ? error.message : String(error);
+    if (state.packet?.schema === ROUTE_PACKET_SCHEMA) state.packet = { ...state.packet, mark: "fail" };
     state.updatedAt = new Date().toISOString();
     await atomicPrivateJson(statePath, state);
     throw error;
@@ -357,7 +486,11 @@ export async function conductReview(run, statePath, options = {}) {
   };
 
   if (verdict.verdict === "pass") {
-    state.pack = { summary: verdict.summary, files: await packFor(run, state) };
+    const files = await packFor(run, state);
+    state.pack = { summary: verdict.summary, files };
+    if (state.packet?.schema === ROUTE_PACKET_SCHEMA) {
+      state.packet = { ...state.packet, files: files.map(fileCounts), mark: "pass" };
+    }
     state.status = "proposal";
     await atomicPrivateJson(statePath, state);
     await closePane();
@@ -373,7 +506,11 @@ export async function conductReview(run, statePath, options = {}) {
     return state;
   }
 
-  state.pack = { summary: verdict.summary, files: await packFor(run, state) };
+  const files = await packFor(run, state);
+  state.pack = { summary: verdict.summary, files };
+  if (state.packet?.schema === ROUTE_PACKET_SCHEMA) {
+    state.packet = { ...state.packet, files: files.map(fileCounts), mark: "fail" };
+  }
   state.status = "blocked";
   state.blockedReason = verdict.feedback || verdict.summary;
   await atomicPrivateJson(statePath, state);

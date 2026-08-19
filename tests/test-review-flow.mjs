@@ -39,6 +39,30 @@ assert.deepEqual(review.parseNumstat("3\t1\tsrc/a.ts\n-\t-\tassets/x.bin\n"), [
   { path: "assets/x.bin", added: null, deleted: null },
 ]);
 assert.equal(review.formatPack({ summary: "small fix", files: [{ path: "src/a.ts", added: 3, deleted: 1 }] }), "small fix\nsrc/a.ts +3/-1");
+assert.deepEqual(review.parseDiffPointers([
+  "diff --git a/src/a.ts b/src/a.ts",
+  "--- a/src/a.ts",
+  "+++ b/src/a.ts",
+  "@@ -10,0 +11,2 @@ export function foo",
+  "+  return 1;",
+  "+  return 2;",
+].join("\n")), ["src/a.ts:11 export function foo"]);
+assert.equal(review.parseDiffPointers("@@ -1 +1 @@\n-old\n+new\n").length, 0);
+assert.equal(review.stampFromEvidence({
+  brief: "Paint the button color in the stylesheet.",
+  files: [{ path: "src/button.css", added: 200, deleted: 10 }],
+}), "land");
+assert.equal(review.stampFromEvidence({
+  brief: "Fix the runner session handshake.",
+  files: [{ path: "bin/lib/session.mjs", added: 3, deleted: 1 }],
+}), "review");
+assert.equal(review.stampFromEvidence({
+  brief: "Tighten store identity after login.",
+  files: [{ path: "src/identity.ts", added: 4, deleted: 0 }],
+}), "review");
+assert.equal(review.parseRouteStamp("land\n"), "land");
+assert.equal(review.parseRouteStamp("review because the store moved"), "review");
+assert.equal(review.parseRouteStamp("maybe later"), undefined);
 
 const scratch = await mkdtemp(join(homedir(), "qq-review-test."));
 try {
@@ -87,6 +111,20 @@ try {
     if (command === "git" && args[0] === "status") return { code: 0, stdout: "", stderr: "" };
     if (command === "git" && args[0] === "symbolic-ref") return { code: 0, stdout: "main\n", stderr: "" };
     if (command === "git" && args[0] === "diff" && args.includes("--name-only")) return { code: 0, stdout: "src/a.ts\0", stderr: "" };
+    if (command === "git" && args[0] === "diff" && args.includes("-U0")) {
+      return {
+        code: 0,
+        stdout: [
+          "diff --git a/src/a.ts b/src/a.ts",
+          "--- a/src/a.ts",
+          "+++ b/src/a.ts",
+          "@@ -2,0 +3,1 @@ export function a",
+          "+return 1;",
+          "",
+        ].join("\n"),
+        stderr: "",
+      };
+    }
     if (command === "git" && args[0] === "diff") return { code: 0, stdout: "2\t1\tsrc/a.ts\n", stderr: "" };
     if (command === "git" && args[0] === "merge-base" && args.at(-1) === "HEAD") return { code: 1, stdout: "", stderr: "" };
     if (command === "git" && args[0] === "for-each-ref") return { code: 0, stdout: "origin\0refs/heads/main\n", stderr: "" };
@@ -129,6 +167,30 @@ try {
   assert.equal((await runLib.readHandoff(statePath)).status, "submitted", "fresh readers must recover the native submission");
   assert.ok(calls.some(({ args }) => args[0] === "merge-base"));
 
+  await writeFile(base.ticketPath, "# TASK-1\n\nOne task.\n");
+  await writeFile(base.notePath, "Keep the change small.\n");
+  await runLib.atomicPrivateJson(statePath, base);
+  const compiled = await review.compilePacket(run, { ...base, ref: "refsha" });
+  assert.equal(compiled.schema, review.ROUTE_PACKET_SCHEMA);
+  assert.match(compiled.brief, /One task/);
+  assert.match(compiled.brief, /Keep the change small/);
+  assert.deepEqual(compiled.files, [{ path: "src/a.ts", added: 2, deleted: 1 }]);
+  assert.deepEqual(compiled.pointers, ["src/a.ts:3 export function a"]);
+  assert.equal(JSON.stringify(compiled).includes("+return 1;"), false, "packet must not include full hunks");
+  assert.equal(await review.routePacket({
+    brief: "Paint the button color in the stylesheet.",
+    files: [{ path: "src/button.css", added: 200, deleted: 10 }],
+    pointers: ["src/button.css:1 .btn"],
+  }), "land");
+  assert.equal(await review.routePacket({
+    brief: "Move session store identity off the runner.",
+    files: [{ path: "bin/lib/session.mjs", added: 3, deleted: 1 }],
+    pointers: ["bin/lib/session.mjs:12 export function load"],
+  }), "review");
+  assert.equal(await review.routePacket({
+    brief: "Paint the button color in the stylesheet.",
+    files: [{ path: "src/button.css", added: 200, deleted: 10 }],
+  }, { async complete() { return "review\n"; } }), "review");
   await runLib.atomicPrivateJson(statePath, base);
   const prepared = await review.prepareDone(run, worktree, statePath, "HEAD");
   assert.equal(prepared.look, 1);
@@ -314,11 +376,89 @@ try {
   const piDoneMessage = `Submitted ${prepared.task.id} to qa look 1. The runner is finished; stop now.`;
   assert.deepEqual(outcome, {
     content: [{ type: "text", text: piDoneMessage }],
-    details: { status: "reviewing", look: 1, worker_pid: 99, state_path: statePath, message: piDoneMessage },
+    details: { status: "reviewing", look: 1, mark: "review", worker_pid: 99, state_path: statePath, message: piDoneMessage },
   }, "Pi/Herdr done result changed");
   assert.equal(launched, statePath);
+  const routed = JSON.parse(await readFile(statePath, "utf8"));
+  assert.equal(routed.packet.schema, review.ROUTE_PACKET_SCHEMA);
+  assert.equal(routed.packet.mark, "review");
+  assert.deepEqual(routed.packet.files, [{ path: "src/a.ts", added: 2, deleted: 1 }]);
+  assert.deepEqual(routed.packet.pointers, ["src/a.ts:3 export function a"]);
+  assert.match(routed.packet.brief, /Keep the change small/);
+  assert.equal(JSON.stringify(routed.packet).includes("+return 1;"), false);
   await new Promise((resolve) => setTimeout(resolve, 40));
   assert.equal(shutdowns, 1);
+
+  prepared.status = "running";
+  prepared.look = 0;
+  await runLib.atomicPrivateJson(statePath, prepared);
+  const landTools = [];
+  let landReviewLaunches = 0;
+  let landShutdowns = 0;
+  const landPi = {
+    registerTool(tool) { landTools.push(tool); },
+    events: { on() {} },
+    on() {},
+    exec: run,
+  };
+  const landRun = async (command, args, options = {}) => {
+    if (command === "git" && args[0] === "rev-parse" && args.includes("--git-common-dir")) {
+      return { code: 0, stdout: `${join(scratch, "git-common")}\n`, stderr: "" };
+    }
+    if (command === "flock") {
+      const current = JSON.parse(await readFile(args.at(-1), "utf8"));
+      current.status = "landed";
+      current.landedAt = "2026-04-01T00:00:05.000Z";
+      current.updatedAt = current.landedAt;
+      await runLib.atomicPrivateJson(current.statePath, current);
+      return { code: 0, stdout: `Landed ${current.task.id}.\n`, stderr: "" };
+    }
+    return run(command, args, options);
+  };
+  extension.default(landPi, {
+    env: { QQ_AGENT_ROLE: "runner", QQ_RUN_STATE: statePath }, exec: landRun,
+    async routePacket() { return "land"; },
+    launchReview() { landReviewLaunches += 1; throw new Error("route land must not launch QA"); },
+  });
+  const landDone = landTools.find(({ name }) => name === "done");
+  const landOutcome = await landDone.execute("land-d", { ref: "HEAD" }, undefined, undefined, {
+    cwd: worktree, shutdown() { landShutdowns += 1; }, abort() { throw new Error("land done should shut down, not abort"); },
+  });
+  assert.equal(landOutcome.details.status, "landed");
+  assert.equal(landOutcome.details.mark, "land");
+  assert.equal(landReviewLaunches, 0);
+  assert.equal(JSON.parse(await readFile(statePath, "utf8")).status, "landed");
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(landShutdowns, 1);
+
+  const routedLandState = {
+    ...prepared, status: "reviewing", look: 1, ref: "refsha",
+    packet: {
+      schema: review.ROUTE_PACKET_SCHEMA,
+      brief: "Paint the button color in the stylesheet.",
+      files: [{ path: "src/button.css", added: 200, deleted: 10 }],
+      pointers: ["src/button.css:1 .btn"],
+      mark: "land",
+    },
+    pack: { summary: "land", files: [{ path: "src/button.css", added: 200, deleted: 10 }] },
+    qaVerdict: undefined,
+  };
+  assert.equal(review.isRoutedLand(routedLandState), true);
+  assert.equal(review.isReadyToLand(routedLandState), true);
+  assert.equal(review.isQaPassedProposal(routedLandState), false);
+  await runLib.atomicPrivateJson(statePath, routedLandState);
+  await review.landHandoff(run, statePath);
+  assert.equal(JSON.parse(await readFile(statePath, "utf8")).status, "landed");
+
+  await runLib.atomicPrivateJson(statePath, routedLandState);
+  await assert.rejects(review.landHandoff(async (command, args, options = {}) => {
+    if (command === "git" && args[0] === "merge-tree") return { code: 1, stdout: "", stderr: "content conflict" };
+    return run(command, args, options);
+  }, statePath), /proposal no longer merges cleanly/);
+  const failedRouteLand = JSON.parse(await readFile(statePath, "utf8"));
+  assert.equal(failedRouteLand.status, "blocked");
+  assert.equal(failedRouteLand.packet.mark, "fail");
+  assert.equal(review.isReadyToLand(failedRouteLand), false);
 
   await runLib.atomicPrivateJson(statePath, { ...nativeState, approval: nativeApproval });
   const nativeTools = [];
@@ -753,6 +893,13 @@ try {
   } = {}) => {
     const caseState = {
       ...prepared, status: "reviewing", look, ref, qaSessionId, pane: "w2T:p9",
+      packet: {
+        schema: review.ROUTE_PACKET_SCHEMA,
+        brief: "Keep the change small.",
+        files: [{ path: "src/a.ts", added: 2, deleted: 1 }],
+        pointers: ["src/a.ts:3 export function a"],
+        mark: "review",
+      },
     };
     await runLib.atomicPrivateJson(statePath, caseState);
     const verdictPath = join(scratch, "state", `qa-look-${look}.json`);
@@ -816,6 +963,7 @@ try {
     head: "qa-tests-ref", changedPaths: ["tests/test-review-flow.mjs"], testsModified: true,
   });
   assert.equal(committedTests.state.status, "proposal");
+  assert.equal(committedTests.state.packet.mark, "pass");
   assert.equal(committedTests.state.ref, "qa-tests-ref");
   assert.deepEqual(boardStatuses(committedTests.calls), []);
   assert.equal(committedTests.state.qaVerdict.tests_modified, true);
@@ -927,6 +1075,7 @@ try {
     look: 2, qaSessionId: failedRewrite.state.qaSessionId, dirty: " M tests/a.test.ts\n", testsModified: true,
   });
   assert.equal(dirtyLook2.state.status, "blocked");
+  assert.equal(dirtyLook2.state.packet.mark, "fail");
   assert.equal(dirtyLook2.state.qaVerdict.verdict, "fail");
   assert.deepEqual(boardStatuses(dirtyLook2.calls), ["To Do"]);
   assert.match(dirtyLook2.state.qaVerdict.feedback, /uncommitted worktree changes/);
@@ -958,11 +1107,32 @@ try {
 
   const sentRunEvents = [];
   const captureRunEventClient = { async send(envelope) { sentRunEvents.push(envelope); return { record: { event_id: "evt_capture" } }; } };
-  const landedForEvent = { ...successfulLandState, status: "landed", landedAt: "2026-04-01T00:00:05.000Z" };
+  const sniffPacket = {
+    schema: review.ROUTE_PACKET_SCHEMA,
+    brief: "Keep the change small.",
+    files: [{ path: "src/a.ts", added: 2, deleted: 1 }],
+    pointers: ["src/a.ts:3 export function a"],
+    mark: "land",
+  };
+  const landedForEvent = {
+    ...successfulLandState, status: "landed", landedAt: "2026-04-01T00:00:05.000Z",
+    packet: sniffPacket, pack: { summary: "land", files: sniffPacket.files },
+  };
   await runEvents.sendRunEvent(landedForEvent, runEvents.RUN_LANDED_KIND, { client: captureRunEventClient, env: successfulLandEnv });
   await runEvents.sendRunEvent(dirtyLook2.state, runEvents.RUN_BLOCKED_KIND, { client: captureRunEventClient, env: listEnv });
   assert.equal(sentRunEvents[0].producer_id, "qq/land-worker");
   assert.equal(sentRunEvents[1].producer_id, "qq/review-worker");
+  assert.deepEqual(sentRunEvents[0].payload.packet, sniffPacket);
+  assert.equal(sentRunEvents[1].payload.packet.mark, "fail");
+  assert.deepEqual(sentRunEvents[1].payload.packet.files, sniffPacket.files);
+  assert.deepEqual(sentRunEvents[1].payload.packet.pointers, sniffPacket.pointers);
+  assert.equal(JSON.stringify(sentRunEvents[0].payload.packet).includes("+return 1;"), false);
+  assert.equal(extension.runOutcomeMessage({
+    kind: runEvents.RUN_LANDED_KIND, payload: sentRunEvents[0].payload, eventId: "evt_capture",
+  }).content.includes("Mark: land"), true);
+  assert.match(extension.runOutcomeMessage({
+    kind: runEvents.RUN_BLOCKED_KIND, payload: sentRunEvents[1].payload, eventId: "evt_blocked",
+  }).content, /Mark: fail/);
   assert.ok(sentRunEvents.every(({ product_id }) => product_id === "qq"));
   assert.ok(sentRunEvents.every(({ recipient_id }) => recipient_id === `qq/review-flow/${base.architectSession}`));
   assert.ok(sentRunEvents.every(({ kind }) => kind !== "agent.message"));
