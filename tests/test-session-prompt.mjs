@@ -56,7 +56,8 @@ const qq = createQqService(
   },
 );
 
-await qq.prompt(sessionId, "/workflows architect");
+const selected = await qq.prompt(sessionId, "/workflows architect");
+assert.equal(selected, "architect selected");
 assert.equal(followups.length, 0);
 assert.equal(executed.length, 1);
 assert.equal(executed[0].line, "/workflows architect");

@@ -26,22 +26,40 @@ has_qwen_credential_file() {
   fi
 }
 
-if [[ $QQ_DSH_PROVIDER == qwen-token-plan ]] &&
-  [[ -z ${QWEN_TOKEN_PLAN_API_KEY:-} ]] &&
-  ! has_qwen_credential_file "$DSH_HOME/.credentials.yaml" yaml &&
-  ! has_qwen_credential_file "$root/.env" env &&
-  ! has_qwen_credential_file "$DSH_HOME/.env" env; then
-  cat >&2 <<EOF
+auth_ext=json
+selected_login=""
+case $QQ_DSH_PROVIDER in
+  qwen-token-plan)
+    if [[ -z ${QWEN_TOKEN_PLAN_API_KEY:-} ]] &&
+      ! has_qwen_credential_file "$DSH_HOME/.credentials.yaml" yaml &&
+      ! has_qwen_credential_file "$root/.env" env &&
+      ! has_qwen_credential_file "$DSH_HOME/.env" env; then
+      cat >&2 <<EOF
 qq: qwen-token-plan requires QWEN_TOKEN_PLAN_API_KEY.
 Export it before starting, or store it under that name in:
   $DSH_HOME/.credentials.yaml  (chmod 600)
 
 The launcher uses DSH's public credential-reference seam. It does not read
-or copy Pi credentials. qq's Grok route is not usable here because the pinned
-host has no supported xai-auth OAuth refresh/proxy transport path.
+or copy Pi credentials.
 EOF
-  exit 2
-fi
+      exit 2
+    fi
+    ;;
+  xai-auth)
+    selected_login="$DSH_HOME/.qq-grok-auth.${auth_ext}"
+    if [[ ! -f $selected_login ]]; then
+      printf 'qq: xai-auth requires a Grok login on this host (qq-login grok).\n' >&2
+      exit 2
+    fi
+    ;;
+  openai-codex)
+    selected_login="$DSH_HOME/.qq-codex-auth.${auth_ext}"
+    if [[ ! -f $selected_login ]]; then
+      printf 'qq: openai-codex requires a Codex login on this host (qq-login codex).\n' >&2
+      exit 2
+    fi
+    ;;
+esac
 
 toolchain="$root/dsh"
 dsh="$toolchain/node_modules/.bin/dsh"
