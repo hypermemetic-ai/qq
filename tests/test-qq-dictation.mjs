@@ -326,6 +326,20 @@ try {
   assert.deepEqual(pluginModule.inject, ["qq", "webServer"]);
   assert.equal(pluginModule.provide, "qq-dictation");
   assert.equal(pluginModule.name, "qq-dictation");
+  {
+    const launcher = readFileSync(join(root, "bin/qq"), "utf8");
+    const patch = readFileSync(join(root, "qq/host.patch.yml"), "utf8");
+    const pkg = JSON.parse(readFileSync(join(root, "qq-dictation/package.json"), "utf8"));
+    const cordis = readFileSync(join(root, "qq-dictation/cordis.patch.yml"), "utf8");
+    assert.doesNotMatch(launcher, /qq-dictation|QQ_DSH_HAVE_DICTATION/);
+    assert.doesNotMatch(patch, /qq-dictation|QQ_DSH_HAVE_DICTATION/);
+    assert.match(launcher, /qq-\*\/package\.json/);
+    assert.equal(pkg.name, "@hypermemetic-ai/qq-dictation");
+    assert.equal(pkg.dsh?.bundle?.patch, "./cordis.patch.yml");
+    assert.match(cordis, /id: qq-dictation/);
+    assert.match(cordis, /name: '@hypermemetic-ai\/qq-dictation'/);
+  }
+  assert.doesNotMatch(clientJs, /textContent/);
   assert.match(SESSION_ID.source, /session-/);
   assert.equal(parseSessionId(alphaId), alphaId);
   assert.equal(parseSessionId("nope"), "");
@@ -533,7 +547,11 @@ try {
       );
       assert.match(page, /id="composer-dictate"/);
       assert.match(page, new RegExp(`data-session-id="${alphaId}"`));
+      assert.match(page, /aria-label="Dictate"/);
+      assert.match(page, /class="dictate-mic"/);
+      assert.match(page, /class="dictate-cancel"/);
       assert.match(page, /id="composer-submit"/);
+      assert.doesNotMatch(page, />Mic</);
       const full = renderPage(
         { id: alphaId, events: [], agentStatus: "idle" },
         {
@@ -556,9 +574,13 @@ try {
       );
       assert.match(full, /\/qq\/dictate\/client\.js/);
 
+      const status = await request(server, "/qq/dictate/");
+      assert.equal(status.status, 200);
+      assert.match(status.body, /"state":"idle"/);
       const client = await request(server, "/qq/dictate/client.js");
       assert.equal(client.status, 200);
       assert.match(client.body, /AltRight/);
+      assert.doesNotMatch(client.body, /textContent/);
 
       const focus = await request(server, "/qq/dictate/focus", {
         method: "POST",
@@ -822,7 +844,7 @@ try {
     harness.click(harness.dictate);
     await settle();
     assert.equal(harness.dictate.dataset.state, "recording");
-    assert.equal(harness.dictate.textContent, "X");
+    assert.equal(harness.dictate.getAttribute("aria-label"), "Cancel dictation");
     assert.ok(harness.fetches.some((call) => String(call.path).endsWith("/start")));
     harness.pump();
     harness.click(harness.submit);
@@ -835,7 +857,7 @@ try {
     assert.equal(wavBytes.subarray(8, 12).toString("ascii"), "WAVE");
     assert.ok(wavBytes.length > 44);
     assert.equal(harness.dictate.dataset.state, "idle");
-    assert.equal(harness.dictate.textContent, "Mic");
+    assert.equal(harness.dictate.getAttribute("aria-label"), "Dictate");
   }
 
   {
@@ -901,8 +923,10 @@ try {
   }
 
   const css = readFileSync(join(root, "qq-ui/assets/console.css"), "utf8");
-  assert.match(css, /grid-template-columns: minmax\(0, 1fr\) auto auto/);
+  assert.match(css, /\.composer-row \{[\s\S]*grid-template-columns: minmax\(0, 1fr\) auto;/);
   assert.match(css, /#composer-dictate/);
+  assert.match(css, /#composer-submit \{[\s\S]*clip-path: inset\(50%\)/);
+  assert.match(css, /@media \(min-width: 42\.01rem\) and \(pointer: fine\) \{[\s\S]*#composer-dictate \{ display: none; \}/);
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }
