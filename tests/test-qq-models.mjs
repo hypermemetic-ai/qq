@@ -481,6 +481,11 @@ try {
     assert.equal(captured.store, false);
     assert.deepEqual(captured.include, ["reasoning.encrypted_content"]);
     assert.equal(captured.instructions, "You are a coder.");
+    assert.deepEqual(captured.input, [{
+      type: "message",
+      role: "user",
+      content: [{ type: "input_text", text: "list files" }],
+    }]);
     assert.equal(captured.tools.length, 2);
     assert.deepEqual(captured.tools.map((tool) => tool.type), ["function", "function"]);
     assert.deepEqual(captured.tools.map((tool) => tool.name), ["bash", "read"]);
@@ -588,8 +593,10 @@ try {
         },
       ],
     });
+    assert.deepEqual(captured.input.map((item) => item.type), ["message", "function_call", "function_call_output"]);
     const call = captured.input.find((item) => item.type === "function_call");
     const result = captured.input.find((item) => item.type === "function_call_output");
+    assert.deepEqual(captured.input[0].content, [{ type: "input_text", text: "pwd" }]);
     assert.equal(call.call_id, "call_qq_1");
     assert.equal(call.name, "bash");
     assert.equal(call.arguments, "{\"command\":\"pwd\"}");
