@@ -625,14 +625,6 @@ function makeClientHarness(options = {}) {
     space(target = outside) {
       return this.keydown({ key: " ", code: "Space", target });
     },
-    submitForm() {
-      const event = {
-        target: nodes.composer,
-        preventDefault() {},
-        stopPropagation() {},
-      };
-      dispatch("submit", event, true);
-    },
     focusPrompt() {
       document.activeElement = nodes.prompt;
       dispatch("focusin", { target: nodes.prompt }, false);
