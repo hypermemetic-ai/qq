@@ -1,3 +1,4 @@
 # Files
 
-- [Delegation and review lifecycle](delegation-and-review.md) - End-to-end guide to qq task admission, operator approval, isolated runner execution, two-look QA, proposal landing, artifacts, invariants, failures, and focused validation.
+- [Legacy delegation, review, and landing](delegation-and-review.md) - Practical guide to Pi/Herdr Backlog admission, operator gating, isolated runners, packet routing, two-look QA, automatic landing, and failure handling.
+- [DSH workflows and task pile](dsh-workflows.md) - Practical map of workflow selection, architect notes and folding, iterate implementation/review, external workflow registration, and the optional markdown task service.

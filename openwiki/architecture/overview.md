@@ -1,120 +1,71 @@
 ---
 type: Architecture overview
 title: System topology and ownership
-description: Process boundaries, extension composition, durable state, generated-output ownership, and practical entrypoints for the qq orchestration runtime.
+description: Practical map of the qq DSH host, optional Cordis plugins, legacy Pi orchestration, state ownership, and external boundaries.
 tags: [architecture, runtime, ownership]
+openwiki:
+  roles: [architecture, repository]
+  change_kinds: [composition, plugin-lifecycle]
+  source_paths: [bin/qq, qq/host.patch.yml, qq/src/plugin.mjs, extensions/index.ts]
+  test_paths: [tests/test-qq-host.mjs, tests/test-qq-host-boot.sh]
+  validation_commands: [node tests/test-qq-host.mjs .]
 ---
 
 # System topology and ownership
 
-qq is a private ESM package and operator-controlled orchestration layer around Pi/Herdr with incremental DSH adoption. It owns policy, extensions, workers, state contracts, a daily DSH coding workbench, and native DSH runner launch through submission. It does not own the Herdr, qq-relay, dashboard, pi2dsh, or DSH product implementations. [DSH compatibility](../runtime/dsh-compatibility.md) records the remaining review/landing cutover boundary.
+qq currently contains two runtime paths:
 
-## Component topology
+- **Daily DSH host:** `bin/qq` starts the pinned DSH toolchain and composes the presentation-neutral `qq` session service with optional `qq-*` Cordis plugins. This is the active operator surface.
+- **Legacy Pi/Herdr orchestration:** `extensions/index.ts` still provides activation profiles, guarded tools, delegation, QA, landing, and durable installed-relay outcomes. It remains the complete Backlog delegation path.
+
+## Daily host composition
 
 ```mermaid
 flowchart TD
-    Operator["Operator"] --> Pi["Pi process"]
-    Operator --> ProfileCLI["qq-profile"]
-    Operator --> MethodCLI["qq-methodology"]
-    Operator --> HerdrClient["Herdr client"]
-    Operator --> DashboardWrapper["Dashboard wrappers"]
-    Pi --> Bundle["extensions/index.ts"]
-    Bundle --> Profiles["execution profiles"]
-    Bundle --> Messaging["agent messaging"]
-    Bundle --> Workflow["board and review"]
-    Bundle --> Safety["safety and context"]
-    Profiles --> Policy["execution-profiles.json"]
-    Profiles --> SessionContext["per-host session context"]
-    Messaging --> Relay["installed qq-relay service"]
-    Workflow --> Workers["start, review, and land workers"]
-    MethodCLI --> GitConfig["repository Git config"]
-    MethodCLI --> BacklogStore["external Backlog store"]
-    HerdrClient --> HerdrServer["external Herdr product"]
-    DashboardWrapper --> DashboardPackage["installed dashboard artifact"]
-    DashboardPackage --> ProfileCLI
-    DshHost["pinned DSH host"] --> Bundle
-    Bundle --> NativeAdapter["native launch adapter"]
-    NativeAdapter --> NativeRunner["continuable DSH runner"]
-    DshConsole["qq DSH workbench"] --> DshHost
-    Timer["systemd timer"] --> OpenWikiService["OpenWiki service"]
-    OpenWikiService --> Generated["openwiki output"]
+    Launcher["bin/qq"] --> Pins["pinned dsh toolchain"]
+    Launcher --> Patch["qq/host.patch.yml"]
+    Patch --> Core["qq session service"]
+    Core --> Agents["DSH agents and persistence"]
+    UI["qq-ui"] --> Core
+    Relay["qq-relay"] --> Core
+    Workflows["qq-workflows"] --> Agents
+    Workflows --> Relay
+    Workflows --> Tasks["qq-tasks"]
+    Models["qq-models"] --> LLM["DSH llm service"]
+    Dictation["qq-dictation"] --> Core
+    Finder["image-finder sibling"] --> Workflows
+    Media["media-box sibling"] --> UI
 ```
 
-*The operator enters through qq-owned adapters; independent services and external products remain separate process and ownership boundaries.*
+*`bin/qq` discovers packages on disk and DSH/Cordis wires them as replaceable plugin fibers.*
 
-## Pi composition and role coupling
+`qq/src/session.mjs#createQqService` owns project discovery, live root-session operations, observation, and spoken session aliases. [`qq-ui`](../runtime/dsh-console.md) is one-way presentation over that service. [`qq-workflows`](../workflow/dsh-workflows.md), [`qq-tasks`](../workflow/dsh-workflows.md#task-pile), [`qq-relay`](../event-plane/service.md#dsh-in-process-relay), [`qq-models`](../runtime/model-connectors.md), and dictation are optional siblings: absence removes that capability but must not prevent the core host from booting.
 
-`extensions/index.ts` registers extensions in this exact order:
+The launcher generically adds every local `qq-*/package.json`, plus optional adjacent `image-finder` and `media-box` repositories. Named flags enable the three inserts declared directly in `qq/host.patch.yml`; other sibling packages activate through their own `dsh.bundle`. HMR watches only the discovered roots. Plugins must register routes, tools, listeners, timers, and background work with reversible `ctx.effect` handlers and communicate through Cordis services rather than sibling imports.
 
-1. `registerExecutionProfiles`
-2. `registerRead`
-3. `registerAgentMessages`
-4. `registerOperatorStage`
-5. `registerContinue`
-6. `registerSessionScrub`
-7. `registerBacklogGuard`
-8. `registerGrokParaphraseGuard`
-9. `registerBoard`
-10. `registerReviewFlow`
+## Legacy Pi composition
 
-The order makes profile activation the composition root and installs qq's replacement `read` before workflow tools. `registerQQ` creates one `createQqSessionContext()` instance and shares it with profiles, board, and review flow so DSH parent/child sessions do not leak role or run ownership through process-global state. On profile application, `extensions/execution-profiles.ts` emits `qq:role-selected` with `{ role, profile }` and, for DSH, `sessionId`. Messaging updates presence, the board gates architect-only tools, and review flow starts or stops the matching architect session's run-event reception from that event. The Grok guard can also emit the event when selecting its fallback. The standalone QA-result surface is intentionally not registered globally; review workers invoke isolated QA behavior instead. See [repository activation and execution policy](../runtime/profiles-and-activation.md), [agent messaging](../event-plane/agent-messaging.md), [delegation and review](../workflow/delegation-and-review.md), and [safety and context](../extensions/safety-and-context.md).
+`extensions/index.ts` registers profiles first, then `read`, agent messaging, operator staging, continue, scrub, Backlog guard, Grok repetition and retry recovery, board, and review flow. `qq:role-selected` remains the coupling event among profiles, presence, architect tools, and run outcomes. This runtime's durable relay is the external installed product described in [agent messaging](../event-plane/agent-messaging.md), not the DSH in-process mailbox.
 
-## Process boundaries and responsibilities
+The [delegation lifecycle](../workflow/delegation-and-review.md) still owns protected worktrees and two-look QA. Completed runner packets are now routed: trivial presentation-only changes can land immediately, while control/runtime changes go through isolated QA and then auto-land on pass.
 
-| Boundary | qq-owned responsibility | External or independent side |
-|---|---|---|
-| Pi session | Extension registration, role prompt replacement, tools, guards, role events | Installed Pi runtime and provider authentication |
-| qq-relay | Installed executable/client resolution and message/run-outcome consumer contracts | Protocol, persistence, installation, service lifecycle, and product checks in the linked qq-relay repository |
-| Startup, review, and landing | Pi workers plus native DSH adapter/runner, runtime-discriminated bootstrap/handoff contracts, QA verdict schema, and locks | DSH continuable/persistence services or Herdr socket, child Git, Backlog, model, and installed qq-relay delivery |
-| Herdr | Config, activation/smoke scripts, plugin adapters, `herdr.service` packaging | Rust source, tests, build, install, and product lifecycle in the linked Herdr repository |
-| Dashboard | Two installed-artifact launch wrappers and the `qq-profile list --json` contract | Source, tests, installation, upgrades, and cookie semantics in the linked dashboard repository |
-| OpenWiki | Timer/service, dispatch, isolated writer/publication scripts, allowed generated paths | OpenWiki executable and model provider |
+## Durable state
 
-Herdr's service launches `%h/.local/lib/qq/herdr/bin/herdr server`, logs under `%h/.local/state/herdr/`, and uses `ExitType=cgroup` so a live handoff can retain the replacement process. Operational details belong in [Herdr operator workflows](../herdr/operator-workflows.md).
-
-## Durable state and ownership
-
-| Location | Owner and invariant |
+| State | Owner and invariant |
 |---|---|
-| Repository common local Git config, `qq.methodology` | `qq-methodology`; the activation marker is local and shared by linked worktrees, never clones |
-| `~/.config/qq/execution-profiles.json` | qq profile policy; owner-only, non-symlink regular file with schema `qq.execution-profiles/v1` |
-| `~/.local/state/qq/store/<project>/` and checkout `backlog` symlink | `qq-methodology` and Backlog.md; data is outside Git and `auto_commit` is false |
-| `${XDG_STATE_HOME:-~/.local/state}/qq/pane-profiles/<pane>.json` | profile extension; owner-only pane-local role/profile selection for Pi/Herdr |
-| `${XDG_STATE_HOME:-~/.local/state}/qq/session-contexts/<session>.json` | shared host boundary; owner-only DSH role/profile/run ownership, exclusively claimed for native bootstrap parent and runner identities |
-| `${XDG_STATE_HOME:-~/.local/state}/qq/dsh-workbench/` | daily workbench default DSH home; persistent profile, sessions, and saved default session identity; credentials, if file-backed, remain owner-only |
-| `${XDG_STATE_HOME:-~/.local/state}/qq-relay/` | qq-relay-owned service state and `qq-relay.sock`; qq consumers connect but do not manage it |
-| `${XDG_STATE_HOME:-~/.local/state}/qq/agent-messages/presence/` | Agent-messaging extension; ephemeral private presence leases, separate from relay state |
-| `~/.local/state/qq/telemetry/` | Dashboard contract; preserve usage caches and cookie snapshot across installs and upgrades |
-| qq run/handoff state and `qq/bootstrap-failures/` below the qq state home | Delegation/review libraries and workers; private bootstrap/handoff JSON, durable sanitized startup-failure outbox, and worktree lifecycle |
-| Repository `openwiki/` | OpenWiki automation is the sole generated-output writer; publication validates paths and modes and coordinates landing locks |
+| `${XDG_STATE_HOME:-$HOME/.local/state}/qq` | Daily DSH home; private profile/session persistence, `qq.session`, aliases, and plugin stores. |
+| `${XDG_CONFIG_HOME:-$HOME/.config}/qq/workflows-settings.json` | Workflow role bindings, passed by `qq/host.patch.yml`. |
+| `~/.local/state/qq/runs/` and `~/.herdr/worktrees/` | Legacy delegation handoffs and isolated Git worktrees. |
+| `~/.local/state/qq-relay/` | External Pi relay state only; DSH relay state is in-process. |
+| repository `openwiki/` | Generated documentation owned by OpenWiki publication automation. |
 
-Do not move external Backlog or telemetry state into the repository. Generated OpenWiki publication and its lock boundary are covered in [OpenWiki automation](../operations/openwiki-automation.md).
+## Change navigation
 
-## Practical entrypoints
-
-| Intent | Stable entrypoint | Notes |
+| Intent | Start with | Focused check |
 |---|---|---|
-| Link, inspect, or unlink a checkout | `bin/qq-methodology` | Writes the common Git marker and prepares Pi trust/settings and Backlog state |
-| Inspect or change profile policy | `bin/qq-profile` | `/profile` is the session and pane selector; CLI `default` is durable |
-| Invoke the installed relay CLI | `bin/qq-relay` | Resolves only `${QQ_RELAY_INSTALL_ROOT:-$HOME/.local/lib/qq/relay}/bin/qq-relay`; product lifecycle belongs upstream; see [qq-relay integration](../event-plane/service.md) |
-| Run the dashboard | `bin/qq-dashboard`, `bin/qq-dashboard-cookies` | Execute only binaries under `${QQ_DASHBOARD_INSTALL_ROOT:-$HOME/.local/lib/qq/dashboard}` |
-| Activate or inspect Herdr integration | `bin/qq-herdr-activate`, `bin/qq-herdr-smoke` | Does not build Herdr |
-| Start, review, or land a delegated run | `bin/qq-start-worker.mjs`, `bin/qq-review-worker.mjs`, `bin/qq-land-worker.mjs` | Internal workers consume private bootstrap or handoff JSON paths; they are not normal operator entrypoints |
-| Refresh generated wiki | `bin/qq-openwiki-service` | Reads the `openwiki` service profile then dispatches refreshes |
-| Exercise the pinned DSH host | `compat/pi2dsh/run.sh` | Compatibility-only harness; see [DSH compatibility](../runtime/dsh-compatibility.md) |
-| Start the daily DSH coding workbench | `bin/qq-dsh-workbench` | Persistent DSH home, explicit model, loopback-only sequential use; see [DSH workbench](../runtime/dsh-console.md) |
-| Load Pi extensions | `extensions/index.ts` | Default export `registerQQ(pi)` |
-| Invoke the host Pi installation | `bin/pi` | Host-local compatibility shim that hard-codes `/home/qqp/.local/bin/pi`; it is not a portable installer and has no focused local test |
+| Host discovery, profile, pins, or HMR | `bin/qq`, `qq/host.patch.yml`, `dsh/pins.json` | `node tests/test-qq-host.mjs .` then conditional `tests/test-qq-host-live.sh` |
+| Session/project/alias behavior | `qq/src/session.mjs`, `qq/src/alias.mjs` | `node tests/test-qq-projects.mjs` and `node tests/test-qq-alias.mjs .` |
+| Optional plugin lifecycle | owning `qq-*/src/plugin.mjs`; `ctx.effect` disposer | owning plugin test plus `tests/test-qq-host-boot.sh` when absence/boot changes |
+| Legacy Pi registration | `extensions/index.ts` | owning extension test; use `npm test` only for cross-cutting validation |
 
-## Invariants and extension rules
-
-- Keep execution profiles first in registration order unless role-event consumers and startup ordering are revalidated.
-- Add global behavior only through `extensions/index.ts`; keep isolated QA extensions out of the bundle.
-- Treat `qq:role-selected` as the role-coupling seam and preserve its `{ role, profile }` payload.
-- Add executable adapters under `bin/` with explicit process and state ownership; do not blur external product ownership.
-- Generated files remain confined to `openwiki/`; automation must not create or modify sibling repository content.
-- Linked-product adapters must resolve only explicit installed roots; never execute landed source, search `PATH`, or reintroduce product code as an npm dependency.
-
-## Validation
-
-Run the complete sequential ownership chain with `npm test`. For narrow checks, route activation/profile changes to `tests/test-methodology.sh` and `tests/test-execution-profiles.mjs`; qq-relay, dashboard, Herdr, safety, and OpenWiki changes have their corresponding tests in `tests/`. See [practical test routing](../testing/validation.md). A composition review should also compare the registration list above directly with `extensions/index.ts` and verify every new `bin/` entry has one canonical owner page.
+Do not add a sibling as a hard npm dependency merely to compose it. A shipped plugin change is complete only when its own package entrypoint exposes the Cordis plugin, `bin/qq` discovers/binds it, registration is reversible, and the host or boot test proves the consumer path.

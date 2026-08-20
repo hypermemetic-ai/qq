@@ -89,7 +89,7 @@ Pi/Herdr keeps the environment and pane behavior above. A canonical DSH parent (
 
 Each DSH session record lives at `${XDG_STATE_HOME:-~/.local/state}/qq/session-contexts/<session-id>.json` with schema `qq.session-context/v1` and exact fields `schema`, `sessionId`, `role`, `profile`, and `runState`. The directory must be owner-controlled, non-symlink mode `0700`; files are atomically written as `0600`. `runState` is an absolute path or `null`. Invalid IDs, ownership, modes, keys, roles, profiles, or paths fail closed.
 
-This boundary matters because a DSH host may run an architect parent and runner child in one process. Profiles resolve the active session on each turn; `sketch`, `note`, and `delegate` check that session's role; `done` reads that session's run-state path; review events ignore role-selection events for another active DSH session. A fresh host can restore the same records after continuation, while plain Pi UUIDs remain on the historical environment fallback. See the pinned [DSH compatibility proof](dsh-compatibility.md).
+This boundary remains for the legacy extension bundle and its DSH-aware tests: profiles and workflow tools resolve the active session instead of process-global role state. The removed native-launch harness no longer makes this the daily `bin/qq` composition; see the [current DSH host boundary](dsh-compatibility.md).
 
 ## Session startup, prompts, and refusal
 

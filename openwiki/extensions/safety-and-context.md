@@ -82,7 +82,9 @@ node --experimental-strip-types tests/test-read.mjs .
 node --experimental-strip-types tests/test-backlog-guard.mjs .
 node --experimental-strip-types tests/test-session-scrub.mjs .
 node --experimental-strip-types tests/test-grok-paraphrase-guard.mjs .
+node --experimental-strip-types tests/test-grok-auto-continue.mjs .
 node --experimental-strip-types tests/test-continue.mjs .
 ```
 
 These cover budget/range/outline/image branches, including per-cwd built-in caching, `@`/home/relative resolution, beyond-EOF and empty-range failures, depth collapse, missing/parser/unsupported outline fallbacks, cancellation, ordinary text beginning with image-like status text, and huge Unicode previews bounded by both token estimate and UTF-8 bytes. They also cover Backlog path normalization/store resolution, scrub matching and refusal cases, stream/turn recovery and fallback behavior, and idle-only shortcut dispatch. Use the full sequential suite described in [Testing and validation](../testing/validation.md) after cross-extension changes.
+bounded by both token estimate and UTF-8 bytes. They also cover Backlog path normalization/store resolution, scrub matching and refusal cases, stream/turn recovery and fallback behavior, and idle-only shortcut dispatch. Use the full sequential suite described in [Testing and validation](../testing/validation.md) after cross-extension changes.
