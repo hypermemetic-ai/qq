@@ -369,17 +369,15 @@ function openSse(sessionId, port = address.port, path = sessionPath(sessionId, "
   assert.match(markdown, /<p>script relative <a href="mailto:dev@example.com">mail<\/a><\/p>/);
   assert.doesNotMatch(markdown, /javascript:alert|<img |href="\/settings"/);
   assert.match(markdown, /<p>diagram<\/p>/);
-  assert.match(markdown, /<pre><code class="language-js">const answer = 42<\/code><\/pre>/);
+  assert.match(markdown, /<pre><code class="language-js"><span class="hljs-keyword">const<\/span> answer = <span class="hljs-number">42<\/span>/);
 
   const started = Date.now();
   const emptyHeading = renderMarkdownText("# ");
   assert.ok(Date.now() - started < 250);
-  assert.match(emptyHeading, /<p># <\/p>/);
-  assert.doesNotMatch(emptyHeading, /<h1>/);
-  for (const line of ["## ", "#\t", "   # "]) {
+  assert.match(emptyHeading, /<h1><\/h1>/);
+  for (const [line, level] of [["## ", 2], ["#\t", 1], ["   # ", 1]]) {
     const html = renderMarkdownText(line);
-    assert.match(html, /<p>/);
-    assert.doesNotMatch(html, /<h[1-6]>/);
+    assert.match(html, new RegExp(`<h${level}><\\/h${level}>`));
   }
 
   const blocks = renderMarkdownText([
@@ -393,9 +391,9 @@ function openSse(sessionId, port = address.port, path = sessionPath(sessionId, "
     "---",
   ].join("\n"));
   assert.match(blocks, /<h1>Heading<\/h1>/);
-  assert.match(blocks, /<blockquote><p>quoted <em>text<\/em><\/p><\/blockquote>/);
-  assert.match(blocks, /<ul><li>bullet<\/li><\/ul>/);
-  assert.match(blocks, /<ol><li>numbered<\/li><\/ol>/);
+  assert.match(blocks, /<blockquote>\s*<p>quoted <em>text<\/em><\/p>\s*<\/blockquote>/);
+  assert.match(blocks, /<ul>\s*<li>bullet<\/li>\s*<\/ul>/);
+  assert.match(blocks, /<ol>\s*<li>numbered<\/li>\s*<\/ol>/);
   assert.match(blocks, /<hr>/);
 }
 
@@ -1310,11 +1308,11 @@ try {
   assert.match(home.body, /htmx-2\.0\.10\.min\.js/);
   assert.match(home.body, /htmx-ext-sse-2\.2\.4\.js/);
   assert.match(home.body, /rel="manifest"/);
-  assert.match(home.body, /console-v16\.css/);
-  assert.doesNotMatch(home.body, /console-v15\.css/);
-  assert.match(home.body, /browser-v7\.js/);
-  assert.doesNotMatch(home.body, /browser-v6\.js/);
-  assert.match(home.body, /data-service-worker="\/qq\/sw-v16\.js"/);
+  assert.match(home.body, /console-v17\.css/);
+  assert.doesNotMatch(home.body, /console-v16\.css/);
+  assert.match(home.body, /browser-v8\.js/);
+  assert.doesNotMatch(home.body, /browser-v7\.js/);
+  assert.match(home.body, /data-service-worker="\/qq\/sw-v17\.js"/);
   assert.match(home.body, /<code>\d+<\/code>/);
   assert.doesNotMatch(home.body, new RegExp(`<code>${primaryId}</code>`));
   assert.match(home.body, new RegExp(`<option value="${primaryId}" selected>Current · \\d+</option>`));
@@ -1573,7 +1571,7 @@ try {
   assert.equal(manifest.scope, "/qq/");
   assert.deepEqual(manifest.icons.map((icon) => icon.sizes), ["192x192", "512x512"]);
 
-  const worker = await request("/qq/sw-v16.js");
+  const worker = await request("/qq/sw-v17.js");
   assert.equal(worker.status, 200);
   assert.equal(worker.headers["service-worker-allowed"], "/qq/");
   assert.match(worker.body, /request\.method !== "GET"/);
@@ -1588,9 +1586,11 @@ try {
   assert.match(worker.body, /console-v14\.css/);
   assert.match(worker.body, /console-v15\.css/);
   assert.match(worker.body, /console-v16\.css/);
+  assert.match(worker.body, /console-v17\.css/);
   assert.match(worker.body, /browser-v5\.js/);
   assert.match(worker.body, /browser-v6\.js/);
   assert.match(worker.body, /browser-v7\.js/);
+  assert.match(worker.body, /browser-v8\.js/);
   assert.match(worker.body, /reconnect-v1\.js/);
   assert.match(worker.body, /geist-latin-wght-normal-5\.3\.0\.woff2/);
   assert.match(worker.body, /geist-latin-wght-italic-5\.3\.0\.woff2/);
@@ -1604,7 +1604,7 @@ try {
   assert.match(offline.body, /No transcript is cached and no message can be sent offline/);
   assert.match(offline.body, /console-v8\.css/);
   assert.match(offline.body, /reconnect-v1\.js/);
-  const staticCss = await request("/qq/assets/console-v16.css");
+  const staticCss = await request("/qq/assets/console-v17.css");
   assert.match(staticCss.headers["cache-control"], /immutable/);
   assert.match(staticCss.body, /@font-face/);
   assert.match(staticCss.body, /font-family: "Geist UI"/);
@@ -1627,6 +1627,11 @@ try {
   assert.match(staticCss.body, /\.close-confirm\[hidden\] \{ display: none; \}/);
   assert.match(staticCss.body, /\.session-controls\.close-confirming \.close-arm \{ display: none; \}/);
   assert.match(staticCss.body, /\.close-arm \{/);
+  assert.match(staticCss.body, /\.project-drawer \{/);
+  assert.match(staticCss.body, /width: min\(15\.5rem, calc\(100vw - 8rem\)\)/);
+  assert.match(staticCss.body, /\.drawer-name \{[\s\S]*text-overflow: ellipsis/);
+  assert.match(staticCss.body, /\.file-document \{/);
+  assert.match(staticCss.body, /\.hljs-keyword/);
   assert.match(staticCss.body, /#composer-submit \{[\s\S]*clip-path: none/);
   assert.match(staticCss.body, /\.overlay-saving/);
   assert.match(staticCss.body, /\.overlay-cancel/);
@@ -1661,8 +1666,8 @@ try {
     readFile(join(root, "qq/host.patch.yml"), "utf8"),
     readFile(join(root, "bin/qq"), "utf8"),
     readFile(join(root, "dsh/qq-dsh-model-compat.mjs"), "utf8"),
-    readFile(join(root, "qq-ui/assets/browser-v5.js"), "utf8"),
-    readFile(join(root, "qq-ui/assets/sw-v16.js"), "utf8"),
+    readFile(join(root, "qq-ui/assets/browser-v8.js"), "utf8"),
+    readFile(join(root, "qq-ui/assets/sw-v17.js"), "utf8"),
     readFile(join(root, "qq-ui/src/render.mjs"), "utf8"),
   ]);
   assert.equal(pins.schema, "qq.dsh-console-vendor-pins/v1");
@@ -1706,6 +1711,8 @@ try {
   assert.equal(relayPkg.name, "@hypermemetic-ai/qq-relay");
   assert.equal(workflowsPkg.name, "@hypermemetic-ai/qq-workflows");
   assert.equal(uiPkg.dependencies["@hypermemetic-ai/qq"], "file:../qq");
+  assert.equal(uiPkg.dependencies["markdown-it"], "15.0.0");
+  assert.equal(uiPkg.dependencies["highlight.js"], "11.12.0");
   assert.equal(qqPkg.dependencies?.["@hypermemetic-ai/qq-ui"], undefined);
   assert.equal(relayPkg.dependencies?.["@hypermemetic-ai/qq"], undefined);
   assert.equal(qqPkg.dependencies?.["@hypermemetic-ai/qq-relay"], undefined);
@@ -1778,6 +1785,12 @@ try {
   assert.match(browser, /location\.assign\(`\$\{base\}\/session\/\$\{sessionId\}`\)/);
   assert.match(browser, /workflows-dismiss/);
   assert.match(browser, /workflows-popup/);
+  assert.match(browser, /openDrawer/);
+  assert.match(browser, /closeDrawer/);
+  assert.match(browser, /pointercancel/);
+  assert.match(browser, /dx >= 56/);
+  assert.match(browser, /trapDrawerFocus/);
+  assert.match(browser, /url\.searchParams\.set\("drawer"/);
   assert.doesNotMatch(browser, /localStorage|sessionStorage|indexedDB|document\.cookie|EventSource|WebSocket|htmx\.process/);
   assert.doesNotMatch(renderSource, /outerHTML|controller|observer|lease|take control/i);
   assert.doesNotMatch(workerSource, /addEventListener\("(?:sync|periodicsync|push|notificationclick)"|indexedDB|localStorage/i);

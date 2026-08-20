@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createConsoleHandler, internals as httpInternals } from "../qq-ui/src/http-app.mjs";
 import { renderSessionContent } from "../qq-ui/src/render.mjs";
+import { MAX_READABLE_FILE_BYTES } from "../qq/src/files.mjs";
 import {
   compareSessionRecency,
   createQqService,
@@ -27,8 +28,17 @@ const projects = makeProjectsHome("alpha");
 const alphaCwd = projects.cwd;
 const betaCwd = addProject(projects.root, "beta");
 mkdirSync(join(alphaCwd, "nested"));
+mkdirSync(join(alphaCwd, "nested", "deeper"));
+writeFileSync(join(alphaCwd, "README.md"), "# Alpha\n\n<script>nope</script>\n");
+writeFileSync(join(alphaCwd, "notes.txt"), "one calm line\n");
+writeFileSync(join(alphaCwd, "nested", "sample.js"), "const answer = 42;\n");
+writeFileSync(join(alphaCwd, "manual.pdf"), Buffer.from("%PDF-1.4 proof"));
+writeFileSync(join(alphaCwd, "mystery.bin"), Buffer.from([0, 1, 2, 3]));
+writeFileSync(join(alphaCwd, "huge.txt"), "x".repeat(MAX_READABLE_FILE_BYTES + 1));
 const outside = makeProjectsHome("escape");
+writeFileSync(join(outside.cwd, "secret.txt"), "outside\n");
 symlinkSync(outside.cwd, join(projects.root, "escaped"));
+symlinkSync(outside.cwd, join(alphaCwd, "escape-link"));
 writeFileSync(join(projects.root, "file.txt"), "nope");
 
 let emptyRoot;
@@ -165,6 +175,47 @@ try {
     model: "deepseek-v4-pro-0813",
   });
 
+  const projectLevel = qq.listProjectFiles();
+  assert.equal(projectLevel.scope, "projects");
+  assert.deepEqual(projectLevel.entries.map((entry) => entry.name), ["alpha", "beta"]);
+  assert.equal(projectLevel.entries.every((entry) => entry.type === "project"), true);
+
+  const alphaLevel = qq.listProjectFiles("alpha");
+  assert.equal(alphaLevel.scope, "project");
+  assert.equal(alphaLevel.path, "");
+  assert.equal(alphaLevel.parent, null);
+  assert.equal(alphaLevel.entries.some((entry) => entry.name === "escape-link"), false);
+  assert.deepEqual(alphaLevel.entries.find((entry) => entry.name === "README.md"), {
+    name: "README.md", type: "file", path: "README.md", kind: "markdown",
+  });
+  assert.deepEqual(alphaLevel.entries.find((entry) => entry.name === "manual.pdf"), {
+    name: "manual.pdf", type: "file", path: "manual.pdf", kind: "binary",
+    mediaType: "application/pdf", disposition: "inline",
+  });
+  const nestedLevel = qq.listProjectFiles("alpha", "nested");
+  assert.equal(nestedLevel.parent, "");
+  assert.deepEqual(nestedLevel.entries.map((entry) => entry.name), ["deeper", "sample.js"]);
+  assert.deepEqual(nestedLevel.breadcrumbs.map((crumb) => crumb.name), ["projects", "alpha", "nested"]);
+  assert.throws(() => qq.listProjectFiles("alpha", "escape-link"), /escapes the selected project/);
+  assert.throws(() => qq.listProjectFiles("alpha", "../beta"), /canonical and project-relative/);
+
+  const markdownFile = qq.readProjectFile("alpha", "README.md");
+  assert.equal(markdownFile.kind, "markdown");
+  assert.match(markdownFile.text, /# Alpha/);
+  const codeFile = qq.readProjectFile("alpha", "nested/sample.js");
+  assert.equal(codeFile.language, "javascript");
+  assert.equal(codeFile.text, "const answer = 42;\n");
+  assert.throws(() => qq.readProjectFile("alpha", "huge.txt"), /exceeds the 512 KiB limit/);
+  assert.throws(() => qq.readProjectFile("alpha", "mystery.bin"), /unsupported file type/);
+  assert.throws(() => qq.readProjectFile("alpha", "escape-link/secret.txt"), /escapes the selected project/);
+  const pdf = qq.openProjectFile("alpha", "manual.pdf");
+  assert.equal(pdf.mediaType, "application/pdf");
+  assert.equal(pdf.disposition, "inline");
+  assert.equal(pdf.body.toString(), "%PDF-1.4 proof");
+  const pdfHead = qq.openProjectFile("alpha", "manual.pdf", { includeBody: false });
+  assert.equal(pdfHead.body, undefined);
+  assert.throws(() => qq.openProjectFile("alpha", "README.md"), /text file must use/);
+
   const listedAlpha = await qq.list("alpha");
   assert.deepEqual(listedAlpha.map((row) => row.id), [alphaId, betaId]);
   assert.equal(listedAlpha.some((row) => row.id === persistedOnly), false);
@@ -292,6 +343,70 @@ try {
     assert.match(page.body, /history is kept/);
     assert.match(page.body, /class="close-keep"/);
     assert.match(page.body, /id="close-session"/);
+    assert.match(page.body, /id="project-drawer-toggle"[^>]*aria-expanded="false"[^>]*>files<\/button>/);
+    assert.match(page.body, /id="project-drawer"[^>]*aria-hidden="true"[^>]*inert/);
+    assert.match(page.body, /data-entry-type="directory"[^>]*href="[^\"]*\?drawer=nested"/);
+    assert.doesNotMatch(page.body, /# Alpha|one calm line|cwd|preview/i);
+
+    const openDrawer = await request(`${added.headers.location}?drawer=`);
+    assert.equal(openDrawer.status, 200);
+    assert.match(openDrawer.body, /<body class="drawer-open">/);
+    assert.match(openDrawer.body, /id="project-drawer-toggle"[^>]*aria-expanded="true"/);
+    assert.match(openDrawer.body, /id="project-drawer"[^>]*aria-hidden="false"/);
+    assert.match(openDrawer.body, />~\/projects<\/a>[\s\S]*>alpha<\/span>/);
+    assert.match(openDrawer.body, /aria-label="Read file README.md"/);
+    assert.match(openDrawer.body, /aria-label="Open file manual.pdf"/);
+
+    const nestedDrawer = await request(`${added.headers.location}?drawer=nested`);
+    assert.equal(nestedDrawer.status, 200);
+    assert.match(nestedDrawer.body, />nested<\/span>/);
+    assert.match(nestedDrawer.body, /sample\.js/);
+    assert.doesNotMatch(nestedDrawer.body, /README\.md/);
+    const projectsDrawer = await request(`${added.headers.location}?drawer=~`);
+    assert.equal(projectsDrawer.status, 200);
+    assert.match(projectsDrawer.body, />~\/projects<\/span>/);
+    assert.match(projectsDrawer.body, /aria-label="Open project alpha"/);
+    assert.match(projectsDrawer.body, /aria-label="Open project beta"/);
+
+    const createsBeforeProjectChoice = creates.length;
+    const betaChoice = await request("/qq/project/beta?drawer=");
+    assert.equal(betaChoice.status, 200);
+    assert.equal(creates.length, createsBeforeProjectChoice, "choosing a project never creates a session");
+    assert.match(betaChoice.body, /no live sessions/);
+
+    const markdownView = await request("/qq/project/alpha/file/README.md");
+    assert.equal(markdownView.status, 200);
+    assert.match(markdownView.body, /class="file-surface"/);
+    assert.match(markdownView.body, /class="message-text message-markdown file-prose"/);
+    assert.match(markdownView.body, /<h1>Alpha<\/h1>/);
+    assert.match(markdownView.body, /&lt;script&gt;nope&lt;\/script&gt;/);
+    assert.doesNotMatch(markdownView.body, /<script>nope<\/script>/);
+    assert.doesNotMatch(markdownView.body, /id="console-stream"|id="composer"/);
+
+    const codeView = await request("/qq/project/alpha/file/nested%2Fsample.js");
+    assert.equal(codeView.status, 200);
+    assert.match(codeView.body, /class="hljs language-javascript"/);
+    assert.match(codeView.body, /hljs-keyword/);
+    const textView = await request("/qq/project/alpha/file/notes.txt");
+    assert.equal(textView.status, 200);
+    assert.match(textView.body, /file-prose file-plain/);
+    assert.match(textView.body, /one calm line/);
+    const oversizedView = await request("/qq/project/alpha/file/huge.txt");
+    assert.equal(oversizedView.status, 413);
+    assert.match(oversizedView.body, /File is too large/);
+    assert.match(oversizedView.body, /512 KiB limit/);
+    const unsupportedView = await request("/qq/project/alpha/file/mystery.bin");
+    assert.equal(unsupportedView.status, 415);
+    assert.match(unsupportedView.body, /Preview unavailable/);
+    assert.match(unsupportedView.body, /unsupported file type/);
+    const pdfOpen = await request("/qq/project/alpha/open/manual.pdf");
+    assert.equal(pdfOpen.status, 200);
+    assert.equal(pdfOpen.headers["content-type"], "application/pdf");
+    assert.match(pdfOpen.headers["content-disposition"], /^inline;/);
+    assert.equal(pdfOpen.body, "%PDF-1.4 proof");
+    const escapedRead = await request("/qq/project/alpha/file/escape-link%2Fsecret.txt");
+    assert.equal(escapedRead.status, 403);
+    assert.match(escapedRead.body, /escapes the selected project/);
 
     live.get(newId).setStatus("running");
     const runningClear = await request(`/qq/project/alpha/session/${newId}/prompt`, {
