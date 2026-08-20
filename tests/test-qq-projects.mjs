@@ -70,6 +70,13 @@ try {
     ["deciq", "discuss", "everything-box", "inference-box", "media-box", "qq", "ytgrab"],
     "the production catalog registers exactly the operator project set",
   );
+  const productionLabels = [...productionCatalog.matchAll(/\blabel:\s*([^,}\n]+)/gu)]
+    .map((match) => match[1].trim());
+  assert.equal(
+    productionLabels.every((label) => label === label.toLowerCase()),
+    true,
+    "every configured production project and folder label is lowercase",
+  );
   function productionProject(name, label, ...folderFlows) {
     const start = productionCatalog.indexOf(`- name: ${name}`);
     assert.notEqual(start, -1, `production catalog must register ${name}`);
@@ -86,22 +93,22 @@ try {
       previous = position;
     }
   }
-  productionProject("deciq", "DECIQ",
-    "- { name: core, label: Core, path: deciq }",
-    "- { name: logic, label: Logic, path: deciq-logic }");
-  productionProject("qq", "QQ",
-    "- { name: core, label: QQ Core, path: qq }",
-    "- { name: relay, label: Relay, path: qq-relay }",
-    "- { name: dictation, label: Dictation, path: qq-dictation }",
-    "- { name: newspaper, label: Newspaper, path: qq-newspaper }",
-    "- { name: dashboard, label: Dashboard, path: qq-dashboard }",
-    "- { name: image-finder, label: Image Finder, path: image-finder }");
+  productionProject("deciq", "deciq",
+    "- { name: core, label: core, path: deciq }",
+    "- { name: logic, label: logic, path: deciq-logic }");
+  productionProject("qq", "qq",
+    "- { name: core, label: qq core, path: qq }",
+    "- { name: relay, label: relay, path: qq-relay }",
+    "- { name: dictation, label: dictation, path: qq-dictation }",
+    "- { name: newspaper, label: newspaper, path: qq-newspaper }",
+    "- { name: dashboard, label: dashboard, path: qq-dashboard }",
+    "- { name: image-finder, label: image finder, path: image-finder }");
   for (const [name, label] of [
-    ["discuss", "Discuss"],
-    ["everything-box", "Everything Box"],
-    ["inference-box", "Inference Box"],
-    ["media-box", "Media Box"],
-    ["ytgrab", "YTGrab"],
+    ["discuss", "discuss"],
+    ["everything-box", "everything box"],
+    ["inference-box", "inference box"],
+    ["media-box", "media box"],
+    ["ytgrab", "ytgrab"],
   ]) {
     productionProject(name, label, `- { name: ${name}, label: ${label}, path: ${name} }`);
   }
