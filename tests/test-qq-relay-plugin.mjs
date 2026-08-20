@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -18,6 +18,9 @@ const { createRelayService, relayEnvelope, RelayError } = relayModule;
 const { buildRelayTools } = toolsModule;
 
 const scratch = mkdtempSync(join(tmpdir(), "qq-relay-plugin."));
+const projectsRoot = join(scratch, "projects");
+const workCwd = join(projectsRoot, "work");
+mkdirSync(workCwd, { recursive: true });
 const sessionId = (marker) =>
   `session-63a11000-0000-4000-8000-${String(marker).padStart(12, "0")}`;
 const alphaId = sessionId("000000000001");
@@ -109,7 +112,7 @@ try {
       id,
       get status() { return status; },
       setStatus(next) { status = next; },
-      session: { id, events: [], header: { createdAt: Date.now(), cwd: "/work" } },
+      session: { id, events: [], header: { createdAt: Date.now(), cwd: workCwd } },
       steer(message) { calls.steer.push(message); },
       followup(message) { calls.followup.push(message); },
       cancel(cause, options) { calls.cancel.push({ cause, options }); },
@@ -188,7 +191,8 @@ try {
     };
     qqPluginModule.apply(ctx, {
       sessionId: alphaId,
-      cwd: "/work",
+      cwd: workCwd,
+      projectsRoot,
       provider: "qwen-token-plan",
       model: "deepseek-v4-pro-0813",
       aliasFile: file,

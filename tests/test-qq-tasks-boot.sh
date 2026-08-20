@@ -100,6 +100,7 @@ boot() {
     DSH_TELEMETRY_DISABLED=1 \
     QWEN_TOKEN_PLAN_API_KEY=qq-tasks-boot-probe \
     QQ_PORT="$port" \
+    QQ_PROJECTS_ROOT="$(dirname "$sim")" \
     QQ_DSH_SESSION_ID="$primary_id" \
     "$sim/bin/qq" --patch "$sim/local-model.patch.yml" \
     >"$sim/$name.stdout.log" 2>"$sim/$name.stderr.log" &
@@ -175,9 +176,24 @@ post_prompt() {
     "$origin/qq/session/$primary_id/prompt" >"$sim/$name.html"
 }
 
+wait_ready() {
+  local name=$1
+  local text=$2
+  for _ in {1..400}; do
+    curl -fsSL --max-time 2 "$origin/qq/" >"$sim/$name.settled.html" 2>/dev/null || true
+    if grep -Fq "$text" "$sim/$name.settled.html" 2>/dev/null \
+      && grep -Fq 'status-ready' "$sim/$name.settled.html" 2>/dev/null; then
+      return
+    fi
+    sleep 0.05
+  done
+  echo "test-qq-tasks-boot: timed out waiting for '$text' to settle" >&2
+  exit 1
+}
+
 post_prompt select '/workflows architect'
 post_prompt talk 'Reply with exactly tasks-boot and nothing else.'
-grep -Fq 'tasks-boot' "$sim/talk.html"
+wait_ready talk 'tasks-boot'
 
 node - "$sim/llm-requests.jsonl" <<'NODE'
 const { readFileSync } = require("node:fs");
@@ -198,7 +214,7 @@ NODE
 
 post_prompt desk '/workflows iterate'
 post_prompt desk_talk 'Reply with exactly tasks-desk and nothing else.'
-grep -Fq 'tasks-desk' "$sim/desk_talk.html"
+wait_ready desk_talk 'tasks-desk'
 
 node - "$sim/llm-requests.jsonl" <<'NODE'
 const { readFileSync } = require("node:fs");

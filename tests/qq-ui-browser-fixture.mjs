@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { writeFile } from "node:fs/promises";
+import { projectConversation } from "../qq/src/conversation.mjs";
 import { attachObserve } from "../qq/src/session.mjs";
 import { createConsoleHandler } from "../qq-ui/src/http-app.mjs";
 
@@ -12,9 +13,17 @@ if (!endpointFile) throw new Error("usage: qq-ui-browser-fixture.mjs <endpoint-f
 
 const primaryId = "session-63a11000-0000-4000-8000-000000000021";
 const secondaryId = "session-63a11000-0000-4000-8000-000000000022";
+const newState = (id, createdAt) => ({
+  id,
+  createdAt,
+  events: [],
+  turn: 0,
+  status: "idle",
+  inbox: { nextTurn: [], nextStep: [] },
+});
 const states = new Map([
-  [primaryId, { id: primaryId, createdAt: Date.UTC(2026, 7, 16, 12), events: [], turn: 0, status: "idle" }],
-  [secondaryId, { id: secondaryId, createdAt: Date.UTC(2026, 7, 15, 12), events: [], turn: 0, status: "idle" }],
+  [primaryId, newState(primaryId, Date.UTC(2026, 7, 16, 12))],
+  [secondaryId, newState(secondaryId, Date.UTC(2026, 7, 15, 12))],
 ]);
 let connects = 0;
 let flushes = 0;
@@ -27,7 +36,126 @@ function append(state, type, data, surfaceOp) {
     seq: state.events.length,
     time: Date.now(),
     data,
-    ...(surfaceOp ? { surfaceOp } : {}),
+    ...(surfaceOp === undefined ? {} : { surfaceOp }),
+  });
+}
+
+function userMessage(text, id = `user-${randomUUID()}`) {
+  return { id, role: "user", source: { kind: "user" }, content: [{ type: "text", text }] };
+}
+
+function resultMessage(callId, content, isError = false) {
+  return {
+    id: `result-${randomUUID()}`,
+    role: "user",
+    source: { kind: "tool", callId },
+    content: [{ type: "tool-result", toolCallId: callId, content, ...(isError ? { isError: true } : {}) }],
+  };
+}
+
+function splice(state, target, start, deleteCount, inserted, outcome) {
+  const list = target === "next-turn" ? state.inbox.nextTurn : state.inbox.nextStep;
+  append(state, "agent/inbox/spliced", {
+    target,
+    start,
+    ...(deleteCount ? { removedCount: deleteCount } : {}),
+    inserted,
+    ...(outcome ? { outcome } : {}),
+  });
+  return list.splice(start, deleteCount, ...inserted);
+}
+
+function schedule(active, delay, operation) {
+  const timer = setTimeout(() => {
+    active.timers.delete(timer);
+    if (!active.cancelled) operation();
+  }, delay);
+  active.timers.add(timer);
+}
+
+function finishFixtureTurn(state, active) {
+  const { turn } = active;
+  schedule(active, 300, () => append(state, "assistant/chunk", {
+    turn, step: 1, chunk: { type: "reasoning-delta", index: 0, text: "Checking the deterministic fixture" },
+  }));
+  schedule(active, 650, () => append(state, "assistant/chunk", {
+    turn, step: 1, chunk: { type: "text-delta", index: 1, text: "Working through the fixture." },
+  }));
+  schedule(active, 1_000, () => append(state, "assistant/message", {
+    turn,
+    step: 1,
+    message: {
+      id: `assistant-${state.id}-${turn}-1`,
+      role: "assistant",
+      source: { kind: "model", provider: "fixture", model: "proof" },
+      content: [
+        { type: "reasoning", text: "Checking the deterministic fixture" },
+        { type: "text", text: "Working through the fixture." },
+      ],
+    },
+  }, "append"));
+  schedule(active, 1_300, () => {
+    append(state, "tool/call", {
+      turn, step: 1, callId: `read-${turn}`, name: "read", arguments: '{"path":"README.md"}',
+      callView: { card: "generic", title: "Read README.md", kind: "read" },
+    });
+    append(state, "tool/call", {
+      turn, step: 1, callId: `bash-${turn}`, name: "bash", arguments: '{"command":"exit 2"}',
+      callView: { card: "terminal", title: "exit 2" },
+    });
+    append(state, "tool/call", {
+      turn, step: 1, callId: `media-${turn}`, name: "screenshot", arguments: "{}",
+      callView: { card: "generic", title: "Capture screen", kind: "other" },
+    });
+  });
+  schedule(active, 2_000, () => append(state, "tool/result", {
+    turn,
+    step: 1,
+    message: resultMessage(`read-${turn}`, [{ type: "text", text: "Fixture read completed." }]),
+    resultView: { card: "read", path: "README.md", offset: 1, totalLines: 1, lines: [{ number: 1, text: "Fixture read completed." }] },
+  }, "append"));
+  schedule(active, 2_500, () => append(state, "tool/result", {
+    turn,
+    step: 1,
+    message: resultMessage(`bash-${turn}`, [{ type: "text", text: "fixture non-zero output" }]),
+    resultView: { card: "terminal", output: "fixture non-zero output", exitCode: 2 },
+  }, "append"));
+  schedule(active, 3_000, () => append(state, "tool/result", {
+    turn,
+    step: 1,
+    message: resultMessage(`media-${turn}`, [{ type: "image", attachment: { width: 412, height: 915 } }]),
+  }, "append"));
+  schedule(active, 60_000, () => {
+    const steering = splice(state, "next-step", 0, state.inbox.nextStep.length, []);
+    if (steering.length > 0) {
+      for (const message of steering) append(state, "user/message", message, "append");
+      append(state, "step/start", { turn, step: 2 });
+      append(state, "assistant/chunk", {
+        turn, step: 2, chunk: { type: "reasoning-delta", index: 0, text: "Applying every pending steer together" },
+      });
+      append(state, "assistant/chunk", {
+        turn, step: 2, chunk: { type: "text-delta", index: 1, text: "Steering batch accepted." },
+      });
+      append(state, "assistant/message", {
+        turn,
+        step: 2,
+        message: {
+          id: `assistant-${state.id}-${turn}-2`,
+          role: "assistant",
+          source: { kind: "model", provider: "fixture", model: "proof" },
+          content: [
+            { type: "reasoning", text: "Applying every pending steer together" },
+            { type: "text", text: "Steering batch accepted." },
+          ],
+        },
+      }, "append");
+    }
+  });
+  schedule(active, 120_000, () => {
+    append(state, "turn/end", { turn, reason: { kind: "completed" } });
+    state.status = "idle";
+    pending.delete(state.id);
+    flushes += 1;
   });
 }
 
@@ -38,13 +166,7 @@ const backend = {
   },
   async create() {
     const id = `session-${randomUUID()}`;
-    states.set(id, {
-      id,
-      createdAt: Date.now(),
-      events: [],
-      turn: 0,
-      status: "idle",
-    });
+    states.set(id, newState(id, Date.now()));
     flushes += 1;
     return { id };
   },
@@ -55,38 +177,77 @@ const backend = {
       error.status = 404;
       throw error;
     }
-    return { id, events: state.events, agentStatus: state.status };
+    return {
+      id,
+      events: state.events,
+      conversation: projectConversation(state.events, { inbox: state.inbox }),
+      canMutatePending: true,
+      agentStatus: state.status,
+    };
   },
   async prompt(id, text) {
     const state = states.get(id);
+    if (String(text).startsWith("/")) {
+      const match = /^\/([a-z][a-z0-9_-]*)/.exec(String(text));
+      if (!match || !["workflows", "noop", "broken"].includes(match[1])) {
+        const error = new Error(`qq: unknown slash command /${match?.[1] ?? ""}`);
+        error.status = 400;
+        throw error;
+      }
+      const commandId = `command-${randomUUID()}`;
+      append(state, "command/run", { commandId, name: match[1], args: String(text).slice(match[0].length), source: { kind: "user" } });
+      if (match[1] === "broken") {
+        append(state, "command/done", { commandId, kind: "error", text: "Fixture command failed safely" });
+        const error = new Error("Fixture command failed safely");
+        error.status = 400;
+        throw error;
+      }
+      const commandText = match[1] === "workflows" ? "iterate selected" : undefined;
+      append(state, "command/done", { commandId, kind: "success", ...(commandText ? { text: commandText } : {}) });
+      flushes += 1;
+      return commandText ?? "";
+    }
+    const message = userMessage(text);
+    if (state.status === "running") {
+      splice(state, "next-step", state.inbox.nextStep.length, 0, [message]);
+      flushes += 1;
+      return { kind: "accepted", mode: "steer", messageId: message.id };
+    }
+    splice(state, "next-turn", state.inbox.nextTurn.length, 0, [message]);
     state.turn += 1;
+    const turn = state.turn;
     state.status = "running";
-    append(state, "turn/start", { turn: state.turn });
-    append(state, "user/message", {
-      id: `user-${id}-${state.turn}`,
-      role: "user",
-      source: { kind: "user" },
-      content: [{ type: "text", text }],
-    }, "append");
-    await new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        append(state, "assistant/message", {
-          turn: state.turn,
-          step: 1,
-          message: {
-            id: `assistant-${id}-${state.turn}`,
-            role: "assistant",
-            source: { kind: "model", provider: "fixture", model: "proof" },
-            content: [{ type: "text", text: `Browser durable reply ${state.turn}` }],
-          },
-        }, "append");
-        append(state, "turn/end", { turn: state.turn, reason: { kind: "completed" } });
-        state.status = "idle";
-        pending.delete(id);
-        resolve();
-      }, text.includes("interrupt") ? 30_000 : 650);
-      pending.set(id, { timer, resolve, turn: state.turn });
-    });
+    append(state, "turn/start", { turn });
+    const [claimed] = splice(state, "next-turn", 0, 1, []);
+    append(state, "user/message", claimed, "append");
+    append(state, "step/start", { turn, step: 1 });
+    const active = { turn, timers: new Set(), cancelled: false };
+    pending.set(id, active);
+    finishFixtureTurn(state, active);
+    flushes += 1;
+    return { kind: "accepted", mode: "followup", messageId: message.id };
+  },
+  async editPending(id, itemId, text) {
+    const state = states.get(id);
+    const at = state.inbox.nextStep.findIndex((message) => message.id === itemId);
+    if (at < 0) {
+      const error = new Error("pending message is no longer available");
+      error.status = 409;
+      throw error;
+    }
+    const replacement = { ...state.inbox.nextStep[at], content: [{ type: "text", text }] };
+    splice(state, "next-step", at, 1, [replacement], "canceled");
+    flushes += 1;
+  },
+  async removePending(id, itemId) {
+    const state = states.get(id);
+    const at = state.inbox.nextStep.findIndex((message) => message.id === itemId);
+    if (at < 0) {
+      const error = new Error("pending message is no longer available");
+      error.status = 409;
+      throw error;
+    }
+    splice(state, "next-step", at, 1, [], "canceled");
     flushes += 1;
   },
   async close(id) {
@@ -97,7 +258,11 @@ const backend = {
     }
     const remaining = [...states.keys()].filter((sessionId) => sessionId !== id);
     states.delete(id);
-    pending.get(id)?.resolve();
+    const active = pending.get(id);
+    if (active) {
+      active.cancelled = true;
+      for (const timer of active.timers) clearTimeout(timer);
+    }
     pending.delete(id);
     if (remaining[0]) return { id: remaining[0], closed: id };
     return { ...(await this.create()), closed: id };
@@ -106,14 +271,14 @@ const backend = {
     const state = states.get(id);
     const active = pending.get(id);
     if (!active) return false;
-    clearTimeout(active.timer);
+    active.cancelled = true;
+    for (const timer of active.timers) clearTimeout(timer);
     append(state, "turn/end", {
       turn: active.turn,
       reason: { kind: "aborted", reason: { kind: "user" } },
     });
     state.status = "idle";
     pending.delete(id);
-    active.resolve();
     flushes += 1;
     return true;
   },
@@ -149,7 +314,10 @@ server.listen(0, "127.0.0.1", async () => {
 
 for (const signal of ["SIGTERM", "SIGINT"]) {
   process.on(signal, () => {
-    for (const active of pending.values()) clearTimeout(active.timer);
+    for (const active of pending.values()) {
+      active.cancelled = true;
+      for (const timer of active.timers) clearTimeout(timer);
+    }
     for (const stream of streams) stream.destroy();
     server.closeAllConnections?.();
     server.close(() => process.exit(0));

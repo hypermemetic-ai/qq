@@ -337,9 +337,11 @@ assert.match(restored.body, /<form id="interrupt-form"/);
 
 const streamAgain = await openSse();
 await streamAgain.waitFor(/<form id="interrupt-form"/);
-await promptStarted;
-assert.equal(agent.status, "idle");
+const admission = await promptStarted;
+assert.equal(admission.mode, "followup");
+assert.equal(agent.status, "running", "prompt returns after durable admission, not after the turn");
 const completed = await streamAgain.waitFor(/Fiber reply 1/);
+assert.equal(agent.status, "idle");
 assert.match(completed, /<form id="composer"/);
 assert.equal(prompts, 1, "qq-ui must not duplicate or queue the in-flight prompt");
 assert.ok(flushes >= 1, "durable flush remains on the qq service");

@@ -166,6 +166,19 @@ wait_count() {
   exit 1
 }
 
+wait_page() {
+  local path=$1
+  local file=$2
+  local text=$3
+  for _ in {1..400}; do
+    curl -fsS --max-time 2 "$origin$path" >"$file" 2>/dev/null || true
+    grep -Fq "$text" "$file" 2>/dev/null && return
+    sleep 0.05
+  done
+  echo "test-qq-host-live: timed out waiting for '$text' at $path" >&2
+  exit 1
+}
+
 open_stream() {
   local client=$1
   local id=$2
@@ -337,7 +350,9 @@ find "$DSH_HOME/sessions" -type f \( -name session.jsonl -o -name session.jsonl.
 # read/write/edit/search/bash schemas, and its deterministic calls execute in
 # this repository without a Pi/pi2dsh bridge.
 post_prompt native-tools "$primary_id" 'QQ_DSH_NATIVE_TOOL_PROBE' htmx
-grep -Fq 'QQ_DSH_NATIVE_TOOL_PROBE_COMPLETE' "$work/native-tools.post.html"
+# Prompt admission returns after its durable inbox flush. Observe model/tool
+# settlement independently instead of making the HTTP request own the turn.
+wait_page "$(canonical "$primary_id")" "$work/native-tools.settled.html" 'QQ_DSH_NATIVE_TOOL_PROBE_COMPLETE'
 [[ $(<"$root/.qq-tool-proof") == beta ]]
 node - "$work/llm-requests.jsonl" <<'NODE'
 const { readFileSync } = require("node:fs");
