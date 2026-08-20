@@ -10,6 +10,7 @@ import { attachObserve, createQqService } from "../qq/src/session.mjs";
 import { renderMarkdownText, renderMessageText } from "../qq-ui/src/markdown.mjs";
 import { renderLoginSheet, renderOfferPopup, renderOverlay, renderProgressChip, renderSessionContent } from "../qq-ui/src/render.mjs";
 import { makeProjectsHome } from "./qq-projects-fixture.mjs";
+import { runQqPwaBrowserProof } from "./qq-pwa-browser-proof.mjs";
 
 const root = resolve(process.argv[2] ?? ".");
 const projects = makeProjectsHome("qq");
@@ -1312,7 +1313,7 @@ try {
   assert.doesNotMatch(home.body, /console-v16\.css/);
   assert.match(home.body, /browser-v8\.js/);
   assert.doesNotMatch(home.body, /browser-v7\.js/);
-  assert.match(home.body, /data-service-worker="\/qq\/sw-v17\.js"/);
+  assert.match(home.body, /data-service-worker="\/qq\/sw\.js"/);
   assert.match(home.body, /<code>\d+<\/code>/);
   assert.doesNotMatch(home.body, new RegExp(`<code>${primaryId}</code>`));
   assert.match(home.body, new RegExp(`<option value="${primaryId}" selected>Current · \\d+</option>`));
@@ -1571,11 +1572,14 @@ try {
   assert.equal(manifest.scope, "/qq/");
   assert.deepEqual(manifest.icons.map((icon) => icon.sizes), ["192x192", "512x512"]);
 
-  const worker = await request("/qq/sw-v17.js");
+  const worker = await request("/qq/sw.js");
   assert.equal(worker.status, 200);
   assert.equal(worker.headers["service-worker-allowed"], "/qq/");
+  assert.match(worker.headers["cache-control"], /no-store/);
   assert.match(worker.body, /request\.method !== "GET"/);
   assert.match(worker.body, /request\.mode === "navigate"/);
+  assert.match(worker.body, /response\.type === "opaqueredirect"/);
+  assert.match(worker.body, /responseUrl\.origin === self\.location\.origin/);
   assert.match(worker.body, /livePathSet/);
   assert.match(worker.body, /livePathSet\.has\(url\.pathname\)\) return/);
   assert.match(worker.body, /console-v8\.css/);
@@ -1600,6 +1604,13 @@ try {
   assert.match(worker.body, /LEGACY_CACHE_PREFIX = "qq-dsh-console-static-"/);
   assert.match(worker.body, /name\.startsWith\(CACHE_PREFIX\) \|\| name\.startsWith\(LEGACY_CACHE_PREFIX\)/);
   assert.doesNotMatch(worker.body, /session\/|\/prompt|\/events|\/interrupt|backgroundsync|indexedDB|localStorage/i);
+  for (const legacyName of httpInternals.SERVICE_WORKER_NAMES.filter((name) => name !== "sw.js")) {
+    const compatibilityWorker = await request(`/qq/${legacyName}`);
+    assert.equal(compatibilityWorker.status, 200, legacyName);
+    assert.match(compatibilityWorker.headers["cache-control"], /no-store/, legacyName);
+    assert.equal(compatibilityWorker.headers["service-worker-allowed"], "/qq/", legacyName);
+    assert.equal(compatibilityWorker.body, worker.body, legacyName);
+  }
   const offline = await request("/qq/assets/offline-v8.html");
   assert.match(offline.body, /No transcript is cached and no message can be sent offline/);
   assert.match(offline.body, /console-v8\.css/);
@@ -1667,7 +1678,7 @@ try {
     readFile(join(root, "bin/qq"), "utf8"),
     readFile(join(root, "dsh/qq-dsh-model-compat.mjs"), "utf8"),
     readFile(join(root, "qq-ui/assets/browser-v8.js"), "utf8"),
-    readFile(join(root, "qq-ui/assets/sw-v17.js"), "utf8"),
+    readFile(join(root, "qq-ui/assets/sw.js"), "utf8"),
     readFile(join(root, "qq-ui/src/render.mjs"), "utf8"),
   ]);
   assert.equal(pins.schema, "qq.dsh-console-vendor-pins/v1");
@@ -1791,9 +1802,12 @@ try {
   assert.match(browser, /dx >= 56/);
   assert.match(browser, /trapDrawerFocus/);
   assert.match(browser, /url\.searchParams\.set\("drawer"/);
+  assert.match(browser, /updateViaCache: "none"/);
   assert.doesNotMatch(browser, /localStorage|sessionStorage|indexedDB|document\.cookie|EventSource|WebSocket|htmx\.process/);
   assert.doesNotMatch(renderSource, /outerHTML|controller|observer|lease|take control/i);
   assert.doesNotMatch(workerSource, /addEventListener\("(?:sync|periodicsync|push|notificationclick)"|indexedDB|localStorage/i);
+
+  await runQqPwaBrowserProof();
 
   const [hostUnit, hostActivate] = await Promise.all([
     readFile(join(root, "systemd/user/qq.service"), "utf8"),
