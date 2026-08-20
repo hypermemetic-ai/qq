@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { createQqService } from "../qq/src/session.mjs";
+import { makeProjectsHome, qqConfig } from "./qq-projects-fixture.mjs";
 
 const root = new URL("..", import.meta.url).pathname;
 const aliasModule = await import(pathToFileURL(join(root, "qq/src/alias.mjs")));
@@ -200,22 +201,24 @@ try {
   // qq.list / qq.read include alias only for live sessions, without relay loaded.
   {
     const file = join(scratch, "service.json");
+    const projects = makeProjectsHome("qq");
     const durableOnly = sessionId("000000000099");
     const states = new Map([
-      [alphaId, { id: alphaId, events: [], createdAt: 2, cwd: "/work" }],
-      [durableOnly, { id: durableOnly, events: [], createdAt: 1, cwd: "/work" }],
+      [alphaId, { id: alphaId, events: [], createdAt: 2, cwd: projects.cwd }],
+      [durableOnly, { id: durableOnly, events: [], createdAt: 1, cwd: projects.cwd }],
     ]);
     const live = new Map();
     const listeners = new Map();
     function fakeAgent(id) {
       return {
-        session: { id, events: [], header: { createdAt: 2, cwd: "/work" } },
+        session: { id, events: [], header: { createdAt: 2, cwd: projects.cwd } },
         status: "idle",
         followup() {},
         cancel() {},
         whenIdle: async () => {},
       };
     }
+    live.set(alphaId, fakeAgent(alphaId));
     const ctx = {
       get(name) {
         if (name === "agents") {
@@ -223,20 +226,16 @@ try {
             get: (id) => live.get(id),
             list: () => [...live.values()],
             async resume({ resumeSessionId }) {
-              const agent = fakeAgent(resumeSessionId);
-              live.set(resumeSessionId, agent);
-              return {
-                agent,
-                async dispose() { live.delete(resumeSessionId); states.delete(resumeSessionId); },
-              };
+              throw new Error(`silent resume must not happen: ${resumeSessionId}`);
             },
-            async create({ sessionId: id }) {
-              states.set(id, { id, events: [], createdAt: 3, cwd: "/work" });
+            async create({ sessionId: id, meta }) {
+              assert.equal(meta?.cwd, projects.cwd);
+              states.set(id, { id, events: [], createdAt: 3, cwd: projects.cwd });
               const agent = fakeAgent(id);
               live.set(id, agent);
               return {
                 agent,
-                async dispose() { live.delete(id); states.delete(id); },
+                async dispose() { live.delete(id); },
               };
             },
           };
@@ -258,26 +257,19 @@ try {
       },
       on(name, handler) { listeners.set(name, handler); },
     };
-    const qq = createQqService(ctx, {
-      sessionId: alphaId,
-      cwd: "/work",
-      provider: "qwen-token-plan",
-      model: "deepseek-v4-pro-0813",
-      aliasFile: file,
-      rng: () => 0,
-    });
+    const qq = createQqService(ctx, qqConfig(projects, alphaId, { aliasFile: file, rng: () => 0 }));
     const listed = await qq.list();
-    const durable = listed.find((row) => row.id === durableOnly);
+    assert.equal(listed.find((row) => row.id === durableOnly), undefined, "inactive ids stay out of list");
     const defaultRow = listed.find((row) => row.id === alphaId);
-    assert.equal(durable.alias, undefined, "durable-only row has no live alias");
-    assert.equal(defaultRow.alias, undefined, "unloaded default has no live alias");
+    assert.equal(defaultRow.alias, "1");
+    await assert.rejects(() => qq.read(durableOnly), /not active/);
     const snapshot = await qq.read(alphaId);
     assert.equal(snapshot.alias, "1");
     assert.doesNotMatch(snapshot.id, /^[0-9]+$/);
     assert.match(snapshot.id, /^session-/);
     const afterRead = await qq.list();
     assert.equal(afterRead.find((row) => row.id === alphaId).alias, "1");
-    assert.equal(afterRead.find((row) => row.id === durableOnly).alias, undefined);
+    assert.equal(afterRead.find((row) => row.id === durableOnly), undefined);
     assert.equal(qq.alias(alphaId), "1");
     assert.equal(qq.resolve("1"), alphaId);
     assert.equal(qq.resolve(alphaId), alphaId);
@@ -307,9 +299,10 @@ try {
     assert.notEqual(departed.goneAt, null, "agent/disposed marks the alias gone");
     live.delete(alphaId);
     const afterLeave = await qq.list();
-    assert.equal(afterLeave.find((row) => row.id === alphaId).alias, undefined);
+    assert.equal(afterLeave.find((row) => row.id === alphaId), undefined);
     assert.equal(qq.alias(alphaId), undefined);
     rmSync(file, { force: true });
+    projects.remove();
   }
 
   console.log("test-qq-alias: pass");

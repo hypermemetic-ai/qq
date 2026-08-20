@@ -87,8 +87,9 @@ port=$(node -e '
 ')
 origin="http://127.0.0.1:$port"
 
+project_name=${root##*/}
 canonical() {
-  printf '/qq/session/%s' "$1"
+  printf '/qq/project/%s/session/%s' "$project_name" "$1"
 }
 
 start_host() {
@@ -103,13 +104,14 @@ start_host() {
     DSH_TELEMETRY_DISABLED=1 \
     QWEN_TOKEN_PLAN_API_KEY=qq-local-probe \
     QQ_PORT="$port" \
+    QQ_PROJECTS_ROOT="$(dirname "$root")" \
     "${session_env[@]}" \
     "$launcher" --patch "$work/local-model.patch.yml" \
     >"$work/dsh.stdout.log" 2>"$work/dsh.stderr.log" &
   dsh_pid=$!
 
   for _ in {1..300}; do
-    if curl -fsS --max-time 2 "$origin/qq/" >"$work/startup.html" 2>/dev/null; then
+    if curl -fsSL --max-time 2 "$origin/qq/" >"$work/startup.html" 2>/dev/null; then
       return
     fi
     if ! kill -0 "$dsh_pid" 2>/dev/null; then
@@ -220,7 +222,7 @@ create_session() {
     --data '' "$origin/qq/sessions" >"$work/$client.post.html"
   local location
   location=$(awk 'tolower($1) == "location:" { gsub("\\r", "", $2); print $2 }' "$work/$client.headers" | tail -1)
-  [[ $location =~ ^/qq/session/session-[0-9a-f-]{36}$ ]] || {
+  [[ $location =~ ^/qq/project/$project_name/session/session-[0-9a-f-]{36}$ ]] || {
     echo "test-qq-host-live: new session did not return a canonical location" >&2
     return 1
   }
@@ -269,12 +271,18 @@ grep -Fq "$secondary_id" "$work/new-session.html"
 grep -Fq 'This DSH session has no transcript yet.' "$work/new-session.html"
 stop_host
 
-# Laptop: restart on the primary id, select the second session, then interrupt live work.
+# Laptop: restart on the primary id. The previously created session stays
+# persisted but is not live; GET must not resume it. Create a fresh sibling
+# for switcher coverage, then interrupt live work on the primary.
 session_id=$primary_id
 start_host
 open_stream laptop "$primary_id" proof-laptop
 grep -Fq 'home durable handoff' "$work/laptop.page.html"
-grep -Fq "$secondary_id" "$work/laptop.page.html"
+! grep -Fq "$secondary_id" "$work/laptop.page.html"
+inactive_status=$(curl -sS -o "$work/inactive.html" -w '%{http_code}' --max-time 5 "$origin$(canonical "$secondary_id")")
+[[ $inactive_status == 404 ]]
+grep -Fiq 'not active' "$work/inactive.html"
+secondary_id=$(create_session selector-setup)
 curl -fsS --max-time 5 "$origin$(canonical "$secondary_id")" >"$work/laptop-selected.html"
 grep -Eq '<code>[0-9]+</code>' "$work/laptop-selected.html"
 ! grep -Fq "<code>$secondary_id</code>" "$work/laptop-selected.html"
@@ -313,7 +321,7 @@ stop_host
 session_id=
 start_host
 session_id=$primary_id
-curl -fsS --max-time 5 "$origin/qq/" >"$work/local-again.html"
+curl -fsSL --max-time 5 "$origin/qq/" >"$work/local-again.html"
 for prompt in 'home durable handoff' 'laptop interrupt handoff' 'phone durable handoff'; do
   grep -Fq "$prompt" "$work/local-again.html"
 done

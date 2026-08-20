@@ -67,6 +67,7 @@
       config:
         sessionId: !!js process.env.QQ_DSH_SESSION_ID
         cwd: !!js process.cwd()
+        projectsRoot: !!js process.env.QQ_PROJECTS_ROOT ?? `${process.env.HOME}/projects`
         provider: !!js process.env.QQ_DSH_PROVIDER ?? 'qwen-token-plan'
         model: !!js process.env.QQ_DSH_MODEL ?? 'deepseek-v4-pro-0813'
         reasoningEffort: !!js process.env.QQ_DSH_REASONING_EFFORT

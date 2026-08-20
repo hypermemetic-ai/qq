@@ -62,4 +62,7 @@ bin/qq
 The launcher uses DSH profile `qq`, defaults `DSH_HOME` to
 `${XDG_STATE_HOME:-$HOME/.local/state}/qq` (honoring `QQ_DSH_HOME` then
 `DSH_HOME`), and stores the default resume id in `$DSH_HOME/qq.session`.
-The console serves `http://127.0.0.1:3082/qq`.
+Ordinary operator sessions live at an immediate child of `projectsRoot`
+(production default `${HOME}/projects`; override with `QQ_PROJECTS_ROOT`).
+Boot cwd must equal one of those project roots. The console serves
+`http://127.0.0.1:3082/qq` and redirects onto `/qq/project/:name`.

@@ -9,14 +9,17 @@ npm ci --prefix "$toolchain" --no-audit --no-fund >/dev/null
 # scratch launcher tree whose present plugin directories are the scenario under
 # test. Symlinking the real packages and toolchain keeps the boot honest (real
 # bin/qq, real package trees, real pinned DSH) without mutating the repository.
-sim=$(mktemp -d "${TMPDIR:-/tmp}/qq-host-boot.XXXXXX")
+# The launcher cds to that tree, so it must be an immediate child of projectsRoot.
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/qq-host-boot.XXXXXX")
+projects="$scratch/projects"
+sim="$projects/boot"
 dsh_pid=
 cleanup() {
   if [[ -n ${dsh_pid:-} ]]; then
     kill "$dsh_pid" 2>/dev/null || true
     wait "$dsh_pid" 2>/dev/null || true
   fi
-  rm -rf -- "$sim"
+  rm -rf -- "$scratch"
 }
 trap cleanup EXIT
 
@@ -50,6 +53,7 @@ boot() {
     DSH_TELEMETRY_DISABLED=1 \
     QWEN_TOKEN_PLAN_API_KEY=qq-host-boot-probe \
     QQ_PORT="$port" \
+    QQ_PROJECTS_ROOT="$(dirname "$sim")" \
     QQ_DSH_SESSION_ID=session-63a11000-0000-4000-8000-0000000000aa \
     "$sim/bin/qq" >"$sim/$name.stdout.log" 2>"$sim/$name.stderr.log" &
   dsh_pid=$!
@@ -107,7 +111,7 @@ ln -s "$root/qq-ui" "$sim/qq-ui"
 ln -s "$root/qq-relay" "$sim/qq-relay"
 boot no-workflows
 for _ in {1..200}; do
-  if curl -fsS --max-time 2 "http://127.0.0.1:$port/qq/" >"$sim/no-workflows.page.html" 2>/dev/null; then
+  if curl -fsSL --max-time 2 "http://127.0.0.1:$port/qq/" >"$sim/no-workflows.page.html" 2>/dev/null; then
     break
   fi
   if ! kill -0 "$dsh_pid" 2>/dev/null; then
