@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createConsoleHandler, internals as httpInternals } from "../qq-ui/src/http-app.mjs";
 import { renderSessionContent } from "../qq-ui/src/render.mjs";
 import { createProjectFileService, MAX_READABLE_FILE_BYTES } from "../qq/src/files.mjs";
@@ -56,6 +57,54 @@ try {
   assert.equal(catalog.find((row) => row.name === ".agents"), undefined);
   assert.equal(catalog.find((row) => row.name === "escaped"), undefined);
   assert.deepEqual(catalog[0].folders, [{ name: "alpha", label: "alpha", cwd: alphaCwd }]);
+
+  const hostPatch = readFileSync(join(fileURLToPath(new URL("../qq", import.meta.url)), "host.patch.yml"), "utf8");
+  const catalogStart = hostPatch.indexOf("projectCatalog:");
+  const catalogEnd = hostPatch.indexOf("\n        provider:", catalogStart);
+  assert.notEqual(catalogStart, -1);
+  assert.notEqual(catalogEnd, -1);
+  const productionCatalog = hostPatch.slice(catalogStart, catalogEnd);
+  assert.match(productionCatalog, /root: !!js process\.env\.HOME \+ '\/projects'/);
+  assert.deepEqual(
+    [...productionCatalog.matchAll(/^\s+- name: ([a-z0-9-]+)\s*$/gmu)].map((match) => match[1]),
+    ["deciq", "discuss", "everything-box", "inference-box", "media-box", "qq", "ytgrab"],
+    "the production catalog registers exactly the operator project set",
+  );
+  function productionProject(name, label, ...folderFlows) {
+    const start = productionCatalog.indexOf(`- name: ${name}`);
+    assert.notEqual(start, -1, `production catalog must register ${name}`);
+    const nextStart = productionCatalog.indexOf("\n            - name: ", start + 1);
+    const block = productionCatalog.slice(start, nextStart === -1 ? undefined : nextStart);
+    assert.match(block, new RegExp(`label: ${label}`));
+    let previous = -1;
+    for (const flow of folderFlows) {
+      const position = block.indexOf(flow);
+      assert.ok(
+        position !== -1 && position > previous,
+        `production catalog must list ${flow} in order under ${name}`,
+      );
+      previous = position;
+    }
+  }
+  productionProject("deciq", "DECIQ",
+    "- { name: core, label: Core, path: deciq }",
+    "- { name: logic, label: Logic, path: deciq-logic }");
+  productionProject("qq", "QQ",
+    "- { name: core, label: QQ Core, path: qq }",
+    "- { name: relay, label: Relay, path: qq-relay }",
+    "- { name: dictation, label: Dictation, path: qq-dictation }",
+    "- { name: newspaper, label: Newspaper, path: qq-newspaper }",
+    "- { name: dashboard, label: Dashboard, path: qq-dashboard }",
+    "- { name: image-finder, label: Image Finder, path: image-finder }");
+  for (const [name, label] of [
+    ["discuss", "Discuss"],
+    ["everything-box", "Everything Box"],
+    ["inference-box", "Inference Box"],
+    ["media-box", "Media Box"],
+    ["ytgrab", "YTGrab"],
+  ]) {
+    productionProject(name, label, `- { name: ${name}, label: ${label}, path: ${name} }`);
+  }
 
   const groupedRegistration = {
     root: projects.root,
