@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, request as httpRequest } from "node:http";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createConsoleHandler, internals as httpInternals } from "../qq-ui/src/http-app.mjs";
 import { renderSessionContent } from "../qq-ui/src/render.mjs";
@@ -30,11 +31,30 @@ const outside = makeProjectsHome("escape");
 symlinkSync(outside.cwd, join(projects.root, "escaped"));
 writeFileSync(join(projects.root, "file.txt"), "nope");
 
+let emptyRoot;
+
 try {
   assert.equal(resolveProjectsRoot(projects.root), projects.root);
   const catalog = listProjectCatalog(projects.root);
   assert.deepEqual(catalog.map((row) => row.name), ["alpha", "beta"]);
   assert.equal(catalog.find((row) => row.name === "escaped"), undefined);
+
+  emptyRoot = mkdtempSync(join(tmpdir(), "qq-projects-empty."));
+  const bare = { get() { return undefined; } };
+  assert.throws(() => createQqService(bare, {
+    sessionId: alphaId,
+    cwd: alphaCwd,
+    projectsRoot: emptyRoot,
+    provider: "qwen-token-plan",
+    model: "deepseek-v4-pro-0813",
+  }), /projectsRoot has no operator projects/);
+  assert.throws(() => createQqService(bare, {
+    sessionId: alphaId,
+    cwd: join(alphaCwd, "nested"),
+    projectsRoot: projects.root,
+    provider: "qwen-token-plan",
+    model: "deepseek-v4-pro-0813",
+  }), /cwd must equal one project root/);
 
   const live = new Map();
   const persisted = new Map([
@@ -44,6 +64,7 @@ try {
   const resumes = [];
   const flushes = [];
   const disposed = [];
+  let failNextCreate = false;
 
   function fake(id, options = {}) {
     const cwd = options.cwd ?? alphaCwd;
@@ -80,6 +101,10 @@ try {
           get: (id) => live.get(id),
           list: () => [...live.values()],
           async create(options) {
+            if (failNextCreate) {
+              failNextCreate = false;
+              throw new Error("qq-projects probe: create failed");
+            }
             creates.push(options);
             const id = options.sessionId;
             const cwd = options.meta?.cwd;
@@ -170,6 +195,14 @@ try {
   await assert.rejects(() => qq.close(betaId), /close is unavailable while this session is running/);
   assert.equal(live.has(betaId), true);
   live.get(betaId).setStatus("idle");
+
+  const beforeFailedReplace = (await qq.list("alpha")).length;
+  failNextCreate = true;
+  await assert.rejects(() => qq.replace(alphaId), /create failed/);
+  assert.equal(failNextCreate, false);
+  assert.equal(live.has(alphaId), true, "a failed /clear create leaves the old Agent active");
+  assert.equal(disposed.length, 0, "a failed /clear create disposes nothing");
+  assert.equal((await qq.list("alpha")).length, beforeFailedReplace, "a failed /clear create leaves no replacement");
 
   const beforeReplace = (await qq.list("alpha")).length;
   const replaced = await qq.replace(betaId);
@@ -315,4 +348,5 @@ try {
 } finally {
   projects.remove();
   outside.remove();
+  rmSync(emptyRoot, { recursive: true, force: true });
 }

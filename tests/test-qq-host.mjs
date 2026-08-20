@@ -634,6 +634,7 @@ function openSse(sessionId, port = address.port, path = sessionPath(sessionId, "
       className: attrs.className ?? "",
       id: attrs.id ?? "",
       hidden: Boolean(attrs.hidden),
+      value: attrs.value ?? "",
       focused: false,
       parent: null,
       children: [],
@@ -668,7 +669,15 @@ function openSse(sessionId, port = address.port, path = sessionPath(sessionId, "
   const outside = makeNode("div", { className: "outside" });
   const menu = makeNode("details", { className: "session-menu" });
   menu.open = true;
-  for (const [parent, child] of [[controls, arm], [controls, confirm], [confirm, keep], [confirm, form], [form, submit], [menu, controls]]) {
+  const newForm = makeNode("form", { className: "new-session" });
+  const choice = makeNode("select", { id: "session-choice" });
+  const optionIds = [primaryId, "session-63a11000-0000-4000-8000-0000000000ff"];
+  const options = optionIds.map((id) => makeNode("option", { value: id }));
+  for (const option of options) {
+    option.parent = choice;
+    choice.children.push(option);
+  }
+  for (const [parent, child] of [[controls, arm], [controls, confirm], [controls, newForm], [controls, choice], [confirm, keep], [confirm, form], [form, submit], [menu, controls]]) {
     child.parent = parent;
     parent.children.push(child);
   }
@@ -678,10 +687,12 @@ function openSse(sessionId, port = address.port, path = sessionPath(sessionId, "
   class FakeHTMLSelectElement extends FakeHTMLElement {}
   class FakeHTMLTextAreaElement extends FakeHTMLElement {}
   class FakeHTMLDetailsElement extends FakeHTMLElement {}
-  for (const node of [controls, arm, confirm, keep, form, submit, outside, menu]) {
+  for (const node of [controls, arm, confirm, keep, form, submit, outside, menu, newForm, choice]) {
     Object.setPrototypeOf(node, FakeHTMLElement.prototype);
   }
   Object.setPrototypeOf(form, FakeHTMLFormElement.prototype);
+  Object.setPrototypeOf(newForm, FakeHTMLFormElement.prototype);
+  Object.setPrototypeOf(choice, FakeHTMLSelectElement.prototype);
   Object.setPrototypeOf(menu, FakeHTMLDetailsElement.prototype);
   const document = {
     readyState: "complete",
@@ -694,7 +705,10 @@ function openSse(sessionId, port = address.port, path = sessionPath(sessionId, "
       if (selector.startsWith(".")) return (byClass.get(selector.slice(1)) ?? [])[0] ?? null;
       return null;
     },
-    querySelectorAll() { return []; },
+    querySelectorAll(selector) {
+      if (selector === "#session-choice option") return options;
+      return [];
+    },
     addEventListener(type, fn, opts) { listeners.push({ type, fn, capture: opts === true || opts?.capture === true }); },
   };
   const windowObj = {
@@ -702,7 +716,11 @@ function openSse(sessionId, port = address.port, path = sessionPath(sessionId, "
     addEventListener() {},
     requestAnimationFrame(fn) { fn(); },
   };
-  const location = { pathname: `/qq/project/qq/session/${primaryId}`, assign() {} };
+  const assigned = [];
+  const location = {
+    pathname: `/qq/project/qq/session/${primaryId}`,
+    assign(path) { assigned.push(path); location.pathname = path; },
+  };
   const sandbox = {
     document,
     window: windowObj,
@@ -751,6 +769,16 @@ function openSse(sessionId, port = address.port, path = sessionPath(sessionId, "
   assert.equal(posts.length, 0, "q arms close without POSTing");
   keydown({ key: "x", defaultPrevented: false, isComposing: false, target: outside, preventDefault() {} });
   assert.deepEqual(posts, ["close-session"], "desktop q-then-x submits close directly");
+  posts.length = 0;
+  keydown({ key: "n", defaultPrevented: false, isComposing: false, target: outside, preventDefault() {} });
+  assert.deepEqual(posts, ["new-session"], "desktop n submits the parallel New session form");
+  keydown({ key: "ArrowRight", defaultPrevented: false, isComposing: false, target: outside, preventDefault() {} });
+  assert.deepEqual(assigned, [`/qq/project/qq/session/${optionIds[1]}`]);
+  keydown({ key: "ArrowLeft", defaultPrevented: false, isComposing: false, target: outside, preventDefault() {} });
+  assert.deepEqual(assigned, [
+    `/qq/project/qq/session/${optionIds[1]}`,
+    `/qq/project/qq/session/${primaryId}`,
+  ], "desktop left/right cycle stays in the selected project");
 }
 
 {
