@@ -1527,7 +1527,7 @@ try {
       assert.match(started.message, /Design-loop fixture listening at http:\/\/127\.0\.0\.1:\d+/);
       assert.match(started.result.origin, /^http:\/\/127\.0\.0\.1:\d+$/);
       assert.match(started.result.sessionUrl, /\/qq\/session\//);
-      const probe = await fetch(`${started.result.origin}/qq/assets/console-v16.css`);
+      const probe = await fetch(`${started.result.origin}/qq/assets/console-v17.css`);
       assert.equal(probe.status, 200);
       const stopped = await byName.design_loop_stop.execute({}, exec);
       assert.equal(stopped.status, "ok");

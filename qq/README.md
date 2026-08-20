@@ -3,8 +3,14 @@
 Presentation-neutral Cordis service over DSH Agents and sessions. This package
 owns list, read, create, prompt/steer admission, pending-inbox mutation,
 interrupt, status/change observation, the deterministic conversation
-projection, and the live session number book. It contains no HTML, routes, CSS,
-htmx, or browser assumptions.
+projection, the live session number book, and bounded project file access. It
+contains no HTML, routes, CSS, htmx, or browser assumptions.
+
+`listProjectFiles()` returns one canonical directory level at a time, rooted in
+the configured project catalog. `readProjectFile()` admits at most 512 KiB of
+recognized UTF-8 Markdown, text, or code. `openProjectFile()` bounds safe binary
+responses at 32 MiB. All three resolve canonical paths inside the selected
+project and refuse symlink escape; absolute roots never cross the service API.
 
 `read()` projects the DSH event log and live durable inbox into `conversation`.
 The projection is rebuilt from DSH authority on every read; it is not another

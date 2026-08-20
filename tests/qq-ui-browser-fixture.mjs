@@ -159,16 +159,111 @@ function finishFixtureTurn(state, active) {
   });
 }
 
+const fixtureFiles = Object.freeze({
+  "README.md": {
+    project: "proof", path: "README.md", name: "README.md", kind: "markdown", size: 112,
+    text: "# Project proof\n\nA calm read-only Markdown document with a [safe link](https://example.com).\n\n<script>not html</script>\n",
+  },
+  "notes.txt": {
+    project: "proof", path: "notes.txt", name: "notes.txt", kind: "text", size: 61,
+    text: "The compact drawer keeps this plain text readable and quiet.\n",
+  },
+  "src/fixture.js": {
+    project: "proof", path: "src/fixture.js", name: "fixture.js", kind: "code", language: "javascript", size: 45,
+    text: "export const fixture = \"project drawer\";\n",
+  },
+});
+
 const backend = {
   defaultSessionId: primaryId,
-  async list() {
-    return [...states.values()].map(({ id, createdAt }) => ({ id, createdAt, cwd: "/proof" }));
+  defaultProject: "proof",
+  listProjects() {
+    return [{ name: "proof", cwd: "/proof" }, { name: "second-project", cwd: "/second-project" }];
   },
-  async create() {
+  listProjectFiles(project, path = "") {
+    if (!project) {
+      return {
+        scope: "projects", project: null, path: "", parent: null,
+        breadcrumbs: [{ type: "projects", name: "projects", path: null }],
+        entries: this.listProjects().map(({ name }) => ({ type: "project", project: name, name })),
+      };
+    }
+    if (project !== "proof" && project !== "second-project") {
+      const error = new Error("qq: project not found");
+      error.status = 404;
+      throw error;
+    }
+    if (project === "second-project") {
+      return {
+        scope: "project", project, path: "", parent: null,
+        breadcrumbs: [{ type: "projects", name: "projects", path: null }, { type: "project", name: project, path: "" }],
+        entries: [],
+      };
+    }
+    if (path === "src") {
+      return {
+        scope: "project", project, path, parent: "",
+        breadcrumbs: [
+          { type: "projects", name: "projects", path: null },
+          { type: "project", name: project, path: "" },
+          { type: "directory", name: "src", path: "src" },
+        ],
+        entries: [
+          { type: "directory", name: "components", path: "src/components" },
+          { type: "file", name: "fixture.js", path: "src/fixture.js", kind: "code", language: "javascript" },
+        ],
+      };
+    }
+    if (path === "src/components") {
+      return {
+        scope: "project", project, path, parent: "src",
+        breadcrumbs: [
+          { type: "projects", name: "projects", path: null },
+          { type: "project", name: project, path: "" },
+          { type: "directory", name: "src", path: "src" },
+          { type: "directory", name: "components", path: "src/components" },
+        ],
+        entries: [{ type: "file", name: "intentionally-very-long-component-filename-for-truncation.ts", path: "src/components/intentionally-very-long-component-filename-for-truncation.ts", kind: "code", language: "typescript" }],
+      };
+    }
+    return {
+      scope: "project", project, path: "", parent: null,
+      breadcrumbs: [{ type: "projects", name: "projects", path: null }, { type: "project", name: project, path: "" }],
+      entries: [
+        { type: "directory", name: "src", path: "src" },
+        { type: "file", name: "README.md", path: "README.md", kind: "markdown" },
+        { type: "file", name: "notes.txt", path: "notes.txt", kind: "text" },
+        { type: "file", name: "guide.pdf", path: "guide.pdf", kind: "binary", mediaType: "application/pdf", disposition: "inline" },
+      ],
+    };
+  },
+  readProjectFile(project, path) {
+    const file = fixtureFiles[path];
+    if (project !== "proof" || !file) {
+      const error = new Error("qq: unsupported file type");
+      error.status = 415;
+      throw error;
+    }
+    return file;
+  },
+  openProjectFile(project, path, options = {}) {
+    if (project !== "proof" || path !== "guide.pdf") {
+      const error = new Error("qq: unsupported file type");
+      error.status = 415;
+      throw error;
+    }
+    const body = Buffer.from("%PDF-1.4 fixture");
+    return { project, path, name: "guide.pdf", kind: "binary", mediaType: "application/pdf", disposition: "inline", size: body.length, ...(options.includeBody === false ? {} : { body }) };
+  },
+  async list(project) {
+    if (project === "second-project") return [];
+    return [...states.values()].map(({ id, createdAt }) => ({ id, createdAt, cwd: "/proof", project: "proof" }));
+  },
+  async create(project = "proof") {
     const id = `session-${randomUUID()}`;
     states.set(id, newState(id, Date.now()));
     flushes += 1;
-    return { id };
+    return { id, project };
   },
   async read(id) {
     const state = states.get(id);
@@ -183,6 +278,8 @@ const backend = {
       conversation: projectConversation(state.events, { inbox: state.inbox }),
       canMutatePending: true,
       agentStatus: state.status,
+      project: "proof",
+      cwd: "/proof",
     };
   },
   async prompt(id, text) {
@@ -264,8 +361,8 @@ const backend = {
       for (const timer of active.timers) clearTimeout(timer);
     }
     pending.delete(id);
-    if (remaining[0]) return { id: remaining[0], closed: id };
-    return { ...(await this.create()), closed: id };
+    if (remaining[0]) return { id: remaining[0], closed: id, project: "proof" };
+    return { ...(await this.create("proof")), closed: id, project: "proof" };
   },
   async interrupt(id) {
     const state = states.get(id);
@@ -286,6 +383,11 @@ const backend = {
 const consoleHandler = createConsoleHandler(attachObserve(backend, { intervalMs: 30 }), { ssePollMs: 30, liveAssets });
 
 const server = createServer((req, res) => {
+  if (req.url === "/qq/dictate/client.js") {
+    res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" });
+    res.end('"use strict";\n');
+    return;
+  }
   if (req.url === "/__proof/state") {
     res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
     res.end(JSON.stringify({ connects, flushes, streams: streams.size }));

@@ -9,6 +9,7 @@
     ".": "./src/plugin.mjs",
     "./session": "./src/session.mjs",
     "./conversation": "./src/conversation.mjs",
+    "./files": "./src/files.mjs",
     "./alias": "./src/alias.mjs",
     "./ask": "./src/ask.mjs"
   },

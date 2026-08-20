@@ -5,6 +5,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { createAliasBook, defaultAliasFile, defaultLegacyAliasFile } from "./alias.mjs";
 import { deriveToolEventViews, projectConversation } from "./conversation.mjs";
+import { createProjectFileService } from "./files.mjs";
 
 const SESSION_ID = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEFAULT_OBSERVE_MS = 100;
@@ -350,6 +351,11 @@ export function createQqService(ctx, config) {
     return listProjectCatalog(projectsRoot);
   }
 
+  const projectFiles = createProjectFileService(projectsRoot, catalog, {
+    ...(config.readableFileLimit !== undefined ? { readableLimit: config.readableFileLimit } : {}),
+    ...(config.openFileLimit !== undefined ? { openLimit: config.openFileLimit } : {}),
+  });
+
   function projectByName(name) {
     const project = catalog().find((entry) => entry.name === name);
     if (!project) throw httpError(404, "qq: project not found");
@@ -686,6 +692,9 @@ export function createQqService(ctx, config) {
     defaultProject,
     projectsRoot,
     listProjects: () => catalog(),
+    listProjectFiles: projectFiles.listProjectFiles,
+    readProjectFile: projectFiles.readProjectFile,
+    openProjectFile: projectFiles.openProjectFile,
     list,
     read,
     inspect,
