@@ -419,6 +419,15 @@ function openSse(sessionId, port = address.port, path = sessionPath(sessionId, "
   assert.match(workflowList, /class="offer-choice workflows-choice workflows-dismiss" type="button">Cancel/);
   const selectedFind = renderSessionContent({ id: liveId, events: [] }, paths, "architect\niterate\nfind \(selected\)");
   assert.match(selectedFind, /workflows-choice workflows-current" type="submit" name="prompt" value="\/workflows find">find/);
+  const unboundWorkflow = renderSessionContent(
+    { id: liveId, events: [] },
+    paths,
+    "architect\niterate\nfind\nmedia (selected, unbound)",
+  );
+  assert.match(unboundWorkflow, /class="offer-popup workflows-popup"/);
+  assert.match(unboundWorkflow, /class="workflows-unbound" role="status">media \(selected, unbound\)/);
+  assert.match(unboundWorkflow, /value="\/workflows none"/);
+  assert.doesNotMatch(unboundWorkflow, /value="\/workflows media"/);
   const picked = renderSessionContent({ id: liveId, events: [] }, paths, "find selected");
   assert.match(picked, /class="notice-ok" role="status">find selected/);
   assert.doesNotMatch(picked, /workflows-popup/);
@@ -574,6 +583,14 @@ function openSse(sessionId, port = address.port, path = sessionPath(sessionId, "
   const idleChip = renderSessionContent({ id: liveId, events: [], sessionMode: "find" }, paths);
   assert.match(idleChip, /class="session-mode" data-mode="find">Find/);
   assert.doesNotMatch(idleChip, /id="interrupt-form"/);
+  const siblingChip = renderSessionContent({ id: liveId, events: [], sessionMode: "media" }, paths);
+  assert.match(siblingChip, /class="session-mode" data-mode="media">Media/);
+  for (const mode of ["", "none", "Media", "-media", "media_box", "a".repeat(33), null]) {
+    assert.doesNotMatch(
+      renderSessionContent({ id: liveId, events: [], sessionMode: mode }, paths),
+      /class="session-mode"/,
+    );
+  }
   const finding = renderSessionContent({
     id: liveId,
     events: [],

@@ -606,6 +606,10 @@ try {
     assert.equal(parseWorkflowsInput("mystery extra").action, "error");
     assert.match(formatWorkflowList(["architect"], null), /none selected/);
     assert.match(formatWorkflowList(["architect"], "architect"), /architect \(selected\)/);
+    assert.match(
+      formatWorkflowList(["architect", "iterate", "find"], "media"),
+      /media \(selected, unbound\)$/,
+    );
   }
 
   // ---------------------------------------------------------------- one-shot hop lives on qq; workflows do not copy it
@@ -2082,6 +2086,123 @@ try {
     assert.equal(again["qq-workflows"].workflows.selected(alphaId), "find");
     assert.deepEqual(hungAgain, [{ id: alphaId, label: pluginModule.FIND_LABEL }]);
     assert.deepEqual(armedAgain, [alphaId]);
+  }
+
+  // Sibling plugins can reversibly own a generic workflow registration.
+  {
+    const dir = join(scratch, "plugin-registered-workflow");
+    const selectedDir = join(scratch, "plugin-registered-workflow-selected");
+    const attached = [];
+    const detached = [];
+    const settingsWrites = [];
+    const chair = {
+      id: alphaId,
+      session: { id: alphaId, events: [], header: {} },
+      ctx: { on() { return () => {}; } },
+    };
+    const child = {
+      id: childId,
+      session: { id: childId, events: [], header: { origin: CHILD_ORIGIN } },
+      ctx: { on() { return () => {}; } },
+    };
+    const live = new Map([[alphaId, chair], [childId, child]]);
+    const provided = {};
+    pluginModule.apply({
+      get(name) {
+        if (name === "agents") {
+          return { list: () => [...live.values()], get: (id) => live.get(id) ?? null };
+        }
+        if (name === "sessions") return {};
+        return provided[name];
+      },
+      provide(name, value) { provided[name] = value; },
+      effect(fn) { fn(); return () => {}; },
+      on() { return () => {}; },
+    }, { notebookDir: dir, selectionDir: selectedDir });
+
+    const service = provided["qq-workflows"];
+    const sessionIdOf = (agent) => agent?.session?.id ?? agent?.id ?? "";
+    const mediaSpec = () => ({
+      name: "media",
+      candidate(agent) { return agent?.session?.header?.origin !== CHILD_ORIGIN; },
+      ensureAttached(agent) { attached.push(sessionIdOf(agent)); },
+      ensureDetached(agentOrId) {
+        detached.push(typeof agentOrId === "string" ? agentOrId : sessionIdOf(agentOrId));
+      },
+      listSettings() { return "media has no roles"; },
+      writeSettings(role, binding) {
+        settingsWrites.push({ role, binding });
+        throw new Error("media has no roles");
+      },
+    });
+
+    assert.ok(Object.isFrozen(service.workflows));
+    assert.throws(() => service.workflows.register(null), /invalid workflow spec/);
+    for (const invalid of ["", "Media", "-media", "media_box", "a".repeat(33)]) {
+      assert.throws(
+        () => service.workflows.register({ ...mediaSpec(), name: invalid }),
+        /invalid workflow name/,
+      );
+    }
+    for (const reserved of ["none", "off", "settings", "architect", "iterate", "find"]) {
+      assert.throws(
+        () => service.workflows.register({ ...mediaSpec(), name: reserved }),
+        /reserved/,
+      );
+    }
+    for (const method of ["candidate", "ensureAttached", "ensureDetached", "listSettings", "writeSettings"]) {
+      const incomplete = mediaSpec();
+      delete incomplete[method];
+      assert.throws(() => service.workflows.register(incomplete), new RegExp(method));
+    }
+
+    const mutable = mediaSpec();
+    const disposeMedia = service.workflows.register(mutable);
+    mutable.name = "changed";
+    mutable.ensureAttached = () => attached.push("mutated");
+    assert.deepEqual(service.workflows.names(), ["architect", "iterate", "find", "media"]);
+    assert.throws(() => service.workflows.register(mediaSpec()), /already registered/);
+
+    assert.equal(service.workflows.select(alphaId, "media"), "media");
+    assert.equal(service.workflows.selected(alphaId), "media");
+    assert.deepEqual(attached, [alphaId]);
+    assert.equal(statSync(join(selectedDir, `${alphaId}.json`)).mode & 0o777, 0o600);
+    const listed = service.handleWorkflows({ agent: chair, rawInput: "" });
+    assert.match(listed.text, /media \(selected\)/);
+    assert.equal(service.handleWorkflows({ agent: chair, rawInput: "settings" }).text, "media has no roles");
+    const write = service.handleWorkflows({
+      agent: chair,
+      rawInput: "settings media talking test-provider test-model",
+    });
+    assert.equal(write.kind, "error");
+    assert.equal(settingsWrites.length, 1);
+
+    const childRefused = service.handleWorkflows({ agent: child, rawInput: "media" });
+    assert.equal(childRefused.kind, "error");
+    assert.match(childRefused.text, /child session/);
+    assert.equal(service.workflows.selected(childId), null);
+
+    service.workflows.select(alphaId, "architect");
+    assert.deepEqual(detached, [alphaId]);
+    service.workflows.select(alphaId, "media");
+    assert.deepEqual(attached, [alphaId, alphaId]);
+
+    disposeMedia();
+    disposeMedia();
+    assert.deepEqual(detached, [alphaId, alphaId]);
+    assert.deepEqual(service.workflows.names(), ["architect", "iterate", "find"]);
+    assert.equal(service.workflows.selected(alphaId), "media");
+    const unbound = service.handleWorkflows({ agent: chair, rawInput: "" });
+    assert.match(unbound.text, /media \(selected, unbound\)$/);
+    assert.throws(() => service.workflows.select(alphaId, "media"), /unknown workflow/);
+
+    const disposeAgain = service.workflows.register(mediaSpec());
+    assert.deepEqual(attached, [alphaId, alphaId, alphaId]);
+    service.workflows.clear(alphaId);
+    assert.equal(service.workflows.selected(alphaId), null);
+    assert.deepEqual(detached, [alphaId, alphaId, alphaId]);
+    disposeAgain();
+    assert.deepEqual(detached, [alphaId, alphaId, alphaId]);
   }
 
   // A replacement relay starts with an empty in-memory label board. The

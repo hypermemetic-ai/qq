@@ -250,10 +250,20 @@ assert.deepEqual(uiPlugin.inject, ["qq", "webServer"]);
 assert.doesNotMatch(String(createQqService), /<!doctype html>|htmx|text\/css/);
 
 const ctx = new Context();
+let selectedWorkflow = "media";
+let registeredWorkflows = ["architect", "iterate", "find", "media"];
+let finderMode = false;
 ctx.provide("agents", services.agents);
 ctx.provide("sessions", services.sessions);
 ctx.provide("sessionPersistence", services.sessionPersistence);
 ctx.provide("webServer", webServer);
+ctx.provide("qq-workflows", {
+  workflows: {
+    selected: () => selectedWorkflow,
+    names: () => [...registeredWorkflows],
+  },
+});
+ctx.provide("image-finder", { inFindMode: () => finderMode });
 
 const projectName = root.split("/").at(-1);
 const qqFiber = ctx.plugin(qqPlugin, {
@@ -286,6 +296,16 @@ const page = await follow("/qq/");
 assert.equal(page.status, 200);
 assert.match(page.body, /Operator console/);
 assert.match(page.body, new RegExp(`/qq/project/${projectName}/session/${sessionId}`));
+assert.match(page.body, /class="session-mode" data-mode="media">Media/);
+
+registeredWorkflows = ["architect", "iterate", "find"];
+const unboundPage = await follow(`/qq/project/${projectName}/session/${sessionId}`);
+assert.doesNotMatch(unboundPage.body, /class="session-mode"/);
+finderMode = true;
+const fallbackPage = await follow(`/qq/project/${projectName}/session/${sessionId}`);
+assert.match(fallbackPage.body, /class="session-mode" data-mode="find">Find/);
+finderMode = false;
+selectedWorkflow = null;
 
 const stream = await openSse();
 await stream.waitFor(/<form id="composer"/);

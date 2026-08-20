@@ -5,8 +5,15 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 toolchain="$root/dsh"
 npm ci --prefix "$toolchain" --no-audit --no-fund >/dev/null
 
-launcher="$root/bin/qq"
 work=$(mktemp -d "${TMPDIR:-/tmp}/qq-workflows-boot.XXXXXX")
+projects="$work/home/projects"
+project="$projects/qq"
+mkdir -p -- "$project/bin"
+cp -- "$root/bin/qq" "$project/bin/qq"
+for package in dsh qq qq-ui qq-relay qq-workflows; do
+  ln -s -- "$root/$package" "$project/$package"
+done
+launcher="$project/bin/qq"
 llm_pid=
 dsh_pid=
 cleanup() {
@@ -37,6 +44,11 @@ done
 llm_endpoint=$(<"$work/llm-endpoint")
 settings_file="$work/architect-settings.json"
 cat >"$work/local-model.patch.yml" <<YAML
+# This isolated boot must not consume another inotify watcher. Production HMR
+# remains enabled with its exact launcher-discovered roots.
+- id: hmr
+  disabled: true
+
 - id: llm-pi-ai
   name: '@deepseek-ai/dsh-llm-pi-ai'
   config:
@@ -82,13 +94,14 @@ env \
   DSH_TELEMETRY_DISABLED=1 \
   QWEN_TOKEN_PLAN_API_KEY=qq-workflows-boot-probe \
   QQ_PORT="$port" \
+  QQ_PROJECTS_ROOT="$projects" \
   QQ_DSH_SESSION_ID="$primary_id" \
   "$launcher" --patch "$work/local-model.patch.yml" \
   >"$work/dsh.stdout.log" 2>"$work/dsh.stderr.log" &
 dsh_pid=$!
 
 for _ in {1..300}; do
-  if curl -fsS --max-time 2 "$origin/qq/" >"$work/startup.html" 2>/dev/null; then
+  if curl -fsS --max-time 2 "$origin/qq/project/qq/session/$primary_id" >"$work/startup.html" 2>/dev/null; then
     break
   fi
   if ! kill -0 "$dsh_pid" 2>/dev/null; then
@@ -107,7 +120,7 @@ grep -Fq "$primary_id" "$work/startup.html"
 
 profile="$DSH_HOME/profiles/qq/package.json"
 [[ -f $profile ]]
-node - "$profile" "$root/qq-workflows" <<'NODE'
+node - "$profile" "$project/qq-workflows" <<'NODE'
 const [manifestPath, workflowsPath] = process.argv.slice(2);
 const manifest = require(manifestPath);
 const dep = manifest.dependencies?.["@hypermemetic-ai/qq-workflows"];
@@ -125,11 +138,15 @@ env \
   DSH_TELEMETRY_DISABLED=1 \
   QWEN_TOKEN_PLAN_API_KEY=qq-workflows-boot-probe \
   QQ_PORT="$port" \
+  QQ_PROJECTS_ROOT="$projects" \
   QQ_DSH_SESSION_ID="$primary_id" \
   "$launcher" --dump-config >"$work/dump.yml" 2>"$work/dump.err"
 node - "$work/dump.yml" <<'NODE'
 const { readFileSync } = require("node:fs");
 const dump = readFileSync(process.argv[2], "utf8");
+if (!/- id: hmr[\s\S]*disabled: true/.test(dump)) {
+  throw new Error("isolated workflow boot did not disable HMR");
+}
 if (!/- id: compaction-basic[\s\S]*auto: false/.test(dump)) {
   throw new Error("composed profile did not pin compaction-basic auto: false");
 }
@@ -160,7 +177,7 @@ post_prompt() {
     -H 'HX-Request: true' \
     -H 'Content-Type: application/x-www-form-urlencoded' \
     --data "$encoded" \
-    "$origin/qq/session/$primary_id/prompt" >"$work/$name.html"
+    "$origin/qq/project/qq/session/$primary_id/prompt" >"$work/$name.html"
 }
 
 post_prompt select '/workflows architect'
