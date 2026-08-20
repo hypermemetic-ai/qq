@@ -91,6 +91,13 @@ if [[ -f $find_root/package.json ]] && grep -Fq '"name": "@hypermemetic-ai/image
   qq_siblings+=("$(cd -- "$find_root" && pwd -P)")
 fi
 
+# media-box lives next to this repo, not as qq-*. Bind like image-finder.
+# Missing tree must not stop qq. Not named in host.patch.yml.
+media_root=${QQ_MEDIA_ROOT:-"$root/../media-box"}
+if [[ -f $media_root/package.json ]] && grep -Fq '"name": "@hypermemetic-ai/media-box"' "$media_root/package.json"; then
+  qq_siblings+=("$(cd -- "$media_root" && pwd -P)")
+fi
+
 profile_manifest="$DSH_HOME/profiles/qq/package.json"
 if ! node - "$profile_manifest" "$root/qq" ${qq_siblings[@]+"${qq_siblings[@]}"} <<'NODE'
 const { existsSync, readFileSync } = require("node:fs");

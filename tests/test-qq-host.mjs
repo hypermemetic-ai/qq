@@ -7,7 +7,7 @@ import { join, resolve } from "node:path";
 import { createConsoleHandler, createRootRedirectHandler } from "../qq-ui/src/http-app.mjs";
 import { createQqService } from "../qq/src/session.mjs";
 import { renderMarkdownText, renderMessageText } from "../qq-ui/src/markdown.mjs";
-import { renderLoginSheet, renderOfferPopup, renderOverlay, renderSessionContent } from "../qq-ui/src/render.mjs";
+import { renderLoginSheet, renderOfferPopup, renderOverlay, renderProgressChip, renderSessionContent } from "../qq-ui/src/render.mjs";
 
 const root = resolve(process.argv[2] ?? ".");
 const primaryId = "session-63a11000-0000-4000-8000-000000000001";
@@ -380,6 +380,20 @@ function openSse(sessionId, port = address.port) {
   assert.match(undealt, /<code>durable<\/code>/);
   assert.doesNotMatch(undealt, new RegExp(`<code>${liveId}</code>`));
   assert.doesNotMatch(undealt, /offer-popup/);
+  assert.doesNotMatch(undealt, /download-chip/);
+  assert.equal(renderProgressChip(null), "");
+  assert.equal(renderProgressChip({}), "");
+  const chip = renderProgressChip({ title: "Dune.2021.1080p", percent: "42%", rate: "2.5 MB/s", eta: "12m" });
+  assert.match(chip, /download-chip/);
+  assert.match(chip, /Dune\.2021\.1080p/);
+  assert.match(chip, /42%/);
+  const grabbing = renderSessionContent({
+    id: liveId,
+    events: [],
+    progress: { title: "Dune.2021.1080p", percent: "42%", rate: "2.5 MB/s", eta: "12m" },
+  }, paths);
+  assert.match(grabbing, /download-chip/);
+  assert.match(grabbing, /Dune\.2021\.1080p · 42%/);
 
   const offered = renderSessionContent({
     id: liveId,
@@ -754,6 +768,55 @@ function openSse(sessionId, port = address.port) {
   }
 }
 
+{
+  let grab = null;
+  const chipServer = createServer(createConsoleHandler(backend, {
+    ssePollMs: 20,
+    progressFor: async () => grab,
+  }));
+  await new Promise((resolveListen) => chipServer.listen(0, "127.0.0.1", resolveListen));
+  const chipPort = chipServer.address().port;
+  try {
+    const idle = await new Promise((resolveRequest, reject) => {
+      const req = httpRequest({
+        host: "127.0.0.1",
+        port: chipPort,
+        path: `/qq/session/${primaryId}`,
+        method: "GET",
+        agent: false,
+      }, (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => resolveRequest({
+          status: res.statusCode,
+          body: Buffer.concat(chunks).toString("utf8"),
+        }));
+      });
+      req.on("error", reject);
+      req.end();
+    });
+    assert.equal(idle.status, 200);
+    assert.doesNotMatch(idle.body, /download-chip/);
+    const stream = await openSse(primaryId, chipPort);
+    try {
+      grab = { title: "Dune.2021.1080p", percent: "42%", rate: "2.5 MB/s", eta: "12m" };
+      const appeared = await stream.waitFor(/download-chip/);
+      assert.match(appeared, /Dune\.2021\.1080p/);
+      assert.match(appeared, /42%/);
+      const mark = stream.checkpoint();
+      grab = { title: "Dune.2021.1080p", percent: "80%", rate: "2.5 MB/s", eta: "4m" };
+      const ticked = await stream.waitFor(/80%/, mark);
+      assert.match(ticked, /download-chip/);
+      assert.match(ticked, /80%/);
+    } finally {
+      stream.close();
+    }
+  } finally {
+    chipServer.closeAllConnections?.();
+    await new Promise((resolveClose) => chipServer.close(resolveClose));
+  }
+}
+
 const streams = [];
 try {
   // Stable htmx/SSE lifecycle: the owner and target wrap inner-only fragments.
@@ -819,6 +882,7 @@ try {
   assert.match(home.body, new RegExp(`<option value="${secondaryId}"`));
   assert.match(home.body, new RegExp(`hx-push-url="/qq/session/${primaryId}"`));
   assert.match(home.body, /This DSH session has no transcript yet/);
+  assert.doesNotMatch(home.body, /download-chip/);
   assert.match(home.body, /<details class="session-menu">[\s\S]*<summary aria-label="Show session controls">/);
   assert.doesNotMatch(home.body, /<details class="session-menu" open/);
   assert.match(home.body, /aria-label="Session controls"/);
@@ -1155,6 +1219,11 @@ try {
   assert.match(launcher, /QQ_DSH_HAVE_UI/);
   assert.match(launcher, /QQ_DSH_HAVE_RELAY/);
   assert.match(launcher, /QQ_DSH_HAVE_WORKFLOWS/);
+  assert.match(launcher, /QQ_MEDIA_ROOT/);
+  assert.match(launcher, /@hypermemetic-ai\/media-box/);
+  assert.doesNotMatch(launcher, /QQ_DSH_HAVE_MEDIA/);
+  assert.doesNotMatch(patch, /media-box|QQ_DSH_HAVE_MEDIA/);
+  assert.match(uiPlugin, /progressFor/);
   assert.match(patch, /QQ_PORT \?\? 3082/);
   assert.doesNotMatch(patch, /QQ_DSH_CONSOLE_PORT|QQ_UI_PORT|QQ_WEBSERVER_PORT/);
   assert.match(patch, /QQ_DSH_HAVE_UI/);
