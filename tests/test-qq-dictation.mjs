@@ -34,6 +34,7 @@ const betaId = sessionId("00000000000b");
 const goneId = sessionId("00000000000c");
 
 const clientJs = readFileSync(join(root, "qq-dictation/src/client.js"), "utf8");
+const browserJs = readFileSync(join(root, "qq-ui/assets/browser-v8.js"), "utf8");
 const pluginSource = readFileSync(join(root, "qq-dictation/src/plugin.mjs"), "utf8");
 const serviceSource = readFileSync(join(root, "qq-dictation/src/service.mjs"), "utf8");
 const httpSource = readFileSync(join(root, "qq-dictation/src/http.mjs"), "utf8");
@@ -117,14 +118,29 @@ async function withServer(handler, run) {
 }
 
 class Element {
-  constructor() {
+  constructor(tagName = "DIV") {
     this.id = "";
+    this.tagName = tagName;
+    this.type = "";
     this.dataset = {};
     this.attributes = {};
     this.textContent = "";
     this.parentElement = null;
+    this.hidden = false;
+    this.inert = false;
+    this.style = {};
+    this.scrollHeight = 0;
+    this.scrollTop = 0;
+    this.offsetHeight = 0;
+    this.clientHeight = 0;
     this.classList = {
       names: new Set(),
+      add(...names) {
+        for (const name of names) this.names.add(name);
+      },
+      remove(...names) {
+        for (const name of names) this.names.delete(name);
+      },
       toggle(name, force) {
         if (force === true) this.names.add(name);
         else if (force === false) this.names.delete(name);
@@ -143,6 +159,10 @@ class Element {
   getAttribute(name) {
     return this.attributes[name] ?? null;
   }
+  replaceChildren(...children) {
+    this.textContent = children.join("");
+  }
+  focus() {}
   closest(selector) {
     let node = this;
     while (node) {
@@ -153,32 +173,82 @@ class Element {
   }
 }
 
-class HTMLTextAreaElement extends Element {}
-class HTMLFormElement extends Element {}
+class HTMLTextAreaElement extends Element {
+  constructor() {
+    super("TEXTAREA");
+    this.value = "";
+    this.selectionStart = 0;
+    this.selectionEnd = 0;
+  }
+  setSelectionRange(start, end) {
+    this.selectionStart = start;
+    this.selectionEnd = end;
+  }
+}
+class HTMLFormElement extends Element {
+  constructor() {
+    super("FORM");
+  }
+}
+class HTMLSelectElement extends Element {
+  constructor() {
+    super("SELECT");
+  }
+}
+class HTMLDetailsElement extends Element {
+  constructor() {
+    super("DETAILS");
+  }
+}
+
+class CustomEvent {
+  constructor(type, options = {}) {
+    this.type = type;
+    this.detail = options.detail;
+  }
+}
 
 function makeClientHarness(options = {}) {
   const fetches = [];
   let serverState = "idle";
   let endFailures = options.end409Once ? 1 : 0;
   let processor = null;
+  let mediaStarts = 0;
+  let timerId = 10;
+  const timers = new Map();
   const byId = new Map();
   const listeners = [];
+  const windowListeners = [];
+  const outside = new Element();
+  let nodes = null;
 
-  const composer = new HTMLFormElement();
-  composer.id = "composer";
-  composer.dataset.sessionId = options.omitComposerSession ? "" : (options.sessionId ?? alphaId);
-  const dictate = new Element();
-  dictate.id = "composer-dictate";
-  dictate.dataset.state = "idle";
-  dictate.textContent = "Mic";
-  dictate.parentElement = composer;
-  const submit = new Element();
-  submit.id = "composer-submit";
-  submit.parentElement = composer;
-  const prompt = new HTMLTextAreaElement();
-  prompt.id = "prompt";
-  prompt.parentElement = composer;
-  for (const node of [composer, dictate, submit, prompt]) byId.set(node.id, node);
+  const installComposer = (nextSessionId = options.sessionId ?? alphaId) => {
+    const composer = new HTMLFormElement();
+    composer.id = "composer";
+    composer.dataset.sessionId = options.omitComposerSession ? "" : nextSessionId;
+    const dictate = new Element("BUTTON");
+    dictate.id = "composer-dictate";
+    dictate.type = "button";
+    dictate.dataset.state = "idle";
+    dictate.parentElement = composer;
+    const submit = new Element("BUTTON");
+    submit.id = "composer-submit";
+    submit.type = "submit";
+    submit.parentElement = composer;
+    const prompt = new HTMLTextAreaElement();
+    prompt.id = "prompt";
+    prompt.parentElement = composer;
+    prompt.form = composer;
+    const status = new Element("SPAN");
+    status.id = "dictation-status";
+    status.dataset.state = "idle";
+    status.hidden = true;
+    status.parentElement = composer;
+    for (const node of [composer, dictate, submit, prompt, status]) byId.set(node.id, node);
+    nodes = { composer, dictate, submit, prompt, status };
+    return nodes;
+  };
+  installComposer();
 
   class FakeAudioContext {
     constructor() {
@@ -204,36 +274,99 @@ function makeClientHarness(options = {}) {
     }
   }
 
+  let releaseMicGate = null;
+  const micGate = options.deferMic
+    ? new Promise((resolve) => { releaseMicGate = resolve; })
+    : null;
   const mediaDevices = options.noMic
     ? undefined
     : {
         async getUserMedia() {
+          mediaStarts += 1;
           if (options.micError) throw new Error("denied");
+          if (micGate) await micGate;
           return { getTracks: () => [{ stop() {} }] };
         },
       };
 
+  function dispatch(type, event, capture = false) {
+    for (const listener of [...listeners]) {
+      if (listener.type !== type || listener.capture !== capture) continue;
+      listener.fn(event);
+      if (listener.once) {
+        const at = listeners.indexOf(listener);
+        if (at >= 0) listeners.splice(at, 1);
+      }
+    }
+  }
+
+  const body = new Element("BODY");
+  body.children = [];
   const document = {
     readyState: "complete",
     activeElement: null,
+    currentScript: { dataset: {} },
+    body,
     querySelector(selector) {
-      if (selector.startsWith("#")) return byId.get(selector.slice(1)) ?? null;
+      if (/^#[A-Za-z0-9_-]+$/.test(selector)) return byId.get(selector.slice(1)) ?? null;
       return null;
     },
+    querySelectorAll(selector) {
+      if (selector === "#dictation-status") {
+        const status = byId.get("dictation-status");
+        return status ? [status] : [];
+      }
+      return [];
+    },
     addEventListener(type, fn, opts) {
-      listeners.push({ type, fn, capture: opts === true || opts?.capture === true });
+      listeners.push({
+        type,
+        fn,
+        capture: opts === true || opts?.capture === true,
+        once: opts?.once === true,
+      });
+    },
+    dispatchEvent(event) {
+      dispatch(event.type, event, false);
+      return true;
     },
   };
 
   const windowObj = {
     AudioContext: FakeAudioContext,
     webkitAudioContext: FakeAudioContext,
+    matchMedia() {
+      return { matches: options.desktop === true };
+    },
     setInterval() {
       return 1;
     },
-    addEventListener() {},
+    setTimeout(fn) {
+      const id = timerId++;
+      timers.set(id, fn);
+      return id;
+    },
+    clearTimeout(id) {
+      timers.delete(id);
+    },
+    addEventListener(type, fn, opts) {
+      windowListeners.push({ type, fn, once: opts?.once === true });
+    },
   };
 
+  let releaseEndGate = null;
+  const endGate = options.deferEnd
+    ? new Promise((resolve) => { releaseEndGate = resolve; })
+    : null;
+  const pathname = options.pathname ?? `/qq/session/${options.sessionId ?? alphaId}`;
+  const assigned = [];
+  const location = {
+    pathname,
+    href: `http://127.0.0.1${pathname}`,
+    assign(value) {
+      assigned.push(String(value));
+    },
+  };
   const sandbox = {
     ArrayBuffer,
     DataView,
@@ -246,14 +379,25 @@ function makeClientHarness(options = {}) {
     JSON,
     Object,
     Promise,
+    URL,
     Element,
+    HTMLElement: Element,
     HTMLTextAreaElement,
     HTMLFormElement,
+    HTMLSelectElement,
+    HTMLDetailsElement,
+    CustomEvent,
     document,
-    location: { pathname: options.pathname ?? `/qq/session/${options.sessionId ?? alphaId}` },
+    history: { state: null, replaceState() {} },
+    location,
     navigator: { mediaDevices },
+    performance: { now: () => 1 },
+    requestAnimationFrame(fn) {
+      fn();
+      return 1;
+    },
+    clearInterval() {},
     window: windowObj,
-    Blob,
     fetch: async (url, init = {}) => {
       const path = String(url);
       const headers = init.headers ?? {};
@@ -269,11 +413,29 @@ function makeClientHarness(options = {}) {
       if (path.endsWith("/end") && endFailures > 0) {
         endFailures -= 1;
         serverState = "idle";
-        return { ok: false, status: 409, json: async () => ({ error: "not recording" }) };
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({ error: "not recording", sent: false }),
+        };
       }
-      if (path.endsWith("/end") || path.endsWith("/cancel")) {
+      if (path.endsWith("/end")) {
         serverState = "idle";
-        return { ok: true, status: 200, json: async () => ({ state: "idle", sent: path.endsWith("/end") }) };
+        const deferred = endGate ? await endGate : null;
+        const sent = deferred?.sent ?? options.endSent ?? true;
+        const ok = deferred?.ok ?? !options.endHttpError;
+        const status = ok ? 200 : 500;
+        return {
+          ok,
+          status,
+          json: async () => ok
+            ? { state: "idle", sent, reason: sent ? undefined : "empty" }
+            : { error: "recognizer failed", sent: false },
+        };
+      }
+      if (path.endsWith("/cancel")) {
+        serverState = "idle";
+        return { ok: true, status: 200, json: async () => ({ state: "idle", sent: false }) };
       }
       if (path.endsWith("/focus")) {
         return { ok: true, status: 200, json: async () => ({ lastFocus: options.sessionId ?? alphaId }) };
@@ -283,20 +445,21 @@ function makeClientHarness(options = {}) {
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  vm.runInContext(clientJs, sandbox);
-
-  function dispatch(type, event, capture = false) {
-    for (const listener of listeners) {
-      if (listener.type === type && listener.capture === capture) listener.fn(event);
-    }
+  if (options.browser) {
+    vm.runInContext(browserJs, sandbox, { filename: "browser-v8.js" });
+    document.currentScript = null;
   }
+  vm.runInContext(clientJs, sandbox, { filename: "qq-dictation-client.js" });
 
   return {
     fetches,
-    dictate,
-    composer,
-    prompt,
-    submit,
+    assigned,
+    get dictate() { return nodes.dictate; },
+    get composer() { return nodes.composer; },
+    get prompt() { return nodes.prompt; },
+    get status() { return nodes.status; },
+    get submit() { return nodes.submit; },
+    get mediaStarts() { return mediaStarts; },
     pump() {
       const samples = new Float32Array(160);
       for (let i = 0; i < samples.length; i += 1) samples[i] = 0.2;
@@ -312,15 +475,54 @@ function makeClientHarness(options = {}) {
     },
     keydown(partial) {
       const event = {
-        preventDefault() {},
+        key: "",
+        code: "",
+        target: outside,
+        defaultPrevented: false,
+        isComposing: false,
+        metaKey: false,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+        preventDefault() { this.defaultPrevented = true; },
         stopPropagation() {},
         ...partial,
       };
       dispatch("keydown", event, false);
+      return event;
+    },
+    space(target = outside) {
+      return this.keydown({ key: " ", code: "Space", target });
+    },
+    submitForm() {
+      const event = {
+        target: nodes.composer,
+        preventDefault() {},
+        stopPropagation() {},
+      };
+      dispatch("submit", event, true);
     },
     focusPrompt() {
-      document.activeElement = prompt;
-      dispatch("focusin", { target: prompt }, false);
+      document.activeElement = nodes.prompt;
+      dispatch("focusin", { target: nodes.prompt }, false);
+    },
+    swapComposer(nextSessionId = options.sessionId ?? alphaId, eventName = "htmx:sseMessage") {
+      installComposer(nextSessionId);
+      dispatch(eventName, { target: nodes.composer, detail: { target: nodes.composer } }, false);
+    },
+    listenerCount(type) {
+      return listeners.filter((listener) => listener.type === type).length;
+    },
+    releaseMic() {
+      releaseMicGate?.();
+    },
+    releaseEnd(result = { sent: true }) {
+      releaseEndGate?.(result);
+    },
+    runTimeouts() {
+      const pending = [...timers.values()];
+      timers.clear();
+      for (const fn of pending) fn();
     },
   };
 }
@@ -371,6 +573,11 @@ try {
   assert.match(clientJs, /RIFF/);
   assert.match(clientJs, /audio\/wav/);
   assert.match(clientJs, /microphone is unavailable/);
+  assert.match(clientJs, /qq:desktop-dictation-toggle/);
+  assert.match(clientJs, /Recording · Space to send/);
+  assert.match(clientJs, /Dictation failed · Space to retry/);
+  assert.match(browserJs, /document\.dispatchEvent\(new CustomEvent\("qq:desktop-dictation-toggle"\)\)/);
+  assert.doesNotMatch(browserJs, /if \(key === " " \|\| key === "Spacebar"\) \{[\s\S]{0,160}clickButton\("#composer-dictate"\)/);
   assert.doesNotMatch(clientJs, /MediaRecorder/);
   assert.doesNotMatch(clientJs, /\/chunk/);
 
@@ -560,6 +767,8 @@ try {
       assert.match(page, /class="dictate-mic"/);
       assert.match(page, /class="dictate-cancel"/);
       assert.match(page, /id="composer-submit"/);
+      assert.match(page, /id="dictation-status"[^>]*role="status"[^>]*aria-live="polite"[^>]*aria-atomic="true"[^>]*hidden/);
+      assert.equal(page.match(/id="dictation-status"/g)?.length, 1);
       assert.doesNotMatch(page, />Mic</);
       const full = renderPage(
         { id: alphaId, events: [], agentStatus: "idle" },
@@ -851,6 +1060,95 @@ try {
   assert.ok(!goneId.includes("HERDR"));
 
   {
+    const harness = makeClientHarness({ browser: true, desktop: true, deferMic: true, deferEnd: true });
+    await settle();
+    assert.equal(harness.listenerCount("qq:desktop-dictation-toggle"), 1);
+
+    const firstSpace = harness.space();
+    assert.equal(firstSpace.defaultPrevented, true);
+    assert.equal(harness.mediaStarts, 1);
+    assert.equal(harness.status.dataset.state, "starting");
+    assert.equal(harness.status.textContent, "Starting dictation…");
+    assert.equal(harness.status.hidden, false);
+
+    harness.space();
+    assert.equal(harness.mediaStarts, 1, "repeat Space while starting must not start twice");
+    harness.swapComposer(betaId, "htmx:sseMessage");
+    assert.equal(harness.status.dataset.state, "starting");
+    assert.equal(harness.status.textContent, "Starting dictation…");
+    assert.equal(harness.listenerCount("qq:desktop-dictation-toggle"), 1);
+
+    harness.releaseMic();
+    await settle();
+    const starts = harness.fetches.filter((call) => String(call.path).endsWith("/start"));
+    assert.equal(starts.length, 1);
+    assert.match(String(starts[0].body), new RegExp(`"sessionId":"${alphaId}"`));
+    assert.equal(harness.status.dataset.state, "recording");
+    assert.equal(harness.status.textContent, "Recording · Space to send");
+    assert.equal(harness.composer.classList.contains("is-dictating"), true);
+
+    harness.swapComposer(alphaId, "htmx:afterSwap");
+    assert.equal(harness.status.dataset.state, "recording");
+    assert.equal(harness.status.textContent, "Recording · Space to send");
+    assert.equal(harness.listenerCount("qq:desktop-dictation-toggle"), 1);
+
+    const literalSpace = harness.space(harness.prompt);
+    assert.equal(literalSpace.defaultPrevented, false);
+    assert.equal(harness.fetches.filter((call) => String(call.path).endsWith("/end")).length, 0);
+
+    harness.pump();
+    harness.space();
+    assert.equal(harness.status.dataset.state, "transcribing");
+    assert.equal(harness.status.textContent, "Transcribing…");
+    await settle();
+    assert.equal(harness.fetches.filter((call) => String(call.path).endsWith("/end")).length, 1);
+    harness.space();
+    await settle();
+    assert.equal(harness.fetches.filter((call) => String(call.path).endsWith("/end")).length, 1);
+
+    harness.releaseEnd({ sent: true });
+    await settle();
+    assert.equal(harness.status.dataset.state, "idle");
+    assert.equal(harness.status.hidden, true);
+    assert.equal(harness.dictate.dataset.state, "idle");
+  }
+
+  {
+    const harness = makeClientHarness({ browser: true, desktop: true, endSent: false });
+    await settle();
+    harness.space();
+    await settle();
+    harness.space();
+    await settle();
+    assert.equal(harness.status.dataset.state, "failure");
+    assert.equal(harness.status.textContent, "Dictation failed · Space to retry");
+    assert.equal(harness.status.hidden, false);
+    harness.runTimeouts();
+    assert.equal(harness.status.dataset.state, "idle");
+    assert.equal(harness.status.hidden, true);
+  }
+
+  {
+    const harness = makeClientHarness({ browser: true, desktop: false });
+    await settle();
+    const phoneSpace = harness.space();
+    assert.equal(phoneSpace.defaultPrevented, false);
+    assert.equal(harness.mediaStarts, 0);
+    harness.click(harness.dictate);
+    await settle();
+    assert.equal(harness.dictate.dataset.state, "recording");
+    harness.click(harness.dictate);
+    await settle();
+    assert.equal(harness.fetches.filter((call) => String(call.path).endsWith("/cancel")).length, 1);
+    assert.equal(harness.fetches.filter((call) => String(call.path).endsWith("/end")).length, 0);
+    harness.click(harness.dictate);
+    await settle();
+    harness.click(harness.submit);
+    await settle();
+    assert.equal(harness.fetches.filter((call) => String(call.path).endsWith("/end")).length, 1);
+  }
+
+  {
     const harness = makeClientHarness();
     await settle();
     harness.focusPrompt();
@@ -917,14 +1215,14 @@ try {
   }
 
   {
-    const harness = makeClientHarness();
+    const harness = makeClientHarness({ browser: true, desktop: true });
     await settle();
-    harness.keydown({ code: "AltRight", key: "Alt" });
+    harness.keydown({ code: "AltRight", key: "Alt", altKey: true });
     await settle();
     assert.equal(harness.dictate.dataset.state, "recording");
     assert.ok(harness.fetches.some((call) => String(call.path).endsWith("/start")));
     harness.pump();
-    harness.keydown({ code: "AltRight", key: "Alt" });
+    harness.keydown({ code: "AltRight", key: "Alt", altKey: true });
     await settle();
     const ended = harness.fetches.find((call) => String(call.path).endsWith("/end"));
     assert.ok(ended);
@@ -951,8 +1249,11 @@ try {
     await settle();
     harness.click(harness.dictate);
     await settle();
-    assert.equal(harness.dictate.dataset.state, "idle");
+    assert.equal(harness.dictate.dataset.state, "failure");
+    assert.equal(harness.status.textContent, "Dictation failed · Space to retry");
     assert.ok(!harness.fetches.some((call) => String(call.path).endsWith("/start")));
+    harness.runTimeouts();
+    assert.equal(harness.dictate.dataset.state, "idle");
   }
 
   {
@@ -960,17 +1261,25 @@ try {
     await settle();
     harness.click(harness.dictate);
     await settle();
-    assert.equal(harness.dictate.dataset.state, "idle");
+    assert.equal(harness.dictate.dataset.state, "failure");
     assert.ok(!harness.fetches.some((call) => String(call.path).endsWith("/start")));
+    harness.runTimeouts();
+    assert.equal(harness.dictate.dataset.state, "idle");
   }
 
   const css = readFileSync(join(root, "qq-ui/assets/console.css"), "utf8");
-  assert.match(css, /\.composer-row \{[\s\S]*grid-template-columns: minmax\(0, 1fr\) auto;/);
+  assert.match(css, /\.composer-row \{[\s\S]*grid-template-columns: minmax\(0, 1fr\) auto auto;/);
   assert.match(css, /#composer-dictate/);
   assert.match(css, /#composer-dictate svg \{[\s\S]*grid-area: 1 \/ 1/);
   assert.match(css, /#composer-dictate \.dictate-cancel[\s\S]*visibility: hidden/);
   assert.match(css, /#composer-submit \{[\s\S]*clip-path: inset\(50%\)/);
   assert.match(css, /@media \(min-width: 42\.01rem\) and \(pointer: fine\) \{[\s\S]*#composer-dictate \{ display: none; \}/);
+  assert.match(css, /\.dictation-status \{ display: none; \}/);
+  assert.match(css, /\.dictation-status:not\(\[hidden\]\) \{[\s\S]*display: inline-flex/);
+  assert.match(css, /\.dictation-status\[data-state="recording"\]/);
+  assert.match(css, /\.dictation-status\[data-state="transcribing"\]/);
+  assert.match(css, /\.dictation-status\[data-state="failure"\]/);
+  assert.match(css, /\.composer\.is-dictating textarea/);
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }
