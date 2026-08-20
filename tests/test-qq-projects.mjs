@@ -696,7 +696,11 @@ try {
       sessions: [],
     }, httpInternals.routes("/qq", "", "alpha"));
     assert.match(emptyHtml, /aria-label="New session">\+<\/button>/);
+    assert.match(emptyHtml, /class="drawer-edge"/);
     assert.doesNotMatch(emptyHtml, /id="transcript"|id="composer"|add session|close-arm/);
+
+    const legacyHtml = renderSessionContent({ id: "", events: [], sessions: [] }, httpInternals.routes("/qq", ""));
+    assert.doesNotMatch(legacyHtml, /drawer-edge/, "legacy pages without project files must not get a ghost gesture rail");
   } finally {
     server.closeAllConnections?.();
     await new Promise((resolve) => server.close(resolve));

@@ -206,6 +206,73 @@ async function navigate(client, page, url) {
   await client.send("Page.navigate", { url }, page.sessionId);
 }
 
+async function dispatchTouchSwipe(client, page, { x = 8, y = 420, endX, endY, steps = 5 }) {
+  const point = (clientX, clientY) => [{ x: clientX, y: clientY, radiusX: 6, radiusY: 6, force: 1, id: 0 }];
+  await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: point(x, y) }, page.sessionId);
+  for (let step = 1; step <= steps; step += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await client.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: point(x + ((endX - x) * step) / steps, y + ((endY - y) * step) / steps),
+    }, page.sessionId);
+  }
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }, page.sessionId);
+}
+
+async function waitForDrawerSurface(client, page, pathname) {
+  return waitFor(
+    () => evaluate(client, page, `(() => ({
+      ready: document.readyState === "complete" && Boolean(document.querySelector("#project-drawer")) && Boolean(document.querySelector(".drawer-edge")),
+      pathname: location.pathname,
+    }))()`).then((state) => state?.ready && state.pathname === pathname && state),
+    `drawer surface ${pathname} did not load`,
+  );
+}
+
+async function openDrawerWithTouch(client, page, { y = 420 } = {}) {
+  const before = await evaluate(client, page, `(() => {
+    const edges = document.querySelectorAll(".drawer-edge");
+    window.__qqEdgeCaptured = 0;
+    for (const edge of edges) edge.addEventListener("gotpointercapture", () => { window.__qqEdgeCaptured += 1; }, { once: true });
+    return { timeOrigin: performance.timeOrigin, pathname: location.pathname };
+  })()`);
+  await dispatchTouchSwipe(client, page, { x: 8, y, endX: 104, endY: y + 4 });
+  const opened = await waitFor(
+    () => evaluate(client, page, `(() => ({
+      open: document.body.classList.contains("drawer-open"),
+      hidden: document.querySelector("#project-drawer")?.getAttribute("aria-hidden"),
+      captured: window.__qqEdgeCaptured,
+      timeOrigin: performance.timeOrigin,
+      pathname: location.pathname,
+      drawer: new URL(location.href).searchParams.get("drawer"),
+    }))()`).then((state) => state?.open && state),
+    `edge swipe did not open the drawer on ${before.pathname}`,
+  );
+  assert.equal(opened.hidden, "false");
+  assert.ok(opened.captured >= 1, "edge gesture did not capture its touch pointer");
+  assert.equal(opened.timeOrigin, before.timeOrigin, "edge swipe reloaded the document");
+  assert.equal(opened.pathname, before.pathname);
+  return opened;
+}
+
+async function closeDrawerInPlace(client, page) {
+  const before = await evaluate(client, page, "performance.timeOrigin");
+  await evaluate(client, page, `document.querySelector(".drawer-close").click()`);
+  const closed = await waitFor(
+    () => evaluate(client, page, `({
+      open: document.body.classList.contains("drawer-open"),
+      hidden: document.querySelector("#project-drawer")?.getAttribute("aria-hidden"),
+      timeOrigin: performance.timeOrigin,
+      hasDrawerQuery: new URL(location.href).searchParams.has("drawer"),
+    })`).then((state) => !state?.open && state),
+    "drawer did not close in place",
+  );
+  assert.equal(closed.hidden, "true");
+  assert.equal(closed.timeOrigin, before, "closing the drawer reloaded the document");
+  assert.equal(closed.hasDrawerQuery, false);
+}
+
 async function waitForLive(client, page, origin) {
   const readState = () => evaluate(client, page, `(() => ({
     ready: document.readyState === "complete" && Boolean(document.querySelector("#prompt")),
@@ -240,18 +307,65 @@ async function waitForWorker(client, page, scriptPattern = /\/qq\/sw\.js$/) {
 }
 
 export async function runQqPwaBrowserProof() {
+  const observers = new Set();
+  const longReadme = `# Project proof\n\n${Array.from({ length: 120 }, (_, index) => `Scrollable proof line ${index + 1}.`).join("\n\n")}\n`;
   const backend = {
     defaultSessionId: SESSION_ID,
     defaultProject: "proof",
-    listProjects: () => [{ name: "proof", cwd: "/proof" }],
-    async list() { return [{ id: SESSION_ID, createdAt: 1, project: "proof" }]; },
+    listProjects: () => [{ name: "proof", cwd: "/proof" }, { name: "empty", cwd: "/empty" }],
+    listProjectFiles(project, path = "") {
+      if (!project) {
+        return {
+          scope: "projects", project: null, path: "", parent: null,
+          breadcrumbs: [{ type: "projects", name: "projects", path: null }],
+          entries: this.listProjects().map(({ name }) => ({ type: "project", project: name, name })),
+        };
+      }
+      if (path === "src") {
+        return {
+          scope: "project", project, path, parent: "",
+          breadcrumbs: [
+            { type: "projects", name: "projects", path: null },
+            { type: "project", name: project, path: "" },
+            { type: "directory", name: "src", path: "src" },
+          ],
+          entries: [{ type: "file", name: "fixture.js", path: "src/fixture.js", kind: "code" }],
+        };
+      }
+      return {
+        scope: "project", project, path: "", parent: null,
+        breadcrumbs: [
+          { type: "projects", name: "projects", path: null },
+          { type: "project", name: project, path: "" },
+        ],
+        entries: project === "proof" ? [
+          { type: "directory", name: "src", path: "src" },
+          { type: "file", name: "README.md", path: "README.md", kind: "markdown" },
+        ] : [],
+      };
+    },
+    readProjectFile(project, path) {
+      if (project === "proof" && path === "README.md") {
+        return { project, path, name: "README.md", kind: "markdown", size: longReadme.length, text: longReadme };
+      }
+      const error = new Error("qq: file not found");
+      error.status = 404;
+      throw error;
+    },
+    openProjectFile() {
+      const error = new Error("qq: file not found");
+      error.status = 404;
+      throw error;
+    },
+    async list(project) { return project === "empty" ? [] : [{ id: SESSION_ID, createdAt: 1, project: "proof" }]; },
     async read(id) {
       assert.equal(id, SESSION_ID);
       return { id, project: "proof", events: [], agentStatus: "idle" };
     },
     observe(id, listener) {
+      observers.add(listener);
       void this.read(id).then((snapshot) => listener(null, snapshot), listener);
-      return () => {};
+      return () => observers.delete(listener);
     },
     async create() { return { id: SESSION_ID, project: "proof" }; },
     async prompt() {},
@@ -312,6 +426,7 @@ export async function runQqPwaBrowserProof() {
     await waitForLive(client, desktop, origin);
     await navigate(client, desktop, `${origin}${CANONICAL_PATH}`);
     await waitForLive(client, desktop, origin);
+    assert.equal(await evaluate(client, desktop, `getComputedStyle(document.querySelector(".drawer-edge")).display`), "none");
 
     networkAvailable = false;
     await navigate(client, desktop, `${origin}/qq/`);
@@ -365,6 +480,113 @@ export async function runQqPwaBrowserProof() {
     assert.equal(device.height, 915);
     assert.match(device.userAgent, /Pixel 10/);
     assert.equal(device.protocol, "https:");
+
+    const mobileChrome = await evaluate(client, pixel, `(() => {
+      const toggle = document.querySelector("#project-drawer-toggle");
+      const edge = document.querySelector(".drawer-edge");
+      const edgeStyle = getComputedStyle(edge);
+      const edgeRect = edge.getBoundingClientRect();
+      const transcript = document.querySelector("#transcript");
+      transcript.scrollTop = 0;
+      const probe = document.createElement("span");
+      probe.style.cssText = "display:block;flex:none;height:1px;margin:0;padding:0";
+      edge.after(probe);
+      const expectedProbeTop = transcript.getBoundingClientRect().top + parseFloat(getComputedStyle(transcript).paddingTop);
+      const probeTop = probe.getBoundingClientRect().top;
+      probe.remove();
+      return {
+        toggleDisplay: getComputedStyle(toggle).display,
+        toggleWidth: toggle.getBoundingClientRect().width,
+        edgeParent: edge.parentElement?.tagName,
+        edgeWidth: edgeRect.width,
+        edgeHeight: edgeRect.height,
+        edgePointerEvents: edgeStyle.pointerEvents,
+        edgeTouchAction: edgeStyle.touchAction,
+        railLayoutShift: Math.abs(probeTop - expectedProbeTop),
+      };
+    })()`);
+    assert.equal(mobileChrome.toggleDisplay, "none", "the Files trigger remained painted on mobile");
+    assert.equal(mobileChrome.toggleWidth, 0);
+    assert.equal(mobileChrome.edgeParent, "DIV", "the session gesture edge must belong to its scrolling transcript");
+    assert.ok(mobileChrome.edgeWidth >= 24);
+    assert.equal(mobileChrome.edgeHeight, 915);
+    assert.equal(mobileChrome.edgePointerEvents, "auto");
+    assert.equal(mobileChrome.edgeTouchAction, "pan-y");
+    assert.ok(mobileChrome.railLayoutShift < 1, `gesture rail shifted transcript content by ${mobileChrome.railLayoutShift}px`);
+
+    // A real SSE innerHTML swap must supply a fresh edge target with the new transcript.
+    await evaluate(client, pixel, `(() => {
+      window.__qqEdgeBeforeSse = document.querySelector(".drawer-edge");
+      window.__qqHeadingBeforeSse = document.querySelector(".session-heading");
+      return true;
+    })()`);
+    const published = await backend.read(SESSION_ID);
+    for (const listener of observers) listener(null, published);
+    await waitFor(
+      () => evaluate(client, pixel, `document.querySelector(".session-heading") !== window.__qqHeadingBeforeSse`),
+      "session SSE did not replace the panel content",
+    );
+    assert.equal(await evaluate(client, pixel, `(() => {
+      const edge = document.querySelector(".drawer-edge");
+      return edge !== window.__qqEdgeBeforeSse && edge?.parentElement?.id === "transcript";
+    })()`), true);
+    await openDrawerWithTouch(client, pixel);
+    await closeDrawerInPlace(client, pixel);
+
+    // Closing and reopening a nested folder is an in-place state change.
+    await navigate(client, pixel, `${origin}${CANONICAL_PATH}?drawer=src`);
+    await waitForDrawerSurface(client, pixel, CANONICAL_PATH);
+    assert.equal(await evaluate(client, pixel, `document.querySelector("#project-drawer")?.dataset.drawerPath`), "src");
+    await closeDrawerInPlace(client, pixel);
+    const nested = await openDrawerWithTouch(client, pixel);
+    assert.equal(nested.drawer, "src");
+    assert.equal(await evaluate(client, pixel, `document.querySelector("#project-drawer")?.dataset.drawerPath`), "src");
+    await closeDrawerInPlace(client, pixel);
+
+    // Swipe remains the only mobile opener on an empty project surface and with reduced motion.
+    await client.send("Emulation.setEmulatedMedia", {
+      media: "",
+      features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+    }, pixel.sessionId);
+    const emptyProjectPath = "/qq/project/empty";
+    await navigate(client, pixel, `${origin}${emptyProjectPath}`);
+    await waitForDrawerSurface(client, pixel, emptyProjectPath);
+    assert.equal(await evaluate(client, pixel, `getComputedStyle(document.querySelector("#project-drawer")).transitionDuration`), "0s");
+    await openDrawerWithTouch(client, pixel, { y: 300 });
+    await closeDrawerInPlace(client, pixel);
+
+    // A vertical touch starting in the edge zone scrolls instead of opening the drawer.
+    const filePath = "/qq/project/proof/file/README.md";
+    await navigate(client, pixel, `${origin}${filePath}`);
+    await waitForDrawerSurface(client, pixel, filePath);
+    await evaluate(client, pixel, `(() => {
+      const edge = document.querySelector(".drawer-edge");
+      window.__qqVerticalEvents = [];
+      for (const name of ["pointerdown", "pointermove", "pointercancel", "pointerup"]) {
+        edge.addEventListener(name, () => window.__qqVerticalEvents.push(name));
+      }
+    })()`);
+    await dispatchTouchSwipe(client, pixel, { x: 8, y: 760, endX: 10, endY: 220, steps: 8 });
+    // Headless dispatchTouchEvent does not execute compositor scrolling, so
+    // pointercancel is the observable proof that pan-y yielded to the browser.
+    const vertical = await waitFor(
+      () => evaluate(client, pixel, `(() => {
+        const scroller = document.querySelector(".file-document");
+        const edge = document.querySelector(".drawer-edge");
+        return {
+          events: window.__qqVerticalEvents,
+          drawerOpen: document.body.classList.contains("drawer-open"),
+          edgeOwner: edge?.parentElement === scroller,
+          scrollable: scroller.scrollHeight > scroller.clientHeight,
+        };
+      })()`).then((state) => state?.events.includes("pointercancel") && state),
+      "vertical touch in the edge zone was not yielded to the browser",
+    );
+    assert.equal(vertical.edgeOwner, true);
+    assert.equal(vertical.scrollable, true);
+    assert.equal(vertical.drawerOpen, false, "vertical edge scrolling opened the drawer");
+    await openDrawerWithTouch(client, pixel, { y: 420 });
+    await closeDrawerInPlace(client, pixel);
 
     assert.ok(requests.filter((path) => path === "/qq/").length >= 7, "controlled installed start URL was not repeatedly fetched");
     assert.ok(requests.filter((path) => path === "/qq/sw-v10.js").length >= 2, "legacy worker URL was not checked for migration");
