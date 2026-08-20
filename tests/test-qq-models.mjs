@@ -18,6 +18,9 @@ const loginModule = await import(pathToFileURL(join(root, "qq-models/src/login.m
 const grokModule = await import(pathToFileURL(join(root, "qq-models/src/grok.mjs")));
 const codexModule = await import(pathToFileURL(join(root, "qq-models/src/codex.mjs")));
 const pluginModule = await import(pathToFileURL(join(root, "qq-models/src/plugin.mjs")));
+const relayToolsModule = await import(pathToFileURL(join(root, "qq-relay/src/tools.mjs")));
+const workflowToolsModule = await import(pathToFileURL(join(root, "qq-workflows/src/tools.mjs")));
+const iterateToolsModule = await import(pathToFileURL(join(root, "qq-workflows/src/iterate-tools.mjs")));
 const sessionModule = await import(pathToFileURL(join(root, "qq/src/session.mjs")));
 const renderModule = await import(pathToFileURL(join(root, "qq-ui/src/render.mjs")));
 const httpModule = await import(pathToFileURL(join(root, "qq-ui/src/http-app.mjs")));
@@ -467,6 +470,183 @@ try {
     const store = createAuthStore({ env: { HOME: "/home/u", DSH_HOME: home } });
     await store.write("grok", tokens("grok"));
     return createGrokAdapter({ store, sleepFn: async () => {}, fetchImpl });
+  }
+
+  {
+    const flatTool = {
+      name: "schema_probe",
+      description: "Exercise native DSH parameter metadata",
+      parameters: {
+        optional: { type: "string", required: false, description: "Optional text" },
+        requiredText: { type: "string", required: true },
+        nested: {
+          type: "object",
+          properties: { child: { type: "string" } },
+          required: ["child"],
+          additionalProperties: false,
+        },
+        choice: { type: "string", enum: ["one", "two"] },
+        values: { type: "array", items: { type: "number" } },
+        type: { type: "string", required: true },
+      },
+    };
+    const before = structuredClone(flatTool);
+    const [mapped] = grokModule.toResponsesTools([flatTool]);
+    assert.deepEqual(mapped, {
+      type: "function",
+      name: "schema_probe",
+      description: "Exercise native DSH parameter metadata",
+      parameters: {
+        type: "object",
+        properties: {
+          optional: { type: "string", description: "Optional text" },
+          requiredText: { type: "string" },
+          nested: {
+            type: "object",
+            properties: { child: { type: "string" } },
+            required: ["child"],
+            additionalProperties: false,
+          },
+          choice: { type: "string", enum: ["one", "two"] },
+          values: { type: "array", items: { type: "number" } },
+          type: { type: "string" },
+        },
+        required: ["requiredText", "type"],
+      },
+    });
+    assert.deepEqual(flatTool, before);
+    assert.notStrictEqual(mapped.parameters, flatTool.parameters);
+    assert.notStrictEqual(mapped.parameters.properties.nested, flatTool.parameters.nested);
+
+    const noArgs = { name: "no_args", description: "No arguments", parameters: {} };
+    assert.deepEqual(grokModule.toResponsesTools([noArgs])[0].parameters, {
+      type: "object",
+      properties: {},
+    });
+    assert.deepEqual(noArgs.parameters, {});
+
+    const normalized = {
+      name: "normalized",
+      description: "Already JSON Schema",
+      parameters: {
+        type: "object",
+        properties: { path: { type: "string" } },
+        required: ["path"],
+        additionalProperties: false,
+      },
+    };
+    const normalizedBefore = structuredClone(normalized);
+    const normalizedOutput = grokModule.toResponsesTools([normalized])[0].parameters;
+    assert.deepEqual(normalizedOutput, normalized.parameters);
+    assert.deepEqual(normalized, normalizedBefore);
+    assert.notStrictEqual(normalizedOutput, normalized.parameters);
+    assert.notStrictEqual(normalizedOutput.properties, normalized.parameters.properties);
+  }
+
+  {
+    const actualTools = [
+      ...relayToolsModule.buildRelayTools({}),
+      ...workflowToolsModule.buildArchitectTools({ tasks: { async rundown() { return ""; } } }),
+      ...iterateToolsModule.buildDeskTools({}),
+      ...iterateToolsModule.buildHandsTools({}),
+    ];
+    const before = structuredClone(actualTools.map(({ name, description, parameters }) => ({
+      name,
+      description,
+      parameters,
+    })));
+    const advertised = grokModule.toResponsesTools(actualTools);
+    const names = new Set(advertised.map((tool) => tool.name));
+    for (const representative of ["relay_list", "notes_list", "rundown", "journal_record", "design_loop_start"]) {
+      assert.equal(names.has(representative), true, `missing representative Grok tool ${representative}`);
+    }
+    for (const tool of advertised) {
+      const schema = tool.parameters;
+      assert.equal(tool.type, "function", `${tool.name} is not a Responses function tool`);
+      assert.equal(schema.type, "object", `${tool.name} lacks an object parameter root`);
+      assert.equal(typeof schema.properties, "object", `${tool.name} lacks object properties`);
+      assert.equal(Array.isArray(schema.properties), false, `${tool.name} properties is an array`);
+      if (Object.hasOwn(schema, "required")) {
+        assert.equal(Array.isArray(schema.required), true, `${tool.name} required is not an array`);
+        for (const name of schema.required) {
+          assert.equal(typeof name, "string", `${tool.name} has a non-string required entry`);
+          assert.equal(Object.hasOwn(schema.properties, name), true, `${tool.name} requires unknown property ${name}`);
+        }
+      }
+      for (const property of Object.values(schema.properties)) {
+        assert.notEqual(typeof property.required, "boolean", `${tool.name} retained DSH required metadata`);
+      }
+    }
+    assert.deepEqual(actualTools.map(({ name, description, parameters }) => ({
+      name,
+      description,
+      parameters,
+    })), before);
+  }
+
+  {
+    for (const parameters of [null, [], "Bearer local-secret", 42]) {
+      assert.throws(
+        () => grokModule.toResponsesTools([{ name: "bad", parameters }]),
+        (error) => error instanceof grokModule.GrokLlmError
+          && error.code === "INVALID_TOOL_SCHEMA"
+          && !error.message.includes("local-secret"),
+      );
+    }
+    assert.throws(
+      () => grokModule.toResponsesTools([{ name: "bad", parameters: { query: "not-a-schema" } }]),
+      (error) => error instanceof grokModule.GrokLlmError && error.code === "INVALID_TOOL_SCHEMA",
+    );
+
+    let fetches = 0;
+    const adapter = await grokAdapterWith("tools-invalid-local", async () => {
+      fetches += 1;
+      return grokSse("data: {\"text\":\"must-not-run\"}\n\n");
+    });
+    await assert.rejects(
+      () => grokStream(adapter, {
+        tools: [{ name: "bad", parameters: "Bearer network-secret" }],
+      }),
+      (error) => error instanceof grokModule.GrokLlmError
+        && error.code === "INVALID_TOOL_SCHEMA"
+        && !error.message.includes("network-secret"),
+    );
+    assert.equal(fetches, 0);
+    assert.equal(adapter.lastRequest, undefined);
+  }
+
+  {
+    let captured;
+    const flatTool = {
+      name: "relay_send",
+      description: "Representative flat DSH request",
+      parameters: {
+        to: { type: "string", required: true },
+        delivery: { type: "string", enum: ["default", "urgent"] },
+      },
+    };
+    const before = structuredClone(flatTool);
+    const adapter = await grokAdapterWith("tools-flat-outbound", async (_url, init) => {
+      captured = JSON.parse(init.body);
+      return grokSse("data: {\"text\":\"ok\"}\n\n");
+    });
+    await grokStream(adapter, { tools: [flatTool] });
+    assert.deepEqual(captured.tools, [{
+      type: "function",
+      name: "relay_send",
+      description: "Representative flat DSH request",
+      parameters: {
+        type: "object",
+        properties: {
+          to: { type: "string" },
+          delivery: { type: "string", enum: ["default", "urgent"] },
+        },
+        required: ["to"],
+      },
+    }]);
+    assert.equal(captured.tool_choice, "auto");
+    assert.equal(captured.parallel_tool_calls, true);
+    assert.deepEqual(flatTool, before);
   }
 
   {
