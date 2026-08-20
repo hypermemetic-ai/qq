@@ -30,6 +30,7 @@ DSH_HOME="$work/dsh-home" \
 DSH_TELEMETRY_DISABLED=1 \
 QQ_PORT="$port" \
 QQ_DSH_SESSION_ID="$session_id" \
+QQ_PROJECTS_ROOT="$(dirname "$root")" \
 QQ_DSH_PROVIDER=qwen-token-plan \
 QQ_DSH_MODEL=deepseek-v4-pro-0813 \
 "$root/bin/qq" \
@@ -37,7 +38,7 @@ QQ_DSH_MODEL=deepseek-v4-pro-0813 \
 pid=$!
 
 for _ in {1..600}; do
-  if curl -fsS --max-time 2 "$origin/qq/" >"$work/startup.html" 2>/dev/null; then
+  if curl -fsSL --max-time 2 "$origin/qq/" >"$work/startup.html" 2>/dev/null; then
     break
   fi
   if ! kill -0 "$pid" 2>/dev/null; then
@@ -56,7 +57,8 @@ curl -fsS --max-time 30 -D "$work/new-session.headers" \
   -H 'Content-Type: application/x-www-form-urlencoded' \
   --data '' "$origin/qq/sessions" >"$work/new-session.post.html"
 new_session_path=$(awk 'tolower($1) == "location:" { gsub("\\r", "", $2); print $2 }' "$work/new-session.headers" | tail -1)
-[[ $new_session_path =~ ^/qq/session/session-[0-9a-f-]{36}$ ]]
+project_name=${root##*/}
+[[ $new_session_path =~ ^/qq/project/$project_name/session/session-[0-9a-f-]{36}$ ]]
 curl -fsS --max-time 10 "$origin$new_session_path" >"$work/new-session.html"
 grep -Fq 'This DSH session has no transcript yet.' "$work/new-session.html"
 grep -Fq "$session_id" "$work/new-session.html"
@@ -66,7 +68,7 @@ curl -fsS --max-time 300 \
   -H 'HX-Request: true' \
   -H 'Content-Type: application/x-www-form-urlencoded' \
   --data-urlencode "prompt=Reply with exactly $nonce and nothing else." \
-  "$origin/qq/session/$session_id/prompt" >"$work/response.html"
+  "$origin/qq/project/$project_name/session/$session_id/prompt" >"$work/response.html"
 grep -Fq "$nonce" "$work/response.html"
 grep -Fq 'qwen-token-plan/deepseek-v4-pro-0813' "$work/dsh.stderr.log"
 

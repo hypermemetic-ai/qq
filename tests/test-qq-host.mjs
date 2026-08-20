@@ -4,12 +4,17 @@ import { createHash } from "node:crypto";
 import { createServer, request as httpRequest } from "node:http";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import vm from "node:vm";
 import { createConsoleHandler, createRootRedirectHandler, internals as httpInternals } from "../qq-ui/src/http-app.mjs";
 import { attachObserve, createQqService } from "../qq/src/session.mjs";
 import { renderMarkdownText, renderMessageText } from "../qq-ui/src/markdown.mjs";
 import { renderLoginSheet, renderOfferPopup, renderOverlay, renderProgressChip, renderSessionContent } from "../qq-ui/src/render.mjs";
+import { makeProjectsHome } from "./qq-projects-fixture.mjs";
 
 const root = resolve(process.argv[2] ?? ".");
+const projects = makeProjectsHome("qq");
+const projectCwd = projects.cwd;
+const projectName = projects.name;
 const primaryId = "session-63a11000-0000-4000-8000-000000000001";
 const secondaryId = "session-63a11000-0000-4000-8000-000000000002";
 const states = new Map([
@@ -39,7 +44,11 @@ function fakeAgent(state) {
   let settle;
   let activity = Promise.resolve();
   return {
-    session: { id: state.id, events: state.events },
+    session: {
+      id: state.id,
+      events: state.events,
+      header: { createdAt: state.createdAt, cwd: projectCwd },
+    },
     get status() { return status; },
     followup(message) {
       assert.equal(status, "idle");
@@ -104,13 +113,13 @@ const services = {
         agent,
         async dispose() {
           liveAgents.delete(state.id);
-          states.delete(state.id);
         },
       };
     },
     async create(options) {
       creates += 1;
       modelSelections.push(options.agentOptions);
+      assert.equal(options.meta?.cwd, projectCwd);
       let state = states.get(options.sessionId);
       if (!state) {
         state = {
@@ -128,7 +137,6 @@ const services = {
         agent,
         async dispose() {
           liveAgents.delete(state.id);
-          states.delete(state.id);
         },
       };
     },
@@ -145,17 +153,20 @@ const services = {
         id: state.id,
         version: 0,
         createdAt: state.createdAt,
-        cwd: root,
+        cwd: projectCwd,
       }));
     },
   },
   loader: { async await() {} },
 };
+liveAgents.set(primaryId, fakeAgent(states.get(primaryId)));
+liveAgents.set(secondaryId, fakeAgent(states.get(secondaryId)));
 const backend = createQqService(
   { get: (name) => services[name] },
   {
     sessionId: primaryId,
-    cwd: root,
+    cwd: projectCwd,
+    projectsRoot: projects.root,
     provider: "qwen-token-plan",
     model: "deepseek-v4-pro-0813",
     reasoningEffort: "max",
@@ -192,9 +203,25 @@ function request(path, options = {}) {
   });
 }
 
+function sessionPath(sessionId, action) {
+  const base = `/qq/project/${projectName}/session/${sessionId}`;
+  return action ? `${base}/${action}` : base;
+}
+
+async function follow(path, options = {}) {
+  let current = path;
+  for (let hop = 0; hop < 5; hop += 1) {
+    const response = await request(current, options);
+    if (response.status !== 303 && response.status !== 308) return response;
+    current = response.headers.location;
+    assert.ok(current, `redirect from ${path} is missing Location`);
+  }
+  throw new Error(`too many redirects from ${path}`);
+}
+
 function post(sessionId, action, fields = {}, extraHeaders = {}, htmx = true) {
   const body = new URLSearchParams(fields).toString();
-  return request(`/qq/session/${sessionId}/${action}`, {
+  return request(sessionPath(sessionId, action), {
     method: "POST",
     headers: {
       "content-type": "application/x-www-form-urlencoded",
@@ -206,7 +233,7 @@ function post(sessionId, action, fields = {}, extraHeaders = {}, htmx = true) {
   });
 }
 
-function openSse(sessionId, port = address.port) {
+function openSse(sessionId, port = address.port, path = sessionPath(sessionId, "events")) {
   return new Promise((resolveOpen, rejectOpen) => {
     const messages = [];
     const waiters = new Set();
@@ -215,7 +242,7 @@ function openSse(sessionId, port = address.port) {
     const req = httpRequest({
       host: "127.0.0.1",
       port,
-      path: `/qq/session/${sessionId}/events`,
+      path,
       method: "GET",
       agent: false,
       headers: { accept: "text/event-stream" },
@@ -336,17 +363,7 @@ function openSse(sessionId, port = address.port) {
 {
   const liveId = "session-63a11000-0000-4000-8000-0000000000aa";
   const durableId = "session-63a11000-0000-4000-8000-0000000000bb";
-  const paths = {
-    canonical: `/qq/session/${liveId}`,
-    events: `/qq/session/${liveId}/events`,
-    interrupt: `/qq/session/${liveId}/interrupt`,
-    prompt: `/qq/session/${liveId}/prompt`,
-    offer: `/qq/session/${liveId}/offer`,
-    overlay: `/qq/session/${liveId}/overlay`,
-    close: `/qq/session/${liveId}/close`,
-    createSession: "/qq/sessions",
-    switchSession: "/qq/sessions/open",
-  };
+  const paths = httpInternals.routes("/qq", liveId, "qq");
   const html = renderSessionContent({
     id: liveId,
     alias: "12",
@@ -365,7 +382,10 @@ function openSse(sessionId, port = address.port) {
   assert.doesNotMatch(durableLabel, /session-/);
   assert.doesNotMatch(html, /<button type="submit">Open<\/button>/);
   assert.doesNotMatch(html, /<form id="close-session"[^>]*hidden/);
-  assert.match(html, new RegExp(`hx-push-url="/qq/session/${liveId}"`));
+  assert.match(html, /class="close-arm"/);
+  assert.match(html, /class="close-keep"/);
+  assert.match(html, /history is kept/);
+  assert.match(html, new RegExp(`hx-push-url="/qq/project/qq/session/${liveId}"`));
   assert.match(html, new RegExp(`data-session-id="${liveId}"`));
 
   const dated = renderSessionContent({
@@ -376,7 +396,7 @@ function openSse(sessionId, port = address.port) {
   assert.match(dated, /<code>2026-08-16<\/code>/);
   assert.match(dated, new RegExp(`<option value="${liveId}" selected>Current · 2026-08-16</option>`));
   assert.doesNotMatch(dated, new RegExp(`<code>${liveId}</code>`));
-  assert.match(dated, new RegExp(`hx-push-url="/qq/session/${liveId}"`));
+  assert.match(dated, new RegExp(`hx-push-url="/qq/project/qq/session/${liveId}"`));
 
   const undealt = renderSessionContent({ id: liveId, events: [] }, paths);
   assert.match(undealt, /<code>durable<\/code>/);
@@ -432,7 +452,7 @@ function openSse(sessionId, port = address.port) {
   assert.match(offered, /name="choice" value="handoff">Hand off/);
   assert.match(offered, /name="choice" value="bank">Bank/);
   assert.match(offered, /name="choice" value="ignore">Ignore/);
-  assert.match(offered, new RegExp(`hx-post="/qq/session/${liveId}/offer"`));
+  assert.match(offered, new RegExp(`hx-post="/qq/project/qq/session/${liveId}/offer"`));
   const popup = renderOfferPopup({
     id: "offer-1",
     title: "Ship leftover",
@@ -503,7 +523,7 @@ function openSse(sessionId, port = address.port) {
   assert.match(overlayCard, /name="choice" value="never">Never/);
   assert.match(overlayCard, /name="choice" value="chrome">Hide buttons/);
   assert.match(overlayCard, /name="choice" value="dismiss" aria-label="Close"/);
-  assert.match(overlayCard, new RegExp(`hx-post="/qq/session/${liveId}/overlay"`));
+  assert.match(overlayCard, new RegExp(`hx-post="/qq/project/qq/session/${liveId}/overlay"`));
   assert.doesNotMatch(overlayCard, /overlay-stage-hit/);
   assert.doesNotMatch(overlayCard, /data-fit/);
   assert.doesNotMatch(overlayCard, /data-overlay-keys/);
@@ -581,7 +601,7 @@ function openSse(sessionId, port = address.port) {
   assert.match(saving, />Saving…</);
   assert.match(saving, /class="overlay-saving"/);
   assert.match(saving, /class="overlay-cancel"/);
-  assert.match(saving, new RegExp(`hx-post="/qq/session/${liveId}/interrupt"`));
+  assert.match(saving, new RegExp(`hx-post="/qq/project/qq/session/${liveId}/interrupt"`));
   assert.doesNotMatch(renderSessionContent({ id: liveId, events: [], sessionMode: "none" }, paths), /session-mode/);
   assert.equal(httpInternals.compilingFindPrompt("/find", liveId, () => true), false);
   assert.equal(httpInternals.compilingFindPrompt("/find tall rain", liveId, () => false), true);
@@ -592,6 +612,145 @@ function openSse(sessionId, port = address.port) {
   const badForm = new URLSearchParams({ choice: "bad" });
   assert.equal(httpInternals.overlaySaveChoice(keepForm), true);
   assert.equal(httpInternals.overlaySaveChoice(badForm), false);
+}
+
+{
+  const posts = [];
+  const byClass = new Map();
+  const byId = new Map();
+  const listeners = [];
+  const classListFor = (node) => {
+    const names = new Set(String(node.className ?? "").split(/\s+/).filter(Boolean));
+    const sync = () => { node.className = [...names].join(" "); };
+    return {
+      add(name) { names.add(name); sync(); },
+      remove(name) { names.delete(name); sync(); },
+      contains(name) { return names.has(name); },
+    };
+  };
+  const makeNode = (tag, attrs = {}) => {
+    const node = {
+      tagName: tag.toUpperCase(),
+      className: attrs.className ?? "",
+      id: attrs.id ?? "",
+      hidden: Boolean(attrs.hidden),
+      focused: false,
+      parent: null,
+      children: [],
+      dataset: {},
+      closest(selector) {
+        let current = this;
+        while (current) {
+          if (selector.startsWith(".") && String(current.className).split(/\s+/).includes(selector.slice(1))) return current;
+          if (selector.startsWith("#") && current.id === selector.slice(1)) return current;
+          current = current.parent;
+        }
+        return null;
+      },
+      focus() { node.focused = true; },
+      click() {},
+      requestSubmit() { posts.push(node.id || node.className); },
+    };
+    node.classList = classListFor(node);
+    if (node.id) byId.set(node.id, node);
+    for (const name of String(node.className).split(/\s+/).filter(Boolean)) {
+      if (!byClass.has(name)) byClass.set(name, []);
+      byClass.get(name).push(node);
+    }
+    return node;
+  };
+  const controls = makeNode("div", { className: "session-controls" });
+  const arm = makeNode("button", { className: "close-arm" });
+  const confirm = makeNode("div", { className: "close-confirm", hidden: true });
+  const keep = makeNode("button", { className: "close-keep" });
+  const form = makeNode("form", { id: "close-session", className: "close-session" });
+  const submit = makeNode("button", { className: "close-confirm-submit" });
+  const outside = makeNode("div", { className: "outside" });
+  const menu = makeNode("details", { className: "session-menu" });
+  menu.open = true;
+  for (const [parent, child] of [[controls, arm], [controls, confirm], [confirm, keep], [confirm, form], [form, submit], [menu, controls]]) {
+    child.parent = parent;
+    parent.children.push(child);
+  }
+  class FakeElement {}
+  class FakeHTMLElement extends FakeElement {}
+  class FakeHTMLFormElement extends FakeHTMLElement {}
+  class FakeHTMLSelectElement extends FakeHTMLElement {}
+  class FakeHTMLTextAreaElement extends FakeHTMLElement {}
+  class FakeHTMLDetailsElement extends FakeHTMLElement {}
+  for (const node of [controls, arm, confirm, keep, form, submit, outside, menu]) {
+    Object.setPrototypeOf(node, FakeHTMLElement.prototype);
+  }
+  Object.setPrototypeOf(form, FakeHTMLFormElement.prototype);
+  Object.setPrototypeOf(menu, FakeHTMLDetailsElement.prototype);
+  const document = {
+    readyState: "complete",
+    currentScript: null,
+    querySelector(selector) {
+      if (selector.startsWith("#")) return byId.get(selector.slice(1)) ?? null;
+      if (selector === ".session-controls.close-confirming") {
+        return controls.classList.contains("close-confirming") ? controls : null;
+      }
+      if (selector.startsWith(".")) return (byClass.get(selector.slice(1)) ?? [])[0] ?? null;
+      return null;
+    },
+    querySelectorAll() { return []; },
+    addEventListener(type, fn, opts) { listeners.push({ type, fn, capture: opts === true || opts?.capture === true }); },
+  };
+  const windowObj = {
+    matchMedia() { return { matches: true }; },
+    addEventListener() {},
+    requestAnimationFrame(fn) { fn(); },
+  };
+  const location = { pathname: `/qq/project/qq/session/${primaryId}`, assign() {} };
+  const sandbox = {
+    document,
+    window: windowObj,
+    location,
+    navigator: {},
+    requestAnimationFrame(fn) { fn(); },
+    Element: FakeElement,
+    HTMLElement: FakeHTMLElement,
+    HTMLFormElement: FakeHTMLFormElement,
+    HTMLSelectElement: FakeHTMLSelectElement,
+    HTMLTextAreaElement: FakeHTMLTextAreaElement,
+    HTMLDetailsElement: FakeHTMLDetailsElement,
+    JSON,
+    console,
+  };
+  sandbox.window.matchMedia = windowObj.matchMedia;
+  const source = await readFile(join(root, "qq-ui/assets/browser-v5.js"), "utf8");
+  vm.runInNewContext(source, sandbox, { filename: "browser-v5.js" });
+  const click = listeners.find((entry) => entry.type === "click").fn;
+  const keydown = listeners.find((entry) => entry.type === "keydown").fn;
+  const toggle = listeners.find((entry) => entry.type === "toggle").fn;
+  click({ target: arm, preventDefault() {} });
+  assert.equal(controls.classList.contains("close-confirming"), true);
+  assert.equal(confirm.hidden, false);
+  assert.equal(posts.length, 0, "first close tap must not POST");
+  click({ target: arm, preventDefault() {} });
+  assert.equal(posts.length, 0, "second close tap must not POST");
+  click({ target: keep, preventDefault() {} });
+  assert.equal(controls.classList.contains("close-confirming"), false);
+  assert.equal(confirm.hidden, true);
+  click({ target: arm, preventDefault() {} });
+  click({ target: outside, preventDefault() {} });
+  assert.equal(controls.classList.contains("close-confirming"), false);
+  click({ target: arm, preventDefault() {} });
+  keydown({ key: "Escape", defaultPrevented: false, isComposing: false, target: outside, preventDefault() {} });
+  assert.equal(controls.classList.contains("close-confirming"), false);
+  click({ target: arm, preventDefault() {} });
+  menu.open = false;
+  toggle({ target: menu });
+  assert.equal(controls.classList.contains("close-confirming"), false);
+  click({ target: arm, preventDefault() {} });
+  form.requestSubmit();
+  assert.deepEqual(posts, ["close-session"]);
+  posts.length = 0;
+  keydown({ key: "q", defaultPrevented: false, isComposing: false, target: outside, preventDefault() {} });
+  assert.equal(posts.length, 0, "q arms close without POSTing");
+  keydown({ key: "x", defaultPrevented: false, isComposing: false, target: outside, preventDefault() {} });
+  assert.deepEqual(posts, ["close-session"], "desktop q-then-x submits close directly");
 }
 
 {
@@ -622,7 +781,7 @@ function openSse(sessionId, port = address.port) {
       const req = httpRequest({
         host: "127.0.0.1",
         port: offerPort,
-        path: `/qq/session/${primaryId}`,
+        path: sessionPath(primaryId),
         method: "GET",
         agent: false,
       }, (res) => {
@@ -652,7 +811,7 @@ function openSse(sessionId, port = address.port) {
         const req = httpRequest({
           host: "127.0.0.1",
           port: offerPort,
-          path: `/qq/session/${primaryId}/offer`,
+          path: sessionPath(primaryId, "offer"),
           method: "POST",
           agent: false,
           headers: {
@@ -684,7 +843,7 @@ function openSse(sessionId, port = address.port) {
         const req = httpRequest({
           host: "127.0.0.1",
           port: offerPort,
-          path: `/qq/session/${primaryId}/offer`,
+          path: sessionPath(primaryId, "offer"),
           method: "POST",
           agent: false,
           headers: {
@@ -759,7 +918,7 @@ function openSse(sessionId, port = address.port) {
       const req = httpRequest({
         host: "127.0.0.1",
         port: overlayPort,
-        path: `/qq/session/${primaryId}`,
+        path: sessionPath(primaryId),
         method: "GET",
         agent: false,
       }, (res) => {
@@ -786,7 +945,7 @@ function openSse(sessionId, port = address.port) {
         const req = httpRequest({
           host: "127.0.0.1",
           port: overlayPort,
-          path: `/qq/session/${primaryId}/overlay`,
+          path: sessionPath(primaryId, "overlay"),
           method: "POST",
           agent: false,
           headers: {
@@ -816,7 +975,7 @@ function openSse(sessionId, port = address.port) {
         const req = httpRequest({
           host: "127.0.0.1",
           port: overlayPort,
-          path: `/qq/session/${primaryId}/overlay`,
+          path: sessionPath(primaryId, "overlay"),
           method: "POST",
           agent: false,
           headers: {
@@ -863,7 +1022,7 @@ function openSse(sessionId, port = address.port) {
       const req = httpRequest({
         host: "127.0.0.1",
         port: chipPort,
-        path: `/qq/session/${primaryId}`,
+        path: sessionPath(primaryId),
         method: "GET",
         agent: false,
       }, (res) => {
@@ -941,7 +1100,7 @@ function openSse(sessionId, port = address.port) {
     assert.equal(page.status, 200);
     assert.match(page.body, /class="session-mode" data-mode="find">Find/);
     assert.doesNotMatch(page.body, /id="interrupt-form"/);
-    const stream = await openSse(primaryId, findPort);
+    const stream = await openSse(primaryId, findPort, `/qq/session/${primaryId}/events`);
     try {
       await stream.waitFor(/class="session-mode" data-mode="find">Find/);
       const mark = stream.checkpoint();
@@ -1055,14 +1214,14 @@ try {
     rootServer.closeAllConnections?.();
     await new Promise((resolveClose) => rootServer.close(resolveClose));
   }
-  const home = await request(shortcut.headers.location, { headers: { cookie: "proof-client=home" } });
+  const home = await follow(shortcut.headers.location, { headers: { cookie: "proof-client=home" } });
   assert.equal(home.status, 200);
   assert.match(home.headers["cache-control"], /no-store/);
   assert.match(home.headers["content-security-policy"], /font-src 'self'/);
   assert.match(home.headers["content-security-policy"], /manifest-src 'self'/);
   assert.match(home.body, /^<!doctype html>/);
   assert.match(home.body, /interactive-widget=resizes-content/);
-  assert.match(home.body, new RegExp(`id="console-stream"[^>]*hx-ext="sse"[^>]*sse-connect="/qq/session/${primaryId}/events"`));
+  assert.match(home.body, new RegExp(`id="console-stream"[^>]*hx-ext="sse"[^>]*sse-connect="/qq/project/${projectName}/session/${primaryId}/events"`));
   assert.match(home.body, /id="session-panel"[^>]*hx-ext="sse"[^>]*sse-swap="session"[^>]*hx-swap="innerHTML"/);
   assert.match(home.body, /htmx-2\.0\.10\.min\.js/);
   assert.match(home.body, /htmx-ext-sse-2\.2\.4\.js/);
@@ -1075,16 +1234,18 @@ try {
   assert.match(home.body, /<code>\d+<\/code>/);
   assert.doesNotMatch(home.body, new RegExp(`<code>${primaryId}</code>`));
   assert.match(home.body, new RegExp(`<option value="${primaryId}" selected>Current · \\d+</option>`));
-  assert.match(home.body, new RegExp(`<option value="${secondaryId}">2026-08-15</option>`));
+  assert.match(home.body, new RegExp(`<option value="${secondaryId}">\\d+</option>`));
   assert.match(home.body, new RegExp(`<option value="${secondaryId}"`));
-  assert.match(home.body, new RegExp(`hx-push-url="/qq/session/${primaryId}"`));
+  assert.match(home.body, new RegExp(`hx-push-url="/qq/project/${projectName}/session/${primaryId}"`));
   assert.match(home.body, /This DSH session has no transcript yet/);
   assert.doesNotMatch(home.body, /download-chip/);
   assert.match(home.body, /<details class="session-menu">[\s\S]*<summary aria-label="Show session controls">/);
   assert.doesNotMatch(home.body, /<details class="session-menu" open/);
   assert.match(home.body, /aria-label="Session controls"/);
   assert.match(home.body, /<select id="session-choice"[^>]*>[\s\S]*Current/);
-  assert.match(home.body, /aria-label="Start a new durable DSH session"/);
+  assert.match(home.body, /aria-label="New session"/);
+  assert.match(home.body, /class="close-arm"/);
+  assert.match(home.body, />\+<\/button>/);
   assert.match(home.body, /<textarea id="prompt"[^>]*rows="1"[^>]*enterkeyhint="send"/);
   assert.match(home.body, /id="composer-dictate"/);
 
@@ -1127,13 +1288,13 @@ try {
   assert.equal(longPost.status, 200);
 
   // Laptop and phone are sequential new requests over one canonical durable id.
-  const laptop = await request(`/qq/session/${primaryId}`, { headers: { cookie: "proof-client=laptop" } });
+  const laptop = await follow(`/qq/session/${primaryId}`, { headers: { cookie: "proof-client=laptop" } });
   assert.match(laptop.body, /home handoff/);
   assert.match(laptop.body, /please interrupt this turn/);
   const laptopPost = await post(primaryId, "prompt", { prompt: "laptop handoff" }, {}, false);
   assert.equal(laptopPost.status, 303);
-  assert.equal(laptopPost.headers.location, `/qq/session/${primaryId}`);
-  const phone = await request(`/qq/session/${primaryId}`, {
+  assert.equal(laptopPost.headers.location, sessionPath(primaryId));
+  const phone = await follow(`/qq/session/${primaryId}`, {
     headers: { cookie: "proof-client=phone", "user-agent": "proof-phone/390x844" },
   });
   assert.match(phone.body, /home handoff/);
@@ -1145,7 +1306,7 @@ try {
     { origin: "null", "sec-fetch-site": "same-origin" },
   );
   assert.equal(phonePost.status, 200);
-  const localAgain = await request(`/qq/session/${primaryId}`);
+  const localAgain = await follow(`/qq/session/${primaryId}`);
   for (const text of ["home handoff", "laptop handoff", "phone handoff"]) {
     assert.match(localAgain.body, new RegExp(text));
   }
@@ -1153,7 +1314,7 @@ try {
   // The visible switcher validates a choice and opens its canonical identity.
   const switched = await request(`/qq/sessions/open?session=${encodeURIComponent(secondaryId)}`);
   assert.equal(switched.status, 303);
-  assert.equal(switched.headers.location, `/qq/session/${secondaryId}`);
+  assert.equal(switched.headers.location, sessionPath(secondaryId));
   const selected = await request(switched.headers.location);
   assert.equal(selected.status, 200);
   assert.match(selected.body, /<code>\d+<\/code>/);
@@ -1175,15 +1336,16 @@ try {
     body: "",
   });
   assert.equal(createdResponse.status, 303);
-  assert.match(createdResponse.headers.location, /^\/qq\/session\/session-[0-9a-f-]{36}$/);
+  assert.match(createdResponse.headers.location, new RegExp(`^/qq/project/${projectName}/session/session-[0-9a-f-]{36}$`));
   const freshId = createdResponse.headers.location.split("/").at(-1);
   const fresh = await request(createdResponse.headers.location);
   assert.equal(fresh.status, 200);
   assert.match(fresh.body, new RegExp(`<option value="${freshId}" selected>Current`));
   assert.match(fresh.body, /This DSH session has no transcript yet/);
   assert.match(fresh.body, /id="close-session"/);
+  assert.match(fresh.body, /class="close-arm"/);
 
-  const closedResponse = await request(`/qq/session/${freshId}/close`, {
+  const closedResponse = await request(sessionPath(freshId, "close"), {
     method: "POST",
     headers: {
       "content-type": "application/x-www-form-urlencoded",
@@ -1192,8 +1354,8 @@ try {
     body: "",
   });
   assert.equal(closedResponse.status, 303);
-  assert.match(closedResponse.headers.location, /^\/qq\/session\/session-[0-9a-f-]{36}$/);
-  assert.notEqual(closedResponse.headers.location, `/qq/session/${freshId}`);
+  assert.match(closedResponse.headers.location, new RegExp(`^/qq/project/${projectName}/session/session-[0-9a-f-]{36}$`));
+  assert.notEqual(closedResponse.headers.location, sessionPath(freshId));
   const closedGone = await request(`/qq/session/${freshId}`);
   assert.equal(closedGone.status, 404);
 
@@ -1222,7 +1384,7 @@ try {
       error: { code: "INVALID_REQUEST", message: "provider secret <unsafe>" },
     },
   });
-  const compactFailure = await request(`/qq/session/${primaryId}`);
+  const compactFailure = await follow(`/qq/session/${primaryId}`);
   assert.match(compactFailure.body, /<details class="message message-context"[^>]*>[\s\S]*<summary>/);
   assert.doesNotMatch(compactFailure.body, /<details class="message message-context"[^>]* open/);
   assert.match(compactFailure.body, /The selected model route rejected this request/);
@@ -1254,7 +1416,7 @@ try {
       }],
     },
   }, "append");
-  const markdownPage = await request(`/qq/session/${primaryId}`);
+  const markdownPage = await follow(`/qq/session/${primaryId}`);
   assert.match(markdownPage.body, /<article class="message message-user"[^>]*>\s*<div class="message-text">\*\*Working directory\*\* &lt;b&gt;raw&lt;\/b&gt;<\/div>/);
   assert.match(markdownPage.body, /<article class="message message-assistant"[^>]*>\s*<div class="message-text message-markdown">/);
   assert.match(markdownPage.body, /<strong>Working directory<\/strong>/);
@@ -1263,20 +1425,14 @@ try {
   assert.match(markdownPage.body, /&lt;img src=x onerror=alert\(1\)&gt;/);
   assert.doesNotMatch(markdownPage.body, /<img src=x|<script>|javascript:alert/);
 
-  assert.equal(resumes, 2, "each selected persisted DSH session resumes once");
+  assert.equal(resumes, 0, "live agents are not silently resumed");
   assert.equal(creates, 1, "only the explicit New session action creates an identity");
-  assert.ok(flushes >= 7, "creation, accepted prompts, and interruption cross DSH flush boundaries");
+  assert.ok(flushes >= 6, "creation, accepted prompts, and interruption cross DSH flush boundaries");
   assert.deepEqual(
     registrations,
-    [
-      "system-prompt/assemble", "agent/request",
-      "system-prompt/assemble", "agent/request",
-      "system-prompt/assemble", "agent/request",
-    ],
+    ["system-prompt/assemble", "agent/request"],
   );
   assert.deepEqual(modelSelections, [
-    { provider: "qwen-token-plan", model: "deepseek-v4-pro-0813" },
-    { provider: "qwen-token-plan", model: "deepseek-v4-pro-0813" },
     { provider: "qwen-token-plan", model: "deepseek-v4-pro-0813" },
   ]);
 
@@ -1287,7 +1443,8 @@ try {
     { get: (name) => services[name] },
     {
       sessionId: primaryId,
-      cwd: root,
+      cwd: projectCwd,
+      projectsRoot: projects.root,
       provider: "qwen-token-plan",
       model: "deepseek-v4-pro-0813",
       reasoningEffort: "max",
@@ -1361,8 +1518,9 @@ try {
   assert.match(staticCss.body, /\.notice-ok/);
   assert.match(staticCss.body, /\.workflows-current/);
   assert.match(staticCss.body, /\.session-picker \{[\s\S]*grid-template-columns: auto minmax\(0, 1fr\);/);
-  assert.match(staticCss.body, /\.close-session \{ display: none; \}/);
-  assert.match(staticCss.body, /\.close-session \{ display: block; \}/);
+  assert.match(staticCss.body, /\.close-confirm\[hidden\] \{ display: none; \}/);
+  assert.match(staticCss.body, /\.session-controls\.close-confirming \.close-arm \{ display: none; \}/);
+  assert.match(staticCss.body, /\.close-arm \{/);
   assert.match(staticCss.body, /#composer-submit \{[\s\S]*clip-path: none/);
   assert.match(staticCss.body, /\.overlay-saving/);
   assert.match(staticCss.body, /\.overlay-cancel/);
@@ -1501,11 +1659,16 @@ try {
   assert.match(browser, /desktopChair/);
   assert.match(browser, /pendingClose/);
   assert.match(browser, /#close-session/);
+  assert.match(browser, /armClose/);
+  assert.match(browser, /disarmClose/);
+  assert.match(browser, /close-arm/);
+  assert.match(browser, /close-keep/);
   assert.match(browser, /dataset\.overlayKeys/);
   assert.match(browser, /overlay-dismiss button\[value="dismiss"\]/);
   assert.match(browser, /\.overlay-\$\{action\}/);
   assert.match(browser, /pendingClose[\s\S]*overlay-popup[\s\S]*#close-session/);
   assert.match(browser, /session-choice[\s\S]*openSession/);
+  assert.match(browser, /\/project\\\/\[\^\/\]\+/);
   assert.match(browser, /location\.assign\(`\$\{base\}\/session\/\$\{sessionId\}`\)/);
   assert.match(browser, /workflows-dismiss/);
   assert.match(browser, /workflows-popup/);
@@ -1531,6 +1694,7 @@ try {
   for (const stream of streams) stream.close();
   server.closeAllConnections?.();
   await new Promise((resolveClose) => server.close(resolveClose));
+  projects.remove();
 }
 
 console.log("test-qq-host: pass");

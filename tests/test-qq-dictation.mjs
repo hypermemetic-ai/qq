@@ -166,7 +166,7 @@ function makeClientHarness(options = {}) {
 
   const composer = new HTMLFormElement();
   composer.id = "composer";
-  composer.dataset.sessionId = options.sessionId ?? alphaId;
+  composer.dataset.sessionId = options.omitComposerSession ? "" : (options.sessionId ?? alphaId);
   const dictate = new Element();
   dictate.id = "composer-dictate";
   dictate.dataset.state = "idle";
@@ -250,7 +250,7 @@ function makeClientHarness(options = {}) {
     HTMLTextAreaElement,
     HTMLFormElement,
     document,
-    location: { pathname: `/qq/session/${options.sessionId ?? alphaId}` },
+    location: { pathname: options.pathname ?? `/qq/session/${options.sessionId ?? alphaId}` },
     navigator: { mediaDevices },
     window: windowObj,
     Blob,
@@ -875,6 +875,19 @@ try {
     assert.equal(harness.dictate.dataset.state, "idle");
     assert.equal(harness.dictate.getAttribute("aria-label"), "Dictate");
     assert.equal(harness.prompt.required, true);
+  }
+
+  {
+    const harness = makeClientHarness({
+      pathname: `/qq/project/qq/session/${alphaId}`,
+      omitComposerSession: true,
+    });
+    await settle();
+    harness.focusPrompt();
+    await settle();
+    const focus = harness.fetches.find((call) => String(call.path).endsWith("/focus"));
+    assert.ok(focus);
+    assert.match(String(focus.body), new RegExp(`"sessionId":"${alphaId}"`));
   }
 
   {

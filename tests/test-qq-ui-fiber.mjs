@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createServer, request as httpRequest } from "node:http";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const root = resolve(process.argv[2] ?? ".");
@@ -188,7 +188,7 @@ function openSse() {
     const req = httpRequest({
       host: "127.0.0.1",
       port: address.port,
-      path: `/qq/session/${sessionId}/events`,
+      path: `/qq/project/${projectName}/session/${sessionId}/events`,
       method: "GET",
       agent: false,
       headers: { accept: "text/event-stream" },
@@ -255,9 +255,11 @@ ctx.provide("sessions", services.sessions);
 ctx.provide("sessionPersistence", services.sessionPersistence);
 ctx.provide("webServer", webServer);
 
+const projectName = root.split("/").at(-1);
 const qqFiber = ctx.plugin(qqPlugin, {
   sessionId,
   cwd: root,
+  projectsRoot: dirname(root),
   provider: "qwen-token-plan",
   model: "deepseek-v4-pro-0813",
 });
@@ -269,9 +271,21 @@ const uiFiber = ctx.plugin(uiPlugin, { basePath: "/qq", ssePollMs: 20 });
 await uiFiber;
 assert.equal(routes.length, 2);
 
-const page = await request("/qq/");
+async function follow(path) {
+  let current = path;
+  for (let hop = 0; hop < 5; hop += 1) {
+    const response = await request(current);
+    if (response.status !== 303 && response.status !== 308) return response;
+    current = response.headers.location;
+    assert.ok(current, `redirect from ${path} is missing Location`);
+  }
+  throw new Error(`too many redirects from ${path}`);
+}
+
+const page = await follow("/qq/");
 assert.equal(page.status, 200);
 assert.match(page.body, /Operator console/);
+assert.match(page.body, new RegExp(`/qq/project/${projectName}/session/${sessionId}`));
 
 const stream = await openSse();
 await stream.waitFor(/<form id="composer"/);
@@ -297,7 +311,7 @@ assert.equal(prompts, 1);
 const uiAgain = ctx.plugin(uiPlugin, { basePath: "/qq", ssePollMs: 20 });
 await uiAgain;
 assert.equal(ctx.get("qq"), qq);
-const restored = await request("/qq/");
+const restored = await follow("/qq/");
 assert.equal(restored.status, 200);
 assert.match(restored.body, /<form id="interrupt-form"/);
 

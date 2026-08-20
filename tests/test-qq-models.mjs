@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { makeProjectsHome, qqConfig } from "./qq-projects-fixture.mjs";
 
 const root = new URL("..", import.meta.url).pathname;
 const homeModule = await import(pathToFileURL(join(root, "qq-models/src/home.mjs")));
@@ -34,6 +35,7 @@ const { renderLoginSheet, renderSessionContent } = renderModule;
 const { createConsoleHandler } = httpModule;
 
 const scratch = mkdtempSync(join(tmpdir(), "qq-models."));
+const projects = makeProjectsHome("qq");
 const sessionId = "session-63a11000-0000-4000-8000-000000000084";
 
 function tokens(connector, extra = {}) {
@@ -727,7 +729,7 @@ try {
     const executed = [];
     const events = [];
     const agent = {
-      session: { id: sessionId, events },
+      session: { id: sessionId, events, header: { createdAt: 1, cwd: projects.cwd } },
       status: "idle",
       followup() { throw new Error("slash must not talk"); },
       whenIdle: async () => {},
@@ -750,12 +752,12 @@ try {
         get(name) {
           if (name === "agents") return { get: () => agent, list: () => [agent] };
           if (name === "sessions") return { async flush() {} };
-          if (name === "sessionPersistence") return { async list() { return [{ id: sessionId, createdAt: 1 }]; } };
+          if (name === "sessionPersistence") return { async list() { return [{ id: sessionId, createdAt: 1, cwd: projects.cwd }]; } };
           if (name === "commands") return commands;
           return undefined;
         },
       },
-      { sessionId, cwd: "/work", provider: "qwen-token-plan", model: "deepseek-v4-pro-0813" },
+      qqConfig(projects, sessionId),
     );
     const text = await qq.prompt(sessionId, "/login grok");
     assert.equal(text, "Approve Grok at https://auth.x.ai/connect\nCode: ABCD");
@@ -765,7 +767,7 @@ try {
         get(name) {
           if (name === "agents") return { get: () => agent, list: () => [agent] };
           if (name === "sessions") return { async flush() {} };
-          if (name === "sessionPersistence") return { async list() { return [{ id: sessionId, createdAt: 1 }]; } };
+          if (name === "sessionPersistence") return { async list() { return [{ id: sessionId, createdAt: 1, cwd: projects.cwd }]; } };
           if (name === "commands") {
             return {
               parseCommand(line) {
@@ -778,7 +780,7 @@ try {
           return undefined;
         },
       },
-      { sessionId, cwd: "/work", provider: "qwen-token-plan", model: "deepseek-v4-pro-0813" },
+      qqConfig(projects, sessionId),
     );
     await assert.rejects(() => missing.prompt(sessionId, "/login"), /unknown slash command \/login/);
     await assert.rejects(() => missing.prompt(sessionId, "/logout"), /unknown slash command \/logout/);
@@ -802,7 +804,7 @@ try {
     });
     const events = [];
     const agent = {
-      session: { id: sessionId, events },
+      session: { id: sessionId, events, header: { createdAt: 1, cwd: projects.cwd } },
       status: "idle",
       followup() {},
       whenIdle: async () => {},
@@ -824,12 +826,12 @@ try {
         get(name) {
           if (name === "agents") return { get: () => agent, list: () => [agent] };
           if (name === "sessions") return { async flush() {} };
-          if (name === "sessionPersistence") return { async list() { return [{ id: sessionId, createdAt: 1 }]; } };
+          if (name === "sessionPersistence") return { async list() { return [{ id: sessionId, createdAt: 1, cwd: projects.cwd }]; } };
           if (name === "commands") return commands;
           return undefined;
         },
       },
-      { sessionId, cwd: "/work", provider: "qwen-token-plan", model: "deepseek-v4-pro-0813" },
+      qqConfig(projects, sessionId),
     );
     const server = createServer(createConsoleHandler(qq, {
       ssePollMs: 20,
@@ -918,5 +920,6 @@ try {
 
   console.log("test-qq-models: pass");
 } finally {
+  projects.remove();
   rmSync(scratch, { recursive: true, force: true });
 }

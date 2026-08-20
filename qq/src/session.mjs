@@ -1,9 +1,16 @@
 import { randomUUID } from "node:crypto";
+import { lstatSync, readdirSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { createAliasBook, defaultAliasFile, defaultLegacyAliasFile } from "./alias.mjs";
 
 const SESSION_ID = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEFAULT_OBSERVE_MS = 100;
+const RUNNING_CLEAR = "clear is unavailable while this session is running";
+const RUNNING_CLOSE = "close is unavailable while this session is running";
+const INACTIVE = "DSH session is not active";
+const NOT_FOUND = "DSH session not found";
 // AgentHandles are DSH-owned capabilities. Keep the capability on the live
 // Agent so a qq fiber replacement can rebuild its index without owning or
 // disposing the Agent itself.
@@ -62,9 +69,10 @@ function selectionSetup(selection) {
   };
 }
 
-function httpError(status, message) {
+function httpError(status, message, code) {
   const error = new Error(message);
   error.status = status;
+  if (code) error.code = code;
   return error;
 }
 
@@ -80,6 +88,117 @@ async function waitForIdle(agent, currentAgent = () => agent) {
   }
 }
 
+function canonicalPath(value, label) {
+  if (typeof value !== "string" || !value.startsWith("/")) {
+    throw new Error(`qq: ${label} must be an absolute path`);
+  }
+  try {
+    return realpathSync(value);
+  } catch (error) {
+    throw new Error(`qq: ${label} is not a resolvable directory`, { cause: error });
+  }
+}
+
+function isImmediateChild(root, candidate) {
+  const rel = relative(root, candidate);
+  if (!rel || rel === "." || isAbsolute(rel)) return false;
+  const segments = rel.split(sep);
+  return !segments.includes("..") && segments.length === 1;
+}
+
+/** Resolve the configured projects root; production default is ${HOME}/projects. */
+export function resolveProjectsRoot(value, env = process.env) {
+  const home = typeof env.HOME === "string" && env.HOME.startsWith("/")
+    ? env.HOME
+    : homedir();
+  const raw = value === undefined || value === null
+    ? join(home, "projects")
+    : value;
+  if (typeof raw !== "string" || !raw.startsWith("/")) {
+    throw new Error("qq: projectsRoot must be an absolute path");
+  }
+  return canonicalPath(raw, "projectsRoot");
+}
+
+/**
+ * Immediate non-escaping directories under projectsRoot. A symlink whose
+ * canonical path leaves the root is not a project.
+ */
+export function listProjectCatalog(projectsRoot) {
+  const root = canonicalPath(projectsRoot, "projectsRoot");
+  let entries;
+  try {
+    entries = readdirSync(root, { withFileTypes: true });
+  } catch (error) {
+    throw new Error("qq: projectsRoot is not a readable directory", { cause: error });
+  }
+  const projects = [];
+  const seen = new Set();
+  for (const entry of entries) {
+    const name = entry.name;
+    if (!name || name === "." || name === "..") continue;
+    const listed = join(root, name);
+    let info;
+    try {
+      info = lstatSync(listed);
+    } catch {
+      continue;
+    }
+    if (!info.isDirectory() && !info.isSymbolicLink()) continue;
+    let cwd;
+    try {
+      cwd = realpathSync(listed);
+    } catch {
+      continue;
+    }
+    if (!isImmediateChild(root, cwd)) continue;
+    const key = `${name}\0${cwd}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    projects.push({ name, cwd });
+  }
+  projects.sort((left, right) => left.name.localeCompare(right.name) || left.cwd.localeCompare(right.cwd));
+  return projects;
+}
+
+export function isRootOperatorAgent(agent) {
+  const session = agent?.session;
+  if (!SESSION_ID.test(session?.id)) return false;
+  const header = session.header ?? {};
+  if (header.parentSession) return false;
+  if (header.origin === "subagent") return false;
+  const id = String(session.id);
+  const parent = header.parentId ?? header.parent ?? header.parent_session;
+  if (parent) return false;
+  if (typeof id === "string" && id.includes("/")) return false;
+  return true;
+}
+
+export function sessionRecency(session, fallbackCreatedAt = 0) {
+  const events = Array.isArray(session?.events) ? session.events : [];
+  let latest = 0;
+  for (const event of events) {
+    const time = event?.time;
+    const value = typeof time === "number" ? time : Date.parse(time ?? "");
+    if (Number.isFinite(value) && value > latest) latest = value;
+  }
+  const createdAt = Number.isFinite(session?.header?.createdAt)
+    ? session.header.createdAt
+    : (Number.isFinite(session?.createdAt) ? session.createdAt : fallbackCreatedAt);
+  return { latest, createdAt: createdAt || 0, id: String(session?.id ?? "") };
+}
+
+export function compareSessionRecency(left, right) {
+  if (right.latest !== left.latest) return right.latest - left.latest;
+  if (right.createdAt !== left.createdAt) return right.createdAt - left.createdAt;
+  return left.id.localeCompare(right.id);
+}
+
+function slashName(line) {
+  const match = /^\/([a-z][a-z0-9_-]*)(?=$|[\t\n\r ])/u.exec(String(line ?? ""));
+  return match ? match[1] : "";
+}
+
 /** Compact change token for one catalog + session snapshot. */
 export function snapshotFingerprint(snapshot) {
   const events = Array.isArray(snapshot?.events) ? snapshot.events : [];
@@ -87,12 +206,13 @@ export function snapshotFingerprint(snapshot) {
   const sessions = Array.isArray(snapshot?.sessions) ? snapshot.sessions : [];
   return JSON.stringify([
     snapshot?.id,
+    snapshot?.project,
     snapshot?.agentStatus,
     events.length,
     last?.seq,
     last?.type,
     last?.data?.reason?.kind,
-    sessions.map((session) => [session.id, session.createdAt, session.alias]),
+    sessions.map((session) => [session.id, session.createdAt, session.alias, session.project]),
     snapshot?.alias,
   ]);
 }
@@ -146,9 +266,15 @@ export function attachObserve(backend, options = {}) {
     observe(sessionId, listener, extra = {}) {
       return observeSnapshot(async () => {
         const snapshot = await backend.read(sessionId);
-        const available = await backend.list();
-        if (!available.some((session) => session.id === snapshot.id)) {
-          available.unshift({ id: snapshot.id, createdAt: 0 });
+        const available = typeof backend.list === "function"
+          ? await backend.list(snapshot?.project)
+          : [];
+        if (snapshot?.id && !available.some((session) => session.id === snapshot.id)) {
+          available.unshift({
+            id: snapshot.id,
+            createdAt: 0,
+            ...(snapshot.project ? { project: snapshot.project } : {}),
+          });
         }
         return { ...snapshot, sessions: available };
       }, listener, { ...options, ...extra });
@@ -158,8 +284,8 @@ export function attachObserve(backend, options = {}) {
 
 /**
  * Adapt configured DSH Agent/Session services to a presentation-neutral API.
- * DSH remains the only session catalog, transcript, status, and cancellation
- * authority. The map only deduplicates in-process resume.
+ * Live DSH Agents are the active catalog. Persistence is only used to
+ * recognize an inactive id and to keep durable history after close.
  */
 export function createQqService(ctx, config) {
   const defaultSessionId = String(config.sessionId ?? "");
@@ -179,6 +305,18 @@ export function createQqService(ctx, config) {
     model,
     ...(config.reasoningEffort ? { reasoningEffort: String(config.reasoningEffort) } : {}),
   });
+
+  const projectsRoot = resolveProjectsRoot(config.projectsRoot);
+  const projects = listProjectCatalog(projectsRoot);
+  if (projects.length === 0) {
+    throw new Error("qq: projectsRoot has no operator projects");
+  }
+  const bootCwd = canonicalPath(config.cwd, "cwd");
+  const bootProject = projects.find((project) => project.cwd === bootCwd);
+  if (!bootProject) {
+    throw new Error("qq: cwd must equal one project root");
+  }
+  const defaultProject = bootProject.name;
 
   const agents = ctx.get("agents");
   const sessions = ctx.get("sessions");
@@ -203,6 +341,32 @@ export function createQqService(ctx, config) {
     return typeof process.env.DSH_HOME === "string" && process.env.DSH_HOME.trim().length > 0;
   }
 
+  function catalog() {
+    return listProjectCatalog(projectsRoot);
+  }
+
+  function projectByName(name) {
+    const project = catalog().find((entry) => entry.name === name);
+    if (!project) throw httpError(404, "qq: project not found");
+    return project;
+  }
+
+  function projectForCwd(cwd) {
+    if (typeof cwd !== "string" || !cwd.startsWith("/")) return undefined;
+    let canonical = cwd;
+    try {
+      canonical = realpathSync(cwd);
+    } catch {
+      canonical = resolve(cwd);
+    }
+    return catalog().find((entry) => entry.cwd === canonical);
+  }
+
+  function agentCwd(agent) {
+    const cwd = agent?.session?.header?.cwd;
+    return typeof cwd === "string" ? cwd : undefined;
+  }
+
   function liveAgents() {
     const listed = typeof agents.list === "function"
       ? agents.list()
@@ -210,8 +374,15 @@ export function createQqService(ctx, config) {
     return listed.filter((agent) => SESSION_ID.test(agent?.session?.id));
   }
 
+  function liveRootAgents() {
+    return liveAgents().filter((agent) => {
+      if (!isRootOperatorAgent(agent)) return false;
+      return Boolean(projectForCwd(agentCwd(agent)));
+    });
+  }
+
   function liveSessionIds() {
-    return liveAgents().map((agent) => agent.session.id);
+    return liveRootAgents().map((agent) => agent.session.id);
   }
 
   function rememberHandle(handle) {
@@ -245,21 +416,22 @@ export function createQqService(ctx, config) {
 
   function liveAlias(sessionId) {
     if (!SESSION_ID.test(sessionId) || !agents.get(sessionId)) return undefined;
+    if (!liveRootAgents().some((agent) => agent.session.id === sessionId)) return undefined;
     syncLive(sessionId);
     return book.aliasFor(sessionId);
   }
 
   function resolveAlias(address) {
     syncLive();
-    const exact = liveAgents().find((agent) => agent.session.id === address);
+    const exact = liveRootAgents().find((agent) => agent.session.id === address);
     if (exact) return exact.session.id;
-    return liveAgents().find((agent) => book.aliasFor(agent.session.id) === address)?.session.id;
+    return liveRootAgents().find((agent) => book.aliasFor(agent.session.id) === address)?.session.id;
   }
 
   if (typeof ctx.on === "function") {
     ctx.on("agent/created", ({ agent }) => {
       const sessionId = agent?.session?.id;
-      if (SESSION_ID.test(sessionId)) syncLive(sessionId);
+      if (SESSION_ID.test(sessionId) && isRootOperatorAgent(agent)) syncLive(sessionId);
     });
     ctx.on("agent/disposed", () => {
       syncLive();
@@ -274,134 +446,245 @@ export function createQqService(ctx, config) {
     return (await persistence.list()).filter((header) => SESSION_ID.test(header?.id));
   }
 
-  async function agentForSession(sessionId) {
-    if (!SESSION_ID.test(sessionId)) throw httpError(404, "DSH session not found");
+  function requireLiveAgent(sessionId) {
+    if (!SESSION_ID.test(sessionId)) throw httpError(404, NOT_FOUND);
     const live = agents.get(sessionId);
-    if (live) return live;
-    const pending = agentPromises.get(sessionId);
-    if (pending) return pending;
-
-    const promise = (async () => {
-      await ctx.get("loader")?.await();
-      const appeared = agents.get(sessionId);
-      if (appeared) return appeared;
-
-      const headers = await persistedHeaders();
-      const persisted = headers.some((header) => header.id === sessionId);
-      if (!persisted && sessionId !== defaultSessionId) {
-        throw httpError(404, "DSH session not found");
-      }
-
-      const setup = selectionSetup({ current: selectedModel });
-      const options = {
-        agentOptions: { provider: selectedModel.provider, model: selectedModel.model },
-        setup,
-      };
-      const handle = rememberHandle(persisted
-        ? await agents.resume({ resumeSessionId: sessionId, ...options })
-        : await agents.create({
-            sessionId,
-            meta: { cwd: config.cwd },
-            ...options,
-          }));
-      syncLive(handle.agent.session.id);
-      return handle.agent;
-    })();
-    agentPromises.set(sessionId, promise);
-
-    try {
-      return await promise;
-    } catch (error) {
-      if (agentPromises.get(sessionId) === promise) agentPromises.delete(sessionId);
-      throw error;
-    }
+    if (live && isRootOperatorAgent(live) && projectForCwd(agentCwd(live))) return live;
+    return undefined;
   }
 
-  async function list() {
+  async function rejectInactive(sessionId) {
     const headers = await persistedHeaders();
-    const byId = new Map(
-      headers.map((header) => [header.id, {
-        id: header.id,
-        createdAt: header.createdAt,
-        cwd: header.cwd,
-      }]),
-    );
-    for (const agent of liveAgents()) {
-      if (!SESSION_ID.test(agent?.session?.id) || byId.has(agent.session.id)) continue;
-      byId.set(agent.session.id, {
-        id: agent.session.id,
-        createdAt: agent.session.header?.createdAt ??
-          (agent.session.id === defaultSessionId ? defaultCreatedAt : 0),
-        cwd: agent.session.header?.cwd ??
-          (agent.session.id === defaultSessionId ? config.cwd : undefined),
-      });
+    if (headers.some((header) => header.id === sessionId)) {
+      throw httpError(404, INACTIVE, "inactive");
     }
-    if (!byId.has(defaultSessionId)) {
-      byId.set(defaultSessionId, {
-        id: defaultSessionId,
-        createdAt: defaultCreatedAt,
-        cwd: config.cwd,
-      });
+    throw httpError(404, NOT_FOUND);
+  }
+
+  async function liveAgent(sessionId) {
+    const live = requireLiveAgent(sessionId);
+    if (live) return live;
+    await rejectInactive(sessionId);
+  }
+
+  function createdAtFor(agent) {
+    return agent.session.header?.createdAt
+      ?? (agent.session.id === defaultSessionId ? defaultCreatedAt : 0);
+  }
+
+  function rowFor(agent) {
+    const project = projectForCwd(agentCwd(agent));
+    const recency = sessionRecency(agent.session, createdAtFor(agent));
+    const alias = book.aliasFor(agent.session.id);
+    return {
+      id: agent.session.id,
+      createdAt: recency.createdAt,
+      latestEventAt: recency.latest,
+      cwd: project?.cwd ?? agentCwd(agent),
+      project: project?.name,
+      ...(alias ? { alias } : {}),
+    };
+  }
+
+  async function ensureBootSession() {
+    if (requireLiveAgent(defaultSessionId)) {
+      syncLive(defaultSessionId);
+      return;
     }
+    await ctx.get("loader")?.await();
+    if (requireLiveAgent(defaultSessionId)) {
+      syncLive(defaultSessionId);
+      return;
+    }
+    const headers = await persistedHeaders();
+    const persisted = headers.find((header) => header.id === defaultSessionId);
+    const setup = selectionSetup({ current: selectedModel });
+    const options = {
+      agentOptions: { provider: selectedModel.provider, model: selectedModel.model },
+      setup,
+    };
+    const persistCwd = typeof persisted?.cwd === "string" ? persisted.cwd : undefined;
+    const persistProject = persistCwd ? projectForCwd(persistCwd) : undefined;
+    const handle = rememberHandle(persisted && persistProject
+      ? await agents.resume({ resumeSessionId: defaultSessionId, ...options })
+      : await agents.create({
+          sessionId: defaultSessionId,
+          meta: { cwd: bootProject.cwd },
+          ...options,
+        }));
+    if (!persisted || !persistProject) {
+      await sessions.flush(handle.agent.session);
+    }
+    syncLive(handle.agent.session.id);
+  }
+
+  const boot = ensureBootSession();
+
+  async function list(projectName) {
+    await boot;
     syncLive();
-    return [...byId.values()]
-      .map((session) => {
-        const alias = agents.get(session.id) ? book.aliasFor(session.id) : undefined;
-        return alias ? { ...session, alias } : session;
-      })
-      .sort(
-        (left, right) => right.createdAt - left.createdAt || left.id.localeCompare(right.id),
-      );
+    const wanted = projectName === undefined || projectName === null || projectName === ""
+      ? undefined
+      : projectByName(String(projectName)).name;
+    const rows = liveRootAgents()
+      .map((agent) => rowFor(agent))
+      .filter((row) => row.project && (!wanted || row.project === wanted));
+    rows.sort((left, right) => compareSessionRecency(
+      { latest: left.latestEventAt, createdAt: left.createdAt, id: left.id },
+      { latest: right.latestEventAt, createdAt: right.createdAt, id: right.id },
+    ));
+    return rows;
   }
 
   async function read(sessionId) {
-    const agent = await agentForSession(sessionId);
+    await boot;
+    const agent = await liveAgent(sessionId);
+    const row = rowFor(agent);
     const alias = liveAlias(agent.session.id);
     return {
       id: agent.session.id,
       events: agent.session.events,
       agentStatus: agent.status,
+      cwd: row.cwd,
+      project: row.project,
+      createdAt: row.createdAt,
       ...(alias ? { alias } : {}),
     };
   }
 
+  async function inspect(sessionId) {
+    await boot;
+    if (!SESSION_ID.test(sessionId)) throw httpError(404, NOT_FOUND);
+    const live = requireLiveAgent(sessionId);
+    if (live) {
+      const row = rowFor(live);
+      return { id: live.session.id, live: true, ...row };
+    }
+    const headers = await persistedHeaders();
+    const persisted = headers.find((header) => header.id === sessionId);
+    if (persisted) {
+      return {
+        id: sessionId,
+        live: false,
+        createdAt: persisted.createdAt,
+        cwd: persisted.cwd,
+        project: projectForCwd(persisted.cwd)?.name,
+      };
+    }
+    throw httpError(404, NOT_FOUND);
+  }
+
   async function view(sessionId) {
     const snapshot = await read(sessionId);
-    const available = await list();
-    if (!available.some((session) => session.id === snapshot.id)) {
-      available.unshift({ id: snapshot.id, createdAt: 0 });
-    }
+    const available = await list(snapshot.project);
     return { ...snapshot, sessions: available };
+  }
+
+  async function createAt(projectName) {
+    await boot;
+    const project = projectByName(projectName ?? defaultProject);
+    await ctx.get("loader")?.await();
+    const sessionId = `session-${randomUUID()}`;
+    const setup = selectionSetup({ current: selectedModel });
+    const handle = rememberHandle(await agents.create({
+      sessionId,
+      meta: { cwd: project.cwd },
+      agentOptions: { provider: selectedModel.provider, model: selectedModel.model },
+      setup,
+    }));
+    await sessions.flush(handle.agent.session);
+    const createdId = handle.agent.session.id;
+    syncLive(createdId);
+    const alias = book.aliasFor(createdId);
+    return {
+      id: createdId,
+      project: project.name,
+      cwd: project.cwd,
+      ...(alias ? { alias } : {}),
+    };
+  }
+
+  async function disposeLive(sessionId) {
+    const handle = handles.get(sessionId);
+    if (!handle || typeof handle.dispose !== "function") {
+      throw httpError(409, "qq: session is not closeable");
+    }
+    handles.delete(sessionId);
+    agentPromises.delete(sessionId);
+    const agent = agents.get(sessionId);
+    try { delete agent?.[AGENT_HANDLE]; } catch {}
+    await handle.dispose();
+    syncLive();
+  }
+
+  async function close(sessionId) {
+    await boot;
+    const agent = await liveAgent(sessionId);
+    if (agent.status === "running") throw httpError(409, RUNNING_CLOSE);
+    const project = projectForCwd(agentCwd(agent));
+    const remainingBefore = await list(project?.name);
+    await disposeLive(sessionId);
+    const remaining = remainingBefore.filter((row) => row.id !== sessionId);
+    const next = remaining[0];
+    return {
+      id: next?.id ?? null,
+      closed: sessionId,
+      project: project?.name ?? defaultProject,
+    };
+  }
+
+  async function replace(sessionId) {
+    await boot;
+    const agent = await liveAgent(sessionId);
+    if (agent.status === "running") throw httpError(409, RUNNING_CLEAR);
+    const project = projectForCwd(agentCwd(agent));
+    if (!project) throw httpError(404, "qq: project not found");
+    const created = await createAt(project.name);
+    try {
+      await disposeLive(sessionId);
+    } catch (error) {
+      try { await disposeLive(created.id); } catch {}
+      throw error;
+    }
+    return {
+      id: created.id,
+      project: project.name,
+      cwd: project.cwd,
+      closed: sessionId,
+      ...(created.alias ? { alias: created.alias } : {}),
+    };
   }
 
   return Object.freeze({
     defaultSessionId,
+    defaultProject,
+    projectsRoot,
+    listProjects: () => catalog(),
     list,
     read,
+    inspect,
     alias: liveAlias,
     resolve: resolveAlias,
-    async create() {
-      await ctx.get("loader")?.await();
-      const sessionId = `session-${randomUUID()}`;
-      const setup = selectionSetup({ current: selectedModel });
-      const handle = rememberHandle(await agents.create({
-        sessionId,
-        meta: { cwd: config.cwd },
-        agentOptions: { provider: selectedModel.provider, model: selectedModel.model },
-        setup,
-      }));
-      // DSH's creation event establishes the header; its flush boundary makes
-      // even a brand-new empty session durable before the browser opens it.
-      await sessions.flush(handle.agent.session);
-      const createdId = handle.agent.session.id;
-      syncLive(createdId);
-      const alias = book.aliasFor(createdId);
-      return alias ? { id: createdId, alias } : { id: createdId };
+    async create(projectName) {
+      return createAt(projectName);
     },
+    replace,
+    clear: replace,
     async prompt(sessionId, text) {
-      const agent = await agentForSession(sessionId);
+      await boot;
+      const agent = await liveAgent(sessionId);
       const line = String(text ?? "");
       if (line.startsWith("/")) {
+        const name = slashName(line);
+        if (name === "new") {
+          const project = projectForCwd(agentCwd(agent));
+          const created = await createAt(project?.name);
+          return { kind: "navigate", action: "create", ...created };
+        }
+        if (name === "clear") {
+          const replaced = await replace(sessionId);
+          return { kind: "navigate", action: "replace", ...replaced };
+        }
         const commands = ctx.get("commands", false);
         if (!commands || typeof commands.execute !== "function") {
           throw httpError(503, "qq: slash commands require ctx.commands");
@@ -412,15 +695,15 @@ export function createQqService(ctx, config) {
         if (!parsed) {
           throw httpError(400, "qq: unknown slash command");
         }
-        const name = parsed.name ?? parsed[1];
+        const commandName = parsed.name ?? parsed[1];
         const execution = await commands.execute(agent, line, new AbortController().signal);
         if (!execution) {
-          throw httpError(400, `qq: unknown slash command /${name}`);
+          throw httpError(400, `qq: unknown slash command /${commandName}`);
         }
         await sessions.flush(agent.session);
         const result = execution.result;
         if (result?.kind === "error") {
-          throw httpError(400, result.text || `qq: /${name} failed`);
+          throw httpError(400, result.text || `qq: /${commandName} failed`);
         }
         return typeof result?.text === "string" ? result.text : "";
       }
@@ -441,11 +724,12 @@ export function createQqService(ctx, config) {
       await sessions.flush(agent.session);
     },
     async interrupt(sessionId) {
+      await boot;
       const finder = ctx.get("image-finder", false);
       const abortedFind = typeof finder?.abortCompile === "function"
         ? Boolean(finder.abortCompile(sessionId))
         : false;
-      const agent = await agentForSession(sessionId);
+      const agent = await liveAgent(sessionId);
       const wasRunning = agent.status === "running";
       agent.cancel({ kind: "user" });
       if (wasRunning) {
@@ -454,24 +738,7 @@ export function createQqService(ctx, config) {
       }
       return wasRunning || abortedFind;
     },
-    async close(sessionId) {
-      if (!SESSION_ID.test(sessionId)) throw httpError(404, "DSH session not found");
-      if (!handles.has(sessionId)) await agentForSession(sessionId);
-      const handle = handles.get(sessionId);
-      if (!handle || typeof handle.dispose !== "function") {
-        throw httpError(409, "qq: session is not closeable");
-      }
-      handles.delete(sessionId);
-      agentPromises.delete(sessionId);
-      const agent = agents.get(sessionId);
-      try { delete agent?.[AGENT_HANDLE]; } catch {}
-      await handle.dispose();
-      syncLive();
-      const remaining = await list();
-      const next = remaining.find((row) => row.id !== sessionId);
-      if (next) return { id: next.id, closed: sessionId };
-      return { ...(await create()), closed: sessionId };
-    },
+    close,
     observe(sessionId, listener, options = {}) {
       return observeSnapshot(() => view(sessionId), listener, options);
     },
@@ -481,8 +748,14 @@ export function createQqService(ctx, config) {
 export const internals = Object.freeze({
   DEFAULT_OBSERVE_MS,
   SESSION_ID,
+  INACTIVE,
+  NOT_FOUND,
+  RUNNING_CLEAR,
+  RUNNING_CLOSE,
   httpError,
   selectionSetup,
   userMessage,
   waitForIdle,
+  canonicalPath,
+  isImmediateChild,
 });

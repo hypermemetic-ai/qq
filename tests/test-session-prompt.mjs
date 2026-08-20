@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { createQqService } from "../qq/src/session.mjs";
+import { attachHandle, makeProjectsHome, qqConfig } from "./qq-projects-fixture.mjs";
 
+const projects = makeProjectsHome("qq");
 const sessionId = "session-63a11000-0000-4000-8000-000000000071";
 const followups = [];
 const flushed = [];
@@ -9,7 +11,7 @@ const executed = [];
 const events = [];
 
 const agent = {
-  session: { id: sessionId, events },
+  session: { id: sessionId, events, header: { createdAt: 1, cwd: projects.cwd } },
   status: "idle",
   followup(message) { followups.push(message); },
   whenIdle: async () => {},
@@ -42,18 +44,13 @@ const qq = createQqService(
       }
       if (name === "sessions") return { async flush(session) { flushed.push(session.id); } };
       if (name === "sessionPersistence") {
-        return { async list() { return [{ id: sessionId, createdAt: 1, cwd: "/work" }]; } };
+        return { async list() { return [{ id: sessionId, createdAt: 1, cwd: projects.cwd }]; } };
       }
       if (name === "commands") return commands;
       return undefined;
     },
   },
-  {
-    sessionId,
-    cwd: "/work",
-    provider: "qwen-token-plan",
-    model: "deepseek-v4-pro-0813",
-  },
+  qqConfig(projects, sessionId),
 );
 
 const selected = await qq.prompt(sessionId, "/workflows architect");
@@ -88,7 +85,7 @@ assert.equal(followups[0].content[0].text, "ordinary talking turn");
   const findPrompts = [];
   let findMode = true;
   const findAgent = {
-    session: { id: sessionId, events: [] },
+    session: { id: sessionId, events: [], header: { createdAt: 1, cwd: projects.cwd } },
     status: "idle",
     followup(message) { findFollowups.push(message); },
     whenIdle: async () => {},
@@ -104,7 +101,7 @@ assert.equal(followups[0].content[0].text, "ordinary talking turn");
         }
         if (name === "sessions") return { async flush(session) { findFlushed.push(session.id); } };
         if (name === "sessionPersistence") {
-          return { async list() { return [{ id: sessionId, createdAt: 1, cwd: "/work" }]; } };
+          return { async list() { return [{ id: sessionId, createdAt: 1, cwd: projects.cwd }]; } };
         }
         if (name === "image-finder") {
           return {
@@ -119,12 +116,7 @@ assert.equal(followups[0].content[0].text, "ordinary talking turn");
         return undefined;
       },
     },
-    {
-      sessionId,
-      cwd: "/work",
-      provider: "qwen-token-plan",
-      model: "deepseek-v4-pro-0813",
-    },
+    qqConfig(projects, sessionId),
   );
   const notice = await findQq.prompt(sessionId, "tall woman rain");
   assert.equal(notice, "Finding tall woman rain.");
@@ -136,7 +128,7 @@ assert.equal(followups[0].content[0].text, "ordinary talking turn");
 {
   const aborted = [];
   const idleAgent = {
-    session: { id: sessionId, events: [] },
+    session: { id: sessionId, events: [], header: { createdAt: 1, cwd: projects.cwd } },
     status: "idle",
     followup() {},
     cancel() {},
@@ -153,7 +145,7 @@ assert.equal(followups[0].content[0].text, "ordinary talking turn");
         }
         if (name === "sessions") return { async flush() {} };
         if (name === "sessionPersistence") {
-          return { async list() { return [{ id: sessionId, createdAt: 1, cwd: "/work" }]; } };
+          return { async list() { return [{ id: sessionId, createdAt: 1, cwd: projects.cwd }]; } };
         }
         if (name === "image-finder") {
           return {
@@ -168,12 +160,7 @@ assert.equal(followups[0].content[0].text, "ordinary talking turn");
         return undefined;
       },
     },
-    {
-      sessionId,
-      cwd: "/work",
-      provider: "qwen-token-plan",
-      model: "deepseek-v4-pro-0813",
-    },
+    qqConfig(projects, sessionId),
   );
   assert.equal(await findQq.interrupt(sessionId), true);
   assert.deepEqual(aborted, [sessionId]);
@@ -187,17 +174,12 @@ const missingCommands = createQqService(
       }
       if (name === "sessions") return { async flush() {} };
       if (name === "sessionPersistence") {
-        return { async list() { return [{ id: sessionId, createdAt: 1, cwd: "/work" }]; } };
+        return { async list() { return [{ id: sessionId, createdAt: 1, cwd: projects.cwd }]; } };
       }
       return undefined;
     },
   },
-  {
-    sessionId,
-    cwd: "/work",
-    provider: "qwen-token-plan",
-    model: "deepseek-v4-pro-0813",
-  },
+  qqConfig(projects, sessionId),
 );
 await assert.rejects(
   () => missingCommands.prompt(sessionId, "/workflows"),
@@ -208,13 +190,21 @@ await assert.rejects(
   const disposed = [];
   const live = new Map();
   const persisted = [];
-  const fake = (id) => ({
-    session: { id, events: [], header: { createdAt: Date.now(), cwd: "/work" } },
-    status: "idle",
-    followup() {},
-    cancel() {},
-    whenIdle: async () => {},
-  });
+  const fake = (id) => {
+    const next = {
+      session: { id, events: [], header: { createdAt: Date.now(), cwd: projects.cwd } },
+      status: "idle",
+      followup() {},
+      cancel() {},
+      whenIdle: async () => {},
+    };
+    attachHandle(next, async () => {
+      disposed.push(id);
+      live.delete(id);
+    });
+    return next;
+  };
+  live.set(sessionId, agent);
   const closeQq = createQqService(
     {
       get(name) {
@@ -222,17 +212,16 @@ await assert.rejects(
           return {
             get: (id) => live.get(id),
             list: () => [...live.values()],
-            async create({ sessionId: id }) {
+            async create({ sessionId: id, meta }) {
+              assert.equal(meta?.cwd, projects.cwd);
               const agent = fake(id);
               live.set(id, agent);
-              persisted.push({ id, createdAt: Date.now(), cwd: "/work" });
+              persisted.push({ id, createdAt: Date.now(), cwd: projects.cwd });
               return {
                 agent,
                 async dispose() {
                   disposed.push(id);
                   live.delete(id);
-                  const at = persisted.findIndex((row) => row.id === id);
-                  if (at >= 0) persisted.splice(at, 1);
                 },
               };
             },
@@ -246,12 +235,7 @@ await assert.rejects(
         return undefined;
       },
     },
-    {
-      sessionId,
-      cwd: "/work",
-      provider: "qwen-token-plan",
-      model: "deepseek-v4-pro-0813",
-    },
+    qqConfig(projects, sessionId),
   );
   const first = await closeQq.create();
   const second = await closeQq.create();
@@ -260,9 +244,10 @@ await assert.rejects(
   assert.equal(closed.closed, first.id);
   assert.notEqual(closed.id, first.id);
   assert.ok([second.id, sessionId].includes(closed.id));
-  await assert.rejects(() => closeQq.read(first.id), /not found/);
+  await assert.rejects(() => closeQq.read(first.id), /not active/);
   live.set(sessionId, agent);
   await assert.rejects(() => closeQq.close(sessionId), /not closeable/);
 }
 
+projects.remove();
 console.log("test-session-prompt: pass");
