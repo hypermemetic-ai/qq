@@ -1,60 +1,47 @@
 ---
 type: Validation guide
 title: Practical validation routing
-description: Short routing guide for qq's focused local suites, linked-product semantic contracts, installed-artifact boundaries, live prerequisites, and aggregate npm test chain.
+description: Narrow commands for the daily DSH host and plugins, legacy Pi orchestration, linked products, and conditional live checks.
 tags: [testing, validation, operations]
+openwiki:
+  roles: [testing, repository]
+  source_paths: [package.json]
+  validation_commands: [npm test]
 ---
 
 # Practical validation routing
 
-Run the narrowest owner while iterating. Use `npm test` only for cross-cutting or pre-landing validation: it is a fail-fast sequential chain and includes networked linked-product checks plus an installed Herdr smoke test.
+Run the narrowest owner while iterating. `npm test` is a long fail-fast chain containing live, networked, linked-product, and installed-runtime checks; reserve it for cross-cutting or pre-landing validation with all prerequisites available.
 
-## Focused routes
+## Daily DSH host
 
-| Area | Command | Boundary |
+| Area | Minimal check | Conditional boundary |
 |---|---|---|
-| Activation and Backlog linkage | `tests/test-methodology.sh` | Hermetic Git and temporary state |
-| qq-relay adapter and consumers | `tests/test-qq-relay.sh` | Fetches qq-relay branch tip, installs privately, deletes source, then tests launcher/client, messaging, delegation, and review |
-| Dashboard adapter and profile contract | `tests/test-dashboard.sh` | Fetches dashboard branch tip, installs privately, deletes source, and runs wrappers without touching operator state |
-| Execution profiles | `node --experimental-strip-types tests/test-execution-profiles.mjs .` | Hermetic mocks and temporary files |
-| Pi/DSH session ownership | `node --experimental-strip-types tests/test-session-context.mjs .` | Private-record security, parent/child isolation, continuation, profiles, board, and review |
-| pi2dsh compatibility drift | `node tests/test-pi2dsh-compat.mjs .` | Fast offline pin, harness, receipt, and source-contract checks |
-| DSH coding workbench | `node tests/test-dsh-console.mjs .` | Fast launcher, explicit-model, HTTP/SSE, session, rendering, security, and PWA checks |
-| DSH workbench live | `tests/test-dsh-console-live.sh` | Conditional exact-pinned host, restart, and native coding-tool proof; installs isolated toolchain |
-| DSH real model | `QWEN_TOKEN_PLAN_API_KEY='...' tests/test-dsh-workbench-real.sh` | Credential-gated request to exact `qwen-token-plan/deepseek-v4-pro-0813` |
-| Native DSH QA boundary | `node tests/test-native-qa-proof.mjs .` | Offline strict verdict writer and isolated QA composition/state invariants |
-| Safety/context extension | `node --experimental-strip-types tests/test-<extension>.mjs .` | Choose `read`, `continue`, `session-scrub`, `backlog-guard`, or `grok-paraphrase-guard` |
-| Operator stage and brief gate | `node --experimental-strip-types tests/test-operator-stage.mjs .`; `node tests/test-brief-gate.mjs .` | Mocked Herdr contract |
-| q mode | `tests/test-q-mode.sh` | Fetches configured qq-dictation branch tip when landed source is unavailable; checks semantic parser/test evidence and local adapter behavior |
-| Herdr checked-in integration | `tests/test-herdr-downstream.sh` | Fetches configured Herdr branch tip when needed; checks semantic source/test evidence plus qq adapters |
-| Herdr installed runtime | `tests/test-herdr-live.sh` | Requires installed Herdr or `QQ_HERDR_TEST_BINARY` |
-| OpenWiki automation | Run the owning `tests/test-openwiki-{refresh,refresh-legacy,dispatch,service}.sh` suite | Temporary repositories and fake generator; no hosted model |
+| Core host, HTTP/SSE, security, PWA | `node tests/test-qq-host.mjs .` | `tests/test-qq-host-live.sh` for exact pinned DSH |
+| UI fiber/reload | `node tests/test-qq-ui-fiber.mjs .` | `tests/test-qq-host-boot.sh` when composition/absence changes |
+| Projects and session prompt routing | `node tests/test-qq-projects.mjs`; `node tests/test-session-prompt.mjs` | — |
+| Session aliases | `node tests/test-qq-alias.mjs .` | Also relay test when alias consumption changes |
+| DSH relay | `node tests/test-qq-relay-plugin.mjs .` | — |
+| Workflows | `node tests/test-qq-workflows-plugin.mjs .` | `tests/test-qq-workflows-boot.sh` for bundle/service wiring |
+| Task pile | `node tests/test-qq-tasks.mjs .` | `tests/test-qq-tasks-boot.sh` for bundle wiring |
+| Model connectors | `node tests/test-qq-models.mjs` | `tests/test-qq-host-real.sh` for credential/provider transport |
+| Dictation | `node tests/test-qq-dictation.mjs` | Physical microphone/browser evidence only when UI capture changes |
+| Frontend design loop | `node --experimental-strip-types tests/test-frontend-design-loop.mjs .` | External image-finder/media-box suites when their contract changes |
 
-Canonical behavior belongs on [profiles and activation](../runtime/profiles-and-activation.md), [qq-relay integration](../event-plane/service.md), [agent messaging](../event-plane/agent-messaging.md), [delegation and review](../workflow/delegation-and-review.md), [operator workflows](../herdr/operator-workflows.md), [safety and context](../extensions/safety-and-context.md), and [OpenWiki automation](../operations/openwiki-automation.md).
+## Legacy Pi/Herdr and repository automation
 
-## Installed versus source correctness
+| Area | Minimal check | Broader boundary |
+|---|---|---|
+| Activation/profiles | `tests/test-methodology.sh`; `node --experimental-strip-types tests/test-execution-profiles.mjs .` | — |
+| Installed Pi relay, messaging, delegation, review | `tests/test-qq-relay.sh` | Networked private install; includes consumers requiring installed `client.mjs` |
+| Native verdict helper | `node tests/test-native-qa-proof.mjs .` | Does not prove removed pi2dsh harness |
+| Safety/context | matching `node --experimental-strip-types tests/test-<extension>.mjs .` | Choose read, continue, scrub, Backlog guard, Grok guards |
+| Brief gate/operator stage | `node tests/test-brief-gate.mjs .`; `node --experimental-strip-types tests/test-operator-stage.mjs .` | — |
+| Dashboard/Herdr/q-mode | owning shell suite | Linked branch or installed binary may require network/runtime |
+| OpenWiki | owning `tests/test-openwiki-{refresh,refresh-legacy,dispatch,service}.sh` | Fake generation does not prove provider or GitHub PR behavior |
 
-qq-relay and dashboard are linked products, not vendored code or npm dependencies. Their `upstream.env` files identify a branch and landed repository without commit floors. Their contract suites intentionally validate two boundaries:
+## Shipped-surface rule
 
-1. **Current product semantics:** fetch the configured branch tip and inspect or exercise required public behavior.
-2. **Shipped consumer surface:** install to a private temporary absolute root, remove the source checkout, and run qq's wrappers/imports against only that artifact.
+A defining module test proves internal correctness, not host availability. For a new Cordis plugin or public service, verify its package `dsh.bundle`/entrypoint, `bin/qq` discovery, host registration, consumer lookup, disposer, unit test, and boot test when absence or loading changed. For the legacy external relay/dashboard boundaries, the contract suite must install privately, delete source, and exercise the real consumer import/exec path.
 
-A source check alone does not prove qq can consume the installation. Conversely, wrapper dispatch alone does not prove the current upstream branch still supplies the expected protocol or command contract. These suites may require network access and do not manage the operator's installation, user service, or telemetry.
-
-Herdr and qq-dictation now use the same semantic branch-tip approach instead of ancestry against recorded capability commits. Product-owned provenance markers are informational and are not readiness inputs.
-
-## Aggregate order and prerequisites
-
-`npm test` currently starts with the fast and live DSH workbench suites, then runs methodology, qq-relay (including the composed live pi2dsh proof), dashboard, the offline native-QA proof, fast pi2dsh drift check, execution profiles, session context, safety/context extensions, operator stage, brief gate, q mode, Herdr downstream/live, and four OpenWiki suites. The credential-gated real-model workbench smoke is not in `npm test`. Delegation, review-flow, and agent-messaging checks run inside `tests/test-qq-relay.sh` because importing those consumers requires the installed relay client.
-
-Baseline requirements are Linux, Bash, Node.js 22.19 or newer with `--experimental-strip-types`, npm, Python 3, Git, standard Unix tools, writable `$HOME`, and network access for linked-product and exact DSH package fetches. `test-herdr-live.sh` additionally needs `$HOME/.local/lib/qq/herdr/bin/herdr` or `QQ_HERDR_TEST_BINARY`.
-
-When a prerequisite is unavailable, run the unaffected focused suites and report the omitted boundary; do not describe that as a passing `npm test`. For an unclear shell assertion, rerun only that suite with `bash -x`.
-
-## Known gaps
-
-- Linked-product contract suites are consumer integration evidence, not complete qq-relay, dashboard, Herdr, or qq-dictation product test suites.
-- OpenWiki tests use a fake generator and do not validate provider quality, secrets, GitHub PR creation, Mermaid rendering in the installed package, or OKF retrieval quality.
-- Most Pi extension checks use mocks. The relay suite includes live local messaging against a privately installed relay and pinned DSH host, but it does not cover every interactive Pi lifecycle or authorize a DSH production cutover.
-- The DSH workbench live suite proves an exact isolated host, saved-session restart, and native coding tools; the separate credential-gated smoke proves one real model request. Neither proves physical devices, authentication, simultaneous clients, offline DSH operation, or native review/landing.
-- Repository skill prose has no focused local suite; see [model-visible skills](../runtime/skills.md).
+Do not run removed commands such as `test-dsh-console*` or `test-pi2dsh-compat.mjs`. Baseline aggregate requirements include Linux, Bash, Node 22.19+, npm, Git, Python, writable private state, network for linked products, and installed Herdr for `test-herdr-live.sh`. If one is unavailable, report the omitted boundary rather than claiming `npm test` passed.

@@ -4,7 +4,7 @@ okf_version: "0.1"
 
 # Files
 
-- [qq OpenWiki quickstart](quickstart.md) - Short practical map of qq's agent orchestration runtime, its public tools and services, core lifecycle, ownership boundaries, and the fastest route from a change intent to source and validation.
+- [qq OpenWiki quickstart](quickstart.md) - Short practical map of qq's daily DSH host, optional plugins, legacy Pi delegation path, and narrow change validation.
 
 # Directories
 

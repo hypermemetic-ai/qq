@@ -1,3 +1,3 @@
 # Files
 
-- [Practical validation routing](validation.md) - Short routing guide for qq's focused local suites, linked-product semantic contracts, installed-artifact boundaries, live prerequisites, and aggregate npm test chain.
+- [Practical validation routing](validation.md) - Narrow commands for the daily DSH host and plugins, legacy Pi orchestration, linked products, and conditional live checks.
