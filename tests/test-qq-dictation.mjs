@@ -8,7 +8,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import vm from "node:vm";
 
 const root = dirname(fileURLToPath(new URL(".", import.meta.url)));
-const serviceModule = await import(pathToFileURL(join(root, "qq-dictation/src/service.mjs")));
+const serviceModuleUrl = pathToFileURL(join(root, "qq-dictation/src/service.mjs"));
+const serviceModule = await import(serviceModuleUrl);
+const reloadedServiceModule = await import(`${serviceModuleUrl.href}?hmr-test=1`);
 const httpModule = await import(pathToFileURL(join(root, "qq-dictation/src/http.mjs")));
 const pluginModule = await import(pathToFileURL(join(root, "qq-dictation/src/plugin.mjs")));
 const recognizerModule = await import(pathToFileURL(join(root, "qq-dictation/src/recognizer.mjs")));
@@ -17,9 +19,12 @@ const qqPlugin = await import(pathToFileURL(join(root, "qq/src/plugin.mjs")));
 
 const {
   SESSION_ID,
+  CAPTURE_LEASE_ID,
   asUserSpeech,
   parseSessionId,
+  parseCaptureLeaseId,
   resumeSessionId,
+  createCaptureLeaseAuthority,
   createDictationService,
 } = serviceModule;
 const { createDictateHandler, internals } = httpModule;
@@ -32,6 +37,11 @@ const sessionId = (marker) =>
 const alphaId = sessionId("00000000000a");
 const betaId = sessionId("00000000000b");
 const goneId = sessionId("00000000000c");
+const captureLeaseId = (marker) =>
+  `73a11000-0000-4000-8000-${String(marker).padStart(12, "0")}`;
+const alphaLease = captureLeaseId("00000000000a");
+const betaLease = captureLeaseId("00000000000b");
+let clientLeaseSerial = 100;
 
 const clientJs = readFileSync(join(root, "qq-dictation/src/client.js"), "utf8");
 const browserJs = readFileSync(join(root, "qq-ui/assets/browser-v8.js"), "utf8");
@@ -208,14 +218,83 @@ class CustomEvent {
   }
 }
 
+function makeSharedClientTransport() {
+  let state = "idle";
+  let ownerLease = "";
+  const calls = [];
+
+  return {
+    calls,
+    get state() { return state; },
+    get ownerLease() { return ownerLease; },
+    revokeOwner() {
+      ownerLease = "";
+      state = "idle";
+    },
+    async fetch(path, init = {}) {
+      const headers = init.headers ?? {};
+      const presented = headers["x-qq-dictation-lease"] ?? "";
+      let body = {};
+      if (typeof init.body === "string" && init.body) body = JSON.parse(init.body);
+      calls.push({ path, presented, body, keepalive: init.keepalive === true });
+      if (path === "/qq/dictate/" || path === "/qq/dictate") {
+        const capture = ownerLease ? (presented === ownerLease ? "local" : "foreign") : null;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ state, capture, resumable: capture === "local" && state === "idle" }),
+        };
+      }
+      if (path.endsWith("/focus")) {
+        return { ok: true, status: 200, json: async () => ({ lastFocus: alphaId }) };
+      }
+      if (path.endsWith("/start")) {
+        if (!body.leaseId || ownerLease) {
+          return { ok: false, status: body.leaseId ? 409 : 400, json: async () => ({ error: "busy" }) };
+        }
+        ownerLease = body.leaseId;
+        state = "recording";
+        return { ok: true, status: 200, json: async () => ({ state, capture: "local" }) };
+      }
+      if (path.endsWith("/resume")) {
+        if (!ownerLease || body.leaseId !== ownerLease) {
+          return { ok: false, status: 409, json: async () => ({ error: "revoked" }) };
+        }
+        state = "recording";
+        return { ok: true, status: 200, json: async () => ({ state, capture: "local" }) };
+      }
+      if (path.endsWith("/cancel")) {
+        if (!ownerLease || body.leaseId !== ownerLease) {
+          return { ok: false, status: 409, json: async () => ({ error: "not owner" }) };
+        }
+        ownerLease = "";
+        state = "idle";
+        return { ok: true, status: 200, json: async () => ({ state, capture: null }) };
+      }
+      if (path.endsWith("/end")) {
+        if (!ownerLease || presented !== ownerLease) {
+          return { ok: false, status: 409, json: async () => ({ error: "not owner", sent: false }) };
+        }
+        ownerLease = "";
+        state = "idle";
+        return { ok: true, status: 200, json: async () => ({ state, capture: null, sent: true }) };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    },
+  };
+}
+
 function makeClientHarness(options = {}) {
   const fetches = [];
   let serverState = "idle";
+  let serverLease = "";
   let endFailures = options.end409Once ? 1 : 0;
   let processor = null;
   let mediaStarts = 0;
+  let stoppedTracks = 0;
   let timerId = 10;
   const timers = new Map();
+  const intervals = new Map();
   const byId = new Map();
   const listeners = [];
   const windowListeners = [];
@@ -285,7 +364,7 @@ function makeClientHarness(options = {}) {
           mediaStarts += 1;
           if (options.micError) throw new Error("denied");
           if (micGate) await micGate;
-          return { getTracks: () => [{ stop() {} }] };
+          return { getTracks: () => [{ stop() { stoppedTracks += 1; } }] };
         },
       };
 
@@ -338,7 +417,8 @@ function makeClientHarness(options = {}) {
     matchMedia() {
       return { matches: options.desktop === true };
     },
-    setInterval() {
+    setInterval(fn) {
+      intervals.set(1, fn);
       return 1;
     },
     setTimeout(fn) {
@@ -391,24 +471,68 @@ function makeClientHarness(options = {}) {
     history: { state: null, replaceState() {} },
     location,
     navigator: { mediaDevices },
+    crypto: {
+      randomUUID() {
+        const id = captureLeaseId(clientLeaseSerial);
+        clientLeaseSerial += 1;
+        return id;
+      },
+    },
     performance: { now: () => 1 },
     requestAnimationFrame(fn) {
       fn();
       return 1;
     },
-    clearInterval() {},
+    clearInterval(id) {
+      intervals.delete(id);
+    },
     window: windowObj,
     fetch: async (url, init = {}) => {
       const path = String(url);
       const headers = init.headers ?? {};
       const body = init.body;
-      fetches.push({ path, method: init.method ?? "GET", headers, body });
+      fetches.push({ path, method: init.method ?? "GET", headers, body, keepalive: init.keepalive === true });
+      if (typeof options.fetch === "function") return options.fetch(path, init);
+      const ownerLease = headers["x-qq-dictation-lease"] ?? "";
       if (path === "/qq/dictate/" || path === "/qq/dictate") {
-        return { ok: true, status: 200, json: async () => ({ state: serverState }) };
+        const capture = serverLease ? (ownerLease === serverLease ? "local" : "foreign") : null;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            state: serverState,
+            capture,
+            resumable: capture === "local" && serverState === "idle",
+          }),
+        };
       }
       if (path.endsWith("/start")) {
+        const parsed = JSON.parse(String(body || "{}"));
+        if (!parsed.leaseId || (serverLease && serverLease !== parsed.leaseId)) {
+          return { ok: false, status: parsed.leaseId ? 409 : 400, json: async () => ({ error: "not owner" }) };
+        }
+        serverLease = parsed.leaseId;
         serverState = "recording";
-        return { ok: true, status: 200, json: async () => ({ state: "recording" }) };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ state: "recording", capture: "local", resumable: false }),
+        };
+      }
+      if (path.endsWith("/resume")) {
+        const parsed = JSON.parse(String(body || "{}"));
+        if (!serverLease || serverLease !== parsed.leaseId) {
+          return { ok: false, status: 409, json: async () => ({ error: "lease revoked" }) };
+        }
+        serverState = "recording";
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ state: "recording", capture: "local", resumable: false }),
+        };
+      }
+      if (path.endsWith("/end") && (ownerLease !== serverLease || !serverLease)) {
+        return { ok: false, status: 409, json: async () => ({ error: "not recording", sent: false }) };
       }
       if (path.endsWith("/end") && endFailures > 0) {
         endFailures -= 1;
@@ -421,6 +545,7 @@ function makeClientHarness(options = {}) {
       }
       if (path.endsWith("/end")) {
         serverState = "idle";
+        serverLease = "";
         const deferred = endGate ? await endGate : null;
         const sent = deferred?.sent ?? options.endSent ?? true;
         const ok = deferred?.ok ?? !options.endHttpError;
@@ -429,13 +554,18 @@ function makeClientHarness(options = {}) {
           ok,
           status,
           json: async () => ok
-            ? { state: "idle", sent, reason: sent ? undefined : "empty" }
+            ? { state: "idle", capture: null, sent, reason: sent ? undefined : "empty" }
             : { error: "recognizer failed", sent: false },
         };
       }
       if (path.endsWith("/cancel")) {
+        const parsed = JSON.parse(String(body || "{}"));
+        if (!serverLease || serverLease !== parsed.leaseId) {
+          return { ok: false, status: 409, json: async () => ({ error: "not owner" }) };
+        }
         serverState = "idle";
-        return { ok: true, status: 200, json: async () => ({ state: "idle", sent: false }) };
+        serverLease = "";
+        return { ok: true, status: 200, json: async () => ({ state: "idle", capture: null, sent: false }) };
       }
       if (path.endsWith("/focus")) {
         return { ok: true, status: 200, json: async () => ({ lastFocus: options.sessionId ?? alphaId }) };
@@ -460,6 +590,7 @@ function makeClientHarness(options = {}) {
     get status() { return nodes.status; },
     get submit() { return nodes.submit; },
     get mediaStarts() { return mediaStarts; },
+    get stoppedTracks() { return stoppedTracks; },
     pump() {
       const samples = new Float32Array(160);
       for (let i = 0; i < samples.length; i += 1) samples[i] = 0.2;
@@ -519,6 +650,14 @@ function makeClientHarness(options = {}) {
     releaseEnd(result = { sent: true }) {
       releaseEndGate?.(result);
     },
+    poll() {
+      intervals.get(1)?.();
+    },
+    pagehide() {
+      for (const listener of [...windowListeners]) {
+        if (listener.type === "pagehide") listener.fn({ type: "pagehide" });
+      }
+    },
     runTimeouts() {
       const pending = [...timers.values()];
       timers.clear();
@@ -537,6 +676,11 @@ try {
   assert.deepEqual(pluginModule.inject, ["qq", "webServer"]);
   assert.equal(pluginModule.provide, "qq-dictation");
   assert.equal(pluginModule.name, "qq-dictation");
+  assert.equal(
+    serviceModule.defaultCaptureLeaseAuthority,
+    reloadedServiceModule.defaultCaptureLeaseAuthority,
+    "capture authority must survive module reevaluation",
+  );
   {
     const launcher = readFileSync(join(root, "bin/qq"), "utf8");
     const patch = readFileSync(join(root, "qq/host.patch.yml"), "utf8");
@@ -552,8 +696,11 @@ try {
   }
   assert.doesNotMatch(clientJs, /textContent/);
   assert.match(SESSION_ID.source, /session-/);
+  assert.match(CAPTURE_LEASE_ID.source, /0-9a-f/);
   assert.equal(parseSessionId(alphaId), alphaId);
   assert.equal(parseSessionId("nope"), "");
+  assert.equal(parseCaptureLeaseId(alphaLease.toUpperCase()), alphaLease);
+  assert.equal(parseCaptureLeaseId("not-a-lease"), "");
   assert.equal(asUserSpeech("  hello world  "), "hello world");
   assert.equal(asUserSpeech(""), "");
   assert.equal(asUserSpeech("   "), "");
@@ -576,6 +723,12 @@ try {
   assert.match(clientJs, /qq:desktop-dictation-toggle/);
   assert.match(clientJs, /Recording · Space to send/);
   assert.match(clientJs, /Dictation failed · Space to retry/);
+  assert.match(clientJs, /Dictation active on another device/);
+  assert.match(clientJs, /x-qq-dictation-lease/);
+  assert.match(clientJs, /postJson\("\/resume", \{ leaseId: ownerLease \}\)/);
+  assert.match(clientJs, /keepalive: true/);
+  assert.doesNotMatch(clientJs, /restarting/);
+  assert.doesNotMatch(clientJs, /const poll[\s\S]*postJson\("\/start"/);
   assert.match(browserJs, /document\.dispatchEvent\(new CustomEvent\("qq:desktop-dictation-toggle"\)\)/);
   assert.doesNotMatch(browserJs, /if \(key === " " \|\| key === "Spacebar"\) \{[\s\S]{0,160}clickButton\("#composer-dictate"\)/);
   assert.doesNotMatch(clientJs, /MediaRecorder/);
@@ -598,6 +751,7 @@ try {
   assert.doesNotMatch(String(qqPlugin.apply), /dictate/);
   assert.match(defaultHandyBin({ HOME: "/home/op" }), /\/\.local\/bin\/handy$/);
   assert.equal(internals.routeOf("/qq/dictate", "/qq/dictate/start"), "start");
+  assert.equal(internals.routeOf("/qq/dictate", "/qq/dictate/resume"), "resume");
 
   writeFileSync(join(scratch, "qq.session"), `${alphaId}\n`);
   assert.equal(resumeSessionId({ DSH_HOME: scratch }), alphaId);
@@ -605,6 +759,84 @@ try {
   writeFileSync(join(scratch, "qq-console.session"), `${betaId}\n`);
   assert.equal(resumeSessionId({ DSH_HOME: scratch }), "");
   assert.equal(resumeSessionId({}), "");
+
+  {
+    let clock = 0;
+    const leases = createCaptureLeaseAuthority({ now: () => clock, ttlMs: 100 });
+    const qq = fakeQq();
+    const service = createDictationService({ get: () => qq }, {
+      now: () => clock,
+      leaseAuthority: leases,
+      recognize: async () => "expired capture must not send",
+    });
+    await service.start({ sessionId: alphaId, leaseId: alphaLease });
+    clock = 90;
+    assert.equal(service.snapshot({ leaseId: alphaLease, renew: true }).capture, "local");
+    clock = 150;
+    assert.equal(service.snapshot().capture, "foreign", "foreign status must not renew the owner lease");
+    clock = 191;
+    assert.equal(service.snapshot().state, "idle", "crashed owner lease must expire within its bound");
+    await assert.rejects(
+      () => service.resume({ leaseId: alphaLease }),
+      /cannot resume/,
+    );
+    const recovered = await service.start({ sessionId: betaId, leaseId: betaLease });
+    assert.equal(recovered.capture, "local");
+    assert.equal(recovered.boundSessionId, betaId);
+  }
+
+  {
+    const qq = fakeQq();
+    const leases = createCaptureLeaseAuthority({ ttlMs: 10_000 });
+    const beforeReload = createDictationService({ get: () => qq }, {
+      leaseAuthority: leases,
+      recognize: async () => "unused old recognizer",
+    });
+    await beforeReload.start({ sessionId: alphaId, leaseId: alphaLease });
+    await beforeReload.release();
+
+    const afterReload = createDictationService({ get: () => qq }, {
+      leaseAuthority: leases,
+      recognize: async () => "hmr recovery",
+    });
+    const detached = afterReload.snapshot({ leaseId: alphaLease, renew: true });
+    assert.equal(detached.state, "idle");
+    assert.equal(detached.capture, "local");
+    assert.equal(detached.resumable, true);
+    assert.equal(detached.boundSessionId, alphaId);
+    assert.doesNotMatch(JSON.stringify(afterReload.snapshot()), new RegExp(alphaLease));
+    await afterReload.resume({ leaseId: alphaLease });
+    const sent = await afterReload.end({ audio: Buffer.from("wav"), leaseId: alphaLease });
+    assert.equal(sent.sent, true);
+    assert.deepEqual(qq.prompts, [{ id: alphaId, text: "hmr recovery" }]);
+  }
+
+  {
+    const qq = fakeQq();
+    const leases = createCaptureLeaseAuthority({ ttlMs: 10_000 });
+    const beforeReload = createDictationService({ get: () => qq }, {
+      leaseAuthority: leases,
+      recognize: async () => "must not send",
+    });
+    await beforeReload.start({ sessionId: alphaId, leaseId: alphaLease });
+    await beforeReload.release();
+    const replacement = createDictationService({ get: () => qq }, {
+      leaseAuthority: leases,
+      recognize: async () => "must not send",
+    });
+    await assert.rejects(
+      () => replacement.cancel({ leaseId: betaLease }),
+      /another browser/,
+    );
+    await replacement.cancel({ leaseId: alphaLease });
+    await assert.rejects(() => replacement.resume({ leaseId: alphaLease }), /cannot resume/);
+    await assert.rejects(
+      () => replacement.start({ sessionId: alphaId, leaseId: alphaLease }),
+      /no longer valid/,
+    );
+    assert.equal(replacement.snapshot().state, "idle");
+    assert.equal(qq.prompts.length, 0);
+  }
 
   {
     const qq = fakeQq();
@@ -618,14 +850,27 @@ try {
         },
       },
     );
-    assert.deepEqual(service.snapshot(), { state: "idle", boundSessionId: null, lastFocus: null });
-    await assert.rejects(() => service.end(), /not recording/);
-    const started = await service.start({ sessionId: alphaId });
+    assert.deepEqual(service.snapshot(), {
+      state: "idle",
+      capture: null,
+      resumable: false,
+      boundSessionId: null,
+      lastFocus: null,
+    });
+    await assert.rejects(() => service.end(), /capture lease is required/);
+    await assert.rejects(() => service.end({ leaseId: alphaLease }), /not recording/);
+    const started = await service.start({ sessionId: alphaId, leaseId: alphaLease });
     assert.equal(started.state, "recording");
+    assert.equal(started.capture, "local");
     assert.equal(started.boundSessionId, alphaId);
-    await assert.rejects(() => service.start({ sessionId: betaId }), /already recording/);
-    service.appendAudio(Buffer.from("wa"));
-    const sent = await service.end();
+    assert.equal(service.snapshot().capture, "foreign");
+    assert.equal(service.snapshot().boundSessionId, null);
+    await assert.rejects(
+      () => service.start({ sessionId: betaId, leaseId: betaLease }),
+      /another browser owns/,
+    );
+    service.appendAudio(Buffer.from("wa"), { leaseId: alphaLease });
+    const sent = await service.end({ leaseId: alphaLease });
     assert.equal(sent.sent, true);
     assert.equal(sent.text, "spoken line");
     assert.deepEqual(qq.prompts, [{ id: alphaId, text: "spoken line" }]);
@@ -646,8 +891,8 @@ try {
         },
       },
     );
-    await service.start({ sessionId: alphaId });
-    const sent = await service.end({ audio: fixture });
+    await service.start({ sessionId: alphaId, leaseId: alphaLease });
+    const sent = await service.end({ audio: fixture, leaseId: alphaLease });
     assert.equal(sent.sent, true);
     assert.equal(sent.text, "fixture line");
     assert.deepEqual(qq.prompts, [{ id: alphaId, text: "fixture line" }]);
@@ -661,8 +906,8 @@ try {
       recognize: async () => "should not run",
     });
     service.noteFocus(alphaId);
-    await service.start({ sessionId: alphaId });
-    const cancelled = await service.cancel();
+    await service.start({ sessionId: alphaId, leaseId: alphaLease });
+    const cancelled = await service.cancel({ leaseId: alphaLease });
     assert.equal(cancelled.state, "idle");
     assert.equal(qq.prompts.length, 0);
   }
@@ -672,8 +917,8 @@ try {
     const service = createDictationService({ get: () => qq }, {
       recognize: async () => "   ",
     });
-    await service.start({ sessionId: alphaId });
-    const empty = await service.end({ audio: Buffer.from("x") });
+    await service.start({ sessionId: alphaId, leaseId: alphaLease });
+    const empty = await service.end({ audio: Buffer.from("x"), leaseId: alphaLease });
     assert.equal(empty.sent, false);
     assert.equal(empty.reason, "empty");
     assert.equal(qq.prompts.length, 0);
@@ -684,8 +929,8 @@ try {
     const service = createDictationService({ get: () => qq }, {
       recognize: async () => "/workflows now",
     });
-    await service.start({ sessionId: alphaId });
-    const sent = await service.end({ audio: Buffer.from("x") });
+    await service.start({ sessionId: alphaId, leaseId: alphaLease });
+    const sent = await service.end({ audio: Buffer.from("x"), leaseId: alphaLease });
     assert.equal(sent.text, "workflows now");
     assert.deepEqual(qq.prompts, [{ id: alphaId, text: "workflows now" }]);
   }
@@ -696,9 +941,9 @@ try {
       recognize: async () => "later",
     });
     service.noteFocus(alphaId);
-    await service.start();
+    await service.start({ leaseId: alphaLease });
     service.noteFocus(betaId);
-    const sent = await service.end({ audio: Buffer.from("x") });
+    const sent = await service.end({ audio: Buffer.from("x"), leaseId: alphaLease });
     assert.equal(sent.boundSessionId, alphaId);
     assert.deepEqual(qq.prompts, [{ id: alphaId, text: "later" }]);
   }
@@ -709,8 +954,8 @@ try {
     const service = createDictationService({ get: () => qq }, {
       recognize: async () => "orphan",
     });
-    await service.start({ sessionId: alphaId });
-    const dropped = await service.end({ audio: Buffer.from("x") });
+    await service.start({ sessionId: alphaId, leaseId: alphaLease });
+    const dropped = await service.end({ audio: Buffer.from("x"), leaseId: alphaLease });
     assert.equal(dropped.sent, false);
     assert.equal(dropped.reason, "gone");
     assert.match(dropped.message, /gone/i);
@@ -724,8 +969,8 @@ try {
       env: { DSH_HOME: scratch },
       recognize: async () => "resume",
     });
-    await service.start();
-    const sent = await service.end({ text: "resume" });
+    await service.start({ leaseId: alphaLease });
+    const sent = await service.end({ text: "resume", leaseId: alphaLease });
     assert.equal(sent.boundSessionId, betaId);
     assert.deepEqual(qq.prompts, [{ id: betaId, text: "resume" }]);
   }
@@ -736,8 +981,8 @@ try {
       recognize: async () => "desktop",
     });
     service.noteFocus(betaId);
-    await service.start();
-    const sent = await service.end({ text: "desktop" });
+    await service.start({ leaseId: alphaLease });
+    const sent = await service.end({ text: "desktop", leaseId: alphaLease });
     assert.equal(sent.boundSessionId, betaId);
     assert.deepEqual(qq.prompts, [{ id: betaId, text: "desktop" }]);
   }
@@ -808,23 +1053,43 @@ try {
       assert.equal(focus.status, 200);
       assert.match(focus.body, /"lastFocus":"session-63a11000-0000-4000-8000-00000000000a"/);
 
-      const started = await request(server, "/qq/dictate/start", {
+      const tokenless = await request(server, "/qq/dictate/start", {
         method: "POST",
         headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
         body: JSON.stringify({ sessionId: alphaId }),
       });
+      assert.equal(tokenless.status, 400, "pre-lease clients must not start capture");
+
+      const started = await request(server, "/qq/dictate/start", {
+        method: "POST",
+        headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
+        body: JSON.stringify({ sessionId: alphaId, leaseId: alphaLease }),
+      });
       assert.equal(started.status, 200);
       assert.match(started.body, /"state":"recording"/);
+      assert.match(started.body, /"capture":"local"/);
+
+      const foreign = await request(server, "/qq/dictate/");
+      assert.match(foreign.body, /"capture":"foreign"/);
+      assert.doesNotMatch(foreign.body, new RegExp(alphaLease));
 
       const chunked = await request(server, "/qq/dictate/chunk", {
         method: "POST",
-        headers: { "content-type": "application/octet-stream", "sec-fetch-site": "same-origin" },
+        headers: {
+          "content-type": "application/octet-stream",
+          "sec-fetch-site": "same-origin",
+          "x-qq-dictation-lease": alphaLease,
+        },
         body: Buffer.from("fake-wav"),
       });
       assert.equal(chunked.status, 200);
       const ended = await request(server, "/qq/dictate/end", {
         method: "POST",
-        headers: { "content-type": "application/octet-stream", "sec-fetch-site": "same-origin" },
+        headers: {
+          "content-type": "application/octet-stream",
+          "sec-fetch-site": "same-origin",
+          "x-qq-dictation-lease": alphaLease,
+        },
         body: Buffer.alloc(0),
       });
       assert.equal(ended.status, 200);
@@ -849,12 +1114,16 @@ try {
       const started = await request(server, "/qq/dictate/start", {
         method: "POST",
         headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
-        body: JSON.stringify({ sessionId: alphaId }),
+        body: JSON.stringify({ sessionId: alphaId, leaseId: alphaLease }),
       });
       assert.equal(started.status, 200);
       const ended = await request(server, "/qq/dictate/end", {
         method: "POST",
-        headers: { "content-type": "audio/wav", "sec-fetch-site": "same-origin" },
+        headers: {
+          "content-type": "audio/wav",
+          "sec-fetch-site": "same-origin",
+          "x-qq-dictation-lease": alphaLease,
+        },
         body: fixture,
       });
       assert.equal(ended.status, 200);
@@ -874,16 +1143,98 @@ try {
       await request(server, "/qq/dictate/start", {
         method: "POST",
         headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
-        body: JSON.stringify({ sessionId: alphaId }),
+        body: JSON.stringify({ sessionId: alphaId, leaseId: alphaLease }),
       });
+      const foreignCancel = await request(server, "/qq/dictate/cancel", {
+        method: "POST",
+        headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
+        body: JSON.stringify({ leaseId: betaLease }),
+      });
+      assert.equal(foreignCancel.status, 409);
       const cancelled = await request(server, "/qq/dictate/cancel", {
         method: "POST",
-        headers: { "sec-fetch-site": "same-origin" },
-        body: "",
+        headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
+        body: JSON.stringify({ leaseId: alphaLease }),
       });
       assert.equal(cancelled.status, 200);
       assert.match(cancelled.body, /"state":"idle"/);
       assert.equal(qq.prompts.length, 0);
+    });
+  }
+
+  {
+    const qq = fakeQq();
+    const handler = createDictateHandler(
+      createDictationService({ get: () => qq }, { recognize: async () => "two client" }),
+    );
+    await withServer(handler, async (server) => {
+      const ownerStart = await request(server, "/qq/dictate/start", {
+        method: "POST",
+        headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
+        body: JSON.stringify({ sessionId: alphaId, leaseId: alphaLease }),
+      });
+      assert.equal(ownerStart.status, 200);
+
+      const phoneStatus = await request(server, "/qq/dictate/");
+      assert.match(phoneStatus.body, /"capture":"foreign"/);
+      assert.doesNotMatch(phoneStatus.body, new RegExp(alphaLease));
+      const foreignEnd = await request(server, "/qq/dictate/end", {
+        method: "POST",
+        headers: {
+          "content-type": "audio/wav",
+          "sec-fetch-site": "same-origin",
+          "x-qq-dictation-lease": betaLease,
+        },
+        body: Buffer.from("foreign"),
+      });
+      assert.equal(foreignEnd.status, 409);
+      const foreignCancel = await request(server, "/qq/dictate/cancel", {
+        method: "POST",
+        headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
+        body: JSON.stringify({ leaseId: betaLease }),
+      });
+      assert.equal(foreignCancel.status, 409);
+
+      const ownerCancel = await request(server, "/qq/dictate/cancel", {
+        method: "POST",
+        headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
+        body: JSON.stringify({ leaseId: alphaLease }),
+      });
+      assert.equal(ownerCancel.status, 200);
+      const stalePoll = await request(server, "/qq/dictate/", {
+        headers: { "x-qq-dictation-lease": alphaLease },
+      });
+      assert.match(stalePoll.body, /"state":"idle"/);
+      assert.match(stalePoll.body, /"capture":null/);
+
+      const staleStart = await request(server, "/qq/dictate/start", {
+        method: "POST",
+        headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
+        body: JSON.stringify({ sessionId: alphaId, leaseId: alphaLease }),
+      });
+      assert.equal(staleStart.status, 409, "a cancelled owner must not reassert start");
+      const staleResume = await request(server, "/qq/dictate/resume", {
+        method: "POST",
+        headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
+        body: JSON.stringify({ leaseId: alphaLease }),
+      });
+      assert.equal(staleResume.status, 409);
+      const tokenlessStart = await request(server, "/qq/dictate/start", {
+        method: "POST",
+        headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
+        body: JSON.stringify({ sessionId: alphaId }),
+      });
+      assert.equal(tokenlessStart.status, 400);
+      const stillIdle = await request(server, "/qq/dictate/");
+      assert.match(stillIdle.body, /"state":"idle"/);
+
+      const phoneRecovery = await request(server, "/qq/dictate/start", {
+        method: "POST",
+        headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
+        body: JSON.stringify({ sessionId: betaId, leaseId: betaLease }),
+      });
+      assert.equal(phoneRecovery.status, 200);
+      assert.match(phoneRecovery.body, new RegExp(`"boundSessionId":"${betaId}"`));
     });
   }
 
@@ -901,13 +1252,13 @@ try {
       const started = await request(server, "/qq/dictate/start", {
         method: "POST",
         headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
-        body: "{}",
+        body: JSON.stringify({ leaseId: alphaLease }),
       });
       assert.match(started.body, new RegExp(`"boundSessionId":"${betaId}"`));
       const ended = await request(server, "/qq/dictate/end", {
         method: "POST",
         headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
-        body: JSON.stringify({ text: "desktop end" }),
+        body: JSON.stringify({ text: "desktop end", leaseId: alphaLease }),
       });
       assert.equal(ended.status, 200);
       assert.deepEqual(qq.prompts, [{ id: betaId, text: "desktop end" }]);
@@ -923,12 +1274,12 @@ try {
       await request(server, "/qq/dictate/start", {
         method: "POST",
         headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
-        body: JSON.stringify({ sessionId: alphaId }),
+        body: JSON.stringify({ sessionId: alphaId, leaseId: alphaLease }),
       });
       const ended = await request(server, "/qq/dictate/end", {
         method: "POST",
         headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
-        body: JSON.stringify({ text: "   " }),
+        body: JSON.stringify({ text: "   ", leaseId: alphaLease }),
       });
       assert.match(ended.body, /"sent":false/);
       assert.equal(qq.prompts.length, 0);
@@ -944,7 +1295,7 @@ try {
       const blocked = await request(server, "/qq/dictate/start", {
         method: "POST",
         headers: { "content-type": "application/json", origin: "https://evil.example" },
-        body: JSON.stringify({ sessionId: alphaId }),
+        body: JSON.stringify({ sessionId: alphaId, leaseId: alphaLease }),
       });
       assert.equal(blocked.status, 403);
     });
@@ -1031,18 +1382,18 @@ try {
       const started = await request(server, "/qq/dictate/start", {
         method: "POST",
         headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
-        body: JSON.stringify({ sessionId: alphaId }),
+        body: JSON.stringify({ sessionId: alphaId, leaseId: alphaLease }),
       });
       assert.equal(started.status, 200);
       const ended = await request(server, "/qq/dictate/end", {
         method: "POST",
         headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
-        body: JSON.stringify({ text: "via apply" }),
+        body: JSON.stringify({ text: "via apply", leaseId: alphaLease }),
       });
       assert.equal(ended.status, 200);
       assert.deepEqual(qq.prompts, [{ id: alphaId, text: "via apply" }]);
     });
-    await provided["qq-dictation"].start({ sessionId: alphaId });
+    await provided["qq-dictation"].start({ sessionId: alphaId, leaseId: betaLease });
     await cleanup();
     assert.equal(routes.length, 0);
     assert.equal(provided["qq-dictation"].snapshot().state, "idle");
@@ -1060,12 +1411,71 @@ try {
   assert.ok(!goneId.includes("HERDR"));
 
   {
+    const transport = makeSharedClientTransport();
+    const desktopOwner = makeClientHarness({ fetch: transport.fetch.bind(transport) });
+    await settle();
+    desktopOwner.click(desktopOwner.dictate);
+    await settle();
+    assert.equal(desktopOwner.dictate.dataset.state, "recording");
+    assert.equal(transport.calls.filter((call) => call.path.endsWith("/start")).length, 1);
+
+    const phone = makeClientHarness({ fetch: transport.fetch.bind(transport) });
+    await settle();
+    assert.equal(phone.dictate.dataset.state, "busy");
+    assert.equal(phone.dictate.getAttribute("aria-label"), "Dictation active on another device");
+    assert.equal(phone.dictate.getAttribute("aria-disabled"), "true");
+    assert.notEqual(phone.dictate.dataset.state, "recording", "foreign capture must never show the local X");
+    phone.click(phone.dictate);
+    await settle();
+    assert.equal(phone.mediaStarts, 0);
+    assert.equal(transport.calls.filter((call) => call.path.endsWith("/cancel")).length, 0);
+    assert.equal(transport.calls.filter((call) => call.path.endsWith("/end")).length, 0);
+
+    // Reproduce the live failure: the server is cancelled while the old owner
+    // still has local capture. Its next poll must stop tracks, never POST start.
+    transport.revokeOwner();
+    desktopOwner.poll();
+    await settle();
+    assert.equal(desktopOwner.dictate.dataset.state, "idle");
+    assert.equal(desktopOwner.stoppedTracks, 1);
+    assert.equal(transport.calls.filter((call) => call.path.endsWith("/start")).length, 1);
+
+    phone.poll();
+    await settle();
+    assert.equal(phone.dictate.dataset.state, "idle");
+    phone.click(phone.dictate);
+    await settle();
+    assert.equal(phone.dictate.dataset.state, "recording");
+    assert.equal(transport.calls.filter((call) => call.path.endsWith("/start")).length, 2);
+  }
+
+  {
+    const harness = makeClientHarness();
+    await settle();
+    harness.click(harness.dictate);
+    await settle();
+    assert.equal(harness.dictate.dataset.state, "recording");
+    harness.pagehide();
+    await settle();
+    assert.equal(harness.stoppedTracks, 1);
+    const pageCancel = harness.fetches.find((call) => String(call.path).endsWith("/cancel"));
+    assert.ok(pageCancel);
+    assert.equal(pageCancel.keepalive, true);
+    assert.match(String(pageCancel.body), /"leaseId":"[0-9a-f-]+"/);
+    const startsBefore = harness.fetches.filter((call) => String(call.path).endsWith("/start")).length;
+    harness.poll();
+    await settle();
+    assert.equal(harness.fetches.filter((call) => String(call.path).endsWith("/start")).length, startsBefore);
+  }
+
+  {
     const harness = makeClientHarness({ browser: true, desktop: true, deferMic: true, deferEnd: true });
     await settle();
     assert.equal(harness.listenerCount("qq:desktop-dictation-toggle"), 1);
 
     const firstSpace = harness.space();
     assert.equal(firstSpace.defaultPrevented, true);
+    await settle();
     assert.equal(harness.mediaStarts, 1);
     assert.equal(harness.status.dataset.state, "starting");
     assert.equal(harness.status.textContent, "Starting dictation…");
@@ -1196,8 +1606,16 @@ try {
     harness.pump();
     harness.click(harness.submit);
     await settle();
-    assert.equal(harness.fetches.filter((call) => String(call.path).endsWith("/start")).length, 2);
-    assert.equal(harness.fetches.filter((call) => String(call.path).endsWith("/end")).length, 2);
+    const startCall = harness.fetches.find((call) => String(call.path).endsWith("/start"));
+    const resumeCall = harness.fetches.find((call) => String(call.path).endsWith("/resume"));
+    const endCalls = harness.fetches.filter((call) => String(call.path).endsWith("/end"));
+    assert.ok(startCall);
+    assert.ok(resumeCall);
+    assert.equal(endCalls.length, 2);
+    const lease = JSON.parse(String(startCall.body)).leaseId;
+    assert.equal(JSON.parse(String(resumeCall.body)).leaseId, lease);
+    assert.equal(endCalls[0].headers["x-qq-dictation-lease"], lease);
+    assert.equal(endCalls[1].headers["x-qq-dictation-lease"], lease);
     assert.equal(harness.dictate.dataset.state, "idle");
   }
 
@@ -1278,6 +1696,8 @@ try {
   assert.match(css, /\.dictation-status:not\(\[hidden\]\) \{[\s\S]*display: inline-flex/);
   assert.match(css, /\.dictation-status\[data-state="recording"\]/);
   assert.match(css, /\.dictation-status\[data-state="transcribing"\]/);
+  assert.match(css, /\.dictation-status\[data-state="busy"\]/);
+  assert.match(css, /#composer-dictate\[data-state="busy"\]/);
   assert.match(css, /\.dictation-status\[data-state="failure"\]/);
   assert.match(css, /\.composer\.is-dictating textarea/);
 } finally {
