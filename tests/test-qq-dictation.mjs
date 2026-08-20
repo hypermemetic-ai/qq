@@ -679,7 +679,8 @@ try {
     const pkg = JSON.parse(readFileSync(join(root, "qq-dictation/package.json"), "utf8"));
     const cordis = readFileSync(join(root, "qq-dictation/cordis.patch.yml"), "utf8");
     assert.doesNotMatch(launcher, /qq-dictation|QQ_DSH_HAVE_DICTATION/);
-    assert.doesNotMatch(patch, /qq-dictation|QQ_DSH_HAVE_DICTATION/);
+    assert.doesNotMatch(patch, /@hypermemetic-ai\/qq-dictation/);
+    assert.doesNotMatch(patch, /QQ_DSH_HAVE_DICTATION/);
     assert.match(launcher, /qq-\*\/package\.json/);
     assert.equal(pkg.name, "@hypermemetic-ai/qq-dictation");
     assert.equal(pkg.dsh?.bundle?.patch, "./cordis.patch.yml");

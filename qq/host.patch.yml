@@ -68,6 +68,45 @@
         sessionId: !!js process.env.QQ_DSH_SESSION_ID
         cwd: !!js process.cwd()
         projectsRoot: !!js process.env.QQ_PROJECTS_ROOT ?? `${process.env.HOME}/projects`
+        projectCatalog:
+          # This catalog applies only to the ordinary operator root. Alternate
+          # QQ_PROJECTS_ROOT values retain automatic visible-folder discovery.
+          root: !!js process.env.HOME + '/projects'
+          projects:
+            - name: deciq
+              label: DECIQ
+              folders:
+                - { name: core, label: Core, path: deciq }
+                - { name: logic, label: Logic, path: deciq-logic }
+            - name: discuss
+              label: Discuss
+              folders:
+                - { name: discuss, label: Discuss, path: discuss }
+            - name: everything-box
+              label: Everything Box
+              folders:
+                - { name: everything-box, label: Everything Box, path: everything-box }
+            - name: inference-box
+              label: Inference Box
+              folders:
+                - { name: inference-box, label: Inference Box, path: inference-box }
+            - name: media-box
+              label: Media Box
+              folders:
+                - { name: media-box, label: Media Box, path: media-box }
+            - name: qq
+              label: QQ
+              folders:
+                - { name: core, label: QQ Core, path: qq }
+                - { name: relay, label: Relay, path: qq-relay }
+                - { name: dictation, label: Dictation, path: qq-dictation }
+                - { name: newspaper, label: Newspaper, path: qq-newspaper }
+                - { name: dashboard, label: Dashboard, path: qq-dashboard }
+                - { name: image-finder, label: Image Finder, path: image-finder }
+            - name: ytgrab
+              label: YTGrab
+              folders:
+                - { name: ytgrab, label: YTGrab, path: ytgrab }
         provider: !!js process.env.QQ_DSH_PROVIDER ?? 'qwen-token-plan'
         model: !!js process.env.QQ_DSH_MODEL ?? 'deepseek-v4-pro-0813'
         reasoningEffort: !!js process.env.QQ_DSH_REASONING_EFFORT
