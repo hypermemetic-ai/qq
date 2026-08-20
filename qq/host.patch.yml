@@ -74,39 +74,39 @@
           root: !!js process.env.HOME + '/projects'
           projects:
             - name: deciq
-              label: DECIQ
+              label: deciq
               folders:
-                - { name: core, label: Core, path: deciq }
-                - { name: logic, label: Logic, path: deciq-logic }
+                - { name: core, label: core, path: deciq }
+                - { name: logic, label: logic, path: deciq-logic }
             - name: discuss
-              label: Discuss
+              label: discuss
               folders:
-                - { name: discuss, label: Discuss, path: discuss }
+                - { name: discuss, label: discuss, path: discuss }
             - name: everything-box
-              label: Everything Box
+              label: everything box
               folders:
-                - { name: everything-box, label: Everything Box, path: everything-box }
+                - { name: everything-box, label: everything box, path: everything-box }
             - name: inference-box
-              label: Inference Box
+              label: inference box
               folders:
-                - { name: inference-box, label: Inference Box, path: inference-box }
+                - { name: inference-box, label: inference box, path: inference-box }
             - name: media-box
-              label: Media Box
+              label: media box
               folders:
-                - { name: media-box, label: Media Box, path: media-box }
+                - { name: media-box, label: media box, path: media-box }
             - name: qq
-              label: QQ
+              label: qq
               folders:
-                - { name: core, label: QQ Core, path: qq }
-                - { name: relay, label: Relay, path: qq-relay }
-                - { name: dictation, label: Dictation, path: qq-dictation }
-                - { name: newspaper, label: Newspaper, path: qq-newspaper }
-                - { name: dashboard, label: Dashboard, path: qq-dashboard }
-                - { name: image-finder, label: Image Finder, path: image-finder }
+                - { name: core, label: qq core, path: qq }
+                - { name: relay, label: relay, path: qq-relay }
+                - { name: dictation, label: dictation, path: qq-dictation }
+                - { name: newspaper, label: newspaper, path: qq-newspaper }
+                - { name: dashboard, label: dashboard, path: qq-dashboard }
+                - { name: image-finder, label: image finder, path: image-finder }
             - name: ytgrab
-              label: YTGrab
+              label: ytgrab
               folders:
-                - { name: ytgrab, label: YTGrab, path: ytgrab }
+                - { name: ytgrab, label: ytgrab, path: ytgrab }
         provider: !!js process.env.QQ_DSH_PROVIDER ?? 'qwen-token-plan'
         model: !!js process.env.QQ_DSH_MODEL ?? 'deepseek-v4-pro-0813'
         reasoningEffort: !!js process.env.QQ_DSH_REASONING_EFFORT
