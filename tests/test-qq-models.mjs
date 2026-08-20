@@ -439,6 +439,205 @@ try {
     assert.doesNotMatch(redact("Authorization Bearer super-secret-token"), /super-secret-token/);
   }
 
+  const bashTool = {
+    name: "bash",
+    description: "Run a command",
+    parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
+  };
+  const readTool = {
+    name: "read",
+    description: "Read a file",
+    parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+  };
+  const grokSse = (body) => ({ ok: true, status: 200, async text() { return body; } });
+  async function grokStream(adapter, options) {
+    const streamed = [];
+    for await (const chunk of adapter.stream({
+      provider: "xai-auth",
+      model: "grok-4.6",
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      ...options,
+    })) streamed.push(chunk);
+    return streamed;
+  }
+  async function grokAdapterWith(homeName, fetchImpl) {
+    const home = join(scratch, homeName);
+    const store = createAuthStore({ env: { HOME: "/home/u", DSH_HOME: home } });
+    await store.write("grok", tokens("grok"));
+    return createGrokAdapter({ store, sleepFn: async () => {}, fetchImpl });
+  }
+
+  {
+    let captured;
+    const adapter = await grokAdapterWith("tools-outbound", async (_url, init) => {
+      captured = JSON.parse(init.body);
+      return grokSse("data: {\"text\":\"ok\"}\n\n");
+    });
+    await grokStream(adapter, {
+      system: "You are a coder.",
+      tools: [bashTool, readTool],
+      messages: [{ role: "user", content: [{ type: "text", text: "list files" }] }],
+    });
+    assert.equal(captured.store, false);
+    assert.deepEqual(captured.include, ["reasoning.encrypted_content"]);
+    assert.equal(captured.instructions, "You are a coder.");
+    assert.equal(captured.tools.length, 2);
+    assert.deepEqual(captured.tools.map((tool) => tool.type), ["function", "function"]);
+    assert.deepEqual(captured.tools.map((tool) => tool.name), ["bash", "read"]);
+    assert.equal(captured.tools[0].description, "Run a command");
+    assert.deepEqual(captured.tools[0].parameters, bashTool.parameters);
+    assert.deepEqual(captured.tools[1].parameters, readTool.parameters);
+    assert.equal(captured.tool_choice, "auto");
+    assert.equal(captured.parallel_tool_calls, true);
+    assert.equal(JSON.stringify(captured).includes("xai_grok_"), false);
+    assert.equal(JSON.stringify(captured.tools).includes("read_file"), false);
+    assert.equal(JSON.stringify(captured.input).includes("Run a command"), false);
+    assert.equal(adapter.lastRequest.url, GROK_PROXY_URL);
+  }
+
+  {
+    let captured;
+    const adapter = await grokAdapterWith("tools-empty", async (_url, init) => {
+      captured = JSON.parse(init.body);
+      return grokSse("data: {\"text\":\"ok\"}\n\n");
+    });
+    await grokStream(adapter, { tools: [] });
+    assert.equal(Object.hasOwn(captured, "tools"), false);
+    assert.equal(Object.hasOwn(captured, "tool_choice"), false);
+    assert.equal(Object.hasOwn(captured, "parallel_tool_calls"), false);
+    const omitted = await grokAdapterWith("tools-omitted", async (_url, init) => {
+      captured = JSON.parse(init.body);
+      return grokSse("data: {\"text\":\"ok\"}\n\n");
+    });
+    await grokStream(omitted, {});
+    assert.equal(Object.hasOwn(captured, "tools"), false);
+  }
+
+  {
+    const sse = [
+      "event: response.output_item.added",
+      "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_qq_1\",\"name\":\"bash\",\"arguments\":\"\"}}",
+      "",
+      "event: response.function_call_arguments.delta",
+      "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_1\",\"delta\":\"{\\\"command\\\":\\\"pwd\\\"}\"}",
+      "",
+      "event: response.output_item.done",
+      "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_qq_1\",\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"pwd\\\"}\"}}",
+      "",
+      "event: response.completed",
+      "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}",
+      "",
+      "",
+    ].join("\n");
+    const adapter = await grokAdapterWith("function-call-sse", async () => grokSse(sse));
+    const streamed = await grokStream(adapter, { tools: [bashTool] });
+    assert.ok(streamed.some((chunk) => chunk.type === "block-start" && chunk.blockType === "tool-call"));
+    assert.ok(streamed.some((chunk) => chunk.type === "tool-call-delta" && chunk.id === "call_qq_1" && chunk.name === "bash"));
+    const ended = streamed.find((chunk) => chunk.type === "block-end" && chunk.block?.type === "tool-call");
+    assert.equal(ended.block.id, "call_qq_1");
+    assert.equal(ended.block.name, "bash");
+    assert.equal(ended.block.arguments, "{\"command\":\"pwd\"}");
+    const finish = streamed.find((chunk) => chunk.type === "finish");
+    assert.equal(finish.reason.kind, "tool-calls");
+    assert.equal(streamed.some((chunk) => chunk.type === "text-delta"), false);
+    assert.equal(streamed.some((chunk) => chunk.blockType === "text"), false);
+  }
+
+  {
+    const sse = [
+      "event: response.output_text.delta",
+      "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"content_index\":0,\"delta\":\"hello\"}",
+      "",
+      "event: response.output_text.delta",
+      "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"content_index\":0,\"delta\":\" world\"}",
+      "",
+      "event: response.output_item.done",
+      "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\"}}",
+      "",
+      "event: response.completed",
+      "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}",
+      "",
+      "",
+    ].join("\n");
+    const adapter = await grokAdapterWith("responses-text", async () => grokSse(sse));
+    const streamed = await grokStream(adapter);
+    const text = streamed.filter((chunk) => chunk.type === "text-delta").map((chunk) => chunk.text).join("");
+    assert.equal(text, "hello world");
+    const ended = streamed.find((chunk) => chunk.type === "block-end" && chunk.block?.type === "text");
+    assert.equal(ended.block.text, "hello world");
+    assert.equal(streamed.find((chunk) => chunk.type === "finish").reason.kind, "stop");
+    assert.equal(streamed.some((chunk) => chunk.blockType === "tool-call"), false);
+  }
+
+  {
+    let captured;
+    const adapter = await grokAdapterWith("tool-history", async (_url, init) => {
+      captured = JSON.parse(init.body);
+      return grokSse("data: {\"text\":\"ok\"}\n\n");
+    });
+    await grokStream(adapter, {
+      messages: [
+        { role: "user", content: [{ type: "text", text: "pwd" }] },
+        {
+          role: "assistant",
+          content: [{ type: "tool-call", id: "call_qq_1", name: "bash", arguments: "{\"command\":\"pwd\"}" }],
+        },
+        {
+          role: "user",
+          content: [{ type: "tool-result", toolCallId: "call_qq_1", content: [{ type: "text", text: "/work" }] }],
+        },
+      ],
+    });
+    const call = captured.input.find((item) => item.type === "function_call");
+    const result = captured.input.find((item) => item.type === "function_call_output");
+    assert.equal(call.call_id, "call_qq_1");
+    assert.equal(call.name, "bash");
+    assert.equal(call.arguments, "{\"command\":\"pwd\"}");
+    assert.equal(result.call_id, "call_qq_1");
+    assert.equal(result.output, "/work");
+  }
+
+  {
+    const kilo = "<<<<<<0/.a6call_kilo_tool_name_grep path /work<|eos|>";
+    const adapter = await grokAdapterWith("kilo-xml", async () => grokSse(`data: {"text":${JSON.stringify(kilo)}}\n\n`));
+    const streamed = await grokStream(adapter);
+    assert.ok(streamed.some((chunk) => chunk.type === "text-delta" && chunk.text === kilo));
+    assert.equal(streamed.some((chunk) => chunk.type === "tool-call-delta" || chunk.blockType === "tool-call"), false);
+    assert.equal(streamed.find((chunk) => chunk.type === "finish").reason.kind, "stop");
+  }
+
+  {
+    const home = join(scratch, "tools-401-retry");
+    const store = createAuthStore({ env: { HOME: "/home/u", DSH_HOME: home }, now: () => 1_000 });
+    await store.write("grok", tokens("grok", { expires: 10_000_000 }));
+    const bodies = [];
+    const adapter = createGrokAdapter({
+      store,
+      now: () => 1_000,
+      sleepFn: async () => {},
+      fetchImpl: async (url, init) => {
+        const target = String(url);
+        if (target.includes("oauth2/token")) {
+          return jsonResponse({
+            access_token: "after-refresh",
+            refresh_token: "rotated",
+            expires_in: 3600,
+          });
+        }
+        bodies.push(JSON.parse(init.body));
+        if (init.headers?.Authorization === "Bearer access-grok") return jsonResponse("nope", 401);
+        return grokSse("data: {\"text\":\"ok\"}\n\n");
+      },
+    });
+    await grokStream(adapter, { tools: [bashTool] });
+    assert.equal(bodies.length, 2);
+    for (const body of bodies) {
+      assert.equal(body.tools[0].name, "bash");
+      assert.equal(body.tool_choice, "auto");
+      assert.equal(body.parallel_tool_calls, true);
+    }
+  }
+
   {
     const home = join(scratch, "codex-stream");
     const store = createAuthStore({ env: { HOME: "/home/u", DSH_HOME: home } });
