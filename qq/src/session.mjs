@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { createAliasBook, defaultAliasFile, defaultLegacyAliasFile } from "./alias.mjs";
+import { deriveToolEventViews, projectConversation } from "./conversation.mjs";
 
 const SESSION_ID = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEFAULT_OBSERVE_MS = 100;
@@ -204,6 +205,9 @@ export function snapshotFingerprint(snapshot) {
   const events = Array.isArray(snapshot?.events) ? snapshot.events : [];
   const last = events.at(-1);
   const sessions = Array.isArray(snapshot?.sessions) ? snapshot.sessions : [];
+  const pending = Array.isArray(snapshot?.conversation?.pending)
+    ? snapshot.conversation.pending
+    : [];
   return JSON.stringify([
     snapshot?.id,
     snapshot?.project,
@@ -212,6 +216,7 @@ export function snapshotFingerprint(snapshot) {
     last?.seq,
     last?.type,
     last?.data?.reason?.kind,
+    pending.map((item) => [item.id, item.target, item.text]),
     sessions.map((session) => [session.id, session.createdAt, session.alias, session.project]),
     snapshot?.alias,
   ]);
@@ -541,9 +546,30 @@ export function createQqService(ctx, config) {
     const agent = await liveAgent(sessionId);
     const row = rowFor(agent);
     const alias = liveAlias(agent.session.id);
+    const events = agent.session.events;
+    let toolViews;
+    try {
+      const tools = ctx.get("tools", false);
+      toolViews = deriveToolEventViews(events, tools, agent, (error, event) => {
+        ctx.logger?.warn?.(`qq: tool presenter failed at seq ${String(event?.seq)}: ${String(error)}`);
+      });
+    } catch {
+      // Tool presentation is optional. Raw call/result content remains complete.
+    }
+    const conversation = projectConversation(events, {
+      seedLength: agent.session.header?.seedLength,
+      inbox: agent.inbox,
+      toolViews,
+    });
     return {
       id: agent.session.id,
-      events: agent.session.events,
+      events,
+      conversation,
+      canMutatePending: Boolean(
+        agent.inbox
+        && typeof agent.inbox.replace === "function"
+        && typeof agent.inbox.remove === "function"
+      ),
       agentStatus: agent.status,
       cwd: row.cwd,
       project: row.project,
@@ -719,9 +745,48 @@ export function createQqService(ctx, config) {
         }
         return typeof result?.text === "string" ? result.text : "";
       }
-      agent.followup(userMessage(text));
-      await waitForIdle(agent, () => agents.get(sessionId) ?? agent);
+      const message = userMessage(line);
+      const mode = agent.status === "running" ? "steer" : "followup";
+      if (mode === "steer") agent.steer(message);
+      else agent.followup(message);
+      // followup()/steer() durably append their inbox splice synchronously. Flush
+      // that admission and return; the Agent owns later claim and turn progress.
       await sessions.flush(agent.session);
+      return { kind: "accepted", mode, messageId: message.id };
+    },
+    async editPending(sessionId, messageId, text) {
+      await boot;
+      const agent = await liveAgent(sessionId);
+      const inbox = agent.inbox;
+      if (!inbox || typeof inbox.replace !== "function") {
+        throw httpError(501, "qq: pending message editing is unavailable");
+      }
+      const id = String(messageId ?? "");
+      const message = [...(inbox.nextTurn ?? []), ...(inbox.nextStep ?? [])]
+        .find((candidate) => String(candidate?.id ?? "") === id);
+      if (!message) throw httpError(409, "qq: pending message is no longer available");
+      const nextText = String(text ?? "");
+      if (!nextText.trim()) throw httpError(422, "Pending message must not be empty");
+      if (nextText.length > 32_768) throw httpError(413, "Pending message exceeds 32,768 characters");
+      const replacement = freeze({ ...message, content: [{ type: "text", text: nextText }] });
+      if (!inbox.replace(message.id, replacement)) {
+        throw httpError(409, "qq: pending message is no longer available");
+      }
+      await sessions.flush(agent.session);
+      return { accepted: true, messageId: replacement.id };
+    },
+    async removePending(sessionId, messageId) {
+      await boot;
+      const agent = await liveAgent(sessionId);
+      const inbox = agent.inbox;
+      if (!inbox || typeof inbox.remove !== "function") {
+        throw httpError(501, "qq: pending message removal is unavailable");
+      }
+      if (!inbox.remove(String(messageId ?? ""))) {
+        throw httpError(409, "qq: pending message is no longer available");
+      }
+      await sessions.flush(agent.session);
+      return { accepted: true };
     },
     async interrupt(sessionId) {
       await boot;
@@ -731,11 +796,9 @@ export function createQqService(ctx, config) {
         : false;
       const agent = await liveAgent(sessionId);
       const wasRunning = agent.status === "running";
-      agent.cancel({ kind: "user" });
-      if (wasRunning) {
-        await waitForIdle(agent, () => agents.get(sessionId) ?? agent);
-        await sessions.flush(agent.session);
-      }
+      agent.cancel({ kind: "user" }, { keepInbox: true });
+      // Cancellation follows the DSH Host admission contract: return after the
+      // signal is accepted. The loop owns turn settlement and its checkpoint.
       return wasRunning || abortedFind;
     },
     close,

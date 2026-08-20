@@ -180,6 +180,21 @@ post_prompt() {
     "$origin/qq/project/qq/session/$primary_id/prompt" >"$work/$name.html"
 }
 
+wait_ready() {
+  local name=$1
+  local text=$2
+  for _ in {1..400}; do
+    curl -fsS --max-time 2 "$origin/qq/project/qq/session/$primary_id" >"$work/$name.settled.html" 2>/dev/null || true
+    if grep -Fq "$text" "$work/$name.settled.html" 2>/dev/null \
+      && grep -Fq 'status-ready' "$work/$name.settled.html" 2>/dev/null; then
+      return
+    fi
+    sleep 0.05
+  done
+  echo "test-qq-workflows-boot: timed out waiting for '$text' to settle" >&2
+  exit 1
+}
+
 post_prompt select '/workflows architect'
 [[ ! -f $work/llm-requests.jsonl ]] || ! grep -Fq '/workflows architect' "$work/llm-requests.jsonl" || {
   echo "test-qq-workflows-boot: /workflows architect was sent to the model" >&2
@@ -232,7 +247,7 @@ if (profiles.scribe?.model === "test-model" || profiles.scribe?.provider === "te
 NODE
 
 post_prompt talk 'Reply with exactly workflows-boot and nothing else.'
-grep -Fq 'workflows-boot' "$work/talk.html"
+wait_ready talk 'workflows-boot'
 
 node - "$work/llm-requests.jsonl" "$DSH_HOME" "$primary_id" <<'NODE'
 const { readFileSync, readdirSync, statSync } = require("node:fs");
@@ -310,7 +325,7 @@ if (settings.iterate?.roles?.desk?.model !== "desk-model") {
 NODE
 
 post_prompt iter_talk 'Reply with exactly iterate-boot and nothing else.'
-grep -Fq 'iterate-boot' "$work/iter_talk.html"
+wait_ready iter_talk 'iterate-boot'
 
 node - "$work/llm-requests.jsonl" <<'NODE'
 const { readFileSync } = require("node:fs");

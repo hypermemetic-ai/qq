@@ -1,9 +1,17 @@
 # `@hypermemetic-ai/qq`
 
 Presentation-neutral Cordis service over DSH Agents and sessions. This package
-owns list, read, create, prompt, interrupt, status/change observation, and the
-live session number book. It contains no HTML, routes, CSS, htmx, or browser
-assumptions.
+owns list, read, create, prompt/steer admission, pending-inbox mutation,
+interrupt, status/change observation, the deterministic conversation
+projection, and the live session number book. It contains no HTML, routes, CSS,
+htmx, or browser assumptions.
+
+`read()` projects the DSH event log and live durable inbox into `conversation`.
+The projection is rebuilt from DSH authority on every read; it is not another
+transcript store. Idle text uses `agent.followup`, busy text uses `agent.steer`,
+and both return after the inbox splice is flushed instead of waiting for the
+Agent to become idle. Pending edit/remove preserve DSH FIFO placement and
+MessageIds through `agent.inbox`, while interrupt uses `keepInbox: true`.
 
 Live sessions wear a short number (`1 2 3 4 9 10 12 20 40 80`, then strange,
 then integers above 100). The book is schema `qq.alias/v1`, persisted at

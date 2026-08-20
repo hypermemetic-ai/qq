@@ -43,12 +43,43 @@ function fakeAgent(state) {
   let timer;
   let settle;
   let activity = Promise.resolve();
+  const nextTurn = [];
+  const nextStep = [];
+  const splice = (target, start, deleteCount, inserted, outcome) => {
+    append(state, "agent/inbox/spliced", {
+      target,
+      start,
+      ...(deleteCount ? { removedCount: deleteCount } : {}),
+      inserted,
+      ...(outcome ? { outcome } : {}),
+    });
+    return (target === "next-turn" ? nextTurn : nextStep).splice(start, deleteCount, ...inserted);
+  };
+  const inbox = {
+    get nextTurn() { return nextTurn; },
+    get nextStep() { return nextStep; },
+    replace(id, replacement) {
+      for (const [target, list] of [["next-turn", nextTurn], ["next-step", nextStep]]) {
+        const at = list.findIndex((candidate) => candidate.id === id);
+        if (at >= 0) { splice(target, at, 1, [replacement], "canceled"); return true; }
+      }
+      return false;
+    },
+    remove(id) {
+      for (const [target, list] of [["next-turn", nextTurn], ["next-step", nextStep]]) {
+        const at = list.findIndex((candidate) => candidate.id === id);
+        if (at >= 0) { splice(target, at, 1, [], "canceled"); return true; }
+      }
+      return false;
+    },
+  };
   return {
     session: {
       id: state.id,
       events: state.events,
       header: { createdAt: state.createdAt, cwd: projectCwd },
     },
+    inbox,
     get status() { return status; },
     followup(message) {
       assert.equal(status, "idle");
@@ -58,27 +89,35 @@ function fakeAgent(state) {
       append(state, "user/message", message, "append");
       activity = new Promise((resolveActivity) => {
         settle = resolveActivity;
+        const turn = state.turn;
         const delay = message.content[0].text.includes("interrupt") ? 5_000 : 180;
         timer = setTimeout(() => {
           append(state, "assistant/message", {
-            turn: state.turn,
+            turn,
             step: 1,
             message: {
-              id: `assistant-${state.id}-${state.turn}`,
+              id: `assistant-${state.id}-${turn}`,
               role: "assistant",
               source: { kind: "model", provider: "local", model: "proof" },
-              content: [{ type: "text", text: `Durable reply ${state.turn}: ${message.content[0].text}` }],
+              content: [{ type: "text", text: `Durable reply ${turn}: ${message.content[0].text}` }],
             },
           }, "append");
-          append(state, "turn/end", { turn: state.turn, reason: { kind: "completed" } });
+          const steering = splice("next-step", 0, nextStep.length, []);
+          for (const steered of steering) append(state, "user/message", steered, "append");
+          append(state, "turn/end", { turn, reason: { kind: "completed" } });
           status = "idle";
           settle = undefined;
           resolveActivity();
         }, delay);
       });
     },
-    cancel(cause) {
+    steer(message) {
+      assert.equal(status, "running");
+      splice("next-step", nextStep.length, 0, [message]);
+    },
+    cancel(cause, options) {
       assert.deepEqual(cause, { kind: "user" });
+      assert.deepEqual(options, { keepInbox: true });
       if (status !== "running") return;
       clearTimeout(timer);
       append(state, "turn/end", { turn: state.turn, reason: { kind: "aborted", reason: cause } });
@@ -1306,7 +1345,9 @@ try {
   });
   const running = await stream.waitFor(/<form id="interrupt-form"/, mark);
   assert.match(running, /Running turn 1/);
-  assert.doesNotMatch(running, /<form id="composer"/);
+  assert.match(running, /<form id="composer" class="composer composer-running"/);
+  assert.match(running, /id="composer-submit"[^>]*>Send/);
+  assert.match(running, /id="interrupt-submit"[^>]*>Interrupt/);
   mark = stream.checkpoint();
   const completed = await stream.waitFor(/Durable reply 1/, mark);
   assert.match(completed, /home handoff &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
@@ -1325,10 +1366,30 @@ try {
   mark = stream.checkpoint();
   const longPostPromise = post(primaryId, "prompt", { prompt: "please interrupt this turn" });
   await stream.waitFor(/<form id="interrupt-form"/, mark);
+  const steerOne = await post(primaryId, "prompt", { prompt: "pending steer one" });
+  const steerTwo = await post(primaryId, "prompt", { prompt: "pending steer two" });
+  assert.match(steerOne.body, /id="pending-queue"/);
+  assert.match(steerTwo.body, /pending steer one/);
+  assert.match(steerTwo.body, /pending steer two/);
+  const pendingIds = [...steerTwo.body.matchAll(/<li class="queue-item" data-message-id="([^"]+)"/g)].map((match) => match[1]);
+  assert.equal(pendingIds.length, 2);
+  const editedPending = await post(primaryId, "queue", {
+    operation: "edit",
+    itemId: pendingIds[0],
+    text: "pending steer one edited",
+  });
+  assert.match(editedPending.body, /pending steer one edited/);
+  assert.doesNotMatch(editedPending.body, />pending steer one</);
+  const removedPending = await post(primaryId, "queue", { operation: "remove", itemId: pendingIds[1] });
+  assert.match(removedPending.body, /pending steer one edited/);
+  assert.doesNotMatch(removedPending.body, /pending steer two/);
   const interrupted = await post(primaryId, "interrupt");
   assert.equal(interrupted.status, 200);
   assert.match(interrupted.body, /Interrupt requested for the running DSH turn/);
   assert.match(interrupted.body, /Last turn interrupted/);
+  assert.match(interrupted.body, /pending steer one edited/, "interrupt keeps pending DSH inbox rows");
+  const clearedPending = await post(primaryId, "queue", { operation: "remove", itemId: pendingIds[0] });
+  assert.doesNotMatch(clearedPending.body, /pending steer one edited/);
   const longPost = await longPostPromise;
   assert.equal(longPost.status, 200);
 

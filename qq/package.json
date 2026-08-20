@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/plugin.mjs",
     "./session": "./src/session.mjs",
+    "./conversation": "./src/conversation.mjs",
     "./alias": "./src/alias.mjs",
     "./ask": "./src/ask.mjs"
   },
