@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createConsoleHandler, internals as httpInternals } from "../qq-ui/src/http-app.mjs";
 import { renderSessionContent } from "../qq-ui/src/render.mjs";
-import { MAX_READABLE_FILE_BYTES } from "../qq/src/files.mjs";
+import { createProjectFileService, MAX_READABLE_FILE_BYTES } from "../qq/src/files.mjs";
 import {
   compareSessionRecency,
   createQqService,
@@ -23,10 +23,13 @@ const gammaId = "session-63a11000-0000-4000-8000-0000000000c3";
 const childId = "session-63a11000-0000-4000-8000-0000000000d4";
 const nestedId = "session-63a11000-0000-4000-8000-0000000000e5";
 const persistedOnly = "session-63a11000-0000-4000-8000-0000000000f6";
+const groupedCoreId = "session-73a11000-0000-4000-8000-0000000000a7";
+const groupedLogicId = "session-73a11000-0000-4000-8000-0000000000b8";
 
 const projects = makeProjectsHome("alpha");
 const alphaCwd = projects.cwd;
 const betaCwd = addProject(projects.root, "beta");
+mkdirSync(join(projects.root, ".agents"));
 mkdirSync(join(alphaCwd, "nested"));
 mkdirSync(join(alphaCwd, "nested", "deeper"));
 writeFileSync(join(alphaCwd, "README.md"), "# Alpha\n\n<script>nope</script>\n");
@@ -35,10 +38,13 @@ writeFileSync(join(alphaCwd, "nested", "sample.js"), "const answer = 42;\n");
 writeFileSync(join(alphaCwd, "manual.pdf"), Buffer.from("%PDF-1.4 proof"));
 writeFileSync(join(alphaCwd, "mystery.bin"), Buffer.from([0, 1, 2, 3]));
 writeFileSync(join(alphaCwd, "huge.txt"), "x".repeat(MAX_READABLE_FILE_BYTES + 1));
+writeFileSync(join(betaCwd, "logic.js"), "export const logical = true;\n");
+writeFileSync(join(betaCwd, "logic.pdf"), Buffer.from("%PDF-1.4 logic"));
 const outside = makeProjectsHome("escape");
 writeFileSync(join(outside.cwd, "secret.txt"), "outside\n");
 symlinkSync(outside.cwd, join(projects.root, "escaped"));
 symlinkSync(outside.cwd, join(alphaCwd, "escape-link"));
+symlinkSync(betaCwd, join(alphaCwd, "beta-link"));
 writeFileSync(join(projects.root, "file.txt"), "nope");
 
 let emptyRoot;
@@ -47,7 +53,94 @@ try {
   assert.equal(resolveProjectsRoot(projects.root), projects.root);
   const catalog = listProjectCatalog(projects.root);
   assert.deepEqual(catalog.map((row) => row.name), ["alpha", "beta"]);
+  assert.equal(catalog.find((row) => row.name === ".agents"), undefined);
   assert.equal(catalog.find((row) => row.name === "escaped"), undefined);
+  assert.deepEqual(catalog[0].folders, [{ name: "alpha", label: "alpha", cwd: alphaCwd }]);
+
+  const groupedRegistration = {
+    root: projects.root,
+    projects: [
+      {
+        name: "suite",
+        label: "Suite",
+        folders: [
+          { name: "core", label: "Core", path: "alpha" },
+          { name: "logic", label: "Logic", path: "beta" },
+          { name: "missing", label: "Missing plugin", path: "missing-plugin" },
+        ],
+      },
+      {
+        name: "hidden",
+        label: "Hidden",
+        folders: [{ name: "agents", label: "Agents", path: ".agents" }],
+      },
+      {
+        name: "optional",
+        label: "Optional",
+        folders: [{ name: "optional", label: "Optional", path: "not-installed" }],
+      },
+    ],
+  };
+  const groupedCatalog = listProjectCatalog(projects.root, groupedRegistration);
+  assert.deepEqual(groupedCatalog.map((row) => row.name), ["suite"]);
+  assert.equal(groupedCatalog[0].label, "Suite");
+  assert.equal(groupedCatalog[0].grouped, true);
+  assert.deepEqual(groupedCatalog[0].folders.map((folder) => folder.label), ["Core", "Logic"]);
+  assert.deepEqual(
+    listProjectCatalog(projects.root, { ...groupedRegistration, root: outside.root }).map((row) => row.name),
+    ["alpha", "beta"],
+    "a catalog scoped to another root preserves automatic immediate-child discovery",
+  );
+  assert.deepEqual(
+    listProjectCatalog(projects.root, { ...groupedRegistration, root: join(tmpdir(), "qq-missing-operator-root") })
+      .map((row) => row.name),
+    ["alpha", "beta"],
+    "an absent production catalog root does not break an alternate projectsRoot",
+  );
+  assert.throws(() => listProjectCatalog(projects.root, {
+    projects: [{
+      name: "escape",
+      folders: [{ name: "escape", path: "escaped" }],
+    }],
+  }), /registered folder escape escapes projectsRoot/);
+  assert.throws(() => listProjectCatalog(projects.root, {
+    projects: [
+      { name: "one", folders: [{ name: "core", path: "alpha" }] },
+      { name: "two", folders: [{ name: "core", path: "alpha" }] },
+    ],
+  }), /registered by both one and two/);
+
+  const groupedFiles = createProjectFileService(projects.root, () => groupedCatalog);
+  assert.deepEqual(groupedFiles.listProjectFiles().entries, [{
+    name: "Suite", type: "project", project: "suite",
+  }]);
+  const groupedRoot = groupedFiles.listProjectFiles("suite");
+  assert.deepEqual(groupedRoot.entries.map((entry) => entry.name), ["Core", "Logic"]);
+  assert.deepEqual(groupedRoot.entries.map((entry) => entry.path), ["core", "logic"]);
+  assert.deepEqual(groupedRoot.entries.map((entry) => entry.primary), [true, false]);
+  const groupedLogic = groupedFiles.listProjectFiles("suite", "logic");
+  assert.deepEqual(groupedLogic.breadcrumbs.map((crumb) => crumb.name), ["projects", "Suite", "Logic"]);
+  assert.equal(groupedLogic.entries.some((entry) => entry.path === "logic/logic.js"), true);
+  assert.equal(groupedFiles.readProjectFile("suite", "core/README.md").text.startsWith("# Alpha"), true);
+  assert.equal(groupedFiles.readProjectFile("suite", "logic/logic.js").text, "export const logical = true;\n");
+  assert.equal(groupedFiles.openProjectFile("suite", "logic/logic.pdf").body.toString(), "%PDF-1.4 logic");
+  assert.throws(
+    () => groupedFiles.listProjectFiles("suite", "core/beta-link"),
+    /escapes the selected project/,
+    "directory listing cannot cross from one registered folder to another",
+  );
+  assert.throws(
+    () => groupedFiles.readProjectFile("suite", "core/beta-link/logic.js"),
+    /escapes the selected project/,
+    "text reads cannot cross from one registered folder to another",
+  );
+  assert.throws(
+    () => groupedFiles.openProjectFile("suite", "core/beta-link/logic.pdf"),
+    /escapes the selected project/,
+    "binary opens cannot cross from one registered folder to another",
+  );
+  assert.throws(() => groupedFiles.listProjectFiles("suite", "core/../logic"), /canonical and project-relative/);
+  assert.throws(() => groupedFiles.listProjectFiles("suite", "unknown"), /project folder not found/);
 
   emptyRoot = mkdtempSync(join(tmpdir(), "qq-projects-empty."));
   const bare = { get() { return undefined; } };
@@ -65,6 +158,90 @@ try {
     provider: "qwen-token-plan",
     model: "deepseek-v4-pro-0813",
   }), /cwd must equal one project root/);
+
+  const groupedLive = new Map();
+  const groupedPersisted = new Map();
+  const groupedCreates = [];
+  const groupedResumes = [];
+  const groupedDisposed = [];
+
+  function groupedAgent(id, cwd, createdAt) {
+    const agent = {
+      session: { id, events: [], header: { cwd, createdAt } },
+      status: "idle",
+      followup() {},
+      cancel() {},
+      whenIdle: async () => {},
+    };
+    groupedLive.set(id, agent);
+    groupedPersisted.set(id, { id, cwd, createdAt });
+    attachHandle(agent, async () => {
+      groupedDisposed.push(id);
+      groupedLive.delete(id);
+    });
+    return agent;
+  }
+
+  groupedAgent(groupedCoreId, alphaCwd, 10);
+  groupedAgent(groupedLogicId, betaCwd, 20);
+  const groupedCtx = {
+    get(name) {
+      if (name === "agents") {
+        return {
+          get: (id) => groupedLive.get(id),
+          list: () => [...groupedLive.values()],
+          async create(options) {
+            groupedCreates.push(options);
+            const agent = groupedAgent(options.sessionId, options.meta.cwd, Date.now());
+            return agent[Symbol.for("@hypermemetic-ai/qq/agent-handle")];
+          },
+          async resume(options) {
+            groupedResumes.push(options.resumeSessionId);
+            throw new Error("grouped sessions must not resume during navigation");
+          },
+        };
+      }
+      if (name === "sessions") return { async flush() {} };
+      if (name === "sessionPersistence") {
+        return { async list() { return [...groupedPersisted.values()]; } };
+      }
+      if (name === "loader") return { async await() {} };
+      return undefined;
+    },
+  };
+  const groupedQq = createQqService(groupedCtx, {
+    sessionId: groupedLogicId,
+    cwd: betaCwd,
+    projectsRoot: projects.root,
+    projectCatalog: groupedRegistration,
+    provider: "qwen-token-plan",
+    model: "deepseek-v4-pro-0813",
+  });
+  assert.equal(groupedQq.defaultProject, "suite", "a secondary registered folder can be the boot cwd");
+  assert.deepEqual(groupedQq.listProjects().map((project) => project.name), ["suite"]);
+  const groupedRows = await groupedQq.list("suite");
+  assert.deepEqual(new Set(groupedRows.map((row) => row.id)), new Set([groupedCoreId, groupedLogicId]));
+  assert.equal(groupedRows.every((row) => row.project === "suite" && row.projectLabel === "Suite"), true);
+  const groupedSnapshot = await groupedQq.read(groupedLogicId);
+  assert.equal(groupedSnapshot.cwd, betaCwd);
+  assert.equal(groupedSnapshot.project, "suite");
+  assert.equal(groupedSnapshot.projectLabel, "Suite");
+
+  const primaryCreated = await groupedQq.create("suite");
+  assert.equal(primaryCreated.cwd, alphaCwd, "creating from a logical project route uses its primary folder");
+  const createdFromLogic = await groupedQq.prompt(groupedLogicId, "/new");
+  assert.equal(createdFromLogic.action, "create");
+  assert.equal(createdFromLogic.cwd, betaCwd, "/new stays in the selected session's registered folder");
+  assert.equal(groupedLive.has(groupedLogicId), true, "/new leaves the selected session live");
+  const clearedLogic = await groupedQq.prompt(groupedLogicId, "/clear");
+  assert.equal(clearedLogic.action, "replace");
+  assert.equal(clearedLogic.cwd, betaCwd, "/clear stays in the selected session's registered folder");
+  assert.equal(groupedLive.has(groupedLogicId), false);
+  assert.equal(groupedPersisted.has(groupedLogicId), true, "/clear preserves durable history");
+  assert.equal(groupedLive.has(groupedCoreId), true, "folder-local lifecycle leaves sibling folder sessions alone");
+  assert.deepEqual(groupedCreates.map((entry) => entry.meta.cwd), [alphaCwd, betaCwd, betaCwd]);
+  assert.deepEqual(groupedResumes, [], "catalog and lifecycle navigation never resume a session");
+  assert.equal(groupedDisposed.includes(groupedLogicId), true);
 
   const live = new Map();
   const persisted = new Map([
@@ -368,10 +545,20 @@ try {
     assert.match(projectsDrawer.body, /aria-label="Open project alpha"/);
     assert.match(projectsDrawer.body, /aria-label="Open project beta"/);
 
-    const createsBeforeProjectChoice = creates.length;
+    const lifecycleBeforeProjectChoice = {
+      creates: creates.length,
+      disposed: disposed.length,
+      resumes: resumes.length,
+      live: live.size,
+    };
     const betaChoice = await request("/qq/project/beta?drawer=");
     assert.equal(betaChoice.status, 200);
-    assert.equal(creates.length, createsBeforeProjectChoice, "choosing a project never creates a session");
+    assert.deepEqual({
+      creates: creates.length,
+      disposed: disposed.length,
+      resumes: resumes.length,
+      live: live.size,
+    }, lifecycleBeforeProjectChoice, "choosing a project is URL-only and changes no session lifecycle");
     assert.match(betaChoice.body, /no live sessions/);
 
     const markdownView = await request("/qq/project/alpha/file/README.md");

@@ -101,11 +101,132 @@ function canonicalPath(value, label) {
   }
 }
 
+function contained(root, candidate) {
+  const rel = relative(root, candidate);
+  if (!rel || rel === ".") return true;
+  if (isAbsolute(rel)) return false;
+  return !rel.split(sep).includes("..");
+}
+
 function isImmediateChild(root, candidate) {
   const rel = relative(root, candidate);
   if (!rel || rel === "." || isAbsolute(rel)) return false;
   const segments = rel.split(sep);
   return !segments.includes("..") && segments.length === 1;
+}
+
+function registrationName(value, label) {
+  const name = String(value ?? "");
+  if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/u.test(name)) {
+    throw new Error(`qq: ${label} must be a lowercase route name`);
+  }
+  return name;
+}
+
+function configuredCatalog(root, registration) {
+  if (registration === undefined || registration === null) return undefined;
+  const config = Array.isArray(registration)
+    ? { projects: registration }
+    : registration;
+  if (!config || typeof config !== "object" || !Array.isArray(config.projects)) {
+    throw new Error("qq: projectCatalog must contain a projects array");
+  }
+  if (config.root !== undefined) {
+    if (typeof config.root !== "string" || !config.root.startsWith("/")) {
+      throw new Error("qq: projectCatalog.root must be an absolute path");
+    }
+    let registeredRoot;
+    try {
+      registeredRoot = realpathSync(config.root);
+    } catch {
+      // A root-scoped production catalog must not interfere with an alternate
+      // projectsRoot when the ordinary operator root is absent there.
+      return undefined;
+    }
+    if (registeredRoot !== root) return undefined;
+  }
+  return config.projects;
+}
+
+function hiddenRootPath(root, candidate) {
+  const rel = relative(root, candidate);
+  if (!rel || rel === "." || isAbsolute(rel)) return false;
+  return rel.split(sep)[0].startsWith(".");
+}
+
+function listRegisteredProjects(root, registrations) {
+  const projects = [];
+  const projectNames = new Set();
+  const registeredCwds = new Map();
+  for (const registration of registrations) {
+    if (!registration || typeof registration !== "object") {
+      throw new Error("qq: each project registration must be an object");
+    }
+    const name = registrationName(registration.name, "project name");
+    if (projectNames.has(name)) throw new Error(`qq: duplicate project registration ${name}`);
+    projectNames.add(name);
+    const label = String(registration.label ?? name).trim();
+    if (!label) throw new Error(`qq: project ${name} must have a label`);
+    const configuredFolders = Array.isArray(registration.folders) ? registration.folders : [];
+    if (configuredFolders.length === 0) {
+      throw new Error(`qq: project ${name} must register at least one folder`);
+    }
+    const folders = [];
+    const folderNames = new Set();
+    for (const registrationFolder of configuredFolders) {
+      if (!registrationFolder || typeof registrationFolder !== "object") {
+        throw new Error(`qq: project ${name} has an invalid folder registration`);
+      }
+      const folderName = registrationName(registrationFolder.name, `folder name in ${name}`);
+      if (folderNames.has(folderName)) throw new Error(`qq: duplicate folder ${folderName} in project ${name}`);
+      folderNames.add(folderName);
+      const folderLabel = String(registrationFolder.label ?? folderName).trim();
+      if (!folderLabel) throw new Error(`qq: folder ${folderName} in ${name} must have a label`);
+      const path = String(registrationFolder.path ?? "");
+      if (!path || path.includes("\0")) {
+        throw new Error(`qq: folder ${folderName} in ${name} must have a path`);
+      }
+      const listed = isAbsolute(path) ? resolve(path) : resolve(root, path);
+      if (!contained(root, listed) || listed === root) {
+        throw new Error(`qq: registered folder ${folderName} escapes projectsRoot`);
+      }
+      if (hiddenRootPath(root, listed)) continue;
+      let cwd;
+      try {
+        cwd = realpathSync(listed);
+      } catch {
+        // Registrations may describe optional plugins that are not installed.
+        continue;
+      }
+      if (!contained(root, cwd) || cwd === root) {
+        throw new Error(`qq: registered folder ${folderName} escapes projectsRoot`);
+      }
+      if (hiddenRootPath(root, cwd)) continue;
+      let info;
+      try {
+        info = lstatSync(cwd);
+      } catch {
+        continue;
+      }
+      if (!info.isDirectory()) continue;
+      const owner = registeredCwds.get(cwd);
+      if (owner) {
+        throw new Error(`qq: project folder ${cwd} is registered by both ${owner} and ${name}`);
+      }
+      registeredCwds.set(cwd, name);
+      folders.push({ name: folderName, label: folderLabel, cwd });
+    }
+    if (folders.length === 0) continue;
+    projects.push({
+      name,
+      label,
+      cwd: folders[0].cwd,
+      folders,
+      grouped: configuredFolders.length > 1,
+    });
+  }
+  projects.sort((left, right) => left.label.localeCompare(right.label) || left.name.localeCompare(right.name));
+  return projects;
 }
 
 /** Resolve the configured projects root; production default is ${HOME}/projects. */
@@ -123,11 +244,14 @@ export function resolveProjectsRoot(value, env = process.env) {
 }
 
 /**
- * Immediate non-escaping directories under projectsRoot. A symlink whose
- * canonical path leaves the root is not a project.
+ * Logical operator projects. With an explicit catalog, each project can own
+ * several registered folders. Without one, visible immediate directories are
+ * treated as one-folder projects. Symlinks may never leave projectsRoot.
  */
-export function listProjectCatalog(projectsRoot) {
+export function listProjectCatalog(projectsRoot, registration) {
   const root = canonicalPath(projectsRoot, "projectsRoot");
+  const registrations = configuredCatalog(root, registration);
+  if (registrations) return listRegisteredProjects(root, registrations);
   let entries;
   try {
     entries = readdirSync(root, { withFileTypes: true });
@@ -138,7 +262,7 @@ export function listProjectCatalog(projectsRoot) {
   const seen = new Set();
   for (const entry of entries) {
     const name = entry.name;
-    if (!name || name === "." || name === "..") continue;
+    if (!name || name.startsWith(".")) continue;
     const listed = join(root, name);
     let info;
     try {
@@ -157,7 +281,13 @@ export function listProjectCatalog(projectsRoot) {
     const key = `${name}\0${cwd}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    projects.push({ name, cwd });
+    projects.push({
+      name,
+      label: name,
+      cwd,
+      folders: [{ name, label: name, cwd }],
+      grouped: false,
+    });
   }
   projects.sort((left, right) => left.name.localeCompare(right.name) || left.cwd.localeCompare(right.cwd));
   return projects;
@@ -313,14 +443,22 @@ export function createQqService(ctx, config) {
   });
 
   const projectsRoot = resolveProjectsRoot(config.projectsRoot);
-  const projects = listProjectCatalog(projectsRoot);
+  const projectCatalog = config.projectCatalog;
+  const projects = listProjectCatalog(projectsRoot, projectCatalog);
   if (projects.length === 0) {
     throw new Error("qq: projectsRoot has no operator projects");
   }
   const bootCwd = canonicalPath(config.cwd, "cwd");
-  const bootProject = projects.find((project) => project.cwd === bootCwd);
+  let bootProject;
+  for (const project of projects) {
+    const folder = (project.folders ?? [project]).find((entry) => entry.cwd === bootCwd);
+    if (folder) {
+      bootProject = { ...project, cwd: folder.cwd, folder };
+      break;
+    }
+  }
   if (!bootProject) {
-    throw new Error("qq: cwd must equal one project root");
+    throw new Error("qq: cwd must equal one project root or registered folder");
   }
   const defaultProject = bootProject.name;
 
@@ -348,7 +486,7 @@ export function createQqService(ctx, config) {
   }
 
   function catalog() {
-    return listProjectCatalog(projectsRoot);
+    return listProjectCatalog(projectsRoot, projectCatalog);
   }
 
   const projectFiles = createProjectFileService(projectsRoot, catalog, {
@@ -370,7 +508,11 @@ export function createQqService(ctx, config) {
     } catch {
       canonical = resolve(cwd);
     }
-    return catalog().find((entry) => entry.cwd === canonical);
+    for (const project of catalog()) {
+      const folder = (project.folders ?? [project]).find((entry) => entry.cwd === canonical);
+      if (folder) return { ...project, cwd: folder.cwd, folder };
+    }
+    return undefined;
   }
 
   function agentCwd(agent) {
@@ -493,6 +635,7 @@ export function createQqService(ctx, config) {
       latestEventAt: recency.latest,
       cwd: project?.cwd ?? agentCwd(agent),
       project: project?.name,
+      projectLabel: project?.label,
       ...(alias ? { alias } : {}),
     };
   }
@@ -579,6 +722,7 @@ export function createQqService(ctx, config) {
       agentStatus: agent.status,
       cwd: row.cwd,
       project: row.project,
+      projectLabel: row.projectLabel,
       createdAt: row.createdAt,
       ...(alias ? { alias } : {}),
     };
@@ -595,12 +739,14 @@ export function createQqService(ctx, config) {
     const headers = await persistedHeaders();
     const persisted = headers.find((header) => header.id === sessionId);
     if (persisted) {
+      const project = projectForCwd(persisted.cwd);
       return {
         id: sessionId,
         live: false,
         createdAt: persisted.createdAt,
         cwd: persisted.cwd,
-        project: projectForCwd(persisted.cwd)?.name,
+        project: project?.name,
+        projectLabel: project?.label,
       };
     }
     throw httpError(404, NOT_FOUND);
@@ -612,15 +758,18 @@ export function createQqService(ctx, config) {
     return { ...snapshot, sessions: available };
   }
 
-  async function createAt(projectName) {
+  async function createAt(projectName, folderCwd) {
     await boot;
     const project = projectByName(projectName ?? defaultProject);
+    const cwd = folderCwd && (project.folders ?? [project]).some((folder) => folder.cwd === folderCwd)
+      ? folderCwd
+      : project.cwd;
     await ctx.get("loader")?.await();
     const sessionId = `session-${randomUUID()}`;
     const setup = selectionSetup({ current: selectedModel });
     const handle = rememberHandle(await agents.create({
       sessionId,
-      meta: { cwd: project.cwd },
+      meta: { cwd },
       agentOptions: { provider: selectedModel.provider, model: selectedModel.model },
       setup,
     }));
@@ -631,7 +780,7 @@ export function createQqService(ctx, config) {
     return {
       id: createdId,
       project: project.name,
-      cwd: project.cwd,
+      cwd,
       ...(alias ? { alias } : {}),
     };
   }
@@ -671,7 +820,7 @@ export function createQqService(ctx, config) {
     if (agent.status === "running") throw httpError(409, RUNNING_CLEAR);
     const project = projectForCwd(agentCwd(agent));
     if (!project) throw httpError(404, "qq: project not found");
-    const created = await createAt(project.name);
+    const created = await createAt(project.name, project.cwd);
     try {
       await disposeLive(sessionId);
     } catch (error) {
@@ -713,7 +862,7 @@ export function createQqService(ctx, config) {
         const name = slashName(line);
         if (name === "new") {
           const project = projectForCwd(agentCwd(agent));
-          const created = await createAt(project?.name);
+          const created = await createAt(project?.name, project?.cwd);
           return { kind: "navigate", action: "create", ...created };
         }
         if (name === "clear") {
@@ -829,5 +978,6 @@ export const internals = Object.freeze({
   userMessage,
   waitForIdle,
   canonicalPath,
+  contained,
   isImmediateChild,
 });

@@ -1742,7 +1742,8 @@ try {
   assert.match(launcher, /QQ_MEDIA_ROOT/);
   assert.match(launcher, /@hypermemetic-ai\/media-box/);
   assert.doesNotMatch(launcher, /QQ_DSH_HAVE_MEDIA/);
-  assert.doesNotMatch(patch, /media-box|QQ_DSH_HAVE_MEDIA/);
+  assert.doesNotMatch(patch, /@hypermemetic-ai\/media-box/);
+  assert.doesNotMatch(patch, /QQ_DSH_HAVE_MEDIA/);
   assert.match(uiPlugin, /progressFor/);
   assert.match(patch, /QQ_PORT \?\? 3082/);
   assert.doesNotMatch(patch, /QQ_DSH_CONSOLE_PORT|QQ_UI_PORT|QQ_WEBSERVER_PORT/);

@@ -174,15 +174,16 @@ export function projectFileType(name) {
   return Object.freeze({ kind: "unsupported" });
 }
 
-function breadcrumbs(project, path) {
+function breadcrumbs(project, path, folder) {
   const crumbs = [{ type: "projects", name: "projects", path: null }];
   if (!project) return crumbs;
-  crumbs.push({ type: "project", name: project, path: "" });
+  crumbs.push({ type: "project", name: project.label ?? project.name, path: "" });
   const segments = path ? path.split("/") : [];
   let at = "";
-  for (const segment of segments) {
+  for (const [index, segment] of segments.entries()) {
     at = at ? `${at}/${segment}` : segment;
-    crumbs.push({ type: "directory", name: segment, path: at });
+    const name = index === 0 && folder ? folder.label : segment;
+    crumbs.push({ type: "directory", name, path: at });
   }
   return crumbs;
 }
@@ -235,17 +236,57 @@ export function createProjectFileService(projectsRoot, listProjects, options = {
     const wanted = String(name ?? "");
     const project = listProjects().find((entry) => entry.name === wanted);
     if (!project) throw httpError(404, "qq: project not found");
-    const canonical = canonicalDirectory(project.cwd, "project root");
-    if (!contained(root, canonical)) {
-      throw httpError(403, "qq: project root escapes projectsRoot", "escape");
+    const registered = Array.isArray(project.folders) && project.folders.length > 0
+      ? project.folders
+      : [{ name: project.name, label: project.label ?? project.name, cwd: project.cwd }];
+    const folders = registered.map((folder) => {
+      const canonical = canonicalDirectory(folder.cwd, "project folder");
+      if (!contained(root, canonical)) {
+        throw httpError(403, "qq: project folder escapes projectsRoot", "escape");
+      }
+      return {
+        name: String(folder.name),
+        label: String(folder.label ?? folder.name),
+        cwd: canonical,
+      };
+    });
+    return {
+      name: project.name,
+      label: project.label ?? project.name,
+      cwd: folders[0].cwd,
+      folders,
+      grouped: project.grouped === true || (project.grouped === undefined && folders.length > 1),
+    };
+  }
+
+  function projectLocation(project, path, expected) {
+    const requested = relativePath(path, expected === "directory");
+    if (!project.grouped) {
+      const folder = project.folders[0];
+      return {
+        ...canonicalEntry(folder.cwd, requested, expected),
+        requested,
+        innerPath: requested,
+        folder,
+      };
     }
-    return { name: project.name, cwd: canonical };
+    if (!requested) return { requested: "", virtual: true };
+    const [folderName, ...innerSegments] = requested.split("/");
+    const folder = project.folders.find((entry) => entry.name === folderName);
+    if (!folder) throw httpError(404, "qq: project folder not found");
+    const innerPath = innerSegments.join("/");
+    return {
+      ...canonicalEntry(folder.cwd, innerPath, expected),
+      requested,
+      innerPath,
+      folder,
+    };
   }
 
   function listProjectFiles(projectName, path = "") {
     if (projectName === undefined || projectName === null || projectName === "") {
       const entries = listProjects().map((project) => ({
-        name: project.name,
+        name: project.label ?? project.name,
         type: "project",
         project: project.name,
       }));
@@ -261,7 +302,24 @@ export function createProjectFileService(projectsRoot, listProjects, options = {
     }
 
     const project = projectByName(projectName);
-    const directory = canonicalEntry(project.cwd, path, "directory");
+    const directory = projectLocation(project, path, "directory");
+    if (directory.virtual) {
+      const entries = project.folders.map((folder, index) => Object.freeze({
+        name: folder.label,
+        type: "directory",
+        path: folder.name,
+        registered: true,
+        primary: index === 0,
+      }));
+      return Object.freeze({
+        scope: "project",
+        project: project.name,
+        path: "",
+        parent: null,
+        breadcrumbs: Object.freeze(breadcrumbs(project, "").map(Object.freeze)),
+        entries: Object.freeze(entries),
+      });
+    }
     let listed;
     try {
       listed = readdirSync(directory.canonical, { withFileTypes: true });
@@ -277,14 +335,17 @@ export function createProjectFileService(projectsRoot, listProjects, options = {
       try {
         lstatSync(child);
         canonical = realpathSync(child);
-        if (!contained(project.cwd, canonical)) continue;
+        if (!contained(directory.folder.cwd, canonical)) continue;
         info = statSync(canonical);
       } catch {
         continue;
       }
-      const childPath = directory.requested
-        ? `${directory.requested}/${entry.name}`
+      const innerChildPath = directory.innerPath
+        ? `${directory.innerPath}/${entry.name}`
         : entry.name;
+      const childPath = project.grouped
+        ? `${directory.folder.name}/${innerChildPath}`
+        : innerChildPath;
       if (info.isDirectory()) {
         entries.push({ name: entry.name, type: "directory", path: childPath });
       } else if (info.isFile()) {
@@ -303,15 +364,19 @@ export function createProjectFileService(projectsRoot, listProjects, options = {
       project: project.name,
       path: directory.requested,
       parent,
-      breadcrumbs: Object.freeze(breadcrumbs(project.name, directory.requested).map(Object.freeze)),
+      breadcrumbs: Object.freeze(breadcrumbs(
+        project,
+        directory.requested,
+        project.grouped ? directory.folder : undefined,
+      ).map(Object.freeze)),
       entries: Object.freeze(entries.map(Object.freeze)),
     });
   }
 
   function readProjectFile(projectName, path) {
     const project = projectByName(projectName);
-    const file = canonicalEntry(project.cwd, path, "file");
-    const name = file.requested.split("/").at(-1);
+    const file = projectLocation(project, path, "file");
+    const name = file.innerPath.split("/").at(-1);
     const type = projectFileType(name);
     if (type.kind === "binary") {
       throw httpError(415, "qq: binary file opens outside the read-only text view", "binary");
@@ -319,7 +384,7 @@ export function createProjectFileService(projectsRoot, listProjects, options = {
     if (type.kind === "unsupported") {
       throw httpError(415, "qq: unsupported file type", "unsupported");
     }
-    const { body, size } = readBoundedFile(project.cwd, file.canonical, readableLimit);
+    const { body, size } = readBoundedFile(file.folder.cwd, file.canonical, readableLimit);
     let text;
     try {
       text = new TextDecoder("utf-8", { fatal: true }).decode(body);
@@ -341,15 +406,15 @@ export function createProjectFileService(projectsRoot, listProjects, options = {
 
   function openProjectFile(projectName, path, options = {}) {
     const project = projectByName(projectName);
-    const file = canonicalEntry(project.cwd, path, "file");
-    const name = file.requested.split("/").at(-1);
+    const file = projectLocation(project, path, "file");
+    const name = file.innerPath.split("/").at(-1);
     const type = projectFileType(name);
     if (type.kind !== "binary") {
       throw httpError(415, type.kind === "unsupported"
         ? "qq: unsupported file type"
         : "qq: text file must use the read-only file view", type.kind);
     }
-    const opened = readBoundedFile(project.cwd, file.canonical, openLimit, options.includeBody !== false);
+    const opened = readBoundedFile(file.folder.cwd, file.canonical, openLimit, options.includeBody !== false);
     return Object.freeze({
       project: project.name,
       path: file.requested,
