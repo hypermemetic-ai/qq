@@ -258,12 +258,29 @@ assert.equal(isRetryableGrokError({ kind: "aborted", reason: { kind: "user" } })
 
 {
   const created = [];
-  const ctx = {
-    on(name, fn) { created.push(name); if (name === "agent/created") fn({ agent: { options: { model: "gpt-5.6-sol" } } }); },
-    get() { return { list() { return []; } }; },
+  let hostDisposals = 0;
+  let agentDisposals = 0;
+  const agent = {
+    options: { model: "grok-4.6" },
+    session: { events: [] },
+    ctx: {
+      on() {
+        return () => { agentDisposals += 1; };
+      },
+    },
   };
-  attachAgents(ctx);
+  const ctx = {
+    on(name) {
+      created.push(name);
+      return () => { hostDisposals += 1; };
+    },
+    get() { return { list() { return [agent]; } }; },
+  };
+  const dispose = attachAgents(ctx);
   assert.ok(created.includes("agent/created"));
+  dispose();
+  assert.equal(hostDisposals, 2);
+  assert.equal(agentDisposals, 2);
 }
 
 {

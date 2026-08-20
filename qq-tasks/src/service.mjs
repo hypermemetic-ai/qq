@@ -27,7 +27,7 @@ function formatPile(rows) {
 
 export function createTasksService(store, options = {}) {
   const settings = options.settings;
-  const llm = options.llm;
+  const llmOf = typeof options.llm === "function" ? options.llm : () => options.llm;
   const run = options.runRundown ?? oneShot;
 
   const service = Object.freeze({
@@ -61,7 +61,7 @@ export function createTasksService(store, options = {}) {
         "Live pile:",
         formatPile(rows),
       ].join("\n");
-      const report = await run(llm, binding, { system: RUNDOWN_SYSTEM, user });
+      const report = await run(llmOf(), binding, { system: RUNDOWN_SYSTEM, user });
       return report || formatPile(rows);
     },
   });

@@ -31,6 +31,45 @@ try {
   assert.equal(pluginModule.name, "qq-relay");
   assert.doesNotMatch(String(createRelayService), /createAliasBook|defaultAliasFile|qq-relay-aliases/);
 
+  // Optional Tools is a coeffect: relay can load first and attach its tools
+  // when the service appears later.
+  {
+    const agents = new Map([
+      [alphaId, makeFakeAgent(alphaId)],
+      [betaId, makeFakeAgent(betaId)],
+    ]);
+    const provided = {};
+    const registered = [];
+    const disposed = [];
+    let tools;
+    let injectTools;
+    const ctx = {
+      get(name) {
+        if (name === "agents") return { list: () => [...agents.values()], get: (id) => agents.get(id) };
+        if (name === "sessions") return { flush: async () => true };
+        if (name === "tools") return tools;
+        return provided[name];
+      },
+      provide(name, value) { provided[name] = value; },
+      inject(deps, fn) {
+        if (deps.includes("tools")) injectTools = fn;
+      },
+      effect(fn) { return fn(); },
+    };
+    pluginModule.apply(ctx, {});
+    assert.equal(registered.length, 0);
+    tools = {
+      register(tool) {
+        registered.push(tool.name);
+        return () => disposed.push(tool.name);
+      },
+    };
+    const cleanup = injectTools(ctx);
+    assert.deepEqual(registered, ["relay_list", "relay_send", "relay_status"]);
+    cleanup();
+    assert.deepEqual(disposed, registered);
+  }
+
   // ---------------------------------------------------------------- labels
   {
     const live = new Set([alphaId]);

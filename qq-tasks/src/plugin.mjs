@@ -19,10 +19,9 @@ export function apply(ctx, config = {}) {
     now: config.now,
   });
   const settings = createTasksSettings({ settingsFile: config.settingsFile });
-  const llm = ctx.get?.("llm", false) ?? null;
   const service = createTasksService(store, {
     settings,
-    llm,
+    llm: () => ctx.get?.("llm", false) ?? null,
     runRundown: config.runRundown,
   });
   ctx.provide("qq-tasks", service);

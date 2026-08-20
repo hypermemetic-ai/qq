@@ -84,8 +84,8 @@ for qq_pkg in "$root"/qq-*/package.json; do
   esac
 done
 
-# image-finder lives next to this repo, not as qq-*. Bind it the same way as
-# qq-tasks: dsh plugin add from the sibling tree, not host.patch.yml.
+# image-finder lives next to this repo, not as qq-*. Bind it through its own
+# sibling bundle: dsh plugin add from the sibling tree, not host.patch.yml.
 find_root=${QQ_FIND_ROOT:-"$root/../image-finder"}
 if [[ -f $find_root/package.json ]] && grep -Fq '"name": "@hypermemetic-ai/image-finder"' "$find_root/package.json"; then
   qq_siblings+=("$(cd -- "$find_root" && pwd -P)")
@@ -97,6 +97,11 @@ media_root=${QQ_MEDIA_ROOT:-"$root/../media-box"}
 if [[ -f $media_root/package.json ]] && grep -Fq '"name": "@hypermemetic-ai/media-box"' "$media_root/package.json"; then
   qq_siblings+=("$(cd -- "$media_root" && pwd -P)")
 fi
+
+# HMR watches exactly the linked source roots discovered above. Do not widen to
+# a parent directory: isolated boots commonly live directly under /tmp.
+hmr_roots=("$root" ${qq_siblings[@]+"${qq_siblings[@]}"})
+export QQ_DSH_HMR_ROOTS=$(IFS=:; printf '%s' "${hmr_roots[*]}")
 
 profile_manifest="$DSH_HOME/profiles/qq/package.json"
 if ! node - "$profile_manifest" "$root/qq" ${qq_siblings[@]+"${qq_siblings[@]}"} <<'NODE'

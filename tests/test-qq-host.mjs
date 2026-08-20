@@ -4,8 +4,8 @@ import { createHash } from "node:crypto";
 import { createServer, request as httpRequest } from "node:http";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { createConsoleHandler, createRootRedirectHandler } from "../qq-ui/src/http-app.mjs";
-import { createQqService } from "../qq/src/session.mjs";
+import { createConsoleHandler, createRootRedirectHandler, internals as httpInternals } from "../qq-ui/src/http-app.mjs";
+import { attachObserve, createQqService } from "../qq/src/session.mjs";
 import { renderMarkdownText, renderMessageText } from "../qq-ui/src/markdown.mjs";
 import { renderLoginSheet, renderOfferPopup, renderOverlay, renderProgressChip, renderSessionContent } from "../qq-ui/src/render.mjs";
 
@@ -363,6 +363,8 @@ function openSse(sessionId, port = address.port) {
   assert.match(html, new RegExp(`<option value="${durableId}">2026-08-15</option>`));
   const durableLabel = html.match(new RegExp(`<option value="${durableId}">([^<]*)</option>`))[1];
   assert.doesNotMatch(durableLabel, /session-/);
+  assert.doesNotMatch(html, /<button type="submit">Open<\/button>/);
+  assert.doesNotMatch(html, /<form id="close-session"[^>]*hidden/);
   assert.match(html, new RegExp(`hx-push-url="/qq/session/${liveId}"`));
   assert.match(html, new RegExp(`data-session-id="${liveId}"`));
 
@@ -380,6 +382,7 @@ function openSse(sessionId, port = address.port) {
   assert.match(undealt, /<code>durable<\/code>/);
   assert.doesNotMatch(undealt, new RegExp(`<code>${liveId}</code>`));
   assert.doesNotMatch(undealt, /offer-popup/);
+  assert.doesNotMatch(undealt, /workflows-popup/);
   assert.doesNotMatch(undealt, /download-chip/);
   assert.equal(renderProgressChip(null), "");
   assert.equal(renderProgressChip({}), "");
@@ -387,6 +390,21 @@ function openSse(sessionId, port = address.port) {
   assert.match(chip, /download-chip/);
   assert.match(chip, /Dune\.2021\.1080p/);
   assert.match(chip, /42%/);
+  const workflowList = renderSessionContent({ id: liveId, events: [] }, paths, "architect\niterate\nfind\nnone selected");
+  assert.match(workflowList, /class="offer-popup workflows-popup"/);
+  assert.match(workflowList, /id="workflows-heading">Pick a workflow/);
+  assert.match(workflowList, /value="\/workflows architect"/);
+  assert.match(workflowList, /value="\/workflows find"/);
+  assert.match(workflowList, /value="\/workflows none"/);
+  assert.match(workflowList, /class="offer-choice workflows-choice workflows-dismiss" type="button">Cancel/);
+  const selectedFind = renderSessionContent({ id: liveId, events: [] }, paths, "architect\niterate\nfind \(selected\)");
+  assert.match(selectedFind, /workflows-choice workflows-current" type="submit" name="prompt" value="\/workflows find">find/);
+  const picked = renderSessionContent({ id: liveId, events: [] }, paths, "find selected");
+  assert.match(picked, /class="notice-ok" role="status">find selected/);
+  assert.doesNotMatch(picked, /workflows-popup/);
+  const slashError = renderSessionContent({ id: liveId, events: [] }, paths, "unknown /workflows usage");
+  assert.match(slashError, /class="notice" role="status">unknown \/workflows usage/);
+
   const grabbing = renderSessionContent({
     id: liveId,
     events: [],
@@ -487,6 +505,28 @@ function openSse(sessionId, port = address.port) {
   assert.match(overlayCard, /name="choice" value="dismiss" aria-label="Close"/);
   assert.match(overlayCard, new RegExp(`hx-post="/qq/session/${liveId}/overlay"`));
   assert.doesNotMatch(overlayCard, /overlay-stage-hit/);
+  assert.doesNotMatch(overlayCard, /data-fit/);
+  assert.doesNotMatch(overlayCard, /data-overlay-keys/);
+  const keyed = renderOverlay({
+    id: "gelbooru:1",
+    media: { src: "/qq-find/media/gelbooru/1", fit: "cover" },
+    keys: { ArrowLeft: "skip", "Arrow-Left": "skip", h: "dismiss", q: "dismiss" },
+    actions: [{ id: "skip", label: "Skip" }],
+  }, paths);
+  assert.doesNotMatch(keyed, /data-fit/);
+  assert.match(keyed, /data-overlay-keys="/);
+  assert.match(keyed, /ArrowLeft/);
+  assert.doesNotMatch(keyed, /Arrow-Left/);
+  assert.doesNotMatch(keyed, /"h"/);
+  assert.doesNotMatch(keyed, /"q"/);
+  const fitted = renderOverlay({
+    id: "gelbooru:1",
+    media: { src: "/qq-find/media/gelbooru/1", fit: "contain" },
+    keys: { ArrowLeft: "skip", ArrowRight: "skip" },
+    actions: [{ id: "skip", label: "Skip" }],
+  }, paths);
+  assert.match(fitted, /data-fit="contain"/);
+  assert.match(fitted, /data-overlay-keys="/);
   assert.equal(renderOverlay(null, paths), "");
   assert.equal(renderOverlay({ id: "x" }, paths), "");
   const hiddenChrome = renderOverlay({
@@ -510,6 +550,48 @@ function openSse(sessionId, port = address.port) {
   }, paths);
   assert.match(overlaid, /class="overlay-popup"/);
   assert.match(overlaid, /src="\/qq-find\/media\/gelbooru\/2"/);
+
+  const idleChip = renderSessionContent({ id: liveId, events: [], sessionMode: "find" }, paths);
+  assert.match(idleChip, /class="session-mode" data-mode="find">Find/);
+  assert.doesNotMatch(idleChip, /id="interrupt-form"/);
+  const finding = renderSessionContent({
+    id: liveId,
+    events: [],
+    agentStatus: "idle",
+    sessionMode: "find",
+    findWork: "compile",
+  }, paths);
+  assert.match(finding, /id="interrupt-form"/);
+  assert.match(finding, />Finding…</);
+  assert.match(finding, />Cancel</);
+  assert.doesNotMatch(finding, /The current DSH turn is still running/);
+  const saving = renderSessionContent({
+    id: liveId,
+    events: [],
+    agentStatus: "idle",
+    sessionMode: "find",
+    findWork: "save",
+    overlay: {
+      id: "gelbooru:2",
+      title: "score 12",
+      media: { src: "/qq-find/media/gelbooru/2" },
+      actions: [{ id: "keep", label: "Keep" }],
+    },
+  }, paths);
+  assert.match(saving, />Saving…</);
+  assert.match(saving, /class="overlay-saving"/);
+  assert.match(saving, /class="overlay-cancel"/);
+  assert.match(saving, new RegExp(`hx-post="/qq/session/${liveId}/interrupt"`));
+  assert.doesNotMatch(renderSessionContent({ id: liveId, events: [], sessionMode: "none" }, paths), /session-mode/);
+  assert.equal(httpInternals.compilingFindPrompt("/find", liveId, () => true), false);
+  assert.equal(httpInternals.compilingFindPrompt("/find tall rain", liveId, () => false), true);
+  assert.equal(httpInternals.compilingFindPrompt("tall rain", liveId, () => true), true);
+  assert.equal(httpInternals.compilingFindPrompt("tall rain", liveId, () => false), false);
+  assert.equal(httpInternals.compilingFindPrompt("/workflows architect", liveId, () => true), false);
+  const keepForm = new URLSearchParams({ choice: "keep" });
+  const badForm = new URLSearchParams({ choice: "bad" });
+  assert.equal(httpInternals.overlaySaveChoice(keepForm), true);
+  assert.equal(httpInternals.overlaySaveChoice(badForm), false);
 }
 
 {
@@ -817,6 +899,120 @@ function openSse(sessionId, port = address.port) {
   }
 }
 
+{
+  let settle;
+  const delayed = new Promise((resolve) => { settle = resolve; });
+  let interrupted = 0;
+  const findBackend = attachObserve({
+    defaultSessionId: primaryId,
+    async list() { return [{ id: primaryId, createdAt: 1 }]; },
+    async read(id) { return { id, events: [], agentStatus: "idle" }; },
+    async create() { return { id: primaryId }; },
+    async prompt() { await delayed; },
+    async interrupt() { interrupted += 1; settle(); return true; },
+    async close() { return { id: primaryId }; },
+  }, { intervalMs: 20 });
+  const findServer = createServer(createConsoleHandler(findBackend, {
+    ssePollMs: 20,
+    inFindMode: (id) => id === primaryId,
+    sessionModeFor: () => "find",
+  }));
+  await new Promise((resolveListen) => findServer.listen(0, "127.0.0.1", resolveListen));
+  const findPort = findServer.address().port;
+  try {
+    const page = await new Promise((resolveRequest, reject) => {
+      const req = httpRequest({
+        host: "127.0.0.1",
+        port: findPort,
+        path: `/qq/session/${primaryId}`,
+        method: "GET",
+        agent: false,
+      }, (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => resolveRequest({
+          status: res.statusCode,
+          body: Buffer.concat(chunks).toString("utf8"),
+        }));
+      });
+      req.on("error", reject);
+      req.end();
+    });
+    assert.equal(page.status, 200);
+    assert.match(page.body, /class="session-mode" data-mode="find">Find/);
+    assert.doesNotMatch(page.body, /id="interrupt-form"/);
+    const stream = await openSse(primaryId, findPort);
+    try {
+      await stream.waitFor(/class="session-mode" data-mode="find">Find/);
+      const mark = stream.checkpoint();
+      const promptBody = new URLSearchParams({ prompt: "tall woman rain" }).toString();
+      const promptPromise = new Promise((resolveRequest, reject) => {
+        const req = httpRequest({
+          host: "127.0.0.1",
+          port: findPort,
+          path: `/qq/session/${primaryId}/prompt`,
+          method: "POST",
+          agent: false,
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            "content-length": Buffer.byteLength(promptBody),
+            "hx-request": "true",
+            "sec-fetch-site": "same-origin",
+          },
+        }, (res) => {
+          const chunks = [];
+          res.on("data", (chunk) => chunks.push(chunk));
+          res.on("end", () => resolveRequest({
+            status: res.statusCode,
+            body: Buffer.concat(chunks).toString("utf8"),
+          }));
+        });
+        req.on("error", reject);
+        req.end(promptBody);
+      });
+      const finding = await stream.waitFor(/id="interrupt-form"/, mark);
+      assert.match(finding, />Finding…</);
+      assert.match(finding, />Cancel</);
+      assert.doesNotMatch(finding, /The current DSH turn is still running/);
+      const cancelled = await new Promise((resolveRequest, reject) => {
+        const req = httpRequest({
+          host: "127.0.0.1",
+          port: findPort,
+          path: `/qq/session/${primaryId}/interrupt`,
+          method: "POST",
+          agent: false,
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            "content-length": "0",
+            "hx-request": "true",
+            "sec-fetch-site": "same-origin",
+          },
+        }, (res) => {
+          const chunks = [];
+          res.on("data", (chunk) => chunks.push(chunk));
+          res.on("end", () => resolveRequest({
+            status: res.statusCode,
+            body: Buffer.concat(chunks).toString("utf8"),
+          }));
+        });
+        req.on("error", reject);
+        req.end();
+      });
+      assert.equal(cancelled.status, 200);
+      assert.equal(interrupted, 1);
+      assert.match(cancelled.body, /id="composer"/);
+      assert.doesNotMatch(cancelled.body, /id="interrupt-form"/);
+      const prompted = await promptPromise;
+      assert.equal(prompted.status, 200);
+    } finally {
+      stream.close();
+    }
+  } finally {
+    findServer.closeAllConnections?.();
+    await new Promise((resolveClose) => findServer.close(resolveClose));
+  }
+}
+
 const streams = [];
 try {
   // Stable htmx/SSE lifecycle: the owner and target wrap inner-only fragments.
@@ -871,10 +1067,11 @@ try {
   assert.match(home.body, /htmx-2\.0\.10\.min\.js/);
   assert.match(home.body, /htmx-ext-sse-2\.2\.4\.js/);
   assert.match(home.body, /rel="manifest"/);
-  assert.match(home.body, /console-v13\.css/);
-  assert.doesNotMatch(home.body, /console-v12\.css/);
-  assert.match(home.body, /browser-v5\.js/);
-  assert.match(home.body, /data-service-worker="\/qq\/sw-v13\.js"/);
+  assert.match(home.body, /console-v16\.css/);
+  assert.doesNotMatch(home.body, /console-v15\.css/);
+  assert.match(home.body, /browser-v7\.js/);
+  assert.doesNotMatch(home.body, /browser-v6\.js/);
+  assert.match(home.body, /data-service-worker="\/qq\/sw-v16\.js"/);
   assert.match(home.body, /<code>\d+<\/code>/);
   assert.doesNotMatch(home.body, new RegExp(`<code>${primaryId}</code>`));
   assert.match(home.body, new RegExp(`<option value="${primaryId}" selected>Current · \\d+</option>`));
@@ -1083,6 +1280,23 @@ try {
     { provider: "qwen-token-plan", model: "deepseek-v4-pro-0813" },
   ]);
 
+  // qq owns the close capability, not the Agent lifetime. A replacement qq
+  // fiber recovers the handle from the live DSH Agent and can still close it.
+  const reloadOwned = await backend.create();
+  const replacementBackend = createQqService(
+    { get: (name) => services[name] },
+    {
+      sessionId: primaryId,
+      cwd: root,
+      provider: "qwen-token-plan",
+      model: "deepseek-v4-pro-0813",
+      reasoningEffort: "max",
+    },
+  );
+  const reloadClosed = await replacementBackend.close(reloadOwned.id);
+  assert.equal(reloadClosed.closed, reloadOwned.id);
+  assert.equal(liveAgents.has(reloadOwned.id), false);
+
   // Installable PWA boundary caches presentation only and leaves data network-only.
   const manifestResponse = await request("/qq/assets/manifest-v3.webmanifest");
   assert.equal(manifestResponse.status, 200);
@@ -1096,17 +1310,24 @@ try {
   assert.equal(manifest.scope, "/qq/");
   assert.deepEqual(manifest.icons.map((icon) => icon.sizes), ["192x192", "512x512"]);
 
-  const worker = await request("/qq/sw-v13.js");
+  const worker = await request("/qq/sw-v16.js");
   assert.equal(worker.status, 200);
   assert.equal(worker.headers["service-worker-allowed"], "/qq/");
   assert.match(worker.body, /request\.method !== "GET"/);
   assert.match(worker.body, /request\.mode === "navigate"/);
+  assert.match(worker.body, /livePathSet/);
+  assert.match(worker.body, /livePathSet\.has\(url\.pathname\)\) return/);
   assert.match(worker.body, /console-v8\.css/);
   assert.match(worker.body, /console-v9\.css/);
   assert.match(worker.body, /console-v10\.css/);
   assert.match(worker.body, /console-v11\.css/);
   assert.match(worker.body, /console-v13\.css/);
+  assert.match(worker.body, /console-v14\.css/);
+  assert.match(worker.body, /console-v15\.css/);
+  assert.match(worker.body, /console-v16\.css/);
   assert.match(worker.body, /browser-v5\.js/);
+  assert.match(worker.body, /browser-v6\.js/);
+  assert.match(worker.body, /browser-v7\.js/);
   assert.match(worker.body, /reconnect-v1\.js/);
   assert.match(worker.body, /geist-latin-wght-normal-5\.3\.0\.woff2/);
   assert.match(worker.body, /geist-latin-wght-italic-5\.3\.0\.woff2/);
@@ -1120,7 +1341,7 @@ try {
   assert.match(offline.body, /No transcript is cached and no message can be sent offline/);
   assert.match(offline.body, /console-v8\.css/);
   assert.match(offline.body, /reconnect-v1\.js/);
-  const staticCss = await request("/qq/assets/console-v13.css");
+  const staticCss = await request("/qq/assets/console-v16.css");
   assert.match(staticCss.headers["cache-control"], /immutable/);
   assert.match(staticCss.body, /@font-face/);
   assert.match(staticCss.body, /font-family: "Geist UI"/);
@@ -1136,6 +1357,17 @@ try {
   assert.match(staticCss.body, /\.offer-handoff/);
   assert.match(staticCss.body, /\.overlay-popup/);
   assert.match(staticCss.body, /\.overlay-keep/);
+  assert.match(staticCss.body, /\.session-mode/);
+  assert.match(staticCss.body, /\.notice-ok/);
+  assert.match(staticCss.body, /\.workflows-current/);
+  assert.match(staticCss.body, /\.session-picker \{[\s\S]*grid-template-columns: auto minmax\(0, 1fr\);/);
+  assert.match(staticCss.body, /\.close-session \{ display: none; \}/);
+  assert.match(staticCss.body, /\.close-session \{ display: block; \}/);
+  assert.match(staticCss.body, /#composer-submit \{[\s\S]*clip-path: none/);
+  assert.match(staticCss.body, /\.overlay-saving/);
+  assert.match(staticCss.body, /\.overlay-cancel/);
+  assert.match(staticCss.body, /\.overlay-stage img \{[\s\S]*max-width: 100%;[\s\S]*max-height: 100%/);
+  assert.match(staticCss.body, /\.overlay-stage img\[data-fit="contain"\] \{[\s\S]*width: 100%;[\s\S]*height: 100%;[\s\S]*object-fit: contain/);
   assert.doesNotMatch(staticCss.body, /align-self:\s*flex-end/);
   assert.doesNotMatch(staticCss.body, /min\(88%/);
   const normalFont = await request("/qq/assets/geist-latin-wght-normal-5.3.0.woff2");
@@ -1166,7 +1398,7 @@ try {
     readFile(join(root, "bin/qq"), "utf8"),
     readFile(join(root, "dsh/qq-dsh-model-compat.mjs"), "utf8"),
     readFile(join(root, "qq-ui/assets/browser-v5.js"), "utf8"),
-    readFile(join(root, "qq-ui/assets/sw-v13.js"), "utf8"),
+    readFile(join(root, "qq-ui/assets/sw-v16.js"), "utf8"),
     readFile(join(root, "qq-ui/src/render.mjs"), "utf8"),
   ]);
   assert.equal(pins.schema, "qq.dsh-console-vendor-pins/v1");
@@ -1192,6 +1424,12 @@ try {
     assert.equal(createHash("sha256").update(content).digest("hex"), artifact.sha256);
     assert.match(artifact.npmIntegrity, /^sha512-/);
   }
+  assert.match(patch, /id: hmr[\s\S]*disabled: false/);
+  assert.match(patch, /id: hmr[\s\S]*root: !!js[\s\S]*QQ_DSH_HMR_ROOTS/);
+  assert.doesNotMatch(patch, /QQ_FIND_ROOT|QQ_MEDIA_ROOT/);
+  assert.match(launcher, /QQ_DSH_HMR_ROOTS/);
+  assert.match(launcher, /hmr_roots=\("\$root"/);
+  assert.match(patch, /name: '@hypermemetic-ai\/qq-ui'[\s\S]*liveAssets: true/);
   assert.match(patch, /host: 127\.0\.0\.1/);
   assert.match(patch, /provider:.*qwen-token-plan/);
   assert.match(patch, /model:.*deepseek-v4-pro-0813/);
@@ -1233,6 +1471,8 @@ try {
   assert.match(relayPlugin, /ctx\.provide\("qq-relay", service\)/);
   assert.match(workflowsPlugin, /ctx\.provide\("qq-workflows", service\)/);
   assert.doesNotMatch(workflowsPlugin, /from "\.\.\/qq"|run_workflow|dsh-tool-workflow|ctx\.compaction/);
+  assert.match(workflowsPlugin, /workflows\.set\("find"/);
+  assert.doesNotMatch(workflowsPlugin, /syncFind/);
   assert.doesNotMatch(relayPlugin, /from "\.\.\/qq"|qq-relay-install-root|qq-relay-client/);
   assert.doesNotMatch(relaySession, /node:(child_process|net)|createServer|qq-relay-install-root|qq-relay-client/);
   assert.match(patch, /inject: \[qq, webServer\]/);
@@ -1261,6 +1501,14 @@ try {
   assert.match(browser, /desktopChair/);
   assert.match(browser, /pendingClose/);
   assert.match(browser, /#close-session/);
+  assert.match(browser, /dataset\.overlayKeys/);
+  assert.match(browser, /overlay-dismiss button\[value="dismiss"\]/);
+  assert.match(browser, /\.overlay-\$\{action\}/);
+  assert.match(browser, /pendingClose[\s\S]*overlay-popup[\s\S]*#close-session/);
+  assert.match(browser, /session-choice[\s\S]*openSession/);
+  assert.match(browser, /location\.assign\(`\$\{base\}\/session\/\$\{sessionId\}`\)/);
+  assert.match(browser, /workflows-dismiss/);
+  assert.match(browser, /workflows-popup/);
   assert.doesNotMatch(browser, /localStorage|sessionStorage|indexedDB|document\.cookie|EventSource|WebSocket|htmx\.process/);
   assert.doesNotMatch(renderSource, /outerHTML|controller|observer|lease|take control/i);
   assert.doesNotMatch(workerSource, /addEventListener\("(?:sync|periodicsync|push|notificationclick)"|indexedDB|localStorage/i);

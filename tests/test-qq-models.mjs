@@ -244,6 +244,35 @@ try {
   }
 
   {
+    const home = join(scratch, "dispose-login-home");
+    const store = createAuthStore({ env: { HOME: "/home/u", DSH_HOME: home } });
+    let aborted = false;
+    const login = createLoginService({
+      store,
+      env: { HOME: "/home/u", DSH_HOME: home },
+      startDeviceFn: async (id) => ({
+        connector: id,
+        deviceCode: "dev",
+        userCode: "ZZ",
+        verificationUri: "https://auth.x.ai/connect/device",
+        intervalSeconds: 0,
+        expiresInSeconds: 60,
+      }),
+      pollDeviceFn: async (_device, { signal }) => new Promise((resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          aborted = true;
+          reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+        }, { once: true });
+      }),
+    });
+    await login.handleLogin({ agent: { session: { id: sessionId } }, rawInput: "grok" });
+    assert.equal(login.polls.size, 1);
+    await login.dispose();
+    assert.equal(aborted, true);
+    assert.equal(login.polls.size, 0);
+  }
+
+  {
     const operatorHome = join(scratch, "operator-home");
     mkdirSync(join(operatorHome, ".pi", "agent"), { recursive: true });
     mkdirSync(join(operatorHome, ".codex"), { recursive: true });
@@ -632,7 +661,7 @@ try {
     assert.doesNotMatch(sheet.body, /Ready leftover|Hand off/);
     const named = await post("/login grok");
     assert.equal(named.status, 200);
-    assert.match(named.body, /class="notice" role="alert">[\s\S]*https:\/\/auth\.x\.ai\/connect\/device/);
+    assert.match(named.body, /class="notice" role="status">[\s\S]*https:\/\/auth\.x\.ai\/connect\/device/);
     assert.match(named.body, /WXYZ/);
     assert.doesNotMatch(named.body, /login-popup/);
     const unknown = await post("/mystery");

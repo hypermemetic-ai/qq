@@ -8,8 +8,15 @@
     persona: >-
       You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
 
+# DSH/Cordis owns plugin-fiber reload. Watch the qq tree plus bound sibling
+# plugins; a changed plugin is disposed through its reversible effects and
+# re-applied without restarting the host or its other fibers.
 - id: hmr
-  disabled: true
+  disabled: false
+  config:
+    # bin/qq exports the exact linked roots discovered by its generic sibling
+    # scan. Direct DSH boots fall back to the current workspace only.
+    root: !!js (process.env.QQ_DSH_HMR_ROOTS ?? process.cwd()).split(':').filter(Boolean)
 
 # Architect owns fold on this profile. compact-basic must not auto-summarize
 # the talking session; qq-workflows chops fat tool dumps and folds by notes.
@@ -83,3 +90,7 @@
       inject: [qq, webServer]
       config:
         basePath: /qq
+        # HTML/render/CSS/browser assets re-read from the linked source tree.
+        # Plugin code itself reloads through HMR; phone chrome never needs a
+        # host restart or an immutable asset-version bump.
+        liveAssets: true

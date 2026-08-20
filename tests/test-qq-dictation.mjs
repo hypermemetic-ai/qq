@@ -159,6 +159,7 @@ class HTMLFormElement extends Element {}
 function makeClientHarness(options = {}) {
   const fetches = [];
   let serverState = "idle";
+  let endFailures = options.end409Once ? 1 : 0;
   let processor = null;
   const byId = new Map();
   const listeners = [];
@@ -264,6 +265,11 @@ function makeClientHarness(options = {}) {
       if (path.endsWith("/start")) {
         serverState = "recording";
         return { ok: true, status: 200, json: async () => ({ state: "recording" }) };
+      }
+      if (path.endsWith("/end") && endFailures > 0) {
+        endFailures -= 1;
+        serverState = "idle";
+        return { ok: false, status: 409, json: async () => ({ error: "not recording" }) };
       }
       if (path.endsWith("/end") || path.endsWith("/cancel")) {
         serverState = "idle";
@@ -783,6 +789,7 @@ try {
     const qq = fakeQq();
     const routes = [];
     const provided = {};
+    let cleanup;
     const ctx = {
       webServer: {
         host: "127.0.0.1",
@@ -802,7 +809,8 @@ try {
         provided[name] = value;
       },
       effect(factory) {
-        return factory();
+        cleanup = factory();
+        return cleanup;
       },
     };
     pluginModule.apply(ctx, { recognize: async () => "via apply" });
@@ -825,6 +833,10 @@ try {
       assert.equal(ended.status, 200);
       assert.deepEqual(qq.prompts, [{ id: alphaId, text: "via apply" }]);
     });
+    await provided["qq-dictation"].start({ sessionId: alphaId });
+    await cleanup();
+    assert.equal(routes.length, 0);
+    assert.equal(provided["qq-dictation"].snapshot().state, "idle");
     assert.throws(
       () => pluginModule.apply({
         ...ctx,
@@ -848,6 +860,7 @@ try {
     await settle();
     assert.equal(harness.dictate.dataset.state, "recording");
     assert.equal(harness.dictate.getAttribute("aria-label"), "Cancel dictation");
+    assert.equal(harness.prompt.required, false);
     assert.ok(harness.fetches.some((call) => String(call.path).endsWith("/start")));
     harness.pump();
     harness.click(harness.submit);
@@ -861,6 +874,20 @@ try {
     assert.ok(wavBytes.length > 44);
     assert.equal(harness.dictate.dataset.state, "idle");
     assert.equal(harness.dictate.getAttribute("aria-label"), "Dictate");
+    assert.equal(harness.prompt.required, true);
+  }
+
+  {
+    const harness = makeClientHarness({ end409Once: true });
+    await settle();
+    harness.click(harness.dictate);
+    await settle();
+    harness.pump();
+    harness.click(harness.submit);
+    await settle();
+    assert.equal(harness.fetches.filter((call) => String(call.path).endsWith("/start")).length, 2);
+    assert.equal(harness.fetches.filter((call) => String(call.path).endsWith("/end")).length, 2);
+    assert.equal(harness.dictate.dataset.state, "idle");
   }
 
   {

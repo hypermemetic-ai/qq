@@ -26,6 +26,32 @@ as a `--patch` overlay over the pinned `dsh-base` bundle and binds each sibling
 whose tree is on disk. `@hypermemetic-ai/qq` does **not** npm-depend on
 `qq-ui`/`qq-relay`/`qq-workflows`; the start script binds them.
 
+## Plugin lifecycle
+
+The host enables DSH/Cordis hot module replacement over the linked workspace.
+Changing one plugin disposes and reapplies that plugin fiber; it must not
+restart the host or dispose DSH Agents owned by another service.
+
+Every sibling follows the same contract:
+
+- declare required coeffects with `inject`; use `ctx.inject` or a dynamic
+  `ctx.get(name, false)` for optional services that may be replaced;
+- register routes, tools, listeners, timers, and background work through
+  `ctx.effect`, returning the complete inverse operation;
+- abort plugin-local asynchronous work on disposal; keep durable truth in the
+  owning store and rebuild projections after reattachment;
+- never import another qq sibling to communicate. Provide a named service and
+  consume it through Cordis;
+- keep capabilities that outlive a plugin fiber on the DSH-owned object that
+  owns their lifetime. qq stores its closeable AgentHandle on the live Agent;
+- treat the browser as a separate client: phone capture remains on the phone
+  and rebinds to a replacement dictation fiber.
+
+qq-ui opts into live assets. Current HTML, CSS, and browser JavaScript re-read
+from the linked tree with `no-store`; the service worker bypasses its cache for
+those current asset paths. UI changes therefore require a page reload, not a
+host restart or another asset-version bump.
+
 Run from anywhere in the repository:
 
 ```bash

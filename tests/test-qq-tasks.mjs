@@ -246,11 +246,14 @@ try {
     assert.equal(raw.schema, TASKS_SETTINGS_SCHEMA);
     assert.equal(raw.roles.rundown.model, "reporter");
     let ran = 0;
+    let currentLlm = { id: "first" };
+    const seenLlm = [];
     const bound = createTasksService(store, {
       settings,
-      llm: {},
-      runRundown: async (_llm, binding, request) => {
+      llm: () => currentLlm,
+      runRundown: async (llm, binding, request) => {
         ran += 1;
+        seenLlm.push(llm);
         assert.equal(binding.model, "reporter");
         assert.equal(request.system, RUNDOWN_SYSTEM);
         assert.match(request.user, /Banked/);
@@ -258,7 +261,10 @@ try {
       },
     });
     assert.equal(await bound.rundown(), "pile report");
-    assert.equal(ran, 1);
+    currentLlm = { id: "replacement" };
+    assert.equal(await bound.rundown(), "pile report");
+    assert.equal(ran, 2);
+    assert.deepEqual(seenLlm.map((llm) => llm.id), ["first", "replacement"]);
     bound.archive(id);
     assert.deepEqual(bound.list(), []);
     const serviceSource = readFileSync(join(root, "qq-tasks/src/service.mjs"), "utf8");

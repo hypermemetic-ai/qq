@@ -4,6 +4,10 @@ import { createAliasBook, defaultAliasFile, defaultLegacyAliasFile } from "./ali
 
 const SESSION_ID = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEFAULT_OBSERVE_MS = 100;
+// AgentHandles are DSH-owned capabilities. Keep the capability on the live
+// Agent so a qq fiber replacement can rebuild its index without owning or
+// disposing the Agent itself.
+const AGENT_HANDLE = Symbol.for("@hypermemetic-ai/qq/agent-handle");
 
 function freeze(value) {
   if (value && typeof value === "object" && !Object.isFrozen(value)) {
@@ -211,11 +215,26 @@ export function createQqService(ctx, config) {
   }
 
   function rememberHandle(handle) {
-    const sessionId = handle?.agent?.session?.id;
+    const agent = handle?.agent;
+    const sessionId = agent?.session?.id;
     if (SESSION_ID.test(sessionId) && typeof handle.dispose === "function") {
       handles.set(sessionId, handle);
+      try {
+        Object.defineProperty(agent, AGENT_HANDLE, {
+          value: handle,
+          configurable: true,
+        });
+      } catch {
+        // An exotic non-extensible Agent remains live, but cannot be closed by
+        // a replacement qq fiber because DSH exposes no handle lookup service.
+      }
     }
     return handle;
+  }
+
+  for (const agent of liveAgents()) {
+    const handle = agent?.[AGENT_HANDLE];
+    if (handle && typeof handle.dispose === "function") handles.set(agent.session.id, handle);
   }
 
   function syncLive(extraId) {
@@ -444,6 +463,8 @@ export function createQqService(ctx, config) {
       }
       handles.delete(sessionId);
       agentPromises.delete(sessionId);
+      const agent = agents.get(sessionId);
+      try { delete agent?.[AGENT_HANDLE]; } catch {}
       await handle.dispose();
       syncLive();
       const remaining = await list();

@@ -94,6 +94,7 @@ try {
   assert.deepEqual(pluginModule.inject, ["agents", "sessions"]);
   assert.equal(pluginModule.provide, "qq-workflows");
   assert.equal(pluginModule.name, "qq-workflows");
+  assert.equal(pluginModule.FIND_LABEL, "workflows:find");
   assert.equal(NOTEBOOK_SCHEMA, "qq.workflows-notebook/v1");
   assert.equal(DEFAULT_CARD_NAME, "concern");
   assert.equal(ARCHITECT_LABEL, "workflows:architect");
@@ -588,6 +589,7 @@ try {
     assert.deepEqual(parseWorkflowsInput(""), { action: "list" });
     assert.deepEqual(parseWorkflowsInput("architect"), { action: "select", workflow: "architect" });
     assert.deepEqual(parseWorkflowsInput("iterate"), { action: "select", workflow: "iterate" });
+    assert.deepEqual(parseWorkflowsInput("find"), { action: "select", workflow: "find" });
     assert.deepEqual(parseWorkflowsInput("none"), { action: "clear" });
     assert.deepEqual(parseWorkflowsInput("off"), { action: "clear" });
     assert.deepEqual(parseWorkflowsInput("settings"), { action: "settings-list", workflow: null });
@@ -724,7 +726,9 @@ try {
     assert.equal(listed.kind, "success");
     assert.match(listed.text, /architect/);
     assert.match(listed.text, /iterate/);
+    assert.match(listed.text, /find/);
     assert.match(listed.text, /none selected/);
+    assert.deepEqual(service.workflows.names(), ["architect", "iterate", "find"]);
 
     const unknown = commands[0].handler({ agent: fakeAgent, rawInput: "mystery" });
     assert.equal(unknown.kind, "error");
@@ -807,12 +811,15 @@ try {
     assert.match(refused.reason, /qq-relay/);
   }
 
-  // apply without tools: service still loads; boot does not hang
+  // apply without tools: service still loads; its lifecycle effect detaches
+  // the label and listeners it owns when the workflow fiber is disposed.
   {
     const dir = join(scratch, "plugin-no-tools");
     const selectedDir = join(scratch, "plugin-no-tools-selected");
     const provided = {};
     const hung = [];
+    const cleared = [];
+    const cleanups = [];
     const fakeAgent = {
       id: alphaId,
       session: { id: alphaId, events: [], header: {} },
@@ -822,18 +829,28 @@ try {
       get(name) {
         if (name === "agents") return { list: () => [fakeAgent], get: () => fakeAgent };
         if (name === "qq-relay") {
-          return { hang(id, label) { hung.push({ id, label }); }, clear() {}, alias: () => "1" };
+          return {
+            hang(id, label) { hung.push({ id, label }); },
+            clear(id, label) { cleared.push({ id, label }); },
+            alias: () => "1",
+          };
         }
         return undefined;
       },
       provide(name, value) { provided[name] = value; },
-      effect() { throw new Error("tools effect must not run without tools"); },
+      effect(fn) {
+        const cleanup = fn();
+        if (typeof cleanup === "function") cleanups.push(cleanup);
+        return cleanup;
+      },
       on() { return () => {}; },
     }, { notebookDir: dir, selectionDir: selectedDir });
     assert.ok(provided["qq-workflows"]);
     assert.deepEqual(hung, []);
     provided["qq-workflows"].workflows.select(alphaId, "architect");
     assert.deepEqual(hung, [{ id: alphaId, label: ARCHITECT_LABEL }]);
+    cleanups.at(-1)();
+    assert.deepEqual(cleared, [{ id: alphaId, label: ARCHITECT_LABEL }]);
   }
 
   // tools stay off the host tools service until a session is selected
@@ -1506,7 +1523,7 @@ try {
       assert.match(started.message, /Design-loop fixture listening at http:\/\/127\.0\.0\.1:\d+/);
       assert.match(started.result.origin, /^http:\/\/127\.0\.0\.1:\d+$/);
       assert.match(started.result.sessionUrl, /\/qq\/session\//);
-      const probe = await fetch(`${started.result.origin}/qq/assets/console-v13.css`);
+      const probe = await fetch(`${started.result.origin}/qq/assets/console-v16.css`);
       assert.equal(probe.status, 200);
       const stopped = await byName.design_loop_stop.execute({}, exec);
       assert.equal(stopped.status, "ok");
@@ -1953,6 +1970,164 @@ try {
     const face = architect.offer(alphaId);
     assert.match(face.brief, /Hop brief for the leftover/);
     assert.deepEqual(face.choices, ["handoff", "bank", "ignore"]);
+  }
+
+  {
+    const dir = join(scratch, "plugin-find-select");
+    const selectedDir = join(scratch, "plugin-find-select-selected");
+    const hung = [];
+    const cleared = [];
+    const armed = [];
+    const left = [];
+    const fakeAgent = {
+      id: alphaId,
+      session: { id: alphaId, events: [], header: {} },
+      ctx: { on() { return () => {}; } },
+    };
+    const child = {
+      id: childId,
+      session: { id: childId, events: [], header: { origin: CHILD_ORIGIN } },
+      ctx: { on() { return () => {}; } },
+    };
+    const provided = {};
+    pluginModule.apply({
+      get(name) {
+        if (name === "agents") {
+          return {
+            list: () => [fakeAgent],
+            get: (id) => (id === childId ? child : fakeAgent),
+          };
+        }
+        if (name === "sessions") return {};
+        if (name === "qq-relay") {
+          return {
+            hang(id, label) {
+              if (hung.some((item) => item.id === id && item.label === label)) return;
+              hung.push({ id, label });
+            },
+            clear(id, label) { cleared.push({ id, label }); return true; },
+          };
+        }
+        if (name === "image-finder") {
+          return {
+            arm(id) { armed.push(id); },
+            leave(id) { left.push(id); },
+            inFindMode: (id) => armed.includes(id) && !left.includes(id),
+          };
+        }
+        return provided[name];
+      },
+      provide(name, value) { provided[name] = value; },
+      effect(fn) { fn(); return () => {}; },
+      on() { return () => {}; },
+    }, { notebookDir: dir, selectionDir: selectedDir });
+    const service = provided["qq-workflows"];
+    assert.equal(service.workflows.selected(alphaId), null);
+    assert.equal("syncFind" in service.workflows, false);
+    const listed = service.handleWorkflows({ agent: fakeAgent, rawInput: "" });
+    assert.match(listed.text, /find/);
+    const selected = service.handleWorkflows({ agent: fakeAgent, rawInput: "find" });
+    assert.equal(selected.kind, "success");
+    assert.equal(selected.text, "find selected");
+    assert.equal(service.workflows.selected(alphaId), "find");
+    assert.deepEqual(hung, [{ id: alphaId, label: pluginModule.FIND_LABEL }]);
+    assert.deepEqual(armed, [alphaId]);
+    const settings = service.handleWorkflows({ agent: fakeAgent, rawInput: "settings" });
+    assert.equal(settings.kind, "success");
+    assert.match(settings.text, /find has no roles/);
+    const wrote = service.handleWorkflows({
+      agent: fakeAgent,
+      rawInput: "settings find talking test-provider test-model",
+    });
+    assert.equal(wrote.kind, "error");
+    assert.match(wrote.text, /find has no roles/);
+    const refused = service.handleWorkflows({ agent: child, rawInput: "find" });
+    assert.equal(refused.kind, "error");
+    assert.match(refused.text, /child session/);
+    const clearedSelection = service.handleWorkflows({ agent: fakeAgent, rawInput: "none" });
+    assert.equal(clearedSelection.kind, "success");
+    assert.equal(service.workflows.selected(alphaId), null);
+    assert.deepEqual(cleared, [{ id: alphaId, label: pluginModule.FIND_LABEL }]);
+    assert.deepEqual(left, [alphaId]);
+    service.workflows.select(alphaId, "find");
+    service.workflows.select(alphaId, "architect");
+    assert.equal(service.workflows.selected(alphaId), "architect");
+    assert.ok(left.includes(alphaId));
+    assert.deepEqual(hung.filter((item) => item.label === ARCHITECT_LABEL), [
+      { id: alphaId, label: ARCHITECT_LABEL },
+    ]);
+
+    createSelectionStore(selectedDir).set(alphaId, "find");
+    const again = {};
+    const hungAgain = [];
+    const armedAgain = [];
+    pluginModule.apply({
+      get(name) {
+        if (name === "agents") return { list: () => [fakeAgent], get: () => fakeAgent };
+        if (name === "qq-relay") {
+          return { hang(id, label) { hungAgain.push({ id, label }); }, clear() {} };
+        }
+        if (name === "image-finder") {
+          return {
+            arm(id) { if (!armedAgain.includes(id)) armedAgain.push(id); },
+            leave() {},
+          };
+        }
+        return again[name];
+      },
+      provide(name, value) { again[name] = value; },
+      effect(fn) { fn(); return () => {}; },
+      on() { return () => {}; },
+    }, { notebookDir: dir, selectionDir: selectedDir });
+    assert.equal(again["qq-workflows"].workflows.selected(alphaId), "find");
+    assert.deepEqual(hungAgain, [{ id: alphaId, label: pluginModule.FIND_LABEL }]);
+    assert.deepEqual(armedAgain, [alphaId]);
+  }
+
+  // A replacement relay starts with an empty in-memory label board. The
+  // qq-relay coeffect republishes the durable workflow selection once.
+  {
+    const dir = join(scratch, "relay-replacement");
+    const selectedDir = join(scratch, "relay-replacement-selected");
+    createSelectionStore(selectedDir).set(alphaId, "architect");
+    const firstHung = [];
+    const secondHung = [];
+    const firstRelay = {
+      hang(id, label) { firstHung.push({ id, label }); },
+      clear() {},
+    };
+    const secondRelay = {
+      hang(id, label) { secondHung.push({ id, label }); },
+      clear() {},
+    };
+    let currentRelay = firstRelay;
+    const injectors = new Map();
+    const provided = {};
+    const agent = {
+      id: alphaId,
+      session: { id: alphaId, events: [], header: {} },
+      ctx: { on() { return () => {}; } },
+    };
+    const ctx = {
+      get(name) {
+        if (name === "agents") return { list: () => [agent], get: () => agent };
+        if (name === "sessions") return {};
+        if (name === "qq-relay") return currentRelay;
+        return provided[name];
+      },
+      provide(name, value) { provided[name] = value; },
+      inject(deps, fn) {
+        injectors.set(deps.join(","), fn);
+        fn(ctx);
+      },
+      effect(fn) { return fn(); },
+      on() { return () => {}; },
+    };
+    pluginModule.apply(ctx, { notebookDir: dir, selectionDir: selectedDir });
+    assert.deepEqual(firstHung, [{ id: alphaId, label: ARCHITECT_LABEL }]);
+    currentRelay = secondRelay;
+    injectors.get("qq-relay")();
+    assert.deepEqual(secondHung, [{ id: alphaId, label: ARCHITECT_LABEL }]);
   }
 
   console.log("test-qq-workflows-plugin: pass");
