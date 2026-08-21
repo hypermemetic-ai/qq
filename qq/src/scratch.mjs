@@ -2,8 +2,8 @@
 //
 // Organizational workspace ownership only: one private direct child per
 // session id, bound by an owner-only versioned marker. Not an OS sandbox
-// and not attached to the project catalog or session service. T-134 later
-// consumes this for Home Agent cwd and cleanup.
+// and not a project catalog. The session service uses this for Home Agent
+// cwd and cleanup; T-134 later owns Home routes and UI.
 
 import { randomBytes } from "node:crypto";
 import {

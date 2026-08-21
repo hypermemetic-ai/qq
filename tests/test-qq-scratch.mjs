@@ -496,7 +496,10 @@ try {
   assert.doesNotMatch(source, /from \"\.\/(session|files|plugin)\.mjs\"/);
   assert.doesNotMatch(source, /listProjectCatalog|createProjectFileService|createQqService/);
   assert.doesNotMatch(sourceOf("qq/src/plugin.mjs"), /scratch/);
-  assert.doesNotMatch(sourceOf("qq/src/session.mjs"), /createScratchManager|scratch\.mjs/);
+  assert.match(sourceOf("qq/src/session.mjs"), /createScratchManager/);
+  assert.match(sourceOf("qq/src/session.mjs"), /from "\.\/scratch\.mjs"/);
+  assert.doesNotMatch(sourceOf("qq/src/session.mjs"), /startsWith\(.*scratch/);
+  assert.doesNotMatch(sourceOf("qq/src/session.mjs"), /\.transition\(|attachWorkflow|selectedWorkflow/);
   assert.equal(internals.isDirectChild(work, join(work, alphaId)), true);
   assert.equal(internals.isDirectChild(work, join(work, "nested", alphaId)), false);
   assert.equal(internals.contained(work, join(work, "..", "nope")), false);
