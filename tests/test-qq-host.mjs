@@ -1641,7 +1641,9 @@ try {
   assert.match(staticCss.body, /\.project-drawer \{/);
   assert.match(staticCss.body, /width: min\(15\.5rem, calc\(100vw - 8rem\)\)/);
   assert.match(staticCss.body, /\.drawer-name \{[\s\S]*text-overflow: ellipsis/);
-  assert.match(staticCss.body, /\.file-document \{/);
+  assert.match(staticCss.body, /\.document-viewer \{/);
+  assert.match(staticCss.body, /\.document-viewer-content \{/);
+  assert.doesNotMatch(staticCss.body, /\.file-document \{/);
   assert.doesNotMatch(staticCss.body, /\.drawer-edge/);
   assert.match(staticCss.body, /\.hljs-keyword/);
   assert.match(staticCss.body, /#composer-submit \{[\s\S]*clip-path: none/);
@@ -1802,6 +1804,8 @@ try {
   assert.match(browser, /workflows-popup/);
   assert.match(browser, /openDrawer/);
   assert.match(browser, /closeDrawer/);
+  assert.match(browser, /openDocumentViewer/);
+  assert.match(browser, /data-document-viewer-open/);
   assert.match(browser, /touchstart/);
   assert.doesNotMatch(browser, /drawer-edge|dx >= 56/);
   assert.match(browser, /trapDrawerFocus/);

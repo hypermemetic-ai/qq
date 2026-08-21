@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { access, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer as createHttpsServer } from "node:https";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -156,14 +156,16 @@ async function createPage(client, options = {}) {
   const { sessionId } = await client.send("Target.attachToTarget", { targetId, flatten: true });
   await client.send("Page.enable", {}, sessionId);
   await client.send("Runtime.enable", {}, sessionId);
-  if (options.mobile) {
+  if (options.mobile || options.width) {
+    const width = options.width ?? 412;
+    const height = options.height ?? 915;
     await client.send("Emulation.setDeviceMetricsOverride", {
-      width: 412,
-      height: 915,
-      screenWidth: 412,
-      screenHeight: 915,
-      deviceScaleFactor: 2.625,
-      mobile: true,
+      width,
+      height,
+      screenWidth: width,
+      screenHeight: height,
+      deviceScaleFactor: options.deviceScaleFactor ?? 2.625,
+      mobile: options.mobile !== false,
       screenOrientation: { type: "portraitPrimary", angle: 0 },
     }, sessionId);
     await client.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 }, sessionId);
@@ -236,6 +238,22 @@ async function waitForDrawerSurface(client, page, pathname) {
     }))()`).then((state) => state?.ready && state.pathname === pathname && state),
     `drawer surface ${pathname} did not load`,
   );
+}
+
+async function waitForDocumentViewer(client, page, pathname) {
+  return waitFor(
+    () => evaluate(client, page, `(() => ({
+      ready: document.readyState === "complete" && Boolean(document.querySelector("[data-document-viewer]")),
+      pathname: location.pathname,
+    }))()`).then((state) => state?.ready && state.pathname === pathname && state),
+    `document viewer ${pathname} did not load`,
+  );
+}
+
+async function captureViewport(client, page, path) {
+  const shot = await client.send("Page.captureScreenshot", { format: "png" }, page.sessionId);
+  await writeFile(path, Buffer.from(shot.data, "base64"));
+  return path;
 }
 
 async function assertDrawerHeadingFocus(client, page) {
@@ -917,99 +935,261 @@ export async function runQqPwaBrowserProof() {
     );
     await closeDrawerInPlace(client, pixel);
 
-    // Vertical motion on the ordinary file surface remains a native scroll gesture.
+    const shots = join(tmpdir(), "qq-t-129-document-viewer");
+    await mkdir(shots, { recursive: true });
+
+    // Dedicated file route is the full-viewport reader: native vertical scroll,
+    // visual-line wrapping, and no drawer swipe arbitration.
     const filePath = "/qq/project/proof/file/README.md";
     await navigate(client, pixel, `${origin}${filePath}`);
-    await waitForDrawerSurface(client, pixel, filePath);
-    const verticalStart = await evaluate(client, pixel, `(() => {
-      const scroller = document.querySelector(".file-document");
+    await waitForDocumentViewer(client, pixel, filePath);
+    const fileLayout = await evaluate(client, pixel, `(() => {
+      const viewer = document.querySelector("#project-file-viewer");
+      const rect = viewer.getBoundingClientRect();
       const target = document.elementFromPoint(206, 760);
       window.__qqVerticalPointerEvents = [];
       window.__qqVerticalTouchMoves = [];
       for (const name of ["pointerdown", "pointermove", "pointercancel", "pointerup"]) {
-        scroller.addEventListener(name, () => window.__qqVerticalPointerEvents.push(name));
+        viewer.addEventListener(name, () => window.__qqVerticalPointerEvents.push(name));
       }
       document.addEventListener("touchmove", (event) => {
         window.__qqVerticalTouchMoves.push({ prevented: event.defaultPrevented, cancelable: event.cancelable });
       });
       return {
-        targetInScroller: scroller.contains(target),
-        targetTouchAction: getComputedStyle(target).touchAction,
-        scrollerTouchAction: getComputedStyle(scroller).touchAction,
-        scrollable: scroller.scrollHeight > scroller.clientHeight,
+        width: rect.width,
+        height: rect.height,
+        background: getComputedStyle(viewer).backgroundColor,
+        hasDrawer: Boolean(document.querySelector("#project-drawer")),
+        targetInViewer: viewer.contains(target),
+        overflowX: getComputedStyle(viewer).overflowX,
+        overflowY: getComputedStyle(viewer).overflowY,
+        scrollable: viewer.scrollHeight > viewer.clientHeight,
+        wraps: viewer.scrollWidth <= viewer.clientWidth + 1,
       };
     })()`);
-    assert.equal(verticalStart.targetInScroller, true);
-    assert.equal(verticalStart.targetTouchAction, "auto");
-    assert.equal(verticalStart.scrollerTouchAction, "auto");
-    assert.equal(verticalStart.scrollable, true);
+    assert.equal(fileLayout.hasDrawer, false, "file route kept the project drawer");
+    assert.ok(fileLayout.width >= 412, `file viewer width ${fileLayout.width} did not use the visual viewport`);
+    assert.ok(fileLayout.height >= 915, `file viewer height ${fileLayout.height} did not use the visual viewport`);
+    assert.equal(fileLayout.background, "rgb(0, 0, 0)");
+    assert.equal(fileLayout.overflowX, "hidden");
+    assert.equal(fileLayout.overflowY, "auto");
+    assert.equal(fileLayout.scrollable, true);
+    assert.equal(fileLayout.wraps, true);
+    assert.equal(fileLayout.targetInViewer, true);
+    await captureViewport(client, pixel, join(shots, "file-markdown-412.png"));
     await dispatchTouchSwipe(client, pixel, { x: 206, y: 760, endX: 208, endY: 220, steps: 8 });
-    // Headless dispatchTouchEvent does not execute compositor scrolling, so
-    // pointercancel plus untouched TouchEvents proves the gesture was yielded.
     const vertical = await waitFor(
       () => evaluate(client, pixel, `({
         pointerEvents: window.__qqVerticalPointerEvents,
         touchMoves: window.__qqVerticalTouchMoves,
         drawerOpen: document.body.classList.contains("drawer-open"),
       })`).then((state) => state?.pointerEvents.includes("pointercancel") && state),
-      "vertical surface touch was not yielded to the browser",
+      "vertical file touch was not yielded to the browser",
     );
     assert.equal(vertical.touchMoves.some((move) => move.prevented), false, "vertical scrolling was manually intercepted");
-    assert.equal(vertical.drawerOpen, false, "vertical scrolling opened the drawer");
-    await openDrawerWithTouch(client, pixel, { x: 360, y: 420, travel: 40, steps: 1 });
-    await closeDrawerInPlace(client, pixel);
+    assert.equal(vertical.drawerOpen, false, "file-page swipe opened a drawer");
+    await dispatchTouchSwipe(client, pixel, { x: 206, y: 420, endX: 360, endY: 421, steps: 4 });
+    assert.equal(await evaluate(client, pixel, `document.body.classList.contains("drawer-open")`), false);
 
-    // A rightward start inside a genuinely horizontal code scroller stays native.
     const codePath = "/qq/project/proof/file/src%2Ffixture.js";
     await navigate(client, pixel, `${origin}${codePath}`);
-    await waitForDrawerSurface(client, pixel, codePath);
-    const horizontalStart = await evaluate(client, pixel, `(() => {
-      const code = document.querySelector(".file-code");
-      const rect = code.getBoundingClientRect();
-      const x = Math.max(rect.left + 80, 180);
-      const y = rect.top + Math.min(40, rect.height / 2);
-      code.scrollLeft = Math.min(120, code.scrollWidth - code.clientWidth);
-      window.__qqHorizontalPointerEvents = [];
-      window.__qqHorizontalTouchMoves = [];
-      window.__qqHorizontalTarget = null;
-      document.addEventListener("pointerdown", (event) => {
-        window.__qqHorizontalTarget = { code: Boolean(event.target.closest?.(".file-code")) };
-      }, { capture: true, once: true });
-      document.addEventListener("touchmove", (event) => {
-        window.__qqHorizontalTouchMoves.push({ prevented: event.defaultPrevented, cancelable: event.cancelable });
-      });
-      for (const name of ["pointerdown", "pointermove", "pointercancel", "pointerup"]) {
-        code.addEventListener(name, () => window.__qqHorizontalPointerEvents.push(name));
-      }
+    await waitForDocumentViewer(client, pixel, codePath);
+    const codeWrap = await evaluate(client, pixel, `(() => {
+      const code = document.querySelector(".document-code");
+      const viewer = document.querySelector("#project-file-viewer");
+      const style = getComputedStyle(code);
       return {
-        x, y,
-        touchAction: getComputedStyle(code).touchAction,
-        scrollable: code.scrollWidth > code.clientWidth,
-        scrollLeft: code.scrollLeft,
+        whiteSpace: style.whiteSpace,
+        overflowWrap: style.overflowWrap,
+        wraps: code.scrollWidth <= code.clientWidth + 1,
+        viewerWraps: viewer.scrollWidth <= viewer.clientWidth + 1,
+        highlighted: Boolean(code.querySelector(".hljs-keyword, .hljs-string")),
       };
     })()`);
-    assert.equal(horizontalStart.touchAction, "auto");
-    assert.equal(horizontalStart.scrollable, true);
-    assert.ok(horizontalStart.scrollLeft > 0, "horizontal scroller was not positioned to accept a rightward pan");
-    await dispatchTouchSwipe(client, pixel, {
-      x: horizontalStart.x,
-      y: horizontalStart.y,
-      endX: horizontalStart.x + 80,
-      endY: horizontalStart.y + 2,
-      steps: 8,
-    });
-    const horizontal = await waitFor(
-      () => evaluate(client, pixel, `({
-        pointerEvents: window.__qqHorizontalPointerEvents,
-        touchMoves: window.__qqHorizontalTouchMoves,
-        target: window.__qqHorizontalTarget,
-        drawerOpen: document.body.classList.contains("drawer-open"),
-      })`).then((state) => state?.pointerEvents.includes("pointercancel") && state),
-      "horizontal code touch was not yielded to the native scroller",
+    assert.match(codeWrap.whiteSpace, /pre-wrap/);
+    assert.equal(codeWrap.wraps, true, "highlighted code required horizontal panning");
+    assert.equal(codeWrap.viewerWraps, true);
+    assert.equal(codeWrap.highlighted, true);
+    const selected = await evaluate(client, pixel, `(() => {
+      const code = document.querySelector(".document-code");
+      const range = document.createRange();
+      range.selectNodeContents(code);
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return { text: selection.toString(), userSelect: getComputedStyle(code).userSelect };
+    })()`);
+    assert.ok(selected.text.includes("wide-code-proof-"), "code could not be selected for copy");
+    assert.match(selected.userSelect, /text|auto/);
+    await captureViewport(client, pixel, join(shots, "file-code-412.png"));
+
+    const proofPath = "/qq/__document-viewer-proof";
+    await navigate(client, pixel, `${origin}${proofPath}`);
+    await waitForDocumentViewer(client, pixel, proofPath);
+    const accidental = await evaluate(client, pixel, `(() => {
+      const preview = document.querySelector('[data-proof-kind="yaml"] .document-viewer-proof-preview');
+      preview.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      return {
+        open: Boolean(document.querySelector(".document-viewer-dialog[open]")),
+        trigger: document.querySelector('[data-proof-kind="yaml"] [data-document-viewer-open]')?.textContent ?? "",
+      };
+    })()`);
+    assert.equal(accidental.open, false, "tapping the preview opened the viewer");
+    assert.equal(accidental.trigger, "Open full screen");
+    await dispatchTouchSwipe(client, pixel, { x: 206, y: 280, endX: 210, endY: 120, steps: 6 });
+    assert.equal(await evaluate(client, pixel, `Boolean(document.querySelector(".document-viewer-dialog[open]"))`), false, "dragging the preview opened the viewer");
+
+    const opened = await evaluate(client, pixel, `(() => {
+      const page = document.querySelector(".document-viewer-proof");
+      page.scrollTop = 80;
+      const trigger = document.querySelector('[data-proof-kind="terminal"] [data-document-viewer-open]');
+      trigger.focus({ preventScroll: true });
+      trigger.click();
+      const dialog = document.querySelector("#proof-terminal");
+      const output = dialog.querySelector(".document-pre");
+      dialog.scrollTop = Math.min(120, dialog.scrollHeight - dialog.clientHeight);
+      return {
+        open: dialog.open,
+        modal: dialog.getAttribute("aria-modal"),
+        inertBackground: document.querySelector(".document-viewer-proof")?.inert === true,
+        wraps: output.scrollWidth <= output.clientWidth + 1,
+        viewerWraps: dialog.scrollWidth <= dialog.clientWidth + 1,
+        pageScroll: page.scrollTop,
+        dialogScroll: dialog.scrollTop,
+        scrollable: dialog.scrollHeight > dialog.clientHeight,
+      };
+    })()`);
+    assert.equal(opened.open, true);
+    assert.equal(opened.modal, "true");
+    assert.equal(opened.inertBackground, true);
+    assert.equal(opened.wraps, true, "terminal output required horizontal panning");
+    assert.equal(opened.viewerWraps, true);
+    assert.equal(opened.scrollable, true);
+    assert.equal(opened.pageScroll, 80);
+    assert.ok(opened.dialogScroll > 0, "complete terminal output was not inspectable");
+    await captureViewport(client, pixel, join(shots, "proof-terminal-open-412.png"));
+    await dispatchKey(client, pixel, "Escape", "Escape", 27);
+    const closed = await waitFor(
+      () => evaluate(client, pixel, `(() => {
+        const dialog = document.querySelector("#proof-terminal");
+        const trigger = document.querySelector('[data-proof-kind="terminal"] [data-document-viewer-open]');
+        const page = document.querySelector(".document-viewer-proof");
+        if (dialog.open || document.activeElement !== trigger || page.scrollTop !== 80) return null;
+        return {
+          pageScroll: page.scrollTop,
+          focused: true,
+          inertBackground: page.inert === true,
+        };
+      })()`),
+      "closing the viewer did not restore the opener",
     );
-    assert.deepEqual(horizontal.target, { code: true });
-    assert.equal(horizontal.touchMoves.some((move) => move.prevented), false, "horizontal file panning was manually intercepted");
-    assert.equal(horizontal.drawerOpen, false);
+    assert.equal(closed.pageScroll, 80, "closing the viewer moved the underlying page");
+    assert.equal(closed.focused, true, "closing the viewer did not restore focus");
+    assert.equal(closed.inertBackground, false);
+
+    await evaluate(client, pixel, `document.querySelector('[data-proof-kind="yaml"] [data-document-viewer-open]').click()`);
+    const yaml = await waitFor(
+      () => evaluate(client, pixel, `(() => {
+        const dialog = document.querySelector("#proof-yaml");
+        const code = dialog?.querySelector(".document-code");
+        if (!dialog?.open || !code) return null;
+        return {
+          wraps: code.scrollWidth <= code.clientWidth + 1,
+          highlighted: Boolean(code.querySelector("[class^=hljs-]")),
+        };
+      })()`),
+      "YAML viewer did not open",
+    );
+    assert.equal(yaml.wraps, true, "YAML required horizontal panning");
+    assert.equal(yaml.highlighted, true);
+    await captureViewport(client, pixel, join(shots, "proof-yaml-412.png"));
+    await evaluate(client, pixel, `document.querySelector("#proof-yaml [data-document-viewer-close]").click()`);
+    await waitFor(
+      () => evaluate(client, pixel, `!document.querySelector("#proof-yaml")?.open`),
+      "YAML viewer did not close",
+    );
+
+    for (const kind of ["line", "diff", "terminal", "error"]) {
+      await evaluate(client, pixel, `document.querySelector('[data-proof-kind="${kind}"] [data-document-viewer-open]').click()`);
+      const proof = await waitFor(
+        () => evaluate(client, pixel, `(() => {
+          const dialog = document.querySelector("#proof-${kind}");
+          if (!dialog?.open) return null;
+          const surface = dialog.querySelector(".document-code, .document-pre, .document-state");
+          return {
+            wraps: dialog.scrollWidth <= dialog.clientWidth + 1,
+            surfaceWraps: !surface || surface.scrollWidth <= surface.clientWidth + 1,
+            kind: dialog.querySelector(".document-viewer-content")?.dataset.contentKind ?? "",
+          };
+        })()`),
+        `proof ${kind} did not open`,
+      );
+      assert.equal(proof.wraps, true, `${kind} viewer panned horizontally`);
+      assert.equal(proof.surfaceWraps, true, `${kind} content panned horizontally`);
+      await captureViewport(client, pixel, join(shots, `proof-${kind}-412.png`));
+      await evaluate(client, pixel, `document.querySelector("#proof-${kind} [data-document-viewer-close]").click()`);
+      await waitFor(
+        () => evaluate(client, pixel, `!document.querySelector("#proof-${kind}")?.open`),
+        `proof ${kind} did not close`,
+      );
+    }
+
+    const narrow = await createPage(client, { mobile: true, width: 320, height: 568, deviceScaleFactor: 2 });
+    await navigate(client, narrow, `${origin}${proofPath}`);
+    await waitForDocumentViewer(client, narrow, proofPath);
+    await evaluate(client, narrow, `document.querySelector('[data-proof-kind="line"] [data-document-viewer-open]').click()`);
+    const narrowLine = await waitFor(
+      () => evaluate(client, narrow, `(() => {
+        const dialog = document.querySelector("#proof-line");
+        const pre = dialog?.querySelector(".document-pre");
+        if (!dialog?.open || !pre) return null;
+        const rect = dialog.getBoundingClientRect();
+        return {
+          width: rect.width,
+          wraps: pre.scrollWidth <= pre.clientWidth + 1,
+          viewerWraps: dialog.scrollWidth <= dialog.clientWidth + 1,
+        };
+      })()`),
+      "320px long-line viewer did not open",
+    );
+    assert.ok(narrowLine.width >= 320, `320px viewer width ${narrowLine.width}`);
+    assert.equal(narrowLine.wraps, true, "320px long line required horizontal panning");
+    assert.equal(narrowLine.viewerWraps, true);
+    await captureViewport(client, narrow, join(shots, "proof-line-320.png"));
+
+    await client.send("Emulation.setDeviceMetricsOverride", {
+      width: 1280,
+      height: 800,
+      screenWidth: 1280,
+      screenHeight: 800,
+      deviceScaleFactor: 1,
+      mobile: false,
+    }, desktop.sessionId);
+    await navigate(client, desktop, `${origin}${filePath}`);
+    await waitForDocumentViewer(client, desktop, filePath);
+    const desktopFile = await evaluate(client, desktop, `(() => {
+      const viewer = document.querySelector("#project-file-viewer");
+      const rect = viewer.getBoundingClientRect();
+      return {
+        width: rect.width,
+        height: rect.height,
+        hasCard: Boolean(document.querySelector(".file-surface, .session-panel")),
+        background: getComputedStyle(viewer).backgroundColor,
+      };
+    })()`);
+    assert.ok(desktopFile.width >= 1280, `desktop viewer width ${desktopFile.width} was not the visual viewport`);
+    assert.ok(desktopFile.height >= 800, `desktop viewer height ${desktopFile.height} was not the visual viewport`);
+    assert.equal(desktopFile.hasCard, false);
+    assert.equal(desktopFile.background, "rgb(0, 0, 0)");
+    await captureViewport(client, desktop, join(shots, "file-markdown-1280.png"));
+    await navigate(client, desktop, `${origin}${proofPath}`);
+    await waitForDocumentViewer(client, desktop, proofPath);
+    await evaluate(client, desktop, `document.querySelector('[data-proof-kind="diff"] [data-document-viewer-open]').click()`);
+    await waitFor(
+      () => evaluate(client, desktop, `document.querySelector("#proof-diff")?.open`),
+      "desktop diff viewer did not open",
+    );
+    await captureViewport(client, desktop, join(shots, "proof-diff-1280.png"));
 
     assert.ok(requests.filter((path) => path === "/qq/").length >= 7, "controlled installed start URL was not repeatedly fetched");
     assert.ok(requests.filter((path) => path === "/qq/sw-v10.js").length >= 2, "legacy worker URL was not checked for migration");
