@@ -733,6 +733,10 @@ try {
     assert.match(listed.text, /find/);
     assert.match(listed.text, /none selected/);
     assert.deepEqual(service.workflows.names(), ["architect", "iterate", "find"]);
+    assert.deepEqual(service.workflows.acceptedContexts("architect"), ["project"]);
+    assert.deepEqual(service.workflows.acceptedContexts("iterate"), ["project"]);
+    assert.deepEqual(service.workflows.acceptedContexts("find"), ["project"]);
+    assert.equal(service.workflows.accepts("architect", "scratch"), false);
 
     const unknown = commands[0].handler({ agent: fakeAgent, rawInput: "mystery" });
     assert.equal(unknown.kind, "error");
@@ -2161,6 +2165,7 @@ try {
     mutable.name = "changed";
     mutable.ensureAttached = () => attached.push("mutated");
     assert.deepEqual(service.workflows.names(), ["architect", "iterate", "find", "media"]);
+    assert.deepEqual(service.workflows.acceptedContexts("media"), ["project"]);
     assert.throws(() => service.workflows.register(mediaSpec()), /already registered/);
 
     assert.equal(service.workflows.select(alphaId, "media"), "media");
