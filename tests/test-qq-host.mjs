@@ -1767,6 +1767,8 @@ try {
   assert.match(uiPlugin, /path: "\/"/);
   assert.match(qqPlugin, /provide = "qq"/);
   assert.match(qqPlugin, /inject = \["agents", "sessions", "sessionPersistence"\]/);
+  assert.match(qqPlugin, /attachSkillToolVisibility/);
+  assert.match(qqPlugin, /inject\(\["tools", "skills"\]/);
   assert.doesNotMatch(qqSession, /<!doctype html>|htmx|text\/css|EventSource/);
   assert.doesNotMatch(uiPlugin, /agents\.create|sessionPersistence|followup|Agent\.cancel/);
   assert.match(launcher, /QQ_DSH_HOME:-\$\{DSH_HOME:-"\$state_root\/qq"\}/);

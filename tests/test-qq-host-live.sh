@@ -380,6 +380,7 @@ for (const { body } of probe) {
   for (const name of ["read", "write", "edit", "grep", "bash"]) {
     if (!names.includes(name)) throw new Error(`missing native ${name} tool`);
   }
+  if (names.includes("skill")) throw new Error("empty skill catalog still advertised the skill tool");
 }
 const messages = probe.at(-1).body.messages;
 const results = new Map(messages.filter(({ role }) => role === "tool").map(
@@ -393,5 +394,40 @@ if (!results.get("call_qq_native_3").includes("beta")) throw new Error("native g
 if (!results.get("call_qq_native_4").includes(process.cwd())) throw new Error("native bash did not pass in repository");
 NODE
 rm -f -- "$root/.qq-tool-proof"
+
+# A later complete catalog must expose `skill` and execute a real skill from
+# DSH_HOME. The proof skill is isolated to this host home; it is not a repo
+# SKILL.md and does not mention sibling projects.
+stop_host
+mkdir -p "$DSH_HOME/skills/qq-proof"
+cat >"$DSH_HOME/skills/qq-proof/SKILL.md" <<'EOF'
+---
+name: qq-proof
+description: Isolated live-host proof skill for qq skill-tool visibility.
+---
+When loaded, the proof is complete. Do not invent other skill names.
+EOF
+start_host
+post_prompt skill-tools "$primary_id" 'QQ_DSH_SKILL_PROBE' htmx
+wait_page "$(canonical "$primary_id")" "$work/skill-tools.settled.html" 'QQ_DSH_SKILL_PROBE_COMPLETE'
+! grep -Fq 'QQ_DSH_SKILL_PROBE_MISSING_TOOL' "$work/skill-tools.settled.html"
+node - "$work/llm-requests.jsonl" <<'NODE'
+const { readFileSync } = require("node:fs");
+const requests = readFileSync(process.argv[2], "utf8").trim().split("\n").map(JSON.parse);
+const probe = requests.filter(({ body }) => body.messages?.some(
+  ({ role, content }) => role === "user" && JSON.stringify(content).includes("QQ_DSH_SKILL_PROBE"),
+));
+if (probe.length < 2) throw new Error(`expected skill-tool requests, got ${probe.length}`);
+for (const { body } of probe) {
+  const names = body.tools?.map(({ function: fn }) => fn.name) ?? [];
+  if (!names.includes("skill")) throw new Error("real skill catalog hid the skill tool");
+}
+const messages = probe.at(-1).body.messages;
+const skillResult = messages.find(({ role, tool_call_id: id }) => role === "tool" && id === "call_qq_skill_0");
+if (!skillResult) throw new Error("missing skill tool result");
+const text = JSON.stringify(skillResult.content);
+if (!text.includes("qq-proof")) throw new Error("skill tool did not load qq-proof");
+if (/media-box/.test(text)) throw new Error("skill proof invented a sibling project name");
+NODE
 
 printf 'test-qq-host-live: pass\n'

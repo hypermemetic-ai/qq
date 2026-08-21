@@ -12,6 +12,10 @@ recognized UTF-8 Markdown, text, or code. `openProjectFile()` bounds safe binary
 responses at 32 MiB. All three resolve canonical paths inside the selected
 project and refuse symlink escape; absolute roots never cross the service API.
 
+The qq plugin hides DSH's generic `skill` tool when a session catalog has no
+model-invocable skills, and restores it when a real skill appears. Grok
+inherits those DSH names unchanged.
+
 `read()` projects the DSH event log and live durable inbox into `conversation`.
 The projection is rebuilt from DSH authority on every read; it is not another
 transcript store. Idle text uses `agent.followup`, busy text uses `agent.steer`,

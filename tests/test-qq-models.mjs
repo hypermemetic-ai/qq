@@ -684,6 +684,29 @@ try {
 
   {
     let captured;
+    const adapter = await grokAdapterWith("tools-skill-passthrough", async (_url, init) => {
+      captured = JSON.parse(init.body);
+      return grokSse("data: {\"text\":\"ok\"}\n\n");
+    });
+    await grokStream(adapter, {
+      tools: [{
+        name: "skill",
+        description: "Load the full instructions for an available skill.",
+        parameters: {
+          type: "object",
+          properties: { name: { type: "string" } },
+          required: ["name"],
+        },
+      }],
+    });
+    assert.equal(captured.tools.length, 1);
+    assert.equal(captured.tools[0].type, "function");
+    assert.equal(captured.tools[0].name, "skill");
+    assert.equal(JSON.stringify(captured.tools).includes("dsh-tool-skill"), false);
+  }
+
+  {
+    let captured;
     const adapter = await grokAdapterWith("tools-empty", async (_url, init) => {
       captured = JSON.parse(init.body);
       return grokSse("data: {\"text\":\"ok\"}\n\n");
