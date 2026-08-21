@@ -27,7 +27,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 export const MARKER_SCHEMA = "qq.scratch/v1";
 export const MARKER_NAME = ".qq-scratch.json";
 export const STAGING_PREFIX = ".qq-scratch-create.";
-export const SESSION_ID = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+export const SESSION_ID = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 const NOFOLLOW = constants.O_NOFOLLOW ?? 0;
 const DIRECTORY_MODE = 0o700;
@@ -90,15 +90,21 @@ export function defaultScratchRoot(env = process.env) {
   return join(stateHome, "qq", "scratch");
 }
 
+/** Accept only the exact lowercase canonical `session-<uuid>` spelling. */
 export function normalizeSessionId(value) {
   if (typeof value !== "string" || value.includes("\0") || value.includes("/") || value.includes(sep)) {
     throw scratchError("qq: scratch session id is invalid", "invalid-id");
   }
-  const id = value.trim().toLowerCase();
-  if (!SESSION_ID.test(id)) {
+  if (!SESSION_ID.test(value)) {
     throw scratchError("qq: scratch session id is invalid", "invalid-id");
   }
-  return id;
+  return value;
+}
+
+function compareCodeUnits(left, right) {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
 }
 
 function permissionMode(info) {
@@ -206,13 +212,12 @@ function readMarker(io, directory, expectedId) {
     if (parsed.schema !== MARKER_SCHEMA || typeof parsed.sessionId !== "string") {
       return { ok: false, reason: "malformed" };
     }
-    const bound = parsed.sessionId.trim().toLowerCase();
-    if (!SESSION_ID.test(bound) || bound !== expectedId) {
+    if (!SESSION_ID.test(parsed.sessionId) || parsed.sessionId !== expectedId) {
       return { ok: false, reason: "mismatch" };
     }
     return {
       ok: true,
-      marker: Object.freeze({ schema: MARKER_SCHEMA, sessionId: bound }),
+      marker: Object.freeze({ schema: MARKER_SCHEMA, sessionId: parsed.sessionId }),
     };
   } catch (error) {
     if (isInspectError(error)) return { ok: false, reason: "error", error };
@@ -440,10 +445,11 @@ export function createScratchManager(options = {}) {
     const currentRoot = readyRoot();
     let entries;
     try {
-      entries = io.readdirSync(currentRoot, { withFileTypes: true });
+      entries = [...io.readdirSync(currentRoot, { withFileTypes: true })];
     } catch (error) {
       throw scratchError("qq: scratch root is not a readable directory", "unsafe-root", { cause: error });
     }
+    entries.sort((left, right) => compareCodeUnits(left.name, right.name));
     const deleted = [];
     const preserved = [];
     const errors = [];
