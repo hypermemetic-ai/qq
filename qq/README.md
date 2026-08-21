@@ -12,6 +12,13 @@ recognized UTF-8 Markdown, text, or code. `openProjectFile()` bounds safe binary
 responses at 32 MiB. All three resolve canonical paths inside the selected
 project and refuse symlink escape; absolute roots never cross the service API.
 
+`createScratchManager()` owns one private direct child under a configured
+scratch root (production default `~/.local/state/qq/scratch`). Each child is
+mode `0700`, bound by an owner-only `qq.scratch/v1` marker, and is suitable as a
+later Home Agent cwd. Create, verify, delete, and restart reconciliation stay
+inside that root, fail closed on symlinks or marker mismatch, and do not
+register projects. T-134 will call this manager; the session service does not.
+
 The qq plugin hides DSH's generic `skill` tool when a session catalog has no
 model-invocable skills, and restores it when a real skill appears. Grok
 inherits those DSH names unchanged.
