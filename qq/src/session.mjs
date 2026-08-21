@@ -786,11 +786,6 @@ export function createQqService(ctx, config) {
     }
     const liveIds = new Set(liveHomeAgents().map((agent) => agent.session.id));
     for (const id of scopes.protectedIds()) liveIds.add(id);
-    for (const agent of liveAgents()) {
-      const id = agent.session?.id;
-      if (!isRootOperatorAgent(agent) || !SESSION_ID.test(id)) continue;
-      if (homeWorkspace(id)) liveIds.add(id);
-    }
     try {
       const result = scratch.reconcile([...liveIds]);
       for (const row of result.errors ?? []) {
@@ -992,7 +987,6 @@ export function createQqService(ctx, config) {
           throw scratchCleanupError(sessionId, cwd, disposeError, "create");
         }
       }
-      unpublished.delete(sessionId);
       if (cwd) {
         try {
           scratch.delete(sessionId);
@@ -1024,7 +1018,6 @@ export function createQqService(ctx, config) {
     await handle.dispose();
     handles.delete(sessionId);
     agentPromises.delete(sessionId);
-    unpublished.delete(sessionId);
     try { delete agent?.[AGENT_HANDLE]; } catch {}
     syncLive();
   }

@@ -104,7 +104,7 @@ function parseRecord(id, value) {
 }
 
 function emptyState() {
-  return { records: new Map(), protectedIds: new Set(), corrupt: false };
+  return { records: new Map(), protectedEntries: new Map(), corrupt: false };
 }
 
 function parseStore(parsed) {
@@ -118,28 +118,32 @@ function parseStore(parsed) {
     return { ...emptyState(), corrupt: true };
   }
   const records = new Map();
-  const protectedIds = new Set();
+  const protectedEntries = new Map();
   for (const [id, value] of Object.entries(parsed.sessions)) {
     const parsedRecord = parseRecord(id, value);
     if (parsedRecord.ok) {
       records.set(parsedRecord.record.id, parsedRecord.record);
     } else if (parsedRecord.id) {
-      protectedIds.add(parsedRecord.id);
+      protectedEntries.set(parsedRecord.id, value);
     }
   }
-  return { records, protectedIds, corrupt: false };
+  return { records, protectedEntries, corrupt: false };
 }
 
-function serialize(records) {
+function serialize(records, protectedEntries) {
   const sessions = {};
-  const ids = [...records.keys()].sort();
+  const ids = [...new Set([...records.keys(), ...protectedEntries.keys()])].sort();
   for (const id of ids) {
     const record = records.get(id);
-    sessions[id] = {
-      scope: record.scope,
-      context: record.context,
-      cwd: record.cwd,
-    };
+    if (record) {
+      sessions[id] = {
+        scope: record.scope,
+        context: record.context,
+        cwd: record.cwd,
+      };
+      continue;
+    }
+    sessions[id] = protectedEntries.get(id);
   }
   return `${JSON.stringify({ schema: SCOPE_SCHEMA, sessions })}\n`;
 }
@@ -177,13 +181,13 @@ export function createSessionScopeStore(options = {}) {
     return parseStore(parsed);
   }
 
-  function persist(records) {
+  function persist(records, protectedEntries) {
     if (!file) return;
     const directory = dirname(file);
     io.mkdirSync(directory, { recursive: true, mode: DIR_MODE });
     try { io.chmodSync(directory, DIR_MODE); } catch {}
     const temporary = `${file}.${process.pid}.tmp`;
-    io.writeFileSync(temporary, serialize(records), { mode: FILE_MODE });
+    io.writeFileSync(temporary, serialize(records, protectedEntries), { mode: FILE_MODE });
     try { io.chmodSync(temporary, FILE_MODE); } catch {}
     io.renameSync(temporary, file);
     try { io.chmodSync(file, FILE_MODE); } catch {}
@@ -213,7 +217,7 @@ export function createSessionScopeStore(options = {}) {
       if (!id) return Object.freeze({ ok: false, reason: "invalid-id" });
       const record = memory.records.get(id);
       if (record) return Object.freeze({ ok: true, record });
-      if (memory.protectedIds.has(id)) return Object.freeze({ ok: false, reason: "invalid" });
+      if (memory.protectedEntries.has(id)) return Object.freeze({ ok: false, reason: "invalid" });
       return Object.freeze({ ok: false, reason: "missing" });
     },
     ids() {
@@ -222,7 +226,7 @@ export function createSessionScopeStore(options = {}) {
     },
     protectedIds() {
       if (memory.corrupt) return [];
-      return [...memory.protectedIds];
+      return [...memory.protectedEntries.keys()];
     },
     put(sessionId, input = {}) {
       if (memory.corrupt) {
@@ -241,10 +245,12 @@ export function createSessionScopeStore(options = {}) {
       }
       const next = new Map(memory.records);
       next.set(parsed.record.id, parsed.record);
-      persist(next);
+      const nextProtected = new Map(memory.protectedEntries);
+      nextProtected.delete(parsed.record.id);
+      persist(next, nextProtected);
       memory = {
         records: next,
-        protectedIds: new Set([...memory.protectedIds].filter((id) => id !== parsed.record.id)),
+        protectedEntries: nextProtected,
         corrupt: false,
       };
       return parsed.record;
