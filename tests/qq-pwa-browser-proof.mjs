@@ -576,7 +576,15 @@ export async function runQqPwaBrowserProof() {
     async list(project) { return project === "empty" ? [] : [{ id: SESSION_ID, createdAt: 1, project: "proof" }]; },
     async read(id) {
       assert.equal(id, SESSION_ID);
-      return { id, project: "proof", events: [], agentStatus: "idle" };
+      const nodes = Array.from({ length: 40 }, (_, index) => {
+        const seq = index + 1;
+        const line = `Scrollable proof turn ${seq}. ${"line ".repeat(18)}`;
+        if (index % 2 === 0) {
+          return { kind: "user", seq, content: [{ type: "text", text: line }] };
+        }
+        return { kind: "assistant", seq, status: "complete", blocks: [{ type: "text", text: line }] };
+      });
+      return { id, project: "proof", events: [], conversation: { nodes }, agentStatus: "idle" };
     },
     observe(id, listener) {
       observers.add(listener);
@@ -935,20 +943,75 @@ export async function runQqPwaBrowserProof() {
     );
     await closeDrawerInPlace(client, pixel);
 
-    // Closing a session-scoped file page returns to the originating console.
-    await navigate(client, pixel, `${origin}${CANONICAL_PATH}?drawer=`);
-    await waitForDrawerSurface(client, pixel, CANONICAL_PATH);
-    const sessionFileHref = await evaluate(client, pixel, `document.querySelector('a[aria-label="Read file README.md"]')?.getAttribute("href")`);
-    assert.equal(sessionFileHref, `${CANONICAL_PATH}/file/README.md`);
-    await evaluate(client, pixel, `document.querySelector('a[aria-label="Read file README.md"]').click()`);
+    // Closing a session-scoped file page restores the originating console, nested
+    // transcript scroll, and the same drawer file link. Direct file entry falls back.
     const sessionFilePath = `${CANONICAL_PATH}/file/README.md`;
+    await navigate(client, pixel, `${origin}${CANONICAL_PATH}?drawer=`);
+    await waitForLive(client, pixel, origin);
+    await waitForDrawerSurface(client, pixel, CANONICAL_PATH);
+    const recorded = await waitFor(
+      () => evaluate(client, pixel, `(() => {
+        const transcript = document.querySelector("#transcript");
+        const link = document.querySelector('a.drawer-entry[data-file-path="README.md"]');
+        if (!transcript || !link || transcript.scrollHeight <= transcript.clientHeight + 40) return null;
+        const target = Math.min(240, Math.max(80, transcript.scrollHeight - transcript.clientHeight - 24));
+        transcript.scrollTop = target;
+        link.focus({ preventScroll: true });
+        if (document.activeElement !== link || transcript.scrollTop < 40) return null;
+        return {
+          href: location.pathname + location.search,
+          top: transcript.scrollTop,
+          fileHref: link.getAttribute("href"),
+          openerPath: link.dataset.filePath,
+        };
+      })()`),
+      "session console was not scrollable with a focusable drawer file link",
+    );
+    assert.equal(recorded.fileHref, sessionFilePath);
+    assert.equal(recorded.openerPath, "README.md");
+    assert.match(recorded.href, /[?&]drawer=/);
+    await evaluate(client, pixel, `document.querySelector('a.drawer-entry[data-file-path="README.md"]').click()`);
     await waitForDocumentViewer(client, pixel, sessionFilePath);
     const fileClose = await evaluate(client, pixel, `document.querySelector(".document-viewer-close")?.getAttribute("href")`);
-    assert.equal(fileClose, CANONICAL_PATH, "file page close did not target the originating session");
+    assert.equal(fileClose, CANONICAL_PATH, "file page close did not keep a canonical fallback");
+    await evaluate(client, pixel, `document.querySelector(".document-viewer-close").click()`);
+    const restored = await waitFor(
+      () => evaluate(client, pixel, `(() => {
+        const transcript = document.querySelector("#transcript");
+        const link = document.querySelector('a.drawer-entry[data-file-path="README.md"]');
+        if (!transcript || !link || location.pathname !== ${JSON.stringify(CANONICAL_PATH)}) return null;
+        if (document.activeElement !== link) return null;
+        return {
+          href: location.pathname + location.search,
+          top: transcript.scrollTop,
+          active: document.activeElement?.dataset?.filePath ?? "",
+          drawerOpen: document.body.classList.contains("drawer-open"),
+          viewer: Boolean(document.querySelector("#project-file-viewer")),
+        };
+      })()`),
+      "file toolbar Back did not restore the originating console",
+    );
+    assert.equal(restored.href, recorded.href, "file toolbar Back did not return to the originating URL");
+    assert.ok(Math.abs(restored.top - recorded.top) <= 2, `restored transcript scroll ${restored.top} was not ${recorded.top}`);
+    assert.equal(restored.active, "README.md", "file toolbar Back did not restore the drawer file link");
+    assert.equal(restored.drawerOpen, true, "file toolbar Back hid the source drawer");
+    assert.equal(restored.viewer, false);
+    await closeDrawerInPlace(client, pixel);
+
+    await evaluate(client, pixel, `window.name = ""`);
+    await navigate(client, pixel, `${origin}/__legacy`);
+    await waitFor(
+      () => evaluate(client, pixel, `document.title === "legacy worker migration"`).then((ready) => ready && true),
+      "legacy interstitial did not load for direct file entry",
+    );
+    await navigate(client, pixel, `${origin}${sessionFilePath}`);
+    await waitForDocumentViewer(client, pixel, sessionFilePath);
     await evaluate(client, pixel, `document.querySelector(".document-viewer-close").click()`);
     await waitForLive(client, pixel, origin);
-    assert.equal(await evaluate(client, pixel, `location.pathname`), CANONICAL_PATH);
-    assert.equal(await evaluate(client, pixel, `Boolean(document.querySelector("#project-file-viewer"))`), false);
+    const fallback = await evaluate(client, pixel, `({ href: location.pathname + location.search, title: document.title, viewer: Boolean(document.querySelector("#project-file-viewer")) })`);
+    assert.equal(fallback.href, CANONICAL_PATH, "direct file entry used history.back() instead of the canonical session");
+    assert.equal(fallback.viewer, false);
+    assert.notEqual(fallback.title, "legacy worker migration");
 
     // Dialog close must preserve closed-drawer inert on real console chrome.
     const chromeInert = await evaluate(client, pixel, `(() => {

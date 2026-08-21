@@ -1809,12 +1809,17 @@ try {
   assert.match(browser, /openDocumentViewer/);
   assert.match(browser, /documentViewerPriorInert/);
   assert.match(browser, /data-document-viewer-open/);
+  assert.match(browser, /qq-file-return/);
+  assert.match(browser, /history\.back/);
   assert.match(browser, /touchstart/);
   assert.doesNotMatch(browser, /drawer-edge|dx >= 56/);
   assert.match(browser, /trapDrawerFocus/);
   assert.match(browser, /url\.searchParams\.set\("drawer"/);
   assert.match(browser, /updateViaCache: "none"/);
   assert.doesNotMatch(browser, /localStorage|sessionStorage|indexedDB|document\.cookie|EventSource|WebSocket|htmx\.process/);
+  assert.match(renderSource, /data-file-path/);
+  assert.match(renderSource, /document-viewer-close/);
+  assert.match(renderSource, /Back to console/);
   assert.doesNotMatch(renderSource, /outerHTML|controller|observer|lease|take control/i);
   assert.doesNotMatch(workerSource, /addEventListener\("(?:sync|periodicsync|push|notificationclick)"|indexedDB|localStorage/i);
 

@@ -610,6 +610,7 @@ try {
     assert.match(openDrawer.body, /id="project-drawer"[^>]*aria-hidden="false"/);
     assert.match(openDrawer.body, />~\/projects<\/a>[\s\S]*>alpha<\/span>/);
     assert.match(openDrawer.body, /aria-label="Read file README.md"/);
+    assert.match(openDrawer.body, /data-file-path="README.md"/);
     assert.match(openDrawer.body, /aria-label="Open file manual.pdf"/);
     assert.match(openDrawer.body, new RegExp(`href="/qq/project/alpha/session/${newId}/file/README\\.md"`));
     assert.match(openDrawer.body, new RegExp(`href="/qq/project/alpha/session/${newId}/open/manual\\.pdf"`));
