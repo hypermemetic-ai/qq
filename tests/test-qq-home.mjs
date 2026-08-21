@@ -400,7 +400,10 @@ try {
   assert.equal(live.has(later.id), true, "scope-store failure leaves the old Home session truthful");
   assert.deepEqual((await qq.listHome()).map((row) => row.id), homesBeforeScopeFail);
   assert.deepEqual(sessionDirs(), [later.id]);
-  assert.equal(scopeRecord(creates.at(-1).sessionId), undefined);
+  const failedScopeId = creates.at(-1).sessionId;
+  assert.equal(scopeRecord(failedScopeId), undefined);
+  await assert.rejects(() => qq.read(failedScopeId), /not found/);
+  await assert.rejects(() => qq.inspect(failedScopeId), /not found/);
 
   failNextFlush = true;
   failNextDispose = true;
@@ -545,10 +548,8 @@ try {
   writeFileSync(join(scratchRoot, "notes.txt"), "keep\n");
   mkdirSync(join(scratchRoot, "not-a-session"));
   writeFileSync(join(scratchRoot, "not-a-session", "file.txt"), "unrelated\n");
-  const unmarked = join(scratchRoot, bootId);
-  mkdirSync(unmarked, { mode: 0o700 });
-  chmodSync(unmarked, 0o700);
-  writeFileSync(join(unmarked, "not-a-marker.txt"), "project-looking\n");
+  const markedProjectId = join(scratchRoot, bootId);
+  writeOwnedMarker(markedProjectId, bootId);
 
   const restartLive = new Map(live);
   const restartPersisted = new Map(persisted);
@@ -586,7 +587,11 @@ try {
   });
   assert.equal(existsSync(join(scratchRoot, "notes.txt")), true);
   assert.equal(existsSync(join(scratchRoot, "not-a-session", "file.txt")), true);
-  assert.equal(existsSync(unmarked), true);
+  assert.equal(
+    existsSync(markedProjectId),
+    false,
+    "a project Agent id does not make a marked scratch orphan a live owned Home workspace",
+  );
   assert.equal(existsSync(projects.cwd), true);
   assert.equal(existsSync(betaCwd), true);
   assert.equal(restartLive.has(bootId), true);

@@ -122,6 +122,9 @@ try {
   assert.deepEqual(mixed.inspect(betaId), { ok: false, reason: "invalid" });
   assert.deepEqual(mixed.protectedIds(), [betaId]);
   assert.deepEqual(mixed.ids(), [alphaId]);
+  mixed.put(alphaId, { cwd: alphaCwd });
+  const mixedReloaded = createSessionScopeStore({ file: mixedFile });
+  assert.deepEqual(mixedReloaded.protectedIds(), [betaId]);
 
   assert.equal(internals.canonicalSessionId(alphaId), alphaId);
   assert.equal(internals.canonicalSessionId(alphaId.toUpperCase()), undefined);
