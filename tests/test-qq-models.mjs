@@ -1121,6 +1121,104 @@ try {
     assert.equal(logout.connectors.find((row) => row.id === "qwen").hostOwned, true);
   }
 
+  {
+    let captured;
+    const withKey = await grokAdapterWith("cache-key-on", async (_url, init) => {
+      captured = JSON.parse(init.body);
+      return grokSse("data: {\"text\":\"ok\"}\n\n");
+    });
+    await grokStream(withKey, { sessionId });
+    assert.equal(captured.prompt_cache_key, sessionId);
+
+    const withoutKey = await grokAdapterWith("cache-key-off", async (_url, init) => {
+      captured = JSON.parse(init.body);
+      return grokSse("data: {\"text\":\"ok\"}\n\n");
+    });
+    await grokStream(withoutKey, {});
+    assert.equal(Object.hasOwn(captured, "prompt_cache_key"), false);
+  }
+
+  {
+    const events = [
+      { type: "response.reasoning_summary_text.delta", item_id: "rs_1", summary_index: 0, delta: "thinking..." },
+      {
+        type: "response.output_item.done",
+        item: {
+          id: "rs_1",
+          type: "reasoning",
+          summary: [{ type: "summary_text", text: "thinking..." }],
+          status: "completed",
+          encrypted_content: "enc-blob-1",
+        },
+      },
+      { type: "response.output_text.delta", item_id: "msg_1", content_index: 0, delta: "done" },
+      { type: "response.output_item.done", item: { id: "msg_1", type: "message" } },
+      { type: "response.completed", response: { status: "completed", usage: { input_tokens: 10, output_tokens: 5 } } },
+    ];
+    const chunks = grokModule.chunksFromEvents(events);
+    const reasoningDelta = chunks.find((chunk) => chunk.type === "reasoning-delta");
+    assert.equal(reasoningDelta.text, "thinking...");
+    const finish = chunks.find((chunk) => chunk.type === "finish");
+    assert.equal(finish.reason.kind, "stop");
+    assert.deepEqual(finish.replayState, {
+      response: { kind: "xai-auth", version: 1 },
+      blocks: [
+        { type: "reasoning", id: "rs_1", summary: [], encrypted_content: "enc-blob-1" },
+        null,
+      ],
+    });
+  }
+
+  {
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "write it" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "" },
+          { type: "text", text: "done" },
+        ],
+        source: {
+          kind: "model",
+          provider: "xai-auth",
+          model: "grok-4.6",
+          replayState: {
+            response: { kind: "xai-auth", version: 1 },
+            blocks: [
+              { type: "reasoning", id: "rs_1", summary: [], encrypted_content: "enc-blob-1" },
+              null,
+            ],
+          },
+        },
+      },
+      { role: "user", content: [{ type: "text", text: "next" }] },
+    ];
+    const { input } = grokModule.toResponsesInput(messages, "sys");
+    assert.deepEqual(input.map((item) => item.type), ["message", "reasoning", "message", "message"]);
+    assert.deepEqual(input[1], { type: "reasoning", id: "rs_1", summary: [], encrypted_content: "enc-blob-1" });
+  }
+
+  {
+    const noReplay = grokModule.toResponsesInput([{
+      role: "assistant",
+      content: [{ type: "reasoning", text: "secret" }, { type: "text", text: "done" }],
+      source: { kind: "model", provider: "xai-auth", model: "grok-4.6" },
+    }], undefined);
+    assert.deepEqual(noReplay.input.map((item) => item.type), ["message"]);
+
+    const foreign = grokModule.toResponsesInput([{
+      role: "assistant",
+      content: [{ type: "reasoning", text: "secret" }],
+      source: {
+        kind: "model",
+        provider: "xai-auth",
+        model: "grok-4.6",
+        replayState: { response: { kind: "other", version: 1 }, blocks: [{ type: "reasoning", encrypted_content: "x" }] },
+      },
+    }], undefined);
+    assert.deepEqual(foreign.input, []);
+  }
+
   console.log("test-qq-models: pass");
 } finally {
   projects.remove();
