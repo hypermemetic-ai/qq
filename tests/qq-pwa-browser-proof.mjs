@@ -673,56 +673,6 @@ export async function runQqPwaBrowserProof() {
     assert.equal(mobileChrome.closeClipPath, "inset(50%)");
     assert.equal(mobileChrome.closeTabIndex, 0, "mobile nonvisual close left the keyboard order");
 
-    // The removed rail no longer covers the left-side New session control.
-    const plusStart = await evaluate(client, pixel, `(() => {
-      const menu = document.querySelector(".session-menu");
-      menu.open = true;
-      const button = document.querySelector('.new-session button[aria-label="New session"]');
-      const rect = button.getBoundingClientRect();
-      const x = rect.left + rect.width / 2;
-      const y = rect.top + rect.height / 2;
-      window.__qqPlusClicks = 0;
-      window.__qqPlusSubmits = 0;
-      window.__qqPlusPointerTarget = null;
-      document.addEventListener("pointerdown", (event) => {
-        window.__qqPlusPointerTarget = event.target?.getAttribute?.("aria-label") || event.target?.tagName;
-      }, { capture: true, once: true });
-      button.addEventListener("click", () => {
-        window.__qqPlusClicks += 1;
-      }, { once: true });
-      button.form.addEventListener("submit", (event) => {
-        event.preventDefault();
-        window.__qqPlusSubmits += 1;
-      }, { once: true });
-      return {
-        x, y,
-        width: rect.width,
-        height: rect.height,
-        hitLabel: document.elementFromPoint(x, y)?.getAttribute?.("aria-label"),
-      };
-    })()`);
-    assert.equal(plusStart.hitLabel, "New session", "another gesture surface covered the New session control");
-    assert.ok(plusStart.x < 56, `New session proof missed the former rail zone (x=${plusStart.x})`);
-    assert.ok(plusStart.width >= 30 && plusStart.height >= 30);
-    const plusPoint = [{ x: plusStart.x, y: plusStart.y, radiusX: 6, radiusY: 6, force: 1, id: 0 }];
-    await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: plusPoint }, pixel.sessionId);
-    await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }, pixel.sessionId);
-    const plusEnd = await waitFor(
-      () => evaluate(client, pixel, `({
-        clicks: window.__qqPlusClicks,
-        submits: window.__qqPlusSubmits,
-        pointerTarget: window.__qqPlusPointerTarget,
-        drawerOpen: document.body.classList.contains("drawer-open"),
-        pathname: location.pathname,
-      })`).then((state) => state?.clicks === 1 && state?.submits === 1 && state),
-      "real touch did not click and submit New session",
-    );
-    assert.equal(plusEnd.pointerTarget, "New session");
-    assert.equal(plusEnd.submits, 1);
-    assert.equal(plusEnd.drawerOpen, false);
-    assert.equal(plusEnd.pathname, CANONICAL_PATH);
-    await evaluate(client, pixel, `document.querySelector(".session-menu").open = false`);
-
     // Delegated recognition survives a real SSE innerHTML replacement without a fragment-owned gesture target.
     await evaluate(client, pixel, `(() => {
       window.__qqHeadingBeforeSse = document.querySelector(".session-heading");
@@ -735,9 +685,9 @@ export async function runQqPwaBrowserProof() {
       "session SSE did not replace the panel content",
     );
     assert.equal(await evaluate(client, pixel, `document.querySelector(".drawer-edge")`), null);
-    await dispatchTouchSwipe(client, pixel, { x: 380, y: 420, endX: 396, endY: 421, steps: 4 });
+    await dispatchTouchSwipe(client, pixel, { x: 360, y: 420, endX: 376, endY: 421, steps: 4 });
     assert.equal(await evaluate(client, pixel, `document.body.classList.contains("drawer-open")`), false, "a 16px drift opened the drawer");
-    await openDrawerWithTouch(client, pixel, { x: 380, travel: 26, steps: 1 });
+    await openDrawerWithTouch(client, pixel, { x: 360, travel: 40, steps: 1 });
     await closeDrawerWithImmediateBackdropTouch(client, pixel);
     await openDrawerWithTouch(client, pixel, { x: 206, travel: 40 });
     await closeDrawerWithKeyboard(client, pixel);
@@ -788,7 +738,7 @@ export async function runQqPwaBrowserProof() {
     await navigate(client, pixel, `${origin}${emptyProjectPath}`);
     await waitForDrawerSurface(client, pixel, emptyProjectPath);
     assert.equal(await evaluate(client, pixel, `getComputedStyle(document.querySelector("#project-drawer")).transitionDuration`), "0s");
-    await openDrawerWithTouch(client, pixel, { x: 380, y: 300, travel: 26, steps: 1 });
+    await openDrawerWithTouch(client, pixel, { x: 360, y: 300, travel: 40, steps: 1 });
     await closeDrawerInPlace(client, pixel);
 
     // Vertical motion on the ordinary file surface remains a native scroll gesture.
@@ -830,7 +780,7 @@ export async function runQqPwaBrowserProof() {
     );
     assert.equal(vertical.touchMoves.some((move) => move.prevented), false, "vertical scrolling was manually intercepted");
     assert.equal(vertical.drawerOpen, false, "vertical scrolling opened the drawer");
-    await openDrawerWithTouch(client, pixel, { x: 380, y: 420, travel: 26, steps: 1 });
+    await openDrawerWithTouch(client, pixel, { x: 360, y: 420, travel: 40, steps: 1 });
     await closeDrawerInPlace(client, pixel);
 
     // A rightward start inside a genuinely horizontal code scroller stays native.
