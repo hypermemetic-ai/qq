@@ -20,11 +20,14 @@ Run the narrowest owner while iterating. `npm test` is a long fail-fast chain co
 | Core host, HTTP/SSE, security, PWA | `node tests/test-qq-host.mjs .` (includes real-browser PWA proof) | Requires Chrome for gestures/installed start; `tests/test-qq-host-live.sh` for exact pinned DSH |
 | UI fiber/reload | `node tests/test-qq-ui-fiber.mjs .` | `tests/test-qq-host-boot.sh` when composition/absence changes |
 | Projects, grouped folders, bounded files | `node tests/test-qq-projects.mjs` | `node tests/test-qq-host.mjs .` when routes/rendering change |
+| Home session service lifecycle | `node tests/test-qq-home.mjs` | Add scratch and scope suites when ownership, cleanup, persistence, or reconciliation changes |
+| Scratch ownership and scope sidecar | `node tests/test-qq-scratch.mjs`; `node tests/test-qq-session-scope.mjs` | Add Home suite when service lifecycle changes |
 | Conversation projection, steering, pending queue | `node tests/test-qq-conversation.mjs .` | `node tests/test-qq-ui-transcript-scroll.mjs` for streaming scroll behavior |
 | Session prompt routing | `node tests/test-session-prompt.mjs` | — |
 | Session aliases | `node tests/test-qq-alias.mjs .` | Also relay test when alias consumption changes |
 | DSH relay | `node tests/test-qq-relay-plugin.mjs .` | — |
-| Workflows | `node tests/test-qq-workflows-plugin.mjs .` | `tests/test-qq-workflows-boot.sh` for bundle/service wiring |
+| Workflows | `node tests/test-qq-workflows-plugin.mjs .` | Add `node tests/test-qq-workflows-context.mjs` for accepted contexts, leave, transition, or rollback; boot suite for bundle/service wiring |
+| Skill-tool visibility | `node tests/test-qq-skill-tool.mjs` | `tests/test-qq-host-live.sh` only for exact pinned DSH schema exposure |
 | Task pile | `node tests/test-qq-tasks.mjs .` | `tests/test-qq-tasks-boot.sh` for bundle wiring |
 | Model connectors | `node tests/test-qq-models.mjs` | `tests/test-qq-host-real.sh` for credential/provider transport |
 | Dictation | `node tests/test-qq-dictation.mjs` | Physical microphone/browser evidence only when UI capture changes |

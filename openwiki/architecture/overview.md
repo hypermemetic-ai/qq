@@ -6,8 +6,8 @@ tags: [architecture, runtime, ownership]
 openwiki:
   roles: [architecture, repository]
   change_kinds: [composition, plugin-lifecycle]
-  source_paths: [bin/qq, qq/host.patch.yml, qq/src/plugin.mjs, extensions/index.ts]
-  test_paths: [tests/test-qq-host.mjs, tests/test-qq-host-boot.sh]
+  source_paths: [bin/qq, qq/host.patch.yml, qq/src/plugin.mjs, qq/src/session.mjs, qq/src/scratch.mjs, extensions/index.ts]
+  test_paths: [tests/test-qq-host.mjs, tests/test-qq-home.mjs, tests/test-qq-host-boot.sh]
   validation_commands: [node tests/test-qq-host.mjs .]
 ---
 
@@ -53,7 +53,7 @@ The [delegation lifecycle](../workflow/delegation-and-review.md) still owns prot
 
 | State | Owner and invariant |
 |---|---|
-| `${XDG_STATE_HOME:-$HOME/.local/state}/qq` | Daily DSH home; private profile/session persistence, `qq.session`, aliases, and plugin stores. |
+| `${XDG_STATE_HOME:-$HOME/.local/state}/qq` | Daily DSH home; private profile/session persistence, `qq.session`, aliases, plugin stores, Home scratch children, and `session-scope.json`. |
 | `${XDG_CONFIG_HOME:-$HOME/.config}/qq/workflows-settings.json` | Workflow role bindings, passed by `qq/host.patch.yml`. |
 | `~/.local/state/qq/runs/` and `~/.herdr/worktrees/` | Legacy delegation handoffs and isolated Git worktrees. |
 | `~/.local/state/qq-relay/` | External Pi relay state only; DSH relay state is in-process. |
@@ -65,6 +65,7 @@ The [delegation lifecycle](../workflow/delegation-and-review.md) still owns prot
 |---|---|---|
 | Host discovery, profile, pins, or HMR | `bin/qq`, `qq/host.patch.yml`, `dsh/pins.json` | `node tests/test-qq-host.mjs .` then conditional `tests/test-qq-host-live.sh` |
 | Project catalog, bounded files, conversation, or aliases | `qq/src/session.mjs`, `qq/src/files.mjs`, `qq/src/conversation.mjs`, `qq/src/alias.mjs` | owning `test-qq-{projects,conversation,alias}.mjs` |
+| Home scope, scratch ownership, or startup reconciliation | `qq/src/session.mjs`, `qq/src/scratch.mjs`, `qq/src/session-scope.mjs` | `node tests/test-qq-home.mjs`; add scratch/scope suites for storage changes |
 | Optional plugin lifecycle | owning `qq-*/src/plugin.mjs`; `ctx.effect` disposer | owning plugin test plus `tests/test-qq-host-boot.sh` when absence/boot changes |
 | Legacy Pi registration | `extensions/index.ts` | owning extension test; use `npm test` only for cross-cutting validation |
 

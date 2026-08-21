@@ -1,14 +1,14 @@
 ---
 type: Runtime guide
 title: Daily qq DSH host and console
-description: Practical guide to launching qq, grouped projects and bounded files, conversation projection and steering, the loopback operator UI, dictation leases, and focused validation.
+description: Practical guide to launching qq, project and Home session lifecycles, bounded files, conversation steering, the loopback operator UI, dictation, and focused validation.
 tags: [dsh, console, web, pwa]
 openwiki:
   roles: [runtime, integration, operations]
   change_kinds: [operator-surface, session-lifecycle, web-security]
-  source_paths: [bin/qq, qq/src/session.mjs, qq/src/conversation.mjs, qq/src/files.mjs, qq-ui/src/http-app.mjs, qq-dictation/src/service.mjs]
-  symbols: [createQqService, projectConversation, createProjectFileService, createConsoleHandler, createDictationService]
-  test_paths: [tests/test-qq-host.mjs, tests/test-qq-projects.mjs, tests/test-qq-conversation.mjs, tests/test-qq-ui-transcript-scroll.mjs, tests/test-qq-dictation.mjs]
+  source_paths: [bin/qq, qq/src/session.mjs, qq/src/scratch.mjs, qq/src/session-scope.mjs, qq/src/conversation.mjs, qq/src/files.mjs, qq-ui/src/http-app.mjs, qq-dictation/src/service.mjs]
+  symbols: [createQqService, createScratchManager, createSessionScopeStore, projectConversation, createProjectFileService, createConsoleHandler, createDictationService]
+  test_paths: [tests/test-qq-host.mjs, tests/test-qq-projects.mjs, tests/test-qq-home.mjs, tests/test-qq-scratch.mjs, tests/test-qq-session-scope.mjs, tests/test-qq-conversation.mjs, tests/test-qq-ui-transcript-scroll.mjs, tests/test-qq-dictation.mjs]
   validation_commands: [node tests/test-qq-host.mjs .]
 ---
 
@@ -50,6 +50,35 @@ sequenceDiagram
 `qq/src/files.mjs#createProjectFileService` is the filesystem security boundary used by [`qq-ui`](#ui-security-and-reload). It exposes only project-relative paths, rejects symlink escapes, reads recognized UTF-8 Markdown/text/code up to 512 KiB, and opens an allowlist of binary formats up to 32 MiB. Grouped projects present a virtual folder level. The UI keeps drawer/folder locations URL-addressed, renders readable files without raw Markdown HTML, highlights recognized code, and serves admitted binaries from a bounded same-origin route.
 
 Only live top-level `session-<UUID>` operator agents appear in a project's session catalog; subagents are not chairs. `qq.session` stores the default resume ID. `qq/src/alias.mjs` gives live sessions short spoken numbers while preserving UUIDs as identity; `.qq-aliases.json` is private, atomic, and migrates the former relay-owned alias file once. Clear and close are refused while a session is running.
+
+The full-viewport file viewer is server-rendered and history-aware. Closing returns to the originating session when the matching browser history entry still exists, otherwise it navigates to the explicit session URL. Markdown keeps raw HTML disabled, recognized code is highlighted, long content wraps instead of horizontal panning, and admitted binaries continue through the bounded same-origin route.
+
+## Home session core
+
+The service now has a second root-session scope for future Home UI: `createHome`, `listHome`, `latestHome`, `inspect`, `read`, `close`, and `replace` return `scope: "home"` and `context: "scratch"`. Home sessions are not projects and do not appear in `listProjects()` or project session lists. Their cwd is the exact direct child `${XDG_STATE_HOME:-$HOME/.local/state}/qq/scratch/<session-id>`.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant QQ as qq service
+    participant Scratch as scratch manager
+    participant DSH as DSH agents and persistence
+    participant Scope as session scope store
+    Client->>QQ: createHome
+    QQ->>Scratch: create marked private child
+    QQ->>DSH: create and flush session
+    QQ->>Scope: commit immutable Home record
+    QQ-->>Client: publish Home session
+    Client->>QQ: close or replace
+    QQ->>DSH: dispose old live agent
+    QQ->>Scratch: delete verified owned child
+```
+
+*Creation remains unpublished until both DSH flush and the qq-owned scope sidecar commit succeed.*
+
+`qq/src/scratch.mjs#createScratchManager` is an ownership boundary, not an OS sandbox. It accepts only canonical lowercase `session-<UUID>` names, private `0700` direct children, and a matching owner-only `0600` `.qq-scratch.json` marker. Symlinks, malformed markers, wrong-parent paths, and uncertain filesystem inspection fail closed and never authorize deletion.
+
+`qq/src/session-scope.mjs#createSessionScopeStore` writes immutable `qq.session-scope/v1` records atomically to `session-scope.json`. A record is valid only when its cwd equals `join(scratchRoot, sessionId)` exactly. The sidecar preserves Home identity after scratch deletion without extending DSH session headers. Corrupt or invalid entries are protected rather than rewritten or deleted. Startup reconciliation keeps exact live Home children and protected entries, removes only verified stale owned children in stable order, and logs cleanup failures without blocking host boot.
 
 ## Conversation lifecycle
 
@@ -95,7 +124,8 @@ A short opaque lease permits one owning browser capture at a time. Other clients
 
 ## Change recipes and validation
 
-- **Project catalog or files:** change `qq/host.patch.yml`, `qq/src/session.mjs`, and `qq/src/files.mjs`; update UI routes only if the service contract changes. Preserve root containment, grouped virtual roots, byte limits, and the text/binary split. Run `node tests/test-qq-projects.mjs` and `node tests/test-qq-host.mjs .`.
+- **Project catalog or files:** change `qq/host.patch.yml`, `qq/src/session.mjs`, and `qq/src/files.mjs`; update `qq-ui/src/render.mjs` and `http-app.mjs` when viewer navigation or rendering changes. Preserve root containment, grouped virtual roots, byte limits, history fallback, and the text/binary split. Run `node tests/test-qq-projects.mjs` and `node tests/test-qq-host.mjs .`.
+- **Home sessions:** coordinate `qq/src/session.mjs`, `scratch.mjs`, and `session-scope.mjs`. Preserve create → DSH flush → sidecar commit → publication ordering, exact cwd binding, project/Home isolation, close/replace disposal-before-delete, and fail-closed reconciliation. Run `node tests/test-qq-home.mjs`; add `node tests/test-qq-scratch.mjs` and `node tests/test-qq-session-scope.mjs` when ownership or persistence changes. UI routes remain a separate future boundary.
 - **Conversation or queue:** change `qq/src/conversation.mjs` and the admission methods in `qq/src/session.mjs`; update `qq-ui/src/render.mjs` only for presentation. Preserve DSH as authority, message identity/FIFO, and `keepInbox` interruption. Run `node tests/test-qq-conversation.mjs .`; add `node tests/test-qq-ui-transcript-scroll.mjs` when stream replacement or scrolling changes.
 - **Alias deck:** change `qq/src/alias.mjs`; relay consumes the service and must not grow another alias store. Run `node tests/test-qq-alias.mjs .` and `node tests/test-qq-relay-plugin.mjs .`.
 - **HTTP, SSE, PWA, or drawer:** change `qq-ui/src/http-app.mjs`, `render.mjs`, and current assets. Run `node tests/test-qq-host.mjs .`, which includes the real-browser proof; Chrome availability is required for gesture, service-worker, and installed-start behavior.
