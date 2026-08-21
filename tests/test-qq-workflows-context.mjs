@@ -318,6 +318,32 @@ try {
   }
 
   {
+    const selected = new Map([[alphaId, "alpha"]]);
+    let attachmentPresent = true;
+    const api = host({
+      alpha: {
+        name: "alpha",
+        acceptedContexts: DEFAULT_ACCEPTED_CONTEXTS,
+        candidate: () => true,
+        async ensureAttached() {
+          attachmentPresent = true;
+          throw new Error("cannot resume");
+        },
+        async ensureDetached() {
+          attachmentPresent = false;
+          throw new Error("leave exploded");
+        },
+      },
+    }, {
+      selected,
+      agents: new Map([[alphaId, chair()]]),
+    });
+    await assert.rejects(() => api.leave(alphaId, "back"), /leave exploded/);
+    assert.equal(selected.has(alphaId), false);
+    assert.equal(attachmentPresent, false);
+  }
+
+  {
     const boardsDetached = [];
     const draftsAttached = [];
     const draftsDetached = [];
