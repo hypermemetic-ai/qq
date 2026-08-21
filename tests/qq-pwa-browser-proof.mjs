@@ -806,12 +806,52 @@ export async function runQqPwaBrowserProof() {
       x: 206, y: 420, endX: 224, endY: 421, steps: 3, delayMs: 80, releaseDelayMs: 80,
     });
     await waitForCleanDrawerCancel(client, pixel, "slow center pull did not settle closed");
-    await openDrawerWithTouch(client, pixel, { x: 206, travel: 40 });
+    await openDrawerWithTouch(client, pixel, { x: 206, travel: 40, steps: 1 });
     await closeDrawerWithImmediateBackdropTouch(client, pixel);
     await dispatchTouchSwipe(client, pixel, {
       x: 390, y: 420, endX: 406, endY: 421, steps: 2, delayMs: 90, releaseDelayMs: 80,
     });
-    await waitForCleanDrawerCancel(client, pixel, "slow far-edge pull did not settle closed");
+    const heldFlickClosed = await waitForCleanDrawerCancel(client, pixel, "slow far-edge pull did not settle closed");
+    await evaluate(client, pixel, `(() => {
+      window.__qqHeldFlickProbe?.abort();
+      window.__qqHeldFlickProbe = new AbortController();
+      window.__qqHeldFlickMoves = [];
+      document.addEventListener("touchmove", (event) => {
+        window.__qqHeldFlickMoves.push({
+          x: event.touches[0]?.clientX,
+          at: performance.now(),
+          right: document.querySelector("#project-drawer")?.getBoundingClientRect().right,
+          active: document.body.classList.contains("drawer-drag-active"),
+        });
+      }, { signal: window.__qqHeldFlickProbe.signal });
+      return true;
+    })()`);
+    await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: touchPoints(378, 420) }, pixel.sessionId);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    for (const [index, x] of [395, 411].entries()) {
+      const deliveredMove = index === 0 && evaluate(client, pixel, `new Promise((resolve) => {
+        document.addEventListener("touchmove", (event) => resolve(event.touches[0]?.clientX), { capture: true, once: true });
+      })`);
+      await client.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: touchPoints(x, 421) }, pixel.sessionId);
+      if (deliveredMove) assert.equal(await deliveredMove, x, `held far-edge flick move to ${x}px was not delivered`);
+      await new Promise((resolve) => setTimeout(resolve, 16));
+    }
+    await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }, pixel.sessionId);
+    const heldFlickMoves = await evaluate(client, pixel, `(() => {
+      window.__qqHeldFlickProbe?.abort();
+      return window.__qqHeldFlickMoves;
+    })()`);
+    const heldFlickPull = heldFlickMoves.at(-1);
+    assert.equal(heldFlickPull.active, true, "held far-edge flick was not tracked before release");
+    assert.ok(Math.abs((heldFlickPull.right - heldFlickClosed.right) - 33) <= 1.5, "held far-edge flick did not track all 33px");
+    assert.deepEqual(heldFlickMoves.map((move) => move.x), [395, 411]);
+    const heldFlickSpan = heldFlickMoves.at(-1).at - heldFlickMoves[0].at;
+    assert.ok(heldFlickSpan <= 64, `held far-edge flick moves spanned ${heldFlickSpan}ms`);
+    await waitFor(
+      () => readDrawerDragState(client, pixel).then((state) => state.open && state),
+      "held far-edge flick did not velocity-settle open",
+    );
+    await closeDrawerWithKeyboard(client, pixel);
     await openDrawerWithTouch(client, pixel, { x: 390, travel: 16, steps: 1 });
     await closeDrawerWithKeyboard(client, pixel);
 
@@ -848,7 +888,7 @@ export async function runQqPwaBrowserProof() {
     assert.equal(await evaluate(client, pixel, `document.querySelector("#project-drawer")?.dataset.drawerPath`), "src");
     await assertDrawerHeadingFocus(client, pixel);
     await closeDrawerInPlace(client, pixel);
-    const nested = await openDrawerWithTouch(client, pixel);
+    const nested = await openDrawerWithTouch(client, pixel, { steps: 1 });
     assert.equal(nested.drawer, "src");
     assert.equal(await evaluate(client, pixel, `document.querySelector("#project-drawer")?.dataset.drawerPath`), "src");
     await closeDrawerInPlace(client, pixel);
