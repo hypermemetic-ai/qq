@@ -1,6 +1,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  renderDocumentViewerProofPage as bundledRenderDocumentViewerProofPage,
   renderFilePage as bundledRenderFilePage,
   renderPage as bundledRenderPage,
   renderSessionContent as bundledRenderSessionContent,
@@ -28,6 +29,7 @@ const SERVICE_WORKER_NAMES = new Set([
   "sw-v15.js",
   "sw-v16.js",
   "sw-v17.js",
+  "sw-v18.js",
 ]);
 const serviceWorkerBody = readFileSync(new URL("assets/sw.js", root));
 const bundledAssets = Object.freeze({
@@ -79,6 +81,10 @@ const bundledAssets = Object.freeze({
     type: "text/css; charset=utf-8",
     body: readFileSync(new URL("assets/console.css", root)),
   },
+  "console-v18.css": {
+    type: "text/css; charset=utf-8",
+    body: readFileSync(new URL("assets/console.css", root)),
+  },
   "geist-latin-wght-normal-5.3.0.woff2": {
     type: "font/woff2",
     body: readFileSync(new URL("assets/geist-latin-wght-normal-5.3.0.woff2", root)),
@@ -106,6 +112,10 @@ const bundledAssets = Object.freeze({
   "browser-v8.js": {
     type: "text/javascript; charset=utf-8",
     body: readFileSync(new URL("assets/browser-v8.js", root)),
+  },
+  "browser-v9.js": {
+    type: "text/javascript; charset=utf-8",
+    body: readFileSync(new URL("assets/browser-v9.js", root)),
   },
   "reconnect-v1.js": {
     type: "text/javascript; charset=utf-8",
@@ -136,8 +146,8 @@ const bundledAssets = Object.freeze({
 });
 
 const LIVE_ASSET_FILES = Object.freeze({
-  "console-v17.css": "assets/console.css",
-  "browser-v8.js": "assets/browser-v8.js",
+  "console-v18.css": "assets/console.css",
+  "browser-v9.js": "assets/browser-v9.js",
 });
 const RENDER_FILE = fileURLToPath(new URL("./render.mjs", import.meta.url));
 
@@ -252,8 +262,8 @@ function routes(basePath, sessionId, project) {
       canonical,
       project: projectBase,
       projectsBase: `${basePath}/project`,
-      fileView: `${projectBase}/file/`,
-      fileOpen: `${projectBase}/open/`,
+      fileView: `${canonical}/file/`,
+      fileOpen: `${canonical}/open/`,
       events: sessionId ? `${canonical}/events` : "",
       interrupt: sessionId ? `${canonical}/interrupt` : "",
       prompt: sessionId ? `${canonical}/prompt` : "",
@@ -326,6 +336,15 @@ function parseProjectRoute(basePath, pathname) {
       sessionId = decodeURIComponent(parts[2]);
     } catch {
       return undefined;
+    }
+    if ((parts[3] === "file" || parts[3] === "open") && parts.length === 5 && parts[4]) {
+      let filePath;
+      try {
+        filePath = decodeURIComponent(parts[4]);
+      } catch {
+        return undefined;
+      }
+      return { project, sessionId, filePath, action: parts[3] };
     }
     return { project, sessionId, action: parts[3] ?? "page" };
   }
@@ -412,8 +431,8 @@ export function createConsoleHandler(backend, options = {}) {
   const assetPaths = Object.freeze({
     htmx: `${assetsPrefix}htmx-2.0.10.min.js`,
     sse: `${assetsPrefix}htmx-ext-sse-2.2.4.js`,
-    css: `${assetsPrefix}console-v17.css`,
-    browser: `${assetsPrefix}browser-v8.js`,
+    css: `${assetsPrefix}console-v18.css`,
+    browser: `${assetsPrefix}browser-v9.js`,
     icon192: `${assetsPrefix}icon-v2-192.png`,
     icon512: `${assetsPrefix}icon-v2-512.png`,
     manifest: `${assetsPrefix}manifest-v3.webmanifest`,
@@ -626,6 +645,7 @@ export function createConsoleHandler(backend, options = {}) {
   async function loadRender() {
     if (!liveAssets) {
       return {
+        renderDocumentViewerProofPage: bundledRenderDocumentViewerProofPage,
         renderFilePage: bundledRenderFilePage,
         renderPage: bundledRenderPage,
         renderSessionContent: bundledRenderSessionContent,
@@ -790,7 +810,7 @@ export function createConsoleHandler(backend, options = {}) {
           write(res, 405, { Allow: "GET, HEAD", "Content-Type": "text/plain; charset=utf-8" }, "Method not allowed\n", head);
           return;
         }
-        const paths = routes(basePath, "", projectRoute.project);
+        const paths = routes(basePath, projectRoute.sessionId ?? "", projectRoute.project);
         let file;
         let fileError;
         try {
@@ -799,7 +819,6 @@ export function createConsoleHandler(backend, options = {}) {
           fileError = error;
         }
         try {
-          const drawer = await drawerView(projectRoute.project, url, true);
           const { renderFilePage } = await loadRender();
           const body = renderFilePage({
             project: projectRoute.project,
@@ -807,7 +826,6 @@ export function createConsoleHandler(backend, options = {}) {
             name: String(projectRoute.filePath).split("/").at(-1),
             file,
             error: fileError,
-            drawer,
           }, paths, assetPaths);
           write(
             res,
@@ -1233,6 +1251,22 @@ export function createConsoleHandler(backend, options = {}) {
           }
         }
         text(res, errorStatus(error), errorMessage(error));
+      }
+      return;
+    }
+
+    if (url.pathname === `${basePath}/__document-viewer-proof` && (req.method === "GET" || head)) {
+      try {
+        const { renderDocumentViewerProofPage } = await loadRender();
+        write(
+          res,
+          200,
+          { "Content-Type": "text/html; charset=utf-8" },
+          renderDocumentViewerProofPage(assetPaths),
+          head,
+        );
+      } catch (error) {
+        text(res, errorStatus(error), errorMessage(error), head);
       }
       return;
     }

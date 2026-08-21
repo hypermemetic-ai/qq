@@ -6,7 +6,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createConsoleHandler, internals as httpInternals } from "../qq-ui/src/http-app.mjs";
-import { renderSessionContent } from "../qq-ui/src/render.mjs";
+import {
+  renderDocumentViewer,
+  renderDocumentViewerTrigger,
+  renderSessionContent,
+} from "../qq-ui/src/render.mjs";
 import { createProjectFileService, MAX_READABLE_FILE_BYTES } from "../qq/src/files.mjs";
 import {
   compareSessionRecency,
@@ -35,6 +39,8 @@ mkdirSync(join(alphaCwd, "nested"));
 mkdirSync(join(alphaCwd, "nested", "deeper"));
 writeFileSync(join(alphaCwd, "README.md"), "# Alpha\n\n<script>nope</script>\n");
 writeFileSync(join(alphaCwd, "notes.txt"), "one calm line\n");
+writeFileSync(join(alphaCwd, "config.yaml"), "name: proof\nindent:\n  nested: true\n");
+writeFileSync(join(alphaCwd, "unbroken.txt"), `${"abcdefghijklmnopqrstuvwxyz0123456789".repeat(12)}\n`);
 writeFileSync(join(alphaCwd, "nested", "sample.js"), "const answer = 42;\n");
 writeFileSync(join(alphaCwd, "manual.pdf"), Buffer.from("%PDF-1.4 proof"));
 writeFileSync(join(alphaCwd, "mystery.bin"), Buffer.from([0, 1, 2, 3]));
@@ -165,6 +171,22 @@ try {
       { name: "two", folders: [{ name: "core", path: "alpha" }] },
     ],
   }), /registered by both one and two/);
+
+  const dialog = renderDocumentViewer({
+    title: "bash",
+    identity: "complete tool output",
+    kind: "terminal",
+    text: "ok\n",
+  }, { mode: "dialog", id: "tool-output" });
+  assert.match(dialog, /id="tool-output" class="document-viewer document-viewer-dialog"/);
+  assert.match(dialog, /role="dialog" aria-modal="true"/);
+  assert.match(dialog, /data-document-viewer-close>Close</);
+  assert.match(dialog, /document-pre document-terminal/);
+  assert.match(renderDocumentViewerTrigger("tool-output"), /Open full screen/);
+  assert.match(renderDocumentViewerTrigger("tool-output"), /data-document-viewer-open="tool-output"/);
+  const loading = renderDocumentViewer({ title: "out", identity: "complete tool output", state: "loading" }, { mode: "dialog", id: "load" });
+  assert.match(loading, /document-state-loading/);
+  assert.match(loading, /role="status"/);
 
   const groupedFiles = createProjectFileService(projects.root, () => groupedCatalog);
   assert.deepEqual(groupedFiles.listProjectFiles().entries, [{
@@ -588,7 +610,10 @@ try {
     assert.match(openDrawer.body, /id="project-drawer"[^>]*aria-hidden="false"/);
     assert.match(openDrawer.body, />~\/projects<\/a>[\s\S]*>alpha<\/span>/);
     assert.match(openDrawer.body, /aria-label="Read file README.md"/);
+    assert.match(openDrawer.body, /data-file-path="README.md"/);
     assert.match(openDrawer.body, /aria-label="Open file manual.pdf"/);
+    assert.match(openDrawer.body, new RegExp(`href="/qq/project/alpha/session/${newId}/file/README\\.md"`));
+    assert.match(openDrawer.body, new RegExp(`href="/qq/project/alpha/session/${newId}/open/manual\\.pdf"`));
 
     const nestedDrawer = await request(`${added.headers.location}?drawer=nested`);
     assert.equal(nestedDrawer.status, 200);
@@ -619,21 +644,45 @@ try {
 
     const markdownView = await request("/qq/project/alpha/file/README.md");
     assert.equal(markdownView.status, 200);
-    assert.match(markdownView.body, /class="file-surface"/);
-    assert.match(markdownView.body, /class="message-text message-markdown file-prose"/);
+    assert.match(markdownView.body, /class="document-viewer document-viewer-page"/);
+    assert.match(markdownView.body, /class="message-text message-markdown document-prose"/);
+    assert.match(markdownView.body, /Back to console/);
+    assert.match(markdownView.body, /href="\/qq\/project\/alpha"/);
     assert.match(markdownView.body, /<h1>Alpha<\/h1>/);
+    const sessionFileView = await request(`/qq/project/alpha/session/${newId}/file/README.md`);
+    assert.equal(sessionFileView.status, 200);
+    assert.match(sessionFileView.body, new RegExp(`class="document-viewer-close" href="/qq/project/alpha/session/${newId}"`));
     assert.match(markdownView.body, /&lt;script&gt;nope&lt;\/script&gt;/);
     assert.doesNotMatch(markdownView.body, /<script>nope<\/script>/);
-    assert.doesNotMatch(markdownView.body, /id="console-stream"|id="composer"/);
+    assert.doesNotMatch(markdownView.body, /id="console-stream"|id="composer"|id="project-drawer"/);
+    assert.doesNotMatch(markdownView.body, /90ch|72ch|file-surface/);
 
     const codeView = await request("/qq/project/alpha/file/nested%2Fsample.js");
     assert.equal(codeView.status, 200);
     assert.match(codeView.body, /class="hljs language-javascript"/);
     assert.match(codeView.body, /hljs-keyword/);
+    const yamlView = await request("/qq/project/alpha/file/config.yaml");
+    assert.equal(yamlView.status, 200);
+    assert.match(yamlView.body, /class="hljs language-yaml"/);
+    const longLineView = await request("/qq/project/alpha/file/unbroken.txt");
+    assert.equal(longLineView.status, 200);
+    assert.match(longLineView.body, /class="document-pre document-text"/);
     const textView = await request("/qq/project/alpha/file/notes.txt");
     assert.equal(textView.status, 200);
-    assert.match(textView.body, /file-prose file-plain/);
+    assert.match(textView.body, /document-pre document-text/);
     assert.match(textView.body, /one calm line/);
+    const proofView = await request("/qq/__document-viewer-proof");
+    assert.equal(proofView.status, 200);
+    assert.match(proofView.body, /Open full screen/);
+    assert.match(proofView.body, /data-document-viewer-open="proof-yaml"/);
+    assert.match(proofView.body, /id="proof-diff" class="document-viewer document-viewer-dialog"/);
+    assert.match(proofView.body, /document-state-loading/);
+    assert.match(proofView.body, /document-state-error/);
+    assert.match(proofView.body, /document-state-empty/);
+    assert.match(proofView.body, /hljs language-diff/);
+    assert.match(proofView.body, /document-pre document-terminal/);
+    assert.match(proofView.body, /data-proof-kind="yaml"[\s\S]*data-document-viewer-open="proof-yaml">Open full screen<\/button>[\s\S]*<pre class="document-viewer-proof-preview">/);
+
     const oversizedView = await request("/qq/project/alpha/file/huge.txt");
     assert.equal(oversizedView.status, 413);
     assert.match(oversizedView.body, /File is too large/);
@@ -688,6 +737,13 @@ try {
 
     const parsed = httpInternals.parseProjectRoute("/qq", `/qq/project/alpha/session/${alphaId}/prompt`);
     assert.deepEqual(parsed, { project: "alpha", sessionId: alphaId, action: "prompt" });
+    const parsedFile = httpInternals.parseProjectRoute("/qq", `/qq/project/alpha/session/${alphaId}/file/README.md`);
+    assert.deepEqual(parsedFile, {
+      project: "alpha",
+      sessionId: alphaId,
+      filePath: "README.md",
+      action: "file",
+    });
 
     const emptyHtml = renderSessionContent({
       id: "",

@@ -1309,10 +1309,10 @@ try {
   assert.match(home.body, /htmx-2\.0\.10\.min\.js/);
   assert.match(home.body, /htmx-ext-sse-2\.2\.4\.js/);
   assert.match(home.body, /rel="manifest"/);
-  assert.match(home.body, /console-v17\.css/);
-  assert.doesNotMatch(home.body, /console-v16\.css/);
-  assert.match(home.body, /browser-v8\.js/);
-  assert.doesNotMatch(home.body, /browser-v7\.js/);
+  assert.match(home.body, /console-v18\.css/);
+  assert.doesNotMatch(home.body, /console-v17\.css/);
+  assert.match(home.body, /browser-v9\.js/);
+  assert.doesNotMatch(home.body, /browser-v8\.js/);
   assert.match(home.body, /data-service-worker="\/qq\/sw\.js"/);
   assert.match(home.body, /<code>\d+<\/code>/);
   assert.doesNotMatch(home.body, new RegExp(`<code>${primaryId}</code>`));
@@ -1591,10 +1591,12 @@ try {
   assert.match(worker.body, /console-v15\.css/);
   assert.match(worker.body, /console-v16\.css/);
   assert.match(worker.body, /console-v17\.css/);
+  assert.match(worker.body, /console-v18\.css/);
   assert.match(worker.body, /browser-v5\.js/);
   assert.match(worker.body, /browser-v6\.js/);
   assert.match(worker.body, /browser-v7\.js/);
   assert.match(worker.body, /browser-v8\.js/);
+  assert.match(worker.body, /browser-v9\.js/);
   assert.match(worker.body, /reconnect-v1\.js/);
   assert.match(worker.body, /geist-latin-wght-normal-5\.3\.0\.woff2/);
   assert.match(worker.body, /geist-latin-wght-italic-5\.3\.0\.woff2/);
@@ -1615,7 +1617,7 @@ try {
   assert.match(offline.body, /No transcript is cached and no message can be sent offline/);
   assert.match(offline.body, /console-v8\.css/);
   assert.match(offline.body, /reconnect-v1\.js/);
-  const staticCss = await request("/qq/assets/console-v17.css");
+  const staticCss = await request("/qq/assets/console-v18.css");
   assert.match(staticCss.headers["cache-control"], /immutable/);
   assert.match(staticCss.body, /@font-face/);
   assert.match(staticCss.body, /font-family: "Geist UI"/);
@@ -1641,7 +1643,9 @@ try {
   assert.match(staticCss.body, /\.project-drawer \{/);
   assert.match(staticCss.body, /width: min\(15\.5rem, calc\(100vw - 8rem\)\)/);
   assert.match(staticCss.body, /\.drawer-name \{[\s\S]*text-overflow: ellipsis/);
-  assert.match(staticCss.body, /\.file-document \{/);
+  assert.match(staticCss.body, /\.document-viewer \{/);
+  assert.match(staticCss.body, /\.document-viewer-content \{/);
+  assert.doesNotMatch(staticCss.body, /\.file-document \{/);
   assert.doesNotMatch(staticCss.body, /\.drawer-edge/);
   assert.match(staticCss.body, /\.hljs-keyword/);
   assert.match(staticCss.body, /#composer-submit \{[\s\S]*clip-path: none/);
@@ -1678,7 +1682,7 @@ try {
     readFile(join(root, "qq/host.patch.yml"), "utf8"),
     readFile(join(root, "bin/qq"), "utf8"),
     readFile(join(root, "dsh/qq-dsh-model-compat.mjs"), "utf8"),
-    readFile(join(root, "qq-ui/assets/browser-v8.js"), "utf8"),
+    readFile(join(root, "qq-ui/assets/browser-v9.js"), "utf8"),
     readFile(join(root, "qq-ui/assets/sw.js"), "utf8"),
     readFile(join(root, "qq-ui/src/render.mjs"), "utf8"),
   ]);
@@ -1802,12 +1806,20 @@ try {
   assert.match(browser, /workflows-popup/);
   assert.match(browser, /openDrawer/);
   assert.match(browser, /closeDrawer/);
+  assert.match(browser, /openDocumentViewer/);
+  assert.match(browser, /documentViewerPriorInert/);
+  assert.match(browser, /data-document-viewer-open/);
+  assert.match(browser, /qq-file-return/);
+  assert.match(browser, /history\.back/);
   assert.match(browser, /touchstart/);
   assert.doesNotMatch(browser, /drawer-edge|dx >= 56/);
   assert.match(browser, /trapDrawerFocus/);
   assert.match(browser, /url\.searchParams\.set\("drawer"/);
   assert.match(browser, /updateViaCache: "none"/);
   assert.doesNotMatch(browser, /localStorage|sessionStorage|indexedDB|document\.cookie|EventSource|WebSocket|htmx\.process/);
+  assert.match(renderSource, /data-file-path/);
+  assert.match(renderSource, /document-viewer-close/);
+  assert.match(renderSource, /Back to console/);
   assert.doesNotMatch(renderSource, /outerHTML|controller|observer|lease|take control/i);
   assert.doesNotMatch(workerSource, /addEventListener\("(?:sync|periodicsync|push|notificationclick)"|indexedDB|localStorage/i);
 
