@@ -3,6 +3,13 @@ type: Runtime skills guide
 title: Model-visible repository skills
 description: Discovery, prompt exposure, and maintenance contracts for the repository's Mermaid, OKF migration, and OpenWiki connector skills, including the legacy connector duplicate.
 tags: [runtime, skills, openwiki]
+openwiki:
+  roles: [runtime, repository]
+  change_kinds: [tool-visibility, prompt-composition]
+  source_paths: [qq/src/skill-tool.mjs, extensions/execution-profiles.ts, skills/mermaid-diagrams/SKILL.md, skills/migrate-wiki-to-okf/SKILL.md, skills/write-connector/SKILL.md]
+  symbols: [attachSkillToolVisibility, composeSystemPrompt]
+  test_paths: [tests/test-qq-skill-tool.mjs, tests/test-execution-profiles.mjs, tests/test-qq-host-live.sh]
+  validation_commands: [node tests/test-qq-skill-tool.mjs]
 ---
 
 # Model-visible repository skills
@@ -18,6 +25,14 @@ At `before_agent_start`, the execution-profile extension composes the selected r
 3. `disableModelInvocation` is false.
 
 For each visible skill, the extension XML-escapes and emits its `name`, `description`, and absolute `filePath` inside `<available_skills>`. The prompt tells the model to read a matching skill on demand and resolve relative references against the skill file's directory. Without `read`, no skill catalog is emitted. Discovery, metadata parsing, ordering, and deduplication belong to the upstream Pi/OpenWiki host; this extension does not scan `skills/` itself.
+
+## Daily DSH visibility guard
+
+The daily host has a separate DSH-native guard in `qq/src/skill-tool.mjs#attachSkillToolVisibility`. For each live agent it snapshots skills using that agent's cwd and scope. If the complete catalog contains no model-invocable skill, it applies the supported `tools.restrict({ deny: ["skill"] })` and also removes `skill` from the current `system-prompt/assemble` result because schema collection occurs before the normal pre-step hook. A real model-invocable skill restores the tool; skills with `invocation.modelInvocable: false` do not.
+
+The guard reacts to agent creation/disposal and `skills/change`, ignores incomplete or failed snapshots rather than hiding on uncertain evidence, and reverses every restriction and listener on plugin disposal. Grok needs no adapter-specific filter because [`qq-models`](model-connectors.md) preserves DSH tool names.
+
+Change `qq/src/skill-tool.mjs` with `qq/src/plugin.mjs` registration. Run `node tests/test-qq-skill-tool.mjs`; use `tests/test-qq-host-live.sh` only when proving visibility against the exact pinned DSH bundle.
 
 ## Canonical skills
 

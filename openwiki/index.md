@@ -4,7 +4,7 @@ okf_version: "0.1"
 
 # Files
 
-- [qq OpenWiki quickstart](quickstart.md) - Short practical map of qq's daily DSH host, conversation and project-file surfaces, optional plugins, legacy Pi delegation path, and narrow change validation.
+- [qq OpenWiki quickstart](quickstart.md) - Short practical map of qq's daily DSH host, project and Home sessions, optional plugins, legacy Pi delegation path, and narrow change validation.
 
 # Directories
 

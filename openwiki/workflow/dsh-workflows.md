@@ -1,14 +1,14 @@
 ---
 type: Workflow guide
 title: DSH workflows and task pile
-description: Practical map of workflow selection, architect notes and folding, iterate implementation/review, external workflow registration, and the optional markdown task service.
+description: Practical map of workflow selection and context compatibility, awaitable transitions, architect and iterate behavior, external registration, and the optional task service.
 tags: [dsh, workflows, architect, iterate, tasks]
 openwiki:
   roles: [workflow, domain]
   change_kinds: [workflow-registry, context-lifecycle, task-store]
-  source_paths: [qq-workflows/src/plugin.mjs, qq-workflows/src/architect.mjs, qq-workflows/src/iterate.mjs, qq-tasks/src/service.mjs]
-  symbols: [apply, createArchitect, createIterate, createTasksService]
-  test_paths: [tests/test-qq-workflows-plugin.mjs, tests/test-qq-workflows-boot.sh, tests/test-qq-tasks.mjs]
+  source_paths: [qq-workflows/src/plugin.mjs, qq-workflows/src/context.mjs, qq-workflows/src/transition.mjs, qq-workflows/src/architect.mjs, qq-workflows/src/iterate.mjs, qq-tasks/src/service.mjs]
+  symbols: [apply, createWorkflowSessionApi, createArchitect, createIterate, createTasksService]
+  test_paths: [tests/test-qq-workflows-plugin.mjs, tests/test-qq-workflows-context.mjs, tests/test-qq-workflows-boot.sh, tests/test-qq-tasks.mjs]
   validation_commands: [node tests/test-qq-workflows-plugin.mjs .]
 ---
 
@@ -20,7 +20,7 @@ This is separate from the legacy [Backlog delegation lifecycle](delegation-and-r
 
 ## Registry and lifecycle
 
-The `qq-workflows` service exposes `workflows.register(spec)` so sibling plugins can join the selector without being imported. A spec supplies `name`, `candidate`, idempotent attach/detach, and settings list/write functions. Reserved or duplicate names fail. The returned disposer detaches live behavior but preserves the durable selection, allowing hot reload or a temporarily absent sibling to reattach later.
+The `qq-workflows` service exposes `workflows.register(spec)` so sibling plugins can join the selector without being imported. A spec supplies `name`, `candidate`, idempotent attach/detach, and settings list/write functions. It may declare `acceptedContexts` from `project` and `scratch`; omission intentionally defaults to project-only compatibility. Built-in architect, iterate, and find currently declare project only. Reserved or duplicate names fail. The returned disposer detaches live behavior but preserves the durable selection, allowing hot reload or a temporarily absent sibling to reattach later.
 
 ```mermaid
 stateDiagram-v2
@@ -36,6 +36,25 @@ stateDiagram-v2
 ```
 
 *Selection persists independently of a workflow plugin's current fiber.*
+
+### Context-aware leave and transition
+
+`qq-workflows/src/transition.mjs#createWorkflowSessionApi` is the awaitable seam intended for future [Home context navigation](../runtime/dsh-console.md#home-session-core). Read-only `acceptedContexts`, `accepts`, `accepting`, `describe`, and `compatible` queries do not mutate selection. `leave(sessionId, reason)` awaits detach before clearing the durable selection. `transition(sessionId, { name, context, reason })` validates target existence, context compatibility, and live-agent candidacy before leaving the current workflow; same-name transition only reattaches idempotently.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Current
+    Current --> Current: invalid target or context
+    Current --> Current: detach refusal and successful restore
+    Current --> NoneSelected: successful leave
+    Current --> Target: detach then attach then persist
+    Current --> NoneSelected: target attach or persist failure
+    Target --> Target: same-name transition
+```
+
+*The durable selection must always describe attached truth; failure recovery never claims a detached workflow.*
+
+Leave reasons are the closed generic set `back`, `home`, `workflow-switch`, `context-navigation`, and `session-close`; workflow names must not become lifecycle branches. A detach refusal or throw attempts to restore the old attachment and selection. Once leave succeeds, target attach or persistence failure explicitly lands in `none` rather than silently resurrecting the old workflow. Agent/plugin disposal still detaches without clearing durable selection.
 
 Architect and iterate optionally hang namespaced labels through the [DSH relay](../event-plane/service.md#dsh-in-process-relay). Their plugin owns attach/detach and label cleanup. Role bindings live in `${XDG_CONFIG_HOME:-$HOME/.config}/qq/workflows-settings.json`; `/workflows settings` reads or updates only the selected workflow's roles.
 
@@ -60,13 +79,15 @@ Architect registers the `rundown` tool only when the tasks service is present. M
 ## Change recipes
 
 - **Add an internal workflow:** define its candidate, durable state, reversible attach/detach, role settings, tools, and labels in `qq-workflows`; update selection tests and boot composition.
-- **Register a sibling workflow:** call `service.workflows.register(spec)` from the sibling's `ctx.effect`; dispose the returned handle. Do not edit the wrapper's reserved built-ins or import the sibling into `qq-workflows`.
+- **Register a sibling workflow:** call `service.workflows.register(spec)` from the sibling's `ctx.effect`; declare `acceptedContexts` explicitly when scratch is supported, and dispose the returned handle. Do not edit the wrapper's reserved built-ins or import the sibling into `qq-workflows`.
+- **Change leave/transition:** preserve pre-leave validation, await detach, truthful persist ordering, same-name idempotence, closed reasons, and rollback-to-old-or-none behavior. Run `node tests/test-qq-workflows-context.mjs`; its stable sections cover registration defaults, context queries, refusal restoration, target attach failure, persistence failure, and disposal.
 - **Change fold/clerk behavior:** preserve turn boundaries, post-turn ordering, DSH log authority, and the no-mid-turn rule. Run workflow and session-prompt suites.
 - **Change iterate:** test collect-without-go, go, pass/fail evidence, relay absence, role absence, and fresh-child isolation.
 - **Change task persistence or IDs:** preserve private atomic files, cross-project uniqueness, warm/archive behavior, and service-only access.
 
 ```bash
 node tests/test-qq-workflows-plugin.mjs .
+node tests/test-qq-workflows-context.mjs
 node tests/test-session-prompt.mjs
 tests/test-qq-workflows-boot.sh
 node tests/test-qq-tasks.mjs .
