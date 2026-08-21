@@ -62,6 +62,8 @@ try {
   let failDeletePath;
   let deleteOrder;
   let createdAtSeq = 100;
+  let holdFlush;
+  let notifyFlushHold;
 
   const scratchFs = {
     rmSync(path, options) {
@@ -100,15 +102,7 @@ try {
       whenIdle: async () => {},
     };
     live.set(id, agent);
-    if (!persisted.has(id)) {
-      persisted.set(id, {
-        id,
-        createdAt,
-        cwd,
-        ...(header.scope ? { scope: header.scope } : {}),
-        ...(header.context ? { context: header.context } : {}),
-      });
-    }
+    if (options.persist) persistSession(agent.session);
     attachHandle(agent, async () => {
       if (failNextDispose) {
         failNextDispose = false;
@@ -120,14 +114,26 @@ try {
     return agent;
   }
 
-  fake(bootId, { cwd: projects.cwd, createdAt: 10, scope: "project", context: "project" });
+  function persistSession(session) {
+    const header = session?.header ?? {};
+    persisted.set(session.id, {
+      id: session.id,
+      createdAt: header.createdAt,
+      cwd: header.cwd,
+      ...(header.scope ? { scope: header.scope } : {}),
+      ...(header.context ? { context: header.context } : {}),
+    });
+  }
+
+  fake(bootId, { cwd: projects.cwd, createdAt: 10, scope: "project", context: "project", persist: true });
   fake(childId, {
     cwd: projects.cwd,
     parentSession: bootId,
     origin: "subagent",
     createdAt: 90,
+    persist: true,
   });
-  fake(nestedId, { cwd: join(projects.cwd, "nested"), createdAt: 80 });
+  fake(nestedId, { cwd: join(projects.cwd, "nested"), createdAt: 80, persist: true });
 
   const ctx = {
     logger,
@@ -171,11 +177,20 @@ try {
       if (name === "sessions") {
         return {
           async flush(session) {
+            if (typeof notifyFlushHold === "function") {
+              const notify = notifyFlushHold;
+              const gate = holdFlush;
+              notifyFlushHold = undefined;
+              holdFlush = undefined;
+              notify();
+              await gate;
+            }
             if (failNextFlush) {
               failNextFlush = false;
               throw new Error("qq-home probe: flush failed");
             }
             flushes.push(session.id);
+            persistSession(session);
           },
         };
       }
@@ -215,6 +230,9 @@ try {
     sessionId: created.id,
   });
   assert.equal(flushes.includes(created.id), true);
+  assert.equal(persisted.get(created.id)?.scope, "home");
+  assert.equal(persisted.get(created.id)?.context, "scratch");
+  assert.equal(persisted.get(created.id)?.cwd, created.cwd);
   assert.equal(creates.at(-1).meta.scope, "home");
   assert.equal(creates.at(-1).meta.context, "scratch");
   assert.equal(creates.at(-1).meta.cwd, created.cwd);
@@ -236,6 +254,26 @@ try {
   assert.equal(qq.resolve(created.id), created.id);
   assert.ok(qq.alias(created.id));
   assert.equal(qq.resolve(qq.alias(created.id)), created.id);
+
+  let flushEntered;
+  const flushStarted = new Promise((resolve) => { flushEntered = resolve; });
+  let releaseFlush;
+  holdFlush = new Promise((resolve) => { releaseFlush = resolve; });
+  notifyFlushHold = flushEntered;
+  const pendingHome = qq.createHome();
+  await flushStarted;
+  const pendingId = creates.at(-1).sessionId;
+  assert.equal(live.has(pendingId), true);
+  assert.deepEqual((await qq.listHome()).map((row) => row.id), [created.id]);
+  assert.equal(persisted.has(pendingId), false);
+  releaseFlush();
+  const deferred = await pendingHome;
+  assert.equal(deferred.id, pendingId);
+  assert.equal(persisted.get(deferred.id)?.scope, "home");
+  assert.equal(persisted.get(deferred.id)?.context, "scratch");
+  assert.deepEqual((await qq.listHome()).map((row) => row.id), [deferred.id, created.id]);
+  await qq.close(deferred.id);
+  assert.deepEqual((await qq.listHome()).map((row) => row.id), [created.id]);
 
   const later = await qq.createHome();
   writeFileSync(join(later.cwd, "notes.txt"), "scratch file\n");
@@ -307,6 +345,25 @@ try {
   assert.equal(live.has(later.id), true, "flush failure leaves the old Home session truthful");
   assert.deepEqual((await qq.listHome()).map((row) => row.id), [later.id]);
   assert.deepEqual(sessionDirs(), [later.id]);
+
+  failNextFlush = true;
+  failNextDispose = true;
+  const homesBeforeCombined = (await qq.listHome()).map((row) => row.id);
+  await assert.rejects(() => qq.createHome(), (error) => {
+    assert.match(String(error.message), /home session create failed/);
+    assert.equal(error.sessionId, creates.at(-1).sessionId);
+    assert.equal(error.path, join(scratchRoot, creates.at(-1).sessionId));
+    return true;
+  });
+  const failedPublishId = creates.at(-1).sessionId;
+  assert.equal(live.has(failedPublishId), true, "dispose failure leaves the unpublished Agent live");
+  assert.equal(existsSync(join(scratchRoot, failedPublishId)), true, "cleanup failure retains the marker-verifiable workspace");
+  assert.equal(readFileSync(join(scratchRoot, failedPublishId, MARKER_NAME), "utf8").includes(failedPublishId), true);
+  assert.deepEqual((await qq.listHome()).map((row) => row.id), homesBeforeCombined);
+  assert.equal(persisted.has(failedPublishId), false);
+  await qq.close(failedPublishId);
+  assert.equal(live.has(failedPublishId), false);
+  assert.equal(existsSync(join(scratchRoot, failedPublishId)), false);
 
   failNextCreate = true;
   await assert.rejects(() => qq.replace(later.id), /create failed/);

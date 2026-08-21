@@ -482,6 +482,7 @@ export function createQqService(ctx, config) {
 
   const agentPromises = new Map();
   const handles = new Map();
+  const unpublishedHome = new Set();
   const defaultCreatedAt = Date.now();
   const aliasFile = config.aliasFile !== undefined || envHasDshHome()
     ? defaultAliasFile(process.env, config)
@@ -794,7 +795,11 @@ export function createQqService(ctx, config) {
   async function listHome() {
     await boot;
     syncLive();
-    return sortRows(liveHomeAgents().map((agent) => rowFor(agent)));
+    return sortRows(
+      liveHomeAgents()
+        .filter((agent) => !unpublishedHome.has(agent.session.id))
+        .map((agent) => rowFor(agent)),
+    );
   }
 
   async function latestHome() {
@@ -949,6 +954,7 @@ export function createQqService(ctx, config) {
       throw error;
     }
     const setup = selectionSetup({ current: selectedModel });
+    unpublishedHome.add(sessionId);
     let handle;
     try {
       handle = rememberHandle(await agents.create({
@@ -969,8 +975,13 @@ export function createQqService(ctx, config) {
       await sessions.flush(handle.agent.session);
     } catch (error) {
       if (handle) {
-        try { await disposeLive(handle.agent.session.id); } catch {}
+        try {
+          await disposeLive(handle.agent.session.id);
+        } catch (disposeError) {
+          throw scratchCleanupError(sessionId, cwd, disposeError, "create");
+        }
       }
+      unpublishedHome.delete(sessionId);
       try {
         scratch.delete(sessionId);
       } catch (cleanupError) {
@@ -978,6 +989,7 @@ export function createQqService(ctx, config) {
       }
       throw error;
     }
+    unpublishedHome.delete(sessionId);
     const createdId = handle.agent.session.id;
     syncLive(createdId);
     const alias = book.aliasFor(createdId);
@@ -999,6 +1011,7 @@ export function createQqService(ctx, config) {
     await handle.dispose();
     handles.delete(sessionId);
     agentPromises.delete(sessionId);
+    unpublishedHome.delete(sessionId);
     try { delete agent?.[AGENT_HANDLE]; } catch {}
     syncLive();
   }
