@@ -14,10 +14,18 @@ project and refuse symlink escape; absolute roots never cross the service API.
 
 `createScratchManager()` owns one private direct child under a configured
 scratch root (production default `~/.local/state/qq/scratch`). Each child is
-mode `0700`, bound by an owner-only `qq.scratch/v1` marker, and is suitable as a
-later Home Agent cwd. Create, verify, delete, and restart reconciliation stay
-inside that root, fail closed on symlinks or marker mismatch, and do not
-register projects. T-134 will call this manager; the session service does not.
+mode `0700`, bound by an owner-only `qq.scratch/v1` marker. The session service
+uses that manager for Home sessions (`scope: "home"`, `context: "scratch"`):
+create, list, most-recent, close, replace/clear, and restart reconciliation
+against live owned Home root Agents only. Home never registers a project.
+Project sessions keep the registered-root catalog and never delete scratch.
+A qq-owned `qq.session-scope/v1` sidecar (production default
+`~/.local/state/qq/session-scope.json`) stores immutable Home metadata so scope
+survives scratch deletion; DSH session headers stay on the supported field set.
+A Home record is valid only when `cwd` is the exact expected child
+`join(scratchRoot, sessionId)`; wrong-parent entries are protected, never
+classified as Home, and never authorize deletion.
+T-134 later owns Home routes and UI.
 
 The qq plugin hides DSH's generic `skill` tool when a session catalog has no
 model-invocable skills, and restores it when a real skill appears. Grok

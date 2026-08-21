@@ -6,6 +6,8 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { createAliasBook, defaultAliasFile, defaultLegacyAliasFile } from "./alias.mjs";
 import { deriveToolEventViews, projectConversation } from "./conversation.mjs";
 import { createProjectFileService } from "./files.mjs";
+import { createScratchManager, defaultScratchRoot } from "./scratch.mjs";
+import { createSessionScopeStore, defaultScopeFile } from "./session-scope.mjs";
 
 const SESSION_ID = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEFAULT_OBSERVE_MS = 100;
@@ -342,13 +344,15 @@ export function snapshotFingerprint(snapshot) {
   return JSON.stringify([
     snapshot?.id,
     snapshot?.project,
+    snapshot?.scope,
+    snapshot?.context,
     snapshot?.agentStatus,
     events.length,
     last?.seq,
     last?.type,
     last?.data?.reason?.kind,
     pending.map((item) => [item.id, item.target, item.text]),
-    sessions.map((session) => [session.id, session.createdAt, session.alias, session.project]),
+    sessions.map((session) => [session.id, session.createdAt, session.alias, session.project, session.scope]),
     snapshot?.alias,
   ]);
 }
@@ -402,13 +406,17 @@ export function attachObserve(backend, options = {}) {
     observe(sessionId, listener, extra = {}) {
       return observeSnapshot(async () => {
         const snapshot = await backend.read(sessionId);
-        const available = typeof backend.list === "function"
-          ? await backend.list(snapshot?.project)
-          : [];
+        const available = snapshot?.scope === "home" && typeof backend.listHome === "function"
+          ? await backend.listHome()
+          : typeof backend.list === "function"
+            ? await backend.list(snapshot?.project)
+            : [];
         if (snapshot?.id && !available.some((session) => session.id === snapshot.id)) {
           available.unshift({
             id: snapshot.id,
             createdAt: 0,
+            ...(snapshot.scope ? { scope: snapshot.scope } : {}),
+            ...(snapshot.context ? { context: snapshot.context } : {}),
             ...(snapshot.project ? { project: snapshot.project } : {}),
           });
         }
@@ -461,6 +469,17 @@ export function createQqService(ctx, config) {
     throw new Error("qq: cwd must equal one project root or registered folder");
   }
   const defaultProject = bootProject.name;
+  const scratch = createScratchManager({
+    root: config.scratchRoot ?? defaultScratchRoot(),
+    ...(config.scratchFs ? { fs: config.scratchFs } : {}),
+  });
+  const scopes = createSessionScopeStore({
+    scratchRoot: scratch.root,
+    file: config.scopeFile === null
+      ? undefined
+      : (config.scopeFile ?? defaultScopeFile()),
+    ...(config.scopeFs ? { fs: config.scopeFs } : {}),
+  });
 
   const agents = ctx.get("agents");
   const sessions = ctx.get("sessions");
@@ -471,6 +490,7 @@ export function createQqService(ctx, config) {
 
   const agentPromises = new Map();
   const handles = new Map();
+  const unpublished = new Set();
   const defaultCreatedAt = Date.now();
   const aliasFile = config.aliasFile !== undefined || envHasDshHome()
     ? defaultAliasFile(process.env, config)
@@ -520,6 +540,54 @@ export function createQqService(ctx, config) {
     return typeof cwd === "string" ? cwd : undefined;
   }
 
+  function canonicalCwd(cwd) {
+    if (typeof cwd !== "string" || !cwd.startsWith("/")) return undefined;
+    try {
+      return realpathSync(cwd);
+    } catch {
+      return resolve(cwd);
+    }
+  }
+
+  function samePath(left, right) {
+    const a = canonicalCwd(left);
+    const b = canonicalCwd(right);
+    return Boolean(a && b && a === b);
+  }
+
+  function homeWorkspace(sessionId) {
+    if (!SESSION_ID.test(sessionId)) return undefined;
+    try {
+      return scratch.verify(sessionId);
+    } catch {
+      return undefined;
+    }
+  }
+
+  function classifyAgent(agent) {
+    if (!isRootOperatorAgent(agent)) return undefined;
+    const id = agent.session?.id;
+    const cwd = agentCwd(agent);
+    const project = projectForCwd(cwd);
+    if (project) {
+      return { scope: "project", context: "project", project, cwd: project.cwd };
+    }
+    const home = homeWorkspace(id);
+    if (!home || !samePath(cwd, home.path)) return undefined;
+    const record = scopes.get(id);
+    if (record && samePath(record.cwd, home.path)) {
+      return { scope: "home", context: "scratch", cwd: home.path };
+    }
+    if (unpublished.has(id)) {
+      return { scope: "home", context: "scratch", cwd: home.path };
+    }
+    return undefined;
+  }
+
+  function isUnpublished(sessionId) {
+    return unpublished.has(sessionId);
+  }
+
   function liveAgents() {
     const listed = typeof agents.list === "function"
       ? agents.list()
@@ -529,9 +597,26 @@ export function createQqService(ctx, config) {
 
   function liveRootAgents() {
     return liveAgents().filter((agent) => {
-      if (!isRootOperatorAgent(agent)) return false;
-      return Boolean(projectForCwd(agentCwd(agent)));
+      const id = agent.session?.id;
+      if (isUnpublished(id)) return false;
+      return Boolean(classifyAgent(agent));
     });
+  }
+
+  function liveProjectAgents() {
+    return liveRootAgents().filter((agent) => classifyAgent(agent)?.scope === "project");
+  }
+
+  function liveHomeAgents() {
+    return liveRootAgents().filter((agent) => classifyAgent(agent)?.scope === "home");
+  }
+
+  function scratchCleanupError(sessionId, path, cause, action = "cleanup") {
+    const error = httpError(500, `qq: home session ${action} failed`, cause?.code ?? "scratch-cleanup");
+    error.sessionId = sessionId;
+    if (path) error.path = path;
+    if (cause) error.cause = cause;
+    return error;
   }
 
   function liveSessionIds() {
@@ -563,12 +648,14 @@ export function createQqService(ctx, config) {
 
   function syncLive(extraId) {
     const ids = liveSessionIds();
-    if (SESSION_ID.test(extraId) && !ids.includes(extraId)) ids.push(extraId);
+    if (SESSION_ID.test(extraId) && !isUnpublished(extraId) && !ids.includes(extraId)) {
+      ids.push(extraId);
+    }
     book.sync(ids);
   }
 
   function liveAlias(sessionId) {
-    if (!SESSION_ID.test(sessionId) || !agents.get(sessionId)) return undefined;
+    if (!SESSION_ID.test(sessionId) || isUnpublished(sessionId) || !agents.get(sessionId)) return undefined;
     if (!liveRootAgents().some((agent) => agent.session.id === sessionId)) return undefined;
     syncLive(sessionId);
     return book.aliasFor(sessionId);
@@ -584,7 +671,8 @@ export function createQqService(ctx, config) {
   if (typeof ctx.on === "function") {
     ctx.on("agent/created", ({ agent }) => {
       const sessionId = agent?.session?.id;
-      if (SESSION_ID.test(sessionId) && isRootOperatorAgent(agent)) syncLive(sessionId);
+      if (!SESSION_ID.test(sessionId) || isUnpublished(sessionId)) return;
+      if (isRootOperatorAgent(agent)) syncLive(sessionId);
     });
     ctx.on("agent/disposed", () => {
       syncLive();
@@ -601,12 +689,14 @@ export function createQqService(ctx, config) {
 
   function requireLiveAgent(sessionId) {
     if (!SESSION_ID.test(sessionId)) throw httpError(404, NOT_FOUND);
+    if (isUnpublished(sessionId)) return undefined;
     const live = agents.get(sessionId);
-    if (live && isRootOperatorAgent(live) && projectForCwd(agentCwd(live))) return live;
+    if (live && classifyAgent(live)) return live;
     return undefined;
   }
 
   async function rejectInactive(sessionId) {
+    if (isUnpublished(sessionId)) throw httpError(404, NOT_FOUND);
     const headers = await persistedHeaders();
     if (headers.some((header) => header.id === sessionId)) {
       throw httpError(404, INACTIVE, "inactive");
@@ -626,14 +716,28 @@ export function createQqService(ctx, config) {
   }
 
   function rowFor(agent) {
-    const project = projectForCwd(agentCwd(agent));
+    const classified = classifyAgent(agent);
     const recency = sessionRecency(agent.session, createdAtFor(agent));
     const alias = book.aliasFor(agent.session.id);
+    if (classified?.scope === "home") {
+      return {
+        id: agent.session.id,
+        createdAt: recency.createdAt,
+        latestEventAt: recency.latest,
+        cwd: classified.cwd,
+        scope: "home",
+        context: "scratch",
+        ...(alias ? { alias } : {}),
+      };
+    }
+    const project = classified?.project;
     return {
       id: agent.session.id,
       createdAt: recency.createdAt,
       latestEventAt: recency.latest,
-      cwd: project?.cwd ?? agentCwd(agent),
+      cwd: classified?.cwd ?? project?.cwd ?? agentCwd(agent),
+      scope: "project",
+      context: "project",
       project: project?.name,
       projectLabel: project?.label,
       ...(alias ? { alias } : {}),
@@ -672,7 +776,44 @@ export function createQqService(ctx, config) {
     syncLive(handle.agent.session.id);
   }
 
-  const boot = ensureBootSession();
+  async function reconcileHomeScratch() {
+    await ctx.get("loader")?.await();
+    if (scopes.corrupt) {
+      ctx.logger?.warn?.("qq: scratch reconcile skipped", {
+        code: "corrupt-scope",
+        message: "qq: session-scope registry is corrupt",
+      });
+      return;
+    }
+    const liveIds = new Set(liveHomeAgents().map((agent) => agent.session.id));
+    for (const id of scopes.protectedIds()) liveIds.add(id);
+    try {
+      const result = scratch.reconcile([...liveIds]);
+      for (const row of result.errors ?? []) {
+        ctx.logger?.warn?.("qq: scratch reconcile failed", {
+          sessionId: row.name,
+          path: row.path,
+          code: row.error?.code,
+          message: String(row.error?.message ?? row.error),
+        });
+      }
+    } catch (error) {
+      ctx.logger?.warn?.("qq: scratch reconcile failed", {
+        code: error?.code,
+        message: String(error?.message ?? error),
+      });
+    }
+  }
+
+  const boot = ensureBootSession().then(() => reconcileHomeScratch());
+
+  function sortRows(rows) {
+    rows.sort((left, right) => compareSessionRecency(
+      { latest: left.latestEventAt, createdAt: left.createdAt, id: left.id },
+      { latest: right.latestEventAt, createdAt: right.createdAt, id: right.id },
+    ));
+    return rows;
+  }
 
   async function list(projectName) {
     await boot;
@@ -680,14 +821,21 @@ export function createQqService(ctx, config) {
     const wanted = projectName === undefined || projectName === null || projectName === ""
       ? undefined
       : projectByName(String(projectName)).name;
-    const rows = liveRootAgents()
+    const rows = liveProjectAgents()
       .map((agent) => rowFor(agent))
       .filter((row) => row.project && (!wanted || row.project === wanted));
-    rows.sort((left, right) => compareSessionRecency(
-      { latest: left.latestEventAt, createdAt: left.createdAt, id: left.id },
-      { latest: right.latestEventAt, createdAt: right.createdAt, id: right.id },
-    ));
-    return rows;
+    return sortRows(rows);
+  }
+
+  async function listHome() {
+    await boot;
+    syncLive();
+    return sortRows(liveHomeAgents().map((agent) => rowFor(agent)));
+  }
+
+  async function latestHome() {
+    const rows = await listHome();
+    return rows[0] ?? null;
   }
 
   async function read(sessionId) {
@@ -721,9 +869,10 @@ export function createQqService(ctx, config) {
       ),
       agentStatus: agent.status,
       cwd: row.cwd,
-      project: row.project,
-      projectLabel: row.projectLabel,
+      scope: row.scope,
+      context: row.context,
       createdAt: row.createdAt,
+      ...(row.project ? { project: row.project, projectLabel: row.projectLabel } : {}),
       ...(alias ? { alias } : {}),
     };
   }
@@ -731,6 +880,7 @@ export function createQqService(ctx, config) {
   async function inspect(sessionId) {
     await boot;
     if (!SESSION_ID.test(sessionId)) throw httpError(404, NOT_FOUND);
+    if (isUnpublished(sessionId)) throw httpError(404, NOT_FOUND);
     const live = requireLiveAgent(sessionId);
     if (live) {
       const row = rowFor(live);
@@ -740,13 +890,35 @@ export function createQqService(ctx, config) {
     const persisted = headers.find((header) => header.id === sessionId);
     if (persisted) {
       const project = projectForCwd(persisted.cwd);
+      if (project) {
+        return {
+          id: sessionId,
+          live: false,
+          createdAt: persisted.createdAt,
+          cwd: persisted.cwd,
+          scope: "project",
+          context: "project",
+          project: project.name,
+          projectLabel: project.label,
+        };
+      }
+      const record = scopes.get(sessionId);
+      if (record) {
+        return {
+          id: sessionId,
+          live: false,
+          createdAt: persisted.createdAt,
+          cwd: record.cwd,
+          scope: "home",
+          context: "scratch",
+        };
+      }
       return {
         id: sessionId,
         live: false,
         createdAt: persisted.createdAt,
         cwd: persisted.cwd,
-        project: project?.name,
-        projectLabel: project?.label,
+        project: undefined,
       };
     }
     throw httpError(404, NOT_FOUND);
@@ -754,7 +926,9 @@ export function createQqService(ctx, config) {
 
   async function view(sessionId) {
     const snapshot = await read(sessionId);
-    const available = await list(snapshot.project);
+    const available = snapshot.scope === "home"
+      ? await listHome()
+      : await list(snapshot.project);
     return { ...snapshot, sessions: available };
   }
 
@@ -779,7 +953,58 @@ export function createQqService(ctx, config) {
     const alias = book.aliasFor(createdId);
     return {
       id: createdId,
+      scope: "project",
+      context: "project",
       project: project.name,
+      cwd,
+      ...(alias ? { alias } : {}),
+    };
+  }
+
+  async function createHome() {
+    await boot;
+    await ctx.get("loader")?.await();
+    const sessionId = `session-${randomUUID()}`;
+    unpublished.add(sessionId);
+    let cwd;
+    let handle;
+    try {
+      cwd = scratch.create(sessionId);
+      scratch.verify(sessionId);
+      const setup = selectionSetup({ current: selectedModel });
+      handle = rememberHandle(await agents.create({
+        sessionId,
+        meta: { cwd },
+        agentOptions: { provider: selectedModel.provider, model: selectedModel.model },
+        setup,
+      }));
+      await sessions.flush(handle.agent.session);
+      scopes.put(sessionId, { cwd });
+    } catch (error) {
+      if (handle) {
+        try {
+          await disposeLive(handle.agent.session.id);
+        } catch (disposeError) {
+          throw scratchCleanupError(sessionId, cwd, disposeError, "create");
+        }
+      }
+      if (cwd) {
+        try {
+          scratch.delete(sessionId);
+        } catch (cleanupError) {
+          throw scratchCleanupError(sessionId, cwd, cleanupError, "create");
+        }
+      }
+      throw error;
+    }
+    unpublished.delete(sessionId);
+    const createdId = handle.agent.session.id;
+    syncLive(createdId);
+    const alias = book.aliasFor(createdId);
+    return {
+      id: createdId,
+      scope: "home",
+      context: "scratch",
       cwd,
       ...(alias ? { alias } : {}),
     };
@@ -790,19 +1015,15 @@ export function createQqService(ctx, config) {
     if (!handle || typeof handle.dispose !== "function") {
       throw httpError(409, "qq: session is not closeable");
     }
+    const agent = agents.get(sessionId);
+    await handle.dispose();
     handles.delete(sessionId);
     agentPromises.delete(sessionId);
-    const agent = agents.get(sessionId);
     try { delete agent?.[AGENT_HANDLE]; } catch {}
-    await handle.dispose();
     syncLive();
   }
 
-  async function close(sessionId) {
-    await boot;
-    const agent = await liveAgent(sessionId);
-    if (agent.status === "running") throw httpError(409, RUNNING_CLOSE);
-    const project = projectForCwd(agentCwd(agent));
+  async function closeProject(sessionId, project) {
     const remainingBefore = await list(project?.name);
     await disposeLive(sessionId);
     const remaining = remainingBefore.filter((row) => row.id !== sessionId);
@@ -810,16 +1031,49 @@ export function createQqService(ctx, config) {
     return {
       id: next?.id ?? null,
       closed: sessionId,
+      scope: "project",
+      context: "project",
       project: project?.name ?? defaultProject,
     };
   }
 
-  async function replace(sessionId) {
+  async function closeHome(sessionId, classified) {
+    const remainingBefore = await listHome();
+    await disposeLive(sessionId);
+    try {
+      scratch.delete(sessionId);
+    } catch (error) {
+      throw scratchCleanupError(sessionId, classified.cwd, error, "delete");
+    }
+    const remaining = remainingBefore.filter((row) => row.id !== sessionId);
+    const next = remaining[0];
+    return {
+      id: next?.id ?? null,
+      closed: sessionId,
+      scope: "home",
+      context: "scratch",
+    };
+  }
+
+  async function close(sessionId) {
     await boot;
+    if (isUnpublished(sessionId)) {
+      if (!SESSION_ID.test(sessionId)) throw httpError(404, NOT_FOUND);
+      const agent = agents.get(sessionId);
+      if (!agent) throw httpError(404, NOT_FOUND);
+      if (agent.status === "running") throw httpError(409, RUNNING_CLOSE);
+      const classified = classifyAgent(agent);
+      if (classified?.scope !== "home") throw httpError(404, NOT_FOUND);
+      return closeHome(sessionId, classified);
+    }
     const agent = await liveAgent(sessionId);
-    if (agent.status === "running") throw httpError(409, RUNNING_CLEAR);
-    const project = projectForCwd(agentCwd(agent));
-    if (!project) throw httpError(404, "qq: project not found");
+    if (agent.status === "running") throw httpError(409, RUNNING_CLOSE);
+    const classified = classifyAgent(agent);
+    if (classified?.scope === "home") return closeHome(sessionId, classified);
+    return closeProject(sessionId, classified?.project);
+  }
+
+  async function replaceProject(sessionId, project) {
     const created = await createAt(project.name, project.cwd);
     try {
       await disposeLive(sessionId);
@@ -829,11 +1083,42 @@ export function createQqService(ctx, config) {
     }
     return {
       id: created.id,
+      scope: "project",
+      context: "project",
       project: project.name,
       cwd: project.cwd,
       closed: sessionId,
       ...(created.alias ? { alias: created.alias } : {}),
     };
+  }
+
+  async function replaceHome(sessionId) {
+    const classified = classifyAgent(agents.get(sessionId));
+    const created = await createHome();
+    await disposeLive(sessionId);
+    try {
+      scratch.delete(sessionId);
+    } catch (error) {
+      throw scratchCleanupError(sessionId, classified?.cwd, error, "delete");
+    }
+    return {
+      id: created.id,
+      scope: "home",
+      context: "scratch",
+      cwd: created.cwd,
+      closed: sessionId,
+      ...(created.alias ? { alias: created.alias } : {}),
+    };
+  }
+
+  async function replace(sessionId) {
+    await boot;
+    const agent = await liveAgent(sessionId);
+    if (agent.status === "running") throw httpError(409, RUNNING_CLEAR);
+    const classified = classifyAgent(agent);
+    if (classified?.scope === "home") return replaceHome(sessionId);
+    if (!classified?.project) throw httpError(404, "qq: project not found");
+    return replaceProject(sessionId, classified.project);
   }
 
   return Object.freeze({
@@ -845,6 +1130,8 @@ export function createQqService(ctx, config) {
     readProjectFile: projectFiles.readProjectFile,
     openProjectFile: projectFiles.openProjectFile,
     list,
+    listHome,
+    latestHome,
     read,
     inspect,
     alias: liveAlias,
@@ -852,8 +1139,10 @@ export function createQqService(ctx, config) {
     async create(projectName) {
       return createAt(projectName);
     },
+    createHome,
     replace,
     clear: replace,
+    scratchRoot: scratch.root,
     async prompt(sessionId, text) {
       await boot;
       const agent = await liveAgent(sessionId);
@@ -861,8 +1150,10 @@ export function createQqService(ctx, config) {
       if (line.startsWith("/")) {
         const name = slashName(line);
         if (name === "new") {
-          const project = projectForCwd(agentCwd(agent));
-          const created = await createAt(project?.name, project?.cwd);
+          const classified = classifyAgent(agent);
+          const created = classified?.scope === "home"
+            ? await createHome()
+            : await createAt(classified?.project?.name, classified?.cwd);
           return { kind: "navigate", action: "create", ...created };
         }
         if (name === "clear") {

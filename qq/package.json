@@ -11,6 +11,7 @@
     "./conversation": "./src/conversation.mjs",
     "./files": "./src/files.mjs",
     "./scratch": "./src/scratch.mjs",
+    "./session-scope": "./src/session-scope.mjs",
     "./alias": "./src/alias.mjs",
     "./ask": "./src/ask.mjs",
     "./skill-tool": "./src/skill-tool.mjs"

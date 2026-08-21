@@ -291,6 +291,8 @@ try {
     sessionId: groupedLogicId,
     cwd: betaCwd,
     projectsRoot: projects.root,
+    scratchRoot: join(projects.root, ".qq-scratch"),
+    scopeFile: join(projects.root, "session-scope.json"),
     projectCatalog: groupedRegistration,
     provider: "qwen-token-plan",
     model: "deepseek-v4-pro-0813",
@@ -426,6 +428,8 @@ try {
     sessionId: alphaId,
     cwd: alphaCwd,
     projectsRoot: projects.root,
+    scratchRoot: join(projects.root, ".qq-scratch"),
+    scopeFile: join(projects.root, "session-scope.json"),
     provider: "qwen-token-plan",
     model: "deepseek-v4-pro-0813",
   });

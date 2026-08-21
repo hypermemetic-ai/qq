@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer, request as httpRequest } from "node:http";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -266,10 +267,14 @@ ctx.provide("qq-workflows", {
 ctx.provide("image-finder", { inFindMode: () => finderMode });
 
 const projectName = root.split("/").at(-1);
+const scratchRoot = mkdtempSync(join(tmpdir(), "qq-fiber-scratch."));
+const scopeFile = join(scratchRoot, "session-scope.json");
 const qqFiber = ctx.plugin(qqPlugin, {
   sessionId,
   cwd: root,
   projectsRoot: dirname(root),
+  scratchRoot,
+  scopeFile,
   provider: "qwen-token-plan",
   model: "deepseek-v4-pro-0813",
 });
@@ -352,5 +357,6 @@ await uiAgain.dispose();
 await qqFiber.dispose();
 httpServer.closeAllConnections?.();
 await new Promise((resolveClose) => httpServer.close(resolveClose));
+rmSync(scratchRoot, { recursive: true, force: true });
 
 console.log("test-qq-ui-fiber: pass");
