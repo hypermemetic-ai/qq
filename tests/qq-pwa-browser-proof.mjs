@@ -220,6 +220,13 @@ async function dispatchTouchSwipe(client, page, { x = 8, y = 420, endX, endY, st
   await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }, page.sessionId);
 }
 
+async function dispatchKey(client, page, key, code, windowsVirtualKeyCode) {
+  const text = key === "Enter" ? "\r" : undefined;
+  const keyEvent = { key, code, windowsVirtualKeyCode, nativeVirtualKeyCode: windowsVirtualKeyCode, ...(text ? { text, unmodifiedText: text } : {}) };
+  await client.send("Input.dispatchKeyEvent", { type: "keyDown", ...keyEvent }, page.sessionId);
+  await client.send("Input.dispatchKeyEvent", { type: "keyUp", ...keyEvent }, page.sessionId);
+}
+
 async function waitForDrawerSurface(client, page, pathname) {
   return waitFor(
     () => evaluate(client, page, `(() => ({
@@ -230,23 +237,35 @@ async function waitForDrawerSurface(client, page, pathname) {
   );
 }
 
-async function openDrawerWithTouch(client, page, { y = 420 } = {}) {
+async function openDrawerWithTouch(client, page, { x = 40, y = 420 } = {}) {
   const before = await evaluate(client, page, `(() => {
     const edges = document.querySelectorAll(".drawer-edge");
+    const rect = edges[0]?.getBoundingClientRect();
     window.__qqEdgeCaptured = 0;
+    window.__qqDrawerOpenedAt = null;
+    window.__qqDrawerOpenObserver?.disconnect();
+    window.__qqDrawerOpenObserver = new MutationObserver(() => {
+      if (!document.body.classList.contains("drawer-open")) return;
+      window.__qqDrawerOpenedAt = performance.now();
+      window.__qqDrawerOpenObserver.disconnect();
+    });
+    window.__qqDrawerOpenObserver.observe(document.body, { attributes: true, attributeFilter: ["class"] });
     for (const edge of edges) edge.addEventListener("gotpointercapture", () => { window.__qqEdgeCaptured += 1; }, { once: true });
-    return { timeOrigin: performance.timeOrigin, pathname: location.pathname };
+    return { timeOrigin: performance.timeOrigin, pathname: location.pathname, edgeLeft: rect?.left, edgeRight: rect?.right };
   })()`);
-  await dispatchTouchSwipe(client, page, { x: 8, y, endX: 104, endY: y + 4 });
+  assert.ok(x > 24, `touch proof must start away from the extreme edge (x=${x})`);
+  assert.ok(x >= before.edgeLeft && x < before.edgeRight, `touch x=${x} missed the ${before.edgeLeft}–${before.edgeRight}px drawer rail`);
+  await dispatchTouchSwipe(client, page, { x, y, endX: x + 96, endY: y + 4 });
   const opened = await waitFor(
     () => evaluate(client, page, `(() => ({
       open: document.body.classList.contains("drawer-open"),
       hidden: document.querySelector("#project-drawer")?.getAttribute("aria-hidden"),
       captured: window.__qqEdgeCaptured,
+      openedAt: window.__qqDrawerOpenedAt,
       timeOrigin: performance.timeOrigin,
       pathname: location.pathname,
       drawer: new URL(location.href).searchParams.get("drawer"),
-    }))()`).then((state) => state?.open && state),
+    }))()`).then((state) => state?.open && Number.isFinite(state.openedAt) && state),
     `edge swipe did not open the drawer on ${before.pathname}`,
   );
   assert.equal(opened.hidden, "false");
@@ -254,6 +273,90 @@ async function openDrawerWithTouch(client, page, { y = 420 } = {}) {
   assert.equal(opened.timeOrigin, before.timeOrigin, "edge swipe reloaded the document");
   assert.equal(opened.pathname, before.pathname);
   return opened;
+}
+
+async function closeDrawerWithImmediateBackdropTouch(client, page, { x = 330, y = 420 } = {}) {
+  const before = await evaluate(client, page, `(() => {
+    const drawer = document.querySelector("#project-drawer");
+    const probe = document.createElement("button");
+    probe.id = "qq-click-through-probe";
+    probe.type = "button";
+    probe.tabIndex = -1;
+    probe.setAttribute("aria-hidden", "true");
+    probe.style.cssText = "position:fixed;z-index:1;left:${x - 35}px;top:${y - 35}px;width:70px;height:70px";
+    window.__qqClickThroughs = 0;
+    probe.addEventListener("click", () => { window.__qqClickThroughs += 1; });
+    document.body.append(probe);
+    return {
+      timeOrigin: performance.timeOrigin,
+      pathname: location.pathname,
+      openedAt: window.__qqDrawerOpenedAt,
+      transitionMs: parseFloat(getComputedStyle(drawer).transitionDuration) * 1000,
+      target: document.elementFromPoint(${x}, ${y})?.id,
+    };
+  })()`);
+  assert.equal(before.target, "project-drawer-backdrop", "touch proof did not start on the exposed backdrop");
+  const point = [{ x, y, radiusX: 6, radiusY: 6, force: 1, id: 0 }];
+  await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: point }, page.sessionId);
+  const onPointerDown = await evaluate(client, page, `(() => ({
+    open: document.body.classList.contains("drawer-open"),
+    hidden: document.querySelector("#project-drawer")?.getAttribute("aria-hidden"),
+    elapsed: performance.now() - window.__qqDrawerOpenedAt,
+    clicks: window.__qqClickThroughs,
+  }))()`);
+  assert.equal(onPointerDown.open, false, "backdrop touch waited for click/pointerup before closing");
+  assert.equal(onPointerDown.hidden, "true");
+  assert.ok(onPointerDown.elapsed < before.transitionMs, `backdrop closed after the ${before.transitionMs}ms opening transition (${onPointerDown.elapsed}ms)`);
+  await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }, page.sessionId);
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  const closed = await evaluate(client, page, `(() => {
+    const probe = document.querySelector("#qq-click-through-probe");
+    const state = {
+      clicks: window.__qqClickThroughs,
+      timeOrigin: performance.timeOrigin,
+      pathname: location.pathname,
+      hasDrawerQuery: new URL(location.href).searchParams.has("drawer"),
+    };
+    probe?.remove();
+    return state;
+  })()`);
+  assert.equal(closed.clicks, 0, "backdrop touch clicked through to an underlying control");
+  assert.equal(closed.timeOrigin, before.timeOrigin, "backdrop dismissal reloaded the document");
+  assert.equal(closed.pathname, before.pathname);
+  assert.equal(closed.hasDrawerQuery, false);
+}
+
+async function closeDrawerWithKeyboard(client, page) {
+  const before = await evaluate(client, page, `({ timeOrigin: performance.timeOrigin, pathname: location.pathname })`);
+  await dispatchKey(client, page, "Tab", "Tab", 9);
+  const focused = await waitFor(
+    () => evaluate(client, page, `(() => {
+      const close = document.querySelector(".drawer-close");
+      const rect = close.getBoundingClientRect();
+      return {
+        focused: document.activeElement === close,
+        focusVisible: close.matches(":focus-visible"),
+        width: rect.width,
+        height: rect.height,
+      };
+    })()`).then((state) => state?.focused && state),
+    "mobile nonvisual close did not receive keyboard focus",
+  );
+  assert.equal(focused.focusVisible, true);
+  assert.ok(focused.width >= 40 && focused.height >= 40, "mobile close did not become visible on keyboard focus");
+  await dispatchKey(client, page, "Enter", "Enter", 13);
+  const closed = await waitFor(
+    () => evaluate(client, page, `({
+      open: document.body.classList.contains("drawer-open"),
+      timeOrigin: performance.timeOrigin,
+      pathname: location.pathname,
+      hasDrawerQuery: new URL(location.href).searchParams.has("drawer"),
+    })`).then((state) => !state?.open && state),
+    "keyboard close did not dismiss the mobile drawer",
+  );
+  assert.equal(closed.timeOrigin, before.timeOrigin);
+  assert.equal(closed.pathname, before.pathname);
+  assert.equal(closed.hasDrawerQuery, false);
 }
 
 async function closeDrawerInPlace(client, page) {
@@ -309,6 +412,7 @@ async function waitForWorker(client, page, scriptPattern = /\/qq\/sw\.js$/) {
 export async function runQqPwaBrowserProof() {
   const observers = new Set();
   const longReadme = `# Project proof\n\n${Array.from({ length: 120 }, (_, index) => `Scrollable proof line ${index + 1}.`).join("\n\n")}\n`;
+  const wideCode = `export const fixture = "${"wide-code-proof-".repeat(80)}";\n`;
   const backend = {
     defaultSessionId: SESSION_ID,
     defaultProject: "proof",
@@ -347,6 +451,9 @@ export async function runQqPwaBrowserProof() {
     readProjectFile(project, path) {
       if (project === "proof" && path === "README.md") {
         return { project, path, name: "README.md", kind: "markdown", size: longReadme.length, text: longReadme };
+      }
+      if (project === "proof" && path === "src/fixture.js") {
+        return { project, path, name: "fixture.js", kind: "code", language: "javascript", size: wideCode.length, text: wideCode };
       }
       const error = new Error("qq: file not found");
       error.status = 404;
@@ -427,6 +534,33 @@ export async function runQqPwaBrowserProof() {
     await navigate(client, desktop, `${origin}${CANONICAL_PATH}`);
     await waitForLive(client, desktop, origin);
     assert.equal(await evaluate(client, desktop, `getComputedStyle(document.querySelector(".drawer-edge")).display`), "none");
+    const desktopDrawerStart = await evaluate(client, desktop, `({ timeOrigin: performance.timeOrigin, pathname: location.pathname })`);
+    await evaluate(client, desktop, `document.querySelector("#project-drawer-toggle").click()`);
+    await waitFor(() => evaluate(client, desktop, `document.body.classList.contains("drawer-open")`), "desktop Files button did not open the drawer");
+    const desktopClose = await evaluate(client, desktop, `(() => {
+      const close = document.querySelector(".drawer-close");
+      const rect = close.getBoundingClientRect();
+      return { width: rect.width, height: rect.height, label: close.getAttribute("aria-label") };
+    })()`);
+    assert.ok(desktopClose.width >= 40 && desktopClose.height >= 40, "desktop X was not visible");
+    assert.equal(desktopClose.label, "Close files");
+    await evaluate(client, desktop, `document.querySelector(".drawer-close").click()`);
+    await waitFor(() => evaluate(client, desktop, `!document.body.classList.contains("drawer-open")`), "desktop X did not close the drawer");
+    await evaluate(client, desktop, `document.querySelector("#project-drawer-toggle").click()`);
+    await waitFor(() => evaluate(client, desktop, `document.body.classList.contains("drawer-open")`), "desktop drawer did not reopen");
+    await dispatchKey(client, desktop, "Escape", "Escape", 27);
+    const desktopDrawerEnd = await waitFor(
+      () => evaluate(client, desktop, `({
+        open: document.body.classList.contains("drawer-open"),
+        timeOrigin: performance.timeOrigin,
+        pathname: location.pathname,
+        hasDrawerQuery: new URL(location.href).searchParams.has("drawer"),
+      })`).then((state) => !state?.open && state),
+      "desktop Escape did not close the drawer",
+    );
+    assert.equal(desktopDrawerEnd.timeOrigin, desktopDrawerStart.timeOrigin);
+    assert.equal(desktopDrawerEnd.pathname, desktopDrawerStart.pathname);
+    assert.equal(desktopDrawerEnd.hasDrawerQuery, false);
 
     networkAvailable = false;
     await navigate(client, desktop, `${origin}/qq/`);
@@ -486,6 +620,9 @@ export async function runQqPwaBrowserProof() {
       const edge = document.querySelector(".drawer-edge");
       const edgeStyle = getComputedStyle(edge);
       const edgeRect = edge.getBoundingClientRect();
+      const backdrop = document.querySelector("#project-drawer-backdrop");
+      const close = document.querySelector(".drawer-close");
+      const closeRect = close.getBoundingClientRect();
       const transcript = document.querySelector("#transcript");
       transcript.scrollTop = 0;
       const probe = document.createElement("span");
@@ -502,16 +639,27 @@ export async function runQqPwaBrowserProof() {
         edgeHeight: edgeRect.height,
         edgePointerEvents: edgeStyle.pointerEvents,
         edgeTouchAction: edgeStyle.touchAction,
+        backdropTouchAction: getComputedStyle(backdrop).touchAction,
+        closeLabel: close.getAttribute("aria-label"),
+        closeWidth: closeRect.width,
+        closeHeight: closeRect.height,
+        closeClipPath: getComputedStyle(close).clipPath,
+        closeTabIndex: close.tabIndex,
         railLayoutShift: Math.abs(probeTop - expectedProbeTop),
       };
     })()`);
     assert.equal(mobileChrome.toggleDisplay, "none", "the Files trigger remained painted on mobile");
     assert.equal(mobileChrome.toggleWidth, 0);
     assert.equal(mobileChrome.edgeParent, "DIV", "the session gesture edge must belong to its scrolling transcript");
-    assert.ok(mobileChrome.edgeWidth >= 24);
+    assert.ok(mobileChrome.edgeWidth >= 48 && mobileChrome.edgeWidth <= 56, `mobile drawer rail was ${mobileChrome.edgeWidth}px wide`);
     assert.equal(mobileChrome.edgeHeight, 915);
     assert.equal(mobileChrome.edgePointerEvents, "auto");
     assert.equal(mobileChrome.edgeTouchAction, "pan-y");
+    assert.equal(mobileChrome.backdropTouchAction, "manipulation");
+    assert.equal(mobileChrome.closeLabel, "Close files");
+    assert.ok(mobileChrome.closeWidth <= 1 && mobileChrome.closeHeight <= 1, "mobile X remained visibly painted");
+    assert.equal(mobileChrome.closeClipPath, "inset(50%)");
+    assert.equal(mobileChrome.closeTabIndex, 0, "mobile nonvisual close left the keyboard order");
     assert.ok(mobileChrome.railLayoutShift < 1, `gesture rail shifted transcript content by ${mobileChrome.railLayoutShift}px`);
 
     // A real SSE innerHTML swap must supply a fresh edge target with the new transcript.
@@ -531,7 +679,9 @@ export async function runQqPwaBrowserProof() {
       return edge !== window.__qqEdgeBeforeSse && edge?.parentElement?.id === "transcript";
     })()`), true);
     await openDrawerWithTouch(client, pixel);
-    await closeDrawerInPlace(client, pixel);
+    await closeDrawerWithImmediateBackdropTouch(client, pixel);
+    await openDrawerWithTouch(client, pixel);
+    await closeDrawerWithKeyboard(client, pixel);
 
     // Closing and reopening a nested folder is an in-place state change.
     await navigate(client, pixel, `${origin}${CANONICAL_PATH}?drawer=src`);
@@ -566,7 +716,7 @@ export async function runQqPwaBrowserProof() {
         edge.addEventListener(name, () => window.__qqVerticalEvents.push(name));
       }
     })()`);
-    await dispatchTouchSwipe(client, pixel, { x: 8, y: 760, endX: 10, endY: 220, steps: 8 });
+    await dispatchTouchSwipe(client, pixel, { x: 40, y: 760, endX: 42, endY: 220, steps: 8 });
     // Headless dispatchTouchEvent does not execute compositor scrolling, so
     // pointercancel is the observable proof that pan-y yielded to the browser.
     const vertical = await waitFor(
@@ -587,6 +737,54 @@ export async function runQqPwaBrowserProof() {
     assert.equal(vertical.drawerOpen, false, "vertical edge scrolling opened the drawer");
     await openDrawerWithTouch(client, pixel, { y: 420 });
     await closeDrawerInPlace(client, pixel);
+
+    // Horizontal file/code panning starts outside the rail and remains native.
+    const codePath = "/qq/project/proof/file/src%2Ffixture.js";
+    await navigate(client, pixel, `${origin}${codePath}`);
+    await waitForDrawerSurface(client, pixel, codePath);
+    const horizontalStart = await evaluate(client, pixel, `(() => {
+      const rail = document.querySelector(".drawer-edge").getBoundingClientRect();
+      const code = document.querySelector(".file-code");
+      const rect = code.getBoundingClientRect();
+      const x = Math.min(rect.right - 24, Math.max(180, rail.right + 80));
+      const y = rect.top + Math.min(40, rect.height / 2);
+      window.__qqHorizontalEvents = [];
+      window.__qqHorizontalTarget = null;
+      document.addEventListener("pointerdown", (event) => {
+        window.__qqHorizontalTarget = {
+          edge: Boolean(event.target.closest?.(".drawer-edge")),
+          code: Boolean(event.target.closest?.(".file-code")),
+        };
+      }, { capture: true, once: true });
+      for (const name of ["pointerdown", "pointermove", "pointercancel", "pointerup"]) {
+        code.addEventListener(name, () => window.__qqHorizontalEvents.push(name));
+      }
+      return {
+        x, y, railRight: rail.right,
+        touchAction: getComputedStyle(code).touchAction,
+        scrollable: code.scrollWidth > code.clientWidth,
+      };
+    })()`);
+    assert.ok(horizontalStart.x > horizontalStart.railRight, "horizontal code touch began inside the drawer rail");
+    assert.equal(horizontalStart.touchAction, "auto");
+    assert.equal(horizontalStart.scrollable, true);
+    await dispatchTouchSwipe(client, pixel, {
+      x: horizontalStart.x,
+      y: horizontalStart.y,
+      endX: Math.max(horizontalStart.railRight + 20, horizontalStart.x - 120),
+      endY: horizontalStart.y + 2,
+      steps: 8,
+    });
+    const horizontal = await waitFor(
+      () => evaluate(client, pixel, `({
+        events: window.__qqHorizontalEvents,
+        target: window.__qqHorizontalTarget,
+        drawerOpen: document.body.classList.contains("drawer-open"),
+      })`).then((state) => state?.events.includes("pointercancel") && state),
+      "horizontal code touch was not yielded to the native scroller",
+    );
+    assert.deepEqual(horizontal.target, { edge: false, code: true });
+    assert.equal(horizontal.drawerOpen, false);
 
     assert.ok(requests.filter((path) => path === "/qq/").length >= 7, "controlled installed start URL was not repeatedly fetched");
     assert.ok(requests.filter((path) => path === "/qq/sw-v10.js").length >= 2, "legacy worker URL was not checked for migration");
