@@ -405,7 +405,8 @@ cat >"$DSH_HOME/skills/qq-proof/SKILL.md" <<'EOF'
 name: qq-proof
 description: Isolated live-host proof skill for qq skill-tool visibility.
 ---
-When loaded, the proof is complete. Do not invent other skill names.
+When loaded, emit the private instruction marker QQ_DSH_SKILL_BODY_LOADED.
+Do not invent other skill names.
 EOF
 start_host
 post_prompt skill-tools "$primary_id" 'QQ_DSH_SKILL_PROBE' htmx
@@ -426,7 +427,7 @@ const messages = probe.at(-1).body.messages;
 const skillResult = messages.find(({ role, tool_call_id: id }) => role === "tool" && id === "call_qq_skill_0");
 if (!skillResult) throw new Error("missing skill tool result");
 const text = JSON.stringify(skillResult.content);
-if (!text.includes("qq-proof")) throw new Error("skill tool did not load qq-proof");
+if (!text.includes("QQ_DSH_SKILL_BODY_LOADED")) throw new Error("skill tool did not load the qq-proof body");
 if (/media-box/.test(text)) throw new Error("skill proof invented a sibling project name");
 NODE
 
