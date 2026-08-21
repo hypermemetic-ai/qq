@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Deterministic localhost OpenAI-compatible stub for isolated DSH qq host
-// proofs. It supplies no model semantics; one explicit proof prompt drives
-// the pinned DSH base bundle's native coding tools.
+// proofs. It supplies no model semantics; explicit proof prompts drive the
+// pinned DSH base bundle's native coding tools and skill-tool visibility.
 import { createServer } from "node:http";
 import { appendFileSync, writeFileSync } from "node:fs";
 
@@ -30,13 +30,20 @@ const server = createServer((request, response) => {
     const textOf = (content) => Array.isArray(content)
       ? content.map((part) => part?.text ?? "").join("\n")
       : String(content ?? "");
-    const nativeToolProbe = parsed.messages?.some(
+    const skillProbe = parsed.messages?.some(
+      (message) => message?.role === "user" && textOf(message.content).includes("QQ_DSH_SKILL_PROBE"),
+    ) === true;
+    const nativeToolProbe = !skillProbe && parsed.messages?.some(
       (message) => message?.role === "user" && textOf(message.content).includes("QQ_DSH_NATIVE_TOOL_PROBE"),
     ) === true;
     const completedNativeToolCalls = parsed.messages?.filter(
       (message) => message?.role === "tool" && String(message?.tool_call_id).startsWith("call_qq_native_"),
     ) ?? [];
-    const responseDelayMs = nativeToolProbe ? 20 : requestNumber === 1 ? 750 : 3_500;
+    const completedSkillCalls = parsed.messages?.filter(
+      (message) => message?.role === "tool" && String(message?.tool_call_id).startsWith("call_qq_skill_"),
+    ) ?? [];
+    const advertisedNames = parsed.tools?.map((tool) => tool?.function?.name ?? tool?.name) ?? [];
+    const responseDelayMs = nativeToolProbe || skillProbe ? 20 : requestNumber === 1 ? 750 : 3_500;
     setTimeout(() => {
       response.writeHead(200, { "content-type": "text/event-stream" });
       const base = {
@@ -44,6 +51,29 @@ const server = createServer((request, response) => {
         object: "chat.completion.chunk",
         created: Math.floor(Date.now() / 1000),
         model: parsed.model ?? "deepseek-v4-pro-0813",
+      };
+      const writeToolCall = (id, name, args) => {
+        response.write(`data: ${JSON.stringify({
+          ...base,
+          choices: [{
+            index: 0,
+            delta: {
+              role: "assistant",
+              tool_calls: [{
+                index: 0,
+                id,
+                type: "function",
+                function: { name, arguments: JSON.stringify(args) },
+              }],
+            },
+            finish_reason: null,
+          }],
+        })}\n\n`);
+        response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`);
+      };
+      const writeText = (content) => {
+        response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }] })}\n\n`);
+        response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`);
       };
       if (nativeToolProbe && completedNativeToolCalls.length < 5) {
         const calls = [
@@ -55,29 +85,18 @@ const server = createServer((request, response) => {
         ];
         const index = completedNativeToolCalls.length;
         const [toolName, args] = calls[index];
-        response.write(`data: ${JSON.stringify({
-          ...base,
-          choices: [{
-            index: 0,
-            delta: {
-              role: "assistant",
-              tool_calls: [{
-                index: 0,
-                id: `call_qq_native_${index}`,
-                type: "function",
-                function: { name: toolName, arguments: JSON.stringify(args) },
-              }],
-            },
-            finish_reason: null,
-          }],
-        })}\n\n`);
-        response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`);
+        writeToolCall(`call_qq_native_${index}`, toolName, args);
+      } else if (skillProbe && !advertisedNames.includes("skill")) {
+        writeText("QQ_DSH_SKILL_PROBE_MISSING_TOOL");
+      } else if (skillProbe && completedSkillCalls.length < 1) {
+        writeToolCall("call_qq_skill_0", "skill", { name: "qq-proof" });
       } else {
         const content = nativeToolProbe
           ? "QQ_DSH_NATIVE_TOOL_PROBE_COMPLETE"
-          : "receipt probe step complete";
-        response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }] })}\n\n`);
-        response.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`);
+          : skillProbe
+            ? "QQ_DSH_SKILL_PROBE_COMPLETE"
+            : "receipt probe step complete";
+        writeText(content);
       }
       response.end("data: [DONE]\n\n");
     }, responseDelayMs);

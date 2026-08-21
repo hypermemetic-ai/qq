@@ -1,4 +1,5 @@
 import { createQqService } from "./session.mjs";
+import { attachSkillToolVisibility } from "./skill-tool.mjs";
 
 export const name = "qq";
 export const inject = ["agents", "sessions", "sessionPersistence"];
@@ -12,4 +13,7 @@ export function apply(ctx, config) {
     alias: service.alias,
     resolve: service.resolve,
   }));
+  const attach = (holder) => attachSkillToolVisibility(holder ?? ctx);
+  if (typeof ctx.inject === "function") ctx.inject(["tools", "skills"], attach);
+  else attach(ctx);
 }
