@@ -237,6 +237,23 @@ async function waitForDrawerSurface(client, page, pathname) {
   );
 }
 
+async function assertDrawerHeadingFocus(client, page) {
+  const heading = await waitFor(
+    () => evaluate(client, page, `(() => {
+      const heading = document.querySelector("#project-drawer-title");
+      if (!(heading instanceof HTMLElement) || document.activeElement !== heading) return null;
+      const style = getComputedStyle(heading);
+      return {
+        tabIndex: heading.tabIndex,
+        outlineStyle: style.outlineStyle,
+      };
+    })()`),
+    "drawer heading did not receive programmatic focus",
+  );
+  assert.equal(heading.tabIndex, -1, "drawer heading became keyboard-tabbable");
+  assert.equal(heading.outlineStyle, "none", "focused drawer heading retained a visible outline");
+}
+
 async function openDrawerWithTouch(client, page, { x = 206, y = 420, travel = 40, steps = 4 } = {}) {
   const endX = x + travel;
   const before = await evaluate(client, page, `(() => {
@@ -297,6 +314,7 @@ async function openDrawerWithTouch(client, page, { x = 206, y = 420, travel = 40
   assert.equal(opened.moves.some((move) => move.cancelable && move.prevented), true, "horizontal surface swipe was not claimed");
   assert.equal(opened.timeOrigin, before.timeOrigin, "surface swipe reloaded the document");
   assert.equal(opened.pathname, before.pathname);
+  await assertDrawerHeadingFocus(client, page);
   return opened;
 }
 
@@ -363,12 +381,16 @@ async function closeDrawerWithKeyboard(client, page) {
         focusVisible: close.matches(":focus-visible"),
         width: rect.width,
         height: rect.height,
+        outlineStyle: getComputedStyle(close).outlineStyle,
+        outlineWidth: getComputedStyle(close).outlineWidth,
       };
     })()`).then((state) => state?.focused && state),
     "mobile nonvisual close did not receive keyboard focus",
   );
   assert.equal(focused.focusVisible, true);
   assert.ok(focused.width >= 40 && focused.height >= 40, "mobile close did not become visible on keyboard focus");
+  assert.equal(focused.outlineStyle, "solid", "keyboard-focused drawer close lost its visible outline");
+  assert.ok(parseFloat(focused.outlineWidth) >= 2, "keyboard-focused drawer close outline was too thin");
   await dispatchKey(client, page, "Enter", "Enter", 13);
   const closed = await waitFor(
     () => evaluate(client, page, `({
@@ -723,6 +745,7 @@ export async function runQqPwaBrowserProof() {
     await navigate(client, pixel, `${origin}${CANONICAL_PATH}?drawer=src`);
     await waitForDrawerSurface(client, pixel, CANONICAL_PATH);
     assert.equal(await evaluate(client, pixel, `document.querySelector("#project-drawer")?.dataset.drawerPath`), "src");
+    await assertDrawerHeadingFocus(client, pixel);
     await closeDrawerInPlace(client, pixel);
     const nested = await openDrawerWithTouch(client, pixel);
     assert.equal(nested.drawer, "src");
