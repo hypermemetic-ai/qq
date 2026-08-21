@@ -4,15 +4,20 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { createQqService } from "../qq/src/session.mjs";
 import { MARKER_NAME, MARKER_SCHEMA } from "../qq/src/scratch.mjs";
+import { SCOPE_SCHEMA } from "../qq/src/session-scope.mjs";
 import { addProject, attachHandle, makeProjectsHome, qqConfig } from "./qq-projects-fixture.mjs";
 
 const SESSION_ID = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -26,6 +31,7 @@ const projects = makeProjectsHome("alpha");
 const betaCwd = addProject(projects.root, "beta");
 mkdirSync(join(projects.cwd, "nested"));
 const scratchRoot = join(projects.root, ".qq-scratch");
+const scopeFile = join(projects.root, "session-scope.json");
 
 function mode(path) {
   return statSync(path).mode & 0o777;
@@ -47,6 +53,13 @@ function sessionDirs() {
   return readdirSync(scratchRoot).filter((name) => SESSION_ID.test(name));
 }
 
+function scopeRecord(sessionId) {
+  if (!existsSync(scopeFile)) return undefined;
+  const payload = JSON.parse(readFileSync(scopeFile, "utf8"));
+  assert.equal(payload.schema, SCOPE_SCHEMA);
+  return payload.sessions?.[sessionId];
+}
+
 try {
   const live = new Map();
   const persisted = new Map();
@@ -59,6 +72,7 @@ try {
   let failNextCreate = false;
   let failNextFlush = false;
   let failNextDispose = false;
+  let failNextScopePut = false;
   let failDeletePath;
   let deleteOrder;
   let createdAtSeq = 100;
@@ -87,8 +101,6 @@ try {
     const header = {
       createdAt,
       cwd,
-      ...(options.scope ? { scope: options.scope } : {}),
-      ...(options.context ? { context: options.context } : {}),
       ...(options.parentSession ? { parentSession: options.parentSession } : {}),
       ...(options.origin ? { origin: options.origin } : {}),
     };
@@ -120,12 +132,10 @@ try {
       id: session.id,
       createdAt: header.createdAt,
       cwd: header.cwd,
-      ...(header.scope ? { scope: header.scope } : {}),
-      ...(header.context ? { context: header.context } : {}),
     });
   }
 
-  fake(bootId, { cwd: projects.cwd, createdAt: 10, scope: "project", context: "project", persist: true });
+  fake(bootId, { cwd: projects.cwd, createdAt: 10, persist: true });
   fake(childId, {
     cwd: projects.cwd,
     parentSession: bootId,
@@ -135,8 +145,12 @@ try {
   });
   fake(nestedId, { cwd: join(projects.cwd, "nested"), createdAt: 80, persist: true });
 
+  const createdListeners = [];
   const ctx = {
     logger,
+    on(name, handler) {
+      if (name === "agent/created") createdListeners.push(handler);
+    },
     get(name) {
       if (name === "agents") {
         return {
@@ -151,13 +165,13 @@ try {
             const id = options.sessionId;
             const cwd = options.meta?.cwd;
             createdAtSeq += 1;
+            const agent = fake(id, {
+              cwd,
+              createdAt: createdAtSeq,
+            });
+            for (const listener of createdListeners) listener({ agent });
             return {
-              agent: fake(id, {
-                cwd,
-                createdAt: createdAtSeq,
-                scope: options.meta?.scope,
-                context: options.meta?.context,
-              }),
+              agent,
               async dispose() {
                 deleteOrder?.("dispose", id);
                 if (failNextDispose) {
@@ -205,6 +219,15 @@ try {
   const qq = createQqService(ctx, {
     ...qqConfig(projects, bootId),
     scratchFs,
+    scopeFs: {
+      writeFileSync(...args) {
+        if (failNextScopePut) {
+          failNextScopePut = false;
+          throw new Error("qq-home probe: scope put failed");
+        }
+        return writeFileSync(...args);
+      },
+    },
   });
 
   assert.equal(qq.scratchRoot, scratchRoot);
@@ -230,11 +253,16 @@ try {
     sessionId: created.id,
   });
   assert.equal(flushes.includes(created.id), true);
-  assert.equal(persisted.get(created.id)?.scope, "home");
-  assert.equal(persisted.get(created.id)?.context, "scratch");
   assert.equal(persisted.get(created.id)?.cwd, created.cwd);
-  assert.equal(creates.at(-1).meta.scope, "home");
-  assert.equal(creates.at(-1).meta.context, "scratch");
+  assert.equal("scope" in (persisted.get(created.id) ?? {}), false);
+  assert.equal("context" in (persisted.get(created.id) ?? {}), false);
+  assert.deepEqual(scopeRecord(created.id), {
+    scope: "home",
+    context: "scratch",
+    cwd: created.cwd,
+  });
+  assert.equal("scope" in (creates.at(-1).meta ?? {}), false);
+  assert.equal("context" in (creates.at(-1).meta ?? {}), false);
   assert.equal(creates.at(-1).meta.cwd, created.cwd);
   assert.equal(creates.at(-1).agentOptions.model, "deepseek-v4-pro-0813");
   assert.equal("setup" in creates.at(-1), true);
@@ -265,12 +293,26 @@ try {
   const pendingId = creates.at(-1).sessionId;
   assert.equal(live.has(pendingId), true);
   assert.deepEqual((await qq.listHome()).map((row) => row.id), [created.id]);
+  assert.equal((await qq.list()).some((row) => row.id === pendingId), false);
+  assert.equal((await qq.list("alpha")).some((row) => row.id === pendingId), false);
+  assert.equal(qq.alias(pendingId), undefined);
+  assert.equal(qq.resolve(pendingId), undefined);
+  await assert.rejects(() => qq.read(pendingId), /not found/);
+  await assert.rejects(() => qq.inspect(pendingId), /not found/);
   assert.equal(persisted.has(pendingId), false);
+  assert.equal(scopeRecord(pendingId), undefined);
   releaseFlush();
   const deferred = await pendingHome;
   assert.equal(deferred.id, pendingId);
-  assert.equal(persisted.get(deferred.id)?.scope, "home");
-  assert.equal(persisted.get(deferred.id)?.context, "scratch");
+  assert.deepEqual(scopeRecord(deferred.id), {
+    scope: "home",
+    context: "scratch",
+    cwd: deferred.cwd,
+  });
+  assert.ok(qq.alias(deferred.id));
+  assert.equal(qq.resolve(deferred.id), deferred.id);
+  assert.equal((await qq.read(deferred.id)).scope, "home");
+  assert.equal((await qq.inspect(deferred.id)).live, true);
   assert.deepEqual((await qq.listHome()).map((row) => row.id), [deferred.id, created.id]);
   await qq.close(deferred.id);
   assert.deepEqual((await qq.listHome()).map((row) => row.id), [created.id]);
@@ -321,10 +363,16 @@ try {
   assert.equal(live.has(created.id), false);
   assert.equal(persisted.has(created.id), true, "close preserves durable history");
   assert.equal(existsSync(created.cwd), false);
+  assert.deepEqual(scopeRecord(created.id), {
+    scope: "home",
+    context: "scratch",
+    cwd: join(scratchRoot, created.id),
+  }, "close retains the qq Home scope record");
   const inspectedClosed = await qq.inspect(created.id);
   assert.equal(inspectedClosed.live, false);
   assert.equal(inspectedClosed.scope, "home");
   assert.equal(inspectedClosed.context, "scratch");
+  assert.equal(inspectedClosed.cwd, join(scratchRoot, created.id));
   await assert.rejects(() => qq.read(created.id), /not active/);
 
   failNextCreate = true;
@@ -345,6 +393,14 @@ try {
   assert.equal(live.has(later.id), true, "flush failure leaves the old Home session truthful");
   assert.deepEqual((await qq.listHome()).map((row) => row.id), [later.id]);
   assert.deepEqual(sessionDirs(), [later.id]);
+
+  failNextScopePut = true;
+  const homesBeforeScopeFail = (await qq.listHome()).map((row) => row.id);
+  await assert.rejects(() => qq.createHome(), /scope put failed/);
+  assert.equal(live.has(later.id), true, "scope-store failure leaves the old Home session truthful");
+  assert.deepEqual((await qq.listHome()).map((row) => row.id), homesBeforeScopeFail);
+  assert.deepEqual(sessionDirs(), [later.id]);
+  assert.equal(scopeRecord(creates.at(-1).sessionId), undefined);
 
   failNextFlush = true;
   failNextDispose = true;
@@ -476,6 +532,15 @@ try {
   await qq.close(recovered.id);
 
   const liveHome = await qq.createHome();
+  const mismatchId = "session-63a11000-0000-4000-8000-0000000000c7";
+  writeOwnedMarker(join(scratchRoot, mismatchId), mismatchId);
+  const scopePayload = JSON.parse(readFileSync(scopeFile, "utf8"));
+  scopePayload.sessions[mismatchId] = {
+    scope: "home",
+    context: "scratch",
+    cwd: join(scratchRoot, "wrong"),
+  };
+  writeFileSync(scopeFile, `${JSON.stringify(scopePayload)}\n`);
   writeOwnedMarker(join(scratchRoot, orphanId), orphanId);
   writeFileSync(join(scratchRoot, "notes.txt"), "keep\n");
   mkdirSync(join(scratchRoot, "not-a-session"));
@@ -512,7 +577,13 @@ try {
   assert.deepEqual(restartedHomes.map((row) => row.id), [liveHome.id]);
   assert.equal(existsSync(liveHome.cwd), true);
   assert.equal(existsSync(join(scratchRoot, orphanId)), false, "exact marked orphan is deleted");
+  assert.equal(existsSync(join(scratchRoot, mismatchId)), true, "mismatched sidecar data must not authorize deletion");
   assert.equal(existsSync(join(scratchRoot, later.id)), false, "closed leftover is reconciled as an orphan");
+  assert.deepEqual(scopeRecord(liveHome.id), {
+    scope: "home",
+    context: "scratch",
+    cwd: liveHome.cwd,
+  });
   assert.equal(existsSync(join(scratchRoot, "notes.txt")), true);
   assert.equal(existsSync(join(scratchRoot, "not-a-session", "file.txt")), true);
   assert.equal(existsSync(unmarked), true);
@@ -526,6 +597,168 @@ try {
   assert.doesNotMatch(JSON.stringify(creates), /transition|attachWorkflow|selectedWorkflow/);
 } finally {
   projects.remove();
+}
+
+const repoRoot = resolve(process.argv[2] ?? new URL("..", import.meta.url).pathname);
+const toolchain = join(repoRoot, "dsh");
+const cordisEntry = join(toolchain, "node_modules/@deepseek-ai/cordis/lib/index.js");
+if (!existsSync(cordisEntry)) {
+  execFileSync("npm", ["ci", "--prefix", toolchain, "--no-audit", "--no-fund"], {
+    stdio: "inherit",
+  });
+}
+const { Context } = await import(pathToFileURL(cordisEntry).href);
+const SessionStore = (await import(pathToFileURL(join(toolchain, "node_modules/@deepseek-ai/dsh-session/lib/index.js")).href)).default;
+const JsonlSessionPersistence = (await import(pathToFileURL(join(toolchain, "node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js")).href)).default;
+
+const boundary = makeProjectsHome("alpha");
+const persistRoot = mkdtempSync(join(tmpdir(), "qq-home-jsonl."));
+try {
+  const boot = "session-73a11000-0000-4000-8000-0000000000a1";
+  const live = new Map();
+  const disposed = [];
+  const host = new Context();
+  await host.plugin(SessionStore);
+  await host.plugin(JsonlSessionPersistence, { root: persistRoot, compression: "none" });
+  const realSessions = host.get("sessions");
+  const realPersistence = host.get("sessionPersistence");
+  assert.ok(realSessions);
+  assert.ok(realPersistence);
+
+  const bootSession = realSessions.create(boot, { meta: { cwd: boundary.cwd } });
+  bootSession.append("session/end-seed", {});
+  await realSessions.flush(bootSession);
+  const bootAgent = {
+    session: bootSession,
+    status: "idle",
+    followup() {},
+    cancel() {},
+    whenIdle: async () => {},
+  };
+  live.set(boot, bootAgent);
+  attachHandle(bootAgent, async () => {
+    disposed.push(boot);
+    live.delete(boot);
+  });
+
+  const ctx = {
+    get(name) {
+      if (name === "agents") {
+        return {
+          get: (id) => live.get(id),
+          list: () => [...live.values()],
+          async create(options) {
+            const session = realSessions.create(options.sessionId, {
+              meta: options.meta,
+            });
+            session.append("session/end-seed", {});
+            const agent = {
+              session,
+              status: "idle",
+              followup() {},
+              cancel() {},
+              whenIdle: async () => {},
+            };
+            live.set(options.sessionId, agent);
+            attachHandle(agent, async () => {
+              disposed.push(options.sessionId);
+              live.delete(options.sessionId);
+            });
+            options.setup?.({ on() { return () => {}; } });
+            return {
+              agent,
+              async dispose() {
+                disposed.push(options.sessionId);
+                live.delete(options.sessionId);
+              },
+            };
+          },
+          async resume() {
+            throw new Error("silent resume must not happen");
+          },
+        };
+      }
+      if (name === "sessions") return realSessions;
+      if (name === "sessionPersistence") return realPersistence;
+      if (name === "loader") return { async await() {} };
+      return undefined;
+    },
+  };
+
+  const qq = createQqService(ctx, qqConfig(boundary, boot));
+  const created = await qq.createHome();
+  const header = created && live.get(created.id)?.session?.header;
+  assert.ok(header);
+  assert.equal(Object.isFrozen(header), true);
+  assert.deepEqual(
+    Object.keys(header).sort(),
+    ["createdAt", "cwd", "id", "version"].sort(),
+  );
+  assert.equal("scope" in header, false);
+  assert.equal("context" in header, false);
+  assert.equal(header.cwd, created.cwd);
+  assert.throws(() => { header.scope = "home"; });
+  assert.throws(() => { header.context = "scratch"; });
+
+  const listed = await realPersistence.list();
+  const stored = listed.find((row) => row.id === created.id);
+  assert.ok(stored);
+  assert.equal("scope" in stored, false);
+  assert.equal("context" in stored, false);
+  assert.equal(stored.cwd, created.cwd);
+  assert.deepEqual(scopeRecordAt(join(boundary.root, "session-scope.json"), created.id), {
+    scope: "home",
+    context: "scratch",
+    cwd: created.cwd,
+  });
+
+  const closed = await qq.close(created.id);
+  assert.equal(closed.closed, created.id);
+  assert.equal(existsSync(created.cwd), false);
+  assert.deepEqual(scopeRecordAt(join(boundary.root, "session-scope.json"), created.id), {
+    scope: "home",
+    context: "scratch",
+    cwd: created.cwd,
+  });
+
+  const restartLive = new Map([[boot, live.get(boot)]]);
+  const restartCtx = {
+    get(name) {
+      if (name === "agents") {
+        return {
+          get: (id) => restartLive.get(id),
+          list: () => [...restartLive.values()],
+          async create() { throw new Error("restart must not create"); },
+          async resume() { throw new Error("restart must not resume"); },
+        };
+      }
+      if (name === "sessions") return realSessions;
+      if (name === "sessionPersistence") return realPersistence;
+      if (name === "loader") return { async await() {} };
+      return undefined;
+    },
+  };
+  const restarted = createQqService(restartCtx, qqConfig(boundary, boot));
+  const inspected = await restarted.inspect(created.id);
+  assert.equal(inspected.live, false);
+  assert.equal(inspected.scope, "home");
+  assert.equal(inspected.context, "scratch");
+  assert.equal(inspected.cwd, created.cwd);
+  const relisted = await realPersistence.list();
+  const restorable = relisted.find((row) => row.id === created.id);
+  assert.ok(restorable);
+  assert.equal("scope" in restorable, false);
+  assert.equal("context" in restorable, false);
+} finally {
+  boundary.remove();
+  rmSync(persistRoot, { recursive: true, force: true });
+}
+
+function scopeRecordAt(file, sessionId) {
+  if (!existsSync(file)) return undefined;
+  const payload = JSON.parse(readFileSync(file, "utf8"));
+  assert.equal(payload.schema, SCOPE_SCHEMA);
+  return payload.sessions?.[sessionId];
 }
 
 console.log("test-qq-home: pass");

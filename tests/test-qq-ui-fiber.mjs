@@ -268,11 +268,13 @@ ctx.provide("image-finder", { inFindMode: () => finderMode });
 
 const projectName = root.split("/").at(-1);
 const scratchRoot = mkdtempSync(join(tmpdir(), "qq-fiber-scratch."));
+const scopeFile = join(scratchRoot, "session-scope.json");
 const qqFiber = ctx.plugin(qqPlugin, {
   sessionId,
   cwd: root,
   projectsRoot: dirname(root),
   scratchRoot,
+  scopeFile,
   provider: "qwen-token-plan",
   model: "deepseek-v4-pro-0813",
 });

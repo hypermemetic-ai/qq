@@ -19,6 +19,9 @@ uses that manager for Home sessions (`scope: "home"`, `context: "scratch"`):
 create, list, most-recent, close, replace/clear, and restart reconciliation
 against live owned Home root Agents only. Home never registers a project.
 Project sessions keep the registered-root catalog and never delete scratch.
+A qq-owned `qq.session-scope/v1` sidecar (production default
+`~/.local/state/qq/session-scope.json`) stores immutable Home metadata so scope
+survives scratch deletion; DSH session headers stay on the supported field set.
 T-134 later owns Home routes and UI.
 
 The qq plugin hides DSH's generic `skill` tool when a session catalog has no

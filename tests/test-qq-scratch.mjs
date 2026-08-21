@@ -496,9 +496,12 @@ try {
   assert.doesNotMatch(source, /from \"\.\/(session|files|plugin)\.mjs\"/);
   assert.doesNotMatch(source, /listProjectCatalog|createProjectFileService|createQqService/);
   assert.doesNotMatch(sourceOf("qq/src/plugin.mjs"), /scratch/);
+  assert.doesNotMatch(sourceOf("qq/src/session-scope.mjs"), /createScratchManager|from "\.\/scratch\.mjs"/);
   assert.match(sourceOf("qq/src/session.mjs"), /createScratchManager/);
   assert.match(sourceOf("qq/src/session.mjs"), /from "\.\/scratch\.mjs"/);
+  assert.match(sourceOf("qq/src/session.mjs"), /createSessionScopeStore/);
   assert.doesNotMatch(sourceOf("qq/src/session.mjs"), /startsWith\(.*scratch/);
+  assert.doesNotMatch(sourceOf("qq/src/session.mjs"), /header\.scope\s*=|header\.context\s*=/);
   assert.doesNotMatch(sourceOf("qq/src/session.mjs"), /\.transition\(|attachWorkflow|selectedWorkflow/);
   assert.equal(internals.isDirectChild(work, join(work, alphaId)), true);
   assert.equal(internals.isDirectChild(work, join(work, "nested", alphaId)), false);

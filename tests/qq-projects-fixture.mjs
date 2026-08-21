@@ -31,6 +31,7 @@ export function qqConfig(projects, sessionId, extra = {}) {
     cwd: projects.cwd,
     projectsRoot: projects.root,
     scratchRoot: join(projects.root, ".qq-scratch"),
+    scopeFile: join(projects.root, "session-scope.json"),
     provider: "qwen-token-plan",
     model: "deepseek-v4-pro-0813",
     ...extra,

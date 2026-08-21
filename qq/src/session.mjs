@@ -7,6 +7,7 @@ import { createAliasBook, defaultAliasFile, defaultLegacyAliasFile } from "./ali
 import { deriveToolEventViews, projectConversation } from "./conversation.mjs";
 import { createProjectFileService } from "./files.mjs";
 import { createScratchManager, defaultScratchRoot } from "./scratch.mjs";
+import { createSessionScopeStore, defaultScopeFile } from "./session-scope.mjs";
 
 const SESSION_ID = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEFAULT_OBSERVE_MS = 100;
@@ -472,6 +473,12 @@ export function createQqService(ctx, config) {
     root: config.scratchRoot ?? defaultScratchRoot(),
     ...(config.scratchFs ? { fs: config.scratchFs } : {}),
   });
+  const scopes = createSessionScopeStore({
+    file: config.scopeFile === null
+      ? undefined
+      : (config.scopeFile ?? defaultScopeFile()),
+    ...(config.scopeFs ? { fs: config.scopeFs } : {}),
+  });
 
   const agents = ctx.get("agents");
   const sessions = ctx.get("sessions");
@@ -482,7 +489,7 @@ export function createQqService(ctx, config) {
 
   const agentPromises = new Map();
   const handles = new Map();
-  const unpublishedHome = new Set();
+  const unpublished = new Set();
   const defaultCreatedAt = Date.now();
   const aliasFile = config.aliasFile !== undefined || envHasDshHome()
     ? defaultAliasFile(process.env, config)
@@ -558,16 +565,26 @@ export function createQqService(ctx, config) {
 
   function classifyAgent(agent) {
     if (!isRootOperatorAgent(agent)) return undefined;
+    const id = agent.session?.id;
     const cwd = agentCwd(agent);
     const project = projectForCwd(cwd);
     if (project) {
       return { scope: "project", context: "project", project, cwd: project.cwd };
     }
-    const home = homeWorkspace(agent.session?.id);
-    if (home && samePath(cwd, home.path)) {
+    const home = homeWorkspace(id);
+    if (!home || !samePath(cwd, home.path)) return undefined;
+    const record = scopes.get(id);
+    if (record && samePath(record.cwd, home.path)) {
+      return { scope: "home", context: "scratch", cwd: home.path };
+    }
+    if (unpublished.has(id)) {
       return { scope: "home", context: "scratch", cwd: home.path };
     }
     return undefined;
+  }
+
+  function isUnpublished(sessionId) {
+    return unpublished.has(sessionId);
   }
 
   function liveAgents() {
@@ -578,7 +595,11 @@ export function createQqService(ctx, config) {
   }
 
   function liveRootAgents() {
-    return liveAgents().filter((agent) => Boolean(classifyAgent(agent)));
+    return liveAgents().filter((agent) => {
+      const id = agent.session?.id;
+      if (isUnpublished(id)) return false;
+      return Boolean(classifyAgent(agent));
+    });
   }
 
   function liveProjectAgents() {
@@ -626,12 +647,14 @@ export function createQqService(ctx, config) {
 
   function syncLive(extraId) {
     const ids = liveSessionIds();
-    if (SESSION_ID.test(extraId) && !ids.includes(extraId)) ids.push(extraId);
+    if (SESSION_ID.test(extraId) && !isUnpublished(extraId) && !ids.includes(extraId)) {
+      ids.push(extraId);
+    }
     book.sync(ids);
   }
 
   function liveAlias(sessionId) {
-    if (!SESSION_ID.test(sessionId) || !agents.get(sessionId)) return undefined;
+    if (!SESSION_ID.test(sessionId) || isUnpublished(sessionId) || !agents.get(sessionId)) return undefined;
     if (!liveRootAgents().some((agent) => agent.session.id === sessionId)) return undefined;
     syncLive(sessionId);
     return book.aliasFor(sessionId);
@@ -647,7 +670,8 @@ export function createQqService(ctx, config) {
   if (typeof ctx.on === "function") {
     ctx.on("agent/created", ({ agent }) => {
       const sessionId = agent?.session?.id;
-      if (SESSION_ID.test(sessionId) && isRootOperatorAgent(agent)) syncLive(sessionId);
+      if (!SESSION_ID.test(sessionId) || isUnpublished(sessionId)) return;
+      if (isRootOperatorAgent(agent)) syncLive(sessionId);
     });
     ctx.on("agent/disposed", () => {
       syncLive();
@@ -664,12 +688,14 @@ export function createQqService(ctx, config) {
 
   function requireLiveAgent(sessionId) {
     if (!SESSION_ID.test(sessionId)) throw httpError(404, NOT_FOUND);
+    if (isUnpublished(sessionId)) return undefined;
     const live = agents.get(sessionId);
     if (live && classifyAgent(live)) return live;
     return undefined;
   }
 
   async function rejectInactive(sessionId) {
+    if (isUnpublished(sessionId)) throw httpError(404, NOT_FOUND);
     const headers = await persistedHeaders();
     if (headers.some((header) => header.id === sessionId)) {
       throw httpError(404, INACTIVE, "inactive");
@@ -751,9 +777,22 @@ export function createQqService(ctx, config) {
 
   async function reconcileHomeScratch() {
     await ctx.get("loader")?.await();
-    const liveIds = liveHomeAgents().map((agent) => agent.session.id);
+    if (scopes.corrupt) {
+      ctx.logger?.warn?.("qq: scratch reconcile skipped", {
+        code: "corrupt-scope",
+        message: "qq: session-scope registry is corrupt",
+      });
+      return;
+    }
+    const liveIds = new Set(liveHomeAgents().map((agent) => agent.session.id));
+    for (const id of scopes.protectedIds()) liveIds.add(id);
+    for (const agent of liveAgents()) {
+      const id = agent.session?.id;
+      if (!isRootOperatorAgent(agent) || !SESSION_ID.test(id)) continue;
+      if (homeWorkspace(id)) liveIds.add(id);
+    }
     try {
-      const result = scratch.reconcile(liveIds);
+      const result = scratch.reconcile([...liveIds]);
       for (const row of result.errors ?? []) {
         ctx.logger?.warn?.("qq: scratch reconcile failed", {
           sessionId: row.name,
@@ -795,11 +834,7 @@ export function createQqService(ctx, config) {
   async function listHome() {
     await boot;
     syncLive();
-    return sortRows(
-      liveHomeAgents()
-        .filter((agent) => !unpublishedHome.has(agent.session.id))
-        .map((agent) => rowFor(agent)),
-    );
+    return sortRows(liveHomeAgents().map((agent) => rowFor(agent)));
   }
 
   async function latestHome() {
@@ -849,6 +884,7 @@ export function createQqService(ctx, config) {
   async function inspect(sessionId) {
     await boot;
     if (!SESSION_ID.test(sessionId)) throw httpError(404, NOT_FOUND);
+    if (isUnpublished(sessionId)) throw httpError(404, NOT_FOUND);
     const live = requireLiveAgent(sessionId);
     if (live) {
       const row = rowFor(live);
@@ -870,23 +906,13 @@ export function createQqService(ctx, config) {
           projectLabel: project.label,
         };
       }
-      if (persisted.scope === "home" || persisted.context === "scratch") {
+      const record = scopes.get(sessionId);
+      if (record) {
         return {
           id: sessionId,
           live: false,
           createdAt: persisted.createdAt,
-          cwd: persisted.cwd,
-          scope: "home",
-          context: "scratch",
-        };
-      }
-      const verified = homeWorkspace(sessionId);
-      if (verified && samePath(persisted.cwd, verified.path)) {
-        return {
-          id: sessionId,
-          live: false,
-          createdAt: persisted.createdAt,
-          cwd: verified.path,
+          cwd: record.cwd,
           scope: "home",
           context: "scratch",
         };
@@ -921,7 +947,7 @@ export function createQqService(ctx, config) {
     const setup = selectionSetup({ current: selectedModel });
     const handle = rememberHandle(await agents.create({
       sessionId,
-      meta: { cwd, scope: "project", context: "project" },
+      meta: { cwd },
       agentOptions: { provider: selectedModel.provider, model: selectedModel.model },
       setup,
     }));
@@ -943,36 +969,21 @@ export function createQqService(ctx, config) {
     await boot;
     await ctx.get("loader")?.await();
     const sessionId = `session-${randomUUID()}`;
+    unpublished.add(sessionId);
     let cwd;
+    let handle;
     try {
       cwd = scratch.create(sessionId);
       scratch.verify(sessionId);
-    } catch (error) {
-      if (cwd) {
-        try { scratch.delete(sessionId); } catch {}
-      }
-      throw error;
-    }
-    const setup = selectionSetup({ current: selectedModel });
-    unpublishedHome.add(sessionId);
-    let handle;
-    try {
+      const setup = selectionSetup({ current: selectedModel });
       handle = rememberHandle(await agents.create({
         sessionId,
-        meta: { cwd, scope: "home", context: "scratch" },
+        meta: { cwd },
         agentOptions: { provider: selectedModel.provider, model: selectedModel.model },
         setup,
       }));
-      const header = handle.agent.session.header;
-      if (header && typeof header === "object") {
-        try {
-          header.scope = "home";
-          header.context = "scratch";
-        } catch {
-          // Frozen DSH headers still classify live Home via scratch.verify.
-        }
-      }
       await sessions.flush(handle.agent.session);
+      scopes.put(sessionId, { cwd });
     } catch (error) {
       if (handle) {
         try {
@@ -981,15 +992,17 @@ export function createQqService(ctx, config) {
           throw scratchCleanupError(sessionId, cwd, disposeError, "create");
         }
       }
-      unpublishedHome.delete(sessionId);
-      try {
-        scratch.delete(sessionId);
-      } catch (cleanupError) {
-        throw scratchCleanupError(sessionId, cwd, cleanupError, "create");
+      unpublished.delete(sessionId);
+      if (cwd) {
+        try {
+          scratch.delete(sessionId);
+        } catch (cleanupError) {
+          throw scratchCleanupError(sessionId, cwd, cleanupError, "create");
+        }
       }
       throw error;
     }
-    unpublishedHome.delete(sessionId);
+    unpublished.delete(sessionId);
     const createdId = handle.agent.session.id;
     syncLive(createdId);
     const alias = book.aliasFor(createdId);
@@ -1011,7 +1024,7 @@ export function createQqService(ctx, config) {
     await handle.dispose();
     handles.delete(sessionId);
     agentPromises.delete(sessionId);
-    unpublishedHome.delete(sessionId);
+    unpublished.delete(sessionId);
     try { delete agent?.[AGENT_HANDLE]; } catch {}
     syncLive();
   }
@@ -1050,6 +1063,15 @@ export function createQqService(ctx, config) {
 
   async function close(sessionId) {
     await boot;
+    if (isUnpublished(sessionId)) {
+      if (!SESSION_ID.test(sessionId)) throw httpError(404, NOT_FOUND);
+      const agent = agents.get(sessionId);
+      if (!agent) throw httpError(404, NOT_FOUND);
+      if (agent.status === "running") throw httpError(409, RUNNING_CLOSE);
+      const classified = classifyAgent(agent);
+      if (classified?.scope !== "home") throw httpError(404, NOT_FOUND);
+      return closeHome(sessionId, classified);
+    }
     const agent = await liveAgent(sessionId);
     if (agent.status === "running") throw httpError(409, RUNNING_CLOSE);
     const classified = classifyAgent(agent);
