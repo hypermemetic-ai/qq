@@ -26,7 +26,7 @@ OAuth files are private atomic files under `DSH_HOME`: `.qq-grok-auth.json` and 
 
 ## Grok transport and recovery
 
-`createGrokAdapter` sends DSH tools as OpenAI Responses function tools under their original names and round-trips tool history as `function_call` and `function_call_output`; DSH still executes tools. Keep message input items in the supported `input_text` shape and preserve the proxy-legal client headers in `oauth.mjs`.
+`createGrokAdapter` sends DSH tools as OpenAI Responses function tools under their original names and round-trips tool history as `function_call` and `function_call_output`; DSH still executes tools. `normalizeToolParameters` accepts either DSH's flat parameter map or a complete object-root JSON Schema. Flat `required: true` flags become the root `required` list; complete schemas are cloned without semantic mutation. Invalid array/non-object shapes fail locally as `INVALID_TOOL_SCHEMA`, before transport and retries. Keep message input items in the supported `input_text` shape and preserve the proxy-legal client headers in `oauth.mjs`.
 
 `qq-models/src/grok-auto-continue.mjs` watches Grok 4.6 failures, retries only classified transient Responses failures with bounded jitter/backoff, and appends a recovery message that omits tainted partial thinking while preserving safe visible/tool history. Disposal aborts pending retries. The separate Pi extension in [`safety and context`](../extensions/safety-and-context.md) provides analogous recovery for the legacy runtime; the implementations are not a shared service.
 
@@ -38,6 +38,6 @@ A connector change is complete only when:
 2. the adapter is registered through `qq-models/src/plugin.mjs` and disposed through Cordis lifecycle;
 3. login/store/OAuth handling writes no secrets outside the private store;
 4. `bin/qq` accepts the selected route and real consumers can resolve it;
-5. unit tests cover request translation, refresh, redaction, and failure classification.
+5. unit tests cover request and tool-schema translation, invalid-schema rejection, refresh, redaction, and failure classification.
 
 Use `node tests/test-qq-models.mjs` for adapter/login work and `node --experimental-strip-types tests/test-grok-auto-continue.mjs .` for retry lifecycle. Run credential-gated `tests/test-qq-host-real.sh` only when actual provider transport, headers, OAuth, or model routing changes; do not use it for command text or UI-only changes. See the [daily host](dsh-console.md) for launcher selection.

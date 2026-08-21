@@ -22,6 +22,7 @@ The repository currently contains two unrelated runtime transports with the same
 
 ## DSH in-process relay
 
+<!-- openwiki: broken internal link [../runtime/dsh-console.md#projects-and-sessions] heading anchor "projects-and-sessions" does not exist in "../runtime/dsh-console.md". Fix the href or restore the target, then delete this comment. -->
 The plugin provides `qq-relay` and registers `relay_list`, `relay_send`, and `relay_status` when DSH tools are available. Canonical addresses are live `session-<UUID>` IDs; short spoken aliases come from the [`qq` service](../runtime/dsh-console.md#projects-and-sessions), not a relay-owned map. If qq is absent, ID addressing still works and aliases disappear.
 
 ```mermaid

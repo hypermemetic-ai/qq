@@ -39,7 +39,7 @@ flowchart TD
 
 *`bin/qq` discovers packages on disk and DSH/Cordis wires them as replaceable plugin fibers.*
 
-`qq/src/session.mjs#createQqService` owns project discovery, live root-session operations, observation, and spoken session aliases. [`qq-ui`](../runtime/dsh-console.md) is one-way presentation over that service. [`qq-workflows`](../workflow/dsh-workflows.md), [`qq-tasks`](../workflow/dsh-workflows.md#task-pile), [`qq-relay`](../event-plane/service.md#dsh-in-process-relay), [`qq-models`](../runtime/model-connectors.md), and dictation are optional siblings: absence removes that capability but must not prevent the core host from booting.
+`qq/src/session.mjs#createQqService` owns the configured logical project catalog, bounded file capability, live root-session operations, conversation projection, observation, and spoken session aliases. [`qq-ui`](../runtime/dsh-console.md) is one-way presentation over that service. [`qq-workflows`](../workflow/dsh-workflows.md), [`qq-tasks`](../workflow/dsh-workflows.md#task-pile), [`qq-relay`](../event-plane/service.md#dsh-in-process-relay), [`qq-models`](../runtime/model-connectors.md), and dictation are optional siblings: absence removes that capability but must not prevent the core host from booting.
 
 The launcher generically adds every local `qq-*/package.json`, plus optional adjacent `image-finder` and `media-box` repositories. Named flags enable the three inserts declared directly in `qq/host.patch.yml`; other sibling packages activate through their own `dsh.bundle`. HMR watches only the discovered roots. Plugins must register routes, tools, listeners, timers, and background work with reversible `ctx.effect` handlers and communicate through Cordis services rather than sibling imports.
 
@@ -64,7 +64,7 @@ The [delegation lifecycle](../workflow/delegation-and-review.md) still owns prot
 | Intent | Start with | Focused check |
 |---|---|---|
 | Host discovery, profile, pins, or HMR | `bin/qq`, `qq/host.patch.yml`, `dsh/pins.json` | `node tests/test-qq-host.mjs .` then conditional `tests/test-qq-host-live.sh` |
-| Session/project/alias behavior | `qq/src/session.mjs`, `qq/src/alias.mjs` | `node tests/test-qq-projects.mjs` and `node tests/test-qq-alias.mjs .` |
+| Project catalog, bounded files, conversation, or aliases | `qq/src/session.mjs`, `qq/src/files.mjs`, `qq/src/conversation.mjs`, `qq/src/alias.mjs` | owning `test-qq-{projects,conversation,alias}.mjs` |
 | Optional plugin lifecycle | owning `qq-*/src/plugin.mjs`; `ctx.effect` disposer | owning plugin test plus `tests/test-qq-host-boot.sh` when absence/boot changes |
 | Legacy Pi registration | `extensions/index.ts` | owning extension test; use `npm test` only for cross-cutting validation |
 

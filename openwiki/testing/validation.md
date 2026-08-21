@@ -17,9 +17,11 @@ Run the narrowest owner while iterating. `npm test` is a long fail-fast chain co
 
 | Area | Minimal check | Conditional boundary |
 |---|---|---|
-| Core host, HTTP/SSE, security, PWA | `node tests/test-qq-host.mjs .` | `tests/test-qq-host-live.sh` for exact pinned DSH |
+| Core host, HTTP/SSE, security, PWA | `node tests/test-qq-host.mjs .` (includes real-browser PWA proof) | Requires Chrome for gestures/installed start; `tests/test-qq-host-live.sh` for exact pinned DSH |
 | UI fiber/reload | `node tests/test-qq-ui-fiber.mjs .` | `tests/test-qq-host-boot.sh` when composition/absence changes |
-| Projects and session prompt routing | `node tests/test-qq-projects.mjs`; `node tests/test-session-prompt.mjs` | — |
+| Projects, grouped folders, bounded files | `node tests/test-qq-projects.mjs` | `node tests/test-qq-host.mjs .` when routes/rendering change |
+| Conversation projection, steering, pending queue | `node tests/test-qq-conversation.mjs .` | `node tests/test-qq-ui-transcript-scroll.mjs` for streaming scroll behavior |
+| Session prompt routing | `node tests/test-session-prompt.mjs` | — |
 | Session aliases | `node tests/test-qq-alias.mjs .` | Also relay test when alias consumption changes |
 | DSH relay | `node tests/test-qq-relay-plugin.mjs .` | — |
 | Workflows | `node tests/test-qq-workflows-plugin.mjs .` | `tests/test-qq-workflows-boot.sh` for bundle/service wiring |
