@@ -281,28 +281,40 @@ try {
     const detached = [];
     const attached = [];
     const agent = chair();
+    let attachmentPresent = false;
     let refuseLeave = false;
     let throwLeave = false;
     const service = applyPlugin({ agents: [agent], selectionDir: "leave-refuse" });
     service.workflows.register({
       ...spec("sticky", { acceptedContexts: ["project"], attached, detached }),
+      async ensureAttached(live) {
+        attached.push(live.session.id);
+        attachmentPresent = true;
+      },
       async ensureDetached(agentOrId) {
         detached.push(typeof agentOrId === "string" ? agentOrId : agentOrId.session.id);
-        if (throwLeave) throw new Error("leave exploded");
+        if (throwLeave) {
+          attachmentPresent = false;
+          throw new Error("leave exploded");
+        }
         if (refuseLeave) return { status: "refused", reason: "still working" };
+        attachmentPresent = false;
       },
     });
     await service.workflows.transition(alphaId, { name: "sticky", context: "project", reason: "home" });
     refuseLeave = true;
     await assert.rejects(() => service.workflows.leave(alphaId, "home"), /still working/);
     assert.equal(service.workflows.selected(alphaId), "sticky");
+    assert.equal(attachmentPresent, true);
     refuseLeave = false;
     throwLeave = true;
     await assert.rejects(() => service.workflows.leave(alphaId, "session-close"), /leave exploded/);
     assert.equal(service.workflows.selected(alphaId), "sticky");
+    assert.equal(attachmentPresent, true);
     throwLeave = false;
     await service.workflows.leave(alphaId, "session-close");
     assert.equal(service.workflows.selected(alphaId), null);
+    assert.equal(attachmentPresent, false);
   }
 
   {
@@ -416,13 +428,18 @@ try {
   {
     const selected = new Map([[alphaId, "alpha"]]);
     const attached = [];
+    let attachmentPresent = true;
     const api = host({
       alpha: {
         name: "alpha",
         acceptedContexts: DEFAULT_ACCEPTED_CONTEXTS,
         candidate: () => true,
-        async ensureAttached() { attached.push("alpha"); throw new Error("cannot resume"); },
-        async ensureDetached() {},
+        async ensureAttached() {
+          attached.push("alpha");
+          attachmentPresent = true;
+          throw new Error("cannot resume");
+        },
+        async ensureDetached() { attachmentPresent = false; },
       },
     }, {
       selected,
@@ -435,6 +452,7 @@ try {
     });
     await assert.rejects(() => api.leave(alphaId, "back"), /disk full/);
     assert.equal(selected.has(alphaId), false);
+    assert.equal(attachmentPresent, false);
   }
 
   {
