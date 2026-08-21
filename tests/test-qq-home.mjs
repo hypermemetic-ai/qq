@@ -17,7 +17,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createQqService } from "../qq/src/session.mjs";
 import { MARKER_NAME, MARKER_SCHEMA } from "../qq/src/scratch.mjs";
-import { SCOPE_SCHEMA } from "../qq/src/session-scope.mjs";
+import { SCOPE_SCHEMA, createSessionScopeStore } from "../qq/src/session-scope.mjs";
 import { addProject, attachHandle, makeProjectsHome, qqConfig } from "./qq-projects-fixture.mjs";
 
 const SESSION_ID = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -536,14 +536,29 @@ try {
 
   const liveHome = await qq.createHome();
   const mismatchId = "session-63a11000-0000-4000-8000-0000000000c7";
+  const foreignId = "session-63a11000-0000-4000-8000-0000000000c8";
+  const foreignChild = join(scratchRoot, foreignId);
   writeOwnedMarker(join(scratchRoot, mismatchId), mismatchId);
+  writeOwnedMarker(foreignChild, foreignId);
+  fake(foreignId, { cwd: foreignChild, persist: true });
   const scopePayload = JSON.parse(readFileSync(scopeFile, "utf8"));
   scopePayload.sessions[mismatchId] = {
     scope: "home",
     context: "scratch",
     cwd: join(scratchRoot, "wrong"),
   };
+  scopePayload.sessions[foreignId] = {
+    scope: "home",
+    context: "scratch",
+    cwd: join("/other/root", foreignId),
+  };
   writeFileSync(scopeFile, `${JSON.stringify(scopePayload)}\n`);
+  const boundStore = createSessionScopeStore({ file: scopeFile, scratchRoot });
+  assert.equal(boundStore.get(foreignId), undefined);
+  assert.deepEqual(boundStore.inspect(foreignId), { ok: false, reason: "invalid" });
+  assert.equal(boundStore.protectedIds().includes(foreignId), true);
+  assert.equal(boundStore.protectedIds().includes(mismatchId), true);
+  assert.deepEqual(boundStore.get(liveHome.id)?.cwd, liveHome.cwd);
   writeOwnedMarker(join(scratchRoot, orphanId), orphanId);
   writeFileSync(join(scratchRoot, "notes.txt"), "keep\n");
   mkdirSync(join(scratchRoot, "not-a-session"));
@@ -576,10 +591,19 @@ try {
   const restarted = createQqService(restartCtx, qqConfig(projects, bootId));
   const restartedHomes = await restarted.listHome();
   assert.deepEqual(restartedHomes.map((row) => row.id), [liveHome.id]);
+  assert.equal(restartedHomes.some((row) => row.id === foreignId), false);
   assert.equal(existsSync(liveHome.cwd), true);
+  assert.equal(existsSync(foreignChild), true, "wrong-parent sidecar must not delete the real manager child");
   assert.equal(existsSync(join(scratchRoot, orphanId)), false, "exact marked orphan is deleted");
   assert.equal(existsSync(join(scratchRoot, mismatchId)), true, "mismatched sidecar data must not authorize deletion");
   assert.equal(existsSync(join(scratchRoot, later.id)), false, "closed leftover is reconciled as an orphan");
+  const restartedStore = createSessionScopeStore({ file: scopeFile, scratchRoot });
+  assert.equal(restartedStore.get(foreignId), undefined);
+  assert.deepEqual(restartedStore.inspect(foreignId), { ok: false, reason: "invalid" });
+  assert.equal(restartedStore.protectedIds().includes(foreignId), true);
+  const inspectedForeign = await restarted.inspect(foreignId);
+  assert.notEqual(inspectedForeign.scope, "home");
+  assert.equal(restartLive.has(foreignId), true);
   assert.deepEqual(scopeRecord(liveHome.id), {
     scope: "home",
     context: "scratch",

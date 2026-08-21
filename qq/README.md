@@ -22,6 +22,9 @@ Project sessions keep the registered-root catalog and never delete scratch.
 A qq-owned `qq.session-scope/v1` sidecar (production default
 `~/.local/state/qq/session-scope.json`) stores immutable Home metadata so scope
 survives scratch deletion; DSH session headers stay on the supported field set.
+A Home record is valid only when `cwd` is the exact expected child
+`join(scratchRoot, sessionId)`; wrong-parent entries are protected, never
+classified as Home, and never authorize deletion.
 T-134 later owns Home routes and UI.
 
 The qq plugin hides DSH's generic `skill` tool when a session catalog has no

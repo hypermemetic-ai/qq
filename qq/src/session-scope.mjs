@@ -2,8 +2,10 @@
 //
 // Exact canonical session IDs map to immutable explicit metadata sufficient
 // to recover {scope:"home", context:"scratch", cwd} after the scratch tree
-// is deleted. Schema/version and exact cwd/id validation fail closed. This
-// is not a DSH SessionStore header and not a project catalog.
+// is deleted. Schema/version and exact cwd/id validation fail closed. A
+// Home record is valid only when cwd is the exact expected child
+// join(canonicalScratchRoot, sessionId). This is not a DSH SessionStore
+// header and not a project catalog.
 
 import {
   chmodSync,
@@ -67,12 +69,28 @@ function canonicalSessionId(value) {
   return value;
 }
 
-function canonicalCwd(id, value) {
+function canonicalScratchRoot(value) {
+  if (typeof value !== "string" || !value.startsWith("/") || value.includes("\0")) {
+    return undefined;
+  }
+  const resolved = resolve(value);
+  if (resolved !== value || dirname(resolved) === resolved) return undefined;
+  return resolved;
+}
+
+function expectedHomeCwd(scratchRoot, id) {
+  const root = canonicalScratchRoot(scratchRoot);
+  const sessionId = canonicalSessionId(id);
+  if (!root || !sessionId) return undefined;
+  return join(root, sessionId);
+}
+
+function canonicalCwd(id, value, scratchRoot) {
   if (typeof value !== "string" || !value.startsWith("/") || value.includes("\0")) return undefined;
   const resolved = resolve(value);
   if (resolved !== value) return undefined;
-  const base = resolved.split(sep).pop();
-  if (base !== id) return undefined;
+  const expected = expectedHomeCwd(scratchRoot, id);
+  if (!expected || resolved !== expected) return undefined;
   return resolved;
 }
 
@@ -85,7 +103,7 @@ function freezeRecord(id, cwd) {
   });
 }
 
-function parseRecord(id, value) {
+function parseRecord(id, value, scratchRoot) {
   const canonicalId = canonicalSessionId(id);
   if (!canonicalId) return { ok: false, reason: "invalid-id" };
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -98,7 +116,7 @@ function parseRecord(id, value) {
   if (value.scope !== "home" || value.context !== "scratch") {
     return { ok: false, reason: "mismatch", id: canonicalId };
   }
-  const cwd = canonicalCwd(canonicalId, value.cwd);
+  const cwd = canonicalCwd(canonicalId, value.cwd, scratchRoot);
   if (!cwd) return { ok: false, reason: "mismatch", id: canonicalId };
   return { ok: true, record: freezeRecord(canonicalId, cwd) };
 }
@@ -107,7 +125,7 @@ function emptyState() {
   return { records: new Map(), protectedEntries: new Map(), corrupt: false };
 }
 
-function parseStore(parsed) {
+function parseStore(parsed, scratchRoot) {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     return { ...emptyState(), corrupt: true };
   }
@@ -120,7 +138,7 @@ function parseStore(parsed) {
   const records = new Map();
   const protectedEntries = new Map();
   for (const [id, value] of Object.entries(parsed.sessions)) {
-    const parsedRecord = parseRecord(id, value);
+    const parsedRecord = parseRecord(id, value, scratchRoot);
     if (parsedRecord.ok) {
       records.set(parsedRecord.record.id, parsedRecord.record);
     } else if (parsedRecord.id) {
@@ -151,6 +169,8 @@ function serialize(records, protectedEntries) {
 /**
  * One durable Home-scope registry. `file` may be omitted for an in-memory
  * store (unit tests). Production passes the owner-only path under qq state.
+ * `scratchRoot` is the T-139 manager root; a Home record is valid only when
+ * cwd is the exact expected child join(scratchRoot, sessionId).
  */
 export function createSessionScopeStore(options = {}) {
   if (options !== undefined && (options === null || typeof options !== "object")) {
@@ -159,6 +179,10 @@ export function createSessionScopeStore(options = {}) {
   const file = options.file;
   if (file !== undefined && (typeof file !== "string" || !file.startsWith("/") || file.includes("\0"))) {
     throw scopeError("qq: session-scope file must be an absolute path", "invalid-root");
+  }
+  const scratchRoot = canonicalScratchRoot(options.scratchRoot);
+  if (!scratchRoot) {
+    throw scopeError("qq: session-scope scratchRoot must be an absolute path", "invalid-root");
   }
   const io = bindFs(options.fs ?? {});
 
@@ -178,7 +202,7 @@ export function createSessionScopeStore(options = {}) {
     } catch {
       return { ...emptyState(), corrupt: true };
     }
-    return parseStore(parsed);
+    return parseStore(parsed, scratchRoot);
   }
 
   function persist(records, protectedEntries) {
@@ -202,6 +226,7 @@ export function createSessionScopeStore(options = {}) {
 
   const store = {
     file,
+    scratchRoot,
     get corrupt() {
       return memory.corrupt === true;
     },
@@ -236,7 +261,7 @@ export function createSessionScopeStore(options = {}) {
         scope: input.scope ?? "home",
         context: input.context ?? "scratch",
         cwd: input.cwd,
-      });
+      }, scratchRoot);
       if (!parsed.ok) {
         throw scopeError(
           `qq: session-scope record is invalid (${parsed.reason ?? "malformed"})`,
@@ -268,6 +293,8 @@ export const internals = Object.freeze({
   FILE_MODE,
   DIR_MODE,
   canonicalSessionId,
+  canonicalScratchRoot,
+  expectedHomeCwd,
   canonicalCwd,
   parseRecord,
   parseStore,

@@ -1,9 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import {
-  chmodSync,
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -51,8 +49,11 @@ try {
   );
   assert.throws(() => createSessionScopeStore({ file: "relative.json" }), /absolute path/);
   assert.throws(() => createSessionScopeStore({ file: "/tmp/scope\0x" }), /absolute path/);
+  assert.throws(() => createSessionScopeStore(), /scratchRoot/);
+  assert.throws(() => createSessionScopeStore({ scratchRoot: "relative" }), /absolute path/);
+  assert.throws(() => createSessionScopeStore({ scratchRoot: "/" }), /absolute path/);
 
-  const memory = createSessionScopeStore();
+  const memory = createSessionScopeStore({ scratchRoot: scratch });
   assert.equal(memory.get(alphaId), undefined);
   const alphaCwd = join(scratch, alphaId);
   const stored = memory.put(alphaId, { cwd: alphaCwd });
@@ -72,9 +73,10 @@ try {
     context: "project",
     cwd: join(scratch, betaId),
   }), /mismatch/);
+  assert.throws(() => memory.put(betaId, { cwd: join("/other/root", betaId) }), /mismatch/);
 
   const file = join(scratch, "session-scope.json");
-  const disk = createSessionScopeStore({ file });
+  const disk = createSessionScopeStore({ file, scratchRoot: scratch });
   const betaCwd = join(scratch, betaId);
   disk.put(betaId, { cwd: betaCwd });
   assert.equal(existsSync(file), true);
@@ -89,7 +91,7 @@ try {
   });
   assert.equal("id" in payload.sessions[betaId], false);
 
-  const reloaded = createSessionScopeStore({ file });
+  const reloaded = createSessionScopeStore({ file, scratchRoot: scratch });
   assert.deepEqual(reloaded.get(betaId), {
     id: betaId,
     scope: "home",
@@ -99,7 +101,7 @@ try {
   assert.equal(Object.isFrozen(reloaded.get(betaId)), true);
 
   writeFileSync(file, "{not json\n");
-  const corrupt = createSessionScopeStore({ file });
+  const corrupt = createSessionScopeStore({ file, scratchRoot: scratch });
   assert.equal(corrupt.corrupt, true);
   assert.equal(corrupt.get(betaId), undefined);
   assert.deepEqual(corrupt.inspect(betaId), { ok: false, reason: "corrupt" });
@@ -115,7 +117,7 @@ try {
       "not-a-session": { scope: "home", context: "scratch", cwd: join(scratch, "not-a-session") },
     },
   })}\n`);
-  const mixed = createSessionScopeStore({ file: mixedFile });
+  const mixed = createSessionScopeStore({ file: mixedFile, scratchRoot: scratch });
   assert.equal(mixed.corrupt, false);
   assert.deepEqual(mixed.get(alphaId)?.id, alphaId);
   assert.equal(mixed.get(betaId), undefined);
@@ -123,19 +125,63 @@ try {
   assert.deepEqual(mixed.protectedIds(), [betaId]);
   assert.deepEqual(mixed.ids(), [alphaId]);
   mixed.put(alphaId, { cwd: alphaCwd });
-  const mixedReloaded = createSessionScopeStore({ file: mixedFile });
+  const mixedReloaded = createSessionScopeStore({ file: mixedFile, scratchRoot: scratch });
   assert.deepEqual(mixedReloaded.protectedIds(), [betaId]);
+
+  const foreignId = sessionId("0000000000c8");
+  const foreignCwd = join("/other/root", foreignId);
+  const foreignFile = join(scratch, "foreign-scope.json");
+  writeFileSync(foreignFile, `${JSON.stringify({
+    schema: SCOPE_SCHEMA,
+    sessions: {
+      [alphaId]: { scope: "home", context: "scratch", cwd: alphaCwd },
+      [foreignId]: { scope: "home", context: "scratch", cwd: foreignCwd },
+    },
+  })}\n`);
+  const foreign = createSessionScopeStore({ file: foreignFile, scratchRoot: scratch });
+  assert.equal(foreign.get(foreignId), undefined);
+  assert.deepEqual(foreign.inspect(foreignId), { ok: false, reason: "invalid" });
+  assert.deepEqual(foreign.protectedIds(), [foreignId]);
+  assert.deepEqual(foreign.get(alphaId), {
+    id: alphaId,
+    scope: "home",
+    context: "scratch",
+    cwd: alphaCwd,
+  });
+  assert.throws(() => foreign.put(foreignId, { cwd: foreignCwd }), /mismatch/);
+  const expectedForeign = join(scratch, foreignId);
+  const repaired = foreign.put(foreignId, { cwd: expectedForeign });
+  assert.equal(repaired.cwd, expectedForeign);
+  assert.equal(existsSync(expectedForeign), false, "exact expected cwd does not require the child to exist");
+  const foreignReloaded = createSessionScopeStore({ file: foreignFile, scratchRoot: scratch });
+  assert.deepEqual(foreignReloaded.get(foreignId), {
+    id: foreignId,
+    scope: "home",
+    context: "scratch",
+    cwd: expectedForeign,
+  });
+  assert.deepEqual(foreignReloaded.protectedIds(), []);
 
   assert.equal(internals.canonicalSessionId(alphaId), alphaId);
   assert.equal(internals.canonicalSessionId(alphaId.toUpperCase()), undefined);
-  assert.equal(internals.canonicalCwd(alphaId, join(scratch, "nope")), undefined);
-  assert.equal(internals.canonicalCwd(alphaId, `${alphaCwd}/`), undefined);
+  assert.equal(internals.canonicalScratchRoot(scratch), scratch);
+  assert.equal(internals.expectedHomeCwd(scratch, alphaId), alphaCwd);
+  assert.equal(internals.canonicalCwd(alphaId, alphaCwd, scratch), alphaCwd);
+  assert.equal(internals.canonicalCwd(alphaId, join(scratch, "nope"), scratch), undefined);
+  assert.equal(internals.canonicalCwd(alphaId, `${alphaCwd}/`, scratch), undefined);
+  assert.equal(internals.canonicalCwd(alphaId, join("/other/root", alphaId), scratch), undefined);
+  assert.equal(internals.parseRecord(alphaId, {
+    scope: "home",
+    context: "scratch",
+    cwd: join("/other/root", alphaId),
+  }, scratch).ok, false);
 
   const source = sourceOf("qq/src/session-scope.mjs");
   assert.doesNotMatch(source, /from \"\.\/(session|files|plugin|scratch)\.mjs\"/);
   assert.doesNotMatch(source, /listProjectCatalog|createQqService|agents\.create/);
   assert.match(sourceOf("qq/src/session.mjs"), /createSessionScopeStore/);
   assert.match(sourceOf("qq/src/session.mjs"), /from "\.\/session-scope\.mjs"/);
+  assert.match(sourceOf("qq/src/session.mjs"), /scratchRoot: scratch\.root/);
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

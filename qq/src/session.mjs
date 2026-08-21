@@ -474,6 +474,7 @@ export function createQqService(ctx, config) {
     ...(config.scratchFs ? { fs: config.scratchFs } : {}),
   });
   const scopes = createSessionScopeStore({
+    scratchRoot: scratch.root,
     file: config.scopeFile === null
       ? undefined
       : (config.scopeFile ?? defaultScopeFile()),
