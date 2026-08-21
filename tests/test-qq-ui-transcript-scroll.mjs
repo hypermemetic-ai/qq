@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 
 const root = dirname(fileURLToPath(new URL(".", import.meta.url)));
-const browserJs = readFileSync(join(root, "qq-ui/assets/browser-v8.js"), "utf8");
+const browserJs = readFileSync(join(root, "qq-ui/assets/browser-v9.js"), "utf8");
 
 class ClassList {
   constructor() {
@@ -129,7 +129,7 @@ function createHarness(initialHeight = 1_000) {
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  vm.runInContext(browserJs, sandbox, { filename: "browser-v8.js" });
+  vm.runInContext(browserJs, sandbox, { filename: "browser-v9.js" });
 
   const flushFrames = () => {
     while (frames.length > 0) frames.shift()();

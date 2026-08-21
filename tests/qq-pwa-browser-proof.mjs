@@ -514,7 +514,7 @@ async function waitForWorker(client, page, scriptPattern = /\/qq\/sw\.js$/) {
         names,
       };
     })()`);
-    return scriptPattern.test(state.active) && scriptPattern.test(state.controller) && state.names.includes("qq-static-v18") && state;
+    return scriptPattern.test(state.active) && scriptPattern.test(state.controller) && state.names.includes("qq-static-v19") && state;
   }, `service worker ${scriptPattern} did not activate and control the page`, 15_000);
 }
 
@@ -632,7 +632,7 @@ export async function runQqPwaBrowserProof() {
     await waitForLive(client, desktop, origin);
     await waitForWorker(client, desktop);
     const cachedPaths = await evaluate(client, desktop, `(async () => {
-      const cache = await caches.open("qq-static-v18");
+      const cache = await caches.open("qq-static-v19");
       return (await cache.keys()).map((request) => new URL(request.url).pathname);
     })()`);
     assert.ok(cachedPaths.length > 0);
@@ -702,7 +702,7 @@ export async function runQqPwaBrowserProof() {
       return true;
     })()`);
     await waitFor(
-      () => evaluate(client, legacy, "caches.keys()").then((names) => names.includes("qq-static-v18") && !names.includes("qq-static-v10-browser-proof")),
+      () => evaluate(client, legacy, "caches.keys()").then((names) => names.includes("qq-static-v19") && !names.includes("qq-static-v10-browser-proof")),
       "legacy registration did not activate the compatibility worker",
       15_000,
     );
@@ -934,6 +934,69 @@ export async function runQqPwaBrowserProof() {
       "reduced-motion release did not velocity-settle open",
     );
     await closeDrawerInPlace(client, pixel);
+
+    // Closing a session-scoped file page returns to the originating console.
+    await navigate(client, pixel, `${origin}${CANONICAL_PATH}?drawer=`);
+    await waitForDrawerSurface(client, pixel, CANONICAL_PATH);
+    const sessionFileHref = await evaluate(client, pixel, `document.querySelector('a[aria-label="Read file README.md"]')?.getAttribute("href")`);
+    assert.equal(sessionFileHref, `${CANONICAL_PATH}/file/README.md`);
+    await evaluate(client, pixel, `document.querySelector('a[aria-label="Read file README.md"]').click()`);
+    const sessionFilePath = `${CANONICAL_PATH}/file/README.md`;
+    await waitForDocumentViewer(client, pixel, sessionFilePath);
+    const fileClose = await evaluate(client, pixel, `document.querySelector(".document-viewer-close")?.getAttribute("href")`);
+    assert.equal(fileClose, CANONICAL_PATH, "file page close did not target the originating session");
+    await evaluate(client, pixel, `document.querySelector(".document-viewer-close").click()`);
+    await waitForLive(client, pixel, origin);
+    assert.equal(await evaluate(client, pixel, `location.pathname`), CANONICAL_PATH);
+    assert.equal(await evaluate(client, pixel, `Boolean(document.querySelector("#project-file-viewer"))`), false);
+
+    // Dialog close must preserve closed-drawer inert on real console chrome.
+    const chromeInert = await evaluate(client, pixel, `(() => {
+      const drawer = document.querySelector("#project-drawer");
+      const backdrop = document.querySelector("#project-drawer-backdrop");
+      const prior = {
+        drawerInert: drawer.inert === true,
+        backdropInert: backdrop.inert === true,
+        drawerHidden: drawer.getAttribute("aria-hidden"),
+      };
+      const trigger = document.createElement("button");
+      trigger.setAttribute("data-document-viewer-open", "console-proof-viewer");
+      trigger.textContent = "Open full screen";
+      const dialog = document.createElement("dialog");
+      dialog.id = "console-proof-viewer";
+      dialog.className = "document-viewer document-viewer-dialog";
+      dialog.setAttribute("role", "dialog");
+      dialog.setAttribute("aria-modal", "true");
+      dialog.innerHTML = '<button class="document-viewer-close" type="button" data-document-viewer-close>Close</button><h1 tabindex="-1">Proof</h1>';
+      document.querySelector("#transcript").append(trigger, dialog);
+      trigger.click();
+      const opened = {
+        dialogOpen: dialog.open === true,
+        drawerInert: drawer.inert === true,
+        backdropInert: backdrop.inert === true,
+      };
+      dialog.querySelector("[data-document-viewer-close]").click();
+      return {
+        prior,
+        opened,
+        closed: {
+          dialogOpen: dialog.open === true,
+          drawerInert: drawer.inert === true,
+          backdropInert: backdrop.inert === true,
+          drawerHidden: drawer.getAttribute("aria-hidden"),
+        },
+      };
+    })()`);
+    assert.equal(chromeInert.prior.drawerInert, true);
+    assert.equal(chromeInert.prior.backdropInert, true);
+    assert.equal(chromeInert.prior.drawerHidden, "true");
+    assert.equal(chromeInert.opened.dialogOpen, true);
+    assert.equal(chromeInert.opened.drawerInert, true);
+    assert.equal(chromeInert.opened.backdropInert, true);
+    assert.equal(chromeInert.closed.dialogOpen, false);
+    assert.equal(chromeInert.closed.drawerInert, true, "closing the viewer cleared drawer inert");
+    assert.equal(chromeInert.closed.backdropInert, true, "closing the viewer cleared backdrop inert");
+    assert.equal(chromeInert.closed.drawerHidden, "true");
 
     const shots = join(tmpdir(), "qq-t-129-document-viewer");
     await mkdir(shots, { recursive: true });

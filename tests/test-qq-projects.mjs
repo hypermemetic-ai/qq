@@ -611,6 +611,8 @@ try {
     assert.match(openDrawer.body, />~\/projects<\/a>[\s\S]*>alpha<\/span>/);
     assert.match(openDrawer.body, /aria-label="Read file README.md"/);
     assert.match(openDrawer.body, /aria-label="Open file manual.pdf"/);
+    assert.match(openDrawer.body, new RegExp(`href="/qq/project/alpha/session/${newId}/file/README\\.md"`));
+    assert.match(openDrawer.body, new RegExp(`href="/qq/project/alpha/session/${newId}/open/manual\\.pdf"`));
 
     const nestedDrawer = await request(`${added.headers.location}?drawer=nested`);
     assert.equal(nestedDrawer.status, 200);
@@ -644,7 +646,11 @@ try {
     assert.match(markdownView.body, /class="document-viewer document-viewer-page"/);
     assert.match(markdownView.body, /class="message-text message-markdown document-prose"/);
     assert.match(markdownView.body, /Back to console/);
+    assert.match(markdownView.body, /href="\/qq\/project\/alpha"/);
     assert.match(markdownView.body, /<h1>Alpha<\/h1>/);
+    const sessionFileView = await request(`/qq/project/alpha/session/${newId}/file/README.md`);
+    assert.equal(sessionFileView.status, 200);
+    assert.match(sessionFileView.body, new RegExp(`class="document-viewer-close" href="/qq/project/alpha/session/${newId}"`));
     assert.match(markdownView.body, /&lt;script&gt;nope&lt;\/script&gt;/);
     assert.doesNotMatch(markdownView.body, /<script>nope<\/script>/);
     assert.doesNotMatch(markdownView.body, /id="console-stream"|id="composer"|id="project-drawer"/);
@@ -730,6 +736,13 @@ try {
 
     const parsed = httpInternals.parseProjectRoute("/qq", `/qq/project/alpha/session/${alphaId}/prompt`);
     assert.deepEqual(parsed, { project: "alpha", sessionId: alphaId, action: "prompt" });
+    const parsedFile = httpInternals.parseProjectRoute("/qq", `/qq/project/alpha/session/${alphaId}/file/README.md`);
+    assert.deepEqual(parsedFile, {
+      project: "alpha",
+      sessionId: alphaId,
+      filePath: "README.md",
+      action: "file",
+    });
 
     const emptyHtml = renderSessionContent({
       id: "",

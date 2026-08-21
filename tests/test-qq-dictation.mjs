@@ -44,7 +44,7 @@ const betaLease = captureLeaseId("00000000000b");
 let clientLeaseSerial = 100;
 
 const clientJs = readFileSync(join(root, "qq-dictation/src/client.js"), "utf8");
-const browserJs = readFileSync(join(root, "qq-ui/assets/browser-v8.js"), "utf8");
+const browserJs = readFileSync(join(root, "qq-ui/assets/browser-v9.js"), "utf8");
 const pluginSource = readFileSync(join(root, "qq-dictation/src/plugin.mjs"), "utf8");
 const serviceSource = readFileSync(join(root, "qq-dictation/src/service.mjs"), "utf8");
 const httpSource = readFileSync(join(root, "qq-dictation/src/http.mjs"), "utf8");
@@ -576,7 +576,7 @@ function makeClientHarness(options = {}) {
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   if (options.browser) {
-    vm.runInContext(browserJs, sandbox, { filename: "browser-v8.js" });
+    vm.runInContext(browserJs, sandbox, { filename: "browser-v9.js" });
     document.currentScript = null;
   }
   vm.runInContext(clientJs, sandbox, { filename: "qq-dictation-client.js" });
