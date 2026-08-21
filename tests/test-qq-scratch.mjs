@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -182,6 +184,32 @@ try {
   assert.equal(existsSync(join(work, betaId)), false);
   assert.equal(lstatSync(linkedRoot).isSymbolicLink(), true);
 
+  const realBase = mkdtempSync(join(scratch, "real-base."));
+  const aliasParent = join(scratch, "alias-parent");
+  symlinkSync(realBase, aliasParent);
+  const aliasRoot = join(aliasParent, "scratch");
+  const aliased = manager(aliasRoot);
+  assert.throws(() => aliased.create(alphaId), /not a usable directory/);
+  assert.equal(existsSync(join(realBase, "scratch")), false);
+  assert.equal(existsSync(join(realBase, alphaId)), false);
+  assert.equal(lstatSync(aliasParent).isSymbolicLink(), true);
+
+  const looseId = sessionId("0000000000a8");
+  const loosePath = join(work, looseId);
+  mkdirSync(loosePath, { mode: 0o777 });
+  chmodSync(loosePath, 0o777);
+  writeFileSync(join(loosePath, MARKER_NAME), `${JSON.stringify({
+    schema: MARKER_SCHEMA,
+    sessionId: looseId,
+  })}\n`);
+  chmodSync(join(loosePath, MARKER_NAME), 0o666);
+  assert.equal(mode(loosePath), 0o777);
+  assert.equal(mode(join(loosePath, MARKER_NAME)), 0o666);
+  assert.throws(() => api.verify(looseId), /refused/);
+  assert.throws(() => api.create(looseId), /refused/);
+  assert.throws(() => api.delete(looseId), /refused/);
+  assert.equal(existsSync(loosePath), true);
+
   const leftoverStaging = join(work, `${STAGING_PREFIX}leftover`);
   mkdirSync(leftoverStaging, { mode: 0o700 });
   writeFileSync(join(leftoverStaging, MARKER_NAME), `${JSON.stringify({
@@ -222,10 +250,12 @@ try {
   assert.equal(preserved[markerLinkId], "malformed");
   assert.equal(preserved[`${STAGING_PREFIX}leftover`], "unrelated");
   assert.equal(preserved.notes, "unrelated");
+  assert.equal(preserved[looseId], "malformed");
   assert.equal(existsSync(alphaPath), true);
   assert.equal(existsSync(forgedDir), true);
   assert.equal(existsSync(join(work, unmarked)), true);
   assert.equal(existsSync(unrelated), true);
+  assert.equal(existsSync(loosePath), true);
 
   const orphanPath = api.create(betaId);
   writeFileSync(join(orphanPath, "tmp.txt"), "orphan\n");
@@ -253,6 +283,43 @@ try {
   assert.equal(Boolean(alphaError), true);
   assert.match(alphaError.error.message, /orphan delete failed/);
   assert.equal(existsSync(alphaPath), true);
+
+  const markerIoFail = manager(work, {
+    fs: {
+      openSync(path, flags, mode) {
+        if (String(path).endsWith(MARKER_NAME)) {
+          throw Object.assign(new Error("injected marker open"), { code: "EIO" });
+        }
+        return openSync(path, flags, mode);
+      },
+    },
+  });
+  const markerOpen = markerIoFail.reconcile([]);
+  const markerOpenError = markerOpen.errors.find((row) => row.name === alphaId);
+  assert.equal(Boolean(markerOpenError), true);
+  assert.match(markerOpenError.error.message, /could not inspect child/);
+  assert.equal(markerOpen.preserved.some((row) => row.name === alphaId), false);
+  assert.equal(existsSync(alphaPath), true);
+
+  const markerLstatFail = manager(work, {
+    fs: {
+      lstatSync(path) {
+        if (String(path).endsWith(MARKER_NAME)) {
+          throw Object.assign(new Error("injected marker lstat"), { code: "EIO" });
+        }
+        return lstatSync(path);
+      },
+    },
+  });
+  const markerLstat = markerLstatFail.reconcile([]);
+  const markerLstatError = markerLstat.errors.find((row) => row.name === alphaId);
+  assert.equal(Boolean(markerLstatError), true);
+  assert.match(markerLstatError.error.message, /could not inspect child/);
+  assert.equal(existsSync(alphaPath), true);
+
+  const missingReconcileRoot = join(scratch, "missing-reconcile-root");
+  assert.throws(() => manager(missingReconcileRoot).reconcile("bad input"), /live session ids/);
+  assert.equal(existsSync(missingReconcileRoot), false);
 
   api.delete(alphaId);
   assert.equal(existsSync(alphaPath), false);

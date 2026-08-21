@@ -101,6 +101,15 @@ export function normalizeSessionId(value) {
   return id;
 }
 
+function permissionMode(info) {
+  return info.mode & 0o777;
+}
+
+function isInspectError(error) {
+  const code = error?.code;
+  return typeof code === "string" && code.startsWith("E") && code !== "ENOENT";
+}
+
 function lstatOrNull(io, path) {
   try {
     return io.lstatSync(path);
@@ -115,44 +124,75 @@ function openNoFollow(io, path, flags, mode) {
 }
 
 function inspectRoot(io, root) {
-  const info = lstatOrNull(io, root);
-  if (!info) return { kind: "missing" };
-  if (info.isSymbolicLink()) return { kind: "symlink" };
-  if (!info.isDirectory()) return { kind: "not-directory" };
+  const segments = root.split(sep).filter(Boolean);
+  let current = "/";
+  let info = null;
+  for (const segment of segments) {
+    current = join(current, segment);
+    info = lstatOrNull(io, current);
+    if (!info) return { kind: "missing" };
+    if (info.isSymbolicLink()) return { kind: "symlink" };
+    if (!info.isDirectory()) return { kind: "not-directory" };
+  }
   return { kind: "directory", info };
 }
 
+function lstatRootComponent(io, path) {
+  try {
+    return lstatOrNull(io, path);
+  } catch (error) {
+    throw scratchError("qq: scratch root is not a usable directory", "unsafe-root", { cause: error });
+  }
+}
+
 function ensureRoot(io, root) {
-  let current = inspectRoot(io, root);
-  if (current.kind === "missing") {
-    try {
-      io.mkdirSync(root, { recursive: true, mode: DIRECTORY_MODE });
-    } catch (error) {
-      throw scratchError("qq: scratch root is not a usable directory", "unsafe-root", { cause: error });
+  const segments = root.split(sep).filter(Boolean);
+  let current = "/";
+  for (const segment of segments) {
+    const next = join(current, segment);
+    let info = lstatRootComponent(io, next);
+    if (!info) {
+      try {
+        io.mkdirSync(next, { recursive: false, mode: DIRECTORY_MODE });
+      } catch (error) {
+        if (error?.code !== "EEXIST") {
+          throw scratchError("qq: scratch root is not a usable directory", "unsafe-root", { cause: error });
+        }
+      }
+      if (next === root) {
+        try {
+          io.chmodSync(next, DIRECTORY_MODE);
+        } catch {
+          // Best-effort on a just-created root; inspect still fail-closes.
+        }
+      }
+      info = lstatRootComponent(io, next);
     }
-    try {
-      io.chmodSync(root, DIRECTORY_MODE);
-    } catch {
-      // Best-effort on a just-created root; inspect still fail-closes.
+    if (!info || info.isSymbolicLink() || !info.isDirectory()) {
+      throw scratchError("qq: scratch root is not a usable directory", "unsafe-root");
     }
-    current = inspectRoot(io, root);
+    current = next;
   }
-  if (current.kind !== "directory") {
-    throw scratchError("qq: scratch root is not a usable directory", "unsafe-root");
-  }
-  return root;
+  return current;
 }
 
 function readMarker(io, directory, expectedId) {
   const markerPath = join(directory, MARKER_NAME);
-  const listed = lstatOrNull(io, markerPath);
+  let listed;
+  try {
+    listed = lstatOrNull(io, markerPath);
+  } catch (error) {
+    return { ok: false, reason: "error", error };
+  }
   if (!listed) return { ok: false, reason: "unmarked" };
-  if (listed.isSymbolicLink() || !listed.isFile()) return { ok: false, reason: "malformed" };
+  if (listed.isSymbolicLink() || !listed.isFile() || permissionMode(listed) !== MARKER_MODE) {
+    return { ok: false, reason: "malformed" };
+  }
   let descriptor;
   try {
     descriptor = openNoFollow(io, markerPath, constants.O_RDONLY);
     const info = io.fstatSync(descriptor);
-    if (!info.isFile()) return { ok: false, reason: "malformed" };
+    if (!info.isFile() || permissionMode(info) !== MARKER_MODE) return { ok: false, reason: "malformed" };
     const raw = io.readFileSync(descriptor);
     let parsed;
     try {
@@ -174,10 +214,17 @@ function readMarker(io, directory, expectedId) {
       ok: true,
       marker: Object.freeze({ schema: MARKER_SCHEMA, sessionId: bound }),
     };
-  } catch {
+  } catch (error) {
+    if (isInspectError(error)) return { ok: false, reason: "error", error };
     return { ok: false, reason: "malformed" };
   } finally {
-    if (descriptor !== undefined) io.closeSync(descriptor);
+    if (descriptor !== undefined) {
+      try {
+        io.closeSync(descriptor);
+      } catch {
+        // Close is best-effort after inspect.
+      }
+    }
   }
 }
 
@@ -216,8 +263,9 @@ function inspectChild(io, root, sessionId) {
   if (!info) return { kind: "missing", path };
   if (info.isSymbolicLink()) return { kind: "symlink", path };
   if (!info.isDirectory()) return { kind: "not-directory", path };
+  if (permissionMode(info) !== DIRECTORY_MODE) return { kind: "malformed", path };
   const marker = readMarker(io, path, sessionId);
-  if (!marker.ok) return { kind: marker.reason, path };
+  if (!marker.ok) return { kind: marker.reason, path, error: marker.error };
   return { kind: "ready", path, marker: marker.marker, info };
 }
 
@@ -302,6 +350,14 @@ function preserve(name, path, reason) {
   return Object.freeze({ name, path, reason });
 }
 
+function inspectFailed(name, path, cause) {
+  return Object.freeze({
+    name,
+    path,
+    error: scratchError("qq: scratch reconcile could not inspect child", "inspect-failed", { cause }),
+  });
+}
+
 /**
  * Create a scratch manager bounded to one configured root.
  * `fs` may replace node:fs methods in tests; production omits it.
@@ -375,13 +431,13 @@ export function createScratchManager(options = {}) {
   }
 
   function reconcile(liveOwnedSessionIds) {
-    const currentRoot = readyRoot();
     let live;
     try {
       live = liveIdSet(liveOwnedSessionIds);
     } catch (error) {
       throw scratchError("qq: scratch reconcile requires live session ids", "invalid-live", { cause: error });
     }
+    const currentRoot = readyRoot();
     let entries;
     try {
       entries = io.readdirSync(currentRoot, { withFileTypes: true });
@@ -403,11 +459,7 @@ export function createScratchManager(options = {}) {
       try {
         info = io.lstatSync(path);
       } catch (error) {
-        errors.push(Object.freeze({
-          name,
-          path,
-          error: scratchError("qq: scratch reconcile could not inspect child", "inspect-failed", { cause: error }),
-        }));
+        errors.push(inspectFailed(name, path, error));
         continue;
       }
       if (info.isSymbolicLink()) {
@@ -425,8 +477,16 @@ export function createScratchManager(options = {}) {
         preserved.push(preserve(name, path, "unrelated"));
         continue;
       }
+      if (permissionMode(info) !== DIRECTORY_MODE) {
+        preserved.push(preserve(name, path, "malformed"));
+        continue;
+      }
       const marker = readMarker(io, path, id);
       if (!marker.ok) {
+        if (marker.reason === "error") {
+          errors.push(inspectFailed(name, path, marker.error));
+          continue;
+        }
         preserved.push(preserve(name, path, marker.reason === "mismatch" ? "malformed" : marker.reason));
         continue;
       }
