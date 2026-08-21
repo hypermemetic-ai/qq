@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { access, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer as createHttpsServer } from "node:https";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -206,17 +206,18 @@ async function navigate(client, page, url) {
   await client.send("Page.navigate", { url }, page.sessionId);
 }
 
-async function dispatchTouchSwipe(client, page, { x = 8, y = 420, endX, endY, steps = 5 }) {
-  const point = (clientX, clientY) => [{ x: clientX, y: clientY, radiusX: 6, radiusY: 6, force: 1, id: 0 }];
-  await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: point(x, y) }, page.sessionId);
+const touchPoints = (clientX, clientY) => [{ x: clientX, y: clientY, radiusX: 6, radiusY: 6, force: 1, id: 0 }];
+
+async function dispatchTouchSwipe(client, page, { x = 8, y = 420, endX, endY, steps = 5, delayMs = 20, releaseDelayMs = 20 }) {
+  await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: touchPoints(x, y) }, page.sessionId);
   for (let step = 1; step <= steps; step += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
     await client.send("Input.dispatchTouchEvent", {
       type: "touchMove",
-      touchPoints: point(x + ((endX - x) * step) / steps, y + ((endY - y) * step) / steps),
+      touchPoints: touchPoints(x + ((endX - x) * step) / steps, y + ((endY - y) * step) / steps),
     }, page.sessionId);
   }
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await new Promise((resolve) => setTimeout(resolve, releaseDelayMs));
   await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }, page.sessionId);
 }
 
@@ -316,6 +317,49 @@ async function openDrawerWithTouch(client, page, { x = 206, y = 420, travel = 40
   assert.equal(opened.pathname, before.pathname);
   await assertDrawerHeadingFocus(client, page);
   return opened;
+}
+
+async function readDrawerDragState(client, page) {
+  return evaluate(client, page, `(() => {
+    const drawer = document.querySelector("#project-drawer");
+    const backdrop = document.querySelector("#project-drawer-backdrop");
+    const background = [...document.body.children].filter((node) => node !== drawer && node !== backdrop);
+    const rect = drawer.getBoundingClientRect();
+    return {
+      active: document.body.classList.contains("drawer-drag-active"),
+      settling: document.body.classList.contains("drawer-drag-settling"),
+      open: document.body.classList.contains("drawer-open"),
+      left: rect.left,
+      right: rect.right,
+      width: rect.width,
+      transform: getComputedStyle(drawer).transform,
+      inlineTransform: drawer.style.transform,
+      drawerHidden: drawer.getAttribute("aria-hidden"),
+      drawerInert: drawer.inert,
+      backdropHidden: backdrop.hidden,
+      backdropAriaHidden: backdrop.getAttribute("aria-hidden"),
+      backdropInert: backdrop.inert,
+      backdropOpacity: parseFloat(getComputedStyle(backdrop).opacity),
+      backgroundInert: background.some((node) => node.inert),
+      hasDrawerQuery: new URL(location.href).searchParams.has("drawer"),
+      activeElement: document.activeElement?.id || document.activeElement?.tagName,
+    };
+  })()`);
+}
+
+async function waitForCleanDrawerCancel(client, page, message) {
+  const state = await waitFor(
+    () => readDrawerDragState(client, page).then((candidate) =>
+      !candidate.open && !candidate.active && !candidate.settling && candidate.backdropHidden && candidate),
+    message,
+  );
+  assert.equal(state.drawerHidden, "true");
+  assert.equal(state.drawerInert, true);
+  assert.equal(state.backdropAriaHidden, "true");
+  assert.equal(state.backgroundInert, false);
+  assert.equal(state.hasDrawerQuery, false);
+  assert.equal(state.inlineTransform, "", "cancel left a transient drawer transform");
+  return state;
 }
 
 async function closeDrawerWithImmediateBackdropTouch(client, page, { x = 330, y = 420 } = {}) {
@@ -707,11 +751,68 @@ export async function runQqPwaBrowserProof() {
       "session SSE did not replace the panel content",
     );
     assert.equal(await evaluate(client, pixel, `document.querySelector(".drawer-edge")`), null);
-    await dispatchTouchSwipe(client, pixel, { x: 360, y: 420, endX: 376, endY: 421, steps: 4 });
-    assert.equal(await evaluate(client, pixel, `document.body.classList.contains("drawer-open")`), false, "a 16px drift opened the drawer");
-    await openDrawerWithTouch(client, pixel, { x: 360, travel: 40, steps: 1 });
-    await closeDrawerWithImmediateBackdropTouch(client, pixel);
+
+    // Direct manipulation is observable before release: two finger distances
+    // produce two proportional drawer transforms and progressive backdrop
+    // opacity without committing modal, focus, background inertness, or URL.
+    const dragX = 206;
+    const dragY = 420;
+    const dragFocus = await evaluate(client, pixel, `document.activeElement?.id || document.activeElement?.tagName`);
+    const closedPull = await readDrawerDragState(client, pixel);
+    await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: touchPoints(dragX, dragY) }, pixel.sessionId);
+    await new Promise((resolve) => setTimeout(resolve, 24));
+    await client.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: touchPoints(dragX + 24, dragY + 1) }, pixel.sessionId);
+    const firstPull = await readDrawerDragState(client, pixel);
+    await new Promise((resolve) => setTimeout(resolve, 32));
+    await client.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: touchPoints(dragX + 120, dragY + 2) }, pixel.sessionId);
+    const secondPull = await readDrawerDragState(client, pixel);
+    const midDragImage = await client.send("Page.captureScreenshot", { format: "png", fromSurface: true }, pixel.sessionId);
+    const midDragBytes = Buffer.from(midDragImage.data, "base64");
+    await writeFile(join(temporary, "pixel-drawer-mid-drag.png"), midDragBytes);
+    assert.ok(midDragBytes.length > 10_000, "mid-drag Pixel screenshot was empty");
+    for (const [distance, state] of [[24, firstPull], [120, secondPull]]) {
+      assert.equal(state.active, true, `drawer was not tracking at ${distance}px`);
+      assert.equal(state.open, false, `drawer committed while touch remained down at ${distance}px`);
+      const transformDelta = state.right - closedPull.right;
+      assert.ok(Math.abs(transformDelta - distance) <= 1.5, `drawer transform moved ${transformDelta}px for ${distance}px pull`);
+      assert.equal(state.drawerHidden, "true");
+      assert.equal(state.drawerInert, true);
+      assert.equal(state.backdropHidden, false);
+      assert.equal(state.backdropAriaHidden, "true");
+      assert.equal(state.backdropInert, true);
+      assert.equal(state.backgroundInert, false);
+      assert.equal(state.hasDrawerQuery, false);
+      assert.equal(state.activeElement, dragFocus);
+    }
+    assert.ok(secondPull.backdropOpacity > firstPull.backdropOpacity, "backdrop did not progress with drawer travel");
+    assert.ok(Math.abs((secondPull.right - firstPull.right) - 96) <= 1.5, "drawer transform did not match the same held touch between distances");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }, pixel.sessionId);
+    const directOpen = await waitFor(
+      () => readDrawerDragState(client, pixel).then((state) => state.open && state),
+      "progressive center pull did not settle open on release",
+    );
+    assert.equal(directOpen.drawerHidden, "false");
+    assert.equal(directOpen.drawerInert, false);
+    assert.equal(directOpen.backdropAriaHidden, "false");
+    assert.equal(directOpen.backgroundInert, true);
+    assert.equal(directOpen.hasDrawerQuery, true);
+    await assertDrawerHeadingFocus(client, pixel);
+    await closeDrawerInPlace(client, pixel);
+
+    // Slow, short pulls settle closed at the center and with little far-edge
+    // travel; fast pulls at both starts velocity-settle open.
+    await dispatchTouchSwipe(client, pixel, {
+      x: 206, y: 420, endX: 224, endY: 421, steps: 3, delayMs: 80, releaseDelayMs: 80,
+    });
+    await waitForCleanDrawerCancel(client, pixel, "slow center pull did not settle closed");
     await openDrawerWithTouch(client, pixel, { x: 206, travel: 40 });
+    await closeDrawerWithImmediateBackdropTouch(client, pixel);
+    await dispatchTouchSwipe(client, pixel, {
+      x: 390, y: 420, endX: 406, endY: 421, steps: 2, delayMs: 90, releaseDelayMs: 80,
+    });
+    await waitForCleanDrawerCancel(client, pixel, "slow far-edge pull did not settle closed");
+    await openDrawerWithTouch(client, pixel, { x: 390, travel: 16, steps: 1 });
     await closeDrawerWithKeyboard(client, pixel);
 
     // The same rightward motion beginning on the composer remains the control's gesture.
@@ -761,7 +862,19 @@ export async function runQqPwaBrowserProof() {
     await navigate(client, pixel, `${origin}${emptyProjectPath}`);
     await waitForDrawerSurface(client, pixel, emptyProjectPath);
     assert.equal(await evaluate(client, pixel, `getComputedStyle(document.querySelector("#project-drawer")).transitionDuration`), "0s");
-    await openDrawerWithTouch(client, pixel, { x: 360, y: 300, travel: 40, steps: 1 });
+    const reducedClosed = await readDrawerDragState(client, pixel);
+    await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: touchPoints(360, 300) }, pixel.sessionId);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await client.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: touchPoints(400, 301) }, pixel.sessionId);
+    const reducedPull = await readDrawerDragState(client, pixel);
+    assert.equal(reducedPull.active, true, "reduced motion disabled direct finger tracking");
+    assert.ok(Math.abs((reducedPull.right - reducedClosed.right) - 40) <= 1.5, "reduced-motion drawer did not follow the finger");
+    assert.equal(reducedPull.drawerHidden, "true");
+    await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }, pixel.sessionId);
+    await waitFor(
+      () => readDrawerDragState(client, pixel).then((state) => state.open && state),
+      "reduced-motion release did not velocity-settle open",
+    );
     await closeDrawerInPlace(client, pixel);
 
     // Vertical motion on the ordinary file surface remains a native scroll gesture.
