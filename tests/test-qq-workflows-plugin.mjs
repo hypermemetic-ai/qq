@@ -38,7 +38,7 @@ const {
   classifyLeftover, leftoverTitle, splitOperatorBrief, askedHandoff,
 } = offerModule;
 const { createArchitect, isArchitectCandidate, ARCHITECT_LABEL, CHILD_ORIGIN } = architectModule;
-const { createIterate, isIterateCandidate, ITERATE_LABEL, buildHandsPacket, collectReviewEvidence } = iterateModule;
+const { createIterate, isIterateCandidate, ITERATE_LABEL, buildHandsPacket, collectReviewEvidence, collectReviewImages } = iterateModule;
 const {
   JOURNAL_SCHEMA, createJournalStore, defaultJournalDir, projectJournal, collectBreath, formatProjection,
 } = journalModule;
@@ -76,6 +76,18 @@ function assistantMessage(text) {
     content: [{ type: "text", text }],
     source: { kind: "model", provider: "test", model: "test" },
   };
+}
+
+const PNG_1X1 = Buffer.from(
+  "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082",
+  "hex",
+);
+
+function plantShots(env, names = ["desktop.png", "phone.png"]) {
+  const dir = join(env.XDG_STATE_HOME, "qq", "frontend-design-loop", "shots", "current");
+  mkdirSync(dir, { recursive: true });
+  for (const name of names) writeFileSync(join(dir, name), PNG_1X1);
+  return dir;
 }
 
 function pairEvents(turn, startSeq, userText, assistantText, source) {
@@ -629,6 +641,22 @@ try {
     assert.equal(empty, "");
     const unbound = await oneShot({ async *stream() { yield { type: "text-delta", text: "no" }; } }, null, { user: "hi" });
     assert.equal(unbound, "");
+    const pictured = [];
+    const picturedText = await oneShot({
+      async *stream(options) {
+        pictured.push(options);
+        yield { type: "text-delta", text: "saw" };
+      },
+    }, { provider: "test", model: "scribe" }, {
+      content: [
+        { type: "text", text: "look" },
+        { type: "image", mediaType: "image/png", data: PNG_1X1.toString("base64"), name: "desktop.png" },
+      ],
+    });
+    assert.equal(picturedText, "saw");
+    assert.equal(pictured[0].messages[0].content[0].text, "look");
+    assert.equal(pictured[0].messages[0].content[1].type, "image");
+    assert.equal(pictured[0].messages[0].content[1].mediaType, "image/png");
     const clerkSource = readFileSync(join(root, "qq-workflows/src/clerk.mjs"), "utf8");
     const iterateSource = readFileSync(join(root, "qq-workflows/src/iterate.mjs"), "utf8");
     const scribeSource = readFileSync(join(root, "qq-workflows/src/scribe.mjs"), "utf8");
@@ -1226,6 +1254,8 @@ try {
   {
     const journalDir = join(scratch, "iter-go");
     const wikiDir = join(scratch, "iter-go-wiki");
+    const reviewEnv = { HOME: scratch, XDG_STATE_HOME: join(scratch, "iter-go-shots") };
+    plantShots(reviewEnv);
     const journal = createJournalStore(journalDir);
     const wiki = createWikiStore(wikiDir);
     journal.recordDirective(alphaId, { text: "land the frontend iterate", seq: 1 });
@@ -1244,6 +1274,7 @@ try {
     const verdicts = [];
 
     const iterate = createIterate({
+      env: reviewEnv,
       ctx: {
         get(name) {
           if (name === "qq-relay") {
@@ -1356,8 +1387,11 @@ try {
     assert.equal(verdicts.length, 1);
     assert.match(verdicts[0].user, /left rail too wide/);
     assert.match(verdicts[0].user, /Keep-outs/);
-    assert.match(verdicts[0].user, /Shots from the design loop/);
+    assert.match(verdicts[0].user, /Pictures of the product/);
     assert.match(verdicts[0].user, /Patch-surface diff:/);
+    assert.equal(verdicts[0].content[0].type, "text");
+    assert.equal(verdicts[0].content[1].type, "image");
+    assert.equal(verdicts[0].content[1].mediaType, "image/png");
     const afterPass = journal.project(alphaId);
     assert.equal(afterPass.nits[0].open, false);
     const wikiAfter = wiki.project(alphaId);
@@ -1375,6 +1409,7 @@ try {
     childEvents.length = 0;
     sent.length = 0;
     const failing = createIterate({
+      env: reviewEnv,
       ctx: {
         get(name) {
           if (name === "qq-relay") {
@@ -1428,12 +1463,15 @@ try {
   {
     const journal = createJournalStore(join(scratch, "iter-go-review-hop"));
     const wiki = createWikiStore(join(scratch, "iter-go-review-hop-wiki"));
+    const reviewEnv = { HOME: scratch, XDG_STATE_HOME: join(scratch, "iter-go-review-hop-shots") };
+    plantShots(reviewEnv);
     journal.recordNote(alphaId, { polarity: "nit", text: "form is cramped", seq: 1 });
     const sent = [];
     const requests = [];
     const childEvents = [];
     const childListeners = [];
     const iterate = createIterate({
+      env: reviewEnv,
       ctx: {
         get(name) {
           if (name === "qq-relay") {
@@ -1484,28 +1522,126 @@ try {
     assert.equal(requests.length, 1);
     assert.equal(requests[0].provider, "test-review");
     assert.match(requests[0].system, /honors the directive/);
-    assert.match(requests[0].system, /shots listing and the patch-surface diff/);
-    const reviewUser = requests[0].messages?.[0]?.content?.[0]?.text ?? "";
+    assert.match(requests[0].system, /pictures themselves/);
+    const reviewContent = requests[0].messages?.[0]?.content ?? [];
+    const reviewUser = reviewContent.find((block) => block.type === "text")?.text ?? "";
     assert.match(reviewUser, /form is cramped/);
-    assert.match(reviewUser, /Shots from the design loop/);
+    assert.match(reviewUser, /Pictures of the product/);
     assert.match(reviewUser, /Patch-surface diff:/);
+    assert.equal(reviewContent.filter((block) => block.type === "image").length, 2);
     assert.equal(sent.length, 1);
     assert.match(sent[0].message, /passed review/);
     assert.equal(journal.project(alphaId).nits[0].open, false);
   }
 
-  // ---------------------------------------------------------------- iterate: reviewer prompt carries shots listing + patch-surface diff
+  // ---------------------------------------------------------------- iterate: reviewer prompt carries pictures + patch-surface diff
   {
     const env = { HOME: scratch, XDG_STATE_HOME: join(scratch, "review-shots-state") };
     const shots = join(env.XDG_STATE_HOME, "qq", "frontend-design-loop", "shots", "current");
     mkdirSync(shots, { recursive: true });
-    writeFileSync(join(shots, "desktop.png"), "png");
-    writeFileSync(join(shots, "phone.png"), "xx");
+    writeFileSync(join(shots, "desktop.png"), PNG_1X1);
+    writeFileSync(join(shots, "phone.png"), PNG_1X1);
     const evidence = collectReviewEvidence({ cwd: root, env });
-    assert.match(evidence, /current\/desktop\.png \(3 bytes\)/);
-    assert.match(evidence, /current\/phone\.png \(2 bytes\)/);
+    assert.match(evidence, /Pictures of the product/);
+    assert.match(evidence, new RegExp(`current/desktop\\.png \\(${PNG_1X1.length} bytes\\)`));
+    assert.match(evidence, new RegExp(`current/phone\\.png \\(${PNG_1X1.length} bytes\\)`));
     assert.match(evidence, /Patch-surface diff:/);
     assert.doesNotMatch(evidence, /live under /);
+    const pictures = collectReviewImages({ env });
+    assert.equal(pictures.length, 2);
+    assert.equal(pictures[0].type, "image");
+    assert.equal(pictures[0].mediaType, "image/png");
+    assert.equal(pictures[0].data, PNG_1X1.toString("base64"));
+  }
+
+  // ---------------------------------------------------------------- iterate: empty report or no pictures fail without a reviewer hop
+  {
+    const journal = createJournalStore(join(scratch, "iter-review-gates"));
+    const wiki = createWikiStore(join(scratch, "iter-review-gates-wiki"));
+    journal.recordNote(alphaId, { polarity: "nit", text: "form is cramped", seq: 1 });
+    const emptyEnv = { HOME: scratch, XDG_STATE_HOME: join(scratch, "iter-review-gates-empty") };
+    plantShots(emptyEnv);
+    const hops = [];
+    const sent = [];
+    const childEvents = [];
+    const childListeners = [];
+    function harness(env) {
+      return createIterate({
+        env,
+        ctx: {
+          get(name) {
+            if (name === "qq-relay") {
+              return {
+                alias: () => "1",
+                hang() {},
+                clear() {},
+                send: async (payload) => { sent.push(payload); return { status: "sent" }; },
+              };
+            }
+            return null;
+          },
+        },
+        journal,
+        wiki,
+        settings: { get: () => ({ provider: "test-review", model: "review-model" }) },
+        run: async () => { hops.push("ran"); return "PASS"; },
+        agents: {
+          create: async (options) => ({
+            agent: {
+              session: { id: options.sessionId, events: childEvents },
+              followup() {},
+              ctx: { on(type, fn) { childListeners.push({ type, fn }); return () => {}; } },
+            },
+          }),
+        },
+        registerHandsTools: () => {},
+      });
+    }
+    const parentAgent = {
+      session: { id: alphaId, events: [], header: { cwd: root } },
+      ctx: { on() { return () => {}; } },
+    };
+    const emptyReport = harness(emptyEnv);
+    emptyReport.attach(parentAgent);
+    assert.equal((await emptyReport.go({ agent: parentAgent })).status, "ok");
+    await childListeners.at(-1).fn({}, { type: "turn/end", seq: 3, data: { turn: 1 } });
+    assert.match(sent.at(-1).message, /failed review: empty hands report/);
+    assert.equal(hops.length, 0);
+
+    childEvents.length = 0;
+    childListeners.length = 0;
+    const noPics = harness({ HOME: scratch, XDG_STATE_HOME: join(scratch, "iter-review-gates-none") });
+    noPics.attach(parentAgent);
+    journal.recordNote(alphaId, { polarity: "nit", text: "still cramped", seq: 4 });
+    assert.equal((await noPics.go({ agent: parentAgent })).status, "ok");
+    childEvents.push(event("assistant/message", 2, {
+      turn: 1, step: 1, message: assistantMessage("changed a color"),
+    }, { surfaceOp: "append" }));
+    await childListeners.at(-1).fn({}, { type: "turn/end", seq: 5, data: { turn: 1 } });
+    assert.match(sent.at(-1).message, /failed review: no pictures of the product/);
+    assert.equal(hops.length, 0);
+  }
+
+  // ---------------------------------------------------------------- iterate: capture passes a live product url through
+  {
+    const captured = [];
+    const tools = buildHandsTools({
+      designLoop: {
+        captureShots: async (options) => {
+          captured.push(options);
+          return { label: options.label ?? "current", shots: { desktop: "/tmp/d.png" }, sessionUrl: options.url };
+        },
+      },
+    });
+    const byName = Object.fromEntries(tools.map((tool) => [tool.name, tool]));
+    const result = await byName.design_loop_capture.execute({
+      url: "http://127.0.0.1:3082/qq",
+      label: "live",
+    });
+    assert.equal(result.status, "ok");
+    assert.equal(captured[0].url, "http://127.0.0.1:3082/qq");
+    assert.equal(captured[0].label, "live");
+    assert.match(result.message, /Captured live/);
   }
 
   // ---------------------------------------------------------------- iterate: fixture-backed hands path can start and stop the design loop
@@ -1593,7 +1729,11 @@ try {
     assert.match(packet, /safe-area/);
     assert.match(packet, /render\.mjs/);
     assert.match(packet, /Do not touch SSE owner/);
+    assert.doesNotMatch(packet, /Use the fixture, not live DSH/);
+    assert.match(packet, /reason from them/);
+    assert.match(packet, /Live host origin \(read-only\)/);
     assert.match(packet, /one inner cycle/);
+    assert.match(packet, /look at the pictures/);
     assert.match(packet, /alias 1/);
   }
 
@@ -1666,6 +1806,8 @@ try {
   {
     const dir = join(scratch, "plugin-iterate-child");
     const selectedDir = join(scratch, "plugin-iterate-child-selected");
+    const journalDir = join(scratch, "plugin-iterate-child-journal");
+    const wikiDir = join(scratch, "plugin-iterate-child-wiki");
     const hung = [];
     const child = {
       id: childId,
@@ -1684,7 +1826,7 @@ try {
       provide(name, value) { provided[name] = value; },
       effect(fn) { fn(); return () => {}; },
       on() { return () => {}; },
-    }, { notebookDir: dir, selectionDir: selectedDir });
+    }, { notebookDir: dir, selectionDir: selectedDir, journalDir, wikiDir });
     const refused = provided["qq-workflows"].handleWorkflows({
       agent: child,
       rawInput: "iterate",
@@ -1712,7 +1854,7 @@ try {
       provide(name, value) { again[name] = value; },
       effect(fn) { fn(); return () => {}; },
       on() { return () => {}; },
-    }, { notebookDir: dir, selectionDir: selectedDir });
+    }, { notebookDir: dir, selectionDir: selectedDir, journalDir, wikiDir });
     assert.equal(again["qq-workflows"].workflows.selected(alphaId), "iterate");
     assert.deepEqual(hungAgain, [{ id: alphaId, label: ITERATE_LABEL }]);
   }

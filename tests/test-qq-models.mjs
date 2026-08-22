@@ -1219,6 +1219,43 @@ try {
     assert.deepEqual(foreign.input, []);
   }
 
+  {
+    const png = Buffer.from("89504e470d0a1a0a", "hex").toString("base64");
+    const { input } = grokModule.toResponsesInput([{
+      role: "user",
+      content: [
+        { type: "text", text: "what do you see" },
+        { type: "image", mediaType: "image/png", data: png, name: "desktop.png" },
+      ],
+    }]);
+    assert.equal(input.length, 1);
+    assert.equal(input[0].content[0].type, "input_text");
+    assert.equal(input[0].content[1].type, "input_image");
+    assert.equal(input[0].content[1].image_url, `data:image/png;base64,${png}`);
+
+    const toolImages = grokModule.toResponsesInput([{
+      role: "user",
+      content: [{
+        type: "tool-result",
+        toolCallId: "call-1",
+        content: [
+          { type: "text", text: "shot" },
+          { type: "image", mediaType: "image/png", data: png },
+        ],
+      }],
+    }]);
+    assert.equal(toolImages.input[0].type, "function_call_output");
+    assert.equal(toolImages.input[1].content[1].type, "input_image");
+
+    const fromStore = grokModule.toResponsesInput([{
+      role: "user",
+      content: [{ type: "image", attachment: { attachmentId: "att-1", mediaType: "image/png" } }],
+    }], undefined, new Map([["att-1", { mediaType: "image/png", base64: png }]]));
+    assert.equal(fromStore.input[0].content[0].image_url, `data:image/png;base64,${png}`);
+
+    assert.deepEqual(grokModule.GROK_MODEL.input, ["text", "image"]);
+  }
+
   console.log("test-qq-models: pass");
 } finally {
   projects.remove();

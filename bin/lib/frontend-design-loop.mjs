@@ -235,14 +235,18 @@ export async function measureBoxes(options = {}) {
 export async function captureShots(options = {}) {
   const env = options.env ?? process.env;
   const exec = options.exec ?? defaultExec;
-  const state = options.state ?? readState(env);
-  if (!state) throw new Error("design-loop fixture is not running");
+  let state;
+  try { state = options.state ?? readState(env); } catch { state = undefined; }
+  const url = typeof options.url === "string" && options.url.trim()
+    ? options.url.trim()
+    : state?.sessionUrl;
+  if (!url) throw new Error("capture needs a url or a running design-loop fixture");
   const label = sanitizeLabel(options.label ?? "current");
   const dir = shotsDir(label, env);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const names = options.short ? ["desktop", "phone", "short"] : ["desktop", "phone"];
-  await browser(exec, env, ["open", state.sessionUrl]);
-  await browser(exec, env, ["reload"]);
+  await browser(exec, env, ["open", url]);
+  if (options.reload !== false) await browser(exec, env, ["reload"]);
   const shots = {};
   for (const name of names) {
     const viewport = VIEWPORTS[name];
@@ -254,5 +258,5 @@ export async function captureShots(options = {}) {
   const measured = options.measure === false
     ? undefined
     : await measureBoxes({ env, exec, selectors: options.selectors, styles: options.styles });
-  return { label, dir, shots, sessionUrl: state.sessionUrl, ...measured };
+  return { label, dir, shots, sessionUrl: url, ...measured };
 }

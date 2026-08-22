@@ -150,4 +150,26 @@ try {
   await rm(temporary, { recursive: true, force: true });
 }
 
+{
+  const isolated = await mkdtemp(join(tmpdir(), "design-loop-live-url."));
+  const env = { HOME: isolated, XDG_STATE_HOME: join(isolated, "state") };
+  const calls = [];
+  try {
+    const captured = await lib.captureShots({
+      env,
+      url: "http://127.0.0.1:3082/qq",
+      measure: false,
+      exec: async (_command, args) => {
+        calls.push(args);
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    assert.equal(captured.sessionUrl, "http://127.0.0.1:3082/qq");
+    assert.match(captured.shots.desktop, /desktop\.png$/);
+    assert.ok(calls.some((args) => args.includes("open") && args.includes("http://127.0.0.1:3082/qq")));
+  } finally {
+    await rm(isolated, { recursive: true, force: true });
+  }
+}
+
 console.log("test-frontend-design-loop: pass");
